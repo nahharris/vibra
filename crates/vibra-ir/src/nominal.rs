@@ -57,14 +57,61 @@ pub enum TypeBody {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TypeDefinition {
     id: TypeId,
+    parameters: Vec<String>,
     body: TypeBody,
 }
 
 impl TypeDefinition {
-    /// Creates a declared type definition.
+    /// Creates a declared type definition with no generic parameters.
     #[must_use]
     pub const fn new(id: TypeId, body: TypeBody) -> Self {
-        Self { id, body }
+        Self {
+            id,
+            parameters: Vec::new(),
+            body,
+        }
+    }
+
+    /// The same definition with generic parameters, in `where:` order. The
+    /// body names them as [`Type::Param`].
+    #[must_use]
+    pub fn with_parameters(mut self, parameters: Vec<String>) -> Self {
+        self.parameters = parameters;
+        self
+    }
+
+    /// The generic parameter names in `where:` order.
+    #[must_use]
+    pub fn parameters(&self) -> &[String] {
+        &self.parameters
+    }
+
+    /// The body with its generic parameters replaced by `arguments`, or `None`
+    /// when the argument count differs from the parameter list.
+    #[must_use]
+    pub fn instantiate(&self, arguments: &[Type]) -> Option<TypeBody> {
+        if arguments.len() != self.parameters.len() {
+            return None;
+        }
+        let map: std::collections::BTreeMap<String, Type> = self
+            .parameters
+            .iter()
+            .cloned()
+            .zip(arguments.iter().cloned())
+            .collect();
+        let substitute = |members: &[(String, Type)]| {
+            members
+                .iter()
+                .map(|(name, value)| (name.clone(), value.substitute(&map)))
+                .collect()
+        };
+        Some(match &self.body {
+            TypeBody::Record(fields) => TypeBody::Record(substitute(fields)),
+            TypeBody::Enum(variants) => TypeBody::Enum(substitute(variants)),
+            TypeBody::Wrapper(representation) => {
+                TypeBody::Wrapper(representation.substitute(&map))
+            }
+        })
     }
 
     /// The declared identity.
@@ -136,16 +183,22 @@ pub(crate) fn type_table(types: &[TypeDefinition]) -> Result<TypeTable<'_>, IrEr
     Ok(table)
 }
 
-/// Rejects a declared type reference with no definition.
+/// Rejects a declared type with no definition, and a declared type applied to
+/// the wrong number of arguments.
 pub(crate) fn validate_declared_type(
     value: &Type,
     table: &TypeTable<'_>,
 ) -> Result<(), IrError> {
     match value {
-        Type::Declared(id) if !table.contains_key(id) => Err(invalid(format!(
-            "declared type `{}` has no definition",
-            id.id()
-        ))),
+        Type::Declared(_) | Type::Applied(_, _) => {
+            declared_body(table, value)?;
+            if let Type::Applied(_, arguments) = value {
+                for argument in arguments {
+                    validate_declared_type(argument, table)?;
+                }
+            }
+            Ok(())
+        }
         Type::Record(members) | Type::Enum(members) => members
             .iter()
             .try_for_each(|(_, member)| validate_declared_type(member, table)),
@@ -168,8 +221,32 @@ pub(crate) fn validate_declared_signature(
     validate_declared_type(&signature.result(), table)
 }
 
+/// The instantiated body of a declared or applied type.
+pub(crate) fn declared_body(
+    table: &TypeTable<'_>,
+    value: &Type,
+) -> Result<TypeBody, IrError> {
+    let (id, arguments): (&TypeId, &[Type]) = match value {
+        Type::Declared(id) => (id, &[]),
+        Type::Applied(id, arguments) => (id, arguments),
+        _ => return Err(invalid(format!("{value} is not a declared type"))),
+    };
+    let definition = table.get(id).copied().ok_or_else(|| {
+        invalid(format!("declared type `{}` has no definition", id.id()))
+    })?;
+    definition.instantiate(arguments).ok_or_else(|| {
+        invalid(format!(
+            "`{}` takes {} type arguments, not {}",
+            id.id(),
+            definition.parameters().len(),
+            arguments.len()
+        ))
+    })
+}
+
 /// Checks every declared construction and projection in `expression` against
-/// its definition. Shape validation has already typed each operand.
+/// its instantiated definition. Shape validation has already typed each
+/// operand; generic parameters are compared as written.
 pub(crate) fn validate_declared_expr(
     expression: &Expr,
     table: &TypeTable<'_>,
@@ -179,66 +256,60 @@ pub(crate) fn validate_declared_expr(
         validate_declared_type(&expression.result_type(), table)?;
         match expression {
             Expr::Record {
-                value_type: Type::Declared(id),
+                value_type: value_type @ (Type::Declared(_) | Type::Applied(_, _)),
                 fields,
                 ..
             } => {
-                let declared = definition(table, id)?
-                    .record_fields()
-                    .ok_or_else(|| invalid(format!("`{}` is not a record", id.id())))?;
+                let TypeBody::Record(declared) = declared_body(table, value_type)?
+                else {
+                    return Err(invalid(format!("{value_type} is not a record")));
+                };
                 if declared.len() != fields.len() {
                     return Err(invalid(format!(
-                        "`{}` construction has the wrong fields",
-                        id.id()
+                        "{value_type} construction has the wrong fields"
                     )));
                 }
                 for (name, value) in fields {
-                    let expected = member(declared, name).ok_or_else(|| {
-                        invalid(format!("`{}` has no field `{name}`", id.id()))
+                    let expected = member(&declared, name).ok_or_else(|| {
+                        invalid(format!("{value_type} has no field `{name}`"))
                     })?;
                     if !expected.same_shape(&value.result_type()) {
                         return Err(invalid(format!(
-                            "`{}` field `{name}` has type {}, expected {expected}",
-                            id.id(),
+                            "{value_type} field `{name}` has type {}, expected {expected}",
                             value.result_type()
                         )));
                     }
                 }
             }
             Expr::Variant {
-                value_type: Type::Declared(id),
+                value_type: value_type @ (Type::Declared(_) | Type::Applied(_, _)),
                 variant,
                 payload,
                 ..
             } => {
-                let declared = definition(table, id)?
-                    .enum_variants()
-                    .ok_or_else(|| invalid(format!("`{}` is not an enum", id.id())))?;
-                let expected = member(declared, variant).ok_or_else(|| {
-                    invalid(format!("`{}` has no variant `{variant}`", id.id()))
+                let TypeBody::Enum(declared) = declared_body(table, value_type)? else {
+                    return Err(invalid(format!("{value_type} is not an enum")));
+                };
+                let expected = member(&declared, variant).ok_or_else(|| {
+                    invalid(format!("{value_type} has no variant `{variant}`"))
                 })?;
                 let actual = payload.as_deref().map_or(Type::Void, Expr::result_type);
                 if !expected.same_shape(&actual) {
                     return Err(invalid(format!(
-                        "`{}` variant `{variant}` payload has type {actual}, expected {expected}",
-                        id.id()
+                        "{value_type} variant `{variant}` payload has type {actual}, expected {expected}"
                     )));
                 }
             }
             Expr::Wrap {
                 value_type, value, ..
             } => {
-                let TypeBody::Wrapper(expected) = definition(table, value_type)?.body()
+                let TypeBody::Wrapper(expected) = declared_body(table, value_type)?
                 else {
-                    return Err(invalid(format!(
-                        "`{}` is not a wrapper type",
-                        value_type.id()
-                    )));
+                    return Err(invalid(format!("{value_type} is not a wrapper type")));
                 };
                 if !expected.same_shape(&value.result_type()) {
                     return Err(invalid(format!(
-                        "`{}` wraps {expected}, not {}",
-                        value_type.id(),
+                        "{value_type} wraps {expected}, not {}",
                         value.result_type()
                     )));
                 }
@@ -249,17 +320,20 @@ pub(crate) fn validate_declared_expr(
                 value_type,
                 ..
             } => {
-                if let Type::Declared(id) = record.result_type() {
-                    let declared =
-                        definition(table, &id)?.record_fields().ok_or_else(|| {
-                            invalid(format!("projection from non-record `{}`", id.id()))
-                        })?;
-                    if !member(declared, field)
+                let record_type = record.result_type();
+                if matches!(record_type, Type::Declared(_) | Type::Applied(_, _)) {
+                    let TypeBody::Record(declared) =
+                        declared_body(table, &record_type)?
+                    else {
+                        return Err(invalid(format!(
+                            "projection from non-record {record_type}"
+                        )));
+                    };
+                    if !member(&declared, field)
                         .is_some_and(|found| found.same_shape(value_type))
                     {
                         return Err(invalid(format!(
-                            "`{}` has no field `{field}` of type {value_type}",
-                            id.id()
+                            "{record_type} has no field `{field}` of type {value_type}"
                         )));
                     }
                 }
@@ -269,15 +343,6 @@ pub(crate) fn validate_declared_expr(
         pending.extend(children(expression));
     }
     Ok(())
-}
-
-fn definition<'a>(
-    table: &TypeTable<'a>,
-    id: &TypeId,
-) -> Result<&'a TypeDefinition, IrError> {
-    table.get(id).copied().ok_or_else(|| {
-        invalid(format!("declared type `{}` has no definition", id.id()))
-    })
 }
 
 fn member<'a>(members: &'a [(String, Type)], name: &str) -> Option<&'a Type> {

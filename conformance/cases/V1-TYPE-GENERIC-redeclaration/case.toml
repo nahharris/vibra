@@ -1,0 +1,17 @@
+id = "V1-TYPE-GENERIC-redeclaration"
+rule = "V1-TYPE-GENERIC"
+profile = "static-v1"
+operation = "type-check"
+description = "A nested method must not redeclare an inherited generic name."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.generic-redeclaration"
+level = "@error"
+source = "input.vib"
+span = [103, 104]

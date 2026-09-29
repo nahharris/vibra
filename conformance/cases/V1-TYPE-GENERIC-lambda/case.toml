@@ -1,0 +1,29 @@
+id = "V1-TYPE-GENERIC-lambda"
+rule = "V1-TYPE-GENERIC"
+profile = "static-v1"
+operation = "type-check"
+description = "A generic lambda outside a let binding or callee position is instantiated from its expected type, and its bound calls check each instantiation."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-inference"
+level = "@error"
+source = "input.vib"
+span = [28, 85]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [226, 229]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [344, 356]

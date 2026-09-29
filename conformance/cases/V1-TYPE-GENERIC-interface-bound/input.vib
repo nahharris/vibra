@@ -1,0 +1,3 @@
+(defn bounded (value t) t
+  where: (t show)
+  value)

@@ -1,0 +1,18 @@
+(defn main () str
+  (label (pair.of (identity 1i32) (identity types: (str) "x"))))
+
+(defn identity (value t) t
+  where: (t any)
+  value)
+
+(deftype pair (record left a right b)
+  where: (a any b any)
+  (defn of (left a right b) (pair a b) (pair left: left right: right))
+  (defn swap (value self) (pair b a)
+    (pair left: (value @right) right: (value @left)))
+  (defn with-right (value self right c) (pair a c)
+    where: (c any)
+    (pair left: (value @left) right: right)))
+
+(defn label (value (pair i32 str)) str
+  ((pair.swap (pair.with-right value (value @right))) @left))

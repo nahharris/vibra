@@ -1,0 +1,16 @@
+(deftype maybe (enum some t none void)
+  where: (t any))
+
+(defn count (value t) i32
+  where: (t any)
+  0i32)
+
+(defn empty () (maybe t)
+  where: (t any)
+  (maybe.none))
+
+(defn from-constructor () i32 (count (maybe.none)))
+
+(defn from-function () i32 (count (empty)))
+
+(defn fixed () i32 (count (empty types: (str))))

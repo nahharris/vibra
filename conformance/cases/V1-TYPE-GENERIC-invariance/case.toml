@@ -1,0 +1,29 @@
+id = "V1-TYPE-GENERIC-invariance"
+rule = "V1-TYPE-GENERIC"
+profile = "static-v1"
+operation = "type-check"
+description = "Generic arguments are invariant: an argument fixed by one operand is checked against every other."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [155, 158]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [257, 261]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [317, 322]

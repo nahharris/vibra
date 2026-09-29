@@ -2,7 +2,7 @@ id = "V1-TYPE-NOMINAL-availability-types"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
 operation = "type-check"
-description = "Applied, tuple, array, and map type expressions are valid syntax but unavailable in M2."
+description = "Tuple, array, map, option, and result type expressions are valid syntax but unavailable until their steps land."
 
 [inputs]
 source = "input.vib"
@@ -14,22 +14,22 @@ accepted = false
 code = "@tool.unavailable"
 level = "@error"
 source = "input.vib"
-span = [15, 30]
+span = [14, 35]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
 source = "input.vib"
-span = [56, 77]
+span = [62, 79]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
 source = "input.vib"
-span = [104, 121]
+span = [105, 124]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
 source = "input.vib"
-span = [147, 166]
+span = [152, 170]

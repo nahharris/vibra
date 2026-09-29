@@ -152,14 +152,20 @@ type expression and MUST be accepted in every type position: a parameter, a
 result, a record field, an enum payload, a union member, a `def` annotation, an
 `as` type, and a `types:` argument. `array` and `map` take a fixed number of
 arguments, so they are ordinary generic builtin types, and `(array t)` and
-`(map k v)` are ordinary applied types.
+`(map k v)` are ordinary applied types. An applied type supplies exactly the
+complete generic parameter list of its head, and a bare generic head is an
+application with no arguments; any other count is
+`@type.type-argument-mismatch`.
 
 Record and enum types are flat and contain at least one name/type pair whose
 names are pairwise distinct; a repeated name emits `@name.member-collision`.
 Records have closed, named fields. Every enum variant has one written payload
 slot; `void` in that slot declares a nullary, payloadless variant, while any
-other type declares a unary one. Tuples, arrays, maps, records, enums, and
-unions are immutable values.
+other type declares a unary one. A generic payload slot instantiated to `void`
+is nullary in that instantiation: `(maybe.some)` constructs it, a zero-operand
+application fixes the slot's generic argument to `void`, and a `void` operand
+is rejected like any operand of a nullary variant. Tuples, arrays, maps,
+records, enums, and unions are immutable values.
 
 A structural type written outside a `deftype` body is anonymous and its
 identity is its structure. Two anonymous tuple types are the same type when
@@ -252,7 +258,8 @@ because a member is only ever reached through a qualified path and is never a
 bare type head. A nested method named `map` therefore stays legal exactly as the
 source-language chapter states, which the `iter` contract's own default `map`
 member depends on. The separate value-namespace rule on builtin type names
-keeps its own `@name.reserved-value-spelling`.
+keeps its own `@name.reserved-value-spelling`. A generic name spelled `self`,
+which names the receiver type, or `any` also emits `@name.reserved-declaration`.
 
 A union type lists at least two member types and declares no member names. A
 declared union's identity is its `deftype`, an anonymous union's is its member
@@ -539,8 +546,8 @@ that contract and never rewrites the contract from observed implementation.
 ## Generics
 
 Every generic name is declared by one flat `where:` entry on a `deftype`,
-`defint`, `defn`, or nested method. The value paired with the name is one
-nominal interface bound; the predeclared empty interface `any` is the bound
+`defint`, `defn`, nested method, or `lambda`. The value paired with the name is
+one nominal interface bound; the predeclared empty interface `any` is the bound
 that constrains nothing.
 
 ```vibra
@@ -564,6 +571,25 @@ clause, so an `impl` nested in a `deftype` passes that type's names through
 unchanged, and the target of an `impl` nested in a `defint` MUST be a closed
 type expression. A free generic name in an `impl` target is
 `@name.unknown-symbol`, and generic implementations are a post-v1 concern.
+
+A `lambda` sees every generic name of its enclosing declarations and lambdas,
+and its own `where:` declares only additional ones under the same
+redeclaration rule. A generic `lambda` is generic like a generic `defn`: bound
+by `let`, the binding stays generic wherever it is visible, including through
+a capture, and each application infers or takes through `types:` its own
+complete argument list, in the lambda's `where:` order. A generic `lambda`
+applied directly is one such application. Anywhere else, a generic `lambda` or
+a generic binding is instantiated from its written expected `fn` type, exactly
+as a generic function named as a value is, and emits
+`@type.ambiguous-inference` when that type does not fix every argument.
+Function types themselves are never generic.
+
+```vibra
+(let pick (lambda (left t right t) t
+            where: (t any)
+            left)
+  (pick "x" (pick types: (str) "y" "z")))
+```
 
 The complete type-argument list of a `deftype` method is its type's parameters
 in declaration order followed by the method's own, and `types:` supplies that

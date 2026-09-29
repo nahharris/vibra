@@ -45,7 +45,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `TypeExpr::Name` | M2 | — | Nominal names: Step 2; `any` and interfaces as types: Step 12 |
 | `TypeExpr::Function` | M2 | — | Generic and variadic function types: Steps 3–4 |
 | `TypeExpr::Void` | M2 | — | — |
-| `TypeExpr::Applied` | Stage 3A | Step 3 | — |
+| `TypeExpr::Applied` | Stage 3A | Step 3 | Cases `V1-TYPE-GENERIC-applied-types`, `V1-RUNTIME-generic-types` |
 | `TypeExpr::Tuple` | Stage 3A | Step 4 | — |
 | `TypeExpr::Record` | Stage 3A | Step 2 | — |
 | `TypeExpr::Enum` | Stage 3A | Step 2 | — |
@@ -56,7 +56,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `VariadicType::Map` | Stage 3A | Step 4 | — |
 | `DeftypeBody::Type` | Stage 3A | Step 2 | Declared record, enum, and wrapper bodies: Step 2; tuple: Step 4; union: Step 6 |
 | `DeftypeBody::Intrinsic` | Stage 3A | Step 4 | Reader: Step 2; standard-library declarations: Steps 4 and 8 |
-| `Attribute::Where` | Stage 3A | Step 3 | `any` bounds only; interface bounds: Step 11 |
+| `Attribute::Where` | Stage 3A | Step 3 | `any` bounds only (`V1-RUNTIME-generic-functions`, `V1-RUNTIME-generic-lambda`); interface bounds: Step 11 (`V1-TYPE-GENERIC-interface-bound`) |
 | `Attribute::Labelled` | M2 | — | — |
 | `Attribute::Variadic` | Stage 3A | Step 4 | — |
 | `Attribute::Visibility` | M2 | — | — |
@@ -69,10 +69,10 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 
 | M2 row | Owner |
 | --- | --- |
-| C1.3 — generics, nominal collections, interfaces, conversion | Steps 2–4, 11–13 |
+| C1.3 — generics, nominal collections, interfaces, conversion | Steps 2–4, 11–13; `any`-bounded generics implemented by Step 3 (`V1-RUNTIME-generic-functions`) |
 | C1.5 — `match`, `try`, `option`, `result`, refutable patterns | Steps 4, 5, 7 |
 | C1.6 — variadic array and map operands | Step 4 |
 | C1.7 — `as`, singleton widening, narrowing | Step 6 |
 | C5.2 — constructor and destructuring patterns | Step 5 |
-| C6.2 — `types:` generic arguments | Step 3 |
+| C6.2 — `types:` generic arguments | Step 3; implemented (`V1-TYPE-GENERIC-type-arguments`, `V1-TOOL-format-types-order`) |
 | Unavailable `integer.*` compiler symbols (M2 registry note) | Step 8, as static methods of the numeric primitive types |

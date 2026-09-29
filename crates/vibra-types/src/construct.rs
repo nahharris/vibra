@@ -14,17 +14,23 @@ use vibra_syntax::{
     Application, BindingFacts, CallArgument, Expression, ExpressionKind, NameKind,
 };
 
-use crate::nominal::ConstructorTarget;
+use crate::infer::Instantiation;
+use crate::nominal::{ConstructorTarget, declared_self_type};
 use crate::{
-    CheckEnvironment, call_contract_error, check_expression, check_operand,
-    ensure_expected, types_match,
+    CheckEnvironment, ambiguous_generic, call_contract_error, check_expression,
+    check_inferred_operand, ensure_expected, start_instantiation, types_match,
 };
 
 /// Checks an application whose callee names a constructor.
+///
+/// A generic declaration infers its complete argument list from the field,
+/// payload, or representation operands, the written result type, and
+/// `types:`, exactly as a generic function application does.
 pub(crate) fn check_constructor(
     environment: &mut CheckEnvironment<'_>,
     application: &Application,
     target: &ConstructorTarget,
+    type_arguments: Option<&[Type]>,
     expected: Option<Type>,
 ) -> Option<Expr> {
     let (index, variant) = match target {
@@ -34,24 +40,44 @@ pub(crate) fn check_constructor(
     let declared = environment.types.get(index)?.clone();
     // A declaration whose body failed to lower already reported why.
     let body = declared.body.clone()?;
-    let value_type = Type::Declared(declared.id.clone());
+    let pattern = declared_self_type(&declared.id, &declared.parameters);
+    let mut instantiation = start_instantiation(
+        environment,
+        application,
+        &declared.parameters,
+        &pattern,
+        type_arguments,
+        expected.as_ref(),
+    )?;
+    let types_written = type_arguments.is_some();
     let origin = SourceOrigin::new(environment.source_id, application.span());
+    let mut binding = ConstructorBinding::positional(0);
     let expression = match (&body, variant) {
         (TypeBody::Record(fields), None) => {
             let names: Vec<String> =
                 fields.iter().map(|(name, _)| name.clone()).collect();
-            let arguments = bind_labelled(environment, application, &names)?;
+            let (arguments, labelled) =
+                bind_labelled(environment, application, &names)?;
+            binding = labelled;
             let mut checked = Vec::with_capacity(fields.len());
             for ((name, field_type), argument) in fields.iter().zip(arguments) {
-                let value = check_operand(
+                let field_type = instantiation.open(field_type);
+                let value = check_inferred_operand(
                     environment,
+                    &mut instantiation,
                     argument.value(),
-                    Some(field_type.clone()),
+                    &field_type,
+                    types_written,
                 )?;
                 checked.push((name.clone(), value));
             }
             Expr::Record {
-                value_type: value_type.clone(),
+                value_type: instantiated(
+                    environment,
+                    application,
+                    &instantiation,
+                    &pattern,
+                )?,
                 fields: checked,
                 origin,
             }
@@ -59,10 +85,22 @@ pub(crate) fn check_constructor(
         (TypeBody::Wrapper(representation), None) => {
             let operand =
                 single_positional(environment, application, "a wrapper constructor")?;
-            let value =
-                check_operand(environment, operand, Some(representation.clone()))?;
+            binding = ConstructorBinding::positional(1);
+            let representation = instantiation.open(representation);
+            let value = check_inferred_operand(
+                environment,
+                &mut instantiation,
+                operand,
+                &representation,
+                types_written,
+            )?;
             Expr::Wrap {
-                value_type: declared.id.clone(),
+                value_type: instantiated(
+                    environment,
+                    application,
+                    &instantiation,
+                    &pattern,
+                )?,
                 value: Box::new(value),
                 origin,
             }
@@ -81,7 +119,17 @@ pub(crate) fn check_constructor(
                 );
                 return None;
             };
-            let payload = if *payload_type == Type::Void {
+            // A payload is nullary when it is `void`, written or instantiated.
+            // Zero operands against an open generic payload fix it to `void`.
+            let payload_type = instantiation.open(payload_type);
+            let nullary = match instantiation.resolved(&payload_type) {
+                Some(resolved) => resolved == Type::Void,
+                None => {
+                    application.arguments().is_empty()
+                        && instantiation.unify(&payload_type, &Type::Void)
+                }
+            };
+            let payload = if nullary {
                 if !application.arguments().is_empty() {
                     call_contract_error(
                         environment,
@@ -96,14 +144,22 @@ pub(crate) fn check_constructor(
             } else {
                 let operand =
                     single_positional(environment, application, "an enum variant")?;
-                Some(Box::new(check_operand(
+                binding = ConstructorBinding::positional(1);
+                Some(Box::new(check_inferred_operand(
                     environment,
+                    &mut instantiation,
                     operand,
-                    Some(payload_type.clone()),
+                    &payload_type,
+                    types_written,
                 )?))
             };
             Expr::Variant {
-                value_type: value_type.clone(),
+                value_type: instantiated(
+                    environment,
+                    application,
+                    &instantiation,
+                    &pattern,
+                )?,
                 variant: variant.to_owned(),
                 payload,
                 origin,
@@ -132,6 +188,8 @@ pub(crate) fn check_constructor(
             return None;
         }
     };
+    binding.record(environment, application);
+    let value_type = expression.result_type();
     finish(
         environment,
         application.span(),
@@ -209,12 +267,30 @@ pub(crate) fn record_fields(
 ) -> Option<Vec<(String, Type)>> {
     match value_type {
         Type::Record(fields) => Some(fields.clone()),
-        Type::Declared(id) => {
+        Type::Declared(id) | Type::Applied(id, _) => {
             let index = environment.types.index_of(id)?;
-            match &environment.types.get(index)?.body {
-                Some(TypeBody::Record(fields)) => Some(fields.clone()),
-                _ => None,
-            }
+            let declared = environment.types.get(index)?;
+            let Some(TypeBody::Record(fields)) = &declared.body else {
+                return None;
+            };
+            let arguments = match value_type {
+                Type::Applied(_, arguments) => arguments.as_slice(),
+                _ => &[],
+            };
+            let substitution: std::collections::BTreeMap<String, Type> = declared
+                .parameters
+                .iter()
+                .cloned()
+                .zip(arguments.iter().cloned())
+                .collect();
+            Some(
+                fields
+                    .iter()
+                    .map(|(name, field)| {
+                        (name.clone(), field.substitute(&substitution))
+                    })
+                    .collect(),
+            )
         }
         _ => None,
     }
@@ -322,7 +398,7 @@ fn bind_labelled<'a>(
     environment: &mut CheckEnvironment<'_>,
     application: &'a Application,
     names: &[String],
-) -> Option<Vec<&'a CallArgument>> {
+) -> Option<(Vec<&'a CallArgument>, ConstructorBinding)> {
     let facts = BindingFacts::new(0, names.to_vec(), None);
     let ordered = match application.ordered_arguments(&facts) {
         Ok(ordered) => ordered,
@@ -343,27 +419,11 @@ fn bind_labelled<'a>(
         );
         return None;
     }
-    if ordered
+    let reordered = ordered
         .iter()
         .zip(application.arguments())
-        .any(|(left, right)| !std::ptr::eq(*left, right))
-    {
-        environment.diagnostics.push(
-            Diagnostic::new(
-                DiagnosticCode::StyleArgumentOrder,
-                application.span(),
-                "record fields are not in declaration order",
-            )
-            .with_source_id(environment.source_id),
-        );
-    }
-    environment
-        .bindings
-        .push(vibra_syntax::ApplicationBinding::new(
-            application.span(),
-            facts,
-        ));
-    Some(ordered)
+        .any(|(left, right)| !std::ptr::eq(*left, right));
+    Some((ordered, ConstructorBinding { facts, reordered }))
 }
 
 fn single_positional<'a>(
@@ -403,4 +463,56 @@ fn finish(
         .as_ref()
         .is_none_or(|expected| types_match(expected, &actual))
         .then_some(expression)
+}
+
+/// The constructed type once every generic argument is fixed, or
+/// `@type.ambiguous-inference`.
+fn instantiated(
+    environment: &mut CheckEnvironment<'_>,
+    application: &Application,
+    instantiation: &Instantiation,
+    pattern: &Type,
+) -> Option<Type> {
+    let opened = instantiation.open(pattern);
+    let resolved = instantiation.resolved(&opened);
+    if resolved.is_none() {
+        ambiguous_generic(environment, application.span(), &instantiation.unbound());
+    }
+    resolved
+}
+
+/// The binding facts of one constructor application, recorded only once the
+/// construction checks, so the formatter and the style warning never act on
+/// an incomplete binding.
+struct ConstructorBinding {
+    facts: BindingFacts,
+    reordered: bool,
+}
+
+impl ConstructorBinding {
+    fn positional(count: usize) -> Self {
+        Self {
+            facts: BindingFacts::new(count, Vec::new(), None),
+            reordered: false,
+        }
+    }
+
+    fn record(self, environment: &mut CheckEnvironment<'_>, application: &Application) {
+        if self.reordered || application.type_arguments_after_operands() {
+            environment.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::StyleArgumentOrder,
+                    application.span(),
+                    "constructor operands are not in canonical declaration order",
+                )
+                .with_source_id(environment.source_id),
+            );
+        }
+        environment
+            .bindings
+            .push(vibra_syntax::ApplicationBinding::new(
+                application.span(),
+                self.facts,
+            ));
+    }
 }

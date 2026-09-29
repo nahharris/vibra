@@ -147,6 +147,10 @@ pub enum Type {
     Record(Vec<(String, Type)>),
     /// An anonymous enum type; variants are in canonical order.
     Enum(Vec<(String, Type)>),
+    /// A generic parameter of the enclosing declaration, rigid inside it.
+    Param(String),
+    /// A generic declared type applied to its complete argument list.
+    Applied(TypeId, Vec<Type>),
 }
 
 impl Type {
@@ -158,7 +162,7 @@ impl Type {
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
-            Self::Declared(_) => "type",
+            Self::Declared(_) | Self::Param(_) | Self::Applied(_, _) => "type",
             Self::Record(_) => "record",
             Self::Enum(_) => "enum",
             Self::Bool => "bool",
@@ -192,7 +196,87 @@ impl Type {
             (Self::Function(left), Self::Function(right)) => left.same_shape(right),
             (Self::Record(left), Self::Record(right))
             | (Self::Enum(left), Self::Enum(right)) => members_same_shape(left, right),
+            (
+                Self::Applied(left, left_arguments),
+                Self::Applied(right, right_arguments),
+            ) => {
+                left == right
+                    && left_arguments.len() == right_arguments.len()
+                    && left_arguments
+                        .iter()
+                        .zip(right_arguments)
+                        .all(|(left, right)| left.same_shape(right))
+            }
             _ => self == other,
+        }
+    }
+
+    /// This type with every generic parameter named in `arguments` replaced.
+    #[must_use]
+    pub fn substitute(&self, arguments: &BTreeMap<String, Type>) -> Self {
+        match self {
+            Self::Param(name) => {
+                arguments.get(name).cloned().unwrap_or_else(|| self.clone())
+            }
+            Self::Applied(id, values) => Self::Applied(
+                id.clone(),
+                values
+                    .iter()
+                    .map(|value| value.substitute(arguments))
+                    .collect(),
+            ),
+            Self::Record(members) => {
+                Self::Record(substitute_members(members, arguments))
+            }
+            Self::Enum(members) => Self::Enum(substitute_members(members, arguments)),
+            Self::Function(signature) => {
+                Self::Function(Box::new(signature.substitute(arguments)))
+            }
+            _ => self.clone(),
+        }
+    }
+
+    /// Whether a value of static type `self` may hold a runtime value whose
+    /// recorded type is `actual`. Generic parameters are erased at run time, so
+    /// a parameter on either side matches any type.
+    #[must_use]
+    pub fn admits(&self, actual: &Self) -> bool {
+        match (self, actual) {
+            (Self::Param(_), _) | (_, Self::Param(_)) => true,
+            (
+                Self::Applied(left, left_arguments),
+                Self::Applied(right, right_arguments),
+            ) => {
+                left == right
+                    && left_arguments.len() == right_arguments.len()
+                    && left_arguments
+                        .iter()
+                        .zip(right_arguments)
+                        .all(|(left, right)| left.admits(right))
+            }
+            (Self::Record(left), Self::Record(right))
+            | (Self::Enum(left), Self::Enum(right)) => {
+                left.len() == right.len()
+                    && left.iter().zip(right).all(|(left, right)| {
+                        left.0 == right.0 && left.1.admits(&right.1)
+                    })
+            }
+            (Self::Function(left), Self::Function(right)) => left.admits(right),
+            _ => self.same_shape(actual),
+        }
+    }
+
+    /// Whether any generic parameter occurs in this type.
+    #[must_use]
+    pub fn has_params(&self) -> bool {
+        match self {
+            Self::Param(_) => true,
+            Self::Applied(_, values) => values.iter().any(Self::has_params),
+            Self::Record(members) | Self::Enum(members) => {
+                members.iter().any(|(_, value)| value.has_params())
+            }
+            Self::Function(signature) => signature.has_params(),
+            _ => false,
         }
     }
 
@@ -223,6 +307,14 @@ impl fmt::Display for Type {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Declared(id) => formatter.write_str(id.path()),
+            Self::Param(name) => formatter.write_str(name),
+            Self::Applied(id, arguments) => {
+                write!(formatter, "({}", id.path())?;
+                for argument in arguments {
+                    write!(formatter, " {argument}")?;
+                }
+                formatter.write_str(")")
+            }
             Self::Record(members) | Self::Enum(members) => {
                 formatter.write_str(if matches!(self, Self::Record(_)) {
                     "(record"
@@ -231,6 +323,34 @@ impl fmt::Display for Type {
                 })?;
                 for (name, value) in members {
                     write!(formatter, " {name} {value}")?;
+                }
+                formatter.write_str(")")
+            }
+            // Spelled like the `fn` type expression, so two function types
+            // in a diagnostic are told apart by their parameters and result.
+            Self::Function(signature) => {
+                formatter.write_str("(fn (")?;
+                for (index, parameter) in signature.parameters().iter().enumerate() {
+                    if index != 0 {
+                        formatter.write_str(" ")?;
+                    }
+                    write!(formatter, "{parameter}")?;
+                }
+                write!(formatter, ") {}", signature.result())?;
+                if !signature.labelled().is_empty() {
+                    formatter.write_str(" labelled: (")?;
+                    for (index, parameter) in signature.labelled().iter().enumerate() {
+                        if index != 0 {
+                            formatter.write_str(" ")?;
+                        }
+                        write!(
+                            formatter,
+                            "{} {}",
+                            parameter.name(),
+                            parameter.value_type()
+                        )?;
+                    }
+                    formatter.write_str(")")?;
                 }
                 formatter.write_str(")")
             }
@@ -355,6 +475,59 @@ impl FunctionSignature {
                     left.name == right.name
                         && left.value_type.same_shape(&right.value_type)
                 })
+    }
+
+    /// This signature with its generic parameters replaced; defaults are kept.
+    #[must_use]
+    pub fn substitute(&self, arguments: &BTreeMap<String, Type>) -> Self {
+        Self {
+            parameters: self
+                .parameters
+                .iter()
+                .map(|value| value.substitute(arguments))
+                .collect(),
+            labelled: self
+                .labelled
+                .iter()
+                .map(|parameter| LabelledParameter {
+                    name: parameter.name.clone(),
+                    value_type: parameter.value_type.substitute(arguments),
+                    default: parameter.default.clone(),
+                })
+                .collect(),
+            result: self.result.substitute(arguments),
+        }
+    }
+
+    /// [`Type::admits`] extended over every slot of two signatures.
+    #[must_use]
+    pub fn admits(&self, other: &Self) -> bool {
+        self.parameters.len() == other.parameters.len()
+            && self
+                .parameters
+                .iter()
+                .zip(&other.parameters)
+                .all(|(left, right)| left.admits(right))
+            && self.result.admits(&other.result)
+            && self.labelled.len() == other.labelled.len()
+            && self
+                .labelled
+                .iter()
+                .zip(&other.labelled)
+                .all(|(left, right)| {
+                    left.name == right.name && left.value_type.admits(&right.value_type)
+                })
+    }
+
+    /// Whether any slot mentions a generic parameter.
+    #[must_use]
+    pub fn has_params(&self) -> bool {
+        self.parameters.iter().any(Type::has_params)
+            || self.result.has_params()
+            || self
+                .labelled
+                .iter()
+                .any(|parameter| parameter.value_type.has_params())
     }
 
     /// The declared result type.
@@ -759,8 +932,8 @@ pub enum Expr {
     },
     /// A wrapper-type constructor.
     Wrap {
-        /// The declared wrapper type.
-        value_type: TypeId,
+        /// The declared or applied wrapper type.
+        value_type: Type,
         /// The representation operand.
         value: Box<Self>,
         /// The source origin of the complete form.
@@ -1098,7 +1271,7 @@ impl Expr {
             Self::Record { value_type, .. }
             | Self::Variant { value_type, .. }
             | Self::Project { value_type, .. } => value_type.clone(),
-            Self::Wrap { value_type, .. } => Type::Declared(value_type.clone()),
+            Self::Wrap { value_type, .. } => value_type.clone(),
         }
     }
 
@@ -1247,7 +1420,7 @@ impl Expr {
                 {
                     let actual =
                         argument.validate_shape_with_captures(slots, capture_types)?;
-                    if !actual.same_shape(expected) {
+                    if !expected.admits(&actual) {
                         return Err(IrError::InvalidExpression(format!(
                             "{} argument has type {actual}, expected {expected}",
                             intrinsic.symbol()
@@ -1270,7 +1443,7 @@ impl Expr {
                         "capture slot {slot} is outside the closure environment"
                     )));
                 };
-                if !actual.same_shape(value_type) {
+                if !actual.admits(value_type) {
                     return Err(IrError::InvalidExpression(format!(
                         "capture slot {slot} has type {actual}, expression declares {value_type}"
                     )));
@@ -1323,7 +1496,7 @@ impl Expr {
                 for (capture, expected) in captures.iter().zip(closure_capture_types) {
                     let actual =
                         capture.validate_shape_with_captures(slots, capture_types)?;
-                    if !actual.same_shape(expected) {
+                    if !expected.admits(&actual) {
                         return Err(IrError::InvalidExpression(format!(
                             "closure capture has type {actual}, expected {expected}"
                         )));
@@ -1350,10 +1523,10 @@ impl Expr {
                     &mut closure_slots,
                     closure_capture_types,
                 )?;
-                if !actual.same_shape(&signature.result()) {
+                if !signature.result().admits(&actual) {
                     return Err(IrError::ResultTypeMismatch {
-                        expected: signature.result(),
-                        actual,
+                        expected: Box::new(signature.result()),
+                        actual: Box::new(actual),
                     });
                 }
                 Ok(Type::Function(Box::new(signature.clone())))
@@ -1369,7 +1542,7 @@ impl Expr {
             Self::Variable {
                 slot, value_type, ..
             } => match slots.get(*slot).cloned().flatten() {
-                Some(actual) if actual.same_shape(value_type) => Ok(value_type.clone()),
+                Some(actual) if actual.admits(value_type) => Ok(value_type.clone()),
                 Some(actual) => Err(IrError::InvalidExpression(format!(
                     "variable slot {slot} has type {actual}, expression declares {value_type}"
                 ))),
@@ -1475,7 +1648,7 @@ impl Expr {
                 match value_type {
                     // A declared record is checked against its definition by
                     // the program-level pass, which owns the type table.
-                    Type::Declared(_) => {}
+                    Type::Declared(_) | Type::Applied(_, _) => {}
                     Type::Record(expected) => {
                         let actual = canonical_members(actual);
                         if !members_same_shape(expected, &actual) {
@@ -1506,7 +1679,7 @@ impl Expr {
                     .transpose()?
                     .unwrap_or(Type::Void);
                 match value_type {
-                    Type::Declared(_) => {}
+                    Type::Declared(_) | Type::Applied(_, _) => {}
                     Type::Enum(variants) => {
                         let declared = variants
                             .iter()
@@ -1535,7 +1708,7 @@ impl Expr {
                 value_type, value, ..
             } => {
                 value.validate_shape_with_captures(slots, capture_types)?;
-                Ok(Type::Declared(value_type.clone()))
+                Ok(value_type.clone())
             }
             Self::Project {
                 record,
@@ -1546,7 +1719,7 @@ impl Expr {
                 let record_type =
                     record.validate_shape_with_captures(slots, capture_types)?;
                 match &record_type {
-                    Type::Declared(_) => {}
+                    Type::Declared(_) | Type::Applied(_, _) => {}
                     Type::Record(fields) => {
                         let found = fields.iter().find(|(name, _)| name == field);
                         if !found.is_some_and(|(_, found)| found.same_shape(value_type))
@@ -1566,6 +1739,16 @@ impl Expr {
             }
         }
     }
+}
+
+fn substitute_members(
+    members: &[(String, Type)],
+    arguments: &BTreeMap<String, Type>,
+) -> Vec<(String, Type)> {
+    members
+        .iter()
+        .map(|(name, value)| (name.clone(), value.substitute(arguments)))
+        .collect()
 }
 
 /// Whether two canonical member lists have equal names and same-shape types.
@@ -1607,8 +1790,8 @@ impl CheckedGlobal {
         let actual = initializer.validate_shape(&mut slots)?;
         if !actual.same_shape(&value_type) {
             return Err(IrError::ResultTypeMismatch {
-                expected: value_type,
-                actual,
+                expected: Box::new(value_type),
+                actual: Box::new(actual),
             });
         }
         Ok(Self {
@@ -1778,8 +1961,8 @@ impl CheckedFunction {
         let actual = body.validate_shape(&mut slots)?;
         if !actual.same_shape(&signature.result()) {
             return Err(IrError::ResultTypeMismatch {
-                expected: signature.result(),
-                actual,
+                expected: Box::new(signature.result()),
+                actual: Box::new(actual),
             });
         }
         Ok(Self {
@@ -1968,8 +2151,8 @@ impl CheckedModuleSet {
             let actual = function.body.validate_shape(&mut slots)?;
             if !actual.same_shape(&function.signature.result()) {
                 return Err(IrError::ResultTypeMismatch {
-                    expected: function.signature.result(),
-                    actual,
+                    expected: Box::new(function.signature.result()),
+                    actual: Box::new(actual),
                 });
             }
         }
@@ -1984,8 +2167,8 @@ impl CheckedModuleSet {
             let actual = global.initializer.validate_shape(&mut slots)?;
             if !actual.same_shape(&global.value_type) {
                 return Err(IrError::ResultTypeMismatch {
-                    expected: global.value_type.clone(),
-                    actual,
+                    expected: Box::new(global.value_type.clone()),
+                    actual: Box::new(actual),
                 });
             }
         }
@@ -2259,9 +2442,9 @@ pub enum IrError {
     /// A function body result differs from its checked signature.
     ResultTypeMismatch {
         /// The written result type.
-        expected: Type,
+        expected: Box<Type>,
         /// The body result type.
-        actual: Type,
+        actual: Box<Type>,
     },
     /// A function did not allocate slots for all fixed parameters.
     InvalidSlotCount {
@@ -2392,7 +2575,7 @@ fn validate_program_expr(
                     "function index {function} is outside the program"
                 )));
             };
-            if callee.signature() != signature {
+            if !callee.signature().admits(signature) {
                 return Err(IrError::InvalidExpression(format!(
                     "function value index {function} carries a mismatched signature"
                 )));
@@ -2615,15 +2798,17 @@ fn validate_program_expr(
                         .map(|parameter| parameter.value_type()),
                 )
                 .collect::<Vec<_>>();
+            // A generic callee's parameters are erased: the checker fixed one
+            // instantiation, and each slot must admit what it receives.
             for (argument, expected) in arguments.iter().zip(expected_parameters) {
                 let actual = argument.result_type();
-                if !actual.same_shape(&expected) {
+                if !expected.admits(&actual) {
                     return Err(IrError::InvalidExpression(format!(
                         "call argument has type {actual}, expected {expected}"
                     )));
                 }
             }
-            if !result.same_shape(&signature.result()) {
+            if !signature.result().admits(result) {
                 return Err(IrError::InvalidExpression(format!(
                     "call result declares {result}, callee returns {}",
                     signature.result()
@@ -4375,8 +4560,8 @@ fn canonical_expr(expression: &Expr) -> String {
         Expr::Wrap {
             value_type, value, ..
         } => format!(
-            "(record kind: @wrap type: @{} value: {})",
-            value_type.path(),
+            "(record kind: @wrap type: {} value: {})",
+            canonical_type(value_type),
             canonical_expr(value)
         ),
         Expr::Project {
@@ -4525,6 +4710,15 @@ pub fn canonical_type(value: &Type) -> String {
     match value {
         Type::Function(signature) => canonical_function_signature(signature),
         Type::Declared(id) => format!("@{}", id.path()),
+        Type::Applied(id, arguments) => format!(
+            "(record type: @{} arguments: (array{}))",
+            id.path(),
+            arguments
+                .iter()
+                .map(|argument| format!(" {}", canonical_type(argument)))
+                .collect::<String>()
+        ),
+        Type::Param(name) => format!("(record type: @param name: @{name})"),
         Type::Record(fields) => format!(
             "(record type: @record fields: (record{}))",
             canonical_type_members(fields)

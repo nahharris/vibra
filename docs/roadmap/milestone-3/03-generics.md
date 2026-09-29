@@ -61,3 +61,43 @@ binding facts, never guesses.
 
 Inventory rows `Attribute::Where` and `TypeExpr::Applied` point at cases; M2
 ledger rows C1.3 (generic part) and C6.2 are implemented; validation passes.
+
+## Delivery notes
+
+- Generics are erased: `Type::Param` is rigid inside its declaration and
+  `Type::Applied` names an instantiated declared type. Checked IR carries no
+  type arguments on calls; IR validation treats a parameter as admitting any
+  type, and the checker guarantees each call is consistently instantiated.
+- The unifier lives in `crates/vibra-types/src/infer.rs`. An instantiation
+  renames the callee's parameters to `?index:name` variables, so they never
+  collide with the caller's rigid parameters.
+- Operands whose parameter type is already fixed are checked against it; the
+  rest are checked alone and unified, with `lambda` operands last. When a
+  written `types:` fixes the parameter an operand contradicts, the operand's
+  `@type.argument-mismatch` becomes `@type.type-argument-mismatch`.
+- A generic function named outside callee position is instantiated from its
+  written expected `fn` type, or is `@type.ambiguous-inference`.
+- Type-application arity had no diagnostic (G14); D14.1 assigns
+  `@type.type-argument-mismatch`.
+- An applied type adds to size through each argument its declaration stores
+  directly, so `(deftype n (record inner (holder n)))` is
+  `@type.infinite-size` while an argument used only under `fn` is not.
+- `option` and `result` in type position stay `@tool.unavailable` until
+  Steps 4 and 7 declare them.
+- The reader and the source grammar rejected `where:` on `lambda` (G15). D15.1
+  admits it: a `let`-bound generic lambda stays generic under quantified
+  names (`t#index@site`, which no source name can spell), each call
+  instantiates it, and any other use instantiates it from the expected `fn`
+  type. Closures stay erased, so IR slot and capture checks use `admits`.
+- The invariance matrix item uses a generic `boxed` wrapper instead of
+  `(array t)`, because arrays arrive in Step 4.
+- Review fixes: the unifier follows binding chains and never rebinds; a
+  generic parameter no operand, result, or `types:` fixes is ambiguous even
+  when the signature never mentions it; a generic lambda's `types:` list is
+  its complete `where:` list; a generic value contradicting its expected type
+  is a mismatch rather than ambiguity; diagnostics spell parameters as
+  written; only an operand whose whole parameter type is fixed by `types:`
+  becomes `@type.type-argument-mismatch`; constructors and the formatter warn
+  about a late `types:` only after a complete binding; `any` and `self` are
+  reserved generic names, and a function-type labelled slot named `types` is
+  `@name.reserved-label`.

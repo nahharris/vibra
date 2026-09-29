@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-generic-lambda"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A let-bound generic lambda stays generic: each call, including one through a capture, infers or takes its own arguments."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

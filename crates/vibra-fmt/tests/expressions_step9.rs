@@ -334,18 +334,28 @@ fn formatter_preserves_written_order_without_binding_facts() {
 #[test]
 fn formatter_moves_types_group_before_operands_and_reports_style() {
     let source = "(defn call () i32 (call 1i32 types: (i32)))";
-    let formatted = format_source_with_bindings(Path::new("bindings.vib"), source, &[])
-        .expect("source mode");
-    assert_eq!(
-        formatted.text(),
-        "(defn call () i32 (call types: (i32) 1i32))\n"
-    );
-    assert_eq!(
+    let style_count = |bindings: &[ApplicationBinding]| {
+        let formatted =
+            format_source_with_bindings(Path::new("bindings.vib"), source, bindings)
+                .expect("source mode");
+        assert_eq!(
+            formatted.text(),
+            "(defn call () i32 (call types: (i32) 1i32))\n"
+        );
         formatted
             .diagnostics()
             .iter()
-            .filter(|diagnostic| diagnostic.code() == DiagnosticCode::StyleArgumentOrder)
-            .count(),
-        1
+            .filter(|diagnostic| {
+                diagnostic.code() == DiagnosticCode::StyleArgumentOrder
+            })
+            .count()
+    };
+    // Without a complete binding the group still moves, but only a binding
+    // earns the style warning.
+    assert_eq!(style_count(&[]), 0);
+    let binding = ApplicationBinding::new(
+        vibra_diagnostics::ByteSpan::new(18, 42),
+        BindingFacts::new(1, Vec::new(), None),
     );
+    assert_eq!(style_count(&[binding]), 1);
 }

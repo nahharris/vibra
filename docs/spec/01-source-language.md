@@ -276,7 +276,8 @@ function-attribute = "where:", where-clause
                    | "external:", atom-name
                    | "symbol:", string
                    | "doc:", string ;
-lambda-attribute = "labelled:", labelled-parameters
+lambda-attribute = "where:", where-clause
+                 | "labelled:", labelled-parameters
                  | "variadic:", variadic-parameter
                  | "effects:", effect-row ;
 ```
@@ -303,15 +304,17 @@ parameter may use any discard spelling when its value is intentionally unused.
 of generic names: every generic name used by a declaration MUST occur exactly
 once in its `where:` clause, unless an enclosing declaration already binds it.
 A bound is an ordinary interface name; `any` is the predeclared empty interface
-and is the bound that requires nothing. A nested method inherits its
-owner's generic names and MUST NOT redeclare one; the type chapter defines that
+and is the bound that requires nothing. A nested method inherits its owner's
+generic names and a `lambda` those of every enclosing declaration and lambda;
+neither may redeclare an inherited name. The type chapter defines that
 inheritance and the call-site `types:` list built from it.
 
 The canonical function-attribute order is `where:`, `labelled:`, `variadic:`,
-`visibility:`, `effects:`, `external:`, `symbol:`, then `doc:`. The canonical
-type-attribute order is `where:`, `visibility:`, then `doc:`. Attributes may be
-parsed in any unambiguous order, occur at most once, and are formatted
-canonically. Nested methods follow attributes, and `impl` blocks follow methods.
+`visibility:`, `effects:`, `external:`, `symbol:`, then `doc:`; a `lambda` uses
+the same relative order. The canonical type-attribute order is `where:`,
+`visibility:`, then `doc:`. Attributes may be parsed in any unambiguous order,
+occur at most once, and are formatted canonically. Nested methods follow
+attributes, and `impl` blocks follow methods.
 
 Every labelled argument or attribute follows all fixed positional forms of its
 enclosing form and precedes its variadic body or member forms. The parser MAY
@@ -489,7 +492,7 @@ A nested method named `map` on some other owner is allowed; the associative
 A named function declares a name, a flat parameter list, and a result type.
 Function bodies are direct expression sequences; their final expression is the
 result. `lambda` declares an anonymous function with the same parameter,
-result, labelled, variadic, and effect syntax, but no name or visibility.
+result, generic, labelled, variadic, and effect syntax, but no name or visibility.
 `fn` is reserved for function types and is never an anonymous declaration.
 
 ```vibra

@@ -31,6 +31,39 @@ pub(crate) enum LowerError {
     Unknown(String),
     /// A name that denotes a type the current module may not see.
     Private(String),
+    /// A declared type written with the wrong number of type arguments.
+    Arity {
+        name: String,
+        expected: usize,
+        found: usize,
+    },
+}
+
+/// What a type expression may name besides declared types: the receiver type
+/// inside a nested method, and the generic names in scope.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Scope<'a> {
+    pub(crate) self_type: Option<&'a Type>,
+    pub(crate) generics: &'a [String],
+}
+
+impl<'a> Scope<'a> {
+    /// A scope with neither a receiver nor generic names.
+    pub(crate) const NONE: Self = Self {
+        self_type: None,
+        generics: &[],
+    };
+
+    /// A scope with a receiver type and generic names.
+    pub(crate) const fn new(
+        self_type: Option<&'a Type>,
+        generics: &'a [String],
+    ) -> Self {
+        Self {
+            self_type,
+            generics,
+        }
+    }
 }
 
 /// One declared type visible to a checking run.
@@ -48,6 +81,8 @@ pub(crate) struct DeclaredType {
     /// or whose body names such a type, is reported once at its declaration
     /// and is unavailable at every use.
     pub(crate) available: bool,
+    /// Generic parameter names in `where:` order.
+    pub(crate) parameters: Vec<String>,
 }
 
 /// Type names visible from one source module.
@@ -96,6 +131,7 @@ impl TypeNames {
             }),
             body: None,
             available: true,
+            parameters: generic_names(declaration.attributes().items()),
         });
         self.scopes
             .entry(source_id.to_owned())
@@ -139,10 +175,10 @@ impl TypeNames {
         self.declared
             .iter()
             .filter_map(|declared| {
-                declared
-                    .body
-                    .clone()
-                    .map(|body| TypeDefinition::new(declared.id.clone(), body))
+                declared.body.clone().map(|body| {
+                    TypeDefinition::new(declared.id.clone(), body)
+                        .with_parameters(declared.parameters.clone())
+                })
             })
             .collect()
     }
@@ -213,12 +249,12 @@ impl TypeNames {
         }
     }
 
-    /// Lowers a type expression written in `source_id`. `self_type` is the
-    /// receiver type inside a nested method.
+    /// Lowers a type expression written in `source_id`, seeing the receiver
+    /// type and generic names of `scope`.
     pub(crate) fn lower(
         &self,
         source_id: &str,
-        self_type: Option<&Type>,
+        scope: Scope<'_>,
         value: &TypeExpr,
     ) -> Result<Type, LowerError> {
         match value {
@@ -228,21 +264,15 @@ impl TypeNames {
                     return Ok(primitive);
                 }
                 if name.value() == "self" {
-                    return self_type
+                    return scope
+                        .self_type
                         .cloned()
                         .ok_or_else(|| LowerError::Unknown("self".to_owned()));
                 }
-                let index = self.resolve(source_id, name)?;
-                let declared = self
-                    .declared
-                    .get(index)
-                    .ok_or_else(|| LowerError::Unknown(name.value().to_owned()))?;
-                if !declared.available {
-                    return Err(LowerError::Unavailable(
-                        "this declared type is outside the available M3 profile",
-                    ));
+                if scope.generics.iter().any(|generic| generic == name.value()) {
+                    return Ok(Type::Param(name.value().to_owned()));
                 }
-                Ok(Type::Declared(declared.id.clone()))
+                self.applied(source_id, name, Vec::new())
             }
             TypeExpr::Function(function) => {
                 if !function.effects().is_empty() {
@@ -258,7 +288,7 @@ impl TypeNames {
                 let parameters = function
                     .parameters()
                     .iter()
-                    .map(|parameter| self.lower(source_id, self_type, parameter))
+                    .map(|parameter| self.lower(source_id, scope, parameter))
                     .collect::<Result<Vec<_>, _>>()?;
                 let labelled = function
                     .labelled()
@@ -266,25 +296,37 @@ impl TypeNames {
                     .map(|slot| {
                         Ok(LabelledParameter::new(
                             slot.name().value(),
-                            self.lower(source_id, self_type, slot.value_type())?,
+                            self.lower(source_id, scope, slot.value_type())?,
                             None,
                         ))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                let result = self.lower(source_id, self_type, function.result())?;
+                let result = self.lower(source_id, scope, function.result())?;
                 Ok(Type::Function(Box::new(FunctionSignature::with_labelled(
                     parameters, labelled, result,
                 ))))
             }
             TypeExpr::Record(fields) => Ok(Type::Record(vibra_ir::canonical_members(
-                self.lower_members(source_id, self_type, fields)?,
+                self.lower_members(source_id, scope, fields)?,
             ))),
             TypeExpr::Enum(variants) => Ok(Type::Enum(vibra_ir::canonical_members(
-                self.lower_members(source_id, self_type, variants)?,
+                self.lower_members(source_id, scope, variants)?,
             ))),
-            TypeExpr::Applied { .. } => Err(LowerError::Unavailable(
-                "applied generic types arrive in M3 Step 3",
-            )),
+            TypeExpr::Applied { head, arguments } => {
+                if matches!(head.value(), "option" | "result")
+                    && matches!(
+                        self.resolve(source_id, head),
+                        Err(LowerError::Unknown(_))
+                    )
+                {
+                    return self.applied(source_id, head, Vec::new());
+                }
+                let arguments = arguments
+                    .iter()
+                    .map(|argument| self.lower(source_id, scope, argument))
+                    .collect::<Result<Vec<_>, _>>()?;
+                self.applied(source_id, head, arguments)
+            }
             TypeExpr::Tuple(_) | TypeExpr::Array(_) | TypeExpr::Map(_, _) => {
                 Err(LowerError::Unavailable(
                     "tuple, array, and map types arrive in M3 Step 4",
@@ -300,12 +342,12 @@ impl TypeNames {
     pub(crate) fn lower_or_report(
         &self,
         source_id: &str,
-        self_type: Option<&Type>,
+        scope: Scope<'_>,
         value: &TypeExpr,
         span: ByteSpan,
         diagnostics: &mut Vec<Diagnostic>,
     ) -> Option<Type> {
-        match self.lower(source_id, self_type, value) {
+        match self.lower(source_id, scope, value) {
             Ok(value) => Some(value),
             Err(error) => {
                 report_lower_error(diagnostics, source_id, span, &error);
@@ -314,10 +356,51 @@ impl TypeNames {
         }
     }
 
+    /// A declared type named by `name` and applied to `arguments`, which must
+    /// match its complete generic parameter list.
+    fn applied(
+        &self,
+        source_id: &str,
+        name: &Name,
+        arguments: Vec<Type>,
+    ) -> Result<Type, LowerError> {
+        let index = match self.resolve(source_id, name) {
+            Err(LowerError::Unknown(_))
+                if matches!(name.value(), "option" | "result") =>
+            {
+                return Err(LowerError::Unavailable(
+                    "the option and result library types arrive in M3 Steps 4 and 7",
+                ));
+            }
+            resolved => resolved?,
+        };
+        let declared = self
+            .declared
+            .get(index)
+            .ok_or_else(|| LowerError::Unknown(name.value().to_owned()))?;
+        if !declared.available {
+            return Err(LowerError::Unavailable(
+                "this declared type is outside the available M3 profile",
+            ));
+        }
+        if arguments.len() != declared.parameters.len() {
+            return Err(LowerError::Arity {
+                name: name.value().to_owned(),
+                expected: declared.parameters.len(),
+                found: arguments.len(),
+            });
+        }
+        Ok(if arguments.is_empty() {
+            Type::Declared(declared.id.clone())
+        } else {
+            Type::Applied(declared.id.clone(), arguments)
+        })
+    }
+
     fn lower_members(
         &self,
         source_id: &str,
-        self_type: Option<&Type>,
+        scope: Scope<'_>,
         members: &[vibra_syntax::TypeField],
     ) -> Result<Vec<(String, Type)>, LowerError> {
         members
@@ -325,7 +408,7 @@ impl TypeNames {
             .map(|member| {
                 Ok((
                     member.name().value().to_owned(),
-                    self.lower(source_id, self_type, member.ty())?,
+                    self.lower(source_id, scope, member.ty())?,
                 ))
             })
             .collect()
@@ -344,20 +427,13 @@ impl TypeNames {
                 continue;
             };
             let source_id = declared.source_id.clone();
-            let self_type = Type::Declared(declared.id.clone());
-            if let Some(attribute) = declaration
-                .attributes()
-                .items()
-                .iter()
-                .find(|attribute| matches!(attribute, Attribute::Where(_)))
-            {
-                let _ = attribute;
-                unavailable(
-                    diagnostics,
-                    &source_id,
-                    declaration.span(),
-                    "generic declared types arrive in M3 Step 3",
-                );
+            let parameters = declared.parameters.clone();
+            let self_type = declared_self_type(&declared.id, &parameters);
+            if !report_interface_bounds(
+                declaration.attributes().items(),
+                &source_id,
+                diagnostics,
+            ) {
                 continue;
             }
             for member in declaration.members() {
@@ -372,10 +448,18 @@ impl TypeNames {
             }
             let body = match declaration.body() {
                 DeftypeBody::Type(TypeExpr::Record(fields)) => self
-                    .lower_members(&source_id, Some(&self_type), fields)
+                    .lower_members(
+                        &source_id,
+                        Scope::new(Some(&self_type), &parameters),
+                        fields,
+                    )
                     .map(TypeBody::Record),
                 DeftypeBody::Type(TypeExpr::Enum(variants)) => self
-                    .lower_members(&source_id, Some(&self_type), variants)
+                    .lower_members(
+                        &source_id,
+                        Scope::new(Some(&self_type), &parameters),
+                        variants,
+                    )
                     .map(TypeBody::Enum),
                 DeftypeBody::Type(TypeExpr::Tuple(_)) => Err(LowerError::Unavailable(
                     "declared tuple types arrive in M3 Step 4",
@@ -388,7 +472,11 @@ impl TypeNames {
                 )),
                 // Any other body declares a wrapper type over one representation.
                 DeftypeBody::Type(representation) => self
-                    .lower(&source_id, Some(&self_type), representation)
+                    .lower(
+                        &source_id,
+                        Scope::new(Some(&self_type), &parameters),
+                        representation,
+                    )
                     .map(TypeBody::Wrapper),
             };
             match body {
@@ -578,12 +666,81 @@ impl TypeNames {
                     edges.push((index, member.to_owned()));
                 }
             }
+            Type::Applied(id, arguments) => {
+                let Some(index) = self.index_of(id) else {
+                    return;
+                };
+                edges.push((index, member.to_owned()));
+                for (position, argument) in arguments.iter().enumerate() {
+                    if self.parameter_is_direct(index, position, &mut BTreeSet::new()) {
+                        self.direct_edges(argument, member, edges);
+                    }
+                }
+            }
             Type::Record(members) | Type::Enum(members) => {
                 for (_, nested) in members {
                     self.direct_edges(nested, member, edges);
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Whether the generic parameter at `position` of declaration `index`
+    /// is stored directly in its body, so an argument there is part of the
+    /// applied type's own size. A declaration already being visited adds
+    /// nothing: its own recursion is an edge of the size graph.
+    fn parameter_is_direct(
+        &self,
+        index: usize,
+        position: usize,
+        visiting: &mut BTreeSet<usize>,
+    ) -> bool {
+        let Some(declared) = self.declared.get(index) else {
+            return false;
+        };
+        let Some(name) = declared.parameters.get(position) else {
+            return false;
+        };
+        if !visiting.insert(index) {
+            return false;
+        }
+        let direct = match &declared.body {
+            Some(TypeBody::Record(members) | TypeBody::Enum(members)) => members
+                .iter()
+                .any(|(_, member)| self.contains_directly(member, name, visiting)),
+            Some(TypeBody::Wrapper(representation)) => {
+                self.contains_directly(representation, name, visiting)
+            }
+            None => false,
+        };
+        visiting.remove(&index);
+        direct
+    }
+
+    /// Whether `value` stores the generic parameter `name` without passing
+    /// through a variable-size container or a function.
+    fn contains_directly(
+        &self,
+        value: &Type,
+        name: &str,
+        visiting: &mut BTreeSet<usize>,
+    ) -> bool {
+        match value {
+            Type::Param(parameter) => parameter == name,
+            Type::Record(members) | Type::Enum(members) => members
+                .iter()
+                .any(|(_, member)| self.contains_directly(member, name, visiting)),
+            Type::Applied(id, arguments) => {
+                let Some(index) = self.index_of(id) else {
+                    return false;
+                };
+                arguments.iter().enumerate().any(|(position, argument)| {
+                    self.contains_directly(argument, name, visiting)
+                        && self.parameter_is_direct(index, position, visiting)
+                })
+            }
+            _ => false,
         }
     }
 }
@@ -671,5 +828,93 @@ pub(crate) fn report_lower_error(
             )
             .with_source_id(source_id),
         ),
+        LowerError::Arity {
+            name,
+            expected,
+            found,
+        } => diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeTypeArgumentMismatch,
+                span,
+                format!(
+                    "`{name}` takes {expected} type argument{}, not {found}",
+                    if *expected == 1 { "" } else { "s" }
+                ),
+            )
+            .with_source_id(source_id),
+        ),
     }
+}
+
+/// The generic names a declaration's `where:` clause introduces, in order.
+pub(crate) fn generic_names(attributes: &[Attribute]) -> Vec<String> {
+    attributes
+        .iter()
+        .filter_map(|attribute| match attribute {
+            Attribute::Where(bindings) => Some(bindings),
+            _ => None,
+        })
+        .flatten()
+        .map(|binding| binding.name().value().to_owned())
+        .collect()
+}
+
+/// Reports every `where:` bound other than the predeclared `any`, which
+/// Stage 3A does not admit. Returns whether every bound is `any`.
+pub(crate) fn report_interface_bounds(
+    attributes: &[Attribute],
+    source_id: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> bool {
+    let mut all_any = true;
+    for attribute in attributes {
+        let Attribute::Where(bindings) = attribute else {
+            continue;
+        };
+        for binding in bindings {
+            if binding.bound().value() != "any" {
+                all_any = false;
+                unavailable(
+                    diagnostics,
+                    source_id,
+                    binding.span(),
+                    "interface bounds arrive in M3 Step 11",
+                );
+            }
+        }
+    }
+    all_any
+}
+
+/// The receiver type of a declaration: the declared type, applied to its own
+/// generic parameters when it has any.
+pub(crate) fn declared_self_type(id: &vibra_ir::TypeId, parameters: &[String]) -> Type {
+    if parameters.is_empty() {
+        Type::Declared(id.clone())
+    } else {
+        Type::Applied(
+            id.clone(),
+            parameters
+                .iter()
+                .map(|name| Type::Param(name.clone()))
+                .collect(),
+        )
+    }
+}
+
+/// The complete generic parameter list of a function: its owner's, then its
+/// own. Returns `None`, after reporting, when a bound names an interface.
+pub(crate) fn function_generics(
+    owner: &[String],
+    function: &vibra_syntax::FunctionDeclaration,
+    source_id: &str,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Vec<String>> {
+    let items = function.attributes().items();
+    if !report_interface_bounds(items, source_id, diagnostics) {
+        return None;
+    }
+    let mut generics = owner.to_vec();
+    generics.extend(generic_names(items));
+    Some(generics)
 }

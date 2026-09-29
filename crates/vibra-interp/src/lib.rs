@@ -252,7 +252,7 @@ impl Interpreter {
             return Err(invalid());
         };
         let value_type = function.signature().result();
-        if !runtime_type(&value).same_shape(&value_type) {
+        if !value_type.admits(&runtime_type(&value)) {
             return Err(invalid());
         }
         let Some(value) = observe(value) else {
@@ -366,7 +366,7 @@ enum RuntimeValue {
         payload: Option<Box<RuntimeValue>>,
     },
     Wrapper {
-        type_id: TypeId,
+        value_type: Type,
         value: Box<RuntimeValue>,
     },
 }
@@ -556,10 +556,10 @@ impl<'a> Machine<'a> {
                     return TailTransferAction::Invalid;
                 };
                 let actual_signature = function.signature();
-                if !signature.same_shape(actual_signature)
+                if !signature.admits(actual_signature)
                     || actual_signature.fixed_parameter_count() != values.len()
                     || !values_match_signature(&values, actual_signature)
-                    || !actual_signature.result().same_shape(result)
+                    || !result.admits(&actual_signature.result())
                 {
                     return TailTransferAction::Invalid;
                 }
@@ -629,14 +629,14 @@ impl<'a> Machine<'a> {
             } => slots
                 .get(*slot)
                 .and_then(Option::as_ref)
-                .filter(|value| runtime_type(value).same_shape(value_type))
+                .filter(|value| value_type.admits(&runtime_type(value)))
                 .cloned()
                 .map(Evaluation::Value),
             Expr::Global {
                 index, value_type, ..
             } => self
                 .evaluate_global(*index)
-                .filter(|value| runtime_type(value).same_shape(value_type))
+                .filter(|value| value_type.admits(&runtime_type(value)))
                 .map(Evaluation::Value),
             Expr::Function { function, .. } => self
                 .named_callable(*function)
@@ -645,7 +645,7 @@ impl<'a> Machine<'a> {
                 slot, value_type, ..
             } => captures
                 .get(*slot)
-                .filter(|value| runtime_type(value).same_shape(value_type))
+                .filter(|value| value_type.admits(&runtime_type(value)))
                 .cloned()
                 .map(Evaluation::Value),
             Expr::Closure { .. } => self.evaluate_closure(expression, slots, captures),
@@ -675,7 +675,7 @@ impl<'a> Machine<'a> {
             } => {
                 let value = self.evaluate_value(value, slots, captures)?;
                 Some(Evaluation::Value(RuntimeValue::Wrapper {
-                    type_id: value_type.clone(),
+                    value_type: value_type.clone(),
                     value: Box::new(value),
                 }))
             }
@@ -729,7 +729,7 @@ impl<'a> Machine<'a> {
             Type::Record(members) => {
                 members.iter().map(|(name, _)| name.as_str()).collect()
             }
-            Type::Declared(id) => self
+            Type::Declared(id) | Type::Applied(id, _) => self
                 .program
                 .types()
                 .iter()
@@ -944,7 +944,7 @@ impl<'a> Machine<'a> {
             };
             if callable_signature.fixed_parameter_count() != values.len()
                 || !values_match_signature(&values, callable_signature)
-                || !callable_signature.result().same_shape(result)
+                || !result.admits(&callable_signature.result())
             {
                 return None;
             }
@@ -1012,7 +1012,7 @@ impl<'a> Machine<'a> {
         };
         if signature.fixed_parameter_count() != values.len()
             || !values_match_signature(&values, signature)
-            || !signature.result().same_shape(result)
+            || !result.admits(&signature.result())
         {
             return None;
         }
@@ -1023,7 +1023,7 @@ impl<'a> Machine<'a> {
                 captures,
             } => {
                 let function = self.program.functions().get(index)?;
-                if !function.signature().same_shape(&signature) {
+                if !signature.admits(function.signature()) {
                     return None;
                 }
                 let slots = activation_slots(values, function.slot_count());
@@ -1097,7 +1097,7 @@ fn runtime_type(value: &RuntimeValue) -> Type {
         }
         RuntimeValue::Record { value_type, .. }
         | RuntimeValue::Enum { value_type, .. } => value_type.clone(),
-        RuntimeValue::Wrapper { type_id, .. } => Type::Declared(type_id.clone()),
+        RuntimeValue::Wrapper { value_type, .. } => value_type.clone(),
     }
 }
 
@@ -1123,7 +1123,7 @@ fn slots_match_signature(
         .all(|(value, expected)| {
             value
                 .as_ref()
-                .is_some_and(|value| runtime_type(value).same_shape(&expected))
+                .is_some_and(|value| expected.admits(&runtime_type(value)))
         })
 }
 
@@ -1140,7 +1140,7 @@ fn values_match_signature(
     values
         .iter()
         .zip(expected)
-        .all(|(value, expected)| runtime_type(value).same_shape(&expected))
+        .all(|(value, expected)| expected.admits(&runtime_type(value)))
 }
 
 /// The observable form of a runtime value; `None` when it is or contains a
@@ -1168,8 +1168,8 @@ fn observe(value: RuntimeValue) -> Option<ObservedValue> {
                 None => None,
             },
         },
-        RuntimeValue::Wrapper { type_id, value } => ObservedValue::Wrapper {
-            type_id,
+        RuntimeValue::Wrapper { value_type, value } => ObservedValue::Wrapper {
+            type_id: declared_id(&value_type)?,
             value: Box::new(observe(*value)?),
         },
     })
@@ -1177,7 +1177,7 @@ fn observe(value: RuntimeValue) -> Option<ObservedValue> {
 
 fn declared_id(value_type: &Type) -> Option<TypeId> {
     match value_type {
-        Type::Declared(id) => Some(id.clone()),
+        Type::Declared(id) | Type::Applied(id, _) => Some(id.clone()),
         _ => None,
     }
 }

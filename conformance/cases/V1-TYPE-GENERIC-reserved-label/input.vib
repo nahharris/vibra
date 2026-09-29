@@ -1,0 +1,3 @@
+(defn labelled (value i32) i32
+  labelled: (types i32 0i32)
+  value)

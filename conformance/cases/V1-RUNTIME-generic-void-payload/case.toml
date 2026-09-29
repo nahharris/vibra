@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-generic-void-payload"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A generic payload instantiated to void is nullary: its variant takes no operand and encodes no payload."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }
