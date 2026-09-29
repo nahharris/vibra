@@ -10,7 +10,7 @@ use std::fmt;
 use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, DocumentRevision};
-use vibra_ir::{CallTarget, Expr, FunctionSignature, PrimitiveType};
+use vibra_ir::{CallTarget, Expr, FunctionSignature, Type};
 use vibra_resolve::{DeclarationId, EntityKind, ResolvedReference, ResolvedSnapshot};
 use vibra_syntax::{
     Application, Attribute, Declaration, Expression, ExpressionKind, FloatSuffix,
@@ -842,6 +842,14 @@ impl<'a> SemanticCollector<'a> {
                     self.collect_pattern_binding(argument.pattern(), locals, context);
                 }
             }
+            PatternKind::RecordOf(fields) => {
+                for field in fields {
+                    self.collect_pattern_binding(field.pattern(), locals, context);
+                }
+            }
+            PatternKind::EnumOf(variant) => {
+                self.collect_pattern_binding(variant.pattern(), locals, context);
+            }
             PatternKind::As { pattern, .. } => {
                 self.collect_pattern_binding(pattern, locals, context);
             }
@@ -1068,6 +1076,19 @@ impl<'a> SemanticCollector<'a> {
                     );
                 }
             }
+            ExpressionKind::TupleOf(values) => {
+                for value in values {
+                    self.collect_expression(value, locals, "argument", None);
+                }
+            }
+            ExpressionKind::RecordOf(fields) => {
+                for field in fields {
+                    self.collect_expression(field.value(), locals, "argument", None);
+                }
+            }
+            ExpressionKind::EnumOf(variant) => {
+                self.collect_expression(variant.value(), locals, "argument", None);
+            }
             ExpressionKind::Literal(_) | ExpressionKind::Name(_) => {}
         }
     }
@@ -1114,7 +1135,10 @@ impl<'a> SemanticCollector<'a> {
             | ExpressionKind::Lambda(_)
             | ExpressionKind::Match { .. }
             | ExpressionKind::As { .. }
-            | ExpressionKind::Try(_) => ("@unknown".to_owned(), None),
+            | ExpressionKind::Try(_)
+            | ExpressionKind::TupleOf(_)
+            | ExpressionKind::RecordOf(_)
+            | ExpressionKind::EnumOf(_) => ("@unknown".to_owned(), None),
             ExpressionKind::Name(_) => ("@unknown".to_owned(), None),
         }
     }
@@ -1161,7 +1185,7 @@ impl<'a> SemanticCollector<'a> {
             arguments,
             ..
         } = expression
-            && let PrimitiveType::Function(signature) = callee.result_type()
+            && let Type::Function(signature) = callee.result_type()
         {
             let mut expected_types = signature.parameters().to_vec();
             expected_types.extend(
@@ -1224,6 +1248,14 @@ impl<'a> SemanticCollector<'a> {
                 }
                 for argument in arguments {
                     self.collect_ir(argument);
+                }
+            }
+            Expr::Record { .. }
+            | Expr::Variant { .. }
+            | Expr::Wrap { .. }
+            | Expr::Project { .. } => {
+                for operand in expression.data_operands() {
+                    self.collect_ir(operand);
                 }
             }
         }
@@ -1526,6 +1558,9 @@ fn semantic_type_expr(value: &TypeExpr) -> Option<SemanticType> {
         }
         TypeExpr::Applied { .. }
         | TypeExpr::Tuple(_)
+        | TypeExpr::Record(_)
+        | TypeExpr::Enum(_)
+        | TypeExpr::Union(_)
         | TypeExpr::Array(_)
         | TypeExpr::Map(_, _) => None,
     }
@@ -1552,9 +1587,12 @@ fn primitive_name(value: &str) -> Option<&'static str> {
     })
 }
 
-fn semantic_type_primitive(value: &PrimitiveType) -> Option<SemanticType> {
+fn semantic_type_primitive(value: &Type) -> Option<SemanticType> {
     match value {
-        PrimitiveType::Function(signature) => Some(semantic_type_signature(signature)),
+        Type::Function(signature) => Some(semantic_type_signature(signature)),
+        // Declared and structural type facts are part of the M3 index and
+        // query payloads (Step 15); until then the fact is unavailable.
+        Type::Declared(_) | Type::Record(_) | Type::Enum(_) => None,
         _ => Some(SemanticType::primitive(value.as_str())),
     }
 }
@@ -1649,7 +1687,7 @@ fn ir_application_contract(expression: &Expr) -> Option<ApplicationContract> {
     else {
         return None;
     };
-    let PrimitiveType::Function(signature) = callee.result_type() else {
+    let Type::Function(signature) = callee.result_type() else {
         return None;
     };
     let callee_type = semantic_type_signature(signature.as_ref());

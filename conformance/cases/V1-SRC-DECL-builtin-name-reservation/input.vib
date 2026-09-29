@@ -1,0 +1,3 @@
+(deftype str bytes)
+(def i32 u8 1u8)
+(defn f (value (intrinsic-type @i32)) i32 0i32)

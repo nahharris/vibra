@@ -405,7 +405,7 @@ fn an_error_in_an_unreachable_declaration_blocks_the_target_program() {
     assert_eq!(checked.status(), CheckStatus::Diagnostics);
     assert!(checked.program_for_target(target).is_none());
     assert!(checked.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
+        diagnostic.code() == DiagnosticCode::TypeMismatch
             && diagnostic.source_id() == Some("src/app/main.vib")
     }));
     let run = vibra_workspace::semantic::run_target(&snapshot, target);
@@ -482,7 +482,7 @@ fn selected_target_checks_its_import_closure_and_ignores_an_unrelated_target() {
     let all = vibra_workspace::semantic::check_all(&snapshot);
     assert_eq!(all.status(), CheckStatus::Diagnostics);
     assert!(all.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
+        diagnostic.code() == DiagnosticCode::TypeMismatch
             && diagnostic.source_id() == Some("src/other/main.vib")
     }));
 }
@@ -517,7 +517,7 @@ fn an_error_in_a_transitively_imported_unit_blocks_execution() {
     assert_eq!(run.check().status(), CheckStatus::Diagnostics);
     assert!(run.outcome().is_none());
     assert!(run.check().diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
+        diagnostic.code() == DiagnosticCode::TypeMismatch
             && diagnostic.source_id() == Some("src/util/helpers.vib")
     }));
 }
@@ -797,7 +797,7 @@ fn an_unrelated_reserved_bootstrap_import_blocks_an_explicit_target() {
             && diagnostic.source_id() == Some("src/other/module.vib")
     }));
     assert!(!checked.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
+        diagnostic.code() == DiagnosticCode::TypeMismatch
             && diagnostic.source_id() == Some("src/other/module.vib")
     }));
 }
@@ -885,7 +885,9 @@ fn retired_syntax_and_unsupported_valid_declarations_keep_distinct_diagnostics()
         "unsupported-declaration",
         &[(
             "src/app/main.vib",
-            "(deftype box (record value i32))\n(defn execute () void (do))\n",
+            // A declared record is supported from M3 Step 2; a union stays
+            // unavailable until Step 6.
+            "(deftype box (union i32 str))\n(defn execute () void (do))\n",
         )],
     );
     let unsupported_snapshot =

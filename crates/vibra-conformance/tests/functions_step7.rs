@@ -264,10 +264,12 @@ fn invalid_result_does_not_emit_argument_order_facts_or_warnings() {
 "#;
     let checked = check_source("invalid-result.vib", source);
     assert!(!checked.accepted());
-    assert!(checked
-        .diagnostics()
-        .iter()
-        .any(|diagnostic| diagnostic.code() == DiagnosticCode::TypeArgumentMismatch));
+    assert!(
+        checked
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code() == DiagnosticCode::TypeMismatch)
+    );
     assert!(
         !checked
             .diagnostics()

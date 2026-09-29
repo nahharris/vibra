@@ -103,8 +103,6 @@ The following are not partially implemented in v1:
 - async functions, tasks, channels, threads, and shared mutable state;
 - raw WebAssembly FFI, native FFI, dynamic loading, and a package registry;
 - a SemVer dependency solver; dependencies are local or exact-revision Git;
-- anonymous `newtype` types; a newtype exists only to introduce an identity,
-  so it is a `deftype` body only;
 - union subtyping and computed least upper bounds; a union is only ever the one
   an author wrote over a closed, written member set, and it is never inferred;
 - narrowing an interface value to a concrete type, runtime type tests, and

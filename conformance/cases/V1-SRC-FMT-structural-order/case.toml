@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-structural-order"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "The formatter sorts anonymous record fields and enum variants by name and union members by text, recursively, keeps declared bodies in order, and leaves a commented anonymous type in written order."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

@@ -5,8 +5,8 @@
 use vibra_diagnostics::ByteSpan;
 use vibra_interp::Interpreter;
 use vibra_ir::{
-    CheckedFunction, CheckedProgram, Expr, FunctionSignature, PrimitiveType,
-    SourceOrigin, TestAssertion, Value,
+    CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin,
+    TestAssertion, Type, Value,
 };
 
 fn origin() -> SourceOrigin {
@@ -27,10 +27,10 @@ fn program(assertion: TestAssertion, operands: Vec<Value>) -> CheckedProgram {
         .into_iter()
         .map(|value| Expr::literal(value, call_origin.clone()))
         .collect();
-    let body = Expr::call(0, arguments, PrimitiveType::Void, call_origin.clone());
+    let body = Expr::call(0, arguments, Type::Void, call_origin.clone());
     let test = CheckedFunction::new(
         "@tests.assertions::\"example\"",
-        FunctionSignature::new(Vec::new(), PrimitiveType::Void),
+        FunctionSignature::new(Vec::new(), Type::Void),
         body,
         call_origin,
     )
@@ -92,7 +92,7 @@ fn ordinary_run_allows_unused_test_assertion_markers() {
     let origin = origin();
     let entry = CheckedFunction::new(
         "@demo@0.1.0/app.main.execute",
-        FunctionSignature::new(Vec::new(), PrimitiveType::Void),
+        FunctionSignature::new(Vec::new(), Type::Void),
         Expr::literal(Value::Void, origin.clone()),
         origin,
     )
@@ -127,12 +127,12 @@ fn assertion_failure_stops_nested_helper_arguments_and_later_calls() {
                 first_call_origin.clone(),
             ),
         ],
-        PrimitiveType::Void,
+        Type::Void,
         first_call_origin.clone(),
     );
     let helper = CheckedFunction::new(
         "@demo@0.1.0/tests.assertions.helper",
-        FunctionSignature::new(Vec::new(), PrimitiveType::Str),
+        FunctionSignature::new(Vec::new(), Type::Str),
         Expr::sequence(
             vec![
                 first_assertion,
@@ -148,7 +148,7 @@ fn assertion_failure_stops_nested_helper_arguments_and_later_calls() {
     .expect("string helper");
     let sink = CheckedFunction::new(
         "@demo@0.1.0/tests.assertions.sink",
-        FunctionSignature::new(vec![PrimitiveType::Str], PrimitiveType::Void),
+        FunctionSignature::new(vec![Type::Str], Type::Void),
         Expr::literal(Value::Void, first_call_origin.clone()),
         first_call_origin.clone(),
     )
@@ -160,10 +160,10 @@ fn assertion_failure_stops_nested_helper_arguments_and_later_calls() {
         vec![Expr::call(
             1,
             Vec::new(),
-            PrimitiveType::Str,
+            Type::Str,
             first_call_origin.clone(),
         )],
-        PrimitiveType::Void,
+        Type::Void,
         first_call_origin,
     );
     let later_assertion = Expr::call(
@@ -178,12 +178,12 @@ fn assertion_failure_stops_nested_helper_arguments_and_later_calls() {
                 later_call_origin.clone(),
             ),
         ],
-        PrimitiveType::Void,
+        Type::Void,
         later_call_origin.clone(),
     );
     let test = CheckedFunction::new(
         "@tests.assertions::\"nested\"",
-        FunctionSignature::new(Vec::new(), PrimitiveType::Void),
+        FunctionSignature::new(Vec::new(), Type::Void),
         Expr::sequence(vec![sink_call, later_assertion], later_call_origin.clone()),
         later_call_origin,
     )

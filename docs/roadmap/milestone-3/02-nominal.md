@@ -21,15 +21,15 @@ Prerequisite: Step 1 merged. Stage 3A behavior step.
 Two parts, landing together so no valid form is ever malformed:
 
 1. **Reader and formatter.** Parse `(tuple …)`, `(record …)`, `(enum …)`, and
-   `(union …)` as type expressions in every type position; `(newtype …)`
-   outside a `deftype` body as `@type.anonymous-newtype`; `(intrinsic-type @a)`
+   `(union …)` as type expressions in every type position (`newtype` is not a
+   form, per ledger D13.1); `(intrinsic-type @a)`
    as a `deftype` body; and `tupleof`, `recordof`, and `enumof` as reserved
    expression and pattern forms recognized before application. The pattern
    `(tuple …)` is replaced by `(tupleof …)`. The formatter rewrites anonymous
    record fields, enum variants, and union members into canonical order. Retire
    `@type.anonymous-type-body` from the registry, the specification table, and
    the reader in this change, and replace its reader case.
-2. **Semantics.** Declared record, enum, newtype, and plain type-expression
+2. **Semantics.** Declared record, enum, and wrapper (any other type expression)
    `deftype`s with constructors, record projection, and nested non-interface
    methods; anonymous records and enums with `recordof` and `enumof`,
    order-insensitive identity, and projection; the flat member namespace; and
@@ -66,13 +66,12 @@ Two parts, landing together so no valid form is ever malformed:
 
 ## Test matrix
 
-- Reader: every structural type in each type position; `newtype` rejected
-  outside a body; `tupleof`/`recordof`/`enumof` never parsed as applications;
+- Reader: every structural type in each type position; `tupleof`/`recordof`/`enumof` never parsed as applications;
   recovery after a malformed structural type.
 - Formatter: anonymous record, enum, and union members reordered canonically
   and idempotently; declared bodies keep declaration order.
 - Positive: each admitted body form declared, constructed, projected, and
-  rendered in an `interpret` result; a newtype round trip; `recordof` passed to
+  rendered in an `interpret` result; a wrapper round trip; `recordof` passed to
   a parameter typed with the fields in another order; `enumof` checked against
   a written anonymous enum; a method called by path and passed as a value; a
   record that recurses through an array.
@@ -84,6 +83,18 @@ Two parts, landing together so no valid form is ever malformed:
   direct recursion (`@type.infinite-size`); reserved-head and builtin-named
   `deftype`s (`@name.reserved-declaration`); `intrinsic-type` outside the
   toolchain package.
+
+## Delivery notes
+
+- The behavior-neutral split of `vibra-types` was not done: new semantics landed
+  in new modules (`nominal.rs`, `construct.rs`) so `lib.rs` did not grow with
+  them, and a wholesale split was judged riskier than it was worth mid-step.
+- Record fields and enum variants take their owning type's visibility; the
+  resolver previously created them private.
+- Calling a function stored in a record field is `@tool.unavailable` until the
+  call-flow gap G12 is closed.
+- Declared and structural type facts are unavailable in position queries until
+  Step 15.
 
 ## Done
 

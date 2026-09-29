@@ -122,18 +122,17 @@ V1 type constructors are:
 type-expr = primitive | type-name | "(", type-name, type-expr+, ")"
           | tuple-type | record-type | enum-type | union-type
           | function-type ;
-deftype-body = type-expr | newtype-type | intrinsic-type ;
+deftype-body = type-expr | intrinsic-type ;
 tuple-type = "(", "tuple", type-expr*, ")" ;
 record-type = "(", "record", local-name, type-expr,
               { local-name, type-expr }, ")" ;
 enum-type = "(", "enum", local-name, type-expr,
             { local-name, type-expr }, ")" ;
 union-type = "(", "union", type-expr, type-expr+, ")" ;
-newtype-type = "(", "newtype", type-expr, ")" ;
 intrinsic-type = "(", "intrinsic-type", atom, ")" ;
 type-name = symbol - reserved-type-head ;
-reserved-type-head = "tuple" | "record" | "enum" | "union" | "newtype"
-                   | "intrinsic-type" | "fn" ;
+reserved-type-head = "tuple" | "record" | "enum" | "union" | "intrinsic-type"
+                   | "fn" ;
 function-type = "(", "fn", "(", type-expr*, ")", type-expr,
                 [ "labelled:", "(", { local-name, type-expr }, ")" ],
                 [ "variadic:", variadic-type ],
@@ -169,16 +168,21 @@ record types are the same when they have the same set of field names with
 equal types, two anonymous enum types when they have the same set of variant
 names with equal payload types, and two anonymous union types when they have
 the same member set, in each case regardless of written order. Their canonical
-spelling orders record fields and enum variants by the UTF-8 bytes of their
-names and union members by the bytes of their canonical type encoding, and the
-formatter rewrites an anonymous type into that order. A declared record, enum,
-or union keeps its declaration order, because its identity is the declaration.
+order, which fixes discriminants, rendering, and key order, sorts record fields
+and enum variants by the UTF-8 bytes of their names and union members by the
+bytes of their canonical type encoding. The formatter works on syntax alone, so
+it rewrites an anonymous type with fields and variants sorted by name and union
+members sorted by the whitespace-normalized text of their canonical spelling;
+an anonymous type containing a comment keeps its written order. A declared
+record, enum, or union keeps its declaration order, because its identity is
+the declaration.
 
 An anonymous type has no owner. It declares no methods, receives no `impl`
 block, and conforms to no interface other than `any` and the closed registries
 below. It cannot refer to itself; recursion needs a `deftype` name. Recursive
 declared types MUST pass a finite-size check; recursion through a
-variable-size container is permitted, while direct infinite expansion is
+variable-size container (an array or a map) or through a function type, whose
+values do not embed the type, is permitted, while direct infinite expansion is
 rejected with `@type.infinite-size` at the `deftype` whose expansion first
 repeats in declaration order, relating the member or payload through which it
 repeats.
@@ -211,11 +215,14 @@ records; canonical variant order and then payload for enums; and canonical
 member order and then value for unions. A `deftype` key uses its `ordered`
 implementation. Hash-table order is never observable.
 
-Newtypes have a distinct identity and exactly one representation type. Their
-constructor and unwrap operation are available only where visibility permits.
-A newtype exists only to introduce an identity, so `newtype` is admissible only
-as a `deftype` body; `(newtype t)` in any other type position emits
-`@type.anonymous-newtype`.
+A `deftype` whose body is any type expression other than a structural `tuple`,
+`record`, `enum`, or `union` form — a primitive, an applied or declared type,
+an array, a map, or a function type — declares a **wrapper type**: a distinct
+identity over exactly one representation type. `(deftype celsius f64)` is not
+`f64`, and nothing converts between them implicitly. There is no separate
+`newtype` form, because every `deftype` already introduces an identity. A
+wrapper's constructor and its unwrapping constructor pattern are available only
+where visibility permits.
 
 The builtin types — every primitive, `array`, and `map` — are declared by the
 toolchain in its embedded standard-library modules with an `intrinsic-type`
@@ -228,10 +235,10 @@ through the type path with no import, exactly as the builtin type needs none.
 `intrinsic-type` is admissible only in the toolchain-embedded package, under
 the same rule as `external:`; users cannot declare or extend a builtin type.
 
-The applied form `(symbol type-expr+)` would otherwise read `(record …)`,
-`(union …)`, or `(newtype …)` as the application of a type with that name, so
-the head of an applied type is `type-name`, written as the exception
-`symbol - reserved-type-head`: any symbol that is not one of those seven
+The applied form `(symbol type-expr+)` would otherwise read `(record …)` or
+`(union …)` as the application of a type with that name, so the head of an
+applied type is `type-name`, written as the exception
+`symbol - reserved-type-head`: any symbol that is not one of those six
 spellings. This is the grammar's only use of exception notation. Reserved type
 forms are recognized before the applied-type production, exactly as reserved
 expression forms are recognized before application.
@@ -322,7 +329,7 @@ values, not UTF-8 bytes. Projection and lookup are pure. Evaluating their
 callee or operand may perform effects, but the application itself contributes
 no effect and no function-call edge.
 
-An enum value, union value, atom, number, or `void` is not applicable. A newtype
+An enum value, union value, atom, number, or `void` is not applicable. A wrapper
 value does not delegate applicability to its representation, and a union value
 does not delegate applicability to the member it holds. A value whose static
 type is an unconstrained generic is not applicable; v1 has no callable
@@ -339,7 +346,7 @@ is pure and has kind `@constructor`:
 | tuple | `(z f g h)` | One positional operand per component, in order |
 | enum | `(z.a f)` | Zero operands for a `void` payload, else one of the payload type |
 | union | `(z f)` | One operand whose type is exactly one member; this injects it |
-| newtype | `(z f)` | One operand of the representation type |
+| any other type expression (a wrapper) | `(z f)` | One operand of the representation type |
 
 A union constructor operand that could inject under more than one member, such
 as an unsuffixed literal, emits `@type.ambiguous-inference`; one whose type is
@@ -970,7 +977,7 @@ pattern; `match` permits refutable patterns and checks all arms together.
 Tuple patterns, anonymous or declared, have exact arity and are irrefutable
 when every component is. Record patterns may omit fields and are irrefutable
 when every written field pattern is. A fixed-length array pattern is refutable for the
-variable-length array type. A newtype constructor pattern is irrefutable when
+variable-length array type. A wrapper constructor pattern is irrefutable when
 its payload pattern is. An enum constructor pattern is refutable unless its
 expected enum has exactly that one variant and its payload pattern is
 irrefutable. A bare unqualified name always binds; it never pins or compares a
@@ -1015,7 +1022,7 @@ written expected types is:
 - a written result type;
 - a `def` type annotation;
 - a declared record or tuple field type, a declared enum payload type, or a
-  newtype representation type at its constructor, and the payload type of an
+  wrapper representation type at its constructor, and the payload type of an
   `enumof` variant in the written anonymous enum it is checked against;
 - a type supplied through `types:`; and
 - the type written in an `as` expression.
@@ -1088,7 +1095,7 @@ call site's written expected type unifies with that result type and fixes the
 destination. Both contracts declare `effects: ()`, so every conversion is pure.
 
 ```vibra
-(deftype celsius (newtype f64)
+(deftype celsius f64
   visibility: @public
   (impl (from f64)
     (defn convert (value f64) self

@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-nominal-record"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A declared record is built from its labelled fields, projected with atom selectors, and rendered with its canonical atom path."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

@@ -22,16 +22,18 @@ use std::path::Path;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
     CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature, IrError,
-    LabelledParameter as IrLabelledParameter, PrimitiveType, SourceOrigin,
-    TestAssertion, Value, external::CompilerIntrinsic,
+    LabelledParameter as IrLabelledParameter, SourceOrigin, TestAssertion, Type, Value,
+    external::CompilerIntrinsic,
 };
 use vibra_syntax::{
     ApplicationBinding, Attribute, BindingFacts, Declaration, Expression,
     ExpressionKind, FloatSuffix, IntegerSuffix, Literal, NameKind, PatternKind,
-    SourceAst, TypeExpr,
+    SourceAst, TypeExpr, TypeMember,
 };
 
 mod bootstrap;
+mod construct;
+mod nominal;
 mod resolved;
 
 pub use bootstrap::{
@@ -410,7 +412,7 @@ fn check_ast_with_text_import_authority(
 #[derive(Clone)]
 struct GlobalHeader {
     name: String,
-    value_type: PrimitiveType,
+    value_type: Type,
     expression: Expression,
     span: ByteSpan,
     source_id: String,
@@ -476,6 +478,11 @@ struct FunctionHeader {
     external_declared: bool,
     test: Option<vibra_syntax::TestDeclaration>,
     test_assertion: Option<TestAssertion>,
+    /// For a nested method, its index among the owning `deftype`'s members;
+    /// `declaration_index` then names the `deftype`.
+    member_index: Option<usize>,
+    /// The receiver type of a nested method.
+    self_type: Option<Type>,
 }
 
 const IMPORTED_FUNCTION_DECLARATION: usize = usize::MAX;
@@ -483,7 +490,7 @@ const IMPORTED_FUNCTION_DECLARATION: usize = usize::MAX;
 #[derive(Clone)]
 struct LocalBinding {
     slot: usize,
-    value_type: PrimitiveType,
+    value_type: Type,
     span: ByteSpan,
     function_targets: Option<FunctionTargetSet>,
 }
@@ -492,6 +499,7 @@ struct Checker<'a> {
     source_id: &'a str,
     diagnostics: &'a mut Vec<Diagnostic>,
     ast: &'a SourceAst,
+    types: nominal::TypeNames,
     globals: Vec<GlobalHeader>,
     global_indices: BTreeMap<String, usize>,
     functions: Vec<FunctionHeader>,
@@ -516,6 +524,7 @@ impl<'a> Checker<'a> {
             source_id,
             diagnostics,
             ast,
+            types: nominal::TypeNames::default(),
             globals: Vec::new(),
             global_indices: BTreeMap::new(),
             functions: Vec::new(),
@@ -531,19 +540,98 @@ impl<'a> Checker<'a> {
     }
 
     fn collect_headers(&mut self) {
+        // Declared types first: any signature below may name one. A single
+        // source has no package, so a type's identity and path are its name.
+        let mut type_declarations = Vec::new();
+        for declaration in self.ast.declarations() {
+            if let Declaration::Deftype(value) = declaration {
+                let name = value.name().value();
+                if let Some(earlier) = self.module_names.get(name).copied() {
+                    redeclaration(
+                        self.diagnostics,
+                        self.source_id,
+                        name,
+                        name,
+                        value.span(),
+                        earlier,
+                    );
+                    continue;
+                }
+                self.module_names.insert(name.to_owned(), value.span());
+                let index = self.types.declare(
+                    self.source_id,
+                    value,
+                    vibra_ir::TypeId::new(format!("{}:{name}", self.source_id), name),
+                );
+                type_declarations.push((index, value));
+            }
+        }
+        self.types
+            .lower_bodies(&type_declarations, self.diagnostics);
         for (declaration_index, declaration) in
             self.ast.declarations().iter().enumerate()
         {
             match declaration {
-                Declaration::Def(definition) => {
-                    let Some(value_type) = primitive_type(definition.value_type())
+                Declaration::Deftype(value) => {
+                    let Some(type_index) = self
+                        .types
+                        .declared()
+                        .iter()
+                        .position(|declared| declared.span == value.span())
                     else {
-                        unavailable(
-                            self.diagnostics,
+                        continue;
+                    };
+                    let Some(self_type) = self
+                        .types
+                        .get(type_index)
+                        .map(|declared| Type::Declared(declared.id.clone()))
+                    else {
+                        continue;
+                    };
+                    for (member_index, member) in value.members().iter().enumerate() {
+                        let TypeMember::Method(method) = member else {
+                            continue;
+                        };
+                        let Some(signature) = check_signature(
                             self.source_id,
-                            definition.span(),
-                            "only monomorphic module values are available in Step 7",
+                            method,
+                            self.diagnostics,
+                            &self.types,
+                            Some(&self_type),
+                        ) else {
+                            continue;
+                        };
+                        let name = format!(
+                            "{}.{}",
+                            value.name().value(),
+                            method.name().value()
                         );
+                        let index = self.functions.len();
+                        self.function_indices.insert(name.clone(), index);
+                        self.functions.push(FunctionHeader {
+                            declaration_index,
+                            module_index: 0,
+                            source_id: self.source_id.to_owned(),
+                            name,
+                            signature,
+                            variadic: false,
+                            external: None,
+                            external_declared: false,
+                            test: None,
+                            test_assertion: None,
+                            member_index: Some(member_index),
+                            self_type: Some(self_type.clone()),
+                        });
+                    }
+                }
+                Declaration::Def(definition) => {
+                    let Some(value_type) = self.types.lower_or_report(
+                        self.source_id,
+                        None,
+                        definition.value_type(),
+                        definition.span(),
+                        self.diagnostics,
+                    ) else {
                         continue;
                     };
                     let name = definition.name().value().to_owned();
@@ -573,9 +661,13 @@ impl<'a> Checker<'a> {
                     });
                 }
                 Declaration::Defn(function) => {
-                    let Some(signature) =
-                        check_signature(self.source_id, function, self.diagnostics)
-                    else {
+                    let Some(signature) = check_signature(
+                        self.source_id,
+                        function,
+                        self.diagnostics,
+                        &self.types,
+                        None,
+                    ) else {
                         continue;
                     };
                     let name = function.name().value().to_owned();
@@ -613,6 +705,8 @@ impl<'a> Checker<'a> {
                         ),
                         test: None,
                         test_assertion: None,
+                        member_index: None,
+                        self_type: None,
                     });
                 }
                 Declaration::Import(import)
@@ -669,6 +763,8 @@ impl<'a> Checker<'a> {
                     external_declared: true,
                     test: None,
                     test_assertion: None,
+                    member_index: None,
+                    self_type: None,
                 });
             }
             self.text_import_span = Some(import_span);
@@ -721,6 +817,7 @@ impl<'a> Checker<'a> {
                 &self.module_names,
                 &mut self.bindings,
                 None,
+                &self.types,
             );
             let Some(expression) = check_expression(
                 &mut environment,
@@ -772,8 +869,7 @@ impl<'a> Checker<'a> {
                 }
                 continue;
             }
-            let Some(Declaration::Defn(function)) =
-                self.ast.declarations().get(header.declaration_index)
+            let Some(function) = header_function(self.ast.declarations(), &header)
             else {
                 continue;
             };
@@ -823,7 +919,9 @@ impl<'a> Checker<'a> {
                 &self.module_names,
                 &mut self.bindings,
                 Some(index),
+                &self.types,
             );
+            environment.self_type = header.self_type.clone();
             let mut parameters_valid = true;
             for (parameter_index, parameter) in function.parameters().iter().enumerate()
             {
@@ -936,7 +1034,12 @@ impl<'a> Checker<'a> {
             .iter()
             .map(|global| global.origin().clone())
             .collect::<Vec<_>>();
-        match CheckedProgram::try_new_with_globals(globals, functions, 0) {
+        match CheckedProgram::try_new_with_types(
+            self.types.definitions(),
+            globals,
+            functions,
+            0,
+        ) {
             Err(IrError::GlobalInitializerCycle(index)) => {
                 if let Some(origin) = global_origins.get(index) {
                     self.diagnostics.push(initializer_cycle_diagnostic(origin));
@@ -957,6 +1060,27 @@ impl<'a> Checker<'a> {
     }
 }
 
+/// The `defn` a header was collected from: a top-level function or a nested
+/// method of a `deftype`.
+pub(crate) fn header_function<'a>(
+    declarations: &'a [Declaration],
+    header: &FunctionHeader,
+) -> Option<&'a vibra_syntax::FunctionDeclaration> {
+    match (
+        declarations.get(header.declaration_index)?,
+        header.member_index,
+    ) {
+        (Declaration::Defn(function), None) => Some(function),
+        (Declaration::Deftype(value), Some(member)) => {
+            match value.members().get(member)? {
+                TypeMember::Method(function) => Some(function),
+                TypeMember::Implementation(_) => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// The diagnostic for a checked-IR initializer cycle through the global
 /// declared at `global`.
 pub(crate) fn initializer_cycle_diagnostic(global: &SourceOrigin) -> Diagnostic {
@@ -971,6 +1095,10 @@ pub(crate) fn initializer_cycle_diagnostic(global: &SourceOrigin) -> Diagnostic 
 struct CheckEnvironment<'a> {
     source_id: &'a str,
     diagnostics: &'a mut Vec<Diagnostic>,
+    /// Declared types and the names each module sees.
+    types: &'a nominal::TypeNames,
+    /// The receiver type inside a nested method.
+    self_type: Option<Type>,
     global_indices: &'a BTreeMap<String, usize>,
     globals: &'a [GlobalHeader],
     functions: &'a [FunctionHeader],
@@ -1001,7 +1129,7 @@ enum ResolvedReferenceTarget {
 #[derive(Clone)]
 struct CaptureBinding {
     slot: usize,
-    value_type: PrimitiveType,
+    value_type: Type,
     span: ByteSpan,
     function_targets: Option<FunctionTargetSet>,
 }
@@ -1010,13 +1138,13 @@ struct CaptureBinding {
 enum VisibleStorage {
     Activation {
         slot: usize,
-        value_type: PrimitiveType,
+        value_type: Type,
         span: ByteSpan,
         function_targets: Option<FunctionTargetSet>,
     },
     Closure {
         slot: usize,
-        value_type: PrimitiveType,
+        value_type: Type,
         span: ByteSpan,
         function_targets: Option<FunctionTargetSet>,
     },
@@ -1039,10 +1167,13 @@ impl<'a> CheckEnvironment<'a> {
         module_names: &'a BTreeMap<String, ByteSpan>,
         bindings: &'a mut Vec<ApplicationBinding>,
         current_function: Option<usize>,
+        types: &'a nominal::TypeNames,
     ) -> Self {
         Self {
             source_id,
             diagnostics,
+            types,
+            self_type: None,
             global_indices,
             globals,
             functions,
@@ -1069,13 +1200,13 @@ impl<'a> CheckEnvironment<'a> {
         parameter_span: ByteSpan,
         binder_span: ByteSpan,
     ) -> bool {
-        let Some(value_type) = primitive_type(value_type) else {
-            unavailable(
-                self.diagnostics,
-                self.source_id,
-                parameter_span,
-                "only monomorphic binding types are available in Step 7",
-            );
+        let Some(value_type) = self.types.lower_or_report(
+            self.source_id,
+            self.self_type.as_ref(),
+            value_type,
+            parameter_span,
+            self.diagnostics,
+        ) else {
             return false;
         };
         self.add_binding_type(name, value_type, binder_span)
@@ -1084,7 +1215,7 @@ impl<'a> CheckEnvironment<'a> {
     fn add_binding_type(
         &mut self,
         name: &str,
-        value_type: PrimitiveType,
+        value_type: Type,
         span: ByteSpan,
     ) -> bool {
         self.add_binding_type_with_function(name, value_type, span, None)
@@ -1093,11 +1224,11 @@ impl<'a> CheckEnvironment<'a> {
     fn add_binding_type_with_function(
         &mut self,
         name: &str,
-        value_type: PrimitiveType,
+        value_type: Type,
         span: ByteSpan,
         function_index: Option<usize>,
     ) -> bool {
-        let function_targets = if matches!(&value_type, PrimitiveType::Function(_)) {
+        let function_targets = if matches!(&value_type, Type::Function(_)) {
             Some(
                 function_index
                     .map_or_else(FunctionTargetSet::unknown, FunctionTargetSet::known),
@@ -1111,7 +1242,7 @@ impl<'a> CheckEnvironment<'a> {
     fn add_binding_type_with_targets(
         &mut self,
         name: &str,
-        value_type: PrimitiveType,
+        value_type: Type,
         span: ByteSpan,
         function_targets: Option<FunctionTargetSet>,
     ) -> bool {
@@ -1246,13 +1377,8 @@ impl<'a> CheckEnvironment<'a> {
     }
 }
 
-fn types_match(left: &PrimitiveType, right: &PrimitiveType) -> bool {
-    match (left, right) {
-        (PrimitiveType::Function(left), PrimitiveType::Function(right)) => {
-            left.same_shape(right)
-        }
-        _ => left == right,
-    }
+fn types_match(left: &Type, right: &Type) -> bool {
+    left.same_shape(right)
 }
 
 /// Visits `expression` and every nested expression in pre-order.
@@ -1297,6 +1423,11 @@ fn walk_expressions<'e>(
             ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
                 pending.push(operand);
             }
+            ExpressionKind::TupleOf(values) => pending.extend(values),
+            ExpressionKind::RecordOf(fields) => {
+                pending.extend(fields.iter().map(|field| field.value()));
+            }
+            ExpressionKind::EnumOf(variant) => pending.push(variant.value()),
         }
         // Children were pushed in source order; reverse them so they pop in
         // source order and the visit stays pre-order.
@@ -1336,6 +1467,16 @@ fn function_targets_from_expr(
     aliases: &BTreeMap<usize, FunctionTargetSet>,
 ) -> FunctionTargetSet {
     match expression {
+        Expr::Record { .. } | Expr::Variant { .. } | Expr::Wrap { .. } => {
+            FunctionTargetSet::default()
+        }
+        Expr::Project { value_type, .. } => {
+            if matches!(value_type, Type::Function(_)) {
+                FunctionTargetSet::unknown()
+            } else {
+                FunctionTargetSet::default()
+            }
+        }
         Expr::Function { function, .. } => FunctionTargetSet::known(*function),
         Expr::Variable {
             slot, value_type, ..
@@ -1350,7 +1491,7 @@ fn function_targets_from_expr(
                     .and_then(|binding| binding.function_targets.clone())
             })
             .unwrap_or_else(|| {
-                if matches!(value_type, PrimitiveType::Function(_)) {
+                if matches!(value_type, Type::Function(_)) {
                     FunctionTargetSet::unknown()
                 } else {
                     FunctionTargetSet::default()
@@ -1363,7 +1504,7 @@ fn function_targets_from_expr(
             .get(*index)
             .map(|global| global.function_targets.clone())
             .unwrap_or_else(|| {
-                if matches!(value_type, PrimitiveType::Function(_)) {
+                if matches!(value_type, Type::Function(_)) {
                     FunctionTargetSet::unknown()
                 } else {
                     FunctionTargetSet::default()
@@ -1407,7 +1548,7 @@ fn function_targets_from_expr(
             .find(|binding| binding.slot == *slot)
             .and_then(|binding| binding.function_targets.clone())
             .unwrap_or_else(|| {
-                if matches!(value_type, PrimitiveType::Function(_)) {
+                if matches!(value_type, Type::Function(_)) {
                     FunctionTargetSet::unknown()
                 } else {
                     FunctionTargetSet::default()
@@ -1418,7 +1559,7 @@ fn function_targets_from_expr(
         // the function-typed boundary conservatively instead of dropping it
         // to the empty set and manufacturing a singleton hint from a branch.
         Expr::Call {
-            result: PrimitiveType::Function(_),
+            result: Type::Function(_),
             ..
         } => FunctionTargetSet::unknown(),
         Expr::Call { .. }
@@ -1552,8 +1693,8 @@ fn syntax_function_targets(
 fn ensure_expected(
     environment: &mut CheckEnvironment<'_>,
     span: ByteSpan,
-    expected: Option<PrimitiveType>,
-    actual: PrimitiveType,
+    expected: Option<Type>,
+    actual: Type,
 ) {
     if let Some(expected) = expected
         && !types_match(&expected, &actual)
@@ -1569,11 +1710,54 @@ fn ensure_expected(
     }
 }
 
+/// Whether `name`, written at `expression`, denotes a value rather than a
+/// constructor: a local, a capture, a module value, or a function.
+fn names_value(
+    environment: &CheckEnvironment<'_>,
+    expression: &Expression,
+    name: &str,
+) -> bool {
+    if environment.locals.contains_key(name)
+        || environment.captures.contains_key(name)
+        || environment
+            .outer
+            .as_ref()
+            .is_some_and(|outer| outer.values.contains_key(name))
+        || environment.global_indices.contains_key(name)
+        || environment.function_indices.contains_key(name)
+    {
+        return true;
+    }
+    matches!(
+        resolved_reference_target(environment, expression),
+        Some(ResolvedReferenceTarget::Global(_) | ResolvedReferenceTarget::Function(_))
+    )
+}
+
 fn unknown_name(
     environment: &mut CheckEnvironment<'_>,
     expression: &Expression,
     name: &str,
 ) {
+    // A constructor is an application head, never a function value.
+    if let ExpressionKind::Name(written) = expression.kind()
+        && environment
+            .types
+            .constructor(environment.source_id, written)
+            .is_some()
+    {
+        environment.diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::NameWrongEntityKind,
+                expression.span(),
+                format!(
+                    "`{name}` is a constructor, not a value; apply it to its operands"
+                ),
+            )
+            .with_source_id(environment.source_id),
+        );
+        return;
+    }
     environment.diagnostics.push(
         Diagnostic::new(
             DiagnosticCode::NameUnknownSymbol,
@@ -1622,34 +1806,34 @@ fn check_signature(
     source_id: &str,
     function: &vibra_syntax::FunctionDeclaration,
     diagnostics: &mut Vec<Diagnostic>,
+    types: &nominal::TypeNames,
+    self_type: Option<&Type>,
 ) -> Option<FunctionSignature> {
     let mut parameters = Vec::with_capacity(function.parameters().len());
     let mut valid = true;
     for parameter in function.parameters() {
-        match primitive_type(parameter.value_type()) {
+        match types.lower_or_report(
+            source_id,
+            self_type,
+            parameter.value_type(),
+            parameter.span(),
+            diagnostics,
+        ) {
             Some(value_type) => parameters.push(value_type),
-            None => {
-                valid = false;
-                unavailable(
-                    diagnostics,
-                    source_id,
-                    parameter.span(),
-                    "only monomorphic parameter types are available in Step 7",
-                );
-            }
+            None => valid = false,
         }
     }
-    let result = match primitive_type(function.result()) {
+    let result = match types.lower_or_report(
+        source_id,
+        self_type,
+        function.result(),
+        function.span(),
+        diagnostics,
+    ) {
         Some(value_type) => value_type,
         None => {
             valid = false;
-            unavailable(
-                diagnostics,
-                source_id,
-                function.span(),
-                "only monomorphic result types are available in Step 7",
-            );
-            PrimitiveType::Void
+            Type::Void
         }
     };
     let mut labelled = Vec::new();
@@ -1657,14 +1841,14 @@ fn check_signature(
         match attribute {
             Attribute::Labelled(entries) => {
                 for entry in entries {
-                    let Some(value_type) = primitive_type(entry.value_type()) else {
+                    let Some(value_type) = types.lower_or_report(
+                        source_id,
+                        self_type,
+                        entry.value_type(),
+                        entry.span(),
+                        diagnostics,
+                    ) else {
                         valid = false;
-                        unavailable(
-                            diagnostics,
-                            source_id,
-                            entry.span(),
-                            "labelled parameter types must be monomorphic in Step 7",
-                        );
                         continue;
                     };
                     let Some(default) = check_literal(
@@ -1778,7 +1962,7 @@ fn compiler_intrinsic(
             .iter()
             .filter_map(|parameter| primitive_type(parameter.value_type()))
             .collect(),
-        primitive_type(function.result()).unwrap_or(PrimitiveType::Void),
+        primitive_type(function.result()).unwrap_or(Type::Void),
     );
     if !actual.same_shape(&expected) {
         diagnostics.push(
@@ -1807,47 +1991,47 @@ fn check_lambda_signature(
     source_id: &str,
     lambda: &vibra_syntax::LambdaExpression,
     diagnostics: &mut Vec<Diagnostic>,
+    types: &nominal::TypeNames,
+    self_type: Option<&Type>,
 ) -> Option<FunctionSignature> {
     let mut valid = true;
     let parameters = lambda
         .parameters()
         .iter()
         .map(|parameter| {
-            let value_type = primitive_type(parameter.value_type());
+            let value_type = types.lower_or_report(
+                source_id,
+                self_type,
+                parameter.value_type(),
+                parameter.span(),
+                diagnostics,
+            );
             if value_type.is_none() {
                 valid = false;
-                unavailable(
-                    diagnostics,
-                    source_id,
-                    parameter.span(),
-                    "lambda parameter types must be monomorphic in Step 7",
-                );
             }
             value_type
         })
         .collect::<Option<Vec<_>>>()?;
-    let Some(result) = primitive_type(lambda.result()) else {
-        unavailable(
-            diagnostics,
-            source_id,
-            lambda.span(),
-            "lambda result types must be monomorphic in Step 7",
-        );
-        return None;
-    };
+    let result = types.lower_or_report(
+        source_id,
+        self_type,
+        lambda.result(),
+        lambda.span(),
+        diagnostics,
+    )?;
     let mut labelled = Vec::new();
     for attribute in lambda.attributes().items() {
         match attribute {
             Attribute::Labelled(entries) => {
                 for entry in entries {
-                    let Some(value_type) = primitive_type(entry.value_type()) else {
+                    let Some(value_type) = types.lower_or_report(
+                        source_id,
+                        self_type,
+                        entry.value_type(),
+                        entry.span(),
+                        diagnostics,
+                    ) else {
                         valid = false;
-                        unavailable(
-                            diagnostics,
-                            source_id,
-                            entry.span(),
-                            "labelled parameter types must be monomorphic in Step 7",
-                        );
                         continue;
                     };
                     let Some(default) = check_literal(
@@ -1891,57 +2075,10 @@ fn check_lambda_signature(
     valid.then(|| FunctionSignature::with_labelled(parameters, labelled, result))
 }
 
-fn primitive_type(value: &TypeExpr) -> Option<PrimitiveType> {
-    match value {
-        TypeExpr::Void => Some(PrimitiveType::Void),
-        TypeExpr::Name(name) => match name.value() {
-            "bool" => Some(PrimitiveType::Bool),
-            "char" => Some(PrimitiveType::Char),
-            "str" => Some(PrimitiveType::Str),
-            "bytes" => Some(PrimitiveType::Bytes),
-            "atom" => Some(PrimitiveType::Atom),
-            "i8" => Some(PrimitiveType::I8),
-            "i16" => Some(PrimitiveType::I16),
-            "i32" => Some(PrimitiveType::I32),
-            "i64" => Some(PrimitiveType::I64),
-            "u8" => Some(PrimitiveType::U8),
-            "u16" => Some(PrimitiveType::U16),
-            "u32" => Some(PrimitiveType::U32),
-            "u64" => Some(PrimitiveType::U64),
-            "f32" => Some(PrimitiveType::F32),
-            "f64" => Some(PrimitiveType::F64),
-            _ => None,
-        },
-        TypeExpr::Function(function)
-            if function.effects().is_empty() && function.variadic().is_none() =>
-        {
-            let parameters = function
-                .parameters()
-                .iter()
-                .map(primitive_type)
-                .collect::<Option<Vec<_>>>()?;
-            let labelled = function
-                .labelled()
-                .iter()
-                .map(|slot| {
-                    Some(IrLabelledParameter::new(
-                        slot.name().value(),
-                        primitive_type(slot.value_type())?,
-                        None,
-                    ))
-                })
-                .collect::<Option<Vec<_>>>()?;
-            let result = primitive_type(function.result())?;
-            Some(PrimitiveType::Function(Box::new(
-                FunctionSignature::with_labelled(parameters, labelled, result),
-            )))
-        }
-        TypeExpr::Applied { .. }
-        | TypeExpr::Tuple(_)
-        | TypeExpr::Array(_)
-        | TypeExpr::Map(_, _)
-        | TypeExpr::Function(_) => None,
-    }
+/// Lowers a type expression that names only primitive and function types,
+/// as compiler-intrinsic signatures do.
+fn primitive_type(value: &TypeExpr) -> Option<Type> {
+    nominal::TypeNames::default().lower("", None, value).ok()
 }
 
 fn has_deferred_attributes(attributes: &[Attribute]) -> bool {
@@ -1959,21 +2096,21 @@ fn has_deferred_attributes(attributes: &[Attribute]) -> bool {
 fn check_sequence(
     environment: &mut CheckEnvironment<'_>,
     expressions: &[Expression],
-    expected: Option<PrimitiveType>,
+    expected: Option<Type>,
     fallback_span: ByteSpan,
     tail_position: bool,
 ) -> Option<Expr> {
     if expressions.is_empty() {
         if expected
             .as_ref()
-            .is_some_and(|expected| *expected != PrimitiveType::Void)
+            .is_some_and(|expected| *expected != Type::Void)
         {
             mismatch(
                 environment.diagnostics,
                 environment.source_id,
                 fallback_span,
-                expected.clone().unwrap_or(PrimitiveType::Void),
-                PrimitiveType::Void,
+                expected.clone().unwrap_or(Type::Void),
+                Type::Void,
                 "an empty sequence returns void",
             );
             return None;
@@ -2016,15 +2153,37 @@ fn check_sequence(
 fn check_expression(
     environment: &mut CheckEnvironment<'_>,
     expression: &Expression,
-    expected: Option<PrimitiveType>,
+    expected: Option<Type>,
 ) -> Option<Expr> {
     check_expression_in_position(environment, expression, expected, false)
+}
+
+/// Checks an operand bound to a parameter or constructor slot. A type
+/// disagreement at the operand itself is `@type.argument-mismatch`; one nested
+/// inside it, such as a differing branch, keeps `@type.mismatch`.
+fn check_operand(
+    environment: &mut CheckEnvironment<'_>,
+    expression: &Expression,
+    expected: Option<Type>,
+) -> Option<Expr> {
+    let before = environment.diagnostics.len();
+    let checked = check_expression(environment, expression, expected);
+    for diagnostic in environment.diagnostics.iter_mut().skip(before) {
+        if diagnostic.code() == DiagnosticCode::TypeMismatch
+            && diagnostic.primary_span() == expression.span()
+        {
+            *diagnostic = diagnostic
+                .clone()
+                .with_code(DiagnosticCode::TypeArgumentMismatch);
+        }
+    }
+    checked
 }
 
 fn check_expression_in_position(
     environment: &mut CheckEnvironment<'_>,
     expression: &Expression,
-    expected: Option<PrimitiveType>,
+    expected: Option<Type>,
     tail_position: bool,
 ) -> Option<Expr> {
     match expression.kind() {
@@ -2042,7 +2201,7 @@ fn check_expression_in_position(
             )
         }),
         ExpressionKind::Name(name) if name.kind() == NameKind::Atom => {
-            let actual = PrimitiveType::Atom;
+            let actual = Type::Atom;
             if expected
                 .as_ref()
                 .is_some_and(|expected| *expected != actual)
@@ -2077,8 +2236,7 @@ fn check_expression_in_position(
                     environment.function_indices.get(name.value()).copied()
                     && let Some(header) = environment.functions.get(index)
                 {
-                    let actual =
-                        PrimitiveType::Function(Box::new(header.signature.clone()));
+                    let actual = Type::Function(Box::new(header.signature.clone()));
                     ensure_expected(
                         environment,
                         expression.span(),
@@ -2176,8 +2334,7 @@ fn check_expression_in_position(
             if let Some(index) = environment.function_indices.get(name.value()).copied()
             {
                 let header = environment.functions.get(index)?;
-                let actual =
-                    PrimitiveType::Function(Box::new(header.signature.clone()));
+                let actual = Type::Function(Box::new(header.signature.clone()));
                 ensure_expected(
                     environment,
                     expression.span(),
@@ -2197,6 +2354,28 @@ fn check_expression_in_position(
             None
         }
         ExpressionKind::Application(application) => {
+            if let ExpressionKind::Name(name) = application.callee().kind()
+                && name.kind() == NameKind::Symbol
+                && !names_value(environment, application.callee(), name.value())
+                && let Some(target) =
+                    environment.types.constructor(environment.source_id, name)
+            {
+                if application.type_arguments().is_some() {
+                    unavailable(
+                        environment.diagnostics,
+                        environment.source_id,
+                        application.span(),
+                        "generic type arguments arrive in M3 Step 3",
+                    );
+                    return None;
+                }
+                return construct::check_constructor(
+                    environment,
+                    application,
+                    &target,
+                    expected,
+                );
+            }
             if application.type_arguments().is_some() {
                 unavailable(
                     environment.diagnostics,
@@ -2207,7 +2386,15 @@ fn check_expression_in_position(
                 return None;
             }
             let callee = check_expression(environment, application.callee(), None)?;
-            let PrimitiveType::Function(signature) = callee.result_type() else {
+            if construct::record_fields(environment, &callee.result_type()).is_some() {
+                return construct::check_projection(
+                    environment,
+                    application,
+                    callee,
+                    expected,
+                );
+            }
+            let Type::Function(signature) = callee.result_type() else {
                 environment.diagnostics.push(
                     Diagnostic::new(
                         DiagnosticCode::TypeNotApplicable,
@@ -2286,7 +2473,7 @@ fn check_expression_in_position(
                 .take(signature.parameters().len())
                 .zip(signature.parameters())
             {
-                arguments.push(check_expression(
+                arguments.push(check_operand(
                     environment,
                     argument.value(),
                     Some(value_type.clone()),
@@ -2294,7 +2481,7 @@ fn check_expression_in_position(
             }
             for parameter in signature.labelled() {
                 if let Some(argument) = labelled.remove(parameter.name()) {
-                    arguments.push(check_expression(
+                    arguments.push(check_operand(
                         environment,
                         argument.value(),
                         Some(parameter.value_type()),
@@ -2389,13 +2576,15 @@ fn check_expression_in_position(
             body,
         } => {
             let value = check_expression(environment, value, None)?;
-            let function_targets =
-                matches!(value.result_type(), PrimitiveType::Function(_)).then(|| {
+            let function_targets = matches!(value.result_type(), Type::Function(_))
+                .then(|| {
                     function_targets_from_expr(&value, environment, &BTreeMap::new())
                 });
             let mut nested = CheckEnvironment {
                 source_id: environment.source_id,
                 diagnostics: environment.diagnostics,
+                types: environment.types,
+                self_type: environment.self_type.clone(),
                 global_indices: environment.global_indices,
                 globals: environment.globals,
                 functions: environment.functions,
@@ -2462,8 +2651,7 @@ fn check_expression_in_position(
             then_branch,
             else_branch,
         } => {
-            let condition =
-                check_expression(environment, condition, Some(PrimitiveType::Bool))?;
+            let condition = check_expression(environment, condition, Some(Type::Bool))?;
             let then_branch = check_expression_in_position(
                 environment,
                 then_branch,
@@ -2499,6 +2687,8 @@ fn check_expression_in_position(
                 environment.source_id,
                 lambda,
                 environment.diagnostics,
+                environment.types,
+                environment.self_type.as_ref(),
             )?;
             let outer = environment.visible_bindings();
             let mut nested = CheckEnvironment::new(
@@ -2511,7 +2701,9 @@ fn check_expression_in_position(
                 environment.module_names,
                 &mut *environment.bindings,
                 None,
+                environment.types,
             );
+            nested.self_type = environment.self_type.clone();
             nested.resolved_targets = environment.resolved_targets;
             nested.reports_redeclarations = environment.reports_redeclarations;
             nested.outer = Some(outer);
@@ -2531,15 +2723,12 @@ fn check_expression_in_position(
             let mut parameters_valid = true;
             let mut parameter_types = Vec::with_capacity(lambda.parameters().len());
             for (parameter_index, parameter) in lambda.parameters().iter().enumerate() {
-                let Some(value_type) = primitive_type(parameter.value_type()) else {
+                // The signature already lowered and reported every parameter type.
+                let Some(value_type) =
+                    signature.parameters().get(parameter_index).cloned()
+                else {
                     parameters_valid = false;
                     nested.next_slot = parameter_index.saturating_add(1);
-                    unavailable(
-                        nested.diagnostics,
-                        nested.source_id,
-                        parameter.span(),
-                        "lambda parameter types must be monomorphic in Step 7",
-                    );
                     continue;
                 };
                 parameter_types.push(value_type.clone());
@@ -2599,7 +2788,7 @@ fn check_expression_in_position(
             let capture_sources = std::mem::take(&mut nested.capture_sources);
             let slot_count = nested.next_slot;
             drop(nested);
-            let actual = PrimitiveType::Function(Box::new(signature.clone()));
+            let actual = Type::Function(Box::new(signature.clone()));
             ensure_expected(
                 environment,
                 expression.span(),
@@ -2621,9 +2810,16 @@ fn check_expression_in_position(
                 SourceOrigin::new(environment.source_id, expression.span()),
             ))
         }
+        ExpressionKind::RecordOf(fields) => {
+            construct::check_recordof(environment, expression, fields, expected)
+        }
+        ExpressionKind::EnumOf(variant) => {
+            construct::check_enumof(environment, expression, variant, expected)
+        }
         ExpressionKind::Match { .. }
         | ExpressionKind::As { .. }
-        | ExpressionKind::Try(_) => {
+        | ExpressionKind::Try(_)
+        | ExpressionKind::TupleOf(_) => {
             unavailable(
                 environment.diagnostics,
                 environment.source_id,
@@ -2656,11 +2852,23 @@ fn resolved_reference_target(
 fn check_resolved_reference(
     environment: &mut CheckEnvironment<'_>,
     expression: &Expression,
-    expected: Option<PrimitiveType>,
+    expected: Option<Type>,
     target: ResolvedReferenceTarget,
 ) -> Option<Expr> {
     match target {
-        ResolvedReferenceTarget::Unresolved => None,
+        ResolvedReferenceTarget::Unresolved => {
+            // The resolver reported an unknown path. A path that resolved to a
+            // type or variant is a constructor, which is not a value.
+            if let ExpressionKind::Name(name) = expression.kind()
+                && environment
+                    .types
+                    .constructor(environment.source_id, name)
+                    .is_some()
+            {
+                unknown_name(environment, expression, name.value());
+            }
+            None
+        }
         ResolvedReferenceTarget::Global(index) => {
             let global = environment.globals.get(index)?;
             let actual = global.value_type.clone();
@@ -2681,7 +2889,7 @@ fn check_resolved_reference(
         }
         ResolvedReferenceTarget::Function(index) => {
             let function = environment.functions.get(index)?;
-            let actual = PrimitiveType::Function(Box::new(function.signature.clone()));
+            let actual = Type::Function(Box::new(function.signature.clone()));
             ensure_expected(
                 environment,
                 expression.span(),
@@ -2704,7 +2912,7 @@ fn check_literal(
     source_id: &str,
     span: ByteSpan,
     literal: &Literal,
-    expected: Option<PrimitiveType>,
+    expected: Option<Type>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Value> {
     match literal {
@@ -2712,7 +2920,7 @@ fn check_literal(
             source_id,
             span,
             expected,
-            PrimitiveType::Str,
+            Type::Str,
             Value::Str(value.value().to_owned()),
             diagnostics,
         ),
@@ -2720,7 +2928,7 @@ fn check_literal(
             source_id,
             span,
             expected,
-            PrimitiveType::Char,
+            Type::Char,
             Value::Char(value.value()),
             diagnostics,
         ),
@@ -2728,7 +2936,7 @@ fn check_literal(
             source_id,
             span,
             expected,
-            PrimitiveType::Bool,
+            Type::Bool,
             Value::Bool(value.value()),
             diagnostics,
         ),
@@ -2736,7 +2944,7 @@ fn check_literal(
             source_id,
             span,
             expected,
-            PrimitiveType::Void,
+            Type::Void,
             Value::Void,
             diagnostics,
         ),
@@ -2752,8 +2960,8 @@ fn check_literal(
 fn expect_fixed(
     source_id: &str,
     span: ByteSpan,
-    expected: Option<PrimitiveType>,
-    actual: PrimitiveType,
+    expected: Option<Type>,
+    actual: Type,
     value: Value,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Value> {
@@ -2779,7 +2987,7 @@ fn check_integer(
     source_id: &str,
     span: ByteSpan,
     literal: &vibra_syntax::IntegerLiteral,
-    expected: Option<PrimitiveType>,
+    expected: Option<Type>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Value> {
     let target = literal
@@ -2787,14 +2995,22 @@ fn check_integer(
         .map(integer_suffix_type)
         .or_else(|| expected.clone().filter(|value| value.is_integer()));
     let Some(target) = target else {
-        mismatch(
-            diagnostics,
-            source_id,
-            span,
-            expected.unwrap_or(PrimitiveType::I64),
-            PrimitiveType::I64,
-            "an unsuffixed integer needs one expected integer type",
-        );
+        match expected {
+            Some(expected) => mismatch(
+                diagnostics,
+                source_id,
+                span,
+                expected,
+                Type::I64,
+                "an unsuffixed integer is not a value of the expected type",
+            ),
+            None => ambiguous_literal(
+                diagnostics,
+                source_id,
+                span,
+                "an unsuffixed integer needs one expected integer type",
+            ),
+        }
         return None;
     };
     let Some(magnitude) = literal.digits().parse::<u128>().ok() else {
@@ -2837,7 +3053,7 @@ fn check_float(
     source_id: &str,
     span: ByteSpan,
     literal: &vibra_syntax::FloatLiteral,
-    expected: Option<PrimitiveType>,
+    expected: Option<Type>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Value> {
     let target = literal
@@ -2845,24 +3061,32 @@ fn check_float(
         .map(float_suffix_type)
         .or_else(|| expected.clone().filter(|value| value.is_float()));
     let Some(target) = target else {
-        mismatch(
-            diagnostics,
-            source_id,
-            span,
-            expected.unwrap_or(PrimitiveType::F64),
-            PrimitiveType::F64,
-            "an unsuffixed float needs one expected floating-point type",
-        );
+        match expected {
+            Some(expected) => mismatch(
+                diagnostics,
+                source_id,
+                span,
+                expected,
+                Type::F64,
+                "an unsuffixed float is not a value of the expected type",
+            ),
+            None => ambiguous_literal(
+                diagnostics,
+                source_id,
+                span,
+                "an unsuffixed float needs one expected floating-point type",
+            ),
+        }
         return None;
     };
     let value = match target {
-        PrimitiveType::F32 => literal
+        Type::F32 => literal
             .body()
             .parse::<f32>()
             .ok()
             .filter(|value| value.is_finite())
             .and_then(Value::f32),
-        PrimitiveType::F64 => literal
+        Type::F64 => literal
             .body()
             .parse::<f64>()
             .ok()
@@ -2896,55 +3120,49 @@ fn check_float(
     Some(value)
 }
 
-fn integer_suffix_type(suffix: IntegerSuffix) -> PrimitiveType {
+fn integer_suffix_type(suffix: IntegerSuffix) -> Type {
     match suffix {
-        IntegerSuffix::I8 => PrimitiveType::I8,
-        IntegerSuffix::I16 => PrimitiveType::I16,
-        IntegerSuffix::I32 => PrimitiveType::I32,
-        IntegerSuffix::I64 => PrimitiveType::I64,
-        IntegerSuffix::U8 => PrimitiveType::U8,
-        IntegerSuffix::U16 => PrimitiveType::U16,
-        IntegerSuffix::U32 => PrimitiveType::U32,
-        IntegerSuffix::U64 => PrimitiveType::U64,
+        IntegerSuffix::I8 => Type::I8,
+        IntegerSuffix::I16 => Type::I16,
+        IntegerSuffix::I32 => Type::I32,
+        IntegerSuffix::I64 => Type::I64,
+        IntegerSuffix::U8 => Type::U8,
+        IntegerSuffix::U16 => Type::U16,
+        IntegerSuffix::U32 => Type::U32,
+        IntegerSuffix::U64 => Type::U64,
     }
 }
 
-fn float_suffix_type(suffix: FloatSuffix) -> PrimitiveType {
+fn float_suffix_type(suffix: FloatSuffix) -> Type {
     match suffix {
-        FloatSuffix::F32 => PrimitiveType::F32,
-        FloatSuffix::F64 => PrimitiveType::F64,
+        FloatSuffix::F32 => Type::F32,
+        FloatSuffix::F64 => Type::F64,
     }
 }
 
-fn integer_value(
-    target: PrimitiveType,
-    negative: bool,
-    magnitude: u128,
-) -> Option<Value> {
+fn integer_value(target: Type, negative: bool, magnitude: u128) -> Option<Value> {
     match target {
-        PrimitiveType::I8 => {
-            signed_value(negative, magnitude, i8::MIN as i128, i8::MAX as i128)
-                .map(|value| Value::I8(value as i8))
-        }
-        PrimitiveType::I16 => {
+        Type::I8 => signed_value(negative, magnitude, i8::MIN as i128, i8::MAX as i128)
+            .map(|value| Value::I8(value as i8)),
+        Type::I16 => {
             signed_value(negative, magnitude, i16::MIN as i128, i16::MAX as i128)
                 .map(|value| Value::I16(value as i16))
         }
-        PrimitiveType::I32 => {
+        Type::I32 => {
             signed_value(negative, magnitude, i32::MIN as i128, i32::MAX as i128)
                 .map(|value| Value::I32(value as i32))
         }
-        PrimitiveType::I64 => {
+        Type::I64 => {
             signed_value(negative, magnitude, i64::MIN as i128, i64::MAX as i128)
                 .map(|value| Value::I64(value as i64))
         }
-        PrimitiveType::U8 => (!negative && magnitude <= u8::MAX as u128)
+        Type::U8 => (!negative && magnitude <= u8::MAX as u128)
             .then_some(Value::U8(magnitude as u8)),
-        PrimitiveType::U16 => (!negative && magnitude <= u16::MAX as u128)
+        Type::U16 => (!negative && magnitude <= u16::MAX as u128)
             .then_some(Value::U16(magnitude as u16)),
-        PrimitiveType::U32 => (!negative && magnitude <= u32::MAX as u128)
+        Type::U32 => (!negative && magnitude <= u32::MAX as u128)
             .then_some(Value::U32(magnitude as u32)),
-        PrimitiveType::U64 => (!negative && magnitude <= u64::MAX as u128)
+        Type::U64 => (!negative && magnitude <= u64::MAX as u128)
             .then_some(Value::U64(magnitude as u64)),
         _ => None,
     }
@@ -2961,17 +3179,30 @@ fn signed_value(negative: bool, magnitude: u128, min: i128, max: i128) -> Option
     }
 }
 
+/// `@type.ambiguous-inference` for a literal no expected type constrains.
+fn ambiguous_literal(
+    diagnostics: &mut Vec<Diagnostic>,
+    source_id: &str,
+    span: ByteSpan,
+    message: &str,
+) {
+    diagnostics.push(
+        Diagnostic::new(DiagnosticCode::TypeAmbiguousInference, span, message)
+            .with_source_id(source_id),
+    );
+}
+
 fn mismatch(
     diagnostics: &mut Vec<Diagnostic>,
     source_id: &str,
     span: ByteSpan,
-    expected: PrimitiveType,
-    actual: PrimitiveType,
+    expected: Type,
+    actual: Type,
     message: impl Into<String>,
 ) {
     diagnostics.push(
         Diagnostic::new(
-            DiagnosticCode::TypeArgumentMismatch,
+            DiagnosticCode::TypeMismatch,
             span,
             format!("{}: expected {expected}, found {actual}", message.into()),
         )
@@ -2991,7 +3222,7 @@ fn out_of_range(
     );
 }
 
-fn unavailable(
+pub(crate) fn unavailable(
     diagnostics: &mut Vec<Diagnostic>,
     source_id: &str,
     span: ByteSpan,
@@ -3023,7 +3254,7 @@ mod tests {
                 .entry()
                 .body()
                 .result_type(),
-            vibra_ir::PrimitiveType::I32
+            vibra_ir::Type::I32
         );
     }
 
@@ -3041,9 +3272,12 @@ mod tests {
         let result = check_source("answer.vib", "(defn answer () str 1i32)");
         assert!(!result.accepted());
         assert!(result.program().is_none());
-        assert!(result.diagnostics().iter().any(
-            |diagnostic| diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
-        ));
+        assert!(
+            result
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code() == DiagnosticCode::TypeMismatch)
+        );
     }
 
     #[test]
@@ -3130,9 +3364,11 @@ mod tests {
             "condition.vib",
             "(defn answer (value i32) i32 (if value 1i32 2i32))",
         );
-        assert!(condition.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
-        }));
+        assert!(
+            condition.diagnostics().iter().any(|diagnostic| {
+                diagnostic.code() == DiagnosticCode::TypeMismatch
+            })
+        );
     }
 
     #[test]
@@ -3453,12 +3689,13 @@ mod tests {
         // The single-source entry is the first function.
         let depth = 200;
         let mut source = format!(
-            "(defn answer () i32 (f{} leaf))\n(defn leaf () i32 1i32)\n(defn f0 (g (fn () i32)) i32 (g))\n",
+            "(defn answer () i32 (step{} leaf))\n(defn leaf () i32 1i32)\n(defn step0 (g (fn () i32)) i32 (g))\n",
             depth - 1
         );
         for index in 1..depth {
+            // `step` rather than `f`: `f32` and `f64` are builtin type names.
             source.push_str(&format!(
-                "(defn f{index} (g (fn () i32)) i32 (f{} g))\n",
+                "(defn step{index} (g (fn () i32)) i32 (step{} g))\n",
                 index - 1
             ));
         }

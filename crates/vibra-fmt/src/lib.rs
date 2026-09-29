@@ -24,6 +24,8 @@
 //! A recovered document is returned byte-for-byte unchanged because applying
 //! canonical whitespace to incomplete or opaque leaf text would be a guess.
 
+mod structural;
+
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::path::Path;
@@ -260,6 +262,15 @@ fn format_document_inner(
             || document.source().to_owned(),
             |data| format!("{}\n", canonical_data(data)),
         ));
+    }
+
+    if document.accepted()
+        && let Some(reordered) =
+            structural::canonical_structural_order(document.root(), document.source())
+        && let Ok(reordered) = parse_document(document.path(), &reordered)
+        && reordered.accepted()
+    {
+        return format_document_inner(&reordered, context);
     }
 
     if document.accepted()
@@ -545,7 +556,40 @@ fn render_expression(
             render_expression(operand, output, context);
             output.push(')');
         }
+        ExpressionKind::TupleOf(values) => {
+            output.push_str("(tupleof");
+            for value in values {
+                output.push(' ');
+                render_expression(value, output, context);
+            }
+            output.push(')');
+        }
+        ExpressionKind::RecordOf(fields) => {
+            output.push_str("(recordof");
+            for field in fields {
+                output.push(' ');
+                render_labelled_operand(field, output, context);
+            }
+            output.push(')');
+        }
+        ExpressionKind::EnumOf(variant) => {
+            output.push_str("(enumof ");
+            render_labelled_operand(variant, output, context);
+            output.push(')');
+        }
     }
+}
+
+fn render_labelled_operand(
+    operand: &CallArgument,
+    output: &mut String,
+    context: &mut RenderContext<'_>,
+) {
+    if let Some(label) = operand.label() {
+        output.push_str(label.raw());
+        output.push(' ');
+    }
+    render_expression(operand.value(), output, context);
 }
 
 fn render_lambda(
@@ -583,11 +627,24 @@ fn render_pattern(
             output.push(')');
         }
         PatternKind::Tuple(values) => {
-            output.push_str("(tuple");
+            output.push_str("(tupleof");
             for value in values {
                 output.push(' ');
                 render_pattern(value, output, context);
             }
+            output.push(')');
+        }
+        PatternKind::RecordOf(fields) => {
+            output.push_str("(recordof");
+            for field in fields {
+                output.push(' ');
+                render_pattern_argument(field, output, context);
+            }
+            output.push(')');
+        }
+        PatternKind::EnumOf(variant) => {
+            output.push_str("(enumof ");
+            render_pattern_argument(variant, output, context);
             output.push(')');
         }
         PatternKind::Array(values) => {
@@ -626,19 +683,9 @@ fn render_pattern_argument(
 fn render_deftype_body(body: &DeftypeBody, output: &mut String) {
     match body {
         DeftypeBody::Type(value) => render_type(value, output),
-        DeftypeBody::Record(fields) => render_fields("record", fields, output),
-        DeftypeBody::Enum(fields) => render_fields("enum", fields, output),
-        DeftypeBody::Union(members) => {
-            output.push_str("(union");
-            for member in members {
-                output.push(' ');
-                render_type(member, output);
-            }
-            output.push(')');
-        }
-        DeftypeBody::Newtype(value) => {
-            output.push_str("(newtype ");
-            render_type(value, output);
+        DeftypeBody::Intrinsic(atom) => {
+            output.push_str("(intrinsic-type ");
+            output.push_str(atom.raw());
             output.push(')');
         }
     }
@@ -673,6 +720,16 @@ fn render_type(value: &TypeExpr, output: &mut String) {
             for value in values {
                 output.push(' ');
                 render_type(value, output);
+            }
+            output.push(')');
+        }
+        TypeExpr::Record(fields) => render_fields("record", fields, output),
+        TypeExpr::Enum(fields) => render_fields("enum", fields, output),
+        TypeExpr::Union(members) => {
+            output.push_str("(union");
+            for member in members {
+                output.push(' ');
+                render_type(member, output);
             }
             output.push(')');
         }

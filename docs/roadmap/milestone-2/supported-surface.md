@@ -3,7 +3,10 @@
 This inventory is derived from the public enum variants in
 `crates/vibra-syntax/src/ast.rs` at the M1 base. The Step 1 conformance test
 requires every `Enum::Variant` token below to remain present in this document;
-adding an AST variant without a disposition fails the test. `supported` means
+adding an AST variant without a disposition fails the test. That test was
+retired when M3 Step 2 changed the AST; the
+[M3 surface inventory](../milestone-3/supported-surface.md) and its test now
+enforce exhaustiveness, and this table records the M2 state only. `supported` means
 the M2 checker/interpreter will implement it by the owning step. `deferred`
 means M1 may parse it, but M2 reports `@tool.unavailable` when semantic support
 is required. `rejected` means the active v1 grammar itself rejects it. This is

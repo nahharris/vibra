@@ -1,0 +1,31 @@
+id = "V1-TYPE-INFER-anonymous-values"
+rule = "V1-TYPE-INFER"
+profile = "static-v1"
+operation = "type-check"
+description = "enumof needs a written anonymous enum declaring its variant, and recordof labels are distinct."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-inference"
+level = "@error"
+source = "input.vib"
+span = [32, 48]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [89, 105]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [158, 165]

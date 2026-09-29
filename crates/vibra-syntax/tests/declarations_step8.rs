@@ -37,7 +37,9 @@ fn all_seven_top_forms_and_nested_owners_have_native_structure() {
     let Declaration::Deftype(deftype) = &ast.declarations()[1] else {
         panic!("expected deftype")
     };
-    assert!(matches!(deftype.body(), DeftypeBody::Record(fields) if fields.len() == 2));
+    assert!(
+        matches!(deftype.body(), DeftypeBody::Type(TypeExpr::Record(fields)) if fields.len() == 2)
+    );
     assert!(matches!(
         deftype.members().first(),
         Some(TypeMember::Method(method)) if method.name().value() == "map"
@@ -61,7 +63,7 @@ fn type_expression_and_deftype_body_contexts_are_distinct() {
     let Declaration::Deftype(deftype) = &ast.declarations()[0] else {
         panic!("expected deftype")
     };
-    let DeftypeBody::Record(fields) = deftype.body() else {
+    let DeftypeBody::Type(TypeExpr::Record(fields)) = deftype.body() else {
         panic!("expected record body")
     };
     assert!(matches!(fields[0].ty(), TypeExpr::Array(_)));
@@ -72,22 +74,41 @@ fn type_expression_and_deftype_body_contexts_are_distinct() {
 }
 
 #[test]
-fn anonymous_type_bodies_in_type_positions_are_rejected() {
-    let source = "(defn bad (value (record name str)) (array (enum one void)) 0i32)";
+fn structural_types_are_type_expressions_and_other_bodies_are_wrappers() {
+    let source = "(defn ok (value (record name str)) (array (enum one void)) value)";
     let document =
-        parse_source(Path::new("invalid-types.vib"), source).expect("source loader");
-    assert!(!document.accepted());
-    assert!(document.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == DiagnosticCode::TypeAnonymousTypeBody
-    }));
+        parse_source(Path::new("structural-types.vib"), source).expect("source loader");
+    assert!(document.accepted(), "{:?}", document.diagnostics());
+    let ast = document.ast().expect("declaration AST");
+    let Declaration::Defn(function) = &ast.declarations()[0] else {
+        panic!("expected defn")
+    };
+    assert!(matches!(
+        function.parameters()[0].value_type(),
+        TypeExpr::Record(fields) if fields.len() == 1
+    ));
+    assert!(
+        matches!(function.result(), TypeExpr::Array(element) if matches!(**element, TypeExpr::Enum(_)))
+    );
+
+    // There is no `newtype` form: any non-structural body declares a wrapper.
+    let source = "(deftype celsius f64)";
+    let document =
+        parse_source(Path::new("wrapper.vib"), source).expect("source loader");
+    assert!(document.accepted(), "{:?}", document.diagnostics());
+    let ast = document.ast().expect("declaration AST");
+    assert!(matches!(
+        &ast.declarations()[0],
+        Declaration::Deftype(value) if matches!(value.body(), DeftypeBody::Type(TypeExpr::Name(_)))
+    ));
 }
 
 #[test]
 fn reserved_type_heads_cannot_be_declaration_or_generic_names() {
     let source = r#"
-(deftype map (newtype i32))
+(deftype map i32)
 (defint array)
-(deftype valid (newtype i32) where: (tuple any))
+(deftype valid i32 where: (tuple any))
 "#;
     let document =
         parse_source(Path::new("reserved.vib"), source).expect("source loader");
@@ -146,8 +167,9 @@ fn malformed_declaration_shapes_are_rejected_without_reader_panics() {
         "(defn f () i32 0i32 visibility: @public)",
         "(defn f () i32 variadic: (rest (array i32) extra))",
         "(deftype value (union i32))",
-        "(deftype value (newtype i32 i64))",
-        "(deftype value (record field (record nested i32)))",
+        "(deftype value (intrinsic-type))",
+        "(deftype value (record field))",
+        "(deftype value (record field (intrinsic-type @i32)))",
         "(defn qualified.name () i32)",
         "(test \"smoke\" effects: (@read) 0i32)",
         "(defn host () void external: @host symbol: \"host.op\")",
@@ -166,7 +188,7 @@ fn type_body_variants_and_function_type_attributes_are_structured() {
     let source = r#"
 (deftype status (enum ready void failed str))
 (deftype value (union i32 str))
-(deftype boxed (newtype (array i32)))
+(deftype boxed (array i32))
 (defn collect () (fn (i32) str labelled: (limit i32) variadic: (array str) effects: (io)) "")
 "#;
     let document =
@@ -175,15 +197,15 @@ fn type_body_variants_and_function_type_attributes_are_structured() {
     let ast = document.ast().expect("declaration AST");
     assert!(matches!(
         &ast.declarations()[0],
-        Declaration::Deftype(value) if matches!(value.body(), DeftypeBody::Enum(fields) if fields.len() == 2)
+        Declaration::Deftype(value) if matches!(value.body(), DeftypeBody::Type(TypeExpr::Enum(fields)) if fields.len() == 2)
     ));
     assert!(matches!(
         &ast.declarations()[1],
-        Declaration::Deftype(value) if matches!(value.body(), DeftypeBody::Union(members) if members.len() == 2)
+        Declaration::Deftype(value) if matches!(value.body(), DeftypeBody::Type(TypeExpr::Union(members)) if members.len() == 2)
     ));
     assert!(matches!(
         &ast.declarations()[2],
-        Declaration::Deftype(value) if matches!(value.body(), DeftypeBody::Newtype(_))
+        Declaration::Deftype(value) if matches!(value.body(), DeftypeBody::Type(TypeExpr::Array(_)))
     ));
     let Declaration::Defn(function) = &ast.declarations()[3] else {
         panic!("expected collect defn")

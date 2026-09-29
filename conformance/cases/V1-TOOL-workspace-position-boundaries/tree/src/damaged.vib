@@ -1,1 +1,1 @@
-(defn damaged () i32 (let (tuple x) 1i32)
+(defn damaged () i32 (let (array x) 1i32)

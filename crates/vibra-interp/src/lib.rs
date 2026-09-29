@@ -19,14 +19,15 @@ use std::fmt;
 use std::sync::Arc;
 
 use vibra_ir::{
-    CallTarget, CheckedProgram, Expr, FunctionSignature, PrimitiveType, SourceOrigin,
-    TestAssertion, Value,
+    CallTarget, CheckedProgram, Expr, FunctionSignature, ObservedValue, SourceOrigin,
+    TestAssertion, Type, TypeId, Value,
 };
 
 /// One successful reference-interpreter run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Execution {
-    value: Value,
+    value: ObservedValue,
+    value_type: Type,
     audit_trace: Vec<String>,
     max_activation_depth: usize,
     tail_transfer_count: usize,
@@ -35,7 +36,7 @@ pub struct Execution {
 impl Execution {
     /// The value returned by the selected entry function.
     #[must_use]
-    pub const fn value(&self) -> &Value {
+    pub const fn value(&self) -> &ObservedValue {
         &self.value
     }
 
@@ -62,7 +63,7 @@ impl Execution {
     /// Canonical typed value observation.
     #[must_use]
     pub fn canonical_result(&self) -> String {
-        self.value.canonical_observation()
+        self.value.canonical_observation(&self.value_type)
     }
 }
 
@@ -247,14 +248,19 @@ impl Interpreter {
             Vec::new(),
         );
         machine.check_host_budget()?;
-        let Some(RuntimeValue::Primitive(value)) = value else {
+        let Some(value) = value else {
             return Err(invalid());
         };
-        if !value.ty().same_shape(&function.signature().result()) {
+        let value_type = function.signature().result();
+        if !runtime_type(&value).same_shape(&value_type) {
             return Err(invalid());
         }
+        let Some(value) = observe(value) else {
+            return Err(invalid());
+        };
         Ok(Execution {
             value,
+            value_type,
             audit_trace: Vec::new(),
             max_activation_depth: machine.max_depth,
             tail_transfer_count: machine.tail_transfers,
@@ -276,7 +282,7 @@ impl Interpreter {
         let invalid = || RuntimeError::InvalidBody {
             function: function.name().to_owned(),
         };
-        if function.signature().result() != PrimitiveType::Void {
+        if function.signature().result() != Type::Void {
             return Err(invalid());
         }
         let mut machine = Machine::new(program, true);
@@ -348,6 +354,21 @@ enum GlobalState {
 enum RuntimeValue {
     Primitive(Value),
     Function(Callable),
+    /// A record; fields are in type order (declaration order when declared,
+    /// canonical order when anonymous), whatever the evaluation order.
+    Record {
+        value_type: Type,
+        fields: Vec<(String, RuntimeValue)>,
+    },
+    Enum {
+        value_type: Type,
+        variant: String,
+        payload: Option<Box<RuntimeValue>>,
+    },
+    Wrapper {
+        type_id: TypeId,
+        value: Box<RuntimeValue>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -357,7 +378,7 @@ enum Evaluation {
     TailTransfer {
         callable: Callable,
         values: Vec<RuntimeValue>,
-        result: PrimitiveType,
+        result: Type,
     },
 }
 
@@ -523,7 +544,7 @@ impl<'a> Machine<'a> {
         current_index: usize,
         callable: Callable,
         values: Vec<RuntimeValue>,
-        result: &PrimitiveType,
+        result: &Type,
     ) -> TailTransferAction {
         match callable {
             Callable::Named {
@@ -628,6 +649,47 @@ impl<'a> Machine<'a> {
                 .cloned()
                 .map(Evaluation::Value),
             Expr::Closure { .. } => self.evaluate_closure(expression, slots, captures),
+            Expr::Record {
+                value_type, fields, ..
+            } => self.evaluate_record(value_type, fields, slots, captures),
+            Expr::Variant {
+                value_type,
+                variant,
+                payload,
+                ..
+            } => {
+                let payload = match payload {
+                    Some(payload) => {
+                        Some(Box::new(self.evaluate_value(payload, slots, captures)?))
+                    }
+                    None => None,
+                };
+                Some(Evaluation::Value(RuntimeValue::Enum {
+                    value_type: value_type.clone(),
+                    variant: variant.clone(),
+                    payload,
+                }))
+            }
+            Expr::Wrap {
+                value_type, value, ..
+            } => {
+                let value = self.evaluate_value(value, slots, captures)?;
+                Some(Evaluation::Value(RuntimeValue::Wrapper {
+                    type_id: value_type.clone(),
+                    value: Box::new(value),
+                }))
+            }
+            Expr::Project { record, field, .. } => {
+                let RuntimeValue::Record { fields, .. } =
+                    self.evaluate_value(record, slots, captures)?
+                else {
+                    return None;
+                };
+                fields
+                    .into_iter()
+                    .find(|(name, _)| name == field)
+                    .map(|(_, value)| Evaluation::Value(value))
+            }
             Expr::Let {
                 slot, value, body, ..
             } => self.evaluate_let(*slot, value, body, slots, captures),
@@ -647,6 +709,42 @@ impl<'a> Machine<'a> {
                 target, arguments, result, *tail, origin, slots, captures,
             ),
         }
+    }
+
+    /// Evaluates record fields in their checked evaluation order, then stores
+    /// them in the order of the record type.
+    #[inline(never)]
+    fn evaluate_record(
+        &mut self,
+        value_type: &Type,
+        fields: &[(String, Expr)],
+        slots: &mut Frame,
+        captures: &[RuntimeValue],
+    ) -> Option<Evaluation> {
+        let mut values = Vec::with_capacity(fields.len());
+        for (name, field) in fields {
+            values.push((name.clone(), self.evaluate_value(field, slots, captures)?));
+        }
+        let order: Vec<&str> = match value_type {
+            Type::Record(members) => {
+                members.iter().map(|(name, _)| name.as_str()).collect()
+            }
+            Type::Declared(id) => self
+                .program
+                .types()
+                .iter()
+                .find(|definition| definition.id() == id)?
+                .record_fields()?
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect(),
+            _ => return None,
+        };
+        values.sort_by_key(|(name, _)| order.iter().position(|member| member == name));
+        Some(Evaluation::Value(RuntimeValue::Record {
+            value_type: value_type.clone(),
+            fields: values,
+        }))
     }
 
     fn named_callable(&self, function: usize) -> Option<Callable> {
@@ -783,7 +881,7 @@ impl<'a> Machine<'a> {
         &mut self,
         target: &CallTarget,
         arguments: &[Expr],
-        result: &PrimitiveType,
+        result: &Type,
         tail: bool,
         origin: &SourceOrigin,
         slots: &mut Frame,
@@ -870,7 +968,10 @@ impl<'a> Machine<'a> {
             .into_iter()
             .map(|value| match value {
                 RuntimeValue::Primitive(value) => Some(value),
-                RuntimeValue::Function(_) => None,
+                RuntimeValue::Function(_)
+                | RuntimeValue::Record { .. }
+                | RuntimeValue::Enum { .. }
+                | RuntimeValue::Wrapper { .. } => None,
             })
             .collect::<Option<Vec<_>>>()?;
         let (passed, expected, actual) = match (assertion, values.as_slice()) {
@@ -902,7 +1003,7 @@ impl<'a> Machine<'a> {
         &mut self,
         callable: Callable,
         values: Vec<RuntimeValue>,
-        result: &PrimitiveType,
+        result: &Type,
     ) -> Option<RuntimeValue> {
         let signature = match &callable {
             Callable::Named { signature, .. } | Callable::Lambda { signature, .. } => {
@@ -985,15 +1086,18 @@ fn activation_slots(
         .collect()
 }
 
-fn runtime_type(value: &RuntimeValue) -> PrimitiveType {
+fn runtime_type(value: &RuntimeValue) -> Type {
     match value {
         RuntimeValue::Primitive(value) => value.ty(),
         RuntimeValue::Function(Callable::Named { signature, .. }) => {
-            PrimitiveType::Function(Box::new(signature.clone()))
+            Type::Function(Box::new(signature.clone()))
         }
         RuntimeValue::Function(Callable::Lambda { signature, .. }) => {
-            PrimitiveType::Function(Box::new(signature.clone()))
+            Type::Function(Box::new(signature.clone()))
         }
+        RuntimeValue::Record { value_type, .. }
+        | RuntimeValue::Enum { value_type, .. } => value_type.clone(),
+        RuntimeValue::Wrapper { type_id, .. } => Type::Declared(type_id.clone()),
     }
 }
 
@@ -1039,12 +1143,51 @@ fn values_match_signature(
         .all(|(value, expected)| runtime_type(value).same_shape(&expected))
 }
 
+/// The observable form of a runtime value; `None` when it is or contains a
+/// function, which has no canonical encoding.
+fn observe(value: RuntimeValue) -> Option<ObservedValue> {
+    Some(match value {
+        RuntimeValue::Primitive(value) => ObservedValue::Primitive(value),
+        RuntimeValue::Function(_) => return None,
+        RuntimeValue::Record { value_type, fields } => ObservedValue::Record {
+            type_id: declared_id(&value_type),
+            fields: fields
+                .into_iter()
+                .map(|(name, value)| Some((name, observe(value)?)))
+                .collect::<Option<Vec<_>>>()?,
+        },
+        RuntimeValue::Enum {
+            value_type,
+            variant,
+            payload,
+        } => ObservedValue::Enum {
+            type_id: declared_id(&value_type),
+            variant,
+            payload: match payload {
+                Some(payload) => Some(Box::new(observe(*payload)?)),
+                None => None,
+            },
+        },
+        RuntimeValue::Wrapper { type_id, value } => ObservedValue::Wrapper {
+            type_id,
+            value: Box::new(observe(*value)?),
+        },
+    })
+}
+
+fn declared_id(value_type: &Type) -> Option<TypeId> {
+    match value_type {
+        Type::Declared(id) => Some(id.clone()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use vibra_diagnostics::ByteSpan;
     use vibra_ir::{
-        CheckedFunction, CheckedGlobal, Expr, FunctionSignature, PrimitiveType,
-        SourceOrigin, Value,
+        CheckedFunction, CheckedGlobal, Expr, FunctionSignature, SourceOrigin, Type,
+        Value,
     };
 
     use super::run;
@@ -1054,7 +1197,7 @@ mod tests {
         let origin = SourceOrigin::new("test.vib", ByteSpan::new(0, 1));
         let function = CheckedFunction::new(
             "answer",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            FunctionSignature::new(Vec::new(), Type::I32),
             vibra_ir::Expr::literal(vibra_ir::Value::I32(42), origin.clone()),
             origin,
         )
@@ -1071,7 +1214,7 @@ mod tests {
         let first_origin = SourceOrigin::new("test.vib", ByteSpan::new(0, 1));
         let first = CheckedFunction::new(
             "first",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            FunctionSignature::new(Vec::new(), Type::I32),
             vibra_ir::Expr::literal(vibra_ir::Value::I32(1), first_origin.clone()),
             first_origin,
         )
@@ -1079,7 +1222,7 @@ mod tests {
         let entry_origin = SourceOrigin::new("test.vib", ByteSpan::new(2, 3));
         let entry = CheckedFunction::new(
             "entry",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            FunctionSignature::new(Vec::new(), Type::I32),
             vibra_ir::Expr::literal(vibra_ir::Value::I32(2), entry_origin.clone()),
             entry_origin,
         )
@@ -1097,7 +1240,7 @@ mod tests {
         let origin = SourceOrigin::new("test.vib", ByteSpan::new(0, 1));
         let global = CheckedGlobal::new(
             "value",
-            PrimitiveType::I32,
+            Type::I32,
             Expr::literal(Value::I32(9), origin.clone()),
             origin.clone(),
         )
@@ -1105,12 +1248,12 @@ mod tests {
         let body = Expr::if_expression(
             Expr::literal(Value::Bool(true), origin.clone()),
             Expr::literal(Value::I32(7), origin.clone()),
-            Expr::global(0, PrimitiveType::I32, origin.clone()),
+            Expr::global(0, Type::I32, origin.clone()),
             origin.clone(),
         );
         let function = CheckedFunction::new(
             "answer",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            FunctionSignature::new(Vec::new(), Type::I32),
             body,
             origin,
         )
@@ -1149,7 +1292,7 @@ mod tests {
         );
         let function = CheckedFunction::new(
             "answer",
-            FunctionSignature::new(Vec::new(), PrimitiveType::U64),
+            FunctionSignature::new(Vec::new(), Type::U64),
             length,
             origin,
         )
@@ -1168,13 +1311,13 @@ mod tests {
         let origin = SourceOrigin::new("deep.vib", ByteSpan::new(0, 1));
         let body = Expr::let_binding(
             Some(0),
-            Expr::call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
-            Expr::variable(0, PrimitiveType::I32, origin.clone()),
+            Expr::call(0, Vec::new(), Type::I32, origin.clone()),
+            Expr::variable(0, Type::I32, origin.clone()),
             origin.clone(),
         );
         let function = CheckedFunction::with_slots(
             "f",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            FunctionSignature::new(Vec::new(), Type::I32),
             body,
             origin,
             1,

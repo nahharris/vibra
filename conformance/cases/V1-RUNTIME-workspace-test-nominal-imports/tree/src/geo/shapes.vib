@@ -1,0 +1,12 @@
+(deftype point (record x i32 y i32)
+  visibility: @public
+  (defn flip (value self) point
+    visibility: @public
+    (point x: (value @y) y: (value @x))))
+
+(deftype size (enum small void large u64)
+  visibility: @public)
+
+(defn origin () point
+  visibility: @public
+  (point x: 0i32 y: 0i32))

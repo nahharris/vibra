@@ -13,10 +13,25 @@ use crate::literal::{Literal, LiteralClassification};
 use crate::name::{Name, NameClassification, NameKind};
 use crate::reader::{CstNode, SyntaxKind};
 
-const RESERVED_TYPE_HEADS: &[&str] = &[
-    "record", "enum", "union", "newtype", "tuple", "array", "map", "fn",
+/// Type-expression heads that are never an applied type name.
+const RESERVED_TYPE_HEADS: &[&str] =
+    &["tuple", "record", "enum", "union", "intrinsic-type", "fn"];
+/// Builtin type names; only an `intrinsic-type` declaration may use one.
+const BUILTIN_TYPE_NAMES: &[&str] = &[
+    "bool", "void", "char", "str", "bytes", "atom", "i8", "i16", "i32", "i64", "u8",
+    "u16", "u32", "u64", "f32", "f64", "array", "map",
 ];
-const RESERVED_VALUE_SPELLINGS: &[&str] = &["map", "array", "tuple"];
+/// Heads that are reserved forms in expression position.
+const RESERVED_EXPRESSION_TYPE_HEADS: &[&str] = &[
+    "tuple",
+    "array",
+    "map",
+    "record",
+    "enum",
+    "union",
+    "intrinsic-type",
+    "fn",
+];
 const RETIRED_EXPRESSION_HEADS: &[&str] = &[
     "while", "for", "break", "continue", "return", "bind", "case",
 ];
@@ -97,6 +112,12 @@ pub enum ExpressionKind {
     },
     /// The single early-exit form.
     Try(Box<Expression>),
+    /// An anonymous tuple value, `(tupleof e…)`.
+    TupleOf(Vec<Expression>),
+    /// An anonymous record value, `(recordof a: e…)`; every operand is labelled.
+    RecordOf(Vec<CallArgument>),
+    /// An anonymous enum value, `(enumof a: e)`; the operand is labelled.
+    EnumOf(Box<CallArgument>),
 }
 
 /// A nonempty application and its written operand groups.
@@ -346,8 +367,12 @@ pub enum PatternKind {
         /// Positional and labelled subpatterns in written order.
         arguments: Vec<PatternArgument>,
     },
-    /// A tuple pattern.
+    /// An anonymous tuple pattern, `(tupleof p…)`.
     Tuple(Vec<Pattern>),
+    /// An anonymous record pattern, `(recordof a: p…)`; every operand is labelled.
+    RecordOf(Vec<PatternArgument>),
+    /// An anonymous enum pattern, `(enumof a: p)`; the operand is labelled.
+    EnumOf(Box<PatternArgument>),
     /// A fixed-length array pattern.
     Array(Vec<Pattern>),
     /// A union-narrowing pattern ascription.
@@ -1069,8 +1094,14 @@ pub enum TypeExpr {
         /// Type arguments supplied to the head.
         arguments: Vec<TypeExpr>,
     },
-    /// A tuple constructor.
+    /// A structural tuple type.
     Tuple(Vec<TypeExpr>),
+    /// A structural record type with at least one field.
+    Record(Vec<TypeField>),
+    /// A structural enum type with at least one variant.
+    Enum(Vec<TypeField>),
+    /// A structural union type with at least two members.
+    Union(Vec<TypeExpr>),
     /// An array constructor.
     Array(Box<TypeExpr>),
     /// A map constructor.
@@ -1181,19 +1212,17 @@ impl TypeField {
     }
 }
 
-/// The body forms allowed only after a `deftype` header.
+/// The body of a `deftype`.
+///
+/// Structural `record`, `enum`, and `union` bodies are ordinary
+/// [`TypeExpr`]s, and any other type expression declares a wrapper type; only
+/// `intrinsic-type` is a body-only form.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DeftypeBody {
-    /// A normal type expression.
+    /// Any type expression, including the structural forms.
     Type(TypeExpr),
-    /// A flat record body.
-    Record(Vec<TypeField>),
-    /// A flat enum body.
-    Enum(Vec<TypeField>),
-    /// A union with at least two member types.
-    Union(Vec<TypeExpr>),
-    /// A one-representation newtype.
-    Newtype(Box<TypeExpr>),
+    /// A toolchain builtin type binding, `(intrinsic-type @name)`.
+    Intrinsic(Name),
 }
 
 /// A generic name/bound pair.
@@ -1503,7 +1532,8 @@ impl AstParser {
             self.invalid_form(node, "deftype requires a name and body");
             return None;
         }
-        let name = self.declaration_name(forms[1])?;
+        let intrinsic = head_text(forms[2]) == Some("intrinsic-type");
+        let name = self.checked_declaration_name(forms[1], intrinsic)?;
         let body = self.parse_deftype_body(forms[2])?;
         let parsed = self.parse_attributes(&forms[3..], AttributeContext::Type, &[]);
         let attributes = TypeAttributes {
@@ -1748,12 +1778,12 @@ impl AstParser {
         let name =
             self.local_name(forms[1], "defn names must be unqualified symbols")?;
         if matches!(owner, FunctionOwner::Module)
-            && RESERVED_VALUE_SPELLINGS.contains(&name.value())
+            && is_reserved_value_spelling(name.value())
         {
             self.error(
                 DiagnosticCode::NameReservedValueSpelling,
                 forms[1].span(),
-                "a module-level value uses a reserved collection spelling",
+                "a module-level value or alias uses a builtin type name",
             );
         }
         let parameters = self.parse_parameters(forms[2])?;
@@ -1981,6 +2011,9 @@ impl AstParser {
             Some("match") => self.parse_match(node, &forms),
             Some("as") => self.parse_expression_as(node, &forms),
             Some("try") => self.parse_try(node, &forms),
+            Some("tupleof") => self.parse_tupleof(node, &forms),
+            Some("recordof") => self.parse_recordof(node, &forms),
+            Some("enumof") => self.parse_enumof(node, &forms),
             Some(head) if RETIRED_EXPRESSION_HEADS.contains(&head) => {
                 self.error(
                     DiagnosticCode::SyntaxRetiredForm,
@@ -1989,10 +2022,7 @@ impl AstParser {
                 );
                 None
             }
-            Some(
-                "tuple" | "array" | "map" | "record" | "enum" | "union" | "newtype"
-                | "fn",
-            ) => {
+            Some(head) if RESERVED_EXPRESSION_TYPE_HEADS.contains(&head) => {
                 self.invalid_form(
                     node,
                     "a reserved type or pattern head is not an expression",
@@ -2248,6 +2278,90 @@ impl AstParser {
         })
     }
 
+    fn parse_tupleof(
+        &mut self,
+        node: &CstNode,
+        forms: &[&CstNode],
+    ) -> Option<Expression> {
+        let values = forms[1..]
+            .iter()
+            .map(|form| self.parse_expression(form))
+            .collect::<Option<Vec<_>>>()?;
+        Some(Expression {
+            kind: ExpressionKind::TupleOf(values),
+            span: node.span(),
+        })
+    }
+
+    fn parse_recordof(
+        &mut self,
+        node: &CstNode,
+        forms: &[&CstNode],
+    ) -> Option<Expression> {
+        if forms.len() < 3 {
+            self.invalid_form(node, "recordof requires at least one labelled field");
+            return None;
+        }
+        let fields = self.parse_labelled_operands(&forms[1..], "recordof")?;
+        Some(Expression {
+            kind: ExpressionKind::RecordOf(fields),
+            span: node.span(),
+        })
+    }
+
+    fn parse_enumof(
+        &mut self,
+        node: &CstNode,
+        forms: &[&CstNode],
+    ) -> Option<Expression> {
+        if forms.len() != 3 {
+            self.invalid_form(node, "enumof requires exactly one labelled variant");
+            return None;
+        }
+        let mut variant = self.parse_labelled_operands(&forms[1..], "enumof")?;
+        let variant = variant.pop()?;
+        Some(Expression {
+            kind: ExpressionKind::EnumOf(Box::new(variant)),
+            span: node.span(),
+        })
+    }
+
+    /// Operands of `recordof` and `enumof`, every one written `label: value`.
+    /// Duplicate labels are a checker error, not a reader error.
+    fn parse_labelled_operands(
+        &mut self,
+        forms: &[&CstNode],
+        head: &str,
+    ) -> Option<Vec<CallArgument>> {
+        let mut operands = Vec::with_capacity(forms.len() / 2);
+        let mut index = 0;
+        while index < forms.len() {
+            let Some(label) = self.label_name(forms[index]) else {
+                self.invalid_form(
+                    forms[index],
+                    if head == "recordof" {
+                        "every recordof operand must be written with a label"
+                    } else {
+                        "the enumof operand must be written with a label"
+                    },
+                );
+                return None;
+            };
+            let Some(value) = forms.get(index + 1) else {
+                self.invalid_form(forms[index], "a label requires an operand");
+                return None;
+            };
+            let expression = self.parse_expression(value)?;
+            operands.push(CallArgument {
+                label: Some(label),
+                value: expression,
+                span: ByteSpan::new(forms[index].span().start(), value.span().end()),
+            });
+            index += 2;
+        }
+        Some(operands)
+    }
+
     fn parse_pattern(&mut self, node: &CstNode) -> Option<Pattern> {
         if !self.enter_context(node) {
             return None;
@@ -2317,7 +2431,42 @@ impl AstParser {
             return None;
         };
         match head.leaf_text() {
-            Some("tuple") => Some(Pattern {
+            Some("tuple") => {
+                self.invalid_form(
+                    node,
+                    "an anonymous tuple pattern is written with tupleof",
+                );
+                None
+            }
+            Some("recordof") => {
+                if forms.len() < 3 {
+                    self.invalid_form(
+                        node,
+                        "recordof requires at least one labelled field",
+                    );
+                    return None;
+                }
+                let fields = self.parse_labelled_patterns(&forms[1..])?;
+                Some(Pattern {
+                    kind: PatternKind::RecordOf(fields),
+                    span: node.span(),
+                })
+            }
+            Some("enumof") => {
+                if forms.len() != 3 {
+                    self.invalid_form(
+                        node,
+                        "enumof requires exactly one labelled variant",
+                    );
+                    return None;
+                }
+                let variant = self.parse_labelled_patterns(&forms[1..])?.pop()?;
+                Some(Pattern {
+                    kind: PatternKind::EnumOf(Box::new(variant)),
+                    span: node.span(),
+                })
+            }
+            Some("tupleof") => Some(Pattern {
                 kind: PatternKind::Tuple(
                     forms[1..]
                         .iter()
@@ -2372,6 +2521,26 @@ impl AstParser {
         }
     }
 
+    /// Operands of `recordof` and `enumof` patterns, each written `label: p`.
+    fn parse_labelled_patterns(
+        &mut self,
+        forms: &[&CstNode],
+    ) -> Option<Vec<PatternArgument>> {
+        let arguments = self.parse_pattern_arguments(forms)?;
+        if let Some(unlabelled) =
+            arguments.iter().find(|argument| argument.label.is_none())
+        {
+            let span = unlabelled.span;
+            self.error(
+                DiagnosticCode::SyntaxInvalidForm,
+                span,
+                "every recordof and enumof pattern operand must be labelled",
+            );
+            return None;
+        }
+        Some(arguments)
+    }
+
     fn parse_pattern_arguments(
         &mut self,
         forms: &[&CstNode],
@@ -2420,49 +2589,50 @@ impl AstParser {
     }
 
     fn parse_deftype_body(&mut self, node: &CstNode) -> Option<DeftypeBody> {
-        if node.kind() != SyntaxKind::List {
-            return self.parse_type_expr(node).map(DeftypeBody::Type);
-        }
-        let forms = meaningful_children(node);
-        let Some(head) = forms.first().and_then(|form| form.leaf_text()) else {
-            self.invalid_form(node, "deftype body requires a type form");
-            return None;
-        };
-        match head {
-            "record" => self
-                .parse_flat_fields(&forms, true)
-                .map(DeftypeBody::Record),
-            "enum" => self.parse_flat_fields(&forms, false).map(DeftypeBody::Enum),
-            "union" => {
-                let members = forms[1..]
-                    .iter()
-                    .filter_map(|form| self.parse_type_expr(form))
-                    .collect::<Vec<_>>();
-                if members.len() < 2 || forms.len() < 3 {
-                    self.error(
-                        DiagnosticCode::TypeUnionTooFewMembers,
-                        node.span(),
-                        "a union requires at least two member types",
-                    );
-                    None
-                } else {
-                    Some(DeftypeBody::Union(members))
-                }
-            }
-            "newtype" => {
-                if forms.len() != 2 {
+        match head_text(node) {
+            Some("intrinsic-type") => {
+                let forms = meaningful_children(node);
+                let atom = match forms.as_slice() {
+                    [_, value] => match value.name() {
+                        Some(NameClassification::Name(name))
+                            if name.kind() == NameKind::Atom =>
+                        {
+                            Some(name.clone())
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                if atom.is_none() {
                     self.invalid_form(
                         node,
-                        "newtype requires exactly one representation type",
+                        "intrinsic-type requires exactly one builtin type atom",
                     );
-                    None
-                } else {
-                    self.parse_type_expr(forms[1])
-                        .map(|value| DeftypeBody::Newtype(Box::new(value)))
                 }
+                atom.map(DeftypeBody::Intrinsic)
             }
             _ => self.parse_type_expr(node).map(DeftypeBody::Type),
         }
+    }
+
+    /// The members of a `union` type: at least two type expressions.
+    fn parse_union_members(
+        &mut self,
+        node: &CstNode,
+        forms: &[&CstNode],
+    ) -> Option<Vec<TypeExpr>> {
+        if forms.len() < 3 {
+            self.error(
+                DiagnosticCode::TypeUnionTooFewMembers,
+                node.span(),
+                "a union requires at least two member types",
+            );
+            return None;
+        }
+        forms[1..]
+            .iter()
+            .map(|form| self.parse_type_expr(form))
+            .collect()
     }
 
     fn parse_flat_fields(
@@ -2526,15 +2696,17 @@ impl AstParser {
                 self.invalid_form(head_node, "a type head must be a symbol");
                 return None;
             };
-            if matches!(head, "record" | "enum" | "union" | "newtype") {
-                self.error(
-                    DiagnosticCode::TypeAnonymousTypeBody,
-                    node.span(),
-                    "a nominal type body is only valid in a deftype body",
-                );
-                return None;
-            }
             match head {
+                "record" => self.parse_flat_fields(&forms, true).map(TypeExpr::Record),
+                "enum" => self.parse_flat_fields(&forms, false).map(TypeExpr::Enum),
+                "union" => self.parse_union_members(node, &forms).map(TypeExpr::Union),
+                "intrinsic-type" => {
+                    self.invalid_form(
+                        node,
+                        "intrinsic-type is only valid as a deftype body",
+                    );
+                    None
+                }
                 "tuple" => {
                     let values = forms[1..]
                         .iter()
@@ -2574,9 +2746,8 @@ impl AstParser {
                 _ => {
                     let head_name = self.type_name(head_node)?;
                     if RESERVED_TYPE_HEADS.contains(&head_name.value()) {
-                        self.error(
-                            DiagnosticCode::TypeAnonymousTypeBody,
-                            head_node.span(),
+                        self.invalid_form(
+                            head_node,
                             "a reserved type head is not an applied type name",
                         );
                         return None;
@@ -2893,11 +3064,13 @@ impl AstParser {
         for pair in forms.chunks_exact(2) {
             let name =
                 self.local_name(pair[0], "generic names must be unqualified symbols")?;
-            if RESERVED_TYPE_HEADS.contains(&name.value()) {
+            if RESERVED_TYPE_HEADS.contains(&name.value())
+                || BUILTIN_TYPE_NAMES.contains(&name.value())
+            {
                 self.error(
                     DiagnosticCode::NameReservedDeclaration,
                     pair[0].span(),
-                    "a generic name uses a reserved type head",
+                    "a generic name uses a reserved type head or builtin type name",
                 );
             }
             if inherited_generics
@@ -3027,9 +3200,22 @@ impl AstParser {
     }
 
     fn declaration_name(&mut self, node: &CstNode) -> Option<Name> {
+        self.checked_declaration_name(node, false)
+    }
+
+    /// A `deftype`, `defint`, or `deffect` name. Only an `intrinsic-type`
+    /// declaration may take a builtin type name; the resolver decides
+    /// whether its package is trusted to write one.
+    fn checked_declaration_name(
+        &mut self,
+        node: &CstNode,
+        allow_builtin: bool,
+    ) -> Option<Name> {
         let name =
             self.local_name(node, "declaration names must be unqualified symbols")?;
-        if RESERVED_TYPE_HEADS.contains(&name.value()) {
+        if RESERVED_TYPE_HEADS.contains(&name.value())
+            || (!allow_builtin && BUILTIN_TYPE_NAMES.contains(&name.value()))
+        {
             self.error(
                 DiagnosticCode::NameReservedDeclaration,
                 node.span(),
@@ -3041,11 +3227,11 @@ impl AstParser {
 
     fn value_declaration_name(&mut self, node: &CstNode) -> Option<Name> {
         let name = self.local_name(node, "value names must be unqualified symbols")?;
-        if RESERVED_VALUE_SPELLINGS.contains(&name.value()) {
+        if is_reserved_value_spelling(name.value()) {
             self.error(
                 DiagnosticCode::NameReservedValueSpelling,
                 node.span(),
-                "a module-level value uses a reserved collection spelling",
+                "a module-level value or alias uses a builtin type name",
             );
         }
         Some(name)
@@ -3213,12 +3399,17 @@ fn generic_names(attributes: &[Attribute]) -> Vec<String> {
 
 fn deftype_member_names(body: &DeftypeBody) -> BTreeSet<String> {
     match body {
-        DeftypeBody::Record(fields) | DeftypeBody::Enum(fields) => fields
+        DeftypeBody::Type(TypeExpr::Record(fields) | TypeExpr::Enum(fields)) => fields
             .iter()
             .map(|field| field.name.value().to_owned())
             .collect(),
-        DeftypeBody::Type(_) | DeftypeBody::Union(_) | DeftypeBody::Newtype(_) => {
-            BTreeSet::new()
-        }
+        DeftypeBody::Type(_) | DeftypeBody::Intrinsic(_) => BTreeSet::new(),
     }
+}
+
+/// Whether a module-level value or import alias spelling names a builtin
+/// type, whose static methods are reached by the same dotted path.
+#[must_use]
+pub fn is_reserved_value_spelling(spelling: &str) -> bool {
+    spelling == "tuple" || BUILTIN_TYPE_NAMES.contains(&spelling)
 }

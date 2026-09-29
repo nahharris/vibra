@@ -1,0 +1,11 @@
+id = "V1-SRC-DECL-structural-types"
+rule = "V1-SRC-DECL"
+profile = "reader-v1"
+description = "Anonymous tuple, record, enum, and union types are type expressions in every type position; declared bodies keep written order and anonymous ones are formatted in canonical order."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

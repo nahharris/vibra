@@ -289,10 +289,6 @@ diagnostic_registry! {
         "a literal lies outside the range of its suffixed type";
     TypeInitializerCycle => "@type.initializer-cycle", Type, Error, None,
         "module value initializers form a cycle";
-    TypeAnonymousTypeBody => "@type.anonymous-type-body", Type, Error, None,
-        "retired: a structural type form the M2 reader does not yet accept";
-    TypeAnonymousNewtype => "@type.anonymous-newtype", Type, Error, None,
-        "`newtype` appears outside a `deftype` body";
     TypeUndispatchableContractMember => "@type.undispatchable-contract-member", Type, Error, None,
         "a contract member does not name `self` in a dispatchable position";
     TypeUnionTooFewMembers => "@type.union-too-few-members", Type, Error, None,
@@ -395,7 +391,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 85;
+    const REGISTERED_CODES: usize = 83;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {
@@ -511,7 +507,6 @@ mod tests {
             "@pattern.refutable-binding",
             "@name.reserved-value-spelling",
             "@type.function-not-equatable",
-            "@type.anonymous-type-body",
             "@type.undispatchable-contract-member",
             "@type.union-too-few-members",
             "@type.union-member-overlap",

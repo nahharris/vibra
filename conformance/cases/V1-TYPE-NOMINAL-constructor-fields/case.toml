@@ -1,0 +1,43 @@
+id = "V1-TYPE-NOMINAL-constructor-fields"
+rule = "V1-TYPE-NOMINAL"
+profile = "static-v1"
+operation = "type-check"
+description = "A record constructor takes exactly its closed set of labelled fields: missing, duplicate, unknown, and positional operands are argument mismatches."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [60, 75]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [101, 132]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [157, 188]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [216, 233]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [266, 271]

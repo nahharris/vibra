@@ -6,7 +6,7 @@ use std::sync::Arc;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 use vibra_ir::{
     CheckedFunction, CheckedGlobal, CheckedModuleSet, CheckedProgram, Expr,
-    FunctionSignature, IrError, PrimitiveType, SourceOrigin, TestAssertion, Value,
+    FunctionSignature, IrError, SourceOrigin, TestAssertion, Type, Value,
 };
 use vibra_resolve::{DeclarationId, ResolvedSnapshot};
 use vibra_syntax::{ApplicationBinding, Declaration, SourceAst};
@@ -144,6 +144,53 @@ pub fn check_resolved(
         .sort_by(|left, right| left.record.source_id().cmp(right.record.source_id()));
 
     let mut diagnostics = Vec::new();
+
+    // Declared types come first: every signature below may name one, in its
+    // own module or through an import alias.
+    let mut types = crate::nominal::TypeNames::default();
+    let mut type_declarations = Vec::new();
+    for module in &modules {
+        for declaration in module.ast.declarations() {
+            let Declaration::Deftype(value) = declaration else {
+                continue;
+            };
+            let Some(id) = module
+                .declarations
+                .get(&(module.record.source_id().to_owned(), value.span()))
+            else {
+                continue;
+            };
+            let path = std::iter::once(id.unit())
+                .chain(id.module().iter().map(String::as_str))
+                .chain(id.path().iter().map(String::as_str))
+                .collect::<Vec<_>>()
+                .join(".");
+            let index = types.declare(
+                module.record.source_id(),
+                value,
+                vibra_ir::TypeId::new(id.canonical(), path),
+            );
+            type_declarations.push((index, value));
+        }
+    }
+    for import in snapshot
+        .imports()
+        .iter()
+        .filter(|import| selected.contains(import.source_id()))
+    {
+        let Some(target) = import.module() else {
+            continue;
+        };
+        if let Some(record) = snapshot.modules().iter().find(|record| {
+            record.package() == target.package()
+                && record.unit() == target.unit()
+                && record.segments() == target.segments()
+        }) {
+            types.import(import.source_id(), import.alias(), record.source_id());
+        }
+    }
+    types.lower_bodies(&type_declarations, &mut diagnostics);
+
     let mut globals = Vec::<GlobalHeader>::new();
     let mut functions = Vec::<FunctionHeader>::new();
     let mut global_indices = BTreeMap::<DeclarationId, usize>::new();
@@ -162,15 +209,13 @@ pub fn check_resolved(
                     else {
                         continue;
                     };
-                    let Some(value_type) =
-                        crate::primitive_type(definition.value_type())
-                    else {
-                        unavailable(
-                            &mut diagnostics,
-                            module.record.source_id(),
-                            definition.span(),
-                            "only monomorphic module values are available in Step 12",
-                        );
+                    let Some(value_type) = types.lower_or_report(
+                        module.record.source_id(),
+                        None,
+                        definition.value_type(),
+                        definition.span(),
+                        &mut diagnostics,
+                    ) else {
                         continue;
                     };
                     let index = globals.len();
@@ -198,6 +243,8 @@ pub fn check_resolved(
                         module.record.source_id(),
                         function,
                         &mut diagnostics,
+                        &types,
+                        None,
                     ) else {
                         continue;
                     };
@@ -233,6 +280,8 @@ pub fn check_resolved(
                         ),
                         test: None,
                         test_assertion: None,
+                        member_index: None,
+                        self_type: None,
                     });
                 }
                 Declaration::Test(test) => {
@@ -269,16 +318,65 @@ pub fn check_resolved(
                         module_index,
                         source_id: module.record.source_id().to_owned(),
                         name: id.canonical(),
-                        signature: FunctionSignature::new(
-                            Vec::new(),
-                            PrimitiveType::Void,
-                        ),
+                        signature: FunctionSignature::new(Vec::new(), Type::Void),
                         variadic: false,
                         external: None,
                         external_declared: false,
                         test: Some(test.clone()),
                         test_assertion: None,
+                        member_index: None,
+                        self_type: None,
                     });
+                }
+                Declaration::Deftype(value) => {
+                    let Some(self_type) = types
+                        .declared()
+                        .iter()
+                        .find(|declared| {
+                            declared.span == value.span()
+                                && declared.source_id == module.record.source_id()
+                        })
+                        .map(|declared| Type::Declared(declared.id.clone()))
+                    else {
+                        continue;
+                    };
+                    for (member_index, member) in value.members().iter().enumerate() {
+                        let vibra_syntax::TypeMember::Method(method) = member else {
+                            continue;
+                        };
+                        let Some(id) = module
+                            .declarations
+                            .get(&(module.record.source_id().to_owned(), method.span()))
+                            .cloned()
+                        else {
+                            continue;
+                        };
+                        let Some(signature) = check_signature(
+                            module.record.source_id(),
+                            method,
+                            &mut diagnostics,
+                            &types,
+                            Some(&self_type),
+                        ) else {
+                            continue;
+                        };
+                        let index = functions.len();
+                        function_indices.insert(id.clone(), index);
+                        functions.push(FunctionHeader {
+                            declaration_index,
+                            module_index,
+                            source_id: module.record.source_id().to_owned(),
+                            name: id.canonical(),
+                            signature,
+                            variadic: false,
+                            external: None,
+                            external_declared: false,
+                            test: None,
+                            test_assertion: None,
+                            member_index: Some(member_index),
+                            self_type: Some(self_type.clone()),
+                        });
+                    }
                 }
                 Declaration::Import(_) => {}
                 _ => unavailable(
@@ -316,6 +414,8 @@ pub fn check_resolved(
             external_declared: true,
             test: None,
             test_assertion: Some(assertion),
+            member_index: None,
+            self_type: None,
         });
     }
 
@@ -385,6 +485,7 @@ pub fn check_resolved(
             &empty_names,
             &mut bindings,
             None,
+            &types,
         );
         environment.resolved_targets = Some(&resolved_targets);
         environment.reports_redeclarations = false;
@@ -443,13 +544,14 @@ pub fn check_resolved(
                 &empty_names,
                 &mut bindings,
                 Some(index),
+                &types,
             );
             environment.resolved_targets = Some(&resolved_targets);
             environment.reports_redeclarations = false;
             let Some(body) = crate::check_sequence(
                 &mut environment,
                 test.expressions(),
-                Some(PrimitiveType::Void),
+                Some(Type::Void),
                 test.span(),
                 true,
             ) else {
@@ -480,11 +582,8 @@ pub fn check_resolved(
         let Some(module) = modules.get(header.module_index) else {
             continue;
         };
-        let Some(declaration) = module.ast.declarations().get(header.declaration_index)
+        let Some(function) = crate::header_function(module.ast.declarations(), &header)
         else {
-            continue;
-        };
-        let Declaration::Defn(function) = declaration else {
             continue;
         };
         if !header.external_declared
@@ -533,8 +632,10 @@ pub fn check_resolved(
             &empty_names,
             &mut bindings,
             Some(index),
+            &types,
         );
         environment.resolved_targets = Some(&resolved_targets);
+        environment.self_type = header.self_type.clone();
         environment.reports_redeclarations = false;
         let mut parameters_valid = true;
         for (parameter_index, parameter) in function.parameters().iter().enumerate() {
@@ -685,7 +786,12 @@ pub fn check_resolved(
             vibra_ir::validate_global_initializer_cycles(&globals, &functions)
                 .map(|()| None)
         } else {
-            CheckedModuleSet::try_new(globals, functions).map(Some)
+            CheckedModuleSet::try_new_with_types(
+                types.definitions(),
+                globals,
+                functions,
+            )
+            .map(Some)
         };
         match validated {
             Ok(set) => module_set = set,
@@ -784,28 +890,27 @@ pub fn check_resolved(
     }
 }
 
-fn default_expression(
-    value_type: &PrimitiveType,
-    origin: SourceOrigin,
-) -> Option<Expr> {
+fn default_expression(value_type: &Type, origin: SourceOrigin) -> Option<Expr> {
     let value = match value_type {
-        PrimitiveType::Bool => Some(Value::Bool(false)),
-        PrimitiveType::Void => Some(Value::Void),
-        PrimitiveType::Char => Some(Value::Char('\0')),
-        PrimitiveType::Str => Some(Value::Str(String::new())),
-        PrimitiveType::Bytes => Some(Value::Bytes(Vec::new())),
-        PrimitiveType::Atom => Some(Value::Atom(String::new())),
-        PrimitiveType::I8 => Some(Value::I8(0)),
-        PrimitiveType::I16 => Some(Value::I16(0)),
-        PrimitiveType::I32 => Some(Value::I32(0)),
-        PrimitiveType::I64 => Some(Value::I64(0)),
-        PrimitiveType::U8 => Some(Value::U8(0)),
-        PrimitiveType::U16 => Some(Value::U16(0)),
-        PrimitiveType::U32 => Some(Value::U32(0)),
-        PrimitiveType::U64 => Some(Value::U64(0)),
-        PrimitiveType::F32 => Value::f32(0.0),
-        PrimitiveType::F64 => Value::f64(0.0),
-        PrimitiveType::Function(signature) => {
+        Type::Bool => Some(Value::Bool(false)),
+        Type::Void => Some(Value::Void),
+        Type::Char => Some(Value::Char('\0')),
+        Type::Str => Some(Value::Str(String::new())),
+        Type::Bytes => Some(Value::Bytes(Vec::new())),
+        Type::Atom => Some(Value::Atom(String::new())),
+        Type::I8 => Some(Value::I8(0)),
+        Type::I16 => Some(Value::I16(0)),
+        Type::I32 => Some(Value::I32(0)),
+        Type::I64 => Some(Value::I64(0)),
+        Type::U8 => Some(Value::U8(0)),
+        Type::U16 => Some(Value::U16(0)),
+        Type::U32 => Some(Value::U32(0)),
+        Type::U64 => Some(Value::U64(0)),
+        Type::F32 => Value::f32(0.0),
+        Type::F64 => Value::f64(0.0),
+        // Declared and structural types have no placeholder value.
+        Type::Declared(_) | Type::Record(_) | Type::Enum(_) => None,
+        Type::Function(signature) => {
             let body = default_expression(&signature.result(), origin.clone())?;
             return Some(Expr::closure(
                 (**signature).clone(),

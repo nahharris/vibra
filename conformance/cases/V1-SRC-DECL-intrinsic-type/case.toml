@@ -1,0 +1,11 @@
+id = "V1-SRC-DECL-intrinsic-type"
+rule = "V1-SRC-DECL"
+profile = "reader-v1"
+description = "An intrinsic-type body binds a builtin type name; the reader accepts it and leaves package trust to resolution."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

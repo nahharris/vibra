@@ -11,7 +11,7 @@ source = "input.vib"
 accepted = false
 
 [[expect.diagnostics]]
-code = "@type.argument-mismatch"
+code = "@type.mismatch"
 level = "@error"
 source = "input.vib"
 span = [17, 21]

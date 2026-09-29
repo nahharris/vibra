@@ -1,0 +1,6 @@
+(deftype point (record x i32 y i32))
+(defn missing () point (point x: 1i32))
+(defn repeated () point (point x: 1i32 x: 2i32 y: 3i32))
+(defn unknown () point (point x: 1i32 y: 2i32 z: 3i32))
+(defn positional () point (point 1i32 2i32))
+(defn wrong () point (point x: "one" y: 2i32))

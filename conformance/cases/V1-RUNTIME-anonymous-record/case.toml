@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-anonymous-record"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "recordof builds an anonymous record whose identity ignores written field order; fields render in canonical order."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

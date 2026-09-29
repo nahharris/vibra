@@ -1,0 +1,1 @@
+(defn main () (enum some i32 none void) (enumof some: 4i32))

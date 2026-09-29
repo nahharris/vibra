@@ -22,7 +22,8 @@ use std::path::Path;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 use vibra_syntax::{
     Attribute, Declaration, DeftypeBody, Expression, ExpressionKind,
-    FunctionDeclaration, Literal, Name, Pattern, PatternKind, TypeMember, parse_source,
+    FunctionDeclaration, Literal, Name, Pattern, PatternKind, TypeExpr, TypeMember,
+    parse_source,
 };
 
 /// Package provenance carried by every declaration identity.
@@ -1284,12 +1285,12 @@ impl Resolution {
         span: ByteSpan,
         source_id: &str,
     ) {
-        if matches!(name, "map" | "array" | "tuple") {
+        if vibra_syntax::is_reserved_value_spelling(name) {
             self.diagnostics.push(
                 Diagnostic::new(
                     DiagnosticCode::NameReservedValueSpelling,
                     span,
-                    "a module-level import alias uses a reserved value spelling",
+                    "a module-level import alias uses a builtin type name",
                 )
                 .with_source_id(source_id),
             );
@@ -1395,9 +1396,8 @@ impl Resolution {
             Declaration::Test(_) => return,
         };
         let unavailable_message = match declaration {
-            Declaration::Deftype(_) => {
-                Some("nominal type resolution is unavailable in Step 4")
-            }
+            // Declared types resolve from M3 Step 2.
+            Declaration::Deftype(_) => None,
             Declaration::Defint(_) => {
                 Some("interface resolution is unavailable in Step 4")
             }
@@ -1433,7 +1433,7 @@ impl Resolution {
                 names.insert(name.to_owned(), (span, source_id.to_owned()));
             }
             if matches!(kind, EntityKind::Value | EntityKind::Function)
-                && matches!(name, "map" | "array" | "tuple")
+                && vibra_syntax::is_reserved_value_spelling(name)
             {
                 self.diagnostics.push(
                     Diagnostic::new(
@@ -1472,11 +1472,26 @@ impl Resolution {
                     value.members(),
                     path.clone(),
                     source_id,
+                    true,
                 );
-                self.collect_deftype_fields(module, value.body(), path, source_id);
+                // Fields and variants have no visibility syntax of their own;
+                // they are exactly as visible as the type that declares them.
+                self.collect_deftype_fields(
+                    module,
+                    value.body(),
+                    path,
+                    source_id,
+                    visibility,
+                );
             }
             Declaration::Defint(value) => {
-                self.collect_type_members(module, value.members(), path, source_id);
+                self.collect_type_members(
+                    module,
+                    value.members(),
+                    path,
+                    source_id,
+                    false,
+                );
             }
             Declaration::Deffect(value) => {
                 for member in value.members() {
@@ -1505,16 +1520,21 @@ impl Resolution {
         members: &[TypeMember],
         owner: Vec<String>,
         source_id: &str,
+        deftype_owner: bool,
     ) {
         let mut names = BTreeMap::<String, (ByteSpan, String)>::new();
         for member in members {
             match member {
                 TypeMember::Method(function) => {
-                    self.unavailable(
-                        source_id,
-                        function.span(),
-                        "type and interface members are unavailable in Step 4",
-                    );
+                    // Nested `deftype` methods resolve from M3 Step 2; interface
+                    // contract members arrive in Step 11.
+                    if !deftype_owner {
+                        self.unavailable(
+                            source_id,
+                            function.span(),
+                            "interface members are unavailable until M3 Step 11",
+                        );
+                    }
                     self.collect_member(
                         module,
                         function,
@@ -1553,18 +1573,12 @@ impl Resolution {
         body: &DeftypeBody,
         owner: Vec<String>,
         source_id: &str,
+        owner_visibility: Visibility,
     ) {
-        let fields = match body {
-            DeftypeBody::Record(fields) => fields,
-            DeftypeBody::Enum(fields) => fields,
-            DeftypeBody::Type(_) | DeftypeBody::Union(_) | DeftypeBody::Newtype(_) => {
-                return;
-            }
-        };
-        let kind = match body {
-            DeftypeBody::Record(_) => EntityKind::Field,
-            DeftypeBody::Enum(_) => EntityKind::Variant,
-            DeftypeBody::Type(_) | DeftypeBody::Union(_) | DeftypeBody::Newtype(_) => {
+        let (fields, kind) = match body {
+            DeftypeBody::Type(TypeExpr::Record(fields)) => (fields, EntityKind::Field),
+            DeftypeBody::Type(TypeExpr::Enum(fields)) => (fields, EntityKind::Variant),
+            DeftypeBody::Type(_) | DeftypeBody::Intrinsic(_) => {
                 return;
             }
         };
@@ -1572,11 +1586,6 @@ impl Resolution {
         for field in fields {
             let field_name = field.name().value();
             let field_span = field.span();
-            self.unavailable(
-                source_id,
-                field_span,
-                "nominal type members are unavailable in Step 4",
-            );
             self.check_member_name(&mut names, field_name, field_span, source_id);
             let mut path = owner.clone();
             path.push(field_name.to_owned());
@@ -1594,7 +1603,7 @@ impl Resolution {
             self.declarations.push(DeclarationWork {
                 declaration: ResolvedDeclaration {
                     id,
-                    visibility: Visibility::Private,
+                    visibility: owner_visibility,
                     source_id: source_id.to_owned(),
                     span: field_span,
                 },
@@ -2360,6 +2369,31 @@ impl Resolution {
             ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
                 self.resolve_expression(module, from, operand, scope, source_id);
             }
+            ExpressionKind::TupleOf(values) => {
+                for value in values {
+                    self.resolve_expression(module, from, value, scope, source_id);
+                }
+            }
+            ExpressionKind::RecordOf(fields) => {
+                for field in fields {
+                    self.resolve_expression(
+                        module,
+                        from,
+                        field.value(),
+                        scope,
+                        source_id,
+                    );
+                }
+            }
+            ExpressionKind::EnumOf(variant) => {
+                self.resolve_expression(
+                    module,
+                    from,
+                    variant.value(),
+                    scope,
+                    source_id,
+                );
+            }
         }
     }
 
@@ -2551,6 +2585,12 @@ fn collect_pattern_names(pattern: &Pattern, names: &mut Vec<(String, ByteSpan)>)
                 collect_pattern_names(pattern, names);
             }
         }
+        PatternKind::RecordOf(fields) => {
+            for field in fields {
+                collect_pattern_names(field.pattern(), names);
+            }
+        }
+        PatternKind::EnumOf(variant) => collect_pattern_names(variant.pattern(), names),
         PatternKind::As { pattern, .. } => collect_pattern_names(pattern, names),
         PatternKind::Binding(_) | PatternKind::Literal(_) => {}
     }

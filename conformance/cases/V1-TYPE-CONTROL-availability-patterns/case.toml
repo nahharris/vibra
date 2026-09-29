@@ -2,7 +2,7 @@ id = "V1-TYPE-CONTROL-availability-patterns"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
 operation = "type-check"
-description = "Literal, constructor, tuple, array, and as parameter patterns are rejected at their parameter source forms."
+description = "Literal, constructor, tupleof, array, and as parameter patterns are rejected at their parameter source forms."
 
 [inputs]
 source = "input.vib"
@@ -26,16 +26,16 @@ span = [70, 85]
 code = "@tool.unavailable"
 level = "@error"
 source = "input.vib"
-span = [118, 140]
+span = [118, 142]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
 source = "input.vib"
-span = [173, 189]
+span = [175, 191]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
 source = "input.vib"
-span = [219, 236]
+span = [221, 238]

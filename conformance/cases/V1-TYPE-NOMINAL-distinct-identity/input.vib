@@ -1,0 +1,6 @@
+(deftype meters (record value f64))
+(deftype feet (record value f64))
+(defn convert (value meters) feet value)
+(defn anonymous (value meters) (record value f64) value)
+(deftype celsius f64)
+(defn raw (value celsius) f64 value)

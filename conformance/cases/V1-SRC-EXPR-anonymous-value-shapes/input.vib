@@ -1,0 +1,4 @@
+(def a (record x i32) (recordof))
+(def b (record x i32) (recordof 1i32))
+(def c (enum x i32 y i32) (enumof x: 1i32 y: 2i32))
+(defn d ((tuple left) (tuple i32)) i32 left)

@@ -14,9 +14,19 @@ use std::sync::Arc;
 
 use vibra_diagnostics::ByteSpan;
 
+mod nominal;
+mod observed;
+
+pub use nominal::{TypeBody, TypeDefinition, TypeId, canonical_members};
+use nominal::{
+    type_table, validate_declared_expr, validate_declared_signature,
+    validate_declared_type,
+};
+pub use observed::ObservedValue;
+
 /// The closed compiler intrinsic registry admitted by M2.
 pub mod external {
-    use super::{FunctionSignature, PrimitiveType};
+    use super::{FunctionSignature, Type};
 
     /// The closed M2 compiler registry identity used by the runtime contract.
     ///
@@ -72,13 +82,10 @@ pub mod external {
         #[must_use]
         pub fn signature(self) -> FunctionSignature {
             match self {
-                Self::TextConcat => FunctionSignature::new(
-                    vec![PrimitiveType::Str, PrimitiveType::Str],
-                    PrimitiveType::Str,
-                ),
-                Self::TextLength => {
-                    FunctionSignature::new(vec![PrimitiveType::Str], PrimitiveType::U64)
+                Self::TextConcat => {
+                    FunctionSignature::new(vec![Type::Str, Type::Str], Type::Str)
                 }
+                Self::TextLength => FunctionSignature::new(vec![Type::Str], Type::U64),
             }
         }
 
@@ -99,7 +106,7 @@ pub mod external {
 
 /// One of the primitive types admitted by the M2 literal profile.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum PrimitiveType {
+pub enum Type {
     /// Boolean values.
     Bool,
     /// The single successful-completion value.
@@ -134,13 +141,26 @@ pub enum PrimitiveType {
     F64,
     /// A first-class monomorphic function value.
     Function(Box<FunctionSignature>),
+    /// A declared (`deftype`) type, identified by its declaration.
+    Declared(TypeId),
+    /// An anonymous record type; fields are in canonical order.
+    Record(Vec<(String, Type)>),
+    /// An anonymous enum type; variants are in canonical order.
+    Enum(Vec<(String, Type)>),
 }
 
-impl PrimitiveType {
-    /// The canonical source/type spelling.
+impl Type {
+    /// The source spelling of a primitive or function type head.
+    ///
+    /// Declared and structural types have no single head word; they spell
+    /// as `type`, `record`, and `enum`, and [`fmt::Display`] renders them in
+    /// full.
     #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
+            Self::Declared(_) => "type",
+            Self::Record(_) => "record",
+            Self::Enum(_) => "enum",
             Self::Bool => "bool",
             Self::Void => "void",
             Self::Char => "char",
@@ -170,6 +190,8 @@ impl PrimitiveType {
     pub fn same_shape(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Function(left), Self::Function(right)) => left.same_shape(right),
+            (Self::Record(left), Self::Record(right))
+            | (Self::Enum(left), Self::Enum(right)) => members_same_shape(left, right),
             _ => self == other,
         }
     }
@@ -197,9 +219,23 @@ impl PrimitiveType {
     }
 }
 
-impl fmt::Display for PrimitiveType {
+impl fmt::Display for Type {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(self.as_str())
+        match self {
+            Self::Declared(id) => formatter.write_str(id.path()),
+            Self::Record(members) | Self::Enum(members) => {
+                formatter.write_str(if matches!(self, Self::Record(_)) {
+                    "(record"
+                } else {
+                    "(enum"
+                })?;
+                for (name, value) in members {
+                    write!(formatter, " {name} {value}")?;
+                }
+                formatter.write_str(")")
+            }
+            _ => formatter.write_str(self.as_str()),
+        }
     }
 }
 
@@ -207,7 +243,7 @@ impl fmt::Display for PrimitiveType {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LabelledParameter {
     name: String,
-    value_type: PrimitiveType,
+    value_type: Type,
     default: Option<Value>,
 }
 
@@ -217,7 +253,7 @@ impl LabelledParameter {
     #[must_use]
     pub fn new(
         name: impl Into<String>,
-        value_type: PrimitiveType,
+        value_type: Type,
         default: Option<Value>,
     ) -> Self {
         Self {
@@ -235,7 +271,7 @@ impl LabelledParameter {
 
     /// The labelled slot type.
     #[must_use]
-    pub fn value_type(&self) -> PrimitiveType {
+    pub fn value_type(&self) -> Type {
         self.value_type.clone()
     }
 
@@ -249,15 +285,15 @@ impl LabelledParameter {
 /// One fully checked monomorphic function signature.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FunctionSignature {
-    parameters: Vec<PrimitiveType>,
+    parameters: Vec<Type>,
     labelled: Vec<LabelledParameter>,
-    result: PrimitiveType,
+    result: Type,
 }
 
 impl FunctionSignature {
     /// Creates a signature from its checked primitive slots.
     #[must_use]
-    pub fn new(parameters: Vec<PrimitiveType>, result: PrimitiveType) -> Self {
+    pub fn new(parameters: Vec<Type>, result: Type) -> Self {
         Self {
             parameters,
             labelled: Vec::new(),
@@ -268,9 +304,9 @@ impl FunctionSignature {
     /// Creates a signature with declaration-order labelled slots.
     #[must_use]
     pub fn with_labelled(
-        parameters: Vec<PrimitiveType>,
+        parameters: Vec<Type>,
         labelled: Vec<LabelledParameter>,
-        result: PrimitiveType,
+        result: Type,
     ) -> Self {
         Self {
             parameters,
@@ -281,7 +317,7 @@ impl FunctionSignature {
 
     /// Required positional parameter types in written order.
     #[must_use]
-    pub fn parameters(&self) -> &[PrimitiveType] {
+    pub fn parameters(&self) -> &[Type] {
         &self.parameters
     }
 
@@ -323,7 +359,7 @@ impl FunctionSignature {
 
     /// The declared result type.
     #[must_use]
-    pub fn result(&self) -> PrimitiveType {
+    pub fn result(&self) -> Type {
         self.result.clone()
     }
 }
@@ -391,29 +427,12 @@ impl TestAssertion {
     #[must_use]
     pub fn signature(self) -> FunctionSignature {
         let (parameters, result) = match self {
-            Self::True | Self::False => {
-                (vec![PrimitiveType::Bool], PrimitiveType::Void)
-            }
-            Self::EqualBool => (
-                vec![PrimitiveType::Bool, PrimitiveType::Bool],
-                PrimitiveType::Void,
-            ),
-            Self::EqualChar => (
-                vec![PrimitiveType::Char, PrimitiveType::Char],
-                PrimitiveType::Void,
-            ),
-            Self::EqualStr => (
-                vec![PrimitiveType::Str, PrimitiveType::Str],
-                PrimitiveType::Void,
-            ),
-            Self::EqualI32 => (
-                vec![PrimitiveType::I32, PrimitiveType::I32],
-                PrimitiveType::Void,
-            ),
-            Self::EqualU64 => (
-                vec![PrimitiveType::U64, PrimitiveType::U64],
-                PrimitiveType::Void,
-            ),
+            Self::True | Self::False => (vec![Type::Bool], Type::Void),
+            Self::EqualBool => (vec![Type::Bool, Type::Bool], Type::Void),
+            Self::EqualChar => (vec![Type::Char, Type::Char], Type::Void),
+            Self::EqualStr => (vec![Type::Str, Type::Str], Type::Void),
+            Self::EqualI32 => (vec![Type::I32, Type::I32], Type::Void),
+            Self::EqualU64 => (vec![Type::U64, Type::U64], Type::Void),
         };
         FunctionSignature::new(parameters, result)
     }
@@ -491,24 +510,24 @@ pub enum Value {
 impl Value {
     /// Returns the primitive type carried by this value.
     #[must_use]
-    pub fn ty(&self) -> PrimitiveType {
+    pub fn ty(&self) -> Type {
         match self {
-            Self::Bool(_) => PrimitiveType::Bool,
-            Self::Void => PrimitiveType::Void,
-            Self::Char(_) => PrimitiveType::Char,
-            Self::Str(_) => PrimitiveType::Str,
-            Self::Bytes(_) => PrimitiveType::Bytes,
-            Self::Atom(_) => PrimitiveType::Atom,
-            Self::I8(_) => PrimitiveType::I8,
-            Self::I16(_) => PrimitiveType::I16,
-            Self::I32(_) => PrimitiveType::I32,
-            Self::I64(_) => PrimitiveType::I64,
-            Self::U8(_) => PrimitiveType::U8,
-            Self::U16(_) => PrimitiveType::U16,
-            Self::U32(_) => PrimitiveType::U32,
-            Self::U64(_) => PrimitiveType::U64,
-            Self::F32(_) => PrimitiveType::F32,
-            Self::F64(_) => PrimitiveType::F64,
+            Self::Bool(_) => Type::Bool,
+            Self::Void => Type::Void,
+            Self::Char(_) => Type::Char,
+            Self::Str(_) => Type::Str,
+            Self::Bytes(_) => Type::Bytes,
+            Self::Atom(_) => Type::Atom,
+            Self::I8(_) => Type::I8,
+            Self::I16(_) => Type::I16,
+            Self::I32(_) => Type::I32,
+            Self::I64(_) => Type::I64,
+            Self::U8(_) => Type::U8,
+            Self::U16(_) => Type::U16,
+            Self::U32(_) => Type::U32,
+            Self::U64(_) => Type::U64,
+            Self::F32(_) => Type::F32,
+            Self::F64(_) => Type::F64,
         }
     }
 
@@ -604,7 +623,7 @@ pub enum Expr {
     /// A labelled argument whose default is resolved from the runtime callee.
     Default {
         /// The statically checked labelled slot type.
-        value_type: PrimitiveType,
+        value_type: Type,
         /// The source origin of the omitted argument.
         origin: SourceOrigin,
     },
@@ -620,7 +639,7 @@ pub enum Expr {
         /// The immutable activation slot.
         slot: usize,
         /// The statically checked value type.
-        value_type: PrimitiveType,
+        value_type: Type,
         /// The source origin of the name use.
         origin: SourceOrigin,
     },
@@ -629,7 +648,7 @@ pub enum Expr {
         /// The program-global index.
         index: usize,
         /// The statically checked value type.
-        value_type: PrimitiveType,
+        value_type: Type,
         /// The source origin of the name use.
         origin: SourceOrigin,
     },
@@ -647,11 +666,11 @@ pub enum Expr {
         /// The lambda's checked signature.
         signature: FunctionSignature,
         /// Lambda parameters/body, checked in a separate lexical activation.
-        parameters: Vec<PrimitiveType>,
+        parameters: Vec<Type>,
         /// Expressions evaluated once when the closure is created.
         captures: Vec<Self>,
         /// Static types of the closure-environment slots.
-        capture_types: Vec<PrimitiveType>,
+        capture_types: Vec<Type>,
         /// The lambda body, whose free names use [`Self::Captured`].
         ///
         /// Shared so that creating a closure value, or summarizing one during
@@ -667,7 +686,7 @@ pub enum Expr {
         /// The closure-environment slot.
         slot: usize,
         /// The statically checked value type.
-        value_type: PrimitiveType,
+        value_type: Type,
         /// The source origin of the captured name use.
         origin: SourceOrigin,
     },
@@ -700,7 +719,7 @@ pub enum Expr {
         /// Arguments in declaration order.
         arguments: Vec<Self>,
         /// The statically checked result type.
-        result: PrimitiveType,
+        result: Type,
         /// Whether this call is an explicit tail transfer candidate.
         ///
         /// The checker sets this for a call in an activation-relative tail
@@ -714,6 +733,47 @@ pub enum Expr {
         /// exactly when the evaluated callee is a named function in the
         /// group; any other callee is invoked as an ordinary call.
         tail: bool,
+        /// The source origin of the complete application.
+        origin: SourceOrigin,
+    },
+    /// A declared record constructor or an anonymous `recordof`.
+    Record {
+        /// The declared or anonymous record type being built.
+        value_type: Type,
+        /// Field operands in evaluation order: declaration order for a
+        /// declared constructor, written order for `recordof`.
+        fields: Vec<(String, Self)>,
+        /// The source origin of the complete form.
+        origin: SourceOrigin,
+    },
+    /// An enum variant constructor or an anonymous `enumof`.
+    Variant {
+        /// The declared or anonymous enum type being built.
+        value_type: Type,
+        /// The selected variant.
+        variant: String,
+        /// The payload operand; `None` for a `void` payload slot.
+        payload: Option<Box<Self>>,
+        /// The source origin of the complete form.
+        origin: SourceOrigin,
+    },
+    /// A wrapper-type constructor.
+    Wrap {
+        /// The declared wrapper type.
+        value_type: TypeId,
+        /// The representation operand.
+        value: Box<Self>,
+        /// The source origin of the complete form.
+        origin: SourceOrigin,
+    },
+    /// A record projection with a compile-time field selector.
+    Project {
+        /// The record operand, evaluated once.
+        record: Box<Self>,
+        /// The selected field.
+        field: String,
+        /// The statically checked field type.
+        value_type: Type,
         /// The source origin of the complete application.
         origin: SourceOrigin,
     },
@@ -778,17 +838,13 @@ impl Expr {
 
     /// Creates an omitted labelled argument resolved by the selected callable.
     #[must_use]
-    pub fn default_value(value_type: PrimitiveType, origin: SourceOrigin) -> Self {
+    pub fn default_value(value_type: Type, origin: SourceOrigin) -> Self {
         Self::Default { value_type, origin }
     }
 
     /// Creates a checked activation-slot reference.
     #[must_use]
-    pub fn variable(
-        slot: usize,
-        value_type: PrimitiveType,
-        origin: SourceOrigin,
-    ) -> Self {
+    pub fn variable(slot: usize, value_type: Type, origin: SourceOrigin) -> Self {
         Self::Variable {
             slot,
             value_type,
@@ -798,11 +854,7 @@ impl Expr {
 
     /// Creates a checked module-global reference.
     #[must_use]
-    pub fn global(
-        index: usize,
-        value_type: PrimitiveType,
-        origin: SourceOrigin,
-    ) -> Self {
+    pub fn global(index: usize, value_type: Type, origin: SourceOrigin) -> Self {
         Self::Global {
             index,
             value_type,
@@ -828,7 +880,7 @@ impl Expr {
     #[must_use]
     pub fn closure(
         signature: FunctionSignature,
-        parameters: Vec<PrimitiveType>,
+        parameters: Vec<Type>,
         captures: Vec<Self>,
         body: Self,
         slot_count: usize,
@@ -848,11 +900,7 @@ impl Expr {
 
     /// Creates a closure-environment reference.
     #[must_use]
-    pub fn captured(
-        slot: usize,
-        value_type: PrimitiveType,
-        origin: SourceOrigin,
-    ) -> Self {
+    pub fn captured(slot: usize, value_type: Type, origin: SourceOrigin) -> Self {
         Self::Captured {
             slot,
             value_type,
@@ -897,7 +945,7 @@ impl Expr {
     pub fn call(
         function: usize,
         arguments: Vec<Self>,
-        result: PrimitiveType,
+        result: Type,
         origin: SourceOrigin,
     ) -> Self {
         Self::Call {
@@ -914,7 +962,7 @@ impl Expr {
     pub fn tail_call(
         function: usize,
         arguments: Vec<Self>,
-        result: PrimitiveType,
+        result: Type,
         origin: SourceOrigin,
     ) -> Self {
         Self::Call {
@@ -932,7 +980,7 @@ impl Expr {
         callee: Self,
         function_hint: Option<usize>,
         arguments: Vec<Self>,
-        result: PrimitiveType,
+        result: Type,
         origin: SourceOrigin,
     ) -> Self {
         Self::Call {
@@ -953,7 +1001,7 @@ impl Expr {
         callee: Self,
         function_hint: usize,
         arguments: Vec<Self>,
-        result: PrimitiveType,
+        result: Type,
         origin: SourceOrigin,
     ) -> Self {
         Self::indirect_tail_call_with_hint(
@@ -974,7 +1022,7 @@ impl Expr {
         callee: Self,
         function_hint: Option<usize>,
         arguments: Vec<Self>,
-        result: PrimitiveType,
+        result: Type,
         origin: SourceOrigin,
     ) -> Self {
         Self::Call {
@@ -1019,30 +1067,55 @@ impl Expr {
             | Self::Captured { origin, .. }
             | Self::Let { origin, .. }
             | Self::If { origin, .. }
-            | Self::Call { origin, .. } => origin,
+            | Self::Call { origin, .. }
+            | Self::Record { origin, .. }
+            | Self::Variant { origin, .. }
+            | Self::Wrap { origin, .. }
+            | Self::Project { origin, .. } => origin,
         }
     }
 
     /// The statically known result type of this expression.
     #[must_use]
-    pub fn result_type(&self) -> PrimitiveType {
+    pub fn result_type(&self) -> Type {
         match self {
             Self::Literal { value, .. } => value.ty(),
             Self::External { intrinsic, .. } => intrinsic.signature().result(),
             Self::Default { value_type, .. } => value_type.clone(),
-            Self::Sequence { expressions, .. } => expressions
-                .last()
-                .map_or(PrimitiveType::Void, Self::result_type),
+            Self::Sequence { expressions, .. } => {
+                expressions.last().map_or(Type::Void, Self::result_type)
+            }
             Self::Variable { value_type, .. } | Self::Global { value_type, .. } => {
                 value_type.clone()
             }
             Self::Function { signature, .. } | Self::Closure { signature, .. } => {
-                PrimitiveType::Function(Box::new(signature.clone()))
+                Type::Function(Box::new(signature.clone()))
             }
             Self::Captured { value_type, .. } => value_type.clone(),
             Self::Let { body, .. } => body.result_type(),
             Self::If { then_branch, .. } => then_branch.result_type(),
             Self::Call { result, .. } => result.clone(),
+            Self::Record { value_type, .. }
+            | Self::Variant { value_type, .. }
+            | Self::Project { value_type, .. } => value_type.clone(),
+            Self::Wrap { value_type, .. } => Type::Declared(value_type.clone()),
+        }
+    }
+
+    /// The operands of a construction or projection, in evaluation order.
+    /// Every other expression kind returns an empty list.
+    #[must_use]
+    pub fn data_operands(&self) -> Vec<&Self> {
+        match self {
+            Self::Record { fields, .. } => {
+                fields.iter().map(|(_, value)| value).collect()
+            }
+            Self::Variant { payload, .. } => {
+                payload.iter().map(|payload| &**payload).collect()
+            }
+            Self::Wrap { value, .. } => vec![value],
+            Self::Project { record, .. } => vec![record],
+            _ => Vec::new(),
         }
     }
 
@@ -1060,7 +1133,11 @@ impl Expr {
             | Self::Captured { .. }
             | Self::Let { .. }
             | Self::If { .. }
-            | Self::Call { .. } => &[],
+            | Self::Call { .. }
+            | Self::Record { .. }
+            | Self::Variant { .. }
+            | Self::Wrap { .. }
+            | Self::Project { .. } => &[],
             Self::Sequence { expressions, .. } => expressions,
         }
     }
@@ -1080,7 +1157,11 @@ impl Expr {
             | Self::Captured { .. }
             | Self::Let { .. }
             | Self::If { .. }
-            | Self::Call { .. } => None,
+            | Self::Call { .. }
+            | Self::Record { .. }
+            | Self::Variant { .. }
+            | Self::Wrap { .. }
+            | Self::Project { .. } => None,
         }
     }
 
@@ -1124,21 +1205,28 @@ impl Expr {
             Self::Closure { captures, .. } => {
                 captures.iter().map(Self::slot_count).max().unwrap_or(0)
             }
+            Self::Record { fields, .. } => fields
+                .iter()
+                .map(|(_, value)| value.slot_count())
+                .max()
+                .unwrap_or(0),
+            Self::Variant { payload, .. } => {
+                payload.as_deref().map_or(0, Self::slot_count)
+            }
+            Self::Wrap { value, .. } => value.slot_count(),
+            Self::Project { record, .. } => record.slot_count(),
         }
     }
 
-    fn validate_shape(
-        &self,
-        slots: &mut [Option<PrimitiveType>],
-    ) -> Result<PrimitiveType, IrError> {
+    fn validate_shape(&self, slots: &mut [Option<Type>]) -> Result<Type, IrError> {
         self.validate_shape_with_captures(slots, &[])
     }
 
     fn validate_shape_with_captures(
         &self,
-        slots: &mut [Option<PrimitiveType>],
-        capture_types: &[PrimitiveType],
-    ) -> Result<PrimitiveType, IrError> {
+        slots: &mut [Option<Type>],
+        capture_types: &[Type],
+    ) -> Result<Type, IrError> {
         match self {
             Self::Literal { value, .. } => Ok(value.ty()),
             Self::External {
@@ -1172,7 +1260,7 @@ impl Expr {
                 "default argument marker is only valid as a call operand".to_owned(),
             )),
             Self::Function { signature, .. } => {
-                Ok(PrimitiveType::Function(Box::new(signature.clone())))
+                Ok(Type::Function(Box::new(signature.clone())))
             }
             Self::Captured {
                 slot, value_type, ..
@@ -1268,10 +1356,10 @@ impl Expr {
                         actual,
                     });
                 }
-                Ok(PrimitiveType::Function(Box::new(signature.clone())))
+                Ok(Type::Function(Box::new(signature.clone())))
             }
             Self::Sequence { expressions, .. } => {
-                let mut result = PrimitiveType::Void;
+                let mut result = Type::Void;
                 for expression in expressions {
                     result = expression
                         .validate_shape_with_captures(slots, capture_types)?;
@@ -1319,7 +1407,7 @@ impl Expr {
             } => {
                 let condition_type =
                     condition.validate_shape_with_captures(slots, capture_types)?;
-                if !condition_type.same_shape(&PrimitiveType::Bool) {
+                if !condition_type.same_shape(&Type::Bool) {
                     return Err(IrError::InvalidExpression(format!(
                         "if condition has type {condition_type}, expected bool"
                     )));
@@ -1346,7 +1434,7 @@ impl Expr {
                 if let Some(callee) = target.callee() {
                     let callee_type =
                         callee.validate_shape_with_captures(slots, capture_types)?;
-                    if !matches!(callee_type, PrimitiveType::Function(_)) {
+                    if !matches!(callee_type, Type::Function(_)) {
                         return Err(IrError::InvalidExpression(
                             "indirect callee is not a function".to_owned(),
                         ));
@@ -1369,15 +1457,131 @@ impl Expr {
                 }
                 Ok(result.clone())
             }
+            Self::Record {
+                value_type, fields, ..
+            } => {
+                let mut names = BTreeSet::new();
+                let mut actual = Vec::with_capacity(fields.len());
+                for (name, value) in fields {
+                    if !names.insert(name.as_str()) {
+                        return Err(IrError::InvalidExpression(format!(
+                            "record construction repeats field `{name}`"
+                        )));
+                    }
+                    let field_type =
+                        value.validate_shape_with_captures(slots, capture_types)?;
+                    actual.push((name.clone(), field_type));
+                }
+                match value_type {
+                    // A declared record is checked against its definition by
+                    // the program-level pass, which owns the type table.
+                    Type::Declared(_) => {}
+                    Type::Record(expected) => {
+                        let actual = canonical_members(actual);
+                        if !members_same_shape(expected, &actual) {
+                            return Err(IrError::InvalidExpression(format!(
+                                "anonymous record fields do not match {value_type}"
+                            )));
+                        }
+                    }
+                    _ => {
+                        return Err(IrError::InvalidExpression(format!(
+                            "record construction produces non-record type {value_type}"
+                        )));
+                    }
+                }
+                Ok(value_type.clone())
+            }
+            Self::Variant {
+                value_type,
+                variant,
+                payload,
+                ..
+            } => {
+                let payload_type = payload
+                    .as_deref()
+                    .map(|payload| {
+                        payload.validate_shape_with_captures(slots, capture_types)
+                    })
+                    .transpose()?
+                    .unwrap_or(Type::Void);
+                match value_type {
+                    Type::Declared(_) => {}
+                    Type::Enum(variants) => {
+                        let declared = variants
+                            .iter()
+                            .find(|(name, _)| name == variant)
+                            .ok_or_else(|| {
+                                IrError::InvalidExpression(format!(
+                                    "{value_type} has no variant `{variant}`"
+                                ))
+                            })?;
+                        if !declared.1.same_shape(&payload_type) {
+                            return Err(IrError::InvalidExpression(format!(
+                                "variant `{variant}` payload has type {payload_type}, expected {}",
+                                declared.1
+                            )));
+                        }
+                    }
+                    _ => {
+                        return Err(IrError::InvalidExpression(format!(
+                            "variant construction produces non-enum type {value_type}"
+                        )));
+                    }
+                }
+                Ok(value_type.clone())
+            }
+            Self::Wrap {
+                value_type, value, ..
+            } => {
+                value.validate_shape_with_captures(slots, capture_types)?;
+                Ok(Type::Declared(value_type.clone()))
+            }
+            Self::Project {
+                record,
+                field,
+                value_type,
+                ..
+            } => {
+                let record_type =
+                    record.validate_shape_with_captures(slots, capture_types)?;
+                match &record_type {
+                    Type::Declared(_) => {}
+                    Type::Record(fields) => {
+                        let found = fields.iter().find(|(name, _)| name == field);
+                        if !found.is_some_and(|(_, found)| found.same_shape(value_type))
+                        {
+                            return Err(IrError::InvalidExpression(format!(
+                                "{record_type} has no field `{field}` of type {value_type}"
+                            )));
+                        }
+                    }
+                    _ => {
+                        return Err(IrError::InvalidExpression(format!(
+                            "projection of `{field}` from non-record type {record_type}"
+                        )));
+                    }
+                }
+                Ok(value_type.clone())
+            }
         }
     }
+}
+
+/// Whether two canonical member lists have equal names and same-shape types.
+fn members_same_shape(left: &[(String, Type)], right: &[(String, Type)]) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|(left, right)| left.0 == right.0 && left.1.same_shape(&right.1))
 }
 
 /// One checked module-level immutable value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CheckedGlobal {
     name: String,
-    value_type: PrimitiveType,
+    value_type: Type,
     initializer: Expr,
     origin: SourceOrigin,
     slot_count: usize,
@@ -1387,7 +1591,7 @@ impl CheckedGlobal {
     /// Creates a checked global after validating its initializer type.
     pub fn new(
         name: impl Into<String>,
-        value_type: PrimitiveType,
+        value_type: Type,
         initializer: Expr,
         origin: SourceOrigin,
     ) -> Result<Self, IrError> {
@@ -1424,7 +1628,7 @@ impl CheckedGlobal {
 
     /// The checked global type.
     #[must_use]
-    pub fn value_type(&self) -> PrimitiveType {
+    pub fn value_type(&self) -> Type {
         self.value_type.clone()
     }
 
@@ -1705,6 +1909,7 @@ fn reject_entry_free_initializer_cycles(
 /// revalidated per entry.
 #[derive(Debug, PartialEq, Eq)]
 pub struct CheckedModuleSet {
+    types: Vec<TypeDefinition>,
     globals: Vec<CheckedGlobal>,
     functions: Vec<CheckedFunction>,
     static_calls: CallEdges,
@@ -1717,6 +1922,20 @@ impl CheckedModuleSet {
         globals: Vec<CheckedGlobal>,
         functions: Vec<CheckedFunction>,
     ) -> Result<Arc<Self>, IrError> {
+        Self::try_new_with_types(Vec::new(), globals, functions)
+    }
+
+    /// Validates a complete set of declared types, globals, and functions.
+    ///
+    /// Every declared type named by a signature, global, or expression must
+    /// have exactly one definition, and every declared construction and
+    /// projection must agree with it.
+    pub fn try_new_with_types(
+        types: Vec<TypeDefinition>,
+        globals: Vec<CheckedGlobal>,
+        functions: Vec<CheckedFunction>,
+    ) -> Result<Arc<Self>, IrError> {
+        let definitions = type_table(&types)?;
         if functions.is_empty() {
             return Err(IrError::NoFunctions);
         }
@@ -1770,6 +1989,14 @@ impl CheckedModuleSet {
                 });
             }
         }
+        for function in &functions {
+            validate_declared_signature(function.signature(), &definitions)?;
+            validate_declared_expr(function.body(), &definitions)?;
+        }
+        for global in &globals {
+            validate_declared_type(&global.value_type, &definitions)?;
+            validate_declared_expr(global.initializer(), &definitions)?;
+        }
         let (static_calls, static_dependencies) =
             static_program_edges(&globals, &functions)?;
         reject_entry_free_initializer_cycles(
@@ -1778,11 +2005,24 @@ impl CheckedModuleSet {
             static_dependencies.clone(),
         )?;
         Ok(Arc::new(Self {
+            types,
             globals,
             functions,
             static_calls,
             static_dependencies,
         }))
+    }
+
+    /// Declared type definitions in deterministic checked order.
+    #[must_use]
+    pub fn types(&self) -> &[TypeDefinition] {
+        &self.types
+    }
+
+    /// The definition of one declared type.
+    #[must_use]
+    pub fn type_definition(&self, id: &TypeId) -> Option<&TypeDefinition> {
+        self.types.iter().find(|definition| definition.id() == id)
     }
 
     /// Immutable module values in deterministic checked order.
@@ -1827,6 +2067,19 @@ impl CheckedProgram {
         entry: usize,
     ) -> Result<Self, IrError> {
         Self::for_entry(CheckedModuleSet::try_new(globals, functions)?, entry)
+    }
+
+    /// Creates a checked program containing declared types and module values.
+    pub fn try_new_with_types(
+        types: Vec<TypeDefinition>,
+        globals: Vec<CheckedGlobal>,
+        functions: Vec<CheckedFunction>,
+        entry: usize,
+    ) -> Result<Self, IrError> {
+        Self::for_entry(
+            CheckedModuleSet::try_new_with_types(types, globals, functions)?,
+            entry,
+        )
     }
 
     /// Selects one entry of an already validated module set.
@@ -1897,6 +2150,12 @@ impl CheckedProgram {
     #[must_use]
     pub const fn module_set(&self) -> &Arc<CheckedModuleSet> {
         &self.set
+    }
+
+    /// Declared type definitions in deterministic checked order.
+    #[must_use]
+    pub fn types(&self) -> &[TypeDefinition] {
+        &self.set.types
     }
 
     /// Immutable module values in deterministic checked order.
@@ -2000,9 +2259,9 @@ pub enum IrError {
     /// A function body result differs from its checked signature.
     ResultTypeMismatch {
         /// The written result type.
-        expected: PrimitiveType,
+        expected: Type,
         /// The body result type.
-        actual: PrimitiveType,
+        actual: Type,
     },
     /// A function did not allocate slots for all fixed parameters.
     InvalidSlotCount {
@@ -2092,6 +2351,21 @@ fn validate_program_expr(
     dependencies: &mut [BTreeSet<DependencyNode>],
 ) -> Result<(), IrError> {
     match expression {
+        Expr::Record { .. }
+        | Expr::Variant { .. }
+        | Expr::Wrap { .. }
+        | Expr::Project { .. } => {
+            for operand in expression.data_operands() {
+                validate_program_expr(
+                    operand,
+                    globals,
+                    functions,
+                    owner,
+                    calls,
+                    dependencies,
+                )?;
+            }
+        }
         Expr::Literal { .. }
         | Expr::Default { .. }
         | Expr::Variable { .. }
@@ -2257,7 +2531,7 @@ fn validate_program_expr(
                         dependencies,
                     )?;
                     match callee.result_type() {
-                        PrimitiveType::Function(signature) => *signature,
+                        Type::Function(signature) => *signature,
                         actual => {
                             return Err(IrError::InvalidExpression(format!(
                                 "indirect callee has non-function type {actual}"
@@ -2460,6 +2734,12 @@ fn possible_function_targets(
     visiting_globals: &mut BTreeSet<usize>,
 ) -> FunctionTargetSummary {
     match expression {
+        // Constructions are never function values; a projected field may hold
+        // any function stored into a record, so its targets are unbounded.
+        Expr::Record { .. } | Expr::Variant { .. } | Expr::Wrap { .. } => {
+            FunctionTargetSummary::default()
+        }
+        Expr::Project { .. } => FunctionTargetSummary::unknown(),
         Expr::Function { function, .. } => FunctionTargetSummary::known(*function),
         // A closure is a distinct runtime callable, even when its body
         // returns a module function.  It therefore cannot be summarized as
@@ -2602,7 +2882,7 @@ fn possible_function_targets(
                     .zip(function_signature_types(function.signature()))
                     .enumerate()
                 {
-                    if matches!(value_type, PrimitiveType::Function(_)) {
+                    if matches!(value_type, Type::Function(_)) {
                         target_aliases.insert(slot, argument.clone());
                     }
                 }
@@ -2823,7 +3103,7 @@ fn analyze_call_flow_with_entry(
         for (slot, value_type) in
             function_signature_types(function.signature()).enumerate()
         {
-            if matches!(value_type, PrimitiveType::Function(_))
+            if matches!(value_type, Type::Function(_))
                 && let Some(summary) = flow
                     .parameter_targets
                     .get_mut(entry)
@@ -2968,7 +3248,7 @@ fn parameter_aliases(
     };
     for (slot, value_type) in function_signature_types(checked.signature()).enumerate()
     {
-        if !matches!(value_type, PrimitiveType::Function(_)) {
+        if !matches!(value_type, Type::Function(_)) {
             continue;
         }
         let summary = if parameter_sources
@@ -3003,7 +3283,7 @@ where
     T: Clone,
 {
     let slot = slot?;
-    matches!(value.result_type(), PrimitiveType::Function(_)).then(|| {
+    matches!(value.result_type(), Type::Function(_)).then(|| {
         let mut nested = environment.clone();
         nested.insert(slot, summary);
         nested
@@ -3020,7 +3300,7 @@ fn flow_target_summary(summary: &FlowTargetSummary) -> FunctionTargetSummary {
 
 fn function_signature_types(
     signature: &FunctionSignature,
-) -> impl Iterator<Item = PrimitiveType> + '_ {
+) -> impl Iterator<Item = Type> + '_ {
     signature.parameters().iter().cloned().chain(
         signature
             .labelled()
@@ -3038,8 +3318,7 @@ fn function_argument_environment(
         .zip(function_signature_types(signature))
         .enumerate()
         .filter_map(|(slot, (argument, value_type))| {
-            matches!(value_type, PrimitiveType::Function(_))
-                .then(|| (slot, argument.clone()))
+            matches!(value_type, Type::Function(_)).then(|| (slot, argument.clone()))
         })
         .collect()
 }
@@ -3056,7 +3335,7 @@ impl<'a> CallFlow<'a> {
         for (slot, value_type) in
             function_signature_types(checked.signature()).enumerate()
         {
-            if matches!(value_type, PrimitiveType::Function(_)) {
+            if matches!(value_type, Type::Function(_)) {
                 let summary = if self
                     .parameter_sources
                     .get(function)
@@ -3100,6 +3379,10 @@ impl<'a> CallFlow<'a> {
         visiting: &mut BTreeSet<FlowCallId>,
     ) -> FlowTargetSummary {
         match expression {
+            Expr::Record { .. } | Expr::Variant { .. } | Expr::Wrap { .. } => {
+                FlowTargetSummary::default()
+            }
+            Expr::Project { .. } => FlowTargetSummary::unknown_function(),
             Expr::Function { function, .. } => {
                 FlowTargetSummary::known_function(*function)
             }
@@ -3141,7 +3424,7 @@ impl<'a> CallFlow<'a> {
             Expr::Variable {
                 slot, value_type, ..
             } => {
-                if !matches!(value_type, PrimitiveType::Function(_)) {
+                if !matches!(value_type, Type::Function(_)) {
                     return FlowTargetSummary::default();
                 }
                 environment
@@ -3152,7 +3435,7 @@ impl<'a> CallFlow<'a> {
             Expr::Captured {
                 slot, value_type, ..
             } => {
-                if !matches!(value_type, PrimitiveType::Function(_)) {
+                if !matches!(value_type, Type::Function(_)) {
                     return FlowTargetSummary::default();
                 }
                 captures
@@ -3163,7 +3446,7 @@ impl<'a> CallFlow<'a> {
             Expr::Global {
                 index, value_type, ..
             } => {
-                if !matches!(value_type, PrimitiveType::Function(_)) {
+                if !matches!(value_type, Type::Function(_)) {
                     return FlowTargetSummary::default();
                 }
                 self.reads
@@ -3231,7 +3514,7 @@ impl<'a> CallFlow<'a> {
                 result,
                 ..
             } => {
-                if !matches!(result, PrimitiveType::Function(_)) {
+                if !matches!(result, Type::Function(_)) {
                     return FlowTargetSummary::default();
                 }
                 let mut targets = match target {
@@ -3309,7 +3592,7 @@ impl<'a> CallFlow<'a> {
                         .zip(function_signature_types(function.signature()))
                         .enumerate()
                     {
-                        if matches!(value_type, PrimitiveType::Function(_)) {
+                        if matches!(value_type, Type::Function(_)) {
                             target_environment.insert(slot, argument.clone());
                         }
                     }
@@ -3363,6 +3646,14 @@ impl<'a> CallFlow<'a> {
             Expr::External { arguments, .. } => {
                 for argument in arguments {
                     self.collect_expr(argument, owner, environment, captures)?;
+                }
+            }
+            Expr::Record { .. }
+            | Expr::Variant { .. }
+            | Expr::Wrap { .. }
+            | Expr::Project { .. } => {
+                for operand in expression.data_operands() {
+                    self.collect_expr(operand, owner, environment, captures)?;
                 }
             }
             Expr::Closure {
@@ -3454,7 +3745,7 @@ impl<'a> CallFlow<'a> {
                 }
                 if !target_summary.closure_defaults.is_empty()
                     && let Some(callee) = callee
-                    && let PrimitiveType::Function(signature) = callee.result_type()
+                    && let Type::Function(signature) = callee.result_type()
                 {
                     for (index, argument) in arguments.iter().enumerate() {
                         if !matches!(argument, Expr::Default { .. }) {
@@ -3522,7 +3813,7 @@ impl<'a> CallFlow<'a> {
                         .zip(function_signature_types(callee.signature()))
                         .enumerate()
                     {
-                        if !matches!(value_type, PrimitiveType::Function(_)) {
+                        if !matches!(value_type, Type::Function(_)) {
                             continue;
                         }
                         let Some(target_parameters) =
@@ -3567,8 +3858,8 @@ impl<'a> CallFlow<'a> {
     }
 }
 
-fn validate_type_shape(value_type: &PrimitiveType) -> Result<(), String> {
-    if let PrimitiveType::Function(signature) = value_type {
+fn validate_type_shape(value_type: &Type) -> Result<(), String> {
+    if let Type::Function(signature) = value_type {
         validate_signature_shape(signature)?;
     }
     Ok(())
@@ -3760,6 +4051,22 @@ fn validate_tail_calls(
         | Expr::Global { .. }
         | Expr::Function { .. }
         | Expr::Captured { .. } => {}
+        Expr::Record { .. }
+        | Expr::Variant { .. }
+        | Expr::Wrap { .. }
+        | Expr::Project { .. } => {
+            for operand in expression.data_operands() {
+                validate_tail_calls(
+                    operand,
+                    false,
+                    current_function,
+                    recursive_groups,
+                    globals,
+                    functions,
+                    aliases,
+                )?;
+            }
+        }
         Expr::External { arguments, .. } => {
             for argument in arguments {
                 validate_tail_calls(
@@ -4042,6 +4349,46 @@ fn visit_dependency_graph(
 
 fn canonical_expr(expression: &Expr) -> String {
     match expression {
+        Expr::Record {
+            value_type, fields, ..
+        } => format!(
+            "(record kind: @record type: {} fields: (record{}))",
+            canonical_type(value_type),
+            fields
+                .iter()
+                .map(|(name, value)| format!(" {name}: {}", canonical_expr(value)))
+                .collect::<String>()
+        ),
+        Expr::Variant {
+            value_type,
+            variant,
+            payload,
+            ..
+        } => format!(
+            "(record kind: @variant type: {} variant: @{variant}{})",
+            canonical_type(value_type),
+            payload
+                .as_deref()
+                .map(|payload| format!(" payload: {}", canonical_expr(payload)))
+                .unwrap_or_default()
+        ),
+        Expr::Wrap {
+            value_type, value, ..
+        } => format!(
+            "(record kind: @wrap type: @{} value: {})",
+            value_type.path(),
+            canonical_expr(value)
+        ),
+        Expr::Project {
+            record,
+            field,
+            value_type,
+            ..
+        } => format!(
+            "(record kind: @project field: @{field} result: {} record: {})",
+            canonical_type(value_type),
+            canonical_expr(record)
+        ),
         Expr::Literal { value, .. } => format!(
             "(record kind: @literal type: @{} value: {})",
             value.ty().as_str(),
@@ -4172,11 +4519,29 @@ fn canonical_expr(expression: &Expr) -> String {
     }
 }
 
-fn canonical_type(value: &PrimitiveType) -> String {
+/// The canonical type encoding of `docs/spec/06-runtime.md`.
+#[must_use]
+pub fn canonical_type(value: &Type) -> String {
     match value {
-        PrimitiveType::Function(signature) => canonical_function_signature(signature),
+        Type::Function(signature) => canonical_function_signature(signature),
+        Type::Declared(id) => format!("@{}", id.path()),
+        Type::Record(fields) => format!(
+            "(record type: @record fields: (record{}))",
+            canonical_type_members(fields)
+        ),
+        Type::Enum(variants) => format!(
+            "(record type: @enum variants: (record{}))",
+            canonical_type_members(variants)
+        ),
         _ => format!("@{}", value.as_str()),
     }
+}
+
+fn canonical_type_members(members: &[(String, Type)]) -> String {
+    members
+        .iter()
+        .map(|(name, value)| format!(" {name}: {}", canonical_type(value)))
+        .collect()
 }
 
 fn canonical_function_signature(signature: &FunctionSignature) -> String {
@@ -4284,7 +4649,7 @@ mod tests {
 
     use super::{
         ByteSpan, CheckedFunction, CheckedGlobal, CheckedProgram, Expr,
-        FunctionSignature, IrError, PrimitiveType, SourceOrigin, Value,
+        FunctionSignature, IrError, SourceOrigin, Type, Value,
     };
 
     fn origin() -> SourceOrigin {
@@ -4302,7 +4667,7 @@ mod tests {
         );
         let result = CheckedFunction::new(
             "answer",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            FunctionSignature::new(Vec::new(), Type::I32),
             body,
             origin,
         );
@@ -4314,8 +4679,8 @@ mod tests {
         let origin = origin();
         let result = CheckedFunction::new(
             "answer",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
-            Expr::variable(0, PrimitiveType::I32, origin.clone()),
+            FunctionSignature::new(Vec::new(), Type::I32),
+            Expr::variable(0, Type::I32, origin.clone()),
             origin,
         );
         assert!(matches!(result, Err(IrError::InvalidExpression(_))));
@@ -4326,8 +4691,8 @@ mod tests {
         let origin = origin();
         let function = CheckedFunction::new(
             "answer",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
-            Expr::call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
+            FunctionSignature::new(Vec::new(), Type::I32),
+            Expr::call(0, Vec::new(), Type::I32, origin.clone()),
             origin,
         )
         .expect("call shape is valid before program binding");
@@ -4339,11 +4704,11 @@ mod tests {
     #[test]
     fn program_constructor_records_each_function_reachability_group() {
         let origin = origin();
-        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let signature = FunctionSignature::new(Vec::new(), Type::I32);
         let answer = CheckedFunction::new(
             "answer",
             signature.clone(),
-            Expr::call(1, Vec::new(), PrimitiveType::I32, origin.clone()),
+            Expr::call(1, Vec::new(), Type::I32, origin.clone()),
             origin.clone(),
         )
         .expect("answer function");
@@ -4364,13 +4729,13 @@ mod tests {
     #[test]
     fn program_constructor_records_recursive_function_value_group() {
         let origin = origin();
-        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let signature = FunctionSignature::new(Vec::new(), Type::I32);
         let function_value = Expr::function(0, signature.clone(), origin.clone());
         let body = Expr::indirect_call(
             function_value,
             None,
             Vec::new(),
-            PrimitiveType::I32,
+            Type::I32,
             origin.clone(),
         );
         let function = CheckedFunction::new("answer", signature, body, origin)
@@ -4383,21 +4748,20 @@ mod tests {
     #[test]
     fn tail_call_is_explicit_in_checked_ir() {
         let origin = origin();
-        let expression =
-            Expr::tail_call(3, Vec::new(), PrimitiveType::I32, origin.clone());
+        let expression = Expr::tail_call(3, Vec::new(), Type::I32, origin.clone());
         assert!(expression.is_tail_call());
         assert!(super::canonical_expr(&expression).contains("tail: true"));
-        let normal = Expr::call(3, Vec::new(), PrimitiveType::I32, origin);
+        let normal = Expr::call(3, Vec::new(), Type::I32, origin);
         assert!(!super::canonical_expr(&normal).contains("tail: true"));
     }
 
     #[test]
     fn program_constructor_rejects_tail_call_outside_sequence_tail_position() {
         let origin = origin();
-        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let signature = FunctionSignature::new(Vec::new(), Type::I32);
         let body = Expr::sequence(
             vec![
-                Expr::tail_call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
+                Expr::tail_call(0, Vec::new(), Type::I32, origin.clone()),
                 Expr::literal(Value::I32(1), origin.clone()),
             ],
             origin.clone(),
@@ -4412,25 +4776,19 @@ mod tests {
     #[test]
     fn program_constructor_rejects_tail_call_in_an_operand() {
         let origin = origin();
-        let leaf_signature =
-            FunctionSignature::new(vec![PrimitiveType::I32], PrimitiveType::I32);
+        let leaf_signature = FunctionSignature::new(vec![Type::I32], Type::I32);
         let leaf = CheckedFunction::new(
             "leaf",
             leaf_signature,
-            Expr::variable(0, PrimitiveType::I32, origin.clone()),
+            Expr::variable(0, Type::I32, origin.clone()),
             origin.clone(),
         )
         .expect("leaf function");
-        let caller_signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let caller_signature = FunctionSignature::new(Vec::new(), Type::I32);
         let caller_body = Expr::call(
             0,
-            vec![Expr::tail_call(
-                1,
-                Vec::new(),
-                PrimitiveType::I32,
-                origin.clone(),
-            )],
-            PrimitiveType::I32,
+            vec![Expr::tail_call(1, Vec::new(), Type::I32, origin.clone())],
+            Type::I32,
             origin.clone(),
         );
         let caller =
@@ -4444,9 +4802,9 @@ mod tests {
     #[test]
     fn program_constructor_rejects_tail_call_in_a_condition() {
         let origin = origin();
-        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::Bool);
+        let signature = FunctionSignature::new(Vec::new(), Type::Bool);
         let body = Expr::if_expression(
-            Expr::tail_call(0, Vec::new(), PrimitiveType::Bool, origin.clone()),
+            Expr::tail_call(0, Vec::new(), Type::Bool, origin.clone()),
             Expr::literal(Value::Bool(true), origin.clone()),
             Expr::literal(Value::Bool(false), origin.clone()),
             origin.clone(),
@@ -4462,22 +4820,22 @@ mod tests {
     #[test]
     fn program_constructor_rejects_tail_call_in_a_closure_activation() {
         let origin = origin();
-        let closure_signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let closure_signature = FunctionSignature::new(Vec::new(), Type::I32);
         let outer_signature = FunctionSignature::new(
             Vec::new(),
-            PrimitiveType::Function(Box::new(closure_signature.clone())),
+            Type::Function(Box::new(closure_signature.clone())),
         );
         let closure = Expr::closure(
             closure_signature,
             Vec::new(),
             Vec::new(),
-            Expr::tail_call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
+            Expr::tail_call(0, Vec::new(), Type::I32, origin.clone()),
             0,
             origin.clone(),
         );
         let callee = CheckedFunction::new(
             "callee",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            FunctionSignature::new(Vec::new(), Type::I32),
             Expr::literal(Value::I32(7), origin.clone()),
             origin.clone(),
         )
@@ -4499,15 +4857,15 @@ mod tests {
         let origin = origin();
         let function = CheckedFunction::new(
             "answer",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            FunctionSignature::new(Vec::new(), Type::I32),
             Expr::literal(Value::I32(1), origin.clone()),
             origin.clone(),
         )
         .expect("function");
         let global = CheckedGlobal::new(
             "value",
-            PrimitiveType::I32,
-            Expr::tail_call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
+            Type::I32,
+            Expr::tail_call(0, Vec::new(), Type::I32, origin.clone()),
             origin.clone(),
         )
         .expect("global shape is valid before tail-position validation");
@@ -4530,11 +4888,11 @@ mod tests {
         .expect("external wrapper");
         let caller = CheckedFunction::new(
             "caller",
-            FunctionSignature::new(Vec::new(), PrimitiveType::U64),
+            FunctionSignature::new(Vec::new(), Type::U64),
             Expr::tail_call(
                 0,
                 vec![Expr::literal(Value::Str("x".to_owned()), origin.clone())],
-                PrimitiveType::U64,
+                Type::U64,
                 origin.clone(),
             ),
             origin,
@@ -4549,9 +4907,8 @@ mod tests {
     #[test]
     fn program_constructor_keeps_source_functions_with_external_operands_in_groups() {
         let origin = origin();
-        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::Str);
-        let recursive_operand =
-            Expr::call(0, Vec::new(), PrimitiveType::Str, origin.clone());
+        let signature = FunctionSignature::new(Vec::new(), Type::Str);
+        let recursive_operand = Expr::call(0, Vec::new(), Type::Str, origin.clone());
         let body = Expr::external(
             super::external::CompilerIntrinsic::TextConcat,
             vec![
@@ -4570,7 +4927,7 @@ mod tests {
     #[test]
     fn program_constructor_rejects_tail_transfers_through_closures() {
         let origin = origin();
-        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let signature = FunctionSignature::new(Vec::new(), Type::I32);
         let target = CheckedFunction::new(
             "target",
             signature.clone(),
@@ -4589,13 +4946,7 @@ mod tests {
         let caller = CheckedFunction::new(
             "caller",
             signature.clone(),
-            Expr::indirect_tail_call(
-                callee,
-                0,
-                Vec::new(),
-                PrimitiveType::I32,
-                origin.clone(),
-            ),
+            Expr::indirect_tail_call(callee, 0, Vec::new(), Type::I32, origin.clone()),
             origin,
         )
         .expect("caller shape");
@@ -4610,7 +4961,7 @@ mod tests {
     #[test]
     fn program_constructor_allows_tail_candidates_with_a_closure_branch() {
         let origin = origin();
-        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let signature = FunctionSignature::new(Vec::new(), Type::I32);
         let target = CheckedFunction::new(
             "target",
             signature.clone(),
@@ -4639,7 +4990,7 @@ mod tests {
                 callee,
                 None,
                 Vec::new(),
-                PrimitiveType::I32,
+                Type::I32,
                 origin.clone(),
             ),
             origin,
@@ -4653,7 +5004,7 @@ mod tests {
     #[test]
     fn program_constructor_rejects_tail_transfers_from_closures_returning_functions() {
         let origin = origin();
-        let target_signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let target_signature = FunctionSignature::new(Vec::new(), Type::I32);
         let target = CheckedFunction::new(
             "target",
             target_signature.clone(),
@@ -4663,7 +5014,7 @@ mod tests {
         .expect("target");
         let closure_signature = FunctionSignature::new(
             Vec::new(),
-            PrimitiveType::Function(Box::new(target_signature.clone())),
+            Type::Function(Box::new(target_signature.clone())),
         );
         let callee = Expr::closure(
             closure_signature,
@@ -4676,13 +5027,7 @@ mod tests {
         let caller = CheckedFunction::new(
             "caller",
             target_signature.clone(),
-            Expr::indirect_tail_call(
-                callee,
-                0,
-                Vec::new(),
-                PrimitiveType::I32,
-                origin.clone(),
-            ),
+            Expr::indirect_tail_call(callee, 0, Vec::new(), Type::I32, origin.clone()),
             origin,
         )
         .expect("caller shape");
@@ -4699,8 +5044,8 @@ mod tests {
         let origin = origin();
         let result = CheckedFunction::new(
             "answer",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
-            Expr::default_value(PrimitiveType::I32, origin.clone()),
+            FunctionSignature::new(Vec::new(), Type::I32),
+            Expr::default_value(Type::I32, origin.clone()),
             origin,
         );
         assert!(matches!(result, Err(IrError::InvalidExpression(_))));
@@ -4709,7 +5054,7 @@ mod tests {
     #[test]
     fn program_constructor_rejects_forged_indirect_function_hints() {
         let origin = origin();
-        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let signature = FunctionSignature::new(Vec::new(), Type::I32);
         let first = CheckedFunction::new(
             "first",
             signature.clone(),
@@ -4728,7 +5073,7 @@ mod tests {
             Expr::function(0, signature.clone(), origin.clone()),
             Some(1),
             Vec::new(),
-            PrimitiveType::I32,
+            Type::I32,
             origin.clone(),
         );
         let caller = CheckedFunction::new("caller", signature, caller_body, origin)
@@ -4740,7 +5085,7 @@ mod tests {
     #[test]
     fn program_constructor_rejects_hints_that_drop_conditional_targets() {
         let origin = origin();
-        let signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let signature = FunctionSignature::new(Vec::new(), Type::I32);
         let first = CheckedFunction::new(
             "first",
             signature.clone(),
@@ -4761,13 +5106,8 @@ mod tests {
             Expr::function(1, signature.clone(), origin.clone()),
             origin.clone(),
         );
-        let caller_body = Expr::indirect_call(
-            callee,
-            Some(1),
-            Vec::new(),
-            PrimitiveType::I32,
-            origin.clone(),
-        );
+        let caller_body =
+            Expr::indirect_call(callee, Some(1), Vec::new(), Type::I32, origin.clone());
         let caller = CheckedFunction::new("caller", signature, caller_body, origin)
             .expect("caller function");
         let result = CheckedProgram::try_new(vec![first, second, caller], 2);
@@ -4777,7 +5117,7 @@ mod tests {
     #[test]
     fn program_constructor_does_not_trust_hints_for_unknown_parameters() {
         let origin = origin();
-        let called_signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let called_signature = FunctionSignature::new(Vec::new(), Type::I32);
         let first = CheckedFunction::new(
             "first",
             called_signature.clone(),
@@ -4793,18 +5133,18 @@ mod tests {
         )
         .expect("second function");
         let caller_signature = FunctionSignature::new(
-            vec![PrimitiveType::Function(Box::new(called_signature.clone()))],
-            PrimitiveType::I32,
+            vec![Type::Function(Box::new(called_signature.clone()))],
+            Type::I32,
         );
         let caller_body = Expr::indirect_call(
             Expr::variable(
                 0,
-                PrimitiveType::Function(Box::new(called_signature)),
+                Type::Function(Box::new(called_signature)),
                 origin.clone(),
             ),
             Some(1),
             Vec::new(),
-            PrimitiveType::I32,
+            Type::I32,
             origin.clone(),
         );
         let caller =
@@ -4818,29 +5158,29 @@ mod tests {
     fn program_constructor_rejects_default_markers_in_positional_slots() {
         let origin = origin();
         let callee_signature = FunctionSignature::with_labelled(
-            vec![PrimitiveType::I32],
+            vec![Type::I32],
             vec![super::LabelledParameter::new(
                 "value",
-                PrimitiveType::I32,
+                Type::I32,
                 Some(Value::I32(7)),
             )],
-            PrimitiveType::I32,
+            Type::I32,
         );
         let callee = CheckedFunction::new(
             "callee",
             callee_signature.clone(),
-            Expr::variable(0, PrimitiveType::I32, origin.clone()),
+            Expr::variable(0, Type::I32, origin.clone()),
             origin.clone(),
         )
         .expect("callee function");
-        let caller_signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let caller_signature = FunctionSignature::new(Vec::new(), Type::I32);
         let caller_body = Expr::call(
             0,
             vec![
-                Expr::default_value(PrimitiveType::I32, origin.clone()),
+                Expr::default_value(Type::I32, origin.clone()),
                 Expr::literal(Value::I32(8), origin.clone()),
             ],
-            PrimitiveType::I32,
+            Type::I32,
             origin.clone(),
         );
         let caller = CheckedFunction::new(
@@ -4859,28 +5199,24 @@ mod tests {
         let origin = origin();
         let signature = FunctionSignature::with_labelled(
             Vec::new(),
-            vec![super::LabelledParameter::new(
-                "value",
-                PrimitiveType::I32,
-                None,
-            )],
-            PrimitiveType::I32,
+            vec![super::LabelledParameter::new("value", Type::I32, None)],
+            Type::I32,
         );
         let callee = CheckedFunction::new(
             "callee",
             signature.clone(),
-            Expr::variable(0, PrimitiveType::I32, origin.clone()),
+            Expr::variable(0, Type::I32, origin.clone()),
             origin.clone(),
         )
         .expect("callee");
         let caller = CheckedFunction::new(
             "caller",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            FunctionSignature::new(Vec::new(), Type::I32),
             Expr::indirect_call(
                 Expr::function(0, signature, origin.clone()),
                 None,
-                vec![Expr::default_value(PrimitiveType::I32, origin.clone())],
-                PrimitiveType::I32,
+                vec![Expr::default_value(Type::I32, origin.clone())],
+                Type::I32,
                 origin.clone(),
             ),
             origin.clone(),
@@ -4895,29 +5231,25 @@ mod tests {
         let origin = origin();
         let signature = FunctionSignature::with_labelled(
             Vec::new(),
-            vec![super::LabelledParameter::new(
-                "value",
-                PrimitiveType::I32,
-                None,
-            )],
-            PrimitiveType::I32,
+            vec![super::LabelledParameter::new("value", Type::I32, None)],
+            Type::I32,
         );
         let closure = Expr::closure(
             signature.clone(),
             Vec::new(),
             Vec::new(),
-            Expr::variable(0, PrimitiveType::I32, origin.clone()),
+            Expr::variable(0, Type::I32, origin.clone()),
             1,
             origin.clone(),
         );
         let caller = CheckedFunction::new(
             "caller",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            FunctionSignature::new(Vec::new(), Type::I32),
             Expr::indirect_call(
                 closure,
                 None,
-                vec![Expr::default_value(PrimitiveType::I32, origin.clone())],
-                PrimitiveType::I32,
+                vec![Expr::default_value(Type::I32, origin.clone())],
+                Type::I32,
                 origin.clone(),
             ),
             origin.clone(),
@@ -4930,22 +5262,18 @@ mod tests {
     #[test]
     fn closure_constructor_rejects_parameter_metadata_with_wrong_types() {
         let origin = origin();
-        let signature =
-            FunctionSignature::new(vec![PrimitiveType::I32], PrimitiveType::Str);
+        let signature = FunctionSignature::new(vec![Type::I32], Type::Str);
         let closure = Expr::closure(
             signature.clone(),
-            vec![PrimitiveType::Str],
+            vec![Type::Str],
             Vec::new(),
-            Expr::variable(0, PrimitiveType::Str, origin.clone()),
+            Expr::variable(0, Type::Str, origin.clone()),
             1,
             origin.clone(),
         );
         let result = CheckedFunction::new(
             "entry",
-            FunctionSignature::new(
-                Vec::new(),
-                PrimitiveType::Function(Box::new(signature)),
-            ),
+            FunctionSignature::new(Vec::new(), Type::Function(Box::new(signature))),
             closure,
             origin,
         );
@@ -4959,10 +5287,10 @@ mod tests {
             Vec::new(),
             vec![super::LabelledParameter::new(
                 "value",
-                PrimitiveType::I32,
+                Type::I32,
                 Some(Value::Str("wrong".to_owned())),
             )],
-            PrimitiveType::I32,
+            Type::I32,
         );
         let closure = Expr::closure(
             signature.clone(),
@@ -4974,10 +5302,7 @@ mod tests {
         );
         let result = CheckedFunction::new(
             "entry",
-            FunctionSignature::new(
-                Vec::new(),
-                PrimitiveType::Function(Box::new(signature)),
-            ),
+            FunctionSignature::new(Vec::new(), Type::Function(Box::new(signature))),
             closure,
             origin,
         );
@@ -4989,15 +5314,15 @@ mod tests {
         let origin = origin();
         let callee = CheckedFunction::new(
             "callee",
-            FunctionSignature::new(vec![PrimitiveType::I32], PrimitiveType::I32),
-            Expr::variable(0, PrimitiveType::I32, origin.clone()),
+            FunctionSignature::new(vec![Type::I32], Type::I32),
+            Expr::variable(0, Type::I32, origin.clone()),
             origin.clone(),
         )
         .expect("callee");
         let caller = CheckedFunction::new(
             "caller",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
-            Expr::call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
+            FunctionSignature::new(Vec::new(), Type::I32),
+            Expr::call(0, Vec::new(), Type::I32, origin.clone()),
             origin,
         )
         .expect("caller shape is valid before program binding");
@@ -5010,14 +5335,14 @@ mod tests {
         let origin = origin();
         let global = super::CheckedGlobal::new(
             "value",
-            PrimitiveType::I32,
-            Expr::global(0, PrimitiveType::I32, origin.clone()),
+            Type::I32,
+            Expr::global(0, Type::I32, origin.clone()),
             origin.clone(),
         )
         .expect("global shape");
         let function = CheckedFunction::new(
             "answer",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+            FunctionSignature::new(Vec::new(), Type::I32),
             Expr::literal(Value::I32(1), origin.clone()),
             origin.clone(),
         )
@@ -5032,15 +5357,15 @@ mod tests {
         let origin = origin();
         let global = super::CheckedGlobal::new(
             "value",
-            PrimitiveType::I32,
-            Expr::call(0, Vec::new(), PrimitiveType::I32, origin.clone()),
+            Type::I32,
+            Expr::call(0, Vec::new(), Type::I32, origin.clone()),
             origin.clone(),
         )
         .expect("global shape");
         let function = CheckedFunction::new(
             "read",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
-            Expr::global(0, PrimitiveType::I32, origin.clone()),
+            FunctionSignature::new(Vec::new(), Type::I32),
+            Expr::global(0, Type::I32, origin.clone()),
             origin.clone(),
         )
         .expect("function");
@@ -5052,15 +5377,14 @@ mod tests {
     #[test]
     fn program_constructor_allows_global_call_to_terminating_recursive_helper() {
         let origin = origin();
-        let helper_signature =
-            FunctionSignature::new(vec![PrimitiveType::Bool], PrimitiveType::I32);
+        let helper_signature = FunctionSignature::new(vec![Type::Bool], Type::I32);
         let global = super::CheckedGlobal::new(
             "value",
-            PrimitiveType::I32,
+            Type::I32,
             Expr::call(
                 0,
                 vec![Expr::literal(Value::Bool(false), origin.clone())],
-                PrimitiveType::I32,
+                Type::I32,
                 origin.clone(),
             ),
             origin.clone(),
@@ -5070,11 +5394,11 @@ mod tests {
             "helper",
             helper_signature,
             Expr::if_expression(
-                Expr::variable(0, PrimitiveType::Bool, origin.clone()),
+                Expr::variable(0, Type::Bool, origin.clone()),
                 Expr::tail_call(
                     0,
                     vec![Expr::literal(Value::Bool(false), origin.clone())],
-                    PrimitiveType::I32,
+                    Type::I32,
                     origin.clone(),
                 ),
                 Expr::literal(Value::I32(1), origin.clone()),
@@ -5085,8 +5409,8 @@ mod tests {
         .expect("recursive helper");
         let answer = CheckedFunction::new(
             "answer",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
-            Expr::global(0, PrimitiveType::I32, origin.clone()),
+            FunctionSignature::new(Vec::new(), Type::I32),
+            Expr::global(0, Type::I32, origin.clone()),
             origin,
         )
         .expect("answer");
@@ -5100,18 +5424,18 @@ mod tests {
     #[test]
     fn higher_order_global_cycles_reach_initializer_validation() {
         let origin = origin();
-        let read_signature = FunctionSignature::new(Vec::new(), PrimitiveType::I32);
+        let read_signature = FunctionSignature::new(Vec::new(), Type::I32);
         let apply_signature = FunctionSignature::new(
-            vec![PrimitiveType::Function(Box::new(read_signature.clone()))],
-            PrimitiveType::I32,
+            vec![Type::Function(Box::new(read_signature.clone()))],
+            Type::I32,
         );
         let global = super::CheckedGlobal::new(
             "value",
-            PrimitiveType::I32,
+            Type::I32,
             Expr::call(
                 0,
                 vec![Expr::function(1, read_signature.clone(), origin.clone())],
-                PrimitiveType::I32,
+                Type::I32,
                 origin.clone(),
             ),
             origin.clone(),
@@ -5123,12 +5447,12 @@ mod tests {
             Expr::indirect_call(
                 Expr::variable(
                     0,
-                    PrimitiveType::Function(Box::new(read_signature.clone())),
+                    Type::Function(Box::new(read_signature.clone())),
                     origin.clone(),
                 ),
                 None,
                 Vec::new(),
-                PrimitiveType::I32,
+                Type::I32,
                 origin.clone(),
             ),
             origin.clone(),
@@ -5137,14 +5461,14 @@ mod tests {
         let read = CheckedFunction::new(
             "read",
             read_signature,
-            Expr::global(0, PrimitiveType::I32, origin.clone()),
+            Expr::global(0, Type::I32, origin.clone()),
             origin.clone(),
         )
         .expect("read");
         let answer = CheckedFunction::new(
             "answer",
-            FunctionSignature::new(Vec::new(), PrimitiveType::I32),
-            Expr::global(0, PrimitiveType::I32, origin.clone()),
+            FunctionSignature::new(Vec::new(), Type::I32),
+            Expr::global(0, Type::I32, origin.clone()),
             origin.clone(),
         )
         .expect("answer");
@@ -5162,7 +5486,7 @@ mod tests {
             .map(|index| {
                 CheckedFunction::new(
                     format!("f{index}"),
-                    FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+                    FunctionSignature::new(Vec::new(), Type::I32),
                     Expr::literal(Value::I32(0), origin()),
                     origin(),
                 )
@@ -5191,7 +5515,7 @@ mod tests {
             .map(|name| {
                 CheckedFunction::new(
                     name,
-                    FunctionSignature::new(Vec::new(), PrimitiveType::I32),
+                    FunctionSignature::new(Vec::new(), Type::I32),
                     Expr::literal(Value::I32(0), origin()),
                     origin(),
                 )

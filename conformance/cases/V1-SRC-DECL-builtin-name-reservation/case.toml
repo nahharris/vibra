@@ -1,0 +1,31 @@
+id = "V1-SRC-DECL-builtin-name-reservation"
+rule = "V1-SRC-DECL"
+profile = "reader-v1"
+description = "Builtin type names are reserved declaration and value spellings, and intrinsic-type is only a deftype body."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+[expect.diagnostics.span]
+start = 9
+end = 12
+
+[[expect.diagnostics]]
+code = "@name.reserved-value-spelling"
+level = "@error"
+[expect.diagnostics.span]
+start = 25
+end = 28
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 52
+end = 73

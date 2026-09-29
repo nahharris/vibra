@@ -1,0 +1,10 @@
+(record
+  format: @test-run.v1
+  result: @command.ok
+  tests: (array
+    (record name: "@tests.shapes::\"constructs and projects\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.shapes::\"calls a method by path\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.shapes::\"reads an imported value\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.shapes::\"builds a variant\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)
