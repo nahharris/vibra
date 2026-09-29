@@ -11,11 +11,23 @@
       path: "std/option.vib"
       sha256: "sha256:b9e29b27a5fe745bbfb3dfb77ad311f74ce083f41494ca30d3bc1e72ee8d2ce0"
       role: @source)
+    @std.builtin (record
+      path: "std/builtin.vib"
+      sha256: "sha256:27a73c80e8bf4be2a8354c71480472f3508cb113a3d6df8cef913e746be749a2"
+      role: @source)
     @std.assert (record
       path: "std/assert.vib"
       sha256: "sha256:f0bc061265b337f60c0bbf4e2e3cbb9d4a50321f99a380cac5b727c791fdad2d"
       role: @test-registry))
-  compiler: (array "text.concat" "text.length")
+  compiler: (array
+    "text.concat"
+    "text.length"
+    "array.of"
+    "map.of"
+    "array.length"
+    "array.append"
+    "array.concat"
+    "array.slice")
   assertions: (array
     "assert.true"
     "assert.false"

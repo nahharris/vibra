@@ -24,11 +24,11 @@ use nominal::{
 };
 pub use observed::ObservedValue;
 
-/// The closed compiler intrinsic registry admitted by M2.
+/// The closed compiler intrinsic registry.
 pub mod external {
     use super::{FunctionSignature, Type};
 
-    /// The closed M2 compiler registry identity used by the runtime contract.
+    /// The compiler registry identity used by the runtime contract.
     ///
     /// `vibra_v1` is the version named by the v1 runtime specification.  The
     /// compiler registry and the host registry are separate namespaces, but
@@ -42,6 +42,19 @@ pub mod external {
         UnicodeScalarConcatenation,
         /// Count Unicode scalars, rather than UTF-8 bytes.
         UnicodeScalarLength,
+        /// Build an array from its packed variadic elements.
+        ArrayConstruction,
+        /// Build a map from its packed variadic entries in canonical key
+        /// order, a later entry replacing an equal key.
+        MapConstruction,
+        /// Count array elements.
+        ArrayLength,
+        /// A new array with one trailing element.
+        ArrayAppend,
+        /// A new array of the first array's elements, then the second's.
+        ArrayConcatenation,
+        /// Elements in a half-open range, or `none` when it is out of range.
+        ArraySlice,
     }
 
     /// One pure, compiler-owned operation.
@@ -51,6 +64,26 @@ pub mod external {
         TextConcat,
         /// Count Unicode scalars in a string.
         TextLength,
+        /// `array.of`.
+        ArrayOf,
+        /// `map.of`.
+        MapOf,
+        /// `array.length`.
+        ArrayLength,
+        /// `array.append`.
+        ArrayAppend,
+        /// `array.concat`.
+        ArrayConcat,
+        /// `array.slice`.
+        ArraySlice,
+    }
+
+    fn param(name: &str) -> Type {
+        Type::Param(name.to_owned())
+    }
+
+    fn array_of(element: Type) -> Type {
+        Type::Array(Box::new(element))
     }
 
     impl CompilerIntrinsic {
@@ -66,6 +99,12 @@ pub mod external {
             match self {
                 Self::TextConcat => SemanticIdentity::UnicodeScalarConcatenation,
                 Self::TextLength => SemanticIdentity::UnicodeScalarLength,
+                Self::ArrayOf => SemanticIdentity::ArrayConstruction,
+                Self::MapOf => SemanticIdentity::MapConstruction,
+                Self::ArrayLength => SemanticIdentity::ArrayLength,
+                Self::ArrayAppend => SemanticIdentity::ArrayAppend,
+                Self::ArrayConcat => SemanticIdentity::ArrayConcatenation,
+                Self::ArraySlice => SemanticIdentity::ArraySlice,
             }
         }
 
@@ -75,33 +114,91 @@ pub mod external {
             match self {
                 Self::TextConcat => "text.concat",
                 Self::TextLength => "text.length",
+                Self::ArrayOf => "array.of",
+                Self::MapOf => "map.of",
+                Self::ArrayLength => "array.length",
+                Self::ArrayAppend => "array.append",
+                Self::ArrayConcat => "array.concat",
+                Self::ArraySlice => "array.slice",
+            }
+        }
+
+        /// The generic parameters of the exact signature, in `where:` order.
+        #[must_use]
+        pub fn type_parameters(self) -> Vec<String> {
+            match self {
+                Self::TextConcat | Self::TextLength => Vec::new(),
+                Self::MapOf => vec!["k".to_owned(), "v".to_owned()],
+                Self::ArrayOf
+                | Self::ArrayLength
+                | Self::ArrayAppend
+                | Self::ArrayConcat
+                | Self::ArraySlice => vec!["t".to_owned()],
             }
         }
 
         /// The exact checked signature.
         #[must_use]
         pub fn signature(self) -> FunctionSignature {
+            let items = || array_of(param("t"));
             match self {
                 Self::TextConcat => {
                     FunctionSignature::new(vec![Type::Str, Type::Str], Type::Str)
                 }
                 Self::TextLength => FunctionSignature::new(vec![Type::Str], Type::U64),
+                Self::ArrayOf => {
+                    FunctionSignature::new(Vec::new(), items()).with_variadic(items())
+                }
+                Self::MapOf => {
+                    let map = Type::Map(Box::new(param("k")), Box::new(param("v")));
+                    FunctionSignature::new(Vec::new(), map.clone()).with_variadic(map)
+                }
+                Self::ArrayLength => FunctionSignature::new(vec![items()], Type::U64),
+                Self::ArrayAppend => {
+                    FunctionSignature::new(vec![items(), param("t")], items())
+                }
+                Self::ArrayConcat => {
+                    FunctionSignature::new(vec![items(), items()], items())
+                }
+                Self::ArraySlice => FunctionSignature::new(
+                    vec![items(), Type::U64, Type::U64],
+                    super::option_type(items()),
+                ),
             }
         }
 
         /// Resolves only a symbol in the closed registry.
         #[must_use]
         pub fn from_symbol(symbol: &str) -> Option<Self> {
-            match symbol {
-                "text.concat" => Some(Self::TextConcat),
-                "text.length" => Some(Self::TextLength),
-                _ => None,
-            }
+            Self::ALL
+                .into_iter()
+                .find(|intrinsic| intrinsic.symbol() == symbol)
         }
 
         /// Every compiler intrinsic in canonical registry order.
-        pub const ALL: [Self; 2] = [Self::TextConcat, Self::TextLength];
+        pub const ALL: [Self; 8] = [
+            Self::TextConcat,
+            Self::TextLength,
+            Self::ArrayOf,
+            Self::MapOf,
+            Self::ArrayLength,
+            Self::ArrayAppend,
+            Self::ArrayConcat,
+            Self::ArraySlice,
+        ];
     }
+}
+
+/// The canonical identity of the standard `@std.option` `option` type, which
+/// lookups and partial operations answer with.
+pub const OPTION_ID: &str = "@vibra-stdlib@0.2.0/std.option.option";
+/// Its canonical atom path in encodings.
+pub const OPTION_PATH: &str = "std.option.option";
+
+/// The standard `(option value)` type.
+#[must_use]
+pub fn option_type(value: Type) -> Type {
+    Type::Applied(TypeId::new(OPTION_ID, OPTION_PATH), vec![value])
 }
 
 /// One of the primitive types admitted by the M2 literal profile.
@@ -324,13 +421,7 @@ impl Type {
                 members.iter().map(|(_, value)| value.clone()).collect()
             }
             Self::Function(signature) => {
-                let mut values = signature.parameters().to_vec();
-                values.extend(
-                    signature
-                        .labelled()
-                        .iter()
-                        .map(LabelledParameter::value_type),
-                );
+                let mut values = signature.slot_types();
                 values.push(signature.result());
                 values
             }
@@ -436,6 +527,9 @@ impl fmt::Display for Type {
                     }
                     formatter.write_str(")")?;
                 }
+                if let Some(tail) = signature.variadic() {
+                    write!(formatter, " variadic: {tail}")?;
+                }
                 formatter.write_str(")")
             }
             _ => formatter.write_str(self.as_str()),
@@ -491,6 +585,9 @@ impl LabelledParameter {
 pub struct FunctionSignature {
     parameters: Vec<Type>,
     labelled: Vec<LabelledParameter>,
+    /// The `(array t)` or `(map k v)` type of a variadic tail. A call passes
+    /// the packed tail as one final argument after the labelled slots.
+    variadic: Option<Type>,
     result: Type,
 }
 
@@ -501,6 +598,7 @@ impl FunctionSignature {
         Self {
             parameters,
             labelled: Vec::new(),
+            variadic: None,
             result,
         }
     }
@@ -515,8 +613,17 @@ impl FunctionSignature {
         Self {
             parameters,
             labelled,
+            variadic: None,
             result,
         }
+    }
+
+    /// The same signature with a variadic tail of `tail` type, an
+    /// `(array t)` or a `(map k v)`.
+    #[must_use]
+    pub fn with_variadic(mut self, tail: Type) -> Self {
+        self.variadic = Some(tail);
+        self
     }
 
     /// Required positional parameter types in written order.
@@ -531,10 +638,31 @@ impl FunctionSignature {
         &self.labelled
     }
 
-    /// Total fixed slots after defaults have been materialized.
+    /// The variadic tail type, when the signature has one.
+    #[must_use]
+    pub const fn variadic(&self) -> Option<&Type> {
+        self.variadic.as_ref()
+    }
+
+    /// Total argument slots after defaults have been materialized and a
+    /// variadic tail packed: positional, labelled, then the tail.
     #[must_use]
     pub fn fixed_parameter_count(&self) -> usize {
-        self.parameters.len().saturating_add(self.labelled.len())
+        self.parameters
+            .len()
+            .saturating_add(self.labelled.len())
+            .saturating_add(usize::from(self.variadic.is_some()))
+    }
+
+    /// The type of every argument slot, in slot order.
+    #[must_use]
+    pub fn slot_types(&self) -> Vec<Type> {
+        self.parameters
+            .iter()
+            .cloned()
+            .chain(self.labelled.iter().map(LabelledParameter::value_type))
+            .chain(self.variadic.iter().cloned())
+            .collect()
     }
 
     /// Whether two signatures have the same callable type shape.
@@ -559,6 +687,11 @@ impl FunctionSignature {
                     left.name == right.name
                         && left.value_type.same_shape(&right.value_type)
                 })
+            && match (&self.variadic, &other.variadic) {
+                (Some(left), Some(right)) => left.same_shape(right),
+                (None, None) => true,
+                _ => false,
+            }
     }
 
     /// This signature with its generic parameters replaced; defaults are kept.
@@ -579,6 +712,10 @@ impl FunctionSignature {
                     default: parameter.default.clone(),
                 })
                 .collect(),
+            variadic: self
+                .variadic
+                .as_ref()
+                .map(|tail| tail.substitute(arguments)),
             result: self.result.substitute(arguments),
         }
     }
@@ -601,17 +738,17 @@ impl FunctionSignature {
                 .all(|(left, right)| {
                     left.name == right.name && left.value_type.admits(&right.value_type)
                 })
+            && match (&self.variadic, &other.variadic) {
+                (Some(left), Some(right)) => left.admits(right),
+                (None, None) => true,
+                _ => false,
+            }
     }
 
     /// Whether any slot mentions a generic parameter.
     #[must_use]
     pub fn has_params(&self) -> bool {
-        self.parameters.iter().any(Type::has_params)
-            || self.result.has_params()
-            || self
-                .labelled
-                .iter()
-                .any(|parameter| parameter.value_type.has_params())
+        self.slot_types().iter().any(Type::has_params) || self.result.has_params()
     }
 
     /// The declared result type.
@@ -1583,15 +1720,15 @@ impl Expr {
                 ..
             } => {
                 let signature = intrinsic.signature();
-                if arguments.len() != signature.parameters().len() {
+                if arguments.len() != signature.fixed_parameter_count() {
                     return Err(IrError::InvalidExpression(format!(
                         "{} expects {} arguments, got {}",
                         intrinsic.symbol(),
-                        signature.parameters().len(),
+                        signature.fixed_parameter_count(),
                         arguments.len()
                     )));
                 }
-                for (argument, expected) in arguments.iter().zip(signature.parameters())
+                for (argument, expected) in arguments.iter().zip(signature.slot_types())
                 {
                     let actual =
                         argument.validate_shape_with_captures(slots, capture_types)?;
@@ -1687,11 +1824,17 @@ impl Expr {
                         *bound = Some(value_type.clone());
                     }
                 }
-                for (offset, parameter) in signature.labelled().iter().enumerate() {
+                // Labelled slots, then a variadic tail, follow the positional ones.
+                for (offset, value_type) in signature
+                    .slot_types()
+                    .into_iter()
+                    .skip(parameters.len())
+                    .enumerate()
+                {
                     if let Some(bound) =
                         closure_slots.get_mut(parameters.len().saturating_add(offset))
                     {
-                        *bound = Some(parameter.value_type());
+                        *bound = Some(value_type);
                     }
                 }
                 let actual = body.validate_shape_with_captures(
@@ -2186,12 +2329,10 @@ impl CheckedFunction {
             )));
         }
         let arguments = signature
-            .parameters()
-            .iter()
+            .slot_types()
+            .into_iter()
             .enumerate()
-            .map(|(slot, value_type)| {
-                Expr::variable(slot, value_type.clone(), origin.clone())
-            })
+            .map(|(slot, value_type)| Expr::variable(slot, value_type, origin.clone()))
             .collect();
         let body = Expr::external(intrinsic, arguments, origin.clone());
         Self::with_slots_and_external(
@@ -2273,14 +2414,9 @@ impl CheckedFunction {
             });
         }
         let mut slots = vec![None; slot_count];
-        for (slot, value_type) in signature.parameters().iter().enumerate() {
+        for (slot, value_type) in signature.slot_types().into_iter().enumerate() {
             if let Some(bound) = slots.get_mut(slot) {
-                *bound = Some(value_type.clone());
-            }
-        }
-        for (offset, parameter) in signature.labelled().iter().enumerate() {
-            if let Some(bound) = slots.get_mut(signature.parameters().len() + offset) {
-                *bound = Some(parameter.value_type());
+                *bound = Some(value_type);
             }
         }
         let actual = body.validate_shape(&mut slots)?;
@@ -2459,18 +2595,11 @@ impl CheckedModuleSet {
                 )));
             }
             let mut slots = vec![None; function.slot_count];
-            for (slot, value_type) in function.signature.parameters().iter().enumerate()
+            for (slot, value_type) in
+                function.signature.slot_types().into_iter().enumerate()
             {
                 if let Some(bound) = slots.get_mut(slot) {
-                    *bound = Some(value_type.clone());
-                }
-            }
-            for (offset, parameter) in function.signature.labelled().iter().enumerate()
-            {
-                if let Some(bound) =
-                    slots.get_mut(function.signature.parameters().len() + offset)
-                {
-                    *bound = Some(parameter.value_type());
+                    *bound = Some(value_type);
                 }
             }
             let actual = function.body.validate_shape(&mut slots)?;
@@ -3117,17 +3246,7 @@ fn validate_program_expr(
                     dependencies,
                 )?;
             }
-            let expected_parameters = signature
-                .parameters()
-                .iter()
-                .cloned()
-                .chain(
-                    signature
-                        .labelled()
-                        .iter()
-                        .map(|parameter| parameter.value_type()),
-                )
-                .collect::<Vec<_>>();
+            let expected_parameters = signature.slot_types();
             // A generic callee's parameters are erased: the checker fixed one
             // instantiation, and each slot must admit what it receives.
             for (argument, expected) in arguments.iter().zip(expected_parameters) {
@@ -3532,6 +3651,12 @@ struct CallFlow<'a> {
     reads: RefCell<BTreeSet<DependencyNode>>,
     /// Functions whose parameter summaries the current owner widened.
     widened_parameters: BTreeSet<usize>,
+    /// What an unknown call target stands for: every function named as a
+    /// value anywhere in the program and every closure, whose captured
+    /// callables are themselves unknown. The over-approximation keeps a call
+    /// through data, such as a function stored in a record or an array,
+    /// callable while call edges stay sound (gap G12).
+    escaping: FlowTargetSummary,
 }
 
 struct CallAnalysis {
@@ -3607,6 +3732,7 @@ fn analyze_call_flow_with_entry(
         active_closures: BTreeSet::new(),
         reads: RefCell::new(BTreeSet::new()),
         widened_parameters: BTreeSet::new(),
+        escaping: escaping_targets(globals, functions),
     };
     let roots = (0..globals.len())
         .map(DependencyNode::Global)
@@ -3821,13 +3947,8 @@ fn flow_target_summary(summary: &FlowTargetSummary) -> FunctionTargetSummary {
 
 fn function_signature_types(
     signature: &FunctionSignature,
-) -> impl Iterator<Item = Type> + '_ {
-    signature.parameters().iter().cloned().chain(
-        signature
-            .labelled()
-            .iter()
-            .map(LabelledParameter::value_type),
-    )
+) -> impl Iterator<Item = Type> {
+    signature.slot_types().into_iter()
 }
 
 fn function_argument_environment(
@@ -4245,10 +4366,9 @@ impl<'a> CallFlow<'a> {
                     target_summary.known.insert(function_hint);
                     target_summary.is_function = true;
                 }
-                if target_summary.unknown
-                    && let Some(owner) = owner
-                {
-                    self.unresolved.insert(owner);
+                if target_summary.unknown {
+                    let escaping = self.escaping.clone();
+                    target_summary.union(&escaping);
                 }
                 let argument_summaries = arguments
                     .iter()
@@ -4256,10 +4376,9 @@ impl<'a> CallFlow<'a> {
                     .collect::<Vec<_>>();
                 for closure in &target_summary.closures {
                     let closure_id = closure.id;
+                    // A closure already being walked on this path contributes
+                    // its edges once; re-entering it adds none.
                     if !self.active_closures.insert(closure_id) {
-                        if let Some(owner) = owner {
-                            self.unresolved.insert(owner);
-                        }
                         continue;
                     }
                     let closure_environment = function_argument_environment(
@@ -4420,6 +4539,12 @@ fn validate_signature_shape(signature: &FunctionSignature) -> Result<(), String>
                 parameter.value_type()
             ));
         }
+    }
+    if let Some(tail) = signature.variadic() {
+        if !matches!(tail, Type::Array(_) | Type::Map(_, _)) {
+            return Err(format!("variadic tail type {tail} is not an array or map"));
+        }
+        validate_type_shape(tail)?;
     }
     validate_type_shape(&signature.result())
 }
@@ -4773,6 +4898,7 @@ fn validate_tail_calls(
                 CallTarget::Direct(function) => FunctionTargetSummary::known(*function),
             };
             if targets.known.is_empty()
+                && !targets.unknown
                 && !(targets.has_closure
                     && callee.is_some_and(|expression| {
                         !matches!(expression, Expr::Closure { .. })
@@ -5190,6 +5316,9 @@ fn canonical_function_signature(signature: &FunctionSignature) -> String {
             .collect::<Vec<_>>();
         output.push_str(&format!(" labelled: {}", canonical_array(&labelled)));
     }
+    if let Some(tail) = signature.variadic() {
+        output.push_str(&format!(" variadic: {}", canonical_type(tail)));
+    }
     output.push(')');
     output
 }
@@ -5262,6 +5391,61 @@ fn canonical_character(value: char) -> String {
 
 fn format_float<T: fmt::Display>(value: T, suffix: &str) -> String {
     format!("{value}{suffix}")
+}
+
+/// ` e...` for each operand's canonical encoding, in order.
+fn canonical_operands<'a>(operands: impl Iterator<Item = &'a Expr>) -> String {
+    operands
+        .map(|operand| format!(" {}", canonical_expr(operand)))
+        .collect()
+}
+
+/// Every function named as a value and every closure in the program: what an
+/// unknown call target may denote. A closure's captured callables are
+/// unknown, so a call through one widens again to this same set.
+fn escaping_targets(
+    globals: &[CheckedGlobal],
+    functions: &[CheckedFunction],
+) -> FlowTargetSummary {
+    let mut summary = FlowTargetSummary {
+        unknown: true,
+        is_function: true,
+        ..FlowTargetSummary::default()
+    };
+    let mut pending: Vec<&Expr> = globals
+        .iter()
+        .map(CheckedGlobal::initializer)
+        .chain(functions.iter().map(CheckedFunction::body))
+        .collect();
+    while let Some(expression) = pending.pop() {
+        match expression {
+            Expr::Function { function, .. } => {
+                summary.known.insert(*function);
+            }
+            Expr::Closure {
+                signature,
+                captures,
+                body,
+                ..
+            } => {
+                let id = closure_id(body);
+                if !summary.closures.iter().any(|closure| closure.id == id) {
+                    summary.closures.push(FlowClosure {
+                        id,
+                        signature: signature.clone(),
+                        body: Arc::clone(body),
+                        captures: vec![
+                            FlowTargetSummary::unknown_function();
+                            captures.len()
+                        ],
+                    });
+                }
+            }
+            _ => {}
+        }
+        pending.extend(nominal::children(expression));
+    }
+    summary
 }
 
 #[cfg(test)]
@@ -5736,7 +5920,7 @@ mod tests {
     }
 
     #[test]
-    fn program_constructor_does_not_trust_hints_for_unknown_parameters() {
+    fn program_constructor_over_approximates_unknown_parameters_despite_hints() {
         let origin = origin();
         let called_signature = FunctionSignature::new(Vec::new(), Type::I32);
         let first = CheckedFunction::new(
@@ -5772,7 +5956,10 @@ mod tests {
             CheckedFunction::new("caller", caller_signature, caller_body, origin)
                 .expect("caller function");
         let result = CheckedProgram::try_new(vec![first, second, caller], 2);
-        assert!(matches!(result, Err(IrError::RecursiveCall(_))));
+        // The hint names one target, but an unknown parameter stands for every
+        // escaping function; neither function escapes, so the call has no
+        // bounded edge to trust and the program is still well formed.
+        assert!(result.is_ok(), "{result:?}");
     }
 
     #[test]
@@ -6159,11 +6346,4 @@ mod tests {
             Err(IrError::InvalidEntry(2))
         );
     }
-}
-
-/// ` e...` for each operand's canonical encoding, in order.
-fn canonical_operands<'a>(operands: impl Iterator<Item = &'a Expr>) -> String {
-    operands
-        .map(|operand| format!(" {}", canonical_expr(operand)))
-        .collect()
 }

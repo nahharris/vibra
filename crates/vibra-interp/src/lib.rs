@@ -344,6 +344,7 @@ pub fn run(program: &CheckedProgram) -> Result<Execution, RuntimeError> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 enum GlobalState {
     Uninitialized,
     Evaluating,
@@ -866,31 +867,79 @@ impl<'a> Machine<'a> {
         slots: &mut Frame,
         captures: &[RuntimeValue],
     ) -> Option<Evaluation> {
-        let mut primitives = Vec::with_capacity(arguments.len());
-        for argument in arguments {
-            let RuntimeValue::Primitive(value) =
-                self.evaluate_value(argument, slots, captures)?
-            else {
-                return None;
-            };
-            primitives.push(value);
-        }
-        let value = match intrinsic {
-            vibra_ir::external::CompilerIntrinsic::TextConcat => {
-                let [Value::Str(left), Value::Str(right)] = primitives.as_slice()
-                else {
-                    return None;
-                };
-                Value::Str(format!("{left}{right}"))
+        use vibra_ir::external::CompilerIntrinsic;
+        let values = self.evaluate_all(arguments, slots, captures)?;
+        let value = match (intrinsic, values.as_slice()) {
+            (
+                CompilerIntrinsic::TextConcat,
+                [
+                    RuntimeValue::Primitive(Value::Str(left)),
+                    RuntimeValue::Primitive(Value::Str(right)),
+                ],
+            ) => RuntimeValue::Primitive(Value::Str(format!("{left}{right}"))),
+            (
+                CompilerIntrinsic::TextLength,
+                [RuntimeValue::Primitive(Value::Str(value))],
+            ) => RuntimeValue::Primitive(Value::U64(value.chars().count() as u64)),
+            // The packed variadic tail is already the built collection.
+            (CompilerIntrinsic::ArrayOf | CompilerIntrinsic::MapOf, [tail]) => {
+                tail.clone()
             }
-            vibra_ir::external::CompilerIntrinsic::TextLength => {
-                let [Value::Str(value)] = primitives.as_slice() else {
-                    return None;
-                };
-                Value::U64(value.chars().count() as u64)
+            (CompilerIntrinsic::ArrayLength, [RuntimeValue::Array { values, .. }]) => {
+                RuntimeValue::Primitive(Value::U64(values.len() as u64))
             }
+            (
+                CompilerIntrinsic::ArrayAppend,
+                [RuntimeValue::Array { value_type, values }, element],
+            ) => {
+                let mut values = values.clone();
+                values.push(element.clone());
+                RuntimeValue::Array {
+                    value_type: value_type.clone(),
+                    values,
+                }
+            }
+            (
+                CompilerIntrinsic::ArrayConcat,
+                [
+                    RuntimeValue::Array { value_type, values },
+                    RuntimeValue::Array { values: right, .. },
+                ],
+            ) => {
+                let mut values = values.clone();
+                values.extend(right.iter().cloned());
+                RuntimeValue::Array {
+                    value_type: value_type.clone(),
+                    values,
+                }
+            }
+            (
+                CompilerIntrinsic::ArraySlice,
+                [
+                    RuntimeValue::Array { value_type, values },
+                    RuntimeValue::Primitive(Value::U64(start)),
+                    RuntimeValue::Primitive(Value::U64(end)),
+                ],
+            ) => {
+                let range = usize::try_from(*start)
+                    .ok()
+                    .zip(usize::try_from(*end).ok())
+                    .filter(|(start, end)| start <= end && *end <= values.len());
+                let slice = range.and_then(|(start, end)| values.get(start..end));
+                RuntimeValue::Enum {
+                    value_type: vibra_ir::option_type(value_type.clone()),
+                    variant: if slice.is_some() { "some" } else { "none" }.to_owned(),
+                    payload: slice.map(|slice| {
+                        Box::new(RuntimeValue::Array {
+                            value_type: value_type.clone(),
+                            values: slice.to_vec(),
+                        })
+                    }),
+                }
+            }
+            _ => return None,
         };
-        Some(Evaluation::Value(RuntimeValue::Primitive(value)))
+        Some(Evaluation::Value(value))
     }
 
     #[inline(never)]
@@ -1208,17 +1257,7 @@ fn slots_match_signature(
     slots: &[Option<RuntimeValue>],
     signature: &FunctionSignature,
 ) -> bool {
-    let expected = signature
-        .parameters()
-        .iter()
-        .cloned()
-        .chain(
-            signature
-                .labelled()
-                .iter()
-                .map(|parameter| parameter.value_type()),
-        )
-        .collect::<Vec<_>>();
+    let expected = signature.slot_types();
     slots
         .iter()
         .take(expected.len())
@@ -1234,12 +1273,7 @@ fn values_match_signature(
     values: &[RuntimeValue],
     signature: &FunctionSignature,
 ) -> bool {
-    let expected = signature.parameters().iter().cloned().chain(
-        signature
-            .labelled()
-            .iter()
-            .map(|parameter| parameter.value_type()),
-    );
+    let expected = signature.slot_types();
     values
         .iter()
         .zip(expected)

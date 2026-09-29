@@ -189,6 +189,7 @@ pub fn check_resolved(
             types.import(import.source_id(), import.alias(), record.source_id());
         }
     }
+    crate::standard::declare_standard_types(&mut types, &mut type_declarations);
     types.lower_bodies(&type_declarations, &mut diagnostics);
 
     let mut globals = Vec::<GlobalHeader>::new();
@@ -263,21 +264,14 @@ pub fn check_resolved(
                         module_index,
                         source_id: module.record.source_id().to_owned(),
                         name: id.canonical(),
-                        signature,
-                        variadic: function.attributes().items().iter().any(
-                            |attribute| {
-                                matches!(
-                                    attribute,
-                                    vibra_syntax::Attribute::Variadic(_)
-                                )
-                            },
-                        ),
                         external: compiler_intrinsic(
                             module.record.source_id(),
                             function,
                             &mut diagnostics,
                             module.trusted_bootstrap,
+                            &signature,
                         ),
+                        signature,
                         external_declared: function.attributes().items().iter().any(
                             |attribute| {
                                 matches!(
@@ -328,7 +322,6 @@ pub fn check_resolved(
                         source_id: module.record.source_id().to_owned(),
                         name: id.canonical(),
                         signature: FunctionSignature::new(Vec::new(), Type::Void),
-                        variadic: false,
                         external: None,
                         external_declared: false,
                         test: Some(test.clone()),
@@ -394,7 +387,6 @@ pub fn check_resolved(
                             source_id: module.record.source_id().to_owned(),
                             name: id.canonical(),
                             signature,
-                            variadic: false,
                             external: None,
                             external_declared: false,
                             test: None,
@@ -436,7 +428,6 @@ pub fn check_resolved(
             source_id: declaration.source_id().to_owned(),
             name: declaration.id().canonical(),
             signature: assertion.signature(),
-            variadic: false,
             external: None,
             external_declared: true,
             test: None,
@@ -444,6 +435,34 @@ pub fn check_resolved(
             member_index: None,
             self_type: None,
             type_parameters: Vec::new(),
+        });
+    }
+
+    // Builtin static methods such as `array.of` have no module in the graph;
+    // only the members a selected module names join its programs.
+    for member in crate::standard::builtin_members(&types) {
+        let id = vibra_resolve::builtin_member_id(&member.type_name, &member.member);
+        let referenced = snapshot.references().iter().any(|reference| {
+            selected.contains(reference.source_id()) && reference.target() == Some(&id)
+        });
+        if !referenced || function_indices.contains_key(&id) {
+            continue;
+        }
+        let index = functions.len();
+        function_indices.insert(id.clone(), index);
+        functions.push(FunctionHeader {
+            declaration_index: crate::IMPORTED_FUNCTION_DECLARATION,
+            module_index: usize::MAX,
+            source_id: crate::STDLIB_BUILTIN_SOURCE_ID.to_owned(),
+            name: id.canonical(),
+            signature: member.signature,
+            external: Some(member.intrinsic),
+            external_declared: true,
+            test: None,
+            test_assertion: None,
+            member_index: None,
+            self_type: None,
+            type_parameters: member.type_parameters,
         });
     }
 
@@ -543,6 +562,22 @@ pub fn check_resolved(
 
     let mut checked_functions = vec![None; functions.len()];
     for (index, header) in functions.iter().cloned().enumerate() {
+        if header.declaration_index == crate::IMPORTED_FUNCTION_DECLARATION
+            && let Some(intrinsic) = header.external
+        {
+            let origin =
+                SourceOrigin::new(header.source_id.as_str(), ByteSpan::empty_at(0));
+            if let Ok(checked) = CheckedFunction::new_external(
+                header.name,
+                header.signature,
+                intrinsic,
+                origin,
+            ) && let Some(slot) = checked_functions.get_mut(index)
+            {
+                *slot = Some(checked);
+            }
+            continue;
+        }
         if let Some(assertion) = header.test_assertion {
             let origin =
                 SourceOrigin::new(header.source_id.as_str(), ByteSpan::empty_at(0));
@@ -711,6 +746,10 @@ pub fn check_resolved(
                     parameters_valid = false;
                 }
             }
+        }
+        if !environment.bind_variadic(function.attributes().items(), &header.signature)
+        {
+            parameters_valid = false;
         }
         if !parameters_valid {
             continue;

@@ -250,6 +250,7 @@ pub struct ResolveInput {
     units: Vec<SourceUnit>,
     overlay: Option<PackageOverlay>,
     reserved_import_paths: Vec<(String, Vec<String>)>,
+    builtin_members: Vec<(String, String)>,
 }
 
 /// A verified package whose source modules are overlaid on the local graph.
@@ -275,6 +276,7 @@ impl ResolveInput {
             units,
             overlay: None,
             reserved_import_paths: Vec::new(),
+            builtin_members: Vec::new(),
         }
     }
 
@@ -292,6 +294,19 @@ impl ResolveInput {
         self.reserved_import_paths.extend(paths);
         self.reserved_import_paths.sort();
         self.reserved_import_paths.dedup();
+        self
+    }
+
+    /// Declares the static methods of the builtin types, as `(type, member)`
+    /// pairs. A value path `type.member` naming one resolves to the
+    /// `@std.builtin` declaration without an import; any other member of a
+    /// builtin type is an unknown symbol.
+    #[must_use]
+    pub fn with_builtin_members(
+        mut self,
+        members: impl IntoIterator<Item = (String, String)>,
+    ) -> Self {
+        self.builtin_members.extend(members);
         self
     }
 
@@ -2406,6 +2421,45 @@ impl Resolution {
         source_id: &str,
     ) {
         let path = name.segments();
+        if let [type_name, member] = path
+            && self
+                .input
+                .builtin_members
+                .iter()
+                .any(|(builtin, _)| builtin == type_name)
+            && !self
+                .imports
+                .iter()
+                .any(|(owner, import)| owner == module && import.alias == *type_name)
+        {
+            // A builtin type's static method is reached through the type path
+            // with no import (`docs/spec/06-runtime.md`).
+            let known = self
+                .input
+                .builtin_members
+                .iter()
+                .any(|(builtin, name)| builtin == type_name && name == member);
+            if !known {
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::NameUnknownSymbol,
+                        span,
+                        format!(
+                            "the builtin type `{type_name}` has no member `{member}`"
+                        ),
+                    )
+                    .with_source_id(source_id),
+                );
+            }
+            self.references.push(ResolvedReference {
+                from: from.clone(),
+                written: name.value().to_owned(),
+                target: known.then(|| builtin_member_id(type_name, member)),
+                source_id: source_id.to_owned(),
+                span,
+            });
+            return;
+        }
         let (target_module, declaration_path, imported) =
             if let Some(first) = path.first() {
                 let import = self
@@ -2644,4 +2698,17 @@ impl SpanOr for Name {
         let _ = self;
         fallback
     }
+}
+
+/// The identity of a builtin type's static method, declared by the embedded
+/// `@std.builtin` module of `vibra-stdlib@0.2.0`.
+#[must_use]
+pub fn builtin_member_id(type_name: &str, member: &str) -> DeclarationId {
+    DeclarationId::with_package(
+        &PackageId::new("vibra-stdlib", "0.2.0"),
+        "std",
+        ["builtin"],
+        [type_name.to_owned(), member.to_owned()],
+        EntityKind::Function,
+    )
 }

@@ -35,12 +35,15 @@ mod construct;
 mod infer;
 mod nominal;
 mod resolved;
+mod standard;
 mod stdlib;
 
 pub use resolved::{ResolvedCheckResult, check_resolved};
+pub use standard::builtin_member_names;
 pub use stdlib::{
-    STDLIB_ASSERT_SOURCE_ID, STDLIB_OPTION_SOURCE_ID, STDLIB_TEXT_SOURCE_ID, Stdlib,
-    StdlibError, StdlibInputs, StdlibModule, load_stdlib, load_stdlib_bytes,
+    STDLIB_ASSERT_SOURCE_ID, STDLIB_BUILTIN_SOURCE_ID, STDLIB_OPTION_SOURCE_ID,
+    STDLIB_TEXT_SOURCE_ID, Stdlib, StdlibError, StdlibInputs, StdlibModule,
+    load_stdlib, load_stdlib_bytes,
 };
 
 /// The result of checking one source document.
@@ -374,6 +377,17 @@ pub fn check_bootstrap_text_import(
     }
 }
 
+/// The embedded module source ID a single-source import of a
+/// standard-library type module names, such as `(import option @std.option)`.
+fn standard_type_import(
+    import: &vibra_syntax::ImportDeclaration,
+) -> Option<&'static str> {
+    (import.alias().kind() == NameKind::Symbol
+        && import.target().kind() == NameKind::Atom
+        && import.target().value() == "std.option")
+        .then_some(STDLIB_OPTION_SOURCE_ID)
+}
+
 fn bootstrap_import_unavailable(
     source_id: &str,
     span: ByteSpan,
@@ -476,7 +490,6 @@ struct FunctionHeader {
     source_id: String,
     name: String,
     signature: FunctionSignature,
-    variadic: bool,
     external: Option<CompilerIntrinsic>,
     external_declared: bool,
     test: Option<vibra_syntax::TestDeclaration>,
@@ -490,7 +503,7 @@ struct FunctionHeader {
     type_parameters: Vec<String>,
 }
 
-const IMPORTED_FUNCTION_DECLARATION: usize = usize::MAX;
+pub(crate) const IMPORTED_FUNCTION_DECLARATION: usize = usize::MAX;
 
 #[derive(Clone)]
 struct LocalBinding {
@@ -547,6 +560,28 @@ impl<'a> Checker<'a> {
     }
 
     fn collect_headers(&mut self) {
+        // Standard-library type modules first, so declared types may name
+        // their types: `(import option @std.option)` sees the embedded module.
+        for declaration in self.ast.declarations() {
+            if let Declaration::Import(import) = declaration
+                && let Some(target) = standard_type_import(import)
+            {
+                let alias = import.alias().value();
+                if let Some(earlier) = self.module_names.get(alias).copied() {
+                    redeclaration(
+                        self.diagnostics,
+                        self.source_id,
+                        alias,
+                        alias,
+                        import.span(),
+                        earlier,
+                    );
+                    continue;
+                }
+                self.module_names.insert(alias.to_owned(), import.span());
+                self.types.import(self.source_id, alias, target);
+            }
+        }
         // Declared types first: any signature below may name one. A single
         // source has no package, so a type's identity and path are its name.
         let mut type_declarations = Vec::new();
@@ -573,6 +608,7 @@ impl<'a> Checker<'a> {
                 type_declarations.push((index, value));
             }
         }
+        standard::declare_standard_types(&mut self.types, &mut type_declarations);
         self.types
             .lower_bodies(&type_declarations, self.diagnostics);
         for (declaration_index, declaration) in
@@ -635,7 +671,6 @@ impl<'a> Checker<'a> {
                             source_id: self.source_id.to_owned(),
                             name,
                             signature,
-                            variadic: false,
                             external: None,
                             external_declared: false,
                             test: None,
@@ -720,16 +755,14 @@ impl<'a> Checker<'a> {
                         module_index: 0,
                         source_id: self.source_id.to_owned(),
                         name,
-                        signature,
-                        variadic: function.attributes().items().iter().any(
-                            |attribute| matches!(attribute, Attribute::Variadic(_)),
-                        ),
                         external: compiler_intrinsic(
                             self.source_id,
                             function,
                             self.diagnostics,
                             self.trusted_bootstrap,
+                            &signature,
                         ),
+                        signature,
                         external_declared: function.attributes().items().iter().any(
                             |attribute| matches!(attribute, Attribute::External(_)),
                         ),
@@ -761,6 +794,9 @@ impl<'a> Checker<'a> {
                     }
                     self.text_import_span = Some(import.span());
                 }
+                // Registered with the types above.
+                Declaration::Import(import)
+                    if standard_type_import(import).is_some() => {}
                 Declaration::Import(import) => unavailable(
                     self.diagnostics,
                     self.source_id,
@@ -789,7 +825,6 @@ impl<'a> Checker<'a> {
                     source_id: self.source_id.to_owned(),
                     name: name.to_owned(),
                     signature: intrinsic.signature(),
-                    variadic: false,
                     external: Some(intrinsic),
                     external_declared: true,
                     test: None,
@@ -800,6 +835,32 @@ impl<'a> Checker<'a> {
                 });
             }
             self.text_import_span = Some(import_span);
+        }
+        // Builtin static methods such as `array.of` are reached through the
+        // type path with no import; only the members this module names join
+        // its program.
+        let paths = dotted_value_paths(self.ast);
+        for member in standard::builtin_members(&self.types) {
+            let path = member.path();
+            if !paths.contains(&path) || self.function_indices.contains_key(&path) {
+                continue;
+            }
+            let index = self.functions.len();
+            self.function_indices.insert(path.clone(), index);
+            self.functions.push(FunctionHeader {
+                declaration_index: IMPORTED_FUNCTION_DECLARATION,
+                module_index: 0,
+                source_id: STDLIB_BUILTIN_SOURCE_ID.to_owned(),
+                name: path,
+                signature: member.signature,
+                external: Some(member.intrinsic),
+                external_declared: true,
+                test: None,
+                test_assertion: None,
+                member_index: None,
+                self_type: None,
+                type_parameters: member.type_parameters,
+            });
         }
         for _ in 0..=self.globals.len() {
             let global_function_targets = self
@@ -1002,6 +1063,11 @@ impl<'a> Checker<'a> {
                         parameters_valid = false;
                     }
                 }
+            }
+            if !environment
+                .bind_variadic(function.attributes().items(), &header.signature)
+            {
+                parameters_valid = false;
             }
             if !parameters_valid {
                 continue;
@@ -1315,6 +1381,29 @@ impl<'a> CheckEnvironment<'a> {
         );
         self.next_slot = self.next_slot.saturating_add(1);
         true
+    }
+
+    /// Binds a variadic tail parameter to the slot after the labelled ones.
+    /// A discarded tail still occupies its slot.
+    fn bind_variadic(
+        &mut self,
+        attributes: &[Attribute],
+        signature: &FunctionSignature,
+    ) -> bool {
+        let Some(tail) = signature.variadic() else {
+            return true;
+        };
+        let Some(parameter) = attributes.iter().find_map(|attribute| match attribute {
+            Attribute::Variadic(parameter) => Some(parameter),
+            _ => None,
+        }) else {
+            return true;
+        };
+        if parameter.name().is_discard() {
+            self.next_slot = self.next_slot.saturating_add(1);
+            return true;
+        }
+        self.add_binding_type(parameter.name().value(), tail.clone(), parameter.span())
     }
 
     fn earlier_introduction(&self, name: &str) -> Option<ByteSpan> {
@@ -2127,6 +2216,91 @@ pub(crate) fn check_inferred_operand(
     Some(checked)
 }
 
+/// The binding shape of a variadic tail type.
+fn tail_binding(tail: &Type) -> vibra_syntax::VariadicBinding {
+    if matches!(tail, Type::Map(_, _)) {
+        vibra_syntax::VariadicBinding::Map
+    } else {
+        vibra_syntax::VariadicBinding::Array
+    }
+}
+
+/// The expected type of each of `count` tail operands: the element type for
+/// an array tail, alternating key and value types for a map tail.
+fn tail_patterns(tail: &Type, count: usize) -> Vec<Type> {
+    match tail {
+        Type::Array(element) => vec![element.as_ref().clone(); count],
+        Type::Map(key, value) => (0..count)
+            .map(|index| {
+                if index % 2 == 0 {
+                    key.as_ref().clone()
+                } else {
+                    value.as_ref().clone()
+                }
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// Packs checked tail operands into the one argument a variadic slot takes.
+fn pack_tail(tail: &Type, operands: Vec<Expr>, origin: SourceOrigin) -> Expr {
+    match tail {
+        Type::Map(_, _) => {
+            let mut entries = Vec::with_capacity(operands.len() / 2);
+            let mut operands = operands.into_iter();
+            while let (Some(key), Some(value)) = (operands.next(), operands.next()) {
+                entries.push((key, value));
+            }
+            Expr::Map {
+                value_type: tail.clone(),
+                entries,
+                origin,
+            }
+        }
+        _ => Expr::Array {
+            value_type: tail.clone(),
+            elements: operands,
+            origin,
+        },
+    }
+}
+
+/// Reports every map type in `value_type` whose key is inadmissible, as
+/// `@type.invalid-map-key` (or `@type.function-not-equatable` for a function
+/// key) at the application that inferred it. Returns whether all are valid.
+fn check_inferred_map_keys(
+    environment: &mut CheckEnvironment<'_>,
+    span: ByteSpan,
+    value_type: &Type,
+) -> bool {
+    let mut valid = true;
+    if let Type::Map(key, _) = value_type {
+        let code = match nominal::map_key(key) {
+            nominal::KeyVerdict::Admissible | nominal::KeyVerdict::Generic => None,
+            nominal::KeyVerdict::Function => {
+                Some(DiagnosticCode::TypeFunctionNotEquatable)
+            }
+            nominal::KeyVerdict::Invalid => Some(DiagnosticCode::TypeInvalidMapKey),
+        };
+        if let Some(code) = code {
+            environment.diagnostics.push(
+                Diagnostic::new(
+                    code,
+                    span,
+                    format!("the inferred map key type {key} is not an admissible key"),
+                )
+                .with_source_id(environment.source_id),
+            );
+            valid = false;
+        }
+    }
+    for component in value_type.components() {
+        valid &= check_inferred_map_keys(environment, span, &component);
+    }
+    valid
+}
+
 /// The generic callee of one application and what the call site wrote.
 struct GenericCall<'a> {
     parameters: &'a [String],
@@ -2139,26 +2313,38 @@ struct GenericCall<'a> {
 enum OperandSlot {
     Positional(usize),
     Labelled(String),
+    Tail(usize),
+}
+
+/// The checked operands of a generic application.
+struct GenericOperands {
+    /// The instantiated signature.
+    signature: FunctionSignature,
+    /// Positional operands in order.
+    positional: Vec<Expr>,
+    /// Written labelled operands by name.
+    labelled: BTreeMap<String, Expr>,
+    /// Variadic tail operands in order, not yet packed.
+    tail: Vec<Expr>,
 }
 
 /// Checks the written operands of a generic application and infers its
 /// complete type-argument list from them, the written result type, and
-/// `types:`. Returns the instantiated signature, the positional operands, and
-/// the written labelled operands; omitted labelled operands stay in
-/// `labelled` for the caller's default handling.
+/// `types:`. Omitted labelled operands stay in `labelled` for the caller's
+/// default handling.
 ///
 /// Operands whose parameter type is already fixed are checked against it, so
 /// literals and lambdas see a concrete expectation; the rest are checked
 /// alone and unified with their parameter type. Lambda operands wait until
 /// every other operand has had the chance to fix their parameter type.
-#[allow(clippy::type_complexity)]
 fn check_generic_operands(
     environment: &mut CheckEnvironment<'_>,
     application: &Application,
     call: GenericCall<'_>,
     ordered: &[&CallArgument],
     labelled: &mut BTreeMap<String, &CallArgument>,
-) -> Option<(FunctionSignature, Vec<Expr>, BTreeMap<String, Expr>)> {
+    tail: &[&CallArgument],
+) -> Option<GenericOperands> {
     let mut instantiation = start_instantiation(
         environment,
         application,
@@ -2187,6 +2373,15 @@ fn check_generic_operands(
             ));
         }
     }
+    if let Some(tail_type) = opened.variadic() {
+        for (index, (argument, pattern)) in tail
+            .iter()
+            .zip(tail_patterns(tail_type, tail.len()))
+            .enumerate()
+        {
+            pending.push((OperandSlot::Tail(index), pattern, *argument));
+        }
+    }
     let (lambdas, others): (Vec<_>, Vec<_>) =
         pending.into_iter().partition(|(_, _, argument)| {
             matches!(argument.value().kind(), ExpressionKind::Lambda(_))
@@ -2194,6 +2389,7 @@ fn check_generic_operands(
 
     let mut positional = BTreeMap::new();
     let mut labelled_values = BTreeMap::new();
+    let mut tail_values = BTreeMap::new();
     for (slot, pattern, argument) in others.into_iter().chain(lambdas) {
         let checked = check_inferred_operand(
             environment,
@@ -2209,6 +2405,9 @@ fn check_generic_operands(
             OperandSlot::Labelled(name) => {
                 labelled_values.insert(name, checked);
             }
+            OperandSlot::Tail(index) => {
+                tail_values.insert(index, checked);
+            }
         }
     }
 
@@ -2222,11 +2421,12 @@ fn check_generic_operands(
         ambiguous_generic(environment, application.span(), &unbound);
         return None;
     };
-    Some((
-        *instantiated,
-        positional.into_values().collect(),
-        labelled_values,
-    ))
+    Some(GenericOperands {
+        signature: *instantiated,
+        positional: positional.into_values().collect(),
+        labelled: labelled_values,
+        tail: tail_values.into_values().collect(),
+    })
 }
 
 /// Whether `name`, written at `expression`, denotes a value rather than a
@@ -2356,6 +2556,7 @@ fn check_signature(
         }
     };
     let mut labelled = Vec::new();
+    let mut variadic = None;
     for attribute in function.attributes().items() {
         match attribute {
             Attribute::Labelled(entries) => {
@@ -2396,10 +2597,29 @@ fn check_signature(
                     "nonempty effect ceilings remain unavailable in M2",
                 );
             }
+            Attribute::Variadic(parameter) => {
+                match types.lower_variadic(source_id, scope, parameter.value_type()) {
+                    Ok(tail) => variadic = Some(tail),
+                    Err(error) => {
+                        valid = false;
+                        nominal::report_lower_error(
+                            diagnostics,
+                            source_id,
+                            parameter.span(),
+                            &error,
+                        );
+                    }
+                }
+            }
             _ => {}
         }
     }
-    valid.then(|| FunctionSignature::with_labelled(parameters, labelled, result))
+    valid.then(|| {
+        with_tail(
+            FunctionSignature::with_labelled(parameters, labelled, result),
+            variadic,
+        )
+    })
 }
 
 fn compiler_intrinsic(
@@ -2407,6 +2627,7 @@ fn compiler_intrinsic(
     function: &vibra_syntax::FunctionDeclaration,
     diagnostics: &mut Vec<Diagnostic>,
     trusted_bootstrap: bool,
+    actual: &FunctionSignature,
 ) -> Option<CompilerIntrinsic> {
     let provider = function.attributes().items().iter().find_map(|attribute| {
         if let Attribute::External(name) = attribute {
@@ -2474,29 +2695,16 @@ fn compiler_intrinsic(
         );
         return None;
     };
+    // The registry signature is checked exactly, generic names included.
     let expected = intrinsic.signature();
-    let actual = FunctionSignature::new(
-        function
-            .parameters()
-            .iter()
-            .filter_map(|parameter| primitive_type(parameter.value_type()))
-            .collect(),
-        primitive_type(function.result()).unwrap_or(Type::Void),
-    );
     if !actual.same_shape(&expected) {
         diagnostics.push(
             Diagnostic::new(
                 DiagnosticCode::TypeArgumentMismatch,
                 function.span(),
                 format!(
-                    "compiler symbol `{symbol}` has signature {} -> {}",
-                    expected
-                        .parameters()
-                        .iter()
-                        .map(ToString::to_string)
-                        .collect::<Vec<_>>()
-                        .join(" "),
-                    expected.result()
+                    "compiler symbol `{symbol}` has signature {}",
+                    Type::Function(Box::new(expected))
                 ),
             )
             .with_source_id(source_id),
@@ -2539,6 +2747,7 @@ fn check_lambda_signature(
         diagnostics,
     )?;
     let mut labelled = Vec::new();
+    let mut variadic = None;
     for attribute in lambda.attributes().items() {
         match attribute {
             Attribute::Labelled(entries) => {
@@ -2580,34 +2789,36 @@ fn check_lambda_signature(
                 );
             }
             Attribute::Variadic(parameter) => {
-                valid = false;
-                unavailable(
-                    diagnostics,
-                    source_id,
-                    parameter.span(),
-                    "variadic parameters remain unavailable until M3",
-                );
+                match types.lower_variadic(source_id, scope, parameter.value_type()) {
+                    Ok(tail) => variadic = Some(tail),
+                    Err(error) => {
+                        valid = false;
+                        nominal::report_lower_error(
+                            diagnostics,
+                            source_id,
+                            parameter.span(),
+                            &error,
+                        );
+                    }
+                }
             }
             _ => {}
         }
     }
-    valid.then(|| FunctionSignature::with_labelled(parameters, labelled, result))
-}
-
-/// Lowers a type expression that names only primitive and function types,
-/// as compiler-intrinsic signatures do.
-fn primitive_type(value: &TypeExpr) -> Option<Type> {
-    nominal::TypeNames::default()
-        .lower("", nominal::Scope::NONE, value)
-        .ok()
+    valid.then(|| {
+        with_tail(
+            FunctionSignature::with_labelled(parameters, labelled, result),
+            variadic,
+        )
+    })
 }
 
 fn has_deferred_attributes(attributes: &[Attribute]) -> bool {
     attributes.iter().any(|attribute| match attribute {
         // `any`-bounded generics are checked from M3 Step 3; an interface
         // bound was already reported unavailable at the header.
-        Attribute::Variadic(_) | Attribute::External(_) | Attribute::Symbol(_) => true,
-        Attribute::Where(_) | Attribute::Labelled(_) => false,
+        Attribute::External(_) | Attribute::Symbol(_) => true,
+        Attribute::Where(_) | Attribute::Labelled(_) | Attribute::Variadic(_) => false,
         Attribute::Effects(row) => !row.references().is_empty(),
         Attribute::Visibility(_) | Attribute::Doc(_) => false,
     })
@@ -2886,6 +3097,28 @@ fn check_expression_in_position(
                     expected,
                 );
             }
+            let callee_type = callee.result_type();
+            if let Some(components) =
+                construct::tuple_components(environment, &callee_type)
+            {
+                return construct::check_tuple_projection(
+                    environment,
+                    application,
+                    callee,
+                    &components,
+                    expected,
+                );
+            }
+            if let Some((key_type, element)) = construct::lookup_types(&callee_type) {
+                return construct::check_lookup(
+                    environment,
+                    application,
+                    callee,
+                    key_type,
+                    element,
+                    expected,
+                );
+            }
             let Type::Function(signature) = callee.result_type() else {
                 environment.diagnostics.push(
                     Diagnostic::new(
@@ -2903,20 +3136,6 @@ fn check_expression_in_position(
             };
             let function_targets =
                 function_targets_from_expr(&callee, environment, &BTreeMap::new());
-            if function_targets.known.iter().any(|index| {
-                environment
-                    .functions
-                    .get(*index)
-                    .is_some_and(|function| function.variadic)
-            }) {
-                unavailable(
-                    environment.diagnostics,
-                    environment.source_id,
-                    application.span(),
-                    "applications of variadic function signatures are unavailable in M2",
-                );
-                return None;
-            }
             let known_function = direct_function
                 .or_else(|| function_index_from_expr(&callee, environment));
             // A call's own targets are reachable from the caller, so they are
@@ -2940,7 +3159,7 @@ fn check_expression_in_position(
                     .iter()
                     .map(|parameter| parameter.name().to_owned())
                     .collect(),
-                None,
+                signature.variadic().map(tail_binding),
             );
             let ordered = match application.ordered_arguments(&facts) {
                 Ok(arguments) => arguments,
@@ -2954,28 +3173,45 @@ fn check_expression_in_position(
                 }
             };
             let mut labelled = BTreeMap::new();
+            let mut tail_operands = Vec::new();
             for argument in ordered.iter().skip(signature.parameters().len()) {
                 if let Some(label) = argument.label() {
                     labelled.insert(label.value().to_owned(), *argument);
+                } else {
+                    tail_operands.push(*argument);
                 }
             }
             let mut signature = signature;
             let mut arguments = Vec::with_capacity(signature.fixed_parameter_count());
             let mut checked_labelled = BTreeMap::new();
+            let mut checked_tail = Vec::new();
             if let Some(parameters) = generic {
-                let (instantiated, positional, labelled_values) =
-                    check_generic_operands(
-                        environment,
-                        application,
-                        GenericCall {
-                            parameters: &parameters,
-                            signature: &signature,
-                            type_arguments: type_arguments.as_deref(),
-                            expected: expected.as_ref(),
-                        },
-                        &ordered,
-                        &mut labelled,
-                    )?;
+                let GenericOperands {
+                    signature: instantiated,
+                    positional,
+                    labelled: labelled_values,
+                    tail,
+                } = check_generic_operands(
+                    environment,
+                    application,
+                    GenericCall {
+                        parameters: &parameters,
+                        signature: &signature,
+                        type_arguments: type_arguments.as_deref(),
+                        expected: expected.as_ref(),
+                    },
+                    &ordered,
+                    &mut labelled,
+                    &tail_operands,
+                )?;
+                if !check_inferred_map_keys(
+                    environment,
+                    application.span(),
+                    &Type::Function(Box::new(instantiated.clone())),
+                ) {
+                    return None;
+                }
+                checked_tail = tail;
                 // A named function is rebuilt at its instantiation; a generic
                 // closure value stays erased and the call carries the
                 // instantiated operand and result types.
@@ -3004,6 +3240,18 @@ fn check_expression_in_position(
                         Some(value_type.clone()),
                     )?);
                 }
+                if let Some(tail_type) = signature.variadic() {
+                    for (argument, value_type) in tail_operands
+                        .iter()
+                        .zip(tail_patterns(tail_type, tail_operands.len()))
+                    {
+                        checked_tail.push(check_operand(
+                            environment,
+                            argument.value(),
+                            Some(value_type),
+                        )?);
+                    }
+                }
             }
             for parameter in signature.labelled() {
                 if let Some(argument) = checked_labelled.remove(parameter.name()) {
@@ -3031,6 +3279,13 @@ fn check_expression_in_position(
                         SourceOrigin::new(environment.source_id, application.span()),
                     ));
                 }
+            }
+            if let Some(tail_type) = signature.variadic() {
+                arguments.push(pack_tail(
+                    tail_type,
+                    checked_tail,
+                    SourceOrigin::new(environment.source_id, application.span()),
+                ));
             }
             let result = signature.result();
             ensure_expected(
@@ -3325,6 +3580,9 @@ fn check_expression_in_position(
                     }
                 }
             }
+            if !nested.bind_variadic(lambda.attributes().items(), &signature) {
+                parameters_valid = false;
+            }
             if !parameters_valid {
                 return None;
             }
@@ -3407,10 +3665,12 @@ fn check_expression_in_position(
         ExpressionKind::EnumOf(variant) => {
             construct::check_enumof(environment, expression, variant, expected)
         }
+        ExpressionKind::TupleOf(components) => {
+            construct::check_tupleof(environment, expression, components, expected)
+        }
         ExpressionKind::Match { .. }
         | ExpressionKind::As { .. }
-        | ExpressionKind::Try(_)
-        | ExpressionKind::TupleOf(_) => {
+        | ExpressionKind::Try(_) => {
             unavailable(
                 environment.diagnostics,
                 environment.source_id,
@@ -3811,6 +4071,46 @@ pub(crate) fn unavailable(
     );
 }
 
+/// `signature` with its variadic tail, when it has one.
+fn with_tail(signature: FunctionSignature, tail: Option<Type>) -> FunctionSignature {
+    match tail {
+        Some(tail) => signature.with_variadic(tail),
+        None => signature,
+    }
+}
+
+/// Every dotted value path written anywhere in `ast`'s executable bodies.
+fn dotted_value_paths(ast: &SourceAst) -> BTreeSet<String> {
+    let mut bodies: Vec<&Expression> = Vec::new();
+    for declaration in ast.declarations() {
+        match declaration {
+            Declaration::Def(value) => bodies.push(value.expression()),
+            Declaration::Defn(function) => bodies.extend(function.expressions()),
+            Declaration::Deftype(value) => {
+                for member in value.members() {
+                    if let TypeMember::Method(method) = member {
+                        bodies.extend(method.expressions());
+                    }
+                }
+            }
+            Declaration::Test(test) => bodies.extend(test.expressions()),
+            _ => {}
+        }
+    }
+    let mut paths = BTreeSet::new();
+    for body in bodies {
+        walk_expressions(body, &mut |expression| {
+            if let ExpressionKind::Name(name) = expression.kind()
+                && name.kind() == NameKind::Symbol
+                && name.segments().len() > 1
+            {
+                paths.insert(name.value().to_owned());
+            }
+        });
+    }
+    paths
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -4188,66 +4488,36 @@ mod tests {
     }
 
     #[test]
-    fn variadic_array_and_map_calls_are_unavailable_at_the_application() {
-        let sources = [
+    fn variadic_array_and_map_calls_bind_zero_or_more_tail_operands() {
+        for (label, source) in [
             (
                 "array",
-                "(defn collect-array (first i32) i32\n  variadic: (rest (array i32))\n  first)\n(defn use-array () i32\n  (do (collect-array 1i32) (collect-array 1i32 2i32)))",
-                ["(collect-array 1i32)", "(collect-array 1i32 2i32)"],
+                "(defn use-array () i32\n  (do (collect-array 1i32) (collect-array 1i32 2i32)))\n(defn collect-array (first i32) i32\n  variadic: (rest (array i32))\n  first)",
             ),
             (
                 "map",
-                "(defn collect-map (first i32) i32\n  variadic: (rest (map str i32))\n  first)\n(defn use-map () i32\n  (do (collect-map 1i32) (collect-map 1i32 \"key\" 2i32)))",
-                ["(collect-map 1i32)", "(collect-map 1i32 \"key\" 2i32)"],
+                "(defn use-map () i32\n  (do (collect-map 1i32) (collect-map 1i32 \"key\" 2i32)))\n(defn collect-map (first i32) i32\n  variadic: (rest (map str i32))\n  first)",
             ),
-        ];
-
-        for (label, source, calls) in sources {
+        ] {
             let result = check_source(format!("{label}.vib"), source);
-            for call in calls {
-                let start = source.find(call).expect("call source span");
-                let span = ByteSpan::new(start, start + call.len());
-                assert!(
-                    result.diagnostics().iter().any(|diagnostic| {
-                        diagnostic.code() == DiagnosticCode::ToolUnavailable
-                            && diagnostic.primary_span() == span
-                    }),
-                    "{label} call must be unavailable at {span:?}: {:?}",
-                    result.diagnostics()
-                );
-                assert!(
-                    !result.diagnostics().iter().any(|diagnostic| {
-                        diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
-                            && diagnostic.primary_span() == span
-                    }),
-                    "{label} call must not be reclassified as a fixed-arity mismatch: {:?}",
-                    result.diagnostics()
-                );
-            }
+            assert!(result.accepted(), "{label}: {:?}", result.diagnostics());
         }
     }
 
     #[test]
     fn variadic_targets_survive_lambda_alias_captures() {
-        let source = "(defn collect-array (first i32) i32\n  variadic: (rest (array i32))\n  first)\n(defn use-alias () i32\n  (let alias collect-array (alias 1i32)))\n(defn use-direct () (fn () i32)\n  (let alias collect-array\n    (lambda () i32 (alias 1i32))))\n(defn use-nested () (fn () (fn () i32))\n  (let alias collect-array\n    (lambda () (fn () i32)\n      (lambda () i32 (alias 1i32)))))";
+        let source = "(defn use-alias () i32\n  (let alias collect-array (alias 1i32)))\n(defn collect-array (first i32) i32\n  variadic: (rest (array i32))\n  first)\n(defn use-direct () (fn () i32)\n  (let alias collect-array\n    (lambda () i32 (alias 1i32))))\n(defn use-nested () (fn () (fn () i32))\n  (let alias collect-array\n    (lambda () (fn () i32)\n      (lambda () i32 (alias 1i32)))))";
         let result = check_source("captured-variadic.vib", source);
-        let call = "(alias 1i32)";
-        let expected_spans = source
-            .match_indices(call)
-            .map(|(start, _)| ByteSpan::new(start, start + call.len()))
-            .collect::<Vec<_>>();
-
-        assert_eq!(expected_spans.len(), 3);
-        for span in expected_spans {
-            assert!(
-                result.diagnostics().iter().any(|diagnostic| {
-                    diagnostic.code() == DiagnosticCode::ToolUnavailable
-                        && diagnostic.primary_span() == span
-                }),
-                "captured variadic call must be unavailable at {span:?}: {:?}",
-                result.diagnostics()
-            );
-        }
+        assert!(result.accepted(), "{:?}", result.diagnostics());
+        let program = result.program().expect("program");
+        // Every call through an alias packs its tail into one array argument.
+        assert_eq!(
+            program
+                .canonical_vibon()
+                .matches("(record kind: @array")
+                .count(),
+            3
+        );
     }
 
     #[test]

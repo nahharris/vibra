@@ -1,10 +1,12 @@
-//! Constructor, projection, and anonymous-value checking (M3 Step 2).
+//! Constructor, projection, lookup, and anonymous-value checking.
 //!
 //! `docs/spec/02-type-system.md` fixes the applicable categories: a declared
-//! record is built from its closed labelled fields, an enum through one of its
-//! variants, a wrapper type from its representation, and a record value applied to
-//! one atom selector projects a field. `recordof` builds an anonymous record
-//! and `enumof` an anonymous enum checked against a written expected type.
+//! record is built from its closed labelled fields, a tuple from one operand
+//! per component, an enum through one of its variants, and a wrapper type from
+//! its representation. A record value applied to one atom selector projects a
+//! field, a tuple value applied to one index literal projects a component, and
+//! an array, map, `str`, or `bytes` value applied to one key looks it up.
+//! `recordof`, `tupleof`, and `enumof` build anonymous values.
 
 use std::collections::BTreeSet;
 
@@ -18,7 +20,8 @@ use crate::infer::Instantiation;
 use crate::nominal::{ConstructorTarget, declared_self_type};
 use crate::{
     CheckEnvironment, ambiguous_generic, call_contract_error, check_expression,
-    check_inferred_operand, ensure_expected, start_instantiation, types_match,
+    check_inferred_operand, check_operand, ensure_expected, start_instantiation,
+    types_match,
 };
 
 /// Checks an application whose callee names a constructor.
@@ -386,6 +389,208 @@ pub(crate) fn check_recordof(
         value_type,
         expression_ir,
     )
+}
+
+/// Checks `(tupleof e…)`: components evaluate in order, and the type is the
+/// anonymous tuple of their types.
+pub(crate) fn check_tupleof(
+    environment: &mut CheckEnvironment<'_>,
+    expression: &Expression,
+    components: &[Expression],
+    expected: Option<Type>,
+) -> Option<Expr> {
+    let expected_components = match &expected {
+        Some(Type::Tuple(values)) if values.len() == components.len() => {
+            Some(values.clone())
+        }
+        _ => None,
+    };
+    let mut checked = Vec::with_capacity(components.len());
+    let mut types = Vec::with_capacity(components.len());
+    for (index, component) in components.iter().enumerate() {
+        let component_expected = expected_components
+            .as_ref()
+            .and_then(|values| values.get(index).cloned());
+        let value = check_expression(environment, component, component_expected)?;
+        types.push(value.result_type());
+        checked.push(value);
+    }
+    let value_type = Type::Tuple(types);
+    let expression_ir = Expr::Tuple {
+        value_type: value_type.clone(),
+        components: checked,
+        origin: SourceOrigin::new(environment.source_id, expression.span()),
+    };
+    finish(
+        environment,
+        expression.span(),
+        expected,
+        value_type,
+        expression_ir,
+    )
+}
+
+/// The component types of a declared or anonymous tuple type, or `None` when
+/// the type is not a tuple.
+pub(crate) fn tuple_components(
+    environment: &CheckEnvironment<'_>,
+    value_type: &Type,
+) -> Option<Vec<Type>> {
+    match value_type {
+        Type::Tuple(components) => Some(components.clone()),
+        Type::Declared(_) | Type::Applied(_, _) => {
+            match instantiated_body(environment, value_type)? {
+                TypeBody::Tuple(components) => Some(components),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Checks a tuple value applied to one tuple-index literal: an unsuffixed
+/// decimal integer within the tuple arity, written without a leading zero.
+pub(crate) fn check_tuple_projection(
+    environment: &mut CheckEnvironment<'_>,
+    application: &Application,
+    tuple: Expr,
+    components: &[Type],
+    expected: Option<Type>,
+) -> Option<Expr> {
+    let tuple_type = tuple.result_type();
+    let index_literal = match application.arguments() {
+        [operand] if operand.label().is_none() => match operand.value().kind() {
+            ExpressionKind::Literal(vibra_syntax::Literal::Integer(integer))
+                if integer.suffix().is_none() =>
+            {
+                Some((operand.span(), integer.raw()))
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some((span, raw)) = index_literal else {
+        call_contract_error(
+            environment,
+            application.span(),
+            "a tuple projection takes exactly one unsuffixed tuple-index literal"
+                .to_owned(),
+        );
+        return None;
+    };
+    let canonical = raw == "0"
+        || (!raw.starts_with('0') && raw.bytes().all(|byte| byte.is_ascii_digit()));
+    let index = raw.parse::<usize>().ok().filter(|_| canonical);
+    let Some((index, value_type)) = index
+        .and_then(|index| components.get(index).map(|value| (index, value.clone())))
+    else {
+        environment.diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeInvalidTupleIndex,
+                span,
+                format!(
+                    "`{raw}` is not a component index of {tuple_type}, which has {} component{}",
+                    components.len(),
+                    if components.len() == 1 { "" } else { "s" }
+                ),
+            )
+            .with_source_id(environment.source_id),
+        );
+        return None;
+    };
+    let expression = Expr::TupleProject {
+        tuple: Box::new(tuple),
+        index,
+        value_type: value_type.clone(),
+        origin: SourceOrigin::new(environment.source_id, application.span()),
+    };
+    finish(
+        environment,
+        application.span(),
+        expected,
+        value_type,
+        expression,
+    )
+}
+
+/// The key and element types of an array, map, `str`, or `bytes` lookup.
+pub(crate) fn lookup_types(value_type: &Type) -> Option<(Type, Type)> {
+    match value_type {
+        Type::Array(element) => Some((Type::U64, element.as_ref().clone())),
+        Type::Map(key, value) => Some((key.as_ref().clone(), value.as_ref().clone())),
+        Type::Str => Some((Type::U64, Type::Char)),
+        Type::Bytes => Some((Type::U64, Type::U8)),
+        _ => None,
+    }
+}
+
+/// Checks a collection applied to one index or key, answering with
+/// `(option element)`.
+pub(crate) fn check_lookup(
+    environment: &mut CheckEnvironment<'_>,
+    application: &Application,
+    collection: Expr,
+    key_type: Type,
+    element: Type,
+    expected: Option<Type>,
+) -> Option<Expr> {
+    let [operand] = application.arguments() else {
+        call_contract_error(
+            environment,
+            application.span(),
+            "a lookup takes exactly one unlabelled index or key".to_owned(),
+        );
+        return None;
+    };
+    if operand.label().is_some() {
+        call_contract_error(
+            environment,
+            operand.span(),
+            "a lookup takes exactly one unlabelled index or key".to_owned(),
+        );
+        return None;
+    }
+    let Some(value_type) = crate::standard::option_of(environment.types, element)
+    else {
+        crate::unavailable(
+            environment.diagnostics,
+            environment.source_id,
+            application.span(),
+            "lookups need the standard option type",
+        );
+        return None;
+    };
+    let key = check_operand(environment, operand.value(), Some(key_type))?;
+    let expression = Expr::Lookup {
+        collection: Box::new(collection),
+        key: Box::new(key),
+        value_type: value_type.clone(),
+        origin: SourceOrigin::new(environment.source_id, application.span()),
+    };
+    finish(
+        environment,
+        application.span(),
+        expected,
+        value_type,
+        expression,
+    )
+}
+
+/// The body of a declared or applied type with its arguments substituted.
+fn instantiated_body(
+    environment: &CheckEnvironment<'_>,
+    value_type: &Type,
+) -> Option<TypeBody> {
+    let (id, arguments) = match value_type {
+        Type::Declared(id) => (id, &[][..]),
+        Type::Applied(id, arguments) => (id, arguments.as_slice()),
+        _ => return None,
+    };
+    let declared = environment.types.get(environment.types.index_of(id)?)?;
+    let body = declared.body.clone()?;
+    vibra_ir::TypeDefinition::new(declared.id.clone(), body)
+        .with_parameters(declared.parameters.clone())
+        .instantiate(arguments)
 }
 
 /// Checks `(enumof a: e)` against its written expected anonymous enum.

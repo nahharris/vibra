@@ -25,6 +25,8 @@ pub const STDLIB_TEXT_SOURCE_ID: &str = "stdlib/src/std/text.vib";
 pub const STDLIB_ASSERT_SOURCE_ID: &str = "stdlib/src/std/assert.vib";
 /// The source identity of the `@std.option` module.
 pub const STDLIB_OPTION_SOURCE_ID: &str = "stdlib/src/std/option.vib";
+/// The source identity of the `@std.builtin` module.
+pub const STDLIB_BUILTIN_SOURCE_ID: &str = "stdlib/src/std/builtin.vib";
 
 const MANIFEST_PATH: &str = "stdlib/manifest.vibon";
 const SOURCE_ROOT: &str = "stdlib/src/";
@@ -45,10 +47,22 @@ const EMBEDDED_MODULES: &[(&str, &[u8])] = &[
         include_bytes!("../../../stdlib/src/std/option.vib"),
     ),
     (
+        "std/builtin.vib",
+        include_bytes!("../../../stdlib/src/std/builtin.vib"),
+    ),
+    (
         "std/assert.vib",
         include_bytes!("../../../stdlib/src/std/assert.vib"),
     ),
 ];
+
+/// The embedded bytes of the module at `path`, relative to `stdlib/src/`.
+pub(crate) fn embedded_module(path: &str) -> Option<&'static [u8]> {
+    EMBEDDED_MODULES
+        .iter()
+        .find(|(entry, _)| *entry == path)
+        .map(|(_, bytes)| *bytes)
+}
 
 /// The exact byte inputs of one standard-library load.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -585,8 +599,8 @@ mod tests {
     #[test]
     fn a_manifest_symbol_absent_from_the_registry_is_rejected() {
         let manifest = manifest().replace(
-            "compiler: (array \"text.concat\"",
-            "compiler: (array \"text.reverse\" \"text.concat\"",
+            "compiler: (array\n    \"text.concat\"",
+            "compiler: (array\n    \"text.reverse\"\n    \"text.concat\"",
         );
         let mut inputs = StdlibInputs::embedded();
         inputs.manifest = manifest.as_bytes();
@@ -598,10 +612,7 @@ mod tests {
 
     #[test]
     fn a_module_binding_an_unlisted_symbol_is_rejected() {
-        let manifest = manifest().replace(
-            "compiler: (array \"text.concat\" \"text.length\")",
-            "compiler: (array \"text.concat\")",
-        );
+        let manifest = manifest().replace("    \"text.length\"\n", "");
         let mut inputs = StdlibInputs::embedded();
         inputs.manifest = manifest.as_bytes();
         rejects(

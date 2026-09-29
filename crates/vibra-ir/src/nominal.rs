@@ -423,7 +423,7 @@ fn invalid(message: String) -> IrError {
 }
 
 /// Every direct subexpression, including closure bodies and callees.
-fn children(expression: &Expr) -> Vec<&Expr> {
+pub(crate) fn children(expression: &Expr) -> Vec<&Expr> {
     match expression {
         Expr::External { arguments, .. } => arguments.iter().collect(),
         Expr::Sequence { expressions, .. } => expressions.iter().collect(),

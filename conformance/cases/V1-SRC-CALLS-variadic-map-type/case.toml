@@ -2,16 +2,10 @@ id = "V1-SRC-CALLS-variadic-map-type"
 rule = "V1-SRC-CALLS"
 profile = "static-v1"
 operation = "type-check"
-description = "An explicitly map-variadic function type is unavailable at its parameter form."
+description = "A map-variadic function type binds a key/value tail at a call through its value."
 
 [inputs]
 source = "input.vib"
 
 [expect]
-accepted = false
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "input.vib"
-span = [18, 65]
+accepted = true

@@ -256,6 +256,11 @@ fn unify_signatures(
                     && unify(&left.value_type(), &right.value_type(), bindings)
             },
         )
+        && match (left.variadic(), right.variadic()) {
+            (Some(left), Some(right)) => unify(left, right, bindings),
+            (None, None) => true,
+            _ => false,
+        }
         && unify(&left.result(), &right.result(), bindings)
 }
 

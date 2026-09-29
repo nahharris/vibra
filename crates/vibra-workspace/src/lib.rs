@@ -296,7 +296,7 @@ impl WorkspaceSnapshot {
                 vibra_resolve::SourceUnit::new(unit.name(), kind, entry, modules)
             })
             .collect();
-        let mut input = vibra_resolve::ResolveInput::new(
+        let input = vibra_resolve::ResolveInput::new(
             package.name().value(),
             package.version().value(),
             units,
@@ -306,6 +306,7 @@ impl WorkspaceSnapshot {
             ("std".to_owned(), vec!["option".to_owned()]),
             ("std".to_owned(), vec!["assert".to_owned()]),
         ]);
+        let mut input = input.with_builtin_members(vibra_types::builtin_member_names());
         if let Some(verification) = verification {
             let (overlay_package, modules) = verification.resolver_overlay();
             input = input.with_verified_overlay(
