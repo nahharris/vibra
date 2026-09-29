@@ -529,8 +529,9 @@ intrinsic atom with `@external.unknown-symbol`.
 
 The reserved-head reservation is covered on both sides. A `deftype`, a `defint`,
 and a `where:` generic name spelled with a reserved type head or with a
-builtin type name are each rejected with `@name.reserved-declaration`. A nested method named `map` on an owner other
-than the associative `map` type is accepted, together with the `iter` contract's
+builtin type name are each rejected with `@name.reserved-declaration`, as is a
+generic name spelled `any` or `self`. A nested method named `map` on an owner
+other than the associative `map` type is accepted, together with the `iter` contract's
 own default `map` member, proving the reservation does not reach members; the
 `@name.reserved-value-spelling` cases cover module-level values and aliases
 spelled `i32`, `array`, and `map`.

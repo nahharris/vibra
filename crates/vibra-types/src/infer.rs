@@ -80,7 +80,7 @@ impl Instantiation {
 
     /// `value` with every bound variable replaced.
     pub(crate) fn apply(&self, value: &Type) -> Type {
-        value.substitute(&self.bindings)
+        resolve(value, &self.bindings)
     }
 
     /// `value` with every variable bound, or `None` while one is still open.
@@ -117,49 +117,54 @@ pub(crate) fn quantified_name(name: &str, index: usize, site: usize) -> String {
     format!("{name}#{index}@{site}")
 }
 
-/// The written spelling of a generic parameter, for diagnostics.
+/// The written spelling of a generic parameter, for diagnostics: an
+/// inference variable `?index:name` or a quantified `name#index@site` is
+/// shown as `name`.
 pub(crate) fn source_name(name: &str) -> &str {
+    let name = name
+        .strip_prefix('?')
+        .and_then(|rest| rest.split_once(':'))
+        .map_or(name, |(_, name)| name);
     name.split('#').next().unwrap_or(name)
 }
 
-/// The quantified parameters `value` mentions, in their `where:` order.
-pub(crate) fn quantified_parameters(value: &Type) -> Vec<String> {
-    let mut found = Vec::new();
-    collect_quantified(value, &mut found);
-    found.sort_by_key(|name| {
-        name.split_once('#')
-            .and_then(|(_, rest)| rest.split_once('@'))
-            .and_then(|(index, _)| index.parse::<usize>().ok())
-    });
-    found.dedup();
-    found
+/// `value` with every inference variable and quantified parameter spelled as
+/// written, for diagnostics.
+pub(crate) fn display(value: &Type) -> Type {
+    let mut names = Vec::new();
+    collect_parameters(value, &mut names);
+    let written: BTreeMap<String, Type> = names
+        .into_iter()
+        .filter(|name| name.starts_with('?') || name.contains('#'))
+        .map(|name| {
+            let written = Type::Param(source_name(&name).to_owned());
+            (name, written)
+        })
+        .collect();
+    value.substitute(&written)
 }
 
-fn collect_quantified(value: &Type, found: &mut Vec<String>) {
+fn collect_parameters(value: &Type, found: &mut Vec<String>) {
     match value {
-        Type::Param(name) if name.contains('#') => {
-            if !found.contains(name) {
-                found.push(name.clone());
-            }
-        }
+        Type::Param(name) => found.push(name.clone()),
         Type::Applied(_, arguments) => {
             for argument in arguments {
-                collect_quantified(argument, found);
+                collect_parameters(argument, found);
             }
         }
         Type::Record(members) | Type::Enum(members) => {
             for (_, member) in members {
-                collect_quantified(member, found);
+                collect_parameters(member, found);
             }
         }
         Type::Function(signature) => {
             for parameter in signature.parameters() {
-                collect_quantified(parameter, found);
+                collect_parameters(parameter, found);
             }
             for parameter in signature.labelled() {
-                collect_quantified(&parameter.value_type(), found);
+                collect_parameters(&parameter.value_type(), found);
             }
-            collect_quantified(&signature.result(), found);
+            collect_parameters(&signature.result(), found);
         }
         _ => {}
     }
@@ -185,16 +190,33 @@ pub(crate) fn has_variables(value: &Type) -> bool {
     }
 }
 
+/// `value` with every bound variable replaced, following chains such as
+/// `?a` bound to `?b` bound to `i32`. The occurs check keeps bindings acyclic,
+/// so substitution reaches a fixpoint within one pass per binding.
+fn resolve(value: &Type, bindings: &BTreeMap<String, Type>) -> Type {
+    let mut current = value.clone();
+    for _ in 0..=bindings.len() {
+        let next = current.substitute(bindings);
+        if next == current {
+            break;
+        }
+        current = next;
+    }
+    current
+}
+
 /// The bound-agnostic unifier: whether some binding of the variables in
 /// `left` and `right` makes them the same fully resolved type. Rigid
-/// parameters unify only with themselves, and no bound is consulted.
+/// parameters unify only with themselves, and no bound is consulted. Both
+/// sides are resolved first, so a variable met here is unbound and a new
+/// binding never replaces an earlier one.
 pub(crate) fn unify(
     left: &Type,
     right: &Type,
     bindings: &mut BTreeMap<String, Type>,
 ) -> bool {
-    let left = left.substitute(bindings);
-    let right = right.substitute(bindings);
+    let left = resolve(left, bindings);
+    let right = resolve(right, bindings);
     match (&left, &right) {
         (Type::Param(name), other) | (other, Type::Param(name))
             if is_variable(name) =>
@@ -321,6 +343,33 @@ mod tests {
         // `(box t)` and `(box i32)` overlap at `t` = `i32` whatever t's bound.
         let mut bindings = BTreeMap::new();
         assert!(unify(&boxed(Type::I32), &boxed(var("t")), &mut bindings));
+    }
+
+    #[test]
+    fn a_bound_variable_is_followed_rather_than_rebound() {
+        // (record x ?a y ?b z ?a) against (record x ?b y i32 z str): ?a = ?b
+        // = i32, so z cannot also be str.
+        let triple = |x: Type, y: Type, z: Type| {
+            Type::Record(vec![
+                ("x".to_owned(), x),
+                ("y".to_owned(), y),
+                ("z".to_owned(), z),
+            ])
+        };
+        let mut bindings = BTreeMap::new();
+        assert!(!unify(
+            &triple(var("a"), var("b"), var("a")),
+            &triple(var("b"), Type::I32, Type::Str),
+            &mut bindings,
+        ));
+    }
+
+    #[test]
+    fn the_occurs_check_sees_through_a_chain() {
+        let mut bindings = BTreeMap::new();
+        assert!(unify(&var("a"), &var("b"), &mut bindings));
+        assert!(unify(&var("b"), &var("c"), &mut bindings));
+        assert!(!unify(&var("c"), &boxed(var("a")), &mut bindings));
     }
 
     #[test]

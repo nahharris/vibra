@@ -496,6 +496,8 @@ struct LocalBinding {
     value_type: Type,
     span: ByteSpan,
     function_targets: Option<FunctionTargetSet>,
+    /// The quantified `where:` names of a bound generic `lambda`, in order.
+    generics: Vec<String>,
 }
 
 struct Checker<'a> {
@@ -1169,6 +1171,7 @@ struct CaptureBinding {
     value_type: Type,
     span: ByteSpan,
     function_targets: Option<FunctionTargetSet>,
+    generics: Vec<String>,
 }
 
 #[derive(Clone)]
@@ -1178,12 +1181,14 @@ enum VisibleStorage {
         value_type: Type,
         span: ByteSpan,
         function_targets: Option<FunctionTargetSet>,
+        generics: Vec<String>,
     },
     Closure {
         slot: usize,
         value_type: Type,
         span: ByteSpan,
         function_targets: Option<FunctionTargetSet>,
+        generics: Vec<String>,
     },
 }
 
@@ -1303,6 +1308,7 @@ impl<'a> CheckEnvironment<'a> {
                 value_type,
                 span,
                 function_targets,
+                generics: Vec::new(),
             },
         );
         self.next_slot = self.next_slot.saturating_add(1);
@@ -1337,6 +1343,7 @@ impl<'a> CheckEnvironment<'a> {
                     value_type: binding.value_type.clone(),
                     span: binding.span,
                     function_targets: binding.function_targets.clone(),
+                    generics: binding.generics.clone(),
                 },
             );
         }
@@ -1348,6 +1355,7 @@ impl<'a> CheckEnvironment<'a> {
                     value_type: binding.value_type.clone(),
                     span: binding.span,
                     function_targets: binding.function_targets.clone(),
+                    generics: binding.generics.clone(),
                 },
             );
         }
@@ -1371,38 +1379,43 @@ impl<'a> CheckEnvironment<'a> {
             return Some(binding.clone());
         }
         let slot = self.capture_sources.len();
-        let (value_type, function_targets, introduction, source) = match storage {
-            VisibleStorage::Activation {
-                slot,
-                value_type,
-                span: introduction,
-                function_targets,
-            } => (
-                value_type.clone(),
-                function_targets.clone(),
-                introduction,
-                Expr::variable(
+        let (value_type, function_targets, generics, introduction, source) =
+            match storage {
+                VisibleStorage::Activation {
                     slot,
                     value_type,
-                    SourceOrigin::new(self.source_id, span),
+                    span: introduction,
+                    function_targets,
+                    generics,
+                } => (
+                    value_type.clone(),
+                    function_targets.clone(),
+                    generics,
+                    introduction,
+                    Expr::variable(
+                        slot,
+                        value_type,
+                        SourceOrigin::new(self.source_id, span),
+                    ),
                 ),
-            ),
-            VisibleStorage::Closure {
-                slot,
-                value_type,
-                span: introduction,
-                function_targets,
-            } => (
-                value_type.clone(),
-                function_targets.clone(),
-                introduction,
-                Expr::captured(
+                VisibleStorage::Closure {
                     slot,
                     value_type,
-                    SourceOrigin::new(self.source_id, span),
+                    span: introduction,
+                    function_targets,
+                    generics,
+                } => (
+                    value_type.clone(),
+                    function_targets.clone(),
+                    generics,
+                    introduction,
+                    Expr::captured(
+                        slot,
+                        value_type,
+                        SourceOrigin::new(self.source_id, span),
+                    ),
                 ),
-            ),
-        };
+            };
         self.capture_sources.push(source);
         // The capture keeps the outer binder's introduction span so a
         // redeclaration relates the binder, not the capturing lambda.
@@ -1411,6 +1424,7 @@ impl<'a> CheckEnvironment<'a> {
             value_type,
             span: introduction,
             function_targets,
+            generics,
         };
         self.captures.insert(name.to_owned(), binding.clone());
         Some(binding)
@@ -1774,13 +1788,14 @@ fn function_value(
     let signature = if parameters.is_empty() {
         signature
     } else {
-        let mut instantiation = infer::Instantiation::new(&parameters);
-        let opened = Type::Function(Box::new(instantiation.open_signature(&signature)));
-        if let Some(expected) = &expected {
-            instantiation.unify(&opened, expected);
-        }
-        let Some(Type::Function(instantiated)) = instantiation.resolved(&opened) else {
-            ambiguous_generic(environment, expression.span(), &instantiation.unbound());
+        let Type::Function(instantiated) = instantiate_value(
+            environment,
+            expression.span(),
+            &parameters,
+            &Type::Function(Box::new(signature)),
+            expected.as_ref(),
+        )?
+        else {
             return None;
         };
         *instantiated
@@ -1808,10 +1823,11 @@ fn binding_value(
     expression: &Expression,
     expected: Option<Type>,
     value_type: Type,
+    generics: Vec<String>,
     callee_position: bool,
     build: impl FnOnce(Type, SourceOrigin) -> Expr,
 ) -> Option<Expr> {
-    let parameters = infer::quantified_parameters(&value_type);
+    let parameters = generics;
     let actual = if parameters.is_empty() || callee_position {
         value_type
     } else {
@@ -1840,8 +1856,45 @@ fn binding_value(
         })
 }
 
+/// The quantified `where:` names of a generic `lambda` written at
+/// `expression`, in order; empty for anything else. They match the names the
+/// lambda arm substitutes, including ones its signature never mentions.
+fn quantified_lambda_generics(expression: &Expression) -> Vec<String> {
+    let ExpressionKind::Lambda(lambda) = expression.kind() else {
+        return Vec::new();
+    };
+    nominal::generic_names(lambda.attributes().items())
+        .iter()
+        .enumerate()
+        .map(|(index, name)| infer::quantified_name(name, index, lambda.span().start()))
+        .collect()
+}
+
+/// The complete generic parameter list of a generic `lambda` in callee
+/// position: written directly, or named through a local or captured binding.
+fn callee_generics(
+    environment: &CheckEnvironment<'_>,
+    callee: &Expression,
+) -> Vec<String> {
+    if let ExpressionKind::Name(name) = callee.kind()
+        && name.kind() == NameKind::Symbol
+        && name.segments().len() == 1
+    {
+        if let Some(binding) = environment.locals.get(name.value()) {
+            return binding.generics.clone();
+        }
+        if let Some(binding) = environment.captures.get(name.value()) {
+            return binding.generics.clone();
+        }
+        return Vec::new();
+    }
+    quantified_lambda_generics(callee)
+}
+
 /// `value_type` with its generic `parameters` fixed by unification with the
-/// written expected type, or `@type.ambiguous-inference`.
+/// written expected type. An expected type that contradicts the value is a
+/// type mismatch; one that leaves any parameter open, including a parameter
+/// the type never mentions, is `@type.ambiguous-inference`.
 fn instantiate_value(
     environment: &mut CheckEnvironment<'_>,
     span: ByteSpan,
@@ -1851,12 +1904,23 @@ fn instantiate_value(
 ) -> Option<Type> {
     let mut instantiation = infer::Instantiation::new(parameters);
     let opened = instantiation.open(value_type);
-    if let Some(expected) = expected {
-        instantiation.unify(&opened, expected);
+    if let Some(expected) = expected
+        && !instantiation.unify(&opened, expected)
+    {
+        ensure_expected(
+            environment,
+            span,
+            Some(expected.clone()),
+            infer::display(value_type),
+        );
+        return None;
     }
-    let resolved = instantiation.resolved(&opened);
+    let unbound = instantiation.unbound();
+    let resolved = instantiation
+        .resolved(&opened)
+        .filter(|_| unbound.is_empty());
     if resolved.is_none() {
-        ambiguous_generic(environment, span, &instantiation.unbound());
+        ambiguous_generic(environment, span, &unbound);
     }
     resolved
 }
@@ -1981,7 +2045,7 @@ pub(crate) fn start_instantiation(
                 application,
                 format!(
                     "`types:` makes the result {}, but {expected} is expected",
-                    instantiation.apply(&result)
+                    infer::display(&instantiation.apply(&result))
                 ),
             );
             return None;
@@ -2006,10 +2070,20 @@ pub(crate) fn check_inferred_operand(
     if let Some(fixed) = instantiation.resolved(pattern) {
         let before = environment.diagnostics.len();
         let checked = check_operand(environment, operand, Some(fixed));
-        if types_written && infer::has_variables(pattern) {
+        // Only an operand whose whole parameter type is a generic parameter
+        // fixed by `types:` contradicts that list; a mismatch in a concrete
+        // part of a parameter type stays an ordinary argument mismatch.
+        let generic_parameter =
+            matches!(pattern, Type::Param(name) if name.starts_with('?'));
+        if types_written && generic_parameter {
+            let span = operand.span();
             for diagnostic in environment.diagnostics.iter_mut().skip(before) {
-                if diagnostic.code() == DiagnosticCode::TypeArgumentMismatch
-                    && diagnostic.primary_span() == operand.span()
+                let inside = diagnostic.primary_span().start() >= span.start()
+                    && diagnostic.primary_span().end() <= span.end();
+                if matches!(
+                    diagnostic.code(),
+                    DiagnosticCode::TypeArgumentMismatch | DiagnosticCode::TypeMismatch
+                ) && inside
                 {
                     *diagnostic = diagnostic
                         .clone()
@@ -2027,8 +2101,8 @@ pub(crate) fn check_inferred_operand(
                 operand.span(),
                 format!(
                     "operand has type {}, which does not fit the parameter type {}",
-                    checked.result_type(),
-                    instantiation.apply(pattern)
+                    infer::display(&checked.result_type()),
+                    infer::display(&instantiation.apply(pattern))
                 ),
             )
             .with_source_id(environment.source_id),
@@ -2123,10 +2197,14 @@ fn check_generic_operands(
         }
     }
 
-    let Some(Type::Function(instantiated)) =
-        instantiation.resolved(&Type::Function(Box::new(opened)))
+    // Every parameter must be fixed, including one the signature never
+    // mentions: inference is complete only when the argument list is unique.
+    let unbound = instantiation.unbound();
+    let Some(Type::Function(instantiated)) = instantiation
+        .resolved(&Type::Function(Box::new(opened)))
+        .filter(|_| unbound.is_empty())
     else {
-        ambiguous_generic(environment, application.span(), &instantiation.unbound());
+        ambiguous_generic(environment, application.span(), &unbound);
         return None;
     };
     Some((
@@ -2684,6 +2762,7 @@ fn check_expression_in_position(
                     expression,
                     expected,
                     binding.value_type,
+                    binding.generics,
                     callee_position,
                     |value_type, origin| {
                         Expr::variable(binding.slot, value_type, origin)
@@ -2700,6 +2779,7 @@ fn check_expression_in_position(
                     expression,
                     expected,
                     binding.value_type,
+                    binding.generics,
                     callee_position,
                     |value_type, origin| {
                         Expr::captured(binding.slot, value_type, origin)
@@ -2772,7 +2852,7 @@ fn check_expression_in_position(
                     .filter(|header| !header.type_parameters.is_empty())
                     .map(|header| header.type_parameters.clone()),
                 // A generic `lambda`, directly or through a binding.
-                other => Some(infer::quantified_parameters(&other.result_type()))
+                _ => Some(callee_generics(environment, application.callee()))
                     .filter(|parameters| !parameters.is_empty()),
             };
             if type_arguments.is_some() && generic.is_none() {
@@ -3011,6 +3091,7 @@ fn check_expression_in_position(
         } => {
             environment.keeps_generic =
                 matches!(value.kind(), ExpressionKind::Lambda(_));
+            let generics = quantified_lambda_generics(value);
             let value = check_expression(environment, value, None)?;
             let function_targets = matches!(value.result_type(), Type::Function(_))
                 .then(|| {
@@ -3049,6 +3130,9 @@ fn check_expression_in_position(
                         function_targets,
                     ) {
                         return None;
+                    }
+                    if let Some(binding) = nested.locals.get_mut(name.value()) {
+                        binding.generics = generics;
                     }
                     Some(nested.next_slot.saturating_sub(1))
                 }
@@ -3267,20 +3351,14 @@ fn check_expression_in_position(
                         .collect(),
                 )
             } else {
-                let mut instantiation = infer::Instantiation::new(&own_generics);
-                let opened =
-                    Type::Function(Box::new(instantiation.open_signature(&signature)));
-                if let Some(expected) = &expected {
-                    instantiation.unify(&opened, expected);
-                }
-                let Some(Type::Function(instantiated)) =
-                    instantiation.resolved(&opened)
+                let Type::Function(instantiated) = instantiate_value(
+                    environment,
+                    expression.span(),
+                    &own_generics,
+                    &Type::Function(Box::new(signature)),
+                    expected.as_ref(),
+                )?
                 else {
-                    ambiguous_generic(
-                        environment,
-                        expression.span(),
-                        &instantiation.unbound(),
-                    );
                     return None;
                 };
                 let parameters = instantiated.parameters().to_vec();

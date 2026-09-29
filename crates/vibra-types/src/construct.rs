@@ -51,11 +51,14 @@ pub(crate) fn check_constructor(
     )?;
     let types_written = type_arguments.is_some();
     let origin = SourceOrigin::new(environment.source_id, application.span());
+    let mut binding = ConstructorBinding::positional(0);
     let expression = match (&body, variant) {
         (TypeBody::Record(fields), None) => {
             let names: Vec<String> =
                 fields.iter().map(|(name, _)| name.clone()).collect();
-            let arguments = bind_labelled(environment, application, &names)?;
+            let (arguments, labelled) =
+                bind_labelled(environment, application, &names)?;
+            binding = labelled;
             let mut checked = Vec::with_capacity(fields.len());
             for ((name, field_type), argument) in fields.iter().zip(arguments) {
                 let field_type = instantiation.open(field_type);
@@ -82,6 +85,7 @@ pub(crate) fn check_constructor(
         (TypeBody::Wrapper(representation), None) => {
             let operand =
                 single_positional(environment, application, "a wrapper constructor")?;
+            binding = ConstructorBinding::positional(1);
             let representation = instantiation.open(representation);
             let value = check_inferred_operand(
                 environment,
@@ -130,6 +134,7 @@ pub(crate) fn check_constructor(
             } else {
                 let operand =
                     single_positional(environment, application, "an enum variant")?;
+                binding = ConstructorBinding::positional(1);
                 let payload_type = instantiation.open(payload_type);
                 Some(Box::new(check_inferred_operand(
                     environment,
@@ -174,6 +179,7 @@ pub(crate) fn check_constructor(
             return None;
         }
     };
+    binding.record(environment, application);
     let value_type = expression.result_type();
     finish(
         environment,
@@ -383,7 +389,7 @@ fn bind_labelled<'a>(
     environment: &mut CheckEnvironment<'_>,
     application: &'a Application,
     names: &[String],
-) -> Option<Vec<&'a CallArgument>> {
+) -> Option<(Vec<&'a CallArgument>, ConstructorBinding)> {
     let facts = BindingFacts::new(0, names.to_vec(), None);
     let ordered = match application.ordered_arguments(&facts) {
         Ok(ordered) => ordered,
@@ -404,27 +410,11 @@ fn bind_labelled<'a>(
         );
         return None;
     }
-    if ordered
+    let reordered = ordered
         .iter()
         .zip(application.arguments())
-        .any(|(left, right)| !std::ptr::eq(*left, right))
-    {
-        environment.diagnostics.push(
-            Diagnostic::new(
-                DiagnosticCode::StyleArgumentOrder,
-                application.span(),
-                "record fields are not in declaration order",
-            )
-            .with_source_id(environment.source_id),
-        );
-    }
-    environment
-        .bindings
-        .push(vibra_syntax::ApplicationBinding::new(
-            application.span(),
-            facts,
-        ));
-    Some(ordered)
+        .any(|(left, right)| !std::ptr::eq(*left, right));
+    Some((ordered, ConstructorBinding { facts, reordered }))
 }
 
 fn single_positional<'a>(
@@ -480,4 +470,40 @@ fn instantiated(
         ambiguous_generic(environment, application.span(), &instantiation.unbound());
     }
     resolved
+}
+
+/// The binding facts of one constructor application, recorded only once the
+/// construction checks, so the formatter and the style warning never act on
+/// an incomplete binding.
+struct ConstructorBinding {
+    facts: BindingFacts,
+    reordered: bool,
+}
+
+impl ConstructorBinding {
+    fn positional(count: usize) -> Self {
+        Self {
+            facts: BindingFacts::new(count, Vec::new(), None),
+            reordered: false,
+        }
+    }
+
+    fn record(self, environment: &mut CheckEnvironment<'_>, application: &Application) {
+        if self.reordered || application.type_arguments_after_operands() {
+            environment.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::StyleArgumentOrder,
+                    application.span(),
+                    "constructor operands are not in canonical declaration order",
+                )
+                .with_source_id(environment.source_id),
+            );
+        }
+        environment
+            .bindings
+            .push(vibra_syntax::ApplicationBinding::new(
+                application.span(),
+                self.facts,
+            ));
+    }
 }

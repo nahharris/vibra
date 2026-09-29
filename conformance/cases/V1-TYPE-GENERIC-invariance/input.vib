@@ -10,3 +10,5 @@
 (defn keep (value (boxed i64)) (boxed i64) value)
 
 (defn narrowed () (boxed i64) (keep (boxed 1i32)))
+
+(defn passed (value (boxed i32)) (boxed i64) (keep value))

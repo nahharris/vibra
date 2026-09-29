@@ -21,3 +21,9 @@ code = "@type.argument-mismatch"
 level = "@error"
 source = "input.vib"
 span = [257, 261]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [317, 322]

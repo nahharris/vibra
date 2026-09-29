@@ -187,3 +187,132 @@ fn a_lambda_sees_and_must_not_redeclare_enclosing_generic_names() {
         vec![DiagnosticCode::NameGenericRedeclaration]
     );
 }
+
+fn messages(body: &str) -> Vec<(DiagnosticCode, String)> {
+    let source = format!("{PRELUDE}{body}");
+    check_source("case.vib", &source)
+        .diagnostics()
+        .iter()
+        .map(|diagnostic| (diagnostic.code(), diagnostic.message().to_owned()))
+        .collect()
+}
+
+#[test]
+fn a_parameter_no_operand_mentions_is_ambiguous_unless_supplied() {
+    let unused = "(defn second (x b) b\n  where: (a any b any)\n  x)\n";
+    assert_eq!(
+        codes(&format!("{unused}(defn main () i32 (second 1i32))")),
+        vec![DiagnosticCode::TypeAmbiguousInference]
+    );
+    assert_eq!(
+        codes(&format!(
+            "{unused}(defn main () i32 (second types: (str i32) 1i32))"
+        )),
+        Vec::new()
+    );
+    assert_eq!(
+        codes(
+            "(deftype cell (record v t)\n  where: (t any)\n  (defn make (x i32) i32 x))\n\
+             (defn main () i32 (cell.make 1i32))"
+        ),
+        vec![DiagnosticCode::TypeAmbiguousInference]
+    );
+}
+
+#[test]
+fn a_generic_lambda_takes_its_complete_where_list() {
+    let body = |call: &str| {
+        format!(
+            "(defn main () i32\n  (let g (lambda (x b) b\n    where: (a any b any)\n    x)\n    {call}))"
+        )
+    };
+    assert_eq!(codes(&body("(g types: (str i32) 1i32)")), Vec::new());
+    assert_eq!(
+        codes(&body("(g types: (i32) 1i32)")),
+        vec![DiagnosticCode::TypeTypeArgumentMismatch]
+    );
+    assert_eq!(
+        codes(&body("(g 1i32)")),
+        vec![DiagnosticCode::TypeAmbiguousInference]
+    );
+}
+
+#[test]
+fn a_generic_value_contradicting_its_expected_type_is_a_mismatch() {
+    assert_eq!(
+        codes("(defn take (x i32) i32 x)\n(defn main () i32 (take identity))"),
+        vec![DiagnosticCode::TypeArgumentMismatch]
+    );
+}
+
+#[test]
+fn diagnostics_spell_generic_parameters_as_written() {
+    for (_, message) in messages(
+        "(deftype boxed t\n  where: (t any))\n\
+         (defn open (value (boxed t)) i32\n  where: (t any)\n  0i32)\n\
+         (defn main () i32 (open 1i32))",
+    ) {
+        assert!(
+            !message.contains('?') && !message.contains('#'),
+            "{message}"
+        );
+    }
+}
+
+#[test]
+fn only_a_types_fixed_operand_contradicts_types() {
+    assert_eq!(
+        codes(
+            "(defn run (f (fn (t) i32) v t) i32\n  where: (t any)\n  0i32)\n\
+             (defn main () i32 (run types: (i32) (lambda (v i32) str \"s\") 1i32))"
+        ),
+        vec![DiagnosticCode::TypeArgumentMismatch]
+    );
+    assert_eq!(
+        codes(
+            "(deftype boxed t\n  where: (t any))\n\
+             (defn main () (boxed i32) (identity types: ((boxed i32)) (boxed \"x\")))"
+        ),
+        vec![DiagnosticCode::TypeTypeArgumentMismatch]
+    );
+}
+
+#[test]
+fn constructors_warn_about_a_late_types_group_only_when_they_check() {
+    let cell = "(deftype cell (record value t)\n  where: (t any))\n";
+    assert_eq!(
+        codes(&format!(
+            "{cell}(defn main () (cell i32) (cell value: 1i32 types: (i32)))"
+        )),
+        vec![DiagnosticCode::StyleArgumentOrder]
+    );
+    assert_eq!(
+        codes(&format!(
+            "{cell}(defn main () (cell i32) (cell value: \"x\" types: (i32)))"
+        )),
+        vec![DiagnosticCode::TypeTypeArgumentMismatch]
+    );
+    assert_eq!(
+        codes(
+            "(deftype boxed t\n  where: (t any))\n\
+             (defn main () (boxed i32) (boxed 1i32 types: (i32)))"
+        ),
+        vec![DiagnosticCode::StyleArgumentOrder]
+    );
+}
+
+#[test]
+fn any_self_and_a_types_slot_are_reserved() {
+    assert_eq!(
+        codes("(defn f (x i32) i32\n  where: (any any)\n  x)"),
+        vec![DiagnosticCode::NameReservedDeclaration]
+    );
+    assert_eq!(
+        codes("(defn f (x i32) i32\n  where: (self any)\n  x)"),
+        vec![DiagnosticCode::NameReservedDeclaration]
+    );
+    assert_eq!(
+        codes("(defn f (g (fn (i32) i32 labelled: (types i32))) i32 0i32)"),
+        vec![DiagnosticCode::NameReservedLabel]
+    );
+}

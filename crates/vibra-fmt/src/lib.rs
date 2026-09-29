@@ -129,9 +129,8 @@ impl<'a> RenderContext<'a> {
             .iter()
             .find(|binding| binding.span() == application.span())
         else {
-            if changed {
-                self.argument_order_diagnostic(application);
-            }
+            // Rendering still moves a late `types:` group, which is never an
+            // operand, but without a complete binding there is no warning.
             return application.arguments().iter().collect();
         };
         match application.ordered_arguments(binding.facts()) {

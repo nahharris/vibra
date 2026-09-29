@@ -255,7 +255,8 @@ because a member is only ever reached through a qualified path and is never a
 bare type head. A nested method named `map` therefore stays legal exactly as the
 source-language chapter states, which the `iter` contract's own default `map`
 member depends on. The separate value-namespace rule on builtin type names
-keeps its own `@name.reserved-value-spelling`.
+keeps its own `@name.reserved-value-spelling`. A generic name spelled `self`,
+which names the receiver type, or `any` also emits `@name.reserved-declaration`.
 
 A union type lists at least two member types and declares no member names. A
 declared union's identity is its `deftype`, an anonymous union's is its member

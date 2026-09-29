@@ -89,3 +89,15 @@ ledger rows C1.3 (generic part) and C6.2 are implemented; validation passes.
   names (`t#index@site`, which no source name can spell), each call
   instantiates it, and any other use instantiates it from the expected `fn`
   type. Closures stay erased, so IR slot and capture checks use `admits`.
+- The invariance matrix item uses a generic `boxed` wrapper instead of
+  `(array t)`, because arrays arrive in Step 4.
+- Review fixes: the unifier follows binding chains and never rebinds; a
+  generic parameter no operand, result, or `types:` fixes is ambiguous even
+  when the signature never mentions it; a generic lambda's `types:` list is
+  its complete `where:` list; a generic value contradicting its expected type
+  is a mismatch rather than ambiguity; diagnostics spell parameters as
+  written; only an operand whose whole parameter type is fixed by `types:`
+  becomes `@type.type-argument-mismatch`; constructors and the formatter warn
+  about a late `types:` only after a complete binding; `any` and `self` are
+  reserved generic names, and a function-type labelled slot named `types` is
+  `@name.reserved-label`.

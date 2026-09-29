@@ -2911,6 +2911,14 @@ impl AstParser {
         for pair in forms.chunks_exact(2) {
             let name =
                 self.local_name(pair[0], "labelled type slots require local names")?;
+            if name.value() == "types" {
+                self.error(
+                    DiagnosticCode::NameReservedLabel,
+                    pair[0].span(),
+                    "types is reserved for call-site type arguments",
+                );
+                return None;
+            }
             let value_type = self.parse_type_expr(pair[1])?;
             slots.push(TypeSlot { name, value_type });
         }
@@ -3084,11 +3092,12 @@ impl AstParser {
                 self.local_name(pair[0], "generic names must be unqualified symbols")?;
             if RESERVED_TYPE_HEADS.contains(&name.value())
                 || BUILTIN_TYPE_NAMES.contains(&name.value())
+                || matches!(name.value(), "any" | "self")
             {
                 self.error(
                     DiagnosticCode::NameReservedDeclaration,
                     pair[0].span(),
-                    "a generic name uses a reserved type head or builtin type name",
+                    "a generic name uses a reserved type head, builtin type name, `any`, or `self`",
                 );
             }
             if inherited_generics
