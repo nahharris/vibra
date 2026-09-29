@@ -1234,7 +1234,7 @@ impl Resolution {
         let Some(assert_module) = overlay.modules.iter().find(|module| {
             module.unit == "std"
                 && module.segments == ["assert"]
-                && module.source_id == "stdlib/m2/src/std/assert.vib"
+                && module.source_id == "stdlib/src/std/assert.vib"
         }) else {
             return;
         };

@@ -80,7 +80,7 @@ struct Module<'a> {
 pub fn check_resolved(
     snapshot: &ResolvedSnapshot,
     source_ids: &[String],
-    verification: Option<&crate::BootstrapVerification>,
+    verification: Option<&crate::Stdlib>,
 ) -> ResolvedCheckResult {
     let selected = source_ids.iter().cloned().collect::<BTreeSet<_>>();
     let mut seen_source_ids = BTreeSet::new();
@@ -961,7 +961,7 @@ fn default_expression(value_type: &Type, origin: SourceOrigin) -> Option<Expr> {
 fn is_verified_assertion_declaration(
     snapshot: &ResolvedSnapshot,
     id: &DeclarationId,
-    verification: Option<&crate::BootstrapVerification>,
+    verification: Option<&crate::Stdlib>,
 ) -> bool {
     let Some(verification) = verification else {
         return false;

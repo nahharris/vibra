@@ -538,7 +538,7 @@ fn verified_bootstrap_imports_keep_package_identity_and_execute_through_checked_
         .targets()
         .first()
         .expect("target");
-    let verification = vibra_types::verify_bootstrap().expect("bootstrap verification");
+    let verification = vibra_types::load_stdlib().expect("bootstrap verification");
 
     let checked = vibra_workspace::semantic::check_target_with_bootstrap(
         &snapshot,
@@ -564,15 +564,15 @@ fn verified_bootstrap_imports_keep_package_identity_and_execute_through_checked_
     let module = resolved
         .modules()
         .iter()
-        .find(|module| module.source_id() == vibra_types::BOOTSTRAP_TEXT_SOURCE_ID)
+        .find(|module| module.source_id() == vibra_types::STDLIB_TEXT_SOURCE_ID)
         .expect("verified text module");
     assert_eq!(module.package().name(), "vibra-stdlib");
-    assert_eq!(module.package().version(), "0.1.0");
+    assert_eq!(module.package().version(), "0.2.0");
 }
 
 #[test]
 fn bootstrap_overlay_rejects_a_duplicate_project_source_identity() {
-    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @local kind: @lib root: \"stdlib/m2/src/std\")) dependencies: (map))\n";
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @local kind: @lib root: \"stdlib/src/std\")) dependencies: (map))\n";
     let project = TempProject::with_project(
         "bootstrap-source-id-collision",
         project_text,
@@ -582,7 +582,7 @@ fn bootstrap_overlay_rejects_a_duplicate_project_source_identity() {
                 "(import text @std.text)\n(defn execute () void (let - (text.length \"x\") (do)))\n",
             ),
             (
-                "stdlib/m2/src/std/text.vib",
+                "stdlib/src/std/text.vib",
                 "(defn local () i32 \"wrong type\")\n",
             ),
         ],
@@ -594,7 +594,7 @@ fn bootstrap_overlay_rejects_a_duplicate_project_source_identity() {
         .targets()
         .first()
         .expect("binary target");
-    let verification = vibra_types::verify_bootstrap().expect("bootstrap verification");
+    let verification = vibra_types::load_stdlib().expect("bootstrap verification");
 
     let checked = vibra_workspace::semantic::check_target_with_bootstrap(
         &snapshot,
@@ -696,7 +696,7 @@ fn imported_std_modules_keep_the_verified_package_and_local_std_units_resolve_lo
         .targets()
         .first()
         .expect("target");
-    let verification = vibra_types::verify_bootstrap().expect("bootstrap verification");
+    let verification = vibra_types::load_stdlib().expect("bootstrap verification");
 
     let checked = vibra_workspace::semantic::check_target_with_bootstrap(
         &snapshot,

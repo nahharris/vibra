@@ -848,13 +848,13 @@ fn canonical_target_root(
         )
 }
 
-fn verify_toolchain_bootstrap() -> Result<vibra_types::BootstrapVerification, String> {
-    vibra_types::verify_bootstrap().map_err(|error| error.to_string())
+fn verify_toolchain_bootstrap() -> Result<vibra_types::Stdlib, String> {
+    vibra_types::load_stdlib().map_err(|error| error.to_string())
 }
 
 fn verify_workspace_bootstrap(
     snapshot: &vibra_workspace::WorkspaceSnapshot,
-) -> Result<Option<vibra_types::BootstrapVerification>, String> {
+) -> Result<Option<vibra_types::Stdlib>, String> {
     let requires_verification = snapshot
         .requires_bootstrap_verification()
         .map_err(|error| error.to_string())?;
@@ -867,7 +867,7 @@ fn verify_workspace_bootstrap(
 
 fn render_workspace_diagnostics(
     snapshot: &vibra_workspace::WorkspaceSnapshot,
-    verification: Option<&vibra_types::BootstrapVerification>,
+    verification: Option<&vibra_types::Stdlib>,
     diagnostics: &[Diagnostic],
 ) -> Result<Vec<DiagnosticDocument>, String> {
     let mut sources = std::collections::BTreeMap::<String, String>::new();

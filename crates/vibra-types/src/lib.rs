@@ -31,18 +31,17 @@ use vibra_syntax::{
     NameKind, PatternKind, SourceAst, TypeExpr, TypeMember,
 };
 
-mod bootstrap;
 mod construct;
 mod infer;
 mod nominal;
 mod resolved;
+mod stdlib;
 
-pub use bootstrap::{
-    BOOTSTRAP_ASSERT_SOURCE_ID, BOOTSTRAP_TEXT_SOURCE_ID, BootstrapInputs,
-    BootstrapVerification, BootstrapVerificationError, verify_bootstrap,
-    verify_bootstrap_bytes,
-};
 pub use resolved::{ResolvedCheckResult, check_resolved};
+pub use stdlib::{
+    STDLIB_ASSERT_SOURCE_ID, STDLIB_OPTION_SOURCE_ID, STDLIB_TEXT_SOURCE_ID, Stdlib,
+    StdlibError, StdlibInputs, StdlibModule, load_stdlib, load_stdlib_bytes,
+};
 
 /// The result of checking one source document.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -184,19 +183,22 @@ pub fn check_ast_with_bindings(
 /// declaration. The verifier in this crate must approve the bootstrap bytes
 /// before callers pass them here.
 pub fn check_bootstrap_source(
-    verification: &BootstrapVerification,
+    verification: &Stdlib,
     source_id: impl AsRef<str>,
     source: &str,
 ) -> CheckResult {
     let source_id = source_id.as_ref();
-    if source_id != BOOTSTRAP_TEXT_SOURCE_ID
-        || source.as_bytes() != bootstrap::EMBEDDED_TEXT_MODULE
-        || !verification.maps("std.text", BOOTSTRAP_TEXT_SOURCE_ID)
+    if source_id != STDLIB_TEXT_SOURCE_ID
+        || verification
+            .module("std.text")
+            .map(stdlib::StdlibModule::bytes)
+            != Some(source.as_bytes())
+        || !verification.maps("std.text", STDLIB_TEXT_SOURCE_ID)
     {
         let diagnostic = Diagnostic::new(
             DiagnosticCode::ToolUnavailable,
             ByteSpan::empty_at(0),
-            "compiler externals require the verified M2 bootstrap module",
+            "compiler externals require the embedded standard library",
         )
         .with_source_id(source_id);
         return CheckResult::new(None, vec![diagnostic]);
@@ -242,12 +244,12 @@ pub fn check_bootstrap_source(
 }
 
 /// Checks one source module with the narrowly supported explicit `@std.text`
-/// import.  This adapter is capability-backed by [`BootstrapVerification`]; a
+/// import.  This adapter is capability-backed by [`Stdlib`]; a
 /// source file cannot manufacture that authority by copying declarations.
 /// Only the exact signed `@std.text` map entry is exposed, and source external
 /// declarations remain forbidden.
 pub fn check_bootstrap_text_import(
-    verification: &BootstrapVerification,
+    verification: &Stdlib,
     source_id: impl AsRef<str>,
     source: &str,
 ) -> CheckResult {
@@ -309,11 +311,11 @@ pub fn check_bootstrap_text_import(
             "only the exact `(import text @std.text)` import is available",
         );
     }
-    if !verification.maps("std.text", BOOTSTRAP_TEXT_SOURCE_ID) {
+    if !verification.maps("std.text", STDLIB_TEXT_SOURCE_ID) {
         return bootstrap_import_unavailable(
             source_id,
             import.span(),
-            "the @std.text import requires the verified M2 bootstrap map",
+            "the @std.text import requires the embedded standard library",
         );
     }
     if ast.declarations().iter().any(|declaration| {
@@ -2435,7 +2437,7 @@ fn compiler_intrinsic(
             diagnostics,
             source_id,
             function.span(),
-            "@compiler declarations require the verified M2 bootstrap module",
+            "@compiler declarations require the embedded standard library",
         );
         return None;
     }
@@ -3808,8 +3810,8 @@ pub(crate) fn unavailable(
 #[cfg(test)]
 mod tests {
     use super::{
-        BOOTSTRAP_TEXT_SOURCE_ID, check_bootstrap_source, check_bootstrap_text_import,
-        check_source, verify_bootstrap,
+        STDLIB_TEXT_SOURCE_ID, check_bootstrap_source, check_bootstrap_text_import,
+        check_source, load_stdlib,
     };
     use std::path::Path;
     use vibra_diagnostics::{ByteSpan, DiagnosticCode};
@@ -3990,22 +3992,13 @@ mod tests {
 
     #[test]
     fn the_exact_bootstrap_text_module_admits_only_closed_intrinsics() {
-        let source = include_str!("../../../stdlib/m2/src/std/text.vib");
-        let verification = verify_bootstrap().expect("bootstrap provenance");
+        let source = include_str!("../../../stdlib/src/std/text.vib");
+        let verification = load_stdlib().expect("bootstrap provenance");
         let checked =
-            check_bootstrap_source(&verification, BOOTSTRAP_TEXT_SOURCE_ID, source);
+            check_bootstrap_source(&verification, STDLIB_TEXT_SOURCE_ID, source);
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
         let program = checked.program().expect("bootstrap program");
         assert!(program.canonical_vibon().contains("text.length"));
-    }
-
-    #[test]
-    fn signed_bootstrap_verifies_exact_bytes_and_ed25519_signature() {
-        let verification = verify_bootstrap().expect("checked-in bootstrap provenance");
-        assert_eq!(
-            verification.artifact(),
-            include_bytes!("../../../stdlib/m2/bootstrap.vibon")
-        );
     }
 
     #[test]
@@ -4039,7 +4032,7 @@ mod tests {
         let source = r#"(import text @std.text)
 (defn answer () u64
   (text.length (text.concat "A😀" "")))"#;
-        let verification = verify_bootstrap().expect("bootstrap provenance");
+        let verification = load_stdlib().expect("bootstrap provenance");
         let checked =
             check_bootstrap_text_import(&verification, "app/main.vib", source);
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
@@ -4051,7 +4044,7 @@ mod tests {
 
     #[test]
     fn text_import_rejects_alias_target_and_extra_imports() {
-        let verification = verify_bootstrap().expect("bootstrap provenance");
+        let verification = load_stdlib().expect("bootstrap provenance");
         for source in [
             "(import wrong @std.text)\n(defn answer () u64 1u64)",
             "(import text @std.assert)\n(defn answer () u64 1u64)",
@@ -4073,7 +4066,7 @@ mod tests {
 
     #[test]
     fn unavailable_explicit_text_import_uses_import_span() {
-        let verification = verify_bootstrap().expect("bootstrap provenance");
+        let verification = load_stdlib().expect("bootstrap provenance");
         let source = "(import wrong @std.text)\n(defn answer () u64 1u64)";
         let checked =
             check_bootstrap_text_import(&verification, "app/main.vib", source);
@@ -4093,7 +4086,7 @@ mod tests {
 
     #[test]
     fn trusted_text_alias_collisions_report_the_import_span() {
-        let verification = verify_bootstrap().expect("bootstrap provenance");
+        let verification = load_stdlib().expect("bootstrap provenance");
         let module = check_bootstrap_text_import(
             &verification,
             "app/main.vib",
@@ -4163,7 +4156,7 @@ mod tests {
 
     #[test]
     fn trusted_text_import_rejects_source_body_and_effect_external_declarations() {
-        let verification = verify_bootstrap().expect("bootstrap provenance");
+        let verification = load_stdlib().expect("bootstrap provenance");
         for source in [
             r#"(import text @std.text)
 (defn answer () str "spoof"

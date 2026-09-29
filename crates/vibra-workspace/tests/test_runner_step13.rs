@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use vibra_types::verify_bootstrap;
+use vibra_types::load_stdlib;
 use vibra_workspace::{
     WorkspaceSnapshot,
     semantic::{TestItemStatus, TestSelector, TestSuiteStatus, run_tests},
@@ -51,8 +51,8 @@ impl Drop for TempProject {
     }
 }
 
-fn verified_bootstrap() -> vibra_types::BootstrapVerification {
-    verify_bootstrap().expect("signed bootstrap verification")
+fn verified_bootstrap() -> vibra_types::Stdlib {
+    load_stdlib().expect("embedded standard library")
 }
 
 #[test]

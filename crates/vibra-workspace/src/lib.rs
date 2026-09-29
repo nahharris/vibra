@@ -147,11 +147,11 @@ impl WorkspaceSnapshot {
         self.resolve_graph(&graph, None)
     }
 
-    /// Resolves the captured local source graph with an already verified M2
+    /// Resolves the captured local source graph with an already loaded
     /// bootstrap package overlay.
     pub fn resolve_with_bootstrap(
         &self,
-        verification: &vibra_types::BootstrapVerification,
+        verification: &vibra_types::Stdlib,
     ) -> Result<vibra_resolve::ResolvedSnapshot, WorkspaceError> {
         let graph = self.source_graph()?;
         self.resolve_graph(&graph, Some(verification))
@@ -255,7 +255,7 @@ impl WorkspaceSnapshot {
     pub(crate) fn resolve_graph(
         &self,
         graph: &source_graph::SourceGraph,
-        verification: Option<&vibra_types::BootstrapVerification>,
+        verification: Option<&vibra_types::Stdlib>,
     ) -> Result<vibra_resolve::ResolvedSnapshot, WorkspaceError> {
         let package = self.project.project().package();
         let units = graph
@@ -303,6 +303,7 @@ impl WorkspaceSnapshot {
         )
         .with_reserved_import_paths([
             ("std".to_owned(), vec!["text".to_owned()]),
+            ("std".to_owned(), vec!["option".to_owned()]),
             ("std".to_owned(), vec!["assert".to_owned()]),
         ]);
         if let Some(verification) = verification {

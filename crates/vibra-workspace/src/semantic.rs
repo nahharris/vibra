@@ -99,7 +99,7 @@ pub fn check_all(snapshot: &WorkspaceSnapshot) -> WorkspaceCheckResult {
 /// package. No filesystem access occurs in this function.
 pub fn check_all_with_bootstrap(
     snapshot: &WorkspaceSnapshot,
-    verification: Option<&vibra_types::BootstrapVerification>,
+    verification: Option<&vibra_types::Stdlib>,
 ) -> WorkspaceCheckResult {
     check_scope(snapshot, None, verification)
 }
@@ -118,7 +118,7 @@ pub fn check_target(
 pub fn check_target_with_bootstrap(
     snapshot: &WorkspaceSnapshot,
     target: &Target,
-    verification: Option<&vibra_types::BootstrapVerification>,
+    verification: Option<&vibra_types::Stdlib>,
 ) -> WorkspaceCheckResult {
     check_scope(snapshot, Some(target), verification)
 }
@@ -135,7 +135,7 @@ pub fn run_target(snapshot: &WorkspaceSnapshot, target: &Target) -> WorkspaceRun
 pub fn run_target_with_bootstrap(
     snapshot: &WorkspaceSnapshot,
     target: &Target,
-    verification: Option<&vibra_types::BootstrapVerification>,
+    verification: Option<&vibra_types::Stdlib>,
 ) -> WorkspaceRunResult {
     let check = check_target_with_bootstrap(snapshot, target, verification);
     let outcome = if check.status() != CheckStatus::Accepted
@@ -156,7 +156,7 @@ pub fn run_target_with_bootstrap(
 fn check_scope(
     snapshot: &WorkspaceSnapshot,
     selected_target: Option<&Target>,
-    verification: Option<&vibra_types::BootstrapVerification>,
+    verification: Option<&vibra_types::Stdlib>,
 ) -> WorkspaceCheckResult {
     let graph = match snapshot.source_graph() {
         Ok(graph) => graph,
@@ -236,7 +236,7 @@ fn check_resolved_scope(
     resolved: &ResolvedSnapshot,
     initial_units: &BTreeSet<String>,
     selected_unit: Option<&str>,
-    verification: Option<&vibra_types::BootstrapVerification>,
+    verification: Option<&vibra_types::Stdlib>,
     mut diagnostics: Vec<Diagnostic>,
 ) -> WorkspaceCheckResult {
     let (units, source_ids) = import_closure(resolved, initial_units, verification);
@@ -363,12 +363,11 @@ fn check_resolved_scope(
 fn import_closure(
     resolved: &ResolvedSnapshot,
     initial_units: &BTreeSet<String>,
-    verification: Option<&vibra_types::BootstrapVerification>,
+    verification: Option<&vibra_types::Stdlib>,
 ) -> (BTreeSet<String>, BTreeSet<String>) {
     let mut units = initial_units.clone();
     let project_package = resolved.package();
-    let bootstrap_package =
-        verification.map(vibra_types::BootstrapVerification::package);
+    let bootstrap_package = verification.map(vibra_types::Stdlib::package);
     let mut source_ids = resolved
         .modules()
         .iter()
@@ -495,12 +494,14 @@ fn validate_entries(
 }
 
 pub(crate) fn is_bootstrap_import_path(written: &str) -> bool {
-    ["std.text", "std.assert"].iter().any(|module| {
-        written == *module
-            || written
-                .strip_prefix(module)
-                .is_some_and(|suffix| suffix.starts_with('.'))
-    })
+    ["std.text", "std.option", "std.assert"]
+        .iter()
+        .any(|module| {
+            written == *module
+                || written
+                    .strip_prefix(module)
+                    .is_some_and(|suffix| suffix.starts_with('.'))
+        })
 }
 
 fn is_deferred_result_type(ty: &TypeExpr) -> bool {

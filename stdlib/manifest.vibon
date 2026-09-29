@@ -1,0 +1,26 @@
+(record
+  format: @stdlib-manifest.v1
+  package-name: "vibra-stdlib"
+  package-version: "0.2.0"
+  modules: (map
+    @std.text (record
+      path: "std/text.vib"
+      sha256: "sha256:ab87030d3cb108fb24524e7559dd914d8f2279534039b295985906a662231439"
+      role: @source)
+    @std.option (record
+      path: "std/option.vib"
+      sha256: "sha256:b9e29b27a5fe745bbfb3dfb77ad311f74ce083f41494ca30d3bc1e72ee8d2ce0"
+      role: @source)
+    @std.assert (record
+      path: "std/assert.vib"
+      sha256: "sha256:f0bc061265b337f60c0bbf4e2e3cbb9d4a50321f99a380cac5b727c791fdad2d"
+      role: @test-registry))
+  compiler: (array "text.concat" "text.length")
+  assertions: (array
+    "assert.true"
+    "assert.false"
+    "assert.equal-bool"
+    "assert.equal-char"
+    "assert.equal-str"
+    "assert.equal-i32"
+    "assert.equal-u64"))

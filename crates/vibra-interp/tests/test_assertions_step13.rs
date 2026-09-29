@@ -15,7 +15,7 @@ fn origin() -> SourceOrigin {
 
 fn program(assertion: TestAssertion, operands: Vec<Value>) -> CheckedProgram {
     let assertion_origin =
-        SourceOrigin::new("stdlib/m2/src/std/assert.vib", ByteSpan::empty_at(0));
+        SourceOrigin::new("stdlib/src/std/assert.vib", ByteSpan::empty_at(0));
     let assertion_function = CheckedFunction::new_test_assertion(
         assertion.symbol(),
         assertion,
@@ -86,7 +86,7 @@ fn ordinary_run_allows_unused_test_assertion_markers() {
     let assertion = CheckedFunction::new_test_assertion(
         TestAssertion::True.symbol(),
         TestAssertion::True,
-        SourceOrigin::new("stdlib/m2/src/std/assert.vib", ByteSpan::empty_at(0)),
+        SourceOrigin::new("stdlib/src/std/assert.vib", ByteSpan::empty_at(0)),
     )
     .expect("closed assertion function");
     let origin = origin();
@@ -106,7 +106,7 @@ fn ordinary_run_allows_unused_test_assertion_markers() {
 #[test]
 fn assertion_failure_stops_nested_helper_arguments_and_later_calls() {
     let assertion_origin =
-        SourceOrigin::new("stdlib/m2/src/std/assert.vib", ByteSpan::empty_at(0));
+        SourceOrigin::new("stdlib/src/std/assert.vib", ByteSpan::empty_at(0));
     let assertion = CheckedFunction::new_test_assertion(
         TestAssertion::EqualStr.symbol(),
         TestAssertion::EqualStr,
