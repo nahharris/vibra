@@ -12,7 +12,7 @@ Prerequisite: Step 2 merged. Stage 3A behavior step.
 
 ## Scope
 
-`where:` on `deftype`, `defn`, `lambda`, and nested methods when every bound is
+`where:` on `deftype`, `defn`, and nested methods when every bound is
 `any`; inherited generic names in nested methods; applied type expressions;
 invariant inference of complete argument lists from operands and written
 result types; `types:` with complete lists, agreement checking, reserved
@@ -61,3 +61,28 @@ binding facts, never guesses.
 
 Inventory rows `Attribute::Where` and `TypeExpr::Applied` point at cases; M2
 ledger rows C1.3 (generic part) and C6.2 are implemented; validation passes.
+
+## Delivery notes
+
+- Generics are erased: `Type::Param` is rigid inside its declaration and
+  `Type::Applied` names an instantiated declared type. Checked IR carries no
+  type arguments on calls; IR validation treats a parameter as admitting any
+  type, and the checker guarantees each call is consistently instantiated.
+- The unifier lives in `crates/vibra-types/src/infer.rs`. An instantiation
+  renames the callee's parameters to `?index:name` variables, so they never
+  collide with the caller's rigid parameters.
+- Operands whose parameter type is already fixed are checked against it; the
+  rest are checked alone and unified, with `lambda` operands last. When a
+  written `types:` fixes the parameter an operand contradicts, the operand's
+  `@type.argument-mismatch` becomes `@type.type-argument-mismatch`.
+- A generic function named outside callee position is instantiated from its
+  written expected `fn` type, or is `@type.ambiguous-inference`.
+- Type-application arity had no diagnostic (G14); D14.1 assigns
+  `@type.type-argument-mismatch`.
+- An applied type adds to size through each argument its declaration stores
+  directly, so `(deftype n (record inner (holder n)))` is
+  `@type.infinite-size` while an argument used only under `fn` is not.
+- `option` and `result` in type position stay `@tool.unavailable` until
+  Steps 4 and 7 declare them.
+- The guide's scope previously listed `where:` on `lambda`; the reader and the
+  source chapter admit no `where:` there, so the scope was corrected.

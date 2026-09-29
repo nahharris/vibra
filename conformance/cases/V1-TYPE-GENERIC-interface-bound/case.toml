@@ -1,0 +1,17 @@
+id = "V1-TYPE-GENERIC-interface-bound"
+rule = "V1-TYPE-GENERIC"
+profile = "static-v1"
+operation = "type-check"
+description = "A where: bound naming an interface other than any is unavailable until interfaces land."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [36, 42]

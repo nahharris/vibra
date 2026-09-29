@@ -1,0 +1,5 @@
+(deftype holder (record value t)
+  where: (t any)
+  (defn replace (value self next t) self
+    where: (t any)
+    value))

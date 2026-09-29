@@ -1,0 +1,12 @@
+(deftype node (record value t next (node t))
+  where: (t any))
+
+(deftype holder (record value t)
+  where: (t any))
+
+(deftype nested (record inner (holder nested)))
+
+(deftype callback (record run (fn (t) i32))
+  where: (t any))
+
+(deftype handler (record on (callback handler)))

@@ -1,0 +1,35 @@
+id = "V1-TYPE-GENERIC-applied-types"
+rule = "V1-TYPE-GENERIC"
+profile = "static-v1"
+operation = "type-check"
+description = "An applied type names a visible declared type and supplies exactly its generic parameters."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "input.vib"
+span = [72, 87]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [116, 137]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [165, 176]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [208, 225]

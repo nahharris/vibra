@@ -1,0 +1,17 @@
+id = "V1-TYPE-GENERIC-reserved-label"
+rule = "V1-TYPE-GENERIC"
+profile = "static-v1"
+operation = "type-check"
+description = "A declaration must not introduce a labelled parameter named types."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.reserved-label"
+level = "@error"
+source = "input.vib"
+span = [44, 49]

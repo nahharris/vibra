@@ -152,7 +152,10 @@ type expression and MUST be accepted in every type position: a parameter, a
 result, a record field, an enum payload, a union member, a `def` annotation, an
 `as` type, and a `types:` argument. `array` and `map` take a fixed number of
 arguments, so they are ordinary generic builtin types, and `(array t)` and
-`(map k v)` are ordinary applied types.
+`(map k v)` are ordinary applied types. An applied type supplies exactly the
+complete generic parameter list of its head, and a bare generic head is an
+application with no arguments; any other count is
+`@type.type-argument-mismatch`.
 
 Record and enum types are flat and contain at least one name/type pair whose
 names are pairwise distinct; a repeated name emits `@name.member-collision`.

@@ -1,0 +1,5 @@
+(defn main () i32 (choose 3i32 second: 11i32 types: (i32) first: 9i32))
+(defn choose (base t) t
+  where: (t any)
+  labelled: (first i32 7i32 second i32 8i32)
+  base)

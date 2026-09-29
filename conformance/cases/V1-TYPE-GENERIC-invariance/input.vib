@@ -1,0 +1,12 @@
+(deftype boxed t
+  where: (t any))
+
+(defn same (left (boxed t) right (boxed t)) i32
+  where: (t any)
+  0i32)
+
+(defn mixed () i32 (same (boxed 1i32) (boxed "x")))
+
+(defn keep (value (boxed i64)) (boxed i64) value)
+
+(defn narrowed () (boxed i64) (keep (boxed 1i32)))
