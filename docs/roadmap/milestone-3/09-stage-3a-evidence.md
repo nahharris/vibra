@@ -28,3 +28,15 @@ with no network, and record the commands, exits, and outputs.
 
 The README records the demo, commands, counts, and the evidence table, and the
 Stage 3A rows are `landed`. Step 10 may then begin.
+
+## Delivery notes
+
+- The demo is [`examples/stage-3a-config`](../../../examples/stage-3a-config).
+  The commands, exits, corpus counts, inventory table, Stage 3B availability
+  cases, Step 1 code spans, and the conformance-clause map are in
+  [Stage 3A evidence](stage-3a-evidence.md).
+- The audit added `V1-TYPE-NOMINAL-union-no-lifting`,
+  `V1-TYPE-NOMINAL-recursive-through-array`, and
+  `V1-TYPE-GENERIC-stage-3b-types`. It also fixed two gaps: `any` in type
+  position now reports `@tool.unavailable`, and a declared type's unknown
+  member is reported once in the workspace path.

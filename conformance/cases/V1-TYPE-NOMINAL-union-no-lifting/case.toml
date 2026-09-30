@@ -1,0 +1,23 @@
+id = "V1-TYPE-NOMINAL-union-no-lifting"
+rule = "V1-TYPE-NOMINAL"
+profile = "static-v1"
+operation = "type-check"
+description = "A union lifts no member method from its members, and it is not a map key without its own implementations."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.invalid-map-key"
+level = "@error"
+source = "input.vib"
+span = [117, 141]
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "input.vib"
+span = [70, 88]
