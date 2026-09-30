@@ -617,29 +617,14 @@ pub enum TestAssertion {
     True,
     /// Require one boolean operand to be `false`.
     False,
-    /// Compare two booleans.
-    EqualBool,
-    /// Compare two Unicode scalars.
-    EqualChar,
-    /// Compare two Unicode scalar strings.
-    EqualStr,
-    /// Compare two signed 32-bit integers.
-    EqualI32,
-    /// Compare two unsigned 64-bit integers.
-    EqualU64,
+    /// Require two operands of one type to have the same canonical value
+    /// encoding.
+    Equal,
 }
 
 impl TestAssertion {
-    /// Every supported M2 test assertion in canonical order.
-    pub const ALL: [Self; 7] = [
-        Self::True,
-        Self::False,
-        Self::EqualBool,
-        Self::EqualChar,
-        Self::EqualStr,
-        Self::EqualI32,
-        Self::EqualU64,
-    ];
+    /// Every test assertion in canonical order.
+    pub const ALL: [Self; 3] = [Self::True, Self::False, Self::Equal];
 
     /// The assertion member without its `@std.assert.` prefix.
     #[must_use]
@@ -647,11 +632,7 @@ impl TestAssertion {
         match self {
             Self::True => "true",
             Self::False => "false",
-            Self::EqualBool => "equal-bool",
-            Self::EqualChar => "equal-char",
-            Self::EqualStr => "equal-str",
-            Self::EqualI32 => "equal-i32",
-            Self::EqualU64 => "equal-u64",
+            Self::Equal => "equal",
         }
     }
 
@@ -669,18 +650,27 @@ impl TestAssertion {
             .find(|assertion| assertion.member() == member)
     }
 
-    /// Exact monomorphic M2 function signature.
+    /// The generic parameters of the exact signature, in `where:` order.
+    #[must_use]
+    pub fn type_parameters(self) -> Vec<String> {
+        match self {
+            Self::True | Self::False => Vec::new(),
+            Self::Equal => vec!["t".to_owned()],
+        }
+    }
+
+    /// The exact signature: `(expected t) (actual t) -> void` for `equal`.
     #[must_use]
     pub fn signature(self) -> FunctionSignature {
-        let (parameters, result) = match self {
-            Self::True | Self::False => (vec![Type::Bool], Type::Void),
-            Self::EqualBool => (vec![Type::Bool, Type::Bool], Type::Void),
-            Self::EqualChar => (vec![Type::Char, Type::Char], Type::Void),
-            Self::EqualStr => (vec![Type::Str, Type::Str], Type::Void),
-            Self::EqualI32 => (vec![Type::I32, Type::I32], Type::Void),
-            Self::EqualU64 => (vec![Type::U64, Type::U64], Type::Void),
-        };
-        FunctionSignature::new(parameters, result)
+        match self {
+            Self::True | Self::False => {
+                FunctionSignature::new(vec![Type::Bool], Type::Void)
+            }
+            Self::Equal => {
+                let value = Type::Param("t".to_owned());
+                FunctionSignature::new(vec![value.clone(), value], Type::Void)
+            }
+        }
     }
 }
 
@@ -5689,6 +5679,9 @@ fn quote(value: &str) -> String {
             '\n' => output.push_str("\\n"),
             '\r' => output.push_str("\\r"),
             '\t' => output.push_str("\\t"),
+            control if control <= '\u{1f}' || control == '\u{7f}' => {
+                output.push_str(&format!("\\u{{{:x}}}", u32::from(control)));
+            }
             character => output.push(character),
         }
     }

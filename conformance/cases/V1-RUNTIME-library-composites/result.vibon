@@ -1,0 +1,12 @@
+(record
+  format: @test-run.v1
+  result: @command.ok
+  tests: (array
+    (record name: "@tests.composites::\"boolean connectives\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.composites::\"character comparison and classes\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.composites::\"searching\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.composites::\"splitting\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.composites::\"splitting on an empty separator keeps the text\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.composites::\"trimming\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)

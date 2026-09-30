@@ -181,73 +181,6 @@ pub fn check_ast_with_bindings(
     check_ast_with_bindings_authority(source_id.as_ref(), ast, diagnostics, false)
 }
 
-/// Checks the exact signed M2 text bootstrap module.
-///
-/// This entry point is intentionally separate from [`check_source`]: a source
-/// package cannot gain compiler authority merely by copying an external
-/// declaration. The verifier in this crate must approve the bootstrap bytes
-/// before callers pass them here.
-pub fn check_bootstrap_source(
-    verification: &Stdlib,
-    source_id: impl AsRef<str>,
-    source: &str,
-) -> CheckResult {
-    let source_id = source_id.as_ref();
-    if source_id != STDLIB_TEXT_SOURCE_ID
-        || verification
-            .module("std.text")
-            .map(stdlib::StdlibModule::bytes)
-            != Some(source.as_bytes())
-        || !verification.maps("std.text", STDLIB_TEXT_SOURCE_ID)
-    {
-        let diagnostic = Diagnostic::new(
-            DiagnosticCode::ToolUnavailable,
-            ByteSpan::empty_at(0),
-            "compiler externals require the embedded standard library",
-        )
-        .with_source_id(source_id);
-        return CheckResult::new(None, vec![diagnostic]);
-    }
-    let document = match vibra_syntax::parse_source(Path::new(source_id), source) {
-        Ok(document) => document,
-        Err(error) => {
-            return CheckResult::new(
-                None,
-                vec![
-                    Diagnostic::new(
-                        DiagnosticCode::ModuleIoError,
-                        ByteSpan::empty_at(0),
-                        error.to_string(),
-                    )
-                    .with_source_id(source_id),
-                ],
-            );
-        }
-    };
-    let mut diagnostics = document
-        .diagnostics()
-        .iter()
-        .cloned()
-        .map(|diagnostic| diagnostic.with_source_id(source_id))
-        .collect::<Vec<_>>();
-    if !document.accepted() || document.recovered() {
-        return CheckResult::new(None, diagnostics);
-    }
-    let Some(ast) = document.ast() else {
-        return CheckResult::new(None, diagnostics);
-    };
-    let (program, bindings) =
-        check_ast_with_bindings_authority(source_id, ast, &mut diagnostics, true);
-    if diagnostics
-        .iter()
-        .any(|diagnostic| diagnostic.level() == vibra_diagnostics::Level::Error)
-    {
-        CheckResult::new(None, diagnostics)
-    } else {
-        CheckResult::with_bindings(program, diagnostics, bindings)
-    }
-}
-
 /// Checks one source module with the narrowly supported explicit `@std.text`
 /// import.  This adapter is capability-backed by [`Stdlib`]; a
 /// source file cannot manufacture that authority by copying declarations.
@@ -2472,6 +2405,28 @@ fn pack_tail(tail: &Type, operands: Vec<Expr>, origin: SourceOrigin) -> Expr {
     }
 }
 
+/// Whether a value of `value_type` is or contains a function, looking through
+/// declared bodies. A declaration is visited once.
+fn mentions_function(types: &nominal::TypeNames, value_type: &Type) -> bool {
+    let mut visited = BTreeSet::new();
+    let mut pending = vec![value_type.clone()];
+    while let Some(value_type) = pending.pop() {
+        match &value_type {
+            Type::Function(_) => return true,
+            Type::Declared(_) | Type::Applied(_, _) => {
+                if visited.insert(value_type.to_string())
+                    && let Some(body) = pattern::instantiated_body(types, &value_type)
+                {
+                    pending.extend(body.slots().into_iter().map(|(_, slot)| slot));
+                }
+            }
+            _ => {}
+        }
+        pending.extend(value_type.components());
+    }
+    false
+}
+
 /// Reports the first map type in `value_type` whose key is inadmissible, as
 /// `@type.invalid-map-key` (or `@type.function-not-equatable` for a function
 /// key) at the application that inferred it. Returns whether all are valid.
@@ -3681,6 +3636,36 @@ fn check_form(
                     ));
                 }
             }
+            // `assert.equal` compares canonical encodings, which no function
+            // value has.
+            if direct_function
+                .and_then(|index| environment.functions.get(index))
+                .is_some_and(|header| {
+                    header.test_assertion == Some(TestAssertion::Equal)
+                })
+            {
+                let mut equatable = true;
+                for (argument, operand) in arguments.iter().zip(application.arguments())
+                {
+                    if mentions_function(environment.types, &argument.result_type()) {
+                        environment.diagnostics.push(
+                            Diagnostic::new(
+                                DiagnosticCode::TypeFunctionNotEquatable,
+                                operand.value().span(),
+                                format!(
+                                    "{} is or contains a function type, which has no canonical encoding to compare",
+                                    argument.result_type()
+                                ),
+                            )
+                            .with_source_id(environment.source_id),
+                        );
+                        equatable = false;
+                    }
+                }
+                if !equatable {
+                    return None;
+                }
+            }
             if let Some(tail_type) = signature.variadic() {
                 arguments.push(pack_tail(
                     tail_type,
@@ -4748,10 +4733,7 @@ fn dotted_value_paths(ast: &SourceAst) -> BTreeSet<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        STDLIB_TEXT_SOURCE_ID, check_bootstrap_source, check_bootstrap_text_import,
-        check_source, load_stdlib,
-    };
+    use super::{check_bootstrap_text_import, check_source, load_stdlib};
     use std::path::Path;
     use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 
@@ -4927,17 +4909,6 @@ mod tests {
         assert!(checked.diagnostics().iter().any(|diagnostic| {
             diagnostic.code() == DiagnosticCode::ToolUnavailable
         }));
-    }
-
-    #[test]
-    fn the_exact_bootstrap_text_module_admits_only_closed_intrinsics() {
-        let source = include_str!("../../../stdlib/src/std/text.vib");
-        let verification = load_stdlib().expect("bootstrap provenance");
-        let checked =
-            check_bootstrap_source(&verification, STDLIB_TEXT_SOURCE_ID, source);
-        assert!(checked.accepted(), "{:?}", checked.diagnostics());
-        let program = checked.program().expect("bootstrap program");
-        assert!(program.canonical_vibon().contains("text.length"));
     }
 
     #[test]

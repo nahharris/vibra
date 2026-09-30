@@ -199,7 +199,7 @@ fn local_std_assert_functions_are_not_promoted_to_trusted_assertions() {
         "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @std kind: @bin root: \"src/std\" entry: @std.assert.execute effects: (array))) dependencies: (map))\n",
         &[(
             "src/std/assert.vib",
-            "(defn equal-i32 (left i32 right i32) void void)\n(defn execute () void (equal-i32 1i32 2i32))\n",
+            "(defn equal (left i32 right i32) void void)\n(defn execute () void (equal 1i32 2i32))\n",
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");

@@ -133,7 +133,7 @@ fn workspace_test_handler_compares_authored_outcomes_and_empty_item_traces() {
         "V1-RUNTIME-workspace-test-passing",
         "V1-RUNTIME-workspace-test-failure",
         "V1-PROJECT-workspace-test-invalid-missing-assert-import",
-        "V1-RUNTIME-workspace-test-unavailable-assertion",
+        "V1-RUNTIME-workspace-test-assert-equal",
         "V1-RUNTIME-workspace-test-empty",
     ] {
         let case = corpus

@@ -1,0 +1,42 @@
+(import assert @std.assert)
+(import chars @std.char)
+(import core @std.core)
+(import logic @std.bool)
+(import text @std.text)
+
+(test "boolean connectives"
+  (assert.equal
+    (tupleof (logic.not true) (logic.and true false) (logic.or false true) (logic.xor true true))
+    (tupleof false false true false)))
+
+(test "character comparison and classes"
+  (assert.equal
+    (tupleof
+      (chars.equal \a \a)
+      (chars.compare \a \b)
+      (chars.is-ascii-digit \7)
+      (chars.is-ascii-letter \Q)
+      (chars.is-ascii-letter \é)
+      (chars.is-ascii-whitespace \tab))
+    (tupleof true (core.ordering.less) true true false true)))
+
+(test "searching"
+  (assert.equal
+    (tupleof
+      (text.starts-with "héllo" "hé")
+      (text.ends-with "héllo" "lo")
+      (text.ends-with "lo" "héllo")
+      (text.index-of "a,b,,c" ",,")
+      (text.contains "abc" "d"))
+    (tupleof true true false (option.some 3u64) false)))
+
+(test "splitting"
+  (assert.equal (text.split "a,b,,c" ",") (array.of "a" "b" "" "c")))
+
+(test "splitting on an empty separator keeps the text"
+  (assert.equal (text.split "abc" "") (array.of "abc")))
+
+(test "trimming"
+  (assert.equal
+    (tupleof (text.trim "  hé \n") (text.trim-start "  x ") (text.trim-end "  x ") (text.trim " \t "))
+    (tupleof "hé" "x " "  x" "")))

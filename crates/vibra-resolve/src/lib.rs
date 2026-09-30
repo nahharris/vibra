@@ -1281,15 +1281,7 @@ impl Resolution {
             unit: "std".to_owned(),
             segments: vec!["assert".to_owned()],
         };
-        let names = [
-            "true",
-            "false",
-            "equal-bool",
-            "equal-char",
-            "equal-str",
-            "equal-i32",
-            "equal-u64",
-        ];
+        let names = ["true", "false", "equal"];
         for name in names {
             let path = vec![name.to_owned()];
             let id = DeclarationId::with_package(

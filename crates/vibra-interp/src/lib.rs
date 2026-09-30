@@ -108,8 +108,8 @@ impl TestExecution {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TestAssertionFailure {
     assertion: String,
-    expected: Value,
-    actual: Value,
+    expected: String,
+    actual: String,
     origin: SourceOrigin,
 }
 
@@ -120,15 +120,15 @@ impl TestAssertionFailure {
         &self.assertion
     }
 
-    /// Expected assertion operand or required boolean.
+    /// The canonical encoding of the expected operand or required boolean.
     #[must_use]
-    pub const fn expected(&self) -> &Value {
+    pub fn expected(&self) -> &str {
         &self.expected
     }
 
-    /// Actual assertion operand.
+    /// The canonical encoding of the actual operand.
     #[must_use]
-    pub const fn actual(&self) -> &Value {
+    pub fn actual(&self) -> &str {
         &self.actual
     }
 
@@ -1210,24 +1210,20 @@ impl<'a> Machine<'a> {
         values: Vec<RuntimeValue>,
         origin: SourceOrigin,
     ) -> Option<RuntimeValue> {
-        let values = values
+        // Every operand is compared and reported by its canonical encoding;
+        // the checker rejects a function operand.
+        let encodings = values
             .into_iter()
-            .map(|value| match value {
-                RuntimeValue::Primitive(value) => Some(value),
-                _ => None,
-            })
+            .map(|value| observe(value).map(|value| value.canonical_vibon()))
             .collect::<Option<Vec<_>>>()?;
-        let (passed, expected, actual) = match (assertion, values.as_slice()) {
-            (TestAssertion::True, [Value::Bool(actual)]) => {
-                (*actual, Value::Bool(true), Value::Bool(*actual))
+        let (passed, expected, actual) = match (assertion, encodings.as_slice()) {
+            (TestAssertion::True | TestAssertion::False, [actual]) => {
+                let expected =
+                    Value::Bool(assertion == TestAssertion::True).canonical_vibon();
+                (*actual == expected, expected, actual.clone())
             }
-            (TestAssertion::False, [Value::Bool(actual)]) => {
-                (!*actual, Value::Bool(false), Value::Bool(*actual))
-            }
-            (assertion, [left, right])
-                if !matches!(assertion, TestAssertion::True | TestAssertion::False) =>
-            {
-                (left == right, left.clone(), right.clone())
+            (TestAssertion::Equal, [expected, actual]) => {
+                (expected == actual, expected.clone(), actual.clone())
             }
             _ => return None,
         };

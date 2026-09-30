@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Domain, Level};
-use vibra_ir::{SourceOrigin, Value};
+use vibra_ir::SourceOrigin;
 use vibra_resolve::{DeclarationId, EntityKind, ResolvedSnapshot};
 use vibra_syntax::{Declaration, Literal};
 
@@ -648,8 +648,8 @@ fn select_tests(
                         status: TestItemStatus::AssertionFailed,
                         failure: Some(TestFailure {
                             assertion: failure.assertion().to_owned(),
-                            expected: canonical_assertion_value(failure.expected()),
-                            actual: canonical_assertion_value(failure.actual()),
+                            expected: failure.expected().to_owned(),
+                            actual: failure.actual().to_owned(),
                             source_id: failure.origin().source_id().to_owned(),
                             primary_span: failure.origin().span(),
                         }),
@@ -931,13 +931,6 @@ fn diagnostic_in_source_closure(
         .is_some_and(|source_id| source_ids.contains(source_id))
 }
 
-fn canonical_assertion_value(value: &Value) -> String {
-    match value {
-        Value::Str(value) => canonical_string_literal(value),
-        _ => value.canonical_vibon(),
-    }
-}
-
 #[cfg(test)]
 mod provenance_tests {
 
@@ -947,8 +940,9 @@ mod provenance_tests {
 
     #[test]
     fn local_assertion_import_cannot_satisfy_verified_assertion_contract() {
-        let test_source = "(import assert @std.assert)\n(test \"spoofed\" (assert.equal-bool false true))\n";
-        let fake_assertions = "(defn equal-bool (expected bool actual bool) void visibility: @public void)\n";
+        let test_source = "(import assert @std.assert)\n(test \"spoofed\" (assert.equal false true))\n";
+        let fake_assertions =
+            "(defn equal (expected bool actual bool) void visibility: @public void)\n";
         let resolved = Resolver::resolve(ResolveInput::new(
             "demo",
             "0.1.0",

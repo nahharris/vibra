@@ -1,5 +1,6 @@
-; Pure text declarations bound to the compiler registry. The toolchain checks
-; each symbol against the registry before the module is admitted.
+; Text declarations: the registry rows, which the toolchain checks against the
+; registry before the module is admitted, and reviewed Vibra over them.
+(import classes @std.char)
 (import core @std.core)
 
 (defn concat (left str right str) str
@@ -46,3 +47,92 @@
   visibility: @public
   external: @compiler
   symbol: "text.from-utf8")
+
+; The text operations below are reviewed Vibra over the registry rows.
+
+(defn starts-with (value str prefix str) bool
+  visibility: @public
+  (match (slice value 0u64 (length prefix))
+    (option.some head) (equal head prefix)
+    (option.none) false))
+
+(defn ends-with (value str suffix str) bool
+  visibility: @public
+  (match (u64.sub-checked (length value) (length suffix))
+    (result.ok start)
+      (match (slice value start (length value))
+        (option.some tail) (equal tail suffix)
+        (option.none) false)
+    (result.err -) false))
+
+(defn index-of (value str needle str) (option u64)
+  visibility: @public
+  (search value needle 0u64))
+
+(defn contains (value str needle str) bool
+  visibility: @public
+  (match (index-of value needle) (option.some -) true (option.none) false))
+
+(defn split (value str separator str) (array str)
+  visibility: @public
+  (if (u64.equal (length separator) 0u64)
+    (array.of value)
+    (split-from value separator 0u64 (array.of))))
+
+(defn trim-start (value str) str
+  visibility: @public
+  (let scalars (to-chars value)
+    (part value (first-content scalars 0u64) (length value))))
+
+(defn trim-end (value str) str
+  visibility: @public
+  (let scalars (to-chars value)
+    (part value 0u64 (last-content scalars (length value)))))
+
+(defn trim (value str) str
+  visibility: @public
+  (let scalars (to-chars value)
+    (part value (first-content scalars 0u64) (last-content scalars (length value)))))
+
+(defn plus (left u64 right u64) u64
+  (match (u64.add-checked left right)
+    (result.ok sum) sum
+    (result.err -) 18446744073709551615u64))
+
+(defn part (value str start u64 end u64) str
+  (match (slice value start end) (option.some piece) piece (option.none) ""))
+
+(defn search (value str needle str start u64) (option u64)
+  (match (slice value start (plus start (length needle)))
+    (option.some window)
+      (if (equal window needle)
+        (option.some start)
+        (search value needle (plus start 1u64)))
+    (option.none) (option.none)))
+
+(defn split-from (value str separator str start u64 parts (array str)) (array str)
+  (match (search value separator start)
+    (option.some at)
+      (split-from
+        value
+        separator
+        (plus at (length separator))
+        (array.append parts (part value start at)))
+    (option.none) (array.append parts (part value start (length value)))))
+
+(defn first-content (scalars (array char) index u64) u64
+  (match (scalars index)
+    (option.some scalar)
+      (if (classes.is-ascii-whitespace scalar)
+        (first-content scalars (plus index 1u64))
+        index)
+    (option.none) index))
+
+(defn last-content (scalars (array char) end u64) u64
+  (match (u64.sub-checked end 1u64)
+    (result.ok before)
+      (match (scalars before)
+        (option.some scalar)
+          (if (classes.is-ascii-whitespace scalar) (last-content scalars before) end)
+        (option.none) end)
+    (result.err -) end))

@@ -54,6 +54,10 @@ const EMBEDDED_MODULES: &[(&str, &[u8])] = &[
         include_bytes!("../../../stdlib/src/std/core.vib"),
     ),
     (
+        "std/bool.vib",
+        include_bytes!("../../../stdlib/src/std/bool.vib"),
+    ),
+    (
         "std/char.vib",
         include_bytes!("../../../stdlib/src/std/char.vib"),
     ),

@@ -7,13 +7,17 @@
       path: "std/core.vib"
       sha256: "sha256:544820fa58f3aa1249ac4d63a26549b9af7093d2868394146a9249b62505e6d6"
       role: @source)
+    @std.bool (record
+      path: "std/bool.vib"
+      sha256: "sha256:a607d54e9bfaf6e0c1637f672a71b4e528717a7f23eb7c1383f34ecd688b8ff3"
+      role: @source)
     @std.char (record
       path: "std/char.vib"
-      sha256: "sha256:8e36edeeca20093c3d47558880442c429eddf6136f40eccd8730b05ae45d3bdf"
+      sha256: "sha256:8e5bee7a777bc4d94fdaafd7266b581557f671a1d69b441bb9aadc747d759e54"
       role: @source)
     @std.text (record
       path: "std/text.vib"
-      sha256: "sha256:e4a665862a156b933b02d91766302bdb344f8e5e4f65f7a70602413faa2e4556"
+      sha256: "sha256:239015516f503dca04d6d95da31b6ae83baf4c87e94e51128bd6aac922e6f13b"
       role: @source)
     @std.option (record
       path: "std/option.vib"
@@ -172,8 +176,4 @@
   assertions: (array
     "assert.true"
     "assert.false"
-    "assert.equal-bool"
-    "assert.equal-char"
-    "assert.equal-str"
-    "assert.equal-i32"
-    "assert.equal-u64"))
+    "assert.equal"))

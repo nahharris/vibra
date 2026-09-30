@@ -481,7 +481,7 @@ into a target program:
 (import assert @std.assert)
 
 (test "greets by name"
-  (assert.equal-str (greet "Ada") "hello, Ada"))
+  (assert.equal (greet "Ada") "hello, Ada"))
 ```
 
 A test's identity is its canonical module identity and decoded string name.
