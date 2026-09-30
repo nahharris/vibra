@@ -267,6 +267,7 @@ impl CallArgument {
 pub struct LambdaExpression {
     parameters: Vec<Parameter>,
     result: TypeExpr,
+    result_span: ByteSpan,
     attributes: FunctionAttributes,
     body: Vec<Expression>,
     span: ByteSpan,
@@ -283,6 +284,12 @@ impl LambdaExpression {
     #[must_use]
     pub const fn result(&self) -> &TypeExpr {
         &self.result
+    }
+
+    /// The span of the written result type.
+    #[must_use]
+    pub const fn result_span(&self) -> ByteSpan {
+        self.result_span
     }
 
     /// Lambda-only attributes in source order.
@@ -843,6 +850,7 @@ pub struct FunctionDeclaration {
     name: Name,
     parameters: Vec<Parameter>,
     result: TypeExpr,
+    result_span: ByteSpan,
     attributes: FunctionAttributes,
     body: Vec<RawNode>,
     expressions: Vec<Expression>,
@@ -866,6 +874,12 @@ impl FunctionDeclaration {
     #[must_use]
     pub const fn result(&self) -> &TypeExpr {
         &self.result
+    }
+
+    /// The span of the written result type.
+    #[must_use]
+    pub const fn result_span(&self) -> ByteSpan {
+        self.result_span
     }
 
     /// Function attributes in source order.
@@ -1802,6 +1816,7 @@ impl AstParser {
         }
         let parameters = self.parse_parameters(forms[2])?;
         let result = self.parse_type_expr(forms[3])?;
+        let result_span = forms[3].span();
         let context = AttributeContext::Function;
         let parsed = self.parse_attributes(&forms[4..], context, inherited_generics);
         let body_start = 4 + parsed.next;
@@ -1909,6 +1924,7 @@ impl AstParser {
             name,
             parameters,
             result,
+            result_span,
             attributes: FunctionAttributes {
                 items: parsed.items,
             },
@@ -2144,6 +2160,7 @@ impl AstParser {
         }
         let parameters = self.parse_parameters(forms[1])?;
         let result = self.parse_type_expr(forms[2])?;
+        let result_span = forms[2].span();
         let inherited = self.generic_scope.clone();
         let parsed =
             self.parse_attributes(&forms[3..], AttributeContext::Lambda, &inherited);
@@ -2177,6 +2194,7 @@ impl AstParser {
             kind: ExpressionKind::Lambda(LambdaExpression {
                 parameters,
                 result,
+                result_span,
                 attributes: FunctionAttributes {
                     items: parsed.items,
                 },

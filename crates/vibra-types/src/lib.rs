@@ -43,9 +43,9 @@ mod union;
 pub use resolved::{ResolvedCheckResult, check_resolved};
 pub use standard::{builtin_member_names, role_type_names};
 pub use stdlib::{
-    STDLIB_ASSERT_SOURCE_ID, STDLIB_BUILTIN_SOURCE_ID, STDLIB_OPTION_SOURCE_ID,
-    STDLIB_TEXT_SOURCE_ID, Stdlib, StdlibError, StdlibInputs, StdlibModule,
-    load_stdlib, load_stdlib_bytes,
+    STDLIB_ASSERT_SOURCE_ID, STDLIB_BUILTIN_SOURCE_ID, STDLIB_CORE_SOURCE_ID,
+    STDLIB_OPTION_SOURCE_ID, STDLIB_RESULT_SOURCE_ID, STDLIB_TEXT_SOURCE_ID, Stdlib,
+    StdlibError, StdlibInputs, StdlibModule, load_stdlib, load_stdlib_bytes,
 };
 
 /// The result of checking one source document.
@@ -392,6 +392,16 @@ fn standard_type_import(
     match import.target().value() {
         "std.option" => Some((STDLIB_OPTION_SOURCE_ID, None)),
         "std.option.option" => Some((STDLIB_OPTION_SOURCE_ID, Some("option"))),
+        "std.result" => Some((STDLIB_RESULT_SOURCE_ID, None)),
+        "std.result.result" => Some((STDLIB_RESULT_SOURCE_ID, Some("result"))),
+        "std.core" => Some((STDLIB_CORE_SOURCE_ID, None)),
+        "std.core.ordering" => Some((STDLIB_CORE_SOURCE_ID, Some("ordering"))),
+        "std.core.arithmetic-error" => {
+            Some((STDLIB_CORE_SOURCE_ID, Some("arithmetic-error")))
+        }
+        "std.core.conversion-error" => {
+            Some((STDLIB_CORE_SOURCE_ID, Some("conversion-error")))
+        }
         _ => None,
     }
 }
@@ -1037,6 +1047,8 @@ impl<'a> Checker<'a> {
             );
             environment.self_type = header.self_type.clone();
             environment.generics = header.type_parameters.clone();
+            environment.exit =
+                Some((header.signature.result(), Some(function.result_span())));
             let mut parameters_valid = true;
             let mut pending = Vec::new();
             for (parameter_index, parameter) in function.parameters().iter().enumerate()
@@ -1273,6 +1285,10 @@ struct CheckEnvironment<'a> {
     current_function: Option<usize>,
     resolved_targets:
         Option<&'a BTreeMap<(String, usize, usize), ResolvedReferenceTarget>>,
+    /// The written result type of the innermost function, `lambda`, or test
+    /// body, with its span when written, which a `try` exits to; `None`
+    /// outside any of them.
+    exit: Option<(Type, Option<ByteSpan>)>,
     /// Whether this checker reports lexical `@name.redeclaration`. The
     /// workspace path leaves that to the resolver, which owns name
     /// introduction there, so each introduction is reported exactly once.
@@ -1354,6 +1370,7 @@ impl<'a> CheckEnvironment<'a> {
             current_function,
             resolved_targets: None,
             reports_redeclarations: true,
+            exit: None,
         }
     }
 
@@ -1501,6 +1518,7 @@ impl<'a> CheckEnvironment<'a> {
             current_function: self.current_function,
             resolved_targets: self.resolved_targets,
             reports_redeclarations: self.reports_redeclarations,
+            exit: self.exit.clone(),
         }
     }
 
@@ -1760,7 +1778,9 @@ fn function_targets_from_expr(
         | Expr::Array { .. }
         | Expr::Map { .. }
         | Expr::Lookup { .. } => FunctionTargetSet::default(),
-        Expr::Project { value_type, .. } | Expr::TupleProject { value_type, .. } => {
+        Expr::Project { value_type, .. }
+        | Expr::TupleProject { value_type, .. }
+        | Expr::Try { value_type, .. } => {
             if matches!(value_type, Type::Function(_)) {
                 FunctionTargetSet::unknown()
             } else {
@@ -3143,7 +3163,24 @@ fn check_sequence(
             expression_expected,
             tail_position && index + 1 == expressions.len(),
         ) {
-            Some(value) => checked.push(value),
+            Some(value) => {
+                // A non-final element's value is ignored; a `result` there is
+                // a failure nobody handles.
+                if index + 1 != expressions.len()
+                    && is_fallible(environment.types, &value.result_type())
+                {
+                    environment.diagnostics.push(
+                        Diagnostic::new(
+                            DiagnosticCode::TypeUnhandledFallible,
+                            expression.span(),
+                            "a `result` is ignored here; match it, propagate it with `try`, return it, bind it, or discard it with `(let - ...)`",
+                        )
+                        .with_source_id(environment.source_id),
+                    );
+                    valid = false;
+                }
+                checked.push(value);
+            }
             None => valid = false,
         }
     }
@@ -3158,6 +3195,18 @@ fn check_sequence(
         })
         .unwrap_or_else(|| SourceOrigin::new(environment.source_id, fallback_span));
     Some(Expr::sequence(checked, origin))
+}
+
+/// Whether a value of `value_type` is fallible: a `result`, the type playing
+/// the `@result` role. `option` is not fallible.
+fn is_fallible(types: &nominal::TypeNames, value_type: &Type) -> bool {
+    let Type::Applied(id, _) = value_type else {
+        return false;
+    };
+    types
+        .role("result")
+        .and_then(|index| types.get(index))
+        .is_some_and(|declared| declared.id == *id)
 }
 
 fn check_expression(
@@ -3844,6 +3893,7 @@ fn check_form(
             );
             nested.self_type = environment.self_type.clone();
             nested.generics = generics;
+            nested.exit = Some((signature.result(), Some(lambda.result_span())));
             nested.resolved_targets = environment.resolved_targets;
             nested.reports_redeclarations = environment.reports_redeclarations;
             nested.outer = Some(outer);
@@ -4017,20 +4067,87 @@ fn check_form(
             expected,
             tail_position,
         ),
-        ExpressionKind::Try(_) => {
-            unavailable(
-                environment.diagnostics,
-                environment.source_id,
-                expression.span(),
-                "this expression form is deferred until a later M2/M3 step",
-            );
-            None
+        ExpressionKind::Try(operand) => {
+            check_try(environment, expression, operand, expected)
         }
         ExpressionKind::Name(_) => {
             unknown_name(environment, expression, "<invalid name>");
             None
         }
     }
+}
+
+/// Checks `try`: an `(option t)` operand inside a function, `lambda`, or test
+/// whose written result is `(option u)`, or a `(result t e)` operand where
+/// that result is `(result u e)` with the identical error type. The form has
+/// type `t`; anything else is `@type.invalid-try`, relating the enclosing
+/// written result type when there is one.
+fn check_try(
+    environment: &mut CheckEnvironment<'_>,
+    expression: &Expression,
+    operand: &Expression,
+    expected: Option<Type>,
+) -> Option<Expr> {
+    let value = check_expression(environment, operand, None)?;
+    let container = value.result_type();
+    let role_id = |role: &str| {
+        environment
+            .types
+            .role(role)
+            .and_then(|index| environment.types.get(index))
+            .map(|declared| declared.id.clone())
+    };
+    let option_id = role_id("option");
+    let result_id = role_id("result");
+    let exit = environment.exit.clone();
+    let success = match (&container, exit.as_ref().map(|(exit, _)| exit)) {
+        (
+            Type::Applied(id, arguments),
+            Some(Type::Applied(exit_id, exit_arguments)),
+        ) if id == exit_id => match (arguments.as_slice(), exit_arguments.as_slice()) {
+            ([success], [_]) if option_id.as_ref() == Some(id) => Some(success.clone()),
+            ([success, error], [_, exit_error])
+                if result_id.as_ref() == Some(id) && types_match(error, exit_error) =>
+            {
+                Some(success.clone())
+            }
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some(success) = success else {
+        let message = match &exit {
+            None => "`try` needs an enclosing function, `lambda`, or test".to_owned(),
+            Some((exit, _)) => format!(
+                "`try` over {container} cannot exit a body whose result is {exit}: it needs the same `option`, or `result` with the same error type"
+            ),
+        };
+        let mut diagnostic =
+            Diagnostic::new(DiagnosticCode::TypeInvalidTry, expression.span(), message)
+                .with_source_id(environment.source_id);
+        if let Some((_, Some(span))) = exit {
+            diagnostic = diagnostic.with_related(span, "the enclosing result type");
+        }
+        environment.diagnostics.push(diagnostic);
+        return None;
+    };
+    let exit_type = exit.map(|(exit, _)| exit)?;
+    let checked = Expr::Try {
+        value: Box::new(value),
+        value_type: success.clone(),
+        exit_type,
+        origin: SourceOrigin::new(environment.source_id, expression.span()),
+    };
+    ensure_expected(
+        environment,
+        expression.span(),
+        expected.clone(),
+        success.clone(),
+    );
+    expected
+        .as_ref()
+        .is_none_or(|expected| types_match(expected, &success))
+        .then_some(checked)
 }
 
 /// Checks `(as t e)`: the operand at the written type, where it may already

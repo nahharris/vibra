@@ -1,2 +1,0 @@
-(defn propagate () i32
-  (try 1i32))

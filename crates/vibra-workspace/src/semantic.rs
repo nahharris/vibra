@@ -494,14 +494,20 @@ fn validate_entries(
 }
 
 pub(crate) fn is_bootstrap_import_path(written: &str) -> bool {
-    ["std.text", "std.option", "std.assert"]
-        .iter()
-        .any(|module| {
-            written == *module
-                || written
-                    .strip_prefix(module)
-                    .is_some_and(|suffix| suffix.starts_with('.'))
-        })
+    [
+        "std.text",
+        "std.option",
+        "std.result",
+        "std.core",
+        "std.assert",
+    ]
+    .iter()
+    .any(|module| {
+        written == *module
+            || written
+                .strip_prefix(module)
+                .is_some_and(|suffix| suffix.starts_with('.'))
+    })
 }
 
 fn is_deferred_result_type(ty: &TypeExpr) -> bool {

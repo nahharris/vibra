@@ -1,0 +1,9 @@
+(defn source () (result i32 str) (result.ok 1i32))
+
+(defn other-error () (result i32 bool) (result.ok (try (source))))
+
+(defn not-a-container (value i32) (option i32) (option.some (try value)))
+
+(defn other-container () (option i32) (option.some (try (source))))
+
+(def outside i32 (try (option.some 1i32)))

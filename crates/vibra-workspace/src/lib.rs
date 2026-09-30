@@ -304,6 +304,8 @@ impl WorkspaceSnapshot {
         .with_reserved_import_paths([
             ("std".to_owned(), vec!["text".to_owned()]),
             ("std".to_owned(), vec!["option".to_owned()]),
+            ("std".to_owned(), vec!["result".to_owned()]),
+            ("std".to_owned(), vec!["core".to_owned()]),
             ("std".to_owned(), vec!["assert".to_owned()]),
         ]);
         let mut input = input

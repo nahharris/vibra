@@ -451,6 +451,9 @@ struct Machine<'a> {
     /// down on every supported host, so the distance from it is stack use.
     stack_base: usize,
     assertion_failure: Option<TestAssertionFailure>,
+    /// The value a failing `try` returns from the innermost function or
+    /// `lambda`: evaluation unwinds to that boundary, which takes it.
+    pending_exit: Option<RuntimeValue>,
 }
 
 impl<'a> Machine<'a> {
@@ -465,6 +468,7 @@ impl<'a> Machine<'a> {
             host_budget_exhausted: false,
             stack_base: stack_address(),
             assertion_failure: None,
+            pending_exit: None,
         }
     }
 
@@ -554,7 +558,7 @@ impl<'a> Machine<'a> {
                         TailTransferAction::Invalid => break None,
                     }
                 }
-                None => break None,
+                None => break self.pending_exit.take(),
             }
         };
         self.leave_activation();
@@ -721,6 +725,9 @@ impl<'a> Machine<'a> {
                     },
                 }))
             }
+            Expr::Try {
+                value, exit_type, ..
+            } => self.evaluate_try(value, exit_type, slots, captures),
             Expr::Project { record, field, .. } => {
                 let RuntimeValue::Record { fields, .. } =
                     self.evaluate_value(record, slots, captures)?
@@ -1059,6 +1066,37 @@ impl<'a> Machine<'a> {
         None
     }
 
+    /// `try`: the payload of `some` or `ok`, or an early exit that rebuilds
+    /// `none` or `err` at the enclosing result type and unwinds to the
+    /// innermost function or `lambda`.
+    #[inline(never)]
+    fn evaluate_try(
+        &mut self,
+        value: &Expr,
+        exit_type: &Type,
+        slots: &mut Frame,
+        captures: &[RuntimeValue],
+    ) -> Option<Evaluation> {
+        let RuntimeValue::Enum {
+            variant, payload, ..
+        } = self.evaluate_value(value, slots, captures)?
+        else {
+            return None;
+        };
+        match variant.as_str() {
+            "some" | "ok" => payload.map(|payload| Evaluation::Value(*payload)),
+            "none" | "err" => {
+                self.pending_exit = Some(RuntimeValue::Enum {
+                    value_type: exit_type.clone(),
+                    variant,
+                    payload,
+                });
+                None
+            }
+            _ => None,
+        }
+    }
+
     #[inline(never)]
     fn evaluate_if(
         &mut self,
@@ -1242,10 +1280,13 @@ impl<'a> Machine<'a> {
                 self.enter_activation()?;
                 let evaluation = self.evaluate(&body, &mut slots, &captures);
                 self.leave_activation();
-                match evaluation? {
-                    Evaluation::Value(value) => Some(value),
-                    Evaluation::TestAssertionFailed
-                    | Evaluation::TailTransfer { .. } => None,
+                match evaluation {
+                    Some(Evaluation::Value(value)) => Some(value),
+                    Some(
+                        Evaluation::TestAssertionFailed
+                        | Evaluation::TailTransfer { .. },
+                    ) => None,
+                    None => self.pending_exit.take(),
                 }
             }
         }

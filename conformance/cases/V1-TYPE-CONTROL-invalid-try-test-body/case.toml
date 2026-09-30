@@ -1,0 +1,19 @@
+id = "V1-TYPE-CONTROL-invalid-try-test-body"
+rule = "V1-TYPE-CONTROL"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "A test body has result type void, so try is always invalid there."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+interpreter = { result = "result.vibon" }
+
+[[expect.diagnostics]]
+code = "@type.invalid-try"
+level = "@error"
+source = "tests/checks.vib"
+span = [61, 85]
