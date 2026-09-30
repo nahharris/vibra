@@ -371,6 +371,11 @@ impl TypeNames {
                 if scope.generics.iter().any(|generic| generic == name.value()) {
                     return Ok(Type::Param(name.value().to_owned()));
                 }
+                if name.value() == "any" {
+                    return Err(LowerError::Unavailable(
+                        "interfaces in type position arrive in M3 Step 12",
+                    ));
+                }
                 self.applied(source_id, name, Vec::new())
             }
             TypeExpr::Function(function) => {

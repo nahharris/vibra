@@ -1,0 +1,5 @@
+(deftype tree (record label str children (array tree)))
+
+(defn leaf (label str) tree (tree label: label children: (array.of)))
+
+(defn pair () tree (tree label: "root" children: (array.of (leaf "a") (leaf "b"))))

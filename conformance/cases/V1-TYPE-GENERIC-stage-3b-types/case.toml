@@ -1,0 +1,23 @@
+id = "V1-TYPE-GENERIC-stage-3b-types"
+rule = "V1-TYPE-GENERIC"
+profile = "static-v1"
+operation = "type-check"
+description = "Interfaces in type position and maps keyed by a generic parameter stay unavailable until Stage 3B."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [16, 25]
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [51, 70]

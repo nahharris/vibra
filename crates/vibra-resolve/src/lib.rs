@@ -2592,6 +2592,19 @@ impl Resolution {
             });
             return;
         }
+        // A member path under a declared type is the checker's to resolve: it
+        // knows the type's body and reports an unknown variant or member once.
+        let owned_by_type = declaration_path.split_last().is_some_and(|(_, owner)| {
+            !owner.is_empty()
+                && target_module
+                    .as_ref()
+                    .and_then(|target_module| {
+                        self.declaration_indexes
+                            .get(&(target_module.clone(), owner.to_vec()))
+                    })
+                    .and_then(|index| self.declarations.get(*index))
+                    .is_some_and(|work| work.declaration.id.kind() == EntityKind::Type)
+        });
         let target = target_module
             .as_ref()
             .and_then(|target_module| {
@@ -2600,6 +2613,16 @@ impl Resolution {
             })
             .and_then(|index| self.declarations.get(*index))
             .map(|work| &work.declaration);
+        if target.is_none() && owned_by_type {
+            self.references.push(ResolvedReference {
+                from: from.clone(),
+                written: name.value().to_owned(),
+                target: None,
+                source_id: source_id.to_owned(),
+                span,
+            });
+            return;
+        }
         let Some(target) = target else {
             let unavailable_assertion = target_module.as_ref().is_some_and(|target| {
                 target.package.name() == "vibra-stdlib"

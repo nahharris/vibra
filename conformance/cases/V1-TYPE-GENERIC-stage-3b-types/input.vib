@@ -1,0 +1,5 @@
+(defn anything (value any) i32 0i32)
+
+(defn keyed (entries (map k i32)) u64
+  where: (k any)
+  0u64)
