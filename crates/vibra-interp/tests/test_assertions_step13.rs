@@ -42,7 +42,7 @@ fn program(assertion: TestAssertion, operands: Vec<Value>) -> CheckedProgram {
 #[test]
 fn passing_assertion_is_a_void_test_completion() {
     let execution = Interpreter::run_test(&program(
-        TestAssertion::EqualI32,
+        TestAssertion::Equal,
         vec![Value::I32(7), Value::I32(7)],
     ))
     .expect("test execution");
@@ -54,7 +54,7 @@ fn passing_assertion_is_a_void_test_completion() {
 #[test]
 fn false_assertion_is_structured_and_carries_the_call_origin() {
     let execution = Interpreter::run_test(&program(
-        TestAssertion::EqualStr,
+        TestAssertion::Equal,
         vec![
             Value::Str("expected".to_owned()),
             Value::Str("actual".to_owned()),
@@ -63,9 +63,9 @@ fn false_assertion_is_structured_and_carries_the_call_origin() {
     .expect("test execution");
     let failure = execution.assertion_failure().expect("assertion failure");
 
-    assert_eq!(failure.assertion(), "@std.assert.equal-str");
-    assert_eq!(failure.expected(), &Value::Str("expected".to_owned()));
-    assert_eq!(failure.actual(), &Value::Str("actual".to_owned()));
+    assert_eq!(failure.assertion(), "@std.assert.equal");
+    assert_eq!(failure.expected(), "\"expected\"");
+    assert_eq!(failure.actual(), "\"actual\"");
     assert_eq!(failure.origin().source_id(), "tests/assertions.vib");
     assert_eq!(failure.origin().span(), ByteSpan::new(10, 25));
     assert!(execution.audit_trace().is_empty());
@@ -108,8 +108,8 @@ fn assertion_failure_stops_nested_helper_arguments_and_later_calls() {
     let assertion_origin =
         SourceOrigin::new("stdlib/src/std/assert.vib", ByteSpan::empty_at(0));
     let assertion = CheckedFunction::new_test_assertion(
-        TestAssertion::EqualStr.symbol(),
-        TestAssertion::EqualStr,
+        TestAssertion::Equal.symbol(),
+        TestAssertion::Equal,
         assertion_origin,
     )
     .expect("closed assertion function");
@@ -196,7 +196,7 @@ fn assertion_failure_stops_nested_helper_arguments_and_later_calls() {
         .assertion_failure()
         .expect("first assertion failure");
 
-    assert_eq!(failure.expected(), &Value::Str("first-expected".to_owned()));
-    assert_eq!(failure.actual(), &Value::Str("first-actual".to_owned()));
+    assert_eq!(failure.expected(), "\"first-expected\"");
+    assert_eq!(failure.actual(), "\"first-actual\"");
     assert_eq!(failure.origin().span(), ByteSpan::new(20, 43));
 }

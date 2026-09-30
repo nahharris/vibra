@@ -63,7 +63,7 @@ fn selected_tests_use_verified_assertions_and_record_structured_failure() {
             ("src/app/main.vib", "(defn execute () void void)\n"),
             (
                 "tests/math/add.vib",
-                "(import assert @std.assert)\n(test \"fails\" (assert.equal-str \"expected\" \"actual\"))\n(test \"passes-after-failure\" (assert.equal-i32 4i32 4i32))\n",
+                "(import assert @std.assert)\n(test \"fails\" (assert.equal \"expected\" \"actual\"))\n(test \"passes-after-failure\" (assert.equal 4i32 4i32))\n",
             ),
         ],
     );
@@ -83,7 +83,7 @@ fn selected_tests_use_verified_assertions_and_record_structured_failure() {
         result.items()[1].name(),
         "@tests.math.add::\"passes-after-failure\""
     );
-    assert_eq!(failure.assertion(), "@std.assert.equal-str");
+    assert_eq!(failure.assertion(), "@std.assert.equal");
     assert_eq!(failure.expected(), "\"expected\"");
     assert_eq!(failure.actual(), "\"actual\"");
     assert_eq!(failure.source_id(), "tests/math/add.vib");
@@ -179,14 +179,14 @@ fn unavailable_helper_is_attributed_only_to_tests_that_reference_it() {
 }
 
 #[test]
-fn unsupported_assertion_member_is_unavailable_at_its_reference() {
+fn unsupported_test_form_is_unavailable_at_its_reference() {
     let project = TempProject::new(
-        "unsupported-assertion",
+        "unsupported-form",
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),
             (
                 "tests/math.vib",
-                "(import assert @std.assert)\n(test \"generic\" (assert.equal 1i32 1i32))\n",
+                "(import assert @std.assert)\n(test \"generic\" (let - (lambda () void effects: (audit) void) (assert.true true)))\n",
             ),
         ],
     );
@@ -267,7 +267,7 @@ fn tests_can_call_public_target_helpers_through_ordinary_imports() {
             ),
             (
                 "tests/math.vib",
-                "(import assert @std.assert)\n(import api @app.api)\n(test \"uses-public-target\" (assert.equal-i32 (api.answer) 42i32))\n",
+                "(import assert @std.assert)\n(import api @app.api)\n(test \"uses-public-target\" (assert.equal (api.answer) 42i32))\n",
             ),
         ],
     );
@@ -322,7 +322,7 @@ fn warnings_are_reported_without_blocking_test_execution() {
             ("src/app/main.vib", "(defn execute () void void)\n"),
             (
                 "tests/math.vib",
-                "(import assert @std.assert)\n(defn choose (fallback i32) i32 labelled: (first i32 7i32 second i32 8i32) first)\n(test \"warning-still-runs\" (assert.equal-i32 (choose 3i32 second: 11i32 first: 9i32) 9i32))\n",
+                "(import assert @std.assert)\n(defn choose (fallback i32) i32 labelled: (first i32 7i32 second i32 8i32) first)\n(test \"warning-still-runs\" (assert.equal (choose 3i32 second: 11i32 first: 9i32) 9i32))\n",
             ),
         ],
     );

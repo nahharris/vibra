@@ -61,7 +61,7 @@ fn test_result_schema_closes_items_and_rejects_m2_trace_events() {
                 "name": "@tests.math::\"bad\"",
                 "result": "@test.assertion-failed",
                 "failure": {
-                    "assertion": "@std.assert.equal-i32",
+                    "assertion": "@std.assert.equal",
                     "expected": "4i32",
                     "actual": "5i32",
                     "primarySpan": {

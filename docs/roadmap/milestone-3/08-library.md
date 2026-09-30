@@ -61,10 +61,12 @@ Step 8 lands as three PRs, like 4a/4b:
   host boundary tests.
 - **8b — composites and assertions.** The reviewed Vibra composites and the
   generic `assert.equal`, with the projects-chapter example and the migrated
-  cases and CLI tests.
+  cases and CLI tests. Array folds move to 8c: they are the first `@std.builtin`
+  members with Vibra bodies, which need the same bodied-member support as the
+  native text and bytes rows.
 - **8c — library migration.** `bool`, `str`, `bytes`, `ordering`, and the error
   enums as standard-library `deftype`s under their roles. The text and bytes
-  rows become native implementations.
+  rows become native implementations, and `array.fold` joins `@std.builtin`.
 
 ## Delivery notes (8)
 
@@ -94,3 +96,38 @@ Step 8 lands as three PRs, like 4a/4b:
 - The module rows are covered through their real imports by the workspace-test
   case `V1-RUNTIME-registry-modules`: the single-file checker still admits only
   the `@std.text` import.
+
+## Delivery notes (8b)
+
+- `@std.assert` has three members: `true`, `false`, and the generic `equal`
+  (`TestAssertion::Equal`, `where: (t any)`). The interpreter compares every
+  assertion operand by canonical value encoding and reports failures with
+  those encodings, so compound values render as the runtime chapter writes
+  them (`V1-RUNTIME-workspace-test-assert-equal`). An operand whose type is or
+  contains a function, including through declared bodies, is
+  `@type.function-not-equatable` at that operand.
+- Every corpus case, host test, and CLI process test that used a removed
+  `assert.equal-*` member now uses `assert.equal`, as does the projects
+  chapter's **Tests** example. The corpus case that expected the generic
+  member to be unavailable became the new coverage.
+- The canonical string encoding escapes the remaining control characters as
+  `\u{HEX}`, so the value encoding and the test runner's failure strings are
+  one encoding.
+- The composites are reviewed Vibra in their modules:
+  - `@std.bool`: `not`, `and`, `or`, and `xor`, eager because they are
+    functions.
+  - `@std.char`: `equal`, `compare`, and the ASCII classes `is-ascii-digit`,
+    `-upper`, `-lower`, `-letter`, and `-whitespace` (space, tab, line feed,
+    form feed, carriage return).
+  - `@std.text`: `starts-with`, `ends-with`, `index-of` (in scalars),
+    `contains`, `split` (an empty separator yields the whole text), and
+    `trim`, `trim-start`, and `trim-end` over ASCII whitespace.
+
+  `@std.bool` joins the embedded set. They are covered through their imports
+  by `V1-RUNTIME-library-composites`.
+- `@std.text` now imports `@std.char` and `@std.core`, so no single-module
+  checker can check it. The M2 `check_bootstrap_source` entry point is
+  removed; the module is checked through the resolved path wherever it is
+  imported. The CLI and runner tests that used a generic assertion as their
+  unavailable form now use a nonempty lambda effect row, which stays
+  unavailable until M4.

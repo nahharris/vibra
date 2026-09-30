@@ -279,7 +279,7 @@ fn actual_binary_positive_demo_repeats_in_two_fresh_hello_workspaces() {
 
         workspace.write(
             "tests/math.vib",
-            "(import assert @std.assert)\n(import helper @hello.helper)\n(test \"answer\" (assert.equal-i32 (helper.answer) 42i32))\n",
+            "(import assert @std.assert)\n(import helper @hello.helper)\n(test \"answer\" (assert.equal (helper.answer) 42i32))\n",
         );
 
         let checked = run(&workspace.root, &["check", "src/hello"]);

@@ -1,0 +1,12 @@
+(import assert @std.assert)
+
+(deftype point (record x i32 y i32))
+
+(test "equal records pass"
+  (assert.equal (point x: 1i32 y: 2i32) (point x: 1i32 y: 2i32)))
+
+(test "unequal arrays fail with their encodings"
+  (assert.equal (array.of 1i32 2i32) (array.of 1i32 3i32)))
+
+(test "options compare by encoding"
+  (assert.equal (option.some "é") (option.some "é")))

@@ -158,7 +158,7 @@
                           "properties": {
                             "assertion": {
                               "type": "string",
-                              "pattern": "^@std\\.assert\\.(true|false|equal-bool|equal-char|equal-str|equal-i32|equal-u64)$"
+                              "pattern": "^@std\\.assert\\.(true|false|equal)$"
                             },
                             "expected": { "type": "string" },
                             "actual": { "type": "string" },

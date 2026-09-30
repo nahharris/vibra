@@ -129,7 +129,7 @@ fn failed_assertion_is_a_structured_test_failure_and_exit_one() {
         "assertion-failure",
         &[(
             "tests/math.vib",
-            "(import assert @std.assert)\n(test \"fails\" (assert.equal-i32 4i32 5i32))\n",
+            "(import assert @std.assert)\n(test \"fails\" (assert.equal 4i32 5i32))\n",
         )],
     );
 
@@ -143,7 +143,7 @@ fn failed_assertion_is_a_structured_test_failure_and_exit_one() {
     assert_eq!(envelope["payload"]["failed"], 1);
     let item = &envelope["payload"]["tests"][0];
     assert_eq!(item["result"], "@test.assertion-failed");
-    assert_eq!(item["failure"]["assertion"], "@std.assert.equal-i32");
+    assert_eq!(item["failure"]["assertion"], "@std.assert.equal");
     assert_eq!(item["failure"]["expected"], "4i32");
     assert_eq!(item["failure"]["actual"], "5i32");
     assert_eq!(item["failure"]["primarySpan"]["sourceId"], "tests/math.vib");
@@ -177,12 +177,12 @@ fn missing_assertion_import_is_static_diagnostics_not_unavailable() {
 }
 
 #[test]
-fn unavailable_assertion_member_stays_distinct_from_failure() {
+fn unavailable_test_form_stays_distinct_from_failure() {
     let project = TempProject::new(
         "unavailable-assertion",
         &[(
             "tests/math.vib",
-            "(import assert @std.assert)\n(test \"generic\" (assert.equal 1i32 1i32))\n",
+            "(import assert @std.assert)\n(test \"generic\" (let - (lambda () void effects: (audit) void) (assert.true true)))\n",
         )],
     );
 
@@ -335,7 +335,7 @@ fn warnings_are_attributed_to_passing_items_without_blocking_execution() {
         "warning-attribution",
         &[(
             "tests/math.vib",
-            "(import assert @std.assert)\n(defn choose (fallback i32) i32 labelled: (first i32 7i32 second i32 8i32) first)\n(test \"warning-still-runs\" (assert.equal-i32 (choose 3i32 second: 11i32 first: 9i32) 9i32))\n",
+            "(import assert @std.assert)\n(defn choose (fallback i32) i32 labelled: (first i32 7i32 second i32 8i32) first)\n(test \"warning-still-runs\" (assert.equal (choose 3i32 second: 11i32 first: 9i32) 9i32))\n",
         )],
     );
 
@@ -375,7 +375,7 @@ fn unavailability_takes_precedence_over_assertion_failure() {
         "unavailable-precedence",
         &[(
             "tests/math.vib",
-            "(import assert @std.assert)\n(test \"fails\" (assert.false true))\n(test \"unavailable\" (assert.equal 1i32 1i32))\n",
+            "(import assert @std.assert)\n(test \"fails\" (assert.false true))\n(test \"unavailable\" (let - (lambda () void effects: (audit) void) (assert.true true)))\n",
         )],
     );
 

@@ -1,0 +1,25 @@
+id = "V1-TYPE-CONVERT-assert-equal-function"
+rule = "V1-TYPE-CONVERT"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "An assert.equal operand whose type is a function has no canonical encoding and is @type.function-not-equatable."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+interpreter = { result = "result.vibon" }
+
+[[expect.diagnostics]]
+code = "@type.function-not-equatable"
+level = "@error"
+source = "tests/values.vib"
+span = [80, 100]
+
+[[expect.diagnostics]]
+code = "@type.function-not-equatable"
+level = "@error"
+source = "tests/values.vib"
+span = [101, 121]

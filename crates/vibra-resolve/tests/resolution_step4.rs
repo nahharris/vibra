@@ -81,6 +81,8 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
             )],
         )],
     )
+    .with_builtin_members(builtin_members())
+    .with_role_types(["option".to_owned(), "result".to_owned()])
     .with_verified_overlay(
         "vibra-stdlib",
         "0.2.0",
@@ -96,6 +98,12 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
                 ["core"],
                 "stdlib/src/std/core.vib",
                 include_bytes!("../../../stdlib/src/std/core.vib"),
+            ),
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["char"],
+                "stdlib/src/std/char.vib",
+                include_bytes!("../../../stdlib/src/std/char.vib"),
             ),
         ],
     );
@@ -154,6 +162,8 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
             ),
         ],
     )
+    .with_builtin_members(builtin_members())
+    .with_role_types(["option".to_owned(), "result".to_owned()])
     .with_verified_overlay(
         "vibra-stdlib",
         "0.2.0",
@@ -169,6 +179,12 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
                 ["core"],
                 "stdlib/src/std/core.vib",
                 include_bytes!("../../../stdlib/src/std/core.vib"),
+            ),
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["char"],
+                "stdlib/src/std/char.vib",
+                include_bytes!("../../../stdlib/src/std/char.vib"),
             ),
         ],
     );
@@ -744,4 +760,33 @@ fn import_cycle_related_span_comes_from_the_traversed_cycle_edge() {
                 .iter()
                 .any(|related| related.source_id.as_deref() == Some("src/a.vib"))
     }));
+}
+
+/// The `(type, member)` names `@std.builtin` declares, which the standard
+/// library's own bodies call.
+fn builtin_members() -> Vec<(String, String)> {
+    let source = include_str!("../../../stdlib/src/std/builtin.vib");
+    let document =
+        vibra_syntax::parse_source(std::path::Path::new("builtin.vib"), source)
+            .expect("builtin module");
+    let ast = document.ast().expect("builtin AST");
+    ast.declarations()
+        .iter()
+        .filter_map(|declaration| match declaration {
+            vibra_syntax::Declaration::Deftype(value) => Some(value),
+            _ => None,
+        })
+        .flat_map(|value| {
+            value
+                .members()
+                .iter()
+                .filter_map(move |member| match member {
+                    vibra_syntax::TypeMember::Method(method) => Some((
+                        value.name().value().to_owned(),
+                        method.name().value().to_owned(),
+                    )),
+                    vibra_syntax::TypeMember::Implementation(_) => None,
+                })
+        })
+        .collect()
 }

@@ -445,7 +445,7 @@ pub fn check_resolved(
             test_assertion: Some(assertion),
             member_index: None,
             self_type: None,
-            type_parameters: Vec::new(),
+            type_parameters: assertion.type_parameters(),
         });
     }
 

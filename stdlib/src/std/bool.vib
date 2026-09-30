@@ -1,0 +1,17 @@
+; Boolean connectives. Each is an ordinary function, so both operands are
+; evaluated before the call; `if` is the short-circuiting form.
+(defn not (value bool) bool
+  visibility: @public
+  (if value false true))
+
+(defn and (left bool right bool) bool
+  visibility: @public
+  (if left right false))
+
+(defn or (left bool right bool) bool
+  visibility: @public
+  (if left true right))
+
+(defn xor (left bool right bool) bool
+  visibility: @public
+  (if left (not right) right))
