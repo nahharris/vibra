@@ -118,6 +118,15 @@ Floating-point operations follow IEEE 754. Serialization and equality
 canonicalize all NaN payloads to one quiet NaN per width and normalize negative
 zero only where the relevant standard operation explicitly says so.
 
+The canonical float serialization writes NaN as `nan`, the infinities as `inf`
+and `-inf`, and a finite value as the shortest decimal digits that round-trip
+to it: in decimal notation with at least one fractional digit when its
+magnitude is zero or in [1e-4, 1e16), as in `100.0`, `-0.0`, and `0.0025`, and
+otherwise in scientific notation with one integral digit and no `+` sign, as in
+`1e20` and `1.5e-7`. A value encoding appends the width suffix, as in
+`100.0f64`; `to-str` does not. Every finite serialization is a valid float
+literal body.
+
 ## Tail calls
 
 Tail position is defined inductively relative to an enclosing activation

@@ -1,7 +1,8 @@
-; Members of the builtin collection types. They are reached through the type
-; path, such as `(array.of 1i32 2i32)`, with no import. `external:` members
-; are primitive operations; `native:` members are Vibra whose native
-; implementation the toolchain may run instead.
+; Members of the builtin numeric and collection types. They are reached through
+; the type path, such as `(array.of 1i32 2i32)` or `(i32.add-checked 1i32 2i32)`,
+; with no import. `external:` members are primitive operations; `native:`
+; members are Vibra whose native implementation the toolchain may run instead.
+(import core @std.core)
 (import option @std.option)
 
 (deftype array (intrinsic-type @array)
@@ -37,3 +38,473 @@
     variadic: (entries (map k v))
     native: "map.of"
     entries))
+
+(deftype i8 (intrinsic-type @i8)
+  visibility: @public
+  (defn add-checked (left i8 right i8) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.add-checked")
+  (defn sub-checked (left i8 right i8) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.sub-checked")
+  (defn mul-checked (left i8 right i8) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.mul-checked")
+  (defn div-checked (left i8 right i8) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.div-checked")
+  (defn rem-checked (left i8 right i8) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.rem-checked")
+  (defn neg-checked (value i8) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.neg-checked")
+  (defn shift-left-checked (value i8 amount u32) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.shift-left-checked")
+  (defn shift-right (value i8 amount u32) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.shift-right")
+  (defn equal (left i8 right i8) bool
+    visibility: @public
+    external: @compiler
+    symbol: "i8.equal")
+  (defn compare (left i8 right i8) core.ordering
+    visibility: @public
+    external: @compiler
+    symbol: "i8.compare")
+  (defn to-str (value i8) str
+    visibility: @public
+    external: @compiler
+    symbol: "i8.to-str")
+  (defn parse (text str) (result i8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.parse"))
+
+(deftype i16 (intrinsic-type @i16)
+  visibility: @public
+  (defn add-checked (left i16 right i16) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.add-checked")
+  (defn sub-checked (left i16 right i16) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.sub-checked")
+  (defn mul-checked (left i16 right i16) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.mul-checked")
+  (defn div-checked (left i16 right i16) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.div-checked")
+  (defn rem-checked (left i16 right i16) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.rem-checked")
+  (defn neg-checked (value i16) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.neg-checked")
+  (defn shift-left-checked (value i16 amount u32) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.shift-left-checked")
+  (defn shift-right (value i16 amount u32) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.shift-right")
+  (defn equal (left i16 right i16) bool
+    visibility: @public
+    external: @compiler
+    symbol: "i16.equal")
+  (defn compare (left i16 right i16) core.ordering
+    visibility: @public
+    external: @compiler
+    symbol: "i16.compare")
+  (defn to-str (value i16) str
+    visibility: @public
+    external: @compiler
+    symbol: "i16.to-str")
+  (defn parse (text str) (result i16 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.parse"))
+
+(deftype i32 (intrinsic-type @i32)
+  visibility: @public
+  (defn add-checked (left i32 right i32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.add-checked")
+  (defn sub-checked (left i32 right i32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.sub-checked")
+  (defn mul-checked (left i32 right i32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.mul-checked")
+  (defn div-checked (left i32 right i32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.div-checked")
+  (defn rem-checked (left i32 right i32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.rem-checked")
+  (defn neg-checked (value i32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.neg-checked")
+  (defn shift-left-checked (value i32 amount u32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.shift-left-checked")
+  (defn shift-right (value i32 amount u32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.shift-right")
+  (defn equal (left i32 right i32) bool
+    visibility: @public
+    external: @compiler
+    symbol: "i32.equal")
+  (defn compare (left i32 right i32) core.ordering
+    visibility: @public
+    external: @compiler
+    symbol: "i32.compare")
+  (defn to-str (value i32) str
+    visibility: @public
+    external: @compiler
+    symbol: "i32.to-str")
+  (defn parse (text str) (result i32 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.parse"))
+
+(deftype i64 (intrinsic-type @i64)
+  visibility: @public
+  (defn add-checked (left i64 right i64) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.add-checked")
+  (defn sub-checked (left i64 right i64) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.sub-checked")
+  (defn mul-checked (left i64 right i64) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.mul-checked")
+  (defn div-checked (left i64 right i64) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.div-checked")
+  (defn rem-checked (left i64 right i64) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.rem-checked")
+  (defn neg-checked (value i64) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.neg-checked")
+  (defn shift-left-checked (value i64 amount u32) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.shift-left-checked")
+  (defn shift-right (value i64 amount u32) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.shift-right")
+  (defn equal (left i64 right i64) bool
+    visibility: @public
+    external: @compiler
+    symbol: "i64.equal")
+  (defn compare (left i64 right i64) core.ordering
+    visibility: @public
+    external: @compiler
+    symbol: "i64.compare")
+  (defn to-str (value i64) str
+    visibility: @public
+    external: @compiler
+    symbol: "i64.to-str")
+  (defn parse (text str) (result i64 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.parse"))
+
+(deftype u8 (intrinsic-type @u8)
+  visibility: @public
+  (defn add-checked (left u8 right u8) (result u8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.add-checked")
+  (defn sub-checked (left u8 right u8) (result u8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.sub-checked")
+  (defn mul-checked (left u8 right u8) (result u8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.mul-checked")
+  (defn div-checked (left u8 right u8) (result u8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.div-checked")
+  (defn rem-checked (left u8 right u8) (result u8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.rem-checked")
+  (defn shift-left-checked (value u8 amount u32) (result u8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.shift-left-checked")
+  (defn shift-right (value u8 amount u32) (result u8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.shift-right")
+  (defn equal (left u8 right u8) bool
+    visibility: @public
+    external: @compiler
+    symbol: "u8.equal")
+  (defn compare (left u8 right u8) core.ordering
+    visibility: @public
+    external: @compiler
+    symbol: "u8.compare")
+  (defn to-str (value u8) str
+    visibility: @public
+    external: @compiler
+    symbol: "u8.to-str")
+  (defn parse (text str) (result u8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.parse"))
+
+(deftype u16 (intrinsic-type @u16)
+  visibility: @public
+  (defn add-checked (left u16 right u16) (result u16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.add-checked")
+  (defn sub-checked (left u16 right u16) (result u16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.sub-checked")
+  (defn mul-checked (left u16 right u16) (result u16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.mul-checked")
+  (defn div-checked (left u16 right u16) (result u16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.div-checked")
+  (defn rem-checked (left u16 right u16) (result u16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.rem-checked")
+  (defn shift-left-checked (value u16 amount u32) (result u16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.shift-left-checked")
+  (defn shift-right (value u16 amount u32) (result u16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.shift-right")
+  (defn equal (left u16 right u16) bool
+    visibility: @public
+    external: @compiler
+    symbol: "u16.equal")
+  (defn compare (left u16 right u16) core.ordering
+    visibility: @public
+    external: @compiler
+    symbol: "u16.compare")
+  (defn to-str (value u16) str
+    visibility: @public
+    external: @compiler
+    symbol: "u16.to-str")
+  (defn parse (text str) (result u16 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.parse"))
+
+(deftype u32 (intrinsic-type @u32)
+  visibility: @public
+  (defn add-checked (left u32 right u32) (result u32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.add-checked")
+  (defn sub-checked (left u32 right u32) (result u32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.sub-checked")
+  (defn mul-checked (left u32 right u32) (result u32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.mul-checked")
+  (defn div-checked (left u32 right u32) (result u32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.div-checked")
+  (defn rem-checked (left u32 right u32) (result u32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.rem-checked")
+  (defn shift-left-checked (value u32 amount u32) (result u32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.shift-left-checked")
+  (defn shift-right (value u32 amount u32) (result u32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.shift-right")
+  (defn equal (left u32 right u32) bool
+    visibility: @public
+    external: @compiler
+    symbol: "u32.equal")
+  (defn compare (left u32 right u32) core.ordering
+    visibility: @public
+    external: @compiler
+    symbol: "u32.compare")
+  (defn to-str (value u32) str
+    visibility: @public
+    external: @compiler
+    symbol: "u32.to-str")
+  (defn parse (text str) (result u32 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.parse"))
+
+(deftype u64 (intrinsic-type @u64)
+  visibility: @public
+  (defn add-checked (left u64 right u64) (result u64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.add-checked")
+  (defn sub-checked (left u64 right u64) (result u64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.sub-checked")
+  (defn mul-checked (left u64 right u64) (result u64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.mul-checked")
+  (defn div-checked (left u64 right u64) (result u64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.div-checked")
+  (defn rem-checked (left u64 right u64) (result u64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.rem-checked")
+  (defn shift-left-checked (value u64 amount u32) (result u64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.shift-left-checked")
+  (defn shift-right (value u64 amount u32) (result u64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.shift-right")
+  (defn equal (left u64 right u64) bool
+    visibility: @public
+    external: @compiler
+    symbol: "u64.equal")
+  (defn compare (left u64 right u64) core.ordering
+    visibility: @public
+    external: @compiler
+    symbol: "u64.compare")
+  (defn to-str (value u64) str
+    visibility: @public
+    external: @compiler
+    symbol: "u64.to-str")
+  (defn parse (text str) (result u64 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.parse"))
+
+(deftype f32 (intrinsic-type @f32)
+  visibility: @public
+  (defn add (left f32 right f32) f32
+    visibility: @public
+    external: @compiler
+    symbol: "f32.add")
+  (defn sub (left f32 right f32) f32
+    visibility: @public
+    external: @compiler
+    symbol: "f32.sub")
+  (defn mul (left f32 right f32) f32
+    visibility: @public
+    external: @compiler
+    symbol: "f32.mul")
+  (defn div (left f32 right f32) f32
+    visibility: @public
+    external: @compiler
+    symbol: "f32.div")
+  (defn neg (value f32) f32
+    visibility: @public
+    external: @compiler
+    symbol: "f32.neg")
+  (defn equal (left f32 right f32) bool
+    visibility: @public
+    external: @compiler
+    symbol: "f32.equal")
+  (defn compare-total (left f32 right f32) core.ordering
+    visibility: @public
+    external: @compiler
+    symbol: "f32.compare-total")
+  (defn to-str (value f32) str
+    visibility: @public
+    external: @compiler
+    symbol: "f32.to-str")
+  (defn parse (text str) (result f32 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "f32.parse"))
+
+(deftype f64 (intrinsic-type @f64)
+  visibility: @public
+  (defn add (left f64 right f64) f64
+    visibility: @public
+    external: @compiler
+    symbol: "f64.add")
+  (defn sub (left f64 right f64) f64
+    visibility: @public
+    external: @compiler
+    symbol: "f64.sub")
+  (defn mul (left f64 right f64) f64
+    visibility: @public
+    external: @compiler
+    symbol: "f64.mul")
+  (defn div (left f64 right f64) f64
+    visibility: @public
+    external: @compiler
+    symbol: "f64.div")
+  (defn neg (value f64) f64
+    visibility: @public
+    external: @compiler
+    symbol: "f64.neg")
+  (defn equal (left f64 right f64) bool
+    visibility: @public
+    external: @compiler
+    symbol: "f64.equal")
+  (defn compare-total (left f64 right f64) core.ordering
+    visibility: @public
+    external: @compiler
+    symbol: "f64.compare-total")
+  (defn to-str (value f64) str
+    visibility: @public
+    external: @compiler
+    symbol: "f64.to-str")
+  (defn parse (text str) (result f64 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "f64.parse"))

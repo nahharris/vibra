@@ -78,4 +78,4 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | C1.7 — `as`, singleton widening, narrowing | Step 6; implemented (`V1-TYPE-CONVERT-widening-boundaries`, `V1-TYPE-CONVERT-narrowing-rejections`) |
 | C5.2 — constructor and destructuring patterns | Step 5; implemented (`V1-RUNTIME-match-patterns`, `V1-RUNTIME-workspace-test-patterns`) |
 | C6.2 — `types:` generic arguments | Step 3; implemented (`V1-TYPE-GENERIC-type-arguments`, `V1-TOOL-format-types-order`) |
-| Unavailable `integer.*` compiler symbols (M2 registry note) | Step 8, as static methods of the numeric primitive types |
+| Unavailable `integer.*` compiler symbols (M2 registry note) | Step 8; closed by the static methods of the numeric primitive types (`V1-RUNTIME-registry-integers`, `V1-RUNTIME-registry-floats`) |

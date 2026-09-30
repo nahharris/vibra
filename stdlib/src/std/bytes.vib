@@ -1,0 +1,37 @@
+; Pure byte-sequence declarations bound to the compiler registry.
+(import core @std.core)
+
+(defn length (value bytes) u64
+  visibility: @public
+  external: @compiler
+  symbol: "bytes.length")
+
+(defn concat (left bytes right bytes) bytes
+  visibility: @public
+  external: @compiler
+  symbol: "bytes.concat")
+
+(defn equal (left bytes right bytes) bool
+  visibility: @public
+  external: @compiler
+  symbol: "bytes.equal")
+
+(defn compare (left bytes right bytes) core.ordering
+  visibility: @public
+  external: @compiler
+  symbol: "bytes.compare")
+
+(defn slice (value bytes start u64 end u64) (option bytes)
+  visibility: @public
+  external: @compiler
+  symbol: "bytes.slice")
+
+(defn to-array (value bytes) (array u8)
+  visibility: @public
+  external: @compiler
+  symbol: "bytes.to-array")
+
+(defn from-array (values (array u8)) bytes
+  visibility: @public
+  external: @compiler
+  symbol: "bytes.from-array")

@@ -26,203 +26,7 @@ use nominal::{
 pub use observed::ObservedValue;
 pub use pattern::{MatchArm, Pattern};
 
-/// The closed compiler intrinsic registry.
-pub mod external {
-    use super::{FunctionSignature, Type};
-
-    /// The compiler registry identity used by the runtime contract.
-    ///
-    /// `vibra_v1` is the version named by the v1 runtime specification.  The
-    /// compiler registry and the host registry are separate namespaces, but
-    /// share this stable toolchain ABI version.
-    pub const REGISTRY_VERSION: &str = "vibra_v1";
-
-    /// The semantic operation implemented by a compiler intrinsic.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    pub enum SemanticIdentity {
-        /// Concatenate Unicode scalar sequences in order.
-        UnicodeScalarConcatenation,
-        /// Count Unicode scalars, rather than UTF-8 bytes.
-        UnicodeScalarLength,
-        /// Build an array from its packed variadic elements.
-        ArrayConstruction,
-        /// Build a map from its packed variadic entries in canonical key
-        /// order, a later entry replacing an equal key.
-        MapConstruction,
-        /// Count array elements.
-        ArrayLength,
-        /// A new array with one trailing element.
-        ArrayAppend,
-        /// A new array of the first array's elements, then the second's.
-        ArrayConcatenation,
-        /// Elements in a half-open range, or `none` when it is out of range.
-        ArraySlice,
-    }
-
-    /// One pure, compiler-owned operation.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-    pub enum CompilerIntrinsic {
-        /// Concatenate two Unicode scalar sequences.
-        TextConcat,
-        /// Count Unicode scalars in a string.
-        TextLength,
-        /// `array.of`.
-        ArrayOf,
-        /// `map.of`.
-        MapOf,
-        /// `array.length`.
-        ArrayLength,
-        /// `array.append`.
-        ArrayAppend,
-        /// `array.concat`.
-        ArrayConcat,
-        /// `array.slice`.
-        ArraySlice,
-    }
-
-    /// The standard-library types that play the language roles a registry
-    /// signature names. The compiler binds roles, so the registry never
-    /// fixes a library type's identity.
-    #[derive(Clone, Debug, Default, PartialEq, Eq)]
-    pub struct RoleTypes {
-        option: Option<super::TypeId>,
-    }
-
-    impl RoleTypes {
-        /// Roles bound to the type playing `@option`, when one does.
-        #[must_use]
-        pub const fn new(option: Option<super::TypeId>) -> Self {
-            Self { option }
-        }
-
-        /// `(option value)`, or `void` when no type plays `@option`, which no
-        /// declaration can match.
-        #[must_use]
-        pub fn option_of(&self, value: Type) -> Type {
-            self.option
-                .as_ref()
-                .map_or(Type::Void, |id| Type::Applied(id.clone(), vec![value]))
-        }
-    }
-
-    fn param(name: &str) -> Type {
-        Type::Param(name.to_owned())
-    }
-
-    fn array_of(element: Type) -> Type {
-        Type::Array(Box::new(element))
-    }
-
-    impl CompilerIntrinsic {
-        /// The closed registry version for this operation.
-        #[must_use]
-        pub const fn registry_version(self) -> &'static str {
-            REGISTRY_VERSION
-        }
-
-        /// The semantic contract implemented by this operation.
-        #[must_use]
-        pub const fn semantic_identity(self) -> SemanticIdentity {
-            match self {
-                Self::TextConcat => SemanticIdentity::UnicodeScalarConcatenation,
-                Self::TextLength => SemanticIdentity::UnicodeScalarLength,
-                Self::ArrayOf => SemanticIdentity::ArrayConstruction,
-                Self::MapOf => SemanticIdentity::MapConstruction,
-                Self::ArrayLength => SemanticIdentity::ArrayLength,
-                Self::ArrayAppend => SemanticIdentity::ArrayAppend,
-                Self::ArrayConcat => SemanticIdentity::ArrayConcatenation,
-                Self::ArraySlice => SemanticIdentity::ArraySlice,
-            }
-        }
-
-        /// The stable registry symbol.
-        #[must_use]
-        pub const fn symbol(self) -> &'static str {
-            match self {
-                Self::TextConcat => "text.concat",
-                Self::TextLength => "text.length",
-                Self::ArrayOf => "array.of",
-                Self::MapOf => "map.of",
-                Self::ArrayLength => "array.length",
-                Self::ArrayAppend => "array.append",
-                Self::ArrayConcat => "array.concat",
-                Self::ArraySlice => "array.slice",
-            }
-        }
-
-        /// Whether this entry is a native implementation of a standard-library
-        /// function that keeps its Vibra body, named with `native:`, rather
-        /// than a bodiless primitive operation named with `external:`.
-        #[must_use]
-        pub const fn is_native(self) -> bool {
-            matches!(self, Self::ArrayOf | Self::MapOf)
-        }
-
-        /// The generic parameters of the exact signature, in `where:` order.
-        #[must_use]
-        pub fn type_parameters(self) -> Vec<String> {
-            match self {
-                Self::TextConcat | Self::TextLength => Vec::new(),
-                Self::MapOf => vec!["k".to_owned(), "v".to_owned()],
-                Self::ArrayOf
-                | Self::ArrayLength
-                | Self::ArrayAppend
-                | Self::ArrayConcat
-                | Self::ArraySlice => vec!["t".to_owned()],
-            }
-        }
-
-        /// The exact checked signature, with language roles bound by `roles`.
-        #[must_use]
-        pub fn signature(self, roles: &RoleTypes) -> FunctionSignature {
-            let items = || array_of(param("t"));
-            match self {
-                Self::TextConcat => {
-                    FunctionSignature::new(vec![Type::Str, Type::Str], Type::Str)
-                }
-                Self::TextLength => FunctionSignature::new(vec![Type::Str], Type::U64),
-                Self::ArrayOf => {
-                    FunctionSignature::new(Vec::new(), items()).with_variadic(items())
-                }
-                Self::MapOf => {
-                    let map = Type::Map(Box::new(param("k")), Box::new(param("v")));
-                    FunctionSignature::new(Vec::new(), map.clone()).with_variadic(map)
-                }
-                Self::ArrayLength => FunctionSignature::new(vec![items()], Type::U64),
-                Self::ArrayAppend => {
-                    FunctionSignature::new(vec![items(), param("t")], items())
-                }
-                Self::ArrayConcat => {
-                    FunctionSignature::new(vec![items(), items()], items())
-                }
-                Self::ArraySlice => FunctionSignature::new(
-                    vec![items(), Type::U64, Type::U64],
-                    roles.option_of(items()),
-                ),
-            }
-        }
-
-        /// Resolves only a symbol in the closed registry.
-        #[must_use]
-        pub fn from_symbol(symbol: &str) -> Option<Self> {
-            Self::ALL
-                .into_iter()
-                .find(|intrinsic| intrinsic.symbol() == symbol)
-        }
-
-        /// Every compiler intrinsic in canonical registry order.
-        pub const ALL: [Self; 8] = [
-            Self::TextConcat,
-            Self::TextLength,
-            Self::ArrayOf,
-            Self::MapOf,
-            Self::ArrayLength,
-            Self::ArrayAppend,
-            Self::ArrayConcat,
-            Self::ArraySlice,
-        ];
-    }
-}
+pub mod external;
 
 /// One of the primitive types admitted by the M2 literal profile.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1027,8 +831,12 @@ impl Value {
             Self::U16(value) => format!("{value}u16"),
             Self::U32(value) => format!("{value}u32"),
             Self::U64(value) => format!("{value}u64"),
-            Self::F32(bits) => format_float(f32::from_bits(*bits), "f32"),
-            Self::F64(bits) => format_float(f64::from_bits(*bits), "f64"),
+            Self::F32(bits) => {
+                format!("{}f32", canonical_f32_text(f32::from_bits(*bits)))
+            }
+            Self::F64(bits) => {
+                format!("{}f64", canonical_f64_text(f64::from_bits(*bits)))
+            }
         }
     }
 
@@ -5901,8 +5709,31 @@ fn canonical_character(value: char) -> String {
     }
 }
 
-fn format_float<T: fmt::Display>(value: T, suffix: &str) -> String {
-    format!("{value}{suffix}")
+/// The canonical float serialization of `docs/spec/06-runtime.md` for a
+/// binary32 value, without a suffix: `nan`, `inf`, `-inf`, or the shortest
+/// digits that round-trip, in decimal notation with a fraction when the
+/// magnitude is zero or in `[1e-4, 1e16)` and in scientific notation otherwise.
+#[must_use]
+pub fn canonical_f32_text(value: f32) -> String {
+    if value.is_nan() {
+        "nan".to_owned()
+    } else if value.is_infinite() {
+        if value > 0.0 { "inf" } else { "-inf" }.to_owned()
+    } else {
+        format!("{value:?}")
+    }
+}
+
+/// [`canonical_f32_text`] for a binary64 value.
+#[must_use]
+pub fn canonical_f64_text(value: f64) -> String {
+    if value.is_nan() {
+        "nan".to_owned()
+    } else if value.is_infinite() {
+        if value > 0.0 { "inf" } else { "-inf" }.to_owned()
+    } else {
+        format!("{value:?}")
+    }
 }
 
 /// ` e...` for each operand's canonical encoding, in order.

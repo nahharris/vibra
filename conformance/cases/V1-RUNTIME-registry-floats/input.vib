@@ -1,0 +1,33 @@
+(import core @std.core)
+
+(defn main ()
+  (tuple
+    f64
+    f32
+    f64
+    bool
+    bool
+    core.ordering
+    core.ordering
+    str
+    str
+    str
+    str
+    (result f64 core.conversion-error)
+    (result f32 core.conversion-error)
+    (result f64 core.conversion-error))
+  (tupleof
+    (f64.add 0.1f64 0.2f64)
+    (f32.mul 1.5f32 -2.0f32)
+    (f64.neg 0.0f64)
+    (f64.equal (f64.div 0.0f64 0.0f64) (f64.div 0.0f64 0.0f64))
+    (f64.equal -0.0f64 0.0f64)
+    (f64.compare-total -0.0f64 0.0f64)
+    (f32.compare-total (f32.div 1.0f32 0.0f32) (f32.div 0.0f32 0.0f32))
+    (f64.to-str 100.0f64)
+    (f64.to-str 1.0e20f64)
+    (f32.to-str (f32.div -1.0f32 0.0f32))
+    (f64.to-str (f64.div 0.0f64 0.0f64))
+    (f64.parse "2.5e-3")
+    (f32.parse "1e39")
+    (f64.parse "12")))

@@ -54,6 +54,14 @@ const EMBEDDED_MODULES: &[(&str, &[u8])] = &[
         include_bytes!("../../../stdlib/src/std/core.vib"),
     ),
     (
+        "std/char.vib",
+        include_bytes!("../../../stdlib/src/std/char.vib"),
+    ),
+    (
+        "std/bytes.vib",
+        include_bytes!("../../../stdlib/src/std/bytes.vib"),
+    ),
+    (
         "std/text.vib",
         include_bytes!("../../../stdlib/src/std/text.vib"),
     ),
@@ -691,8 +699,8 @@ mod tests {
     #[test]
     fn a_manifest_symbol_absent_from_the_registry_is_rejected() {
         let manifest = manifest().replace(
-            "compiler: (array\n    \"text.concat\"",
-            "compiler: (array\n    \"text.reverse\"\n    \"text.concat\"",
+            "compiler: (array\n",
+            "compiler: (array\n    \"text.reverse\"\n",
         );
         let mut inputs = StdlibInputs::embedded();
         inputs.manifest = manifest.as_bytes();
@@ -704,7 +712,7 @@ mod tests {
 
     #[test]
     fn a_module_binding_an_unlisted_symbol_is_rejected() {
-        let manifest = manifest().replace("    \"text.length\"\n", "");
+        let manifest = manifest().replace("\n    \"text.length\"", "");
         let mut inputs = StdlibInputs::embedded();
         inputs.manifest = manifest.as_bytes();
         rejects(

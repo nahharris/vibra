@@ -59,6 +59,7 @@ pub(crate) fn declare_standard_types<'a>(
 {
     // `@std.builtin` names `option` through its own import.
     types.import(STDLIB_BUILTIN_SOURCE_ID, "option", STDLIB_OPTION_SOURCE_ID);
+    types.import(STDLIB_BUILTIN_SOURCE_ID, "core", STDLIB_CORE_SOURCE_ID);
     for (source_id, module, ast) in type_modules() {
         for declaration in ast.declarations() {
             let Declaration::Deftype(declaration) = declaration else {
@@ -87,12 +88,23 @@ pub(crate) fn option_of(types: &TypeNames, value: Type) -> Option<Type> {
 
 /// The role-playing types a registry signature may name.
 pub(crate) fn role_types(types: &TypeNames) -> RoleTypes {
-    RoleTypes::new(
+    let role = |role: &str| {
         types
-            .role("option")
+            .role(role)
             .and_then(|index| types.get(index))
-            .map(|declared| declared.id.clone()),
-    )
+            .map(|declared| declared.id.clone())
+    };
+    let core = |name: &str| {
+        let id = stdlib_type_id(&["core"], name);
+        types.index_of(&id).map(|_| id)
+    };
+    RoleTypes::new(role("option"))
+        .with_result(role("result"))
+        .with_core(
+            core("ordering"),
+            core("arithmetic-error"),
+            core("conversion-error"),
+        )
 }
 
 fn builtin_module() -> Option<&'static SourceAst> {
@@ -117,6 +129,10 @@ fn builtin_self_type(atom: &str, parameters: &[String]) -> Option<Type> {
     match (atom, parameters.len()) {
         ("array", 1) => Some(Type::Array(Box::new(param(0)?))),
         ("map", 2) => Some(Type::Map(Box::new(param(0)?), Box::new(param(1)?))),
+        (name, 0) => vibra_ir::external::NumericType::ALL
+            .into_iter()
+            .find(|numeric| numeric.name() == name)
+            .map(vibra_ir::external::NumericType::to_type),
         _ => None,
     }
 }
@@ -299,6 +315,8 @@ mod tests {
             .map(|(type_name, member)| format!("{type_name}.{member}"))
             .collect::<Vec<_>>();
         assert_eq!(bound, declared);
-        assert_eq!(declared.len(), 6);
+        // Twelve methods for each signed and eleven for each unsigned integer
+        // type, nine for each float type, and the six collection members.
+        assert_eq!(declared.len(), 4 * 12 + 4 * 11 + 2 * 9 + 6);
     }
 }

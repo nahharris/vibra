@@ -306,6 +306,8 @@ impl WorkspaceSnapshot {
             ("std".to_owned(), vec!["option".to_owned()]),
             ("std".to_owned(), vec!["result".to_owned()]),
             ("std".to_owned(), vec!["core".to_owned()]),
+            ("std".to_owned(), vec!["char".to_owned()]),
+            ("std".to_owned(), vec!["bytes".to_owned()]),
             ("std".to_owned(), vec!["assert".to_owned()]),
         ]);
         let mut input = input

@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-registry-integers"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Integer static methods: checked arithmetic with overflow, division by zero, and invalid shifts; the signed minimum divided and negated; flooring right shift; equality, order, decimal text, and parsing."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

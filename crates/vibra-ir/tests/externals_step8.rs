@@ -12,24 +12,38 @@ use vibra_ir::{
 
 #[test]
 fn registry_contains_only_the_reviewed_operations() {
-    assert_eq!(
-        CompilerIntrinsic::ALL
-            .iter()
-            .map(|intrinsic| intrinsic.symbol())
-            .collect::<Vec<_>>(),
-        [
-            "text.concat",
-            "text.length",
-            "array.of",
-            "map.of",
-            "array.length",
-            "array.append",
-            "array.concat",
-            "array.slice",
-        ]
-    );
+    let symbols = CompilerIntrinsic::all()
+        .into_iter()
+        .map(CompilerIntrinsic::symbol)
+        .collect::<Vec<_>>();
+    // Twelve methods for each signed and eleven for each unsigned integer
+    // type, nine for each float type, and the module and collection rows.
+    assert_eq!(symbols.len(), 4 * 12 + 4 * 11 + 2 * 9 + 24);
+    let distinct = symbols.iter().collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(distinct.len(), symbols.len());
+    for symbol in [
+        "i8.neg-checked",
+        "u64.shift-right",
+        "i32.parse",
+        "f32.compare-total",
+        "f64.to-str",
+        "char.from-u32",
+        "text.from-utf8",
+        "bytes.to-array",
+        "array.slice",
+    ] {
+        assert!(symbols.contains(&symbol), "{symbol} is missing");
+    }
+    assert!(CompilerIntrinsic::from_symbol("u8.neg-checked").is_none());
+    assert!(CompilerIntrinsic::from_symbol("f64.add-checked").is_none());
     assert!(CompilerIntrinsic::from_symbol("integer.add-checked").is_none());
     assert!(CompilerIntrinsic::from_symbol("host.read").is_none());
+    for intrinsic in CompilerIntrinsic::all() {
+        assert_eq!(
+            CompilerIntrinsic::from_symbol(intrinsic.symbol()),
+            Some(intrinsic)
+        );
+    }
 }
 
 #[test]

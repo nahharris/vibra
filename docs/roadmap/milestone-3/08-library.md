@@ -50,3 +50,47 @@ Registry signatures are checked exactly against the trusted declarations.
 
 The M2 registry note on `integer.*` symbols is closed by the static methods of
 the numeric primitive types; all registry rows have evidence; validation passes.
+
+## Delivery split
+
+Step 8 lands as three PRs, like 4a/4b:
+
+- **8 — registry.** Every Stage 3A `@compiler` row: the integer and float
+  static methods of the numeric builtin types in `@std.builtin`, and
+  `@std.char`, `@std.text`, and `@std.bytes`, with interpreter semantics and
+  host boundary tests.
+- **8b — composites and assertions.** The reviewed Vibra composites and the
+  generic `assert.equal`, with the projects-chapter example and the migrated
+  cases and CLI tests.
+- **8c — library migration.** `bool`, `str`, `bytes`, `ordering`, and the error
+  enums as standard-library `deftype`s under their roles. The text and bytes
+  rows become native implementations.
+
+## Delivery notes (8)
+
+- `vibra-ir::external` is its own module. `CompilerIntrinsic` has typed
+  numeric families, `Integer(NumericType, IntegerOp)` and
+  `Float(NumericType, FloatOp)`, next to the flat module and collection rows.
+  `CompilerIntrinsic::all()` lists the 134 rows and `symbol()` spells
+  `T.<name>`. `RoleTypes` also binds `@result` and the three `@std.core`
+  types, found by their standard-library identity, so no signature fixes a
+  library identity in the registry.
+- `@std.builtin` declares `(deftype i32 (intrinsic-type @i32) …)` for every
+  numeric type, with its methods as `external: @compiler` members. They are
+  reached as `(i32.add-checked a b)` with no import, as the collection members
+  are. `@std.char` and `@std.bytes` are new embedded modules, and `@std.text`
+  gains every text row. The manifest lists all 132 compiler symbols. Until 8c,
+  the text and bytes rows are primitive operations over the toolchain's
+  representation.
+- `vibra-interp`'s `registry` module is the reference semantics: integer
+  arithmetic in `i128` with range checks; binary32 arithmetic rounded at its
+  own width; NaN canonicalized for `compare-total`; scalar-counted text
+  slices; and every partial row answering with the `option`, `result`, or
+  `ordering` value of its checked result type.
+- The runtime chapter now defines the canonical float serialization, which
+  was referenced but never specified. Value encodings use it too, so
+  integral floats encode as `1.0f64` and extreme ones in scientific notation
+  (`V1-TYPE-INFER-float-boundaries` was updated).
+- The module rows are covered through their real imports by the workspace-test
+  case `V1-RUNTIME-registry-modules`: the single-file checker still admits only
+  the `@std.text` import.
