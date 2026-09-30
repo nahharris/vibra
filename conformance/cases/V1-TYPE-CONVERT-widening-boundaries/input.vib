@@ -1,0 +1,38 @@
+(deftype number (union i32 str))
+
+(deftype box (record value number))
+
+(deftype pair (tuple number atom))
+
+(deftype slot (enum empty void full number))
+
+(deftype wrapped number)
+
+(def fixed number 1i32)
+
+(def status atom @ok)
+
+(defn positional (value number) number value)
+
+(defn many () i32
+  variadic: (values (array number))
+  0i32)
+
+(defn result () number "text")
+
+(defn identity (value t) t
+  where: (t any)
+  value)
+
+(defn uses () (tuple number i32 box pair slot wrapped (enum some number) number number atom)
+  (tupleof
+    (positional 1i32)
+    (many 1i32 "y")
+    (box value: 2i32)
+    (pair 3i32 @tag)
+    (slot.full "z")
+    (wrapped 4i32)
+    (enumof some: 5i32)
+    (identity types: (number) 6i32)
+    (as number 7i32)
+    (as atom @done)))

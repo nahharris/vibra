@@ -38,6 +38,7 @@ mod pattern;
 mod resolved;
 mod standard;
 mod stdlib;
+mod union;
 
 pub use resolved::{ResolvedCheckResult, check_resolved};
 pub use standard::{builtin_member_names, role_type_names};
@@ -1754,6 +1755,7 @@ fn function_targets_from_expr(
         Expr::Record { .. }
         | Expr::Variant { .. }
         | Expr::Wrap { .. }
+        | Expr::Widen { .. }
         | Expr::Tuple { .. }
         | Expr::Array { .. }
         | Expr::Map { .. }
@@ -3194,6 +3196,77 @@ fn check_expression_in_position(
     expected: Option<Type>,
     tail_position: bool,
 ) -> Option<Expr> {
+    let target = expected
+        .as_ref()
+        .filter(|target| widening_target(environment.types, target))
+        .cloned();
+    let Some(target) = target else {
+        return check_form(environment, expression, expected, tail_position);
+    };
+    // Forms that pass their expected type to their results widen at those
+    // results; every other operand is checked on its own and widened once.
+    if matches!(
+        expression.kind(),
+        ExpressionKind::If { .. }
+            | ExpressionKind::Match { .. }
+            | ExpressionKind::Let { .. }
+            | ExpressionKind::Do(_)
+    ) {
+        return check_form(environment, expression, expected, tail_position);
+    }
+    let checked = check_form(environment, expression, None, tail_position)?;
+    widen_to(environment, checked, &target, expression.span())
+}
+
+/// Whether a written expected type admits a widening: `atom`, or a union.
+fn widening_target(types: &nominal::TypeNames, target: &Type) -> bool {
+    *target == Type::Atom || union::members(types, target).is_some()
+}
+
+/// Widens a checked operand to its written expected type once: an atom
+/// singleton to `atom`, or a member value to a union. An operand that
+/// already has the type is unchanged.
+fn widen_to(
+    environment: &mut CheckEnvironment<'_>,
+    checked: Expr,
+    target: &Type,
+    span: ByteSpan,
+) -> Option<Expr> {
+    let actual = checked.result_type();
+    if types_match(target, &actual) {
+        return Some(checked);
+    }
+    let member = if *target == Type::Atom && matches!(actual, Type::AtomSingleton(_)) {
+        None
+    } else if let Some(index) = union::discriminant(environment.types, target, &actual)
+    {
+        Some(index)
+    } else {
+        mismatch(
+            environment.diagnostics,
+            environment.source_id,
+            span,
+            target.clone(),
+            actual,
+            "expression type does not match the written expectation",
+        );
+        return None;
+    };
+    let origin = checked.origin().clone();
+    Some(Expr::Widen {
+        value: Box::new(checked),
+        value_type: target.clone(),
+        member,
+        origin,
+    })
+}
+
+fn check_form(
+    environment: &mut CheckEnvironment<'_>,
+    expression: &Expression,
+    expected: Option<Type>,
+    tail_position: bool,
+) -> Option<Expr> {
     // Only the expression itself is a callee or a generic binding's value,
     // never its operands.
     let callee_position = std::mem::take(&mut environment.callee_position);
@@ -3213,7 +3286,9 @@ fn check_expression_in_position(
             )
         }),
         ExpressionKind::Name(name) if name.kind() == NameKind::Atom => {
-            let actual = Type::Atom;
+            // A written atom has its singleton type; an `atom` expectation
+            // widens it in `check_expression_in_position`.
+            let actual = Type::AtomSingleton(name.value().to_owned());
             if expected
                 .as_ref()
                 .is_some_and(|expected| *expected != actual)
@@ -3224,7 +3299,7 @@ fn check_expression_in_position(
                     expression.span(),
                     expected.clone().unwrap_or(actual.clone()),
                     actual.clone(),
-                    "an atom literal does not match the written result type",
+                    "an atom literal does not match the expected type",
                 );
                 return None;
             }
@@ -3931,7 +4006,18 @@ fn check_expression_in_position(
         ExpressionKind::TupleOf(components) => {
             construct::check_tupleof(environment, expression, components, expected)
         }
-        ExpressionKind::As { .. } | ExpressionKind::Try(_) => {
+        ExpressionKind::As {
+            value_type,
+            operand,
+        } => check_ascription(
+            environment,
+            expression,
+            value_type,
+            operand,
+            expected,
+            tail_position,
+        ),
+        ExpressionKind::Try(_) => {
             unavailable(
                 environment.diagnostics,
                 environment.source_id,
@@ -3945,6 +4031,71 @@ fn check_expression_in_position(
             None
         }
     }
+}
+
+/// Checks `(as t e)`: the operand at the written type, where it may already
+/// have that type, widen to it once, or have an ambiguous inference fixed by
+/// it. Any other outcome is one `@type.invalid-ascription` at the form.
+/// Ascription is erased: the result is the checked operand.
+fn check_ascription(
+    environment: &mut CheckEnvironment<'_>,
+    expression: &Expression,
+    value_type: &TypeExpr,
+    operand: &Expression,
+    expected: Option<Type>,
+    tail_position: bool,
+) -> Option<Expr> {
+    let target = environment.types.lower_or_report(
+        environment.source_id,
+        nominal::Scope::new(environment.self_type.as_ref(), &environment.generics),
+        value_type,
+        expression.span(),
+        environment.diagnostics,
+    )?;
+    let before = environment.diagnostics.len();
+    let checked = check_expression_in_position(
+        environment,
+        operand,
+        Some(target.clone()),
+        tail_position,
+    );
+    let Some(checked) = checked else {
+        let mut reported = false;
+        let mut index = before;
+        while let Some(diagnostic) = environment.diagnostics.get(index) {
+            if diagnostic.code() == DiagnosticCode::TypeMismatch
+                && diagnostic.primary_span() == operand.span()
+            {
+                environment.diagnostics.remove(index);
+                reported = true;
+            } else {
+                index += 1;
+            }
+        }
+        if reported {
+            environment.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::TypeInvalidAscription,
+                    expression.span(),
+                    format!(
+                        "`as` neither keeps, widens to, nor infers {target}; it never converts or narrows"
+                    ),
+                )
+                .with_source_id(environment.source_id),
+            );
+        }
+        return None;
+    };
+    ensure_expected(
+        environment,
+        expression.span(),
+        expected.clone(),
+        target.clone(),
+    );
+    expected
+        .as_ref()
+        .is_none_or(|expected| types_match(expected, &target))
+        .then_some(checked)
 }
 
 /// Checks `match`: the subject once, then each arm's pattern against the

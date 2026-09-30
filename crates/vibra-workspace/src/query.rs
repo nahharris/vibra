@@ -1261,6 +1261,7 @@ impl<'a> SemanticCollector<'a> {
             Expr::Record { .. }
             | Expr::Variant { .. }
             | Expr::Wrap { .. }
+            | Expr::Widen { .. }
             | Expr::Project { .. }
             | Expr::Tuple { .. }
             | Expr::TupleProject { .. }

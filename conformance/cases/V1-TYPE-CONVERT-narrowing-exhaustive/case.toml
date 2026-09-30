@@ -1,0 +1,11 @@
+id = "V1-TYPE-CONVERT-narrowing-exhaustive"
+rule = "V1-TYPE-CONVERT"
+profile = "static-v1"
+operation = "type-check"
+description = "A union match is exhaustive with one as arm per member or with a binder covering the remaining members."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

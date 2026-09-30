@@ -41,6 +41,10 @@ pub(crate) enum LowerError {
     InvalidMapKey(Type),
     /// A map key type that is or contains a function type.
     FunctionMapKey(Type),
+    /// Two union members that some substitution makes equal.
+    UnionOverlap(Box<(Type, Type)>),
+    /// A union member that is a union, an interface, or a generic name.
+    UnionNotConcrete(Type),
 }
 
 /// What a type expression may name besides declared types: the receiver type
@@ -429,8 +433,13 @@ impl TypeNames {
                 }
                 Ok(Type::Map(Box::new(key), Box::new(value)))
             }
-            TypeExpr::Union(_) => {
-                Err(LowerError::Unavailable("union types arrive in M3 Step 6"))
+            TypeExpr::Union(members) => {
+                let members = members
+                    .iter()
+                    .map(|member| self.lower(source_id, scope, member))
+                    .collect::<Result<Vec<_>, _>>()?;
+                crate::union::check_members(self, &members)?;
+                Ok(Type::Union(vibra_ir::canonical_union(members)))
             }
         }
     }
@@ -600,9 +609,17 @@ impl TypeNames {
                     })
                     .collect::<Result<Vec<_>, _>>()
                     .map(TypeBody::Tuple),
-                DeftypeBody::Type(TypeExpr::Union(_)) => Err(LowerError::Unavailable(
-                    "declared union types arrive in M3 Step 6",
-                )),
+                DeftypeBody::Type(TypeExpr::Union(members)) => members
+                    .iter()
+                    .map(|member| {
+                        self.lower(
+                            &source_id,
+                            Scope::new(Some(&self_type), &parameters),
+                            member,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(TypeBody::Union),
                 DeftypeBody::Intrinsic(_) => Err(LowerError::Unavailable(
                     "intrinsic-type is admissible only in the embedded standard library",
                 )),
@@ -640,8 +657,58 @@ impl TypeNames {
                 declared.body = None;
             }
         }
+        self.check_union_bodies(declarations, diagnostics);
         self.check_finite_size(declarations, diagnostics);
         self.propagate_unavailability(declarations, diagnostics);
+    }
+
+    /// Checks every union member list in the lowered bodies once all bodies
+    /// exist, so a member naming another declared union is seen. A failing
+    /// declaration becomes unavailable.
+    fn check_union_bodies(
+        &mut self,
+        declarations: &[(usize, &DeftypeDeclaration)],
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        let mut failed = Vec::new();
+        for (index, declaration) in declarations {
+            let Some(declared) = self.declared.get(*index) else {
+                continue;
+            };
+            let Some(body) = declared.body.as_ref() else {
+                continue;
+            };
+            let mut lists = Vec::new();
+            if let TypeBody::Union(members) = body {
+                lists.push(members.clone());
+            }
+            let mut pending: Vec<Type> =
+                body.slots().into_iter().map(|(_, value)| value).collect();
+            while let Some(value) = pending.pop() {
+                if let Type::Union(members) = &value {
+                    lists.push(members.clone());
+                }
+                pending.extend(value.components());
+            }
+            if let Some(error) = lists
+                .iter()
+                .find_map(|members| crate::union::check_members(self, members).err())
+            {
+                report_lower_error(
+                    diagnostics,
+                    &declared.source_id,
+                    declaration.span(),
+                    &error,
+                );
+                failed.push(*index);
+            }
+        }
+        for index in failed {
+            if let Some(declared) = self.declared.get_mut(index) {
+                declared.available = false;
+                declared.body = None;
+            }
+        }
     }
 
     /// Marks every type whose body names an unavailable type as unavailable,
@@ -972,6 +1039,25 @@ pub(crate) fn report_lower_error(
                 DiagnosticCode::TypeFunctionNotEquatable,
                 span,
                 format!("{key} contains a function type and cannot key a map"),
+            )
+            .with_source_id(source_id),
+        ),
+        LowerError::UnionOverlap(pair) => diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeUnionMemberOverlap,
+                span,
+                format!(
+                    "union members {} and {} can be the same type",
+                    pair.0, pair.1
+                ),
+            )
+            .with_source_id(source_id),
+        ),
+        LowerError::UnionNotConcrete(member) => diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeUnionMemberNotConcrete,
+                span,
+                format!("union member {member} is not a concrete type"),
             )
             .with_source_id(source_id),
         ),

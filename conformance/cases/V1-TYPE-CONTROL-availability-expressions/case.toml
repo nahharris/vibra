@@ -2,7 +2,7 @@ id = "V1-TYPE-CONTROL-availability-expressions"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
 operation = "type-check"
-description = "Ascription and try stay unavailable until their M3 steps."
+description = "try stays unavailable until M3 Step 7."
 
 [inputs]
 source = "input.vib"
@@ -14,10 +14,4 @@ accepted = false
 code = "@tool.unavailable"
 level = "@error"
 source = "input.vib"
-span = [26, 39]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "input.vib"
-span = [66, 76]
+span = [25, 35]

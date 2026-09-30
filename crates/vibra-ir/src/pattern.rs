@@ -37,6 +37,15 @@ pub enum Pattern {
     Wrap(Box<Pattern>),
     /// An array of exactly these elements.
     Array(Vec<Pattern>),
+    /// One union member, `(as t p)`, with the pattern for its payload.
+    Member {
+        /// The discriminant: the member's index in the union's member list.
+        index: usize,
+        /// The member type.
+        member: Type,
+        /// The payload pattern, checked at the member type.
+        pattern: Box<Pattern>,
+    },
 }
 
 impl Pattern {
@@ -67,7 +76,9 @@ impl Pattern {
                     item.collect_bindings(found);
                 }
             }
-            Self::Wrap(inner) => inner.collect_bindings(found),
+            Self::Wrap(inner) | Self::Member { pattern: inner, .. } => {
+                inner.collect_bindings(found);
+            }
         }
     }
 
@@ -109,6 +120,15 @@ impl Pattern {
             Self::Array(items) => {
                 format!("(record kind: @array items: {})", encode_all(items))
             }
+            Self::Member {
+                index,
+                member,
+                pattern,
+            } => format!(
+                "(record kind: @member index: {index}u64 type: {} value: {})",
+                crate::canonical_type(member),
+                pattern.canonical_vibon()
+            ),
         }
     }
 }

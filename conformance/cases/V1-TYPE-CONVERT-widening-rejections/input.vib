@@ -1,0 +1,10 @@
+(deftype number (union i32 f32))
+
+(defn branches (flag bool) i32
+  (let value (if flag 1i32 2.0f32) 0i32))
+
+(defn invariant (values (array i32)) (array number) values)
+
+(defn atoms () i32 (let values (array.of @ok @err) 0i32))
+
+(defn chained () (union atom i32) @ok)

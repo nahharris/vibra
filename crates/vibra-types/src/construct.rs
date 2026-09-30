@@ -207,6 +207,39 @@ pub(crate) fn check_constructor(
                 origin,
             }
         }
+        (TypeBody::Union(members), None) => {
+            let operand =
+                single_positional(environment, application, "a union constructor")?;
+            binding = ConstructorBinding::positional(1);
+            let value = check_operand(environment, operand, None)?;
+            let actual = value.result_type();
+            // Injection is one widening: the operand is exactly one member.
+            let found = members.iter().enumerate().find_map(|(index, member)| {
+                let mut trial = instantiation.clone();
+                let opened = trial.open(member);
+                trial.unify(&opened, &actual).then_some((index, trial))
+            });
+            let Some((index, trial)) = found else {
+                call_contract_error(
+                    environment,
+                    operand.span(),
+                    format!("{actual} is not a member of `{}`", declared.name),
+                );
+                return None;
+            };
+            instantiation = trial;
+            Expr::Widen {
+                value_type: instantiated(
+                    environment,
+                    application,
+                    &instantiation,
+                    &pattern,
+                )?,
+                value: Box::new(value),
+                member: Some(index),
+                origin,
+            }
+        }
         (TypeBody::Enum(_), None) => {
             wrong_kind(
                 environment,
@@ -219,7 +252,10 @@ pub(crate) fn check_constructor(
             return None;
         }
         (
-            TypeBody::Record(_) | TypeBody::Wrapper(_) | TypeBody::Tuple(_),
+            TypeBody::Record(_)
+            | TypeBody::Wrapper(_)
+            | TypeBody::Tuple(_)
+            | TypeBody::Union(_),
             Some(member),
         ) => {
             environment.diagnostics.push(

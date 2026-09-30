@@ -1,0 +1,54 @@
+id = "V1-TYPE-CONVERT-narrowing-rejections"
+rule = "V1-TYPE-CONVERT"
+profile = "static-v1"
+operation = "type-check"
+description = "As patterns need a union scrutinee and one of its members, are refutable in let and parameters, and join union exhaustiveness and reachability."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.narrowing-non-union"
+level = "@error"
+source = "input.vib"
+span = [79, 89]
+
+[[expect.diagnostics]]
+code = "@type.not-a-union-member"
+level = "@error"
+source = "input.vib"
+span = [144, 154]
+
+[[expect.diagnostics]]
+code = "@pattern.refutable-binding"
+level = "@error"
+source = "input.vib"
+span = [207, 217]
+notes = ["`(as f32 -)` is not matched"]
+
+[[expect.diagnostics]]
+code = "@pattern.refutable-binding"
+level = "@error"
+source = "input.vib"
+span = [249, 259]
+notes = ["`(as f32 -)` is not matched"]
+
+[[expect.diagnostics]]
+code = "@pattern.non-exhaustive"
+level = "@error"
+source = "input.vib"
+span = [309, 335]
+notes = ["`(as f32 -)` is not covered"]
+
+[[expect.diagnostics]]
+code = "@pattern.unreachable-arm"
+level = "@error"
+source = "input.vib"
+span = [416, 426]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [387, 397]

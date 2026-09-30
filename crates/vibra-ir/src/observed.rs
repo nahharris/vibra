@@ -47,6 +47,15 @@ pub enum ObservedValue {
     Array(Vec<ObservedValue>),
     /// A map value; entries in canonical key order.
     Map(Vec<(ObservedValue, ObservedValue)>),
+    /// A union value: its member type and that member's value.
+    Union {
+        /// The declared union, or `None` for an anonymous union.
+        type_id: Option<TypeId>,
+        /// The member type the value holds.
+        member: Box<Type>,
+        /// The member value.
+        value: Box<ObservedValue>,
+    },
 }
 
 impl ObservedValue {
@@ -94,6 +103,16 @@ impl ObservedValue {
                     encode_all(values)
                 )
             }
+            Self::Union {
+                type_id,
+                member,
+                value,
+            } => format!(
+                "(record kind: @union{} member: {} value: {})",
+                type_field(type_id.as_ref()),
+                canonical_type(member),
+                value.canonical_vibon()
+            ),
             Self::Map(entries) => format!(
                 "(record kind: @map entries: (array{}))",
                 entries
@@ -128,7 +147,8 @@ impl ObservedValue {
             | Self::Wrapper { .. }
             | Self::Tuple { .. }
             | Self::Array(_)
-            | Self::Map(_) => None,
+            | Self::Map(_)
+            | Self::Union { .. } => None,
         }
     }
 }

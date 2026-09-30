@@ -239,6 +239,8 @@ pub enum Type {
     Bytes,
     /// Interned atom values.
     Atom,
+    /// The singleton type of one written atom, which widens to `atom`.
+    AtomSingleton(String),
     /// Signed eight-bit integers.
     I8,
     /// Signed sixteen-bit integers.
@@ -277,6 +279,8 @@ pub enum Type {
     Array(Box<Type>),
     /// The builtin `(map k v)` type.
     Map(Box<Type>, Box<Type>),
+    /// An anonymous union type; members are in canonical order.
+    Union(Vec<Type>),
 }
 
 impl Type {
@@ -292,6 +296,7 @@ impl Type {
             Self::Record(_) => "record",
             Self::Enum(_) => "enum",
             Self::Tuple(_) => "tuple",
+            Self::Union(_) => "union",
             Self::Array(_) => "array",
             Self::Map(_, _) => "map",
             Self::Bool => "bool",
@@ -300,6 +305,7 @@ impl Type {
             Self::Str => "str",
             Self::Bytes => "bytes",
             Self::Atom => "atom",
+            Self::AtomSingleton(_) => "atom",
             Self::I8 => "i8",
             Self::I16 => "i16",
             Self::I32 => "i32",
@@ -325,7 +331,8 @@ impl Type {
             (Self::Function(left), Self::Function(right)) => left.same_shape(right),
             (Self::Record(left), Self::Record(right))
             | (Self::Enum(left), Self::Enum(right)) => members_same_shape(left, right),
-            (Self::Tuple(left), Self::Tuple(right)) => {
+            (Self::Tuple(left), Self::Tuple(right))
+            | (Self::Union(left), Self::Union(right)) => {
                 left.len() == right.len()
                     && left
                         .iter()
@@ -369,6 +376,12 @@ impl Type {
                 Self::Record(substitute_members(members, arguments))
             }
             Self::Enum(members) => Self::Enum(substitute_members(members, arguments)),
+            Self::Union(values) => Self::Union(canonical_union(
+                values
+                    .iter()
+                    .map(|value| value.substitute(arguments))
+                    .collect(),
+            )),
             Self::Tuple(values) => Self::Tuple(
                 values
                     .iter()
@@ -437,7 +450,9 @@ impl Type {
     #[must_use]
     pub fn components(&self) -> Vec<Self> {
         match self {
-            Self::Applied(_, values) | Self::Tuple(values) => values.clone(),
+            Self::Applied(_, values) | Self::Tuple(values) | Self::Union(values) => {
+                values.clone()
+            }
             Self::Array(element) => vec![element.as_ref().clone()],
             Self::Map(key, value) => vec![key.as_ref().clone(), value.as_ref().clone()],
             Self::Record(members) | Self::Enum(members) => {
@@ -458,7 +473,9 @@ impl Type {
         match self {
             Self::Param(_) => true,
             Self::Applied(_, values) => values.iter().any(Self::has_params),
-            Self::Tuple(values) => values.iter().any(Self::has_params),
+            Self::Tuple(values) | Self::Union(values) => {
+                values.iter().any(Self::has_params)
+            }
             Self::Array(element) => element.has_params(),
             Self::Map(key, value) => key.has_params() || value.has_params(),
             Self::Record(members) | Self::Enum(members) => {
@@ -522,6 +539,14 @@ impl fmt::Display for Type {
                 }
                 formatter.write_str(")")
             }
+            Self::Union(values) => {
+                formatter.write_str("(union")?;
+                for value in values {
+                    write!(formatter, " {value}")?;
+                }
+                formatter.write_str(")")
+            }
+            Self::AtomSingleton(name) => write!(formatter, "@{name}"),
             Self::Array(element) => write!(formatter, "(array {element})"),
             Self::Map(key, value) => write!(formatter, "(map {key} {value})"),
             // Spelled like the `fn` type expression, so two function types
@@ -934,7 +959,7 @@ impl Value {
             Self::Char(_) => Type::Char,
             Self::Str(_) => Type::Str,
             Self::Bytes(_) => Type::Bytes,
-            Self::Atom(_) => Type::Atom,
+            Self::Atom(name) => Type::AtomSingleton(name.clone()),
             Self::I8(_) => Type::I8,
             Self::I16(_) => Type::I16,
             Self::I32(_) => Type::I32,
@@ -1131,6 +1156,20 @@ pub enum Expr {
         /// The common result type of every arm.
         value_type: Type,
         /// The source origin of the complete form.
+        origin: SourceOrigin,
+    },
+    /// One widening at a written expected type: an atom singleton to `atom`,
+    /// which is erased, or a member value to a union, which attaches the
+    /// member's discriminant.
+    Widen {
+        /// The widened value.
+        value: Box<Self>,
+        /// The written target type.
+        value_type: Type,
+        /// The discriminant, the member's index in the union's member
+        /// list; `None` for atom widening.
+        member: Option<usize>,
+        /// The source origin of the widened operand.
         origin: SourceOrigin,
     },
     /// A boolean conditional with two already checked branches.
@@ -1570,6 +1609,7 @@ impl Expr {
             | Self::Record { origin, .. }
             | Self::Variant { origin, .. }
             | Self::Wrap { origin, .. }
+            | Self::Widen { origin, .. }
             | Self::Project { origin, .. }
             | Self::Tuple { origin, .. }
             | Self::TupleProject { origin, .. }
@@ -1604,6 +1644,7 @@ impl Expr {
             | Self::Variant { value_type, .. }
             | Self::Project { value_type, .. } => value_type.clone(),
             Self::Wrap { value_type, .. }
+            | Self::Widen { value_type, .. }
             | Self::Tuple { value_type, .. }
             | Self::TupleProject { value_type, .. }
             | Self::Array { value_type, .. }
@@ -1658,6 +1699,7 @@ impl Expr {
             | Self::Record { .. }
             | Self::Variant { .. }
             | Self::Wrap { .. }
+            | Self::Widen { .. }
             | Self::Project { .. }
             | Self::Tuple { .. }
             | Self::TupleProject { .. }
@@ -1688,6 +1730,7 @@ impl Expr {
             | Self::Record { .. }
             | Self::Variant { .. }
             | Self::Wrap { .. }
+            | Self::Widen { .. }
             | Self::Project { .. }
             | Self::Tuple { .. }
             | Self::TupleProject { .. }
@@ -1754,7 +1797,7 @@ impl Expr {
             Self::Variant { payload, .. } => {
                 payload.as_deref().map_or(0, Self::slot_count)
             }
-            Self::Wrap { value, .. } => value.slot_count(),
+            Self::Wrap { value, .. } | Self::Widen { value, .. } => value.slot_count(),
             Self::Project { record, .. } => record.slot_count(),
             Self::Tuple { .. }
             | Self::TupleProject { .. }
@@ -2127,6 +2170,32 @@ impl Expr {
                 value.validate_shape_with_captures(slots, capture_types)?;
                 Ok(value_type.clone())
             }
+            Self::Widen {
+                value_type,
+                value,
+                member,
+                ..
+            } => {
+                let actual =
+                    value.validate_shape_with_captures(slots, capture_types)?;
+                let widens = match value_type {
+                    Type::Atom => {
+                        member.is_none() && matches!(actual, Type::AtomSingleton(_))
+                    }
+                    Type::Union(members) => member
+                        .and_then(|index| members.get(index))
+                        .is_some_and(|found| found.admits(&actual)),
+                    // A declared union's members are checked with its definition.
+                    Type::Declared(_) | Type::Applied(_, _) => true,
+                    _ => false,
+                };
+                if !widens {
+                    return Err(IrError::InvalidExpression(format!(
+                        "{actual} does not widen to {value_type}"
+                    )));
+                }
+                Ok(value_type.clone())
+            }
             Self::Project {
                 record,
                 field,
@@ -2332,6 +2401,7 @@ fn validate_pattern(
             Ok(())
         }
         Pattern::Literal(value) => match expected {
+            Some(Type::Atom) if matches!(value, Value::Atom(_)) => Ok(()),
             Some(expected) if !expected.admits(&value.ty()) => invalid(format!(
                 "literal pattern has type {}, expected {expected}",
                 value.ty()
@@ -2410,6 +2480,29 @@ fn validate_pattern(
                 return invalid("wrapper pattern for a non-declared type".to_owned());
             }
             validate_pattern(inner, None, slots)
+        }
+        Pattern::Member {
+            index,
+            member,
+            pattern,
+        } => {
+            match expected {
+                Some(Type::Union(members))
+                    if !members
+                        .get(*index)
+                        .is_some_and(|found| found.same_shape(member)) =>
+                {
+                    return invalid(format!("{member} is not a member of the union"));
+                }
+                Some(Type::Union(_) | Type::Declared(_) | Type::Applied(_, _))
+                | None => {}
+                Some(expected) => {
+                    return invalid(format!(
+                        "member pattern for non-union type {expected}"
+                    ));
+                }
+            }
+            validate_pattern(pattern, Some(member), slots)
         }
         Pattern::Array(items) => {
             let element = match expected {
@@ -3230,6 +3323,7 @@ fn validate_program_expr(
         Expr::Record { .. }
         | Expr::Variant { .. }
         | Expr::Wrap { .. }
+        | Expr::Widen { .. }
         | Expr::Project { .. }
         | Expr::Tuple { .. }
         | Expr::TupleProject { .. }
@@ -3634,6 +3728,7 @@ fn possible_function_targets(
         Expr::Record { .. }
         | Expr::Variant { .. }
         | Expr::Wrap { .. }
+        | Expr::Widen { .. }
         | Expr::Tuple { .. }
         | Expr::Array { .. }
         | Expr::Map { .. }
@@ -4299,6 +4394,7 @@ impl<'a> CallFlow<'a> {
             Expr::Record { .. }
             | Expr::Variant { .. }
             | Expr::Wrap { .. }
+            | Expr::Widen { .. }
             | Expr::Tuple { .. }
             | Expr::Array { .. }
             | Expr::Map { .. }
@@ -4586,6 +4682,7 @@ impl<'a> CallFlow<'a> {
             Expr::Record { .. }
             | Expr::Variant { .. }
             | Expr::Wrap { .. }
+            | Expr::Widen { .. }
             | Expr::Project { .. }
             | Expr::Tuple { .. }
             | Expr::TupleProject { .. }
@@ -5006,6 +5103,7 @@ fn validate_tail_calls(
         Expr::Record { .. }
         | Expr::Variant { .. }
         | Expr::Wrap { .. }
+        | Expr::Widen { .. }
         | Expr::Project { .. }
         | Expr::Tuple { .. }
         | Expr::TupleProject { .. }
@@ -5331,6 +5429,19 @@ fn visit_dependency_graph(
 
 fn canonical_expr(expression: &Expr) -> String {
     match expression {
+        Expr::Widen {
+            value_type,
+            value,
+            member,
+            ..
+        } => format!(
+            "(record kind: @widen type: {}{} value: {})",
+            canonical_type(value_type),
+            member
+                .map(|index| format!(" member: {index}u64"))
+                .unwrap_or_default(),
+            canonical_expr(value)
+        ),
         Expr::Record {
             value_type, fields, ..
         } => format!(
@@ -5427,8 +5538,8 @@ fn canonical_expr(expression: &Expr) -> String {
             canonical_expr(key)
         ),
         Expr::Literal { value, .. } => format!(
-            "(record kind: @literal type: @{} value: {})",
-            value.ty().as_str(),
+            "(record kind: @literal type: {} value: {})",
+            canonical_type(&value.ty()),
             value.canonical_vibon()
         ),
         Expr::External {
@@ -5574,6 +5685,15 @@ fn canonical_expr(expression: &Expr) -> String {
     }
 }
 
+/// Orders anonymous union members canonically: by the bytes of their
+/// canonical type encoding, removing nothing. Anonymous union identity
+/// ignores written order.
+#[must_use]
+pub fn canonical_union(mut members: Vec<Type>) -> Vec<Type> {
+    members.sort_by_cached_key(canonical_type);
+    members
+}
+
 /// The canonical type encoding of `docs/spec/06-runtime.md`.
 #[must_use]
 pub fn canonical_type(value: &Type) -> String {
@@ -5604,6 +5724,16 @@ pub fn canonical_type(value: &Type) -> String {
             "(record type: @enum variants: (record{}))",
             canonical_type_members(variants)
         ),
+        Type::Union(members) => format!(
+            "(record type: @union members: (array{}))",
+            members
+                .iter()
+                .map(|member| format!(" {}", canonical_type(member)))
+                .collect::<String>()
+        ),
+        Type::AtomSingleton(name) => {
+            format!("(record type: @atom-singleton atom: @{name})")
+        }
         _ => format!("@{}", value.as_str()),
     }
 }

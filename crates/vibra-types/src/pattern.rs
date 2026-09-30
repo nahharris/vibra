@@ -15,9 +15,7 @@ use vibra_ir::{Pattern, Type, TypeBody, Value};
 use vibra_syntax::{Literal, PatternArgument, PatternKind};
 
 use crate::nominal::{ConstructorTarget, TypeNames, declared_self_type};
-use crate::{
-    CheckEnvironment, call_contract_error, check_literal, mismatch, unavailable,
-};
+use crate::{CheckEnvironment, call_contract_error, check_literal, mismatch};
 
 /// Lowers a written pattern against its expected type, binding every named
 /// binder in `environment`. Returns `None` after reporting a diagnostic.
@@ -37,13 +35,15 @@ pub(crate) fn check_pattern(
             })
         }
         PatternKind::Atom(name) => {
-            if *expected != Type::Atom {
+            let closed_by_it =
+                matches!(expected, Type::AtomSingleton(atom) if atom == name.value());
+            if *expected != Type::Atom && !closed_by_it {
                 mismatch(
                     environment.diagnostics,
                     environment.source_id,
                     span,
                     expected.clone(),
-                    Type::Atom,
+                    Type::AtomSingleton(name.value().to_owned()),
                     "an atom pattern does not match the expected type",
                 );
                 return None;
@@ -162,14 +162,52 @@ pub(crate) fn check_pattern(
             }
             Some(Pattern::Array(checked))
         }
-        PatternKind::As { .. } => {
-            unavailable(
-                environment.diagnostics,
+        PatternKind::As {
+            value_type,
+            pattern: payload,
+        } => {
+            let Some(members) = crate::union::members(environment.types, expected)
+            else {
+                environment.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::TypeNarrowingNonUnion,
+                        span,
+                        format!("an `as` pattern narrows a union, not {expected}"),
+                    )
+                    .with_source_id(environment.source_id),
+                );
+                return None;
+            };
+            let member = environment.types.lower_or_report(
                 environment.source_id,
+                crate::nominal::Scope::new(
+                    environment.self_type.as_ref(),
+                    &environment.generics,
+                ),
+                value_type,
                 span,
-                "`as` patterns arrive with unions in M3 Step 6",
-            );
-            None
+                environment.diagnostics,
+            )?;
+            let Some(index) = members
+                .iter()
+                .position(|candidate| candidate.same_shape(&member))
+            else {
+                environment.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::TypeNotAUnionMember,
+                        span,
+                        format!("{member} is not a member of {expected}"),
+                    )
+                    .with_source_id(environment.source_id),
+                );
+                return None;
+            };
+            let inner = check_pattern(environment, payload, &member)?;
+            Some(Pattern::Member {
+                index,
+                member,
+                pattern: Box::new(inner),
+            })
         }
     }
 }
@@ -332,6 +370,20 @@ fn check_constructor_pattern(
                 payload,
             })
         }
+        (TypeBody::Union(_), _) => {
+            environment.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::NameWrongEntityKind,
+                    span,
+                    format!(
+                        "`{}` is a union type; narrow it with an `as` pattern",
+                        declared.name
+                    ),
+                )
+                .with_source_id(environment.source_id),
+            );
+            None
+        }
         (TypeBody::Enum(_), None) => {
             environment.diagnostics.push(
                 Diagnostic::new(
@@ -472,6 +524,8 @@ enum Constructor {
     Literal(Value),
     /// An array of exactly this length.
     Array(usize),
+    /// The union member with this discriminant.
+    Member(usize),
 }
 
 /// The shape of a type's value space for the usefulness engine.
@@ -490,6 +544,10 @@ enum Space {
     Void,
     /// Arrays of one element type, by length.
     Array(Type),
+    /// The members of a union, in discriminant order.
+    Union(Vec<Type>),
+    /// The singleton type of one atom.
+    Singleton(String),
     /// Any other type: only a binder or discard covers it.
     Infinite,
 }
@@ -502,6 +560,8 @@ fn space(types: &TypeNames, value_type: &Type) -> Space {
         Type::Tuple(components) => Space::Tuple(components.clone()),
         Type::Enum(variants) => Space::Enum(variants.clone()),
         Type::Array(element) => Space::Array((**element).clone()),
+        Type::Union(members) => Space::Union(members.clone()),
+        Type::AtomSingleton(atom) => Space::Singleton(atom.clone()),
         Type::Declared(_) | Type::Applied(_, _) => {
             match instantiated_body(types, value_type) {
                 Some(TypeBody::Record(members)) => Space::Record(members),
@@ -510,6 +570,7 @@ fn space(types: &TypeNames, value_type: &Type) -> Space {
                     Space::Wrapper(representation)
                 }
                 Some(TypeBody::Enum(variants)) => Space::Enum(variants),
+                Some(TypeBody::Union(members)) => Space::Union(members),
                 None => Space::Infinite,
             }
         }
@@ -530,6 +591,12 @@ fn all_constructors(space: &Space) -> Option<Vec<Constructor>> {
                 .map(|(name, _)| Constructor::Variant(name.clone()))
                 .collect(),
         ),
+        Space::Union(members) => {
+            Some((0..members.len()).map(Constructor::Member).collect())
+        }
+        Space::Singleton(atom) => {
+            Some(vec![Constructor::Literal(Value::Atom(atom.clone()))])
+        }
         Space::Bool => Some(vec![
             Constructor::Literal(Value::Bool(false)),
             Constructor::Literal(Value::Bool(true)),
@@ -557,6 +624,9 @@ fn arity_types(space: &Space, constructor: &Constructor) -> Vec<Type> {
         (Space::Array(element), Constructor::Array(length)) => {
             vec![element.clone(); *length]
         }
+        (Space::Union(members), Constructor::Member(index)) => {
+            members.get(*index).cloned().into_iter().collect()
+        }
         _ => Vec::new(),
     }
 }
@@ -570,6 +640,7 @@ fn head_constructor(pattern: &Pattern) -> Option<Constructor> {
             Some(Constructor::Single)
         }
         Pattern::Array(items) => Some(Constructor::Array(items.len())),
+        Pattern::Member { index, .. } => Some(Constructor::Member(*index)),
     }
 }
 
@@ -609,6 +680,7 @@ fn specialize_head(
         }
         Pattern::Tuple(items) | Pattern::Array(items) => Some(items.clone()),
         Pattern::Wrap(inner) => Some(vec![(**inner).clone()]),
+        Pattern::Member { pattern, .. } => Some(vec![(**pattern).clone()]),
     }
 }
 
@@ -651,6 +723,12 @@ fn rebuild(
         },
         (_, Constructor::Literal(value)) => Pattern::Literal(value.clone()),
         (_, Constructor::Array(_)) => Pattern::Array(operands),
+        (Space::Union(members), Constructor::Member(index)) => Pattern::Member {
+            index: *index,
+            member: members.get(*index).cloned().unwrap_or(Type::Void),
+            pattern: Box::new(operands.into_iter().next().unwrap_or(Pattern::Wildcard)),
+        },
+        (_, Constructor::Member(_)) => Pattern::Wildcard,
         (_, Constructor::Single) => Pattern::Wildcard,
     };
     std::iter::once(head).chain(witness).collect()
@@ -841,6 +919,14 @@ pub(crate) fn spell(types: &TypeNames, pattern: &Pattern, value_type: &Type) -> 
             }
             let head = declared_name().unwrap_or_default();
             format!("({head} {})", spell(types, inner, representation))
+        }
+        (
+            Pattern::Member {
+                member, pattern, ..
+            },
+            _,
+        ) => {
+            format!("(as {member} {})", spell(types, pattern, member))
         }
         (Pattern::Array(items), Space::Array(element)) => format!(
             "(array{})",

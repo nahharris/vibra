@@ -1,0 +1,4 @@
+(deftype lists (union (array t) (array i32))
+  where: (t any))
+
+(defn twice (value (union i32 i32)) i32 0i32)

@@ -1,3 +1,0 @@
-(defn as-pattern ((as i32 item) i32) i32 0i32)
-
-(defn as-let (value i32) i32 (let (as i32 item) value item))

@@ -15,17 +15,18 @@ fn codes(source: &str) -> Vec<(DiagnosticCode, ByteSpan)> {
 
 #[test]
 fn a_type_naming_an_unavailable_type_is_unavailable_at_its_declaration_and_uses() {
-    let source = "(deftype number (union i32 str))\n\
+    let source = "(deftype number (intrinsic-type @number))\n\
                   (deftype wrapper (record value number))\n\
                   (defn read (value wrapper) i32 0i32)";
     let codes = codes(source);
-    // The union, then the record that names it, then the parameter naming the record.
+    // The intrinsic type, then the record that names it, then the parameter
+    // naming the record.
     assert_eq!(
         codes,
         vec![
-            (DiagnosticCode::ToolUnavailable, ByteSpan::new(0, 32)),
-            (DiagnosticCode::ToolUnavailable, ByteSpan::new(33, 72)),
-            (DiagnosticCode::ToolUnavailable, ByteSpan::new(85, 98)),
+            (DiagnosticCode::ToolUnavailable, ByteSpan::new(0, 41)),
+            (DiagnosticCode::ToolUnavailable, ByteSpan::new(42, 81)),
+            (DiagnosticCode::ToolUnavailable, ByteSpan::new(94, 107)),
         ]
     );
 }

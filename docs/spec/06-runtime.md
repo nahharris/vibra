@@ -369,7 +369,8 @@ including `@array` and `@map`; `(record type: @tuple arguments: (array T...))`
 for an anonymous tuple; `(record type: @record fields: (record name: T...))`,
 `(record type: @enum variants: (record name: T...))`, and
 `(record type: @union members: (array T...))` for the other anonymous types,
-in canonical order; and `(record type: @fn parameters: (array T...) labelled:
+in canonical order; `(record type: @atom-singleton atom: @name)` for the
+singleton type of a written atom; and `(record type: @fn parameters: (array T...) labelled:
 (record name: T...) result: T)` for a function type. A result observation is
 `(record type: T value: v)`. Function values have no value encoding and are
 never an observable result.
