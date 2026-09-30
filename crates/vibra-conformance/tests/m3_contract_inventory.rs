@@ -110,8 +110,12 @@ fn every_m3_row_names_an_owning_step() {
     for (variant, disposition, owner) in inventory_rows() {
         match disposition.as_str() {
             "Stage 3A" | "Stage 3B" => {
+                // A lettered step such as `4b` belongs to its numbered step.
                 let step = owner
                     .strip_prefix("Step ")
+                    .map(|number| {
+                        number.trim_end_matches(|c: char| c.is_ascii_lowercase())
+                    })
                     .and_then(|number| number.parse::<u8>().ok())
                     .unwrap_or_else(|| panic!("{variant} has no owning step"));
                 let range = if disposition == "Stage 3A" {

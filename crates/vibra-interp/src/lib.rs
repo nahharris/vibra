@@ -632,8 +632,9 @@ impl<'a> Machine<'a> {
             Expr::External {
                 intrinsic,
                 arguments,
+                result,
                 ..
-            } => self.evaluate_external(*intrinsic, arguments, slots, captures),
+            } => self.evaluate_external(*intrinsic, arguments, result, slots, captures),
             Expr::Default { .. } => None,
             Expr::Sequence { expressions, .. } => {
                 self.evaluate_sequence(expressions, slots, captures)
@@ -864,6 +865,7 @@ impl<'a> Machine<'a> {
         &mut self,
         intrinsic: vibra_ir::external::CompilerIntrinsic,
         arguments: &[Expr],
+        result: &Type,
         slots: &mut Frame,
         captures: &[RuntimeValue],
     ) -> Option<Evaluation> {
@@ -927,7 +929,8 @@ impl<'a> Machine<'a> {
                     .filter(|(start, end)| start <= end && *end <= values.len());
                 let slice = range.and_then(|(start, end)| values.get(start..end));
                 RuntimeValue::Enum {
-                    value_type: vibra_ir::option_type(value_type.clone()),
+                    // The checked result is the type playing `@option`.
+                    value_type: result.clone(),
                     variant: if slice.is_some() { "some" } else { "none" }.to_owned(),
                     payload: slice.map(|slice| {
                         Box::new(RuntimeValue::Array {

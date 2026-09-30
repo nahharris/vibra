@@ -1,0 +1,32 @@
+id = "V1-PROJECT-workspace-check-declaration-imports"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "A declaration import binds one public top-level declaration; a private declaration is private access, and a member path is not an import target."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.private-access"
+level = "@error"
+source = "src/app/main.vib"
+span = [68, 102]
+
+  [[expect.diagnostics.related]]
+  source = "src/app/shapes.vib"
+  span = [66, 97]
+
+[[expect.diagnostics]]
+code = "@name.wrong-entity-kind"
+level = "@error"
+source = "src/app/main.vib"
+span = [103, 137]
+
+  [[expect.diagnostics.related]]
+  source = "src/app/shapes.vib"
+  span = [21, 29]

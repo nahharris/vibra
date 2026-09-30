@@ -251,6 +251,7 @@ pub struct ResolveInput {
     overlay: Option<PackageOverlay>,
     reserved_import_paths: Vec<(String, Vec<String>)>,
     builtin_members: Vec<(String, String)>,
+    role_types: Vec<String>,
 }
 
 /// A verified package whose source modules are overlaid on the local graph.
@@ -277,6 +278,7 @@ impl ResolveInput {
             overlay: None,
             reserved_import_paths: Vec::new(),
             builtin_members: Vec::new(),
+            role_types: Vec::new(),
         }
     }
 
@@ -307,6 +309,15 @@ impl ResolveInput {
         members: impl IntoIterator<Item = (String, String)>,
     ) -> Self {
         self.builtin_members.extend(members);
+        self
+    }
+
+    /// Declares the spellings of the standard-library types that play a
+    /// language role. They need no import: a value path `type.member` naming
+    /// one is left to the checker, which resolves its constructors.
+    #[must_use]
+    pub fn with_role_types(mut self, names: impl IntoIterator<Item = String>) -> Self {
+        self.role_types.extend(names);
         self
     }
 
@@ -624,6 +635,7 @@ pub struct ResolvedImport {
     alias: String,
     written: String,
     module: Option<ModuleId>,
+    declaration: Option<String>,
     source_id: String,
     span: ByteSpan,
 }
@@ -645,6 +657,14 @@ impl ResolvedImport {
     #[must_use]
     pub const fn module(&self) -> Option<&ModuleId> {
         self.module.as_ref()
+    }
+
+    /// The declaration a declaration import binds within `module`, such as
+    /// `ordering` for `(import ordering @std.core.ordering)`; `None` for a
+    /// module import.
+    #[must_use]
+    pub fn declaration(&self) -> Option<&str> {
+        self.declaration.as_deref()
     }
 
     /// Import source identity.
@@ -967,6 +987,8 @@ enum BodyWork {
 #[derive(Clone, Debug)]
 struct ImportWork {
     module: Option<ModuleKey>,
+    /// The one top-level declaration a declaration import binds.
+    declaration: Option<String>,
     alias: String,
     written: String,
     source_id: String,
@@ -1053,6 +1075,7 @@ impl Resolution {
                         ModuleId::new(&module.package, &module.unit, &module.segments)
                     })
                 }),
+                declaration: import.declaration.clone(),
                 source_id: import.source_id.clone(),
                 span: import.span,
             })
@@ -1720,6 +1743,7 @@ impl Resolution {
                     );
                     let work = ImportWork {
                         module: None,
+                        declaration: None,
                         alias: import.alias().value().to_owned(),
                         written: target.value().to_owned(),
                         source_id: parsed.module.source_id.clone(),
@@ -1764,6 +1788,7 @@ impl Resolution {
                         );
                         let work = ImportWork {
                             module: None,
+                            declaration: None,
                             alias: import.alias().value().to_owned(),
                             written: target.value().to_owned(),
                             source_id: parsed.module.source_id.clone(),
@@ -1792,6 +1817,7 @@ impl Resolution {
                     );
                     let work = ImportWork {
                         module: None,
+                        declaration: None,
                         alias: import.alias().value().to_owned(),
                         written: target.value().to_owned(),
                         source_id: parsed.module.source_id.clone(),
@@ -1816,44 +1842,73 @@ impl Resolution {
                     unit: unit.clone(),
                     segments: module_segments.to_vec(),
                 };
+                let mut resolved_declaration = None;
                 if declaration_segments.is_empty() {
                     resolved_module = Some(module);
                 } else {
                     let declaration_path = declaration_segments.to_vec();
                     let target = self
                         .declaration_indexes
-                        .get(&(module.clone(), declaration_path))
+                        .get(&(module.clone(), declaration_path.clone()))
                         .and_then(|index| self.declarations.get(*index))
                         .map(|work| {
-                            (work.declaration.source_id.clone(), work.declaration.span)
+                            (
+                                work.declaration.source_id.clone(),
+                                work.declaration.span,
+                                work.declaration.visibility,
+                            )
                         });
-                    if let Some((source_id, span)) = target {
-                        self.diagnostics.push(
-                            Diagnostic::new(
-                                DiagnosticCode::NameWrongEntityKind,
-                                target_span,
-                                "import target names a declaration; imports require modules",
-                            )
-                            .with_source_id(parsed.module.source_id.clone())
-                            .with_related_source(
-                                source_id,
-                                span,
-                                "the imported entity is declared here",
-                            ),
-                        );
-                    } else {
-                        self.diagnostics.push(
-                            Diagnostic::new(
-                                DiagnosticCode::NameUnknownSymbol,
-                                target_span,
-                                "import member does not resolve to a declaration",
-                            )
-                            .with_source_id(parsed.module.source_id.clone()),
-                        );
+                    match (target, declaration_path.as_slice()) {
+                        // A declaration import binds one top-level declaration.
+                        (Some((source_id, span, visibility)), [name]) => {
+                            if visibility == Visibility::Private {
+                                self.diagnostics.push(
+                                    Diagnostic::new(
+                                        DiagnosticCode::NamePrivateAccess,
+                                        target_span,
+                                        "imported declaration is private",
+                                    )
+                                    .with_source_id(parsed.module.source_id.clone())
+                                    .with_related_source(
+                                        source_id,
+                                        span,
+                                        "the private declaration is here",
+                                    ),
+                                );
+                            }
+                            resolved_declaration = Some(name.clone());
+                            resolved_module = Some(module);
+                        }
+                        (Some((source_id, span, _)), _) => {
+                            self.diagnostics.push(
+                                Diagnostic::new(
+                                    DiagnosticCode::NameWrongEntityKind,
+                                    target_span,
+                                    "import target names a member; imports bind modules or top-level declarations",
+                                )
+                                .with_source_id(parsed.module.source_id.clone())
+                                .with_related_source(
+                                    source_id,
+                                    span,
+                                    "the imported member is declared here",
+                                ),
+                            );
+                        }
+                        (None, _) => {
+                            self.diagnostics.push(
+                                Diagnostic::new(
+                                    DiagnosticCode::NameUnknownSymbol,
+                                    target_span,
+                                    "import member does not resolve to a declaration",
+                                )
+                                .with_source_id(parsed.module.source_id.clone()),
+                            );
+                        }
                     }
                 }
                 let work = ImportWork {
                     module: resolved_module,
+                    declaration: resolved_declaration,
                     alias: import.alias().value().to_owned(),
                     written: target.value().to_owned(),
                     source_id: parsed.module.source_id.clone(),
@@ -2204,6 +2259,8 @@ impl Resolution {
                 | Attribute::Effects(_)
                 | Attribute::External(_)
                 | Attribute::Symbol(_)
+                | Attribute::Native(_)
+                | Attribute::Role(_)
                 | Attribute::Doc(_) => {}
             }
         }
@@ -2421,6 +2478,24 @@ impl Resolution {
         source_id: &str,
     ) {
         let path = name.segments();
+        if let [type_name, _] = path
+            && self.input.role_types.iter().any(|role| role == type_name)
+            && !self
+                .imports
+                .iter()
+                .any(|(owner, import)| owner == module && import.alias == *type_name)
+        {
+            // A role-playing type needs no import; the checker resolves its
+            // constructors and reports an unknown variant or member there.
+            self.references.push(ResolvedReference {
+                from: from.clone(),
+                written: name.value().to_owned(),
+                target: None,
+                source_id: source_id.to_owned(),
+                span,
+            });
+            return;
+        }
         if let [type_name, member] = path
             && self
                 .input
@@ -2467,11 +2542,22 @@ impl Resolution {
                     .iter()
                     .find(|(owner, import)| owner == module && import.alias == *first);
                 if let Some((_, import)) = import {
-                    (
-                        import.module.clone(),
-                        path.iter().skip(1).cloned().collect::<Vec<_>>(),
-                        true,
-                    )
+                    match &import.declaration {
+                        // A declaration alias stands for that declaration; its
+                        // visibility was already checked at the import.
+                        Some(declaration) => (
+                            import.module.clone(),
+                            std::iter::once(declaration.clone())
+                                .chain(path.iter().skip(1).cloned())
+                                .collect::<Vec<_>>(),
+                            false,
+                        ),
+                        None => (
+                            import.module.clone(),
+                            path.iter().skip(1).cloned().collect::<Vec<_>>(),
+                            true,
+                        ),
+                    }
                 } else {
                     (Some(module.clone()), path.to_vec(), false)
                 }

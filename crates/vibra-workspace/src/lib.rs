@@ -306,7 +306,13 @@ impl WorkspaceSnapshot {
             ("std".to_owned(), vec!["option".to_owned()]),
             ("std".to_owned(), vec!["assert".to_owned()]),
         ]);
-        let mut input = input.with_builtin_members(vibra_types::builtin_member_names());
+        let mut input = input
+            .with_builtin_members(vibra_types::builtin_member_names())
+            .with_role_types(
+                vibra_types::role_type_names()
+                    .into_iter()
+                    .map(|(_, name)| name),
+            );
         if let Some(verification) = verification {
             let (overlay_package, modules) = verification.resolver_overlay();
             input = input.with_verified_overlay(

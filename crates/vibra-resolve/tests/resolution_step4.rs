@@ -223,7 +223,8 @@ fn imported_public_function_path_resolves_as_a_function_reference() {
                     "app",
                     ["lib"],
                     "src/lib.vib",
-                    b"(defn greet () void visibility: @public (do))",
+                    b"(defn greet () void visibility: @public (do))
+(deftype box (record value i32) visibility: @public)",
                 ),
             ],
         )],
@@ -480,7 +481,7 @@ fn resolved_artifact_is_structured_vibon_with_stable_text() {
 }
 
 #[test]
-fn importing_a_declaration_reports_wrong_entity_kind_before_unknown_path() {
+fn importing_a_public_declaration_binds_it_and_a_member_path_is_wrong_entity_kind() {
     let input = ResolveInput::new(
         "demo",
         "1.0.0",
@@ -492,34 +493,28 @@ fn importing_a_declaration_reports_wrong_entity_kind_before_unknown_path() {
                     "app",
                     ["main"],
                     "src/main.vib",
-                    b"(import greet @app.lib.greet)\n(defn run () void (do))",
+                    b"(import greet @app.lib.greet)\n(import member @app.lib.box.value)\n(defn run () void (greet))",
                 ),
                 vibra_resolve::SourceModule::new(
                     "app",
                     ["lib"],
                     "src/lib.vib",
-                    b"(defn greet () void visibility: @public (do))",
+                    b"(defn greet () void visibility: @public (do))\n(deftype box (record value i32) visibility: @public)",
                 ),
             ],
         )],
     );
     let snapshot = Resolver::resolve(input);
 
-    assert!(snapshot.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == DiagnosticCode::NameWrongEntityKind
-            && diagnostic
-                .related()
-                .iter()
-                .any(|related| related.source_id.as_deref() == Some("src/lib.vib"))
-    }));
-    assert!(
-        !snapshot
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| diagnostic.code() == DiagnosticCode::ModuleUnknownPath)
-    );
-    assert_eq!(snapshot.imports().len(), 1);
-    assert!(snapshot.imports()[0].module().is_none());
+    // The declaration import binds `greet`; a path into a type's members is
+    // still not an import target.
+    let diagnostics = snapshot.diagnostics();
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code(), DiagnosticCode::NameWrongEntityKind);
+    assert_eq!(snapshot.imports().len(), 2);
+    assert_eq!(snapshot.imports()[0].declaration(), Some("greet"));
+    assert!(snapshot.imports()[0].module().is_some());
+    assert!(snapshot.imports()[1].module().is_none());
 }
 
 #[test]

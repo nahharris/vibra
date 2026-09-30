@@ -78,6 +78,31 @@ pub mod external {
         ArraySlice,
     }
 
+    /// The standard-library types that play the language roles a registry
+    /// signature names. The compiler binds roles, so the registry never
+    /// fixes a library type's identity.
+    #[derive(Clone, Debug, Default, PartialEq, Eq)]
+    pub struct RoleTypes {
+        option: Option<super::TypeId>,
+    }
+
+    impl RoleTypes {
+        /// Roles bound to the type playing `@option`, when one does.
+        #[must_use]
+        pub const fn new(option: Option<super::TypeId>) -> Self {
+            Self { option }
+        }
+
+        /// `(option value)`, or `void` when no type plays `@option`, which no
+        /// declaration can match.
+        #[must_use]
+        pub fn option_of(&self, value: Type) -> Type {
+            self.option
+                .as_ref()
+                .map_or(Type::Void, |id| Type::Applied(id.clone(), vec![value]))
+        }
+    }
+
     fn param(name: &str) -> Type {
         Type::Param(name.to_owned())
     }
@@ -123,6 +148,14 @@ pub mod external {
             }
         }
 
+        /// Whether this entry is a native implementation of a standard-library
+        /// function that keeps its Vibra body, named with `native:`, rather
+        /// than a bodiless primitive operation named with `external:`.
+        #[must_use]
+        pub const fn is_native(self) -> bool {
+            matches!(self, Self::ArrayOf | Self::MapOf)
+        }
+
         /// The generic parameters of the exact signature, in `where:` order.
         #[must_use]
         pub fn type_parameters(self) -> Vec<String> {
@@ -137,9 +170,9 @@ pub mod external {
             }
         }
 
-        /// The exact checked signature.
+        /// The exact checked signature, with language roles bound by `roles`.
         #[must_use]
-        pub fn signature(self) -> FunctionSignature {
+        pub fn signature(self, roles: &RoleTypes) -> FunctionSignature {
             let items = || array_of(param("t"));
             match self {
                 Self::TextConcat => {
@@ -162,7 +195,7 @@ pub mod external {
                 }
                 Self::ArraySlice => FunctionSignature::new(
                     vec![items(), Type::U64, Type::U64],
-                    super::option_type(items()),
+                    roles.option_of(items()),
                 ),
             }
         }
@@ -187,18 +220,6 @@ pub mod external {
             Self::ArraySlice,
         ];
     }
-}
-
-/// The canonical identity of the standard `@std.option` `option` type, which
-/// lookups and partial operations answer with.
-pub const OPTION_ID: &str = "@vibra-stdlib@0.2.0/std.option.option";
-/// Its canonical atom path in encodings.
-pub const OPTION_PATH: &str = "std.option.option";
-
-/// The standard `(option value)` type.
-#[must_use]
-pub fn option_type(value: Type) -> Type {
-    Type::Applied(TypeId::new(OPTION_ID, OPTION_PATH), vec![value])
 }
 
 /// One of the primitive types admitted by the M2 literal profile.
@@ -1011,6 +1032,9 @@ pub enum Expr {
         intrinsic: external::CompilerIntrinsic,
         /// Checked operands in the registry's declaration order.
         arguments: Vec<Self>,
+        /// The checked result type, with any language role bound to the
+        /// standard-library type that plays it.
+        result: Type,
         /// The source origin of the intrinsic call.
         origin: SourceOrigin,
     },
@@ -1274,9 +1298,24 @@ impl Expr {
         arguments: Vec<Self>,
         origin: SourceOrigin,
     ) -> Self {
+        let result = intrinsic
+            .signature(&external::RoleTypes::default())
+            .result();
+        Self::external_with_result(intrinsic, arguments, result, origin)
+    }
+
+    /// Creates a registry call whose checked result binds language roles.
+    #[must_use]
+    pub fn external_with_result(
+        intrinsic: external::CompilerIntrinsic,
+        arguments: Vec<Self>,
+        result: Type,
+        origin: SourceOrigin,
+    ) -> Self {
         Self::External {
             intrinsic,
             arguments,
+            result,
             origin,
         }
     }
@@ -1530,7 +1569,7 @@ impl Expr {
     pub fn result_type(&self) -> Type {
         match self {
             Self::Literal { value, .. } => value.ty(),
-            Self::External { intrinsic, .. } => intrinsic.signature().result(),
+            Self::External { result, .. } => result.clone(),
             Self::Default { value_type, .. } => value_type.clone(),
             Self::Sequence { expressions, .. } => {
                 expressions.last().map_or(Type::Void, Self::result_type)
@@ -1717,9 +1756,11 @@ impl Expr {
             Self::External {
                 intrinsic,
                 arguments,
+                result,
                 ..
             } => {
-                let signature = intrinsic.signature();
+                // Registry operands never name a role; only the result may.
+                let signature = intrinsic.signature(&external::RoleTypes::default());
                 if arguments.len() != signature.fixed_parameter_count() {
                     return Err(IrError::InvalidExpression(format!(
                         "{} expects {} arguments, got {}",
@@ -1739,7 +1780,7 @@ impl Expr {
                         )));
                     }
                 }
-                Ok(signature.result())
+                Ok(result.clone())
             }
             Self::Default { .. } => Err(IrError::InvalidExpression(
                 "default argument marker is only valid as a call operand".to_owned(),
@@ -2322,7 +2363,17 @@ impl CheckedFunction {
         intrinsic: external::CompilerIntrinsic,
         origin: SourceOrigin,
     ) -> Result<Self, IrError> {
-        if signature != intrinsic.signature() {
+        // The checker binds the result's roles; every operand slot is fixed
+        // by the registry itself.
+        let registry = intrinsic.signature(&external::RoleTypes::default());
+        let operands_agree = signature.fixed_parameter_count()
+            == registry.fixed_parameter_count()
+            && signature
+                .slot_types()
+                .iter()
+                .zip(registry.slot_types())
+                .all(|(declared, registered)| declared.same_shape(&registered));
+        if !operands_agree {
             return Err(IrError::InvalidExpression(format!(
                 "external {} has a mismatched declaration signature",
                 intrinsic.symbol()
@@ -2334,15 +2385,15 @@ impl CheckedFunction {
             .enumerate()
             .map(|(slot, value_type)| Expr::variable(slot, value_type, origin.clone()))
             .collect();
-        let body = Expr::external(intrinsic, arguments, origin.clone());
+        let body = Expr::external_with_result(
+            intrinsic,
+            arguments,
+            signature.result(),
+            origin.clone(),
+        );
+        let slot_count = registry.fixed_parameter_count();
         Self::with_slots_and_external(
-            name,
-            signature,
-            body,
-            origin,
-            intrinsic.signature().fixed_parameter_count(),
-            true,
-            None,
+            name, signature, body, origin, slot_count, true, None,
         )
     }
 
@@ -5115,11 +5166,12 @@ fn canonical_expr(expression: &Expr) -> String {
         Expr::External {
             intrinsic,
             arguments,
+            result,
             ..
         } => format!(
             "(record kind: @external symbol: \"{}\" result: {} arguments: {})",
             intrinsic.symbol(),
-            canonical_type(&intrinsic.signature().result()),
+            canonical_type(result),
             canonical_array(&arguments.iter().map(canonical_expr).collect::<Vec<_>>())
         ),
         Expr::Default { value_type, .. } => format!(
@@ -5686,7 +5738,7 @@ mod tests {
         let intrinsic = super::external::CompilerIntrinsic::TextLength;
         let external = CheckedFunction::new_external(
             "text.length",
-            intrinsic.signature(),
+            intrinsic.signature(&super::external::RoleTypes::default()),
             intrinsic,
             origin.clone(),
         )

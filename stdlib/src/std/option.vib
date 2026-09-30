@@ -1,5 +1,6 @@
-; The standard optional value. Lookups return it, and the checker recognizes
-; it by canonical identity.
+; The standard optional value. It plays the `@option` role, so lookups and
+; `try` answer with it and it needs no import.
 (deftype option (enum some t none void)
   where: (t any)
+  role: @option
   visibility: @public)

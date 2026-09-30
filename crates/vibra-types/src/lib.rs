@@ -39,7 +39,7 @@ mod standard;
 mod stdlib;
 
 pub use resolved::{ResolvedCheckResult, check_resolved};
-pub use standard::builtin_member_names;
+pub use standard::{builtin_member_names, role_type_names};
 pub use stdlib::{
     STDLIB_ASSERT_SOURCE_ID, STDLIB_BUILTIN_SOURCE_ID, STDLIB_OPTION_SOURCE_ID,
     STDLIB_TEXT_SOURCE_ID, Stdlib, StdlibError, StdlibInputs, StdlibModule,
@@ -381,11 +381,17 @@ pub fn check_bootstrap_text_import(
 /// standard-library type module names, such as `(import option @std.option)`.
 fn standard_type_import(
     import: &vibra_syntax::ImportDeclaration,
-) -> Option<&'static str> {
-    (import.alias().kind() == NameKind::Symbol
-        && import.target().kind() == NameKind::Atom
-        && import.target().value() == "std.option")
-        .then_some(STDLIB_OPTION_SOURCE_ID)
+) -> Option<(&'static str, Option<&'static str>)> {
+    if import.alias().kind() != NameKind::Symbol
+        || import.target().kind() != NameKind::Atom
+    {
+        return None;
+    }
+    match import.target().value() {
+        "std.option" => Some((STDLIB_OPTION_SOURCE_ID, None)),
+        "std.option.option" => Some((STDLIB_OPTION_SOURCE_ID, Some("option"))),
+        _ => None,
+    }
 }
 
 fn bootstrap_import_unavailable(
@@ -561,7 +567,8 @@ impl<'a> Checker<'a> {
 
     fn collect_headers(&mut self) {
         // Standard-library type modules first, so declared types may name
-        // their types: `(import option @std.option)` sees the embedded module.
+        // their types: `(import option @std.option)` sees the embedded module
+        // and `(import option-of @std.option.option)` its one type.
         for declaration in self.ast.declarations() {
             if let Declaration::Import(import) = declaration
                 && let Some(target) = standard_type_import(import)
@@ -579,7 +586,17 @@ impl<'a> Checker<'a> {
                     continue;
                 }
                 self.module_names.insert(alias.to_owned(), import.span());
-                self.types.import(self.source_id, alias, target);
+                match target {
+                    (module, None) => self.types.import(self.source_id, alias, module),
+                    (module, Some(name)) => {
+                        self.types.import_declaration(
+                            self.source_id,
+                            alias,
+                            module,
+                            name,
+                        );
+                    }
+                }
             }
         }
         // Declared types first: any signature below may name one. A single
@@ -761,6 +778,7 @@ impl<'a> Checker<'a> {
                             self.diagnostics,
                             self.trusted_bootstrap,
                             &signature,
+                            &standard::role_types(&self.types),
                         ),
                         signature,
                         external_declared: function.attributes().items().iter().any(
@@ -824,7 +842,8 @@ impl<'a> Checker<'a> {
                     module_index: 0,
                     source_id: self.source_id.to_owned(),
                     name: name.to_owned(),
-                    signature: intrinsic.signature(),
+                    signature: intrinsic
+                        .signature(&vibra_ir::external::RoleTypes::default()),
                     external: Some(intrinsic),
                     external_declared: true,
                     test: None,
@@ -2636,7 +2655,24 @@ fn compiler_intrinsic(
     diagnostics: &mut Vec<Diagnostic>,
     trusted_bootstrap: bool,
     actual: &FunctionSignature,
+    roles: &vibra_ir::external::RoleTypes,
 ) -> Option<CompilerIntrinsic> {
+    let native = function.attributes().items().iter().find_map(|attribute| {
+        if let Attribute::Native(Literal::String(symbol)) = attribute {
+            Some(symbol.value())
+        } else {
+            None
+        }
+    });
+    if let Some(symbol) = native {
+        return native_intrinsic(
+            source_id,
+            function,
+            diagnostics,
+            trusted_bootstrap,
+            (symbol, actual, roles),
+        );
+    }
     let provider = function.attributes().items().iter().find_map(|attribute| {
         if let Attribute::External(name) = attribute {
             Some(name.value())
@@ -2692,19 +2728,83 @@ fn compiler_intrinsic(
         );
         return None;
     };
-    let Some(intrinsic) = CompilerIntrinsic::from_symbol(symbol) else {
+    // A native implementation accelerates a body and is never `external:`.
+    let Some(intrinsic) = CompilerIntrinsic::from_symbol(symbol)
+        .filter(|intrinsic| !intrinsic.is_native())
+    else {
         diagnostics.push(
             Diagnostic::new(
                 DiagnosticCode::ExternalUnknownSymbol,
                 function.span(),
-                format!("compiler symbol `{symbol}` is outside the closed M2 registry"),
+                format!("compiler symbol `{symbol}` is not a primitive operation of the closed registry"),
             )
             .with_source_id(source_id),
         );
         return None;
     };
-    // The registry signature is checked exactly, generic names included.
-    let expected = intrinsic.signature();
+    registry_signature(source_id, function, diagnostics, intrinsic, actual, roles)
+}
+
+/// Binds a `native:` symbol: only the embedded standard library may write it,
+/// the function keeps its Vibra body, and the symbol must be a native
+/// implementation whose registry signature the declaration matches exactly.
+fn native_intrinsic(
+    source_id: &str,
+    function: &vibra_syntax::FunctionDeclaration,
+    diagnostics: &mut Vec<Diagnostic>,
+    trusted_bootstrap: bool,
+    (symbol, actual, roles): (&str, &FunctionSignature, &vibra_ir::external::RoleTypes),
+) -> Option<CompilerIntrinsic> {
+    if !trusted_bootstrap {
+        unavailable(
+            diagnostics,
+            source_id,
+            function.span(),
+            "native: is admissible only in the embedded standard library",
+        );
+        return None;
+    }
+    if function.expressions().is_empty() {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::ExternalUnknownSymbol,
+                function.span(),
+                "a native implementation keeps its Vibra body as its meaning",
+            )
+            .with_source_id(source_id),
+        );
+        return None;
+    }
+    let Some(intrinsic) = CompilerIntrinsic::from_symbol(symbol)
+        .filter(|intrinsic| intrinsic.is_native())
+    else {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::ExternalUnknownSymbol,
+                function.span(),
+                format!(
+                    "`{symbol}` is not a native implementation of the closed registry"
+                ),
+            )
+            .with_source_id(source_id),
+        );
+        return None;
+    };
+    registry_signature(source_id, function, diagnostics, intrinsic, actual, roles)
+}
+
+/// Checks a declaration against its registry signature exactly, generic names
+/// included.
+fn registry_signature(
+    source_id: &str,
+    function: &vibra_syntax::FunctionDeclaration,
+    diagnostics: &mut Vec<Diagnostic>,
+    intrinsic: CompilerIntrinsic,
+    actual: &FunctionSignature,
+    roles: &vibra_ir::external::RoleTypes,
+) -> Option<CompilerIntrinsic> {
+    let symbol = intrinsic.symbol();
+    let expected = intrinsic.signature(roles);
     if !actual.same_shape(&expected) {
         diagnostics.push(
             Diagnostic::new(
@@ -2828,7 +2928,11 @@ fn has_deferred_attributes(attributes: &[Attribute]) -> bool {
         Attribute::External(_) | Attribute::Symbol(_) => true,
         Attribute::Where(_) | Attribute::Labelled(_) | Attribute::Variadic(_) => false,
         Attribute::Effects(row) => !row.references().is_empty(),
-        Attribute::Visibility(_) | Attribute::Doc(_) => false,
+        // A native implementation keeps a checked body; `role:` is a type attribute.
+        Attribute::Visibility(_)
+        | Attribute::Doc(_)
+        | Attribute::Native(_)
+        | Attribute::Role(_) => false,
     })
 }
 

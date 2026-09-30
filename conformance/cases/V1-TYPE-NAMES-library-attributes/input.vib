@@ -1,0 +1,6 @@
+(deftype mine (enum a void)
+  role: @option)
+
+(defn fast () (array i32)
+  native: "array.of"
+  (array.of))

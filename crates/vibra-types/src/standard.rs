@@ -9,15 +9,15 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
-use vibra_ir::external::CompilerIntrinsic;
-use vibra_ir::{Type, TypeId};
+use vibra_ir::Type;
+use vibra_ir::external::{CompilerIntrinsic, RoleTypes};
 use vibra_syntax::{
     Declaration, DeftypeBody, DeftypeDeclaration, SourceAst, TypeMember,
 };
 
 use crate::nominal::TypeNames;
 use crate::stdlib::{
-    STDLIB_BUILTIN_SOURCE_ID, STDLIB_OPTION_SOURCE_ID, embedded_module,
+    STDLIB_BUILTIN_SOURCE_ID, STDLIB_OPTION_SOURCE_ID, embedded_module, stdlib_type_id,
 };
 
 fn option_module() -> Option<&'static SourceAst> {
@@ -46,13 +46,10 @@ fn option_declaration() -> Option<&'static DeftypeDeclaration> {
         })
 }
 
-/// The identity of the standard `option` type.
-pub(crate) fn option_id() -> TypeId {
-    TypeId::new(vibra_ir::OPTION_ID, vibra_ir::OPTION_PATH)
-}
-
-/// Declares `@std.option`'s `option` unless `types` already has it, adding it
-/// to `declarations` so its body lowers with the run's own declarations.
+/// Declares `@std.option`'s `option` unless a type already plays `@option`,
+/// adding it to `declarations` so its body lowers with the run's own
+/// declarations. Its identity is the one every standard-library declaration
+/// has; the compiler knows it only through the `role:` it claims.
 pub(crate) fn declare_standard_types<'a>(
     types: &mut TypeNames,
     declarations: &mut Vec<(usize, &'a DeftypeDeclaration)>,
@@ -61,20 +58,30 @@ pub(crate) fn declare_standard_types<'a>(
 {
     // `@std.builtin` names `option` through its own import.
     types.import(STDLIB_BUILTIN_SOURCE_ID, "option", STDLIB_OPTION_SOURCE_ID);
-    if types.index_of(&option_id()).is_some() {
+    if types.role("option").is_some() {
         return;
     }
     if let Some(declaration) = option_declaration() {
-        let index = types.declare(STDLIB_OPTION_SOURCE_ID, declaration, option_id());
+        let id = stdlib_type_id(&["option"], declaration.name().value());
+        let index = types.declare(STDLIB_OPTION_SOURCE_ID, declaration, id);
         declarations.push((index, declaration));
     }
 }
 
-/// `(option value)`, when the standard `option` type is declared.
+/// `(option value)` over the type playing `@option`, when one does.
 pub(crate) fn option_of(types: &TypeNames, value: Type) -> Option<Type> {
-    types
-        .index_of(&option_id())
-        .map(|_| vibra_ir::option_type(value))
+    let index = types.role("option")?;
+    Some(Type::Applied(types.get(index)?.id.clone(), vec![value]))
+}
+
+/// The role-playing types a registry signature may name.
+pub(crate) fn role_types(types: &TypeNames) -> RoleTypes {
+    RoleTypes::new(
+        types
+            .role("option")
+            .and_then(|index| types.get(index))
+            .map(|declared| declared.id.clone()),
+    )
 }
 
 fn builtin_module() -> Option<&'static SourceAst> {
@@ -195,11 +202,12 @@ pub(crate) fn builtin_members(types: &TypeNames) -> Vec<BuiltinMember> {
                 &mut ignored,
                 true,
                 &signature,
+                &role_types(types),
             ) else {
                 continue;
             };
             if !ignored.is_empty()
-                || !signature.same_shape(&intrinsic.signature())
+                || !signature.same_shape(&intrinsic.signature(&role_types(types)))
                 || generics != intrinsic.type_parameters()
             {
                 continue;
@@ -214,6 +222,47 @@ pub(crate) fn builtin_members(types: &TypeNames) -> Vec<BuiltinMember> {
         }
     }
     members
+}
+
+/// Every `(role, type name)` the embedded standard library claims with
+/// `role:`, for a resolver that recognizes the role vocabulary before types
+/// are lowered.
+#[must_use]
+pub fn role_type_names() -> Vec<(String, String)> {
+    static ROLES: OnceLock<Vec<(String, String)>> = OnceLock::new();
+    ROLES
+        .get_or_init(|| {
+            let mut roles = Vec::new();
+            for (path, bytes) in crate::stdlib::embedded_modules() {
+                let Ok(text) = std::str::from_utf8(bytes) else {
+                    continue;
+                };
+                let source_id = format!("stdlib/src/{path}");
+                let Ok(document) =
+                    vibra_syntax::parse_source(Path::new(&source_id), text)
+                else {
+                    continue;
+                };
+                let Some(ast) = document.ast() else {
+                    continue;
+                };
+                for declaration in ast.declarations() {
+                    let Declaration::Deftype(value) = declaration else {
+                        continue;
+                    };
+                    for attribute in value.attributes().items() {
+                        if let vibra_syntax::Attribute::Role(role) = attribute {
+                            roles.push((
+                                role.value().to_owned(),
+                                value.name().value().to_owned(),
+                            ));
+                        }
+                    }
+                }
+            }
+            roles
+        })
+        .clone()
 }
 
 #[cfg(test)]
