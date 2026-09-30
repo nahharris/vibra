@@ -1,0 +1,23 @@
+id = "V1-TYPE-CONVERT-invalid-ascription"
+rule = "V1-TYPE-CONVERT"
+profile = "static-v1"
+operation = "type-check"
+description = "Ascription never converts a numeric type and never narrows a union."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.invalid-ascription"
+level = "@error"
+source = "input.vib"
+span = [53, 66]
+
+[[expect.diagnostics]]
+code = "@type.invalid-ascription"
+level = "@error"
+source = "input.vib"
+span = [107, 127]

@@ -1,0 +1,11 @@
+(deftype number (union i32 f32)
+  visibility: @public)
+
+(deftype shape (union (array i32) (tuple i32 i32) str))
+
+(deftype either (union (array t) str)
+  where: (t any))
+
+(defn same (value (union u8 bool)) (union bool u8) value)
+
+(defn lists () (either i32) (either (array.of 1i32)))

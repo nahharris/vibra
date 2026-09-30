@@ -998,6 +998,8 @@ fn default_expression(value_type: &Type, origin: SourceOrigin) -> Option<Expr> {
         | Type::Param(_)
         | Type::Applied(_, _)
         | Type::Tuple(_)
+        | Type::Union(_)
+        | Type::AtomSingleton(_)
         | Type::Array(_)
         | Type::Map(_, _) => None,
         Type::Function(signature) => {

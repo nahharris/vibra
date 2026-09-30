@@ -1,4 +1,2 @@
-(defn ascription () i32
-  (as i32 1i32))
 (defn propagate () i32
   (try 1i32))

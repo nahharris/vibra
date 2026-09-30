@@ -53,6 +53,8 @@ pub enum TypeBody {
     Wrapper(Type),
     /// Positional components.
     Tuple(Vec<Type>),
+    /// Member types, in declaration order, which fixes discriminants.
+    Union(Vec<Type>),
 }
 
 impl TypeBody {
@@ -65,7 +67,7 @@ impl TypeBody {
             Self::Wrapper(representation) => {
                 vec![(String::new(), representation.clone())]
             }
-            Self::Tuple(components) => components
+            Self::Tuple(components) | Self::Union(components) => components
                 .iter()
                 .enumerate()
                 .map(|(index, value)| (index.to_string(), value.clone()))
@@ -138,6 +140,9 @@ impl TypeDefinition {
                     .map(|value| value.substitute(&map))
                     .collect(),
             ),
+            TypeBody::Union(members) => TypeBody::Union(
+                members.iter().map(|value| value.substitute(&map)).collect(),
+            ),
         })
     }
 
@@ -158,7 +163,10 @@ impl TypeDefinition {
     pub fn record_fields(&self) -> Option<&[(String, Type)]> {
         match &self.body {
             TypeBody::Record(fields) => Some(fields),
-            TypeBody::Enum(_) | TypeBody::Wrapper(_) | TypeBody::Tuple(_) => None,
+            TypeBody::Enum(_)
+            | TypeBody::Wrapper(_)
+            | TypeBody::Tuple(_)
+            | TypeBody::Union(_) => None,
         }
     }
 
@@ -167,7 +175,10 @@ impl TypeDefinition {
     pub fn enum_variants(&self) -> Option<&[(String, Type)]> {
         match &self.body {
             TypeBody::Enum(variants) => Some(variants),
-            TypeBody::Record(_) | TypeBody::Wrapper(_) | TypeBody::Tuple(_) => None,
+            TypeBody::Record(_)
+            | TypeBody::Wrapper(_)
+            | TypeBody::Tuple(_)
+            | TypeBody::Union(_) => None,
         }
     }
 }
@@ -330,6 +341,25 @@ pub(crate) fn validate_declared_expr(
                     return Err(invalid(format!(
                         "{value_type} wraps {expected}, not {}",
                         value.result_type()
+                    )));
+                }
+            }
+            Expr::Widen {
+                value_type: value_type @ (Type::Declared(_) | Type::Applied(_, _)),
+                value,
+                member,
+                ..
+            } => {
+                let TypeBody::Union(members) = declared_body(table, value_type)? else {
+                    return Err(invalid(format!("{value_type} is not a union")));
+                };
+                let actual = value.result_type();
+                if !member
+                    .and_then(|index| members.get(index))
+                    .is_some_and(|found| found.admits(&actual))
+                {
+                    return Err(invalid(format!(
+                        "{actual} is not a member of {value_type}"
                     )));
                 }
             }

@@ -1,0 +1,27 @@
+(defn main ()
+  (tuple number number str str str str atom (array atom) number (union bool u8))
+  (tupleof
+    (number 7i32)
+    (as number "seven")
+    (render 1i32)
+    (render "text")
+    (describe true)
+    (describe 3u8)
+    (tag)
+    (as (array atom) (array.of @ok @err))
+    ((reading label: "load" value: 2i32) @value)
+    (as (union bool u8) 9u8)))
+
+(deftype number (union i32 str))
+
+(deftype reading (record label str value number))
+
+(defn render (value number) str
+  (match value
+    (as i32 -) "integer"
+    (as str text) text))
+
+(defn describe (value (union bool u8)) str
+  (match value (as bool true) "yes" (as bool false) "no" (as u8 -) "byte"))
+
+(defn tag () atom @ready)

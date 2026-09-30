@@ -1,0 +1,12 @@
+id = "V1-TYPE-CONVERT-ascription-erased"
+rule = "V1-TYPE-CONVERT"
+profile = "static-v1"
+operation = "type-check"
+description = "A no-op ascription and ascriptions that constrain an empty collection and a generic result reach the typed IR as their operand alone."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+types = "types.vibon"

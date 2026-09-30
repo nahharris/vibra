@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-union-values"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Union values carry their member, widen at written expected types and through a declared union constructor, narrow through as patterns, and atom singletons widen to atom."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

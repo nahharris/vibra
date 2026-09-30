@@ -1,0 +1,29 @@
+id = "V1-TYPE-NOMINAL-union-member-not-concrete"
+rule = "V1-TYPE-NOMINAL"
+profile = "static-v1"
+operation = "type-check"
+description = "A union member that is another union, declared or anonymous, or a bare generic name is not concrete."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.union-member-not-concrete"
+level = "@error"
+source = "input.vib"
+span = [34, 69]
+
+[[expect.diagnostics]]
+code = "@type.union-member-not-concrete"
+level = "@error"
+source = "input.vib"
+span = [71, 119]
+
+[[expect.diagnostics]]
+code = "@type.union-member-not-concrete"
+level = "@error"
+source = "input.vib"
+span = [135, 169]

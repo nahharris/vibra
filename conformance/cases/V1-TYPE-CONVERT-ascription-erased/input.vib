@@ -1,0 +1,5 @@
+(defn keep () str (as str "text"))
+
+(defn empty () (array u32) (as (array u32) (array.of)))
+
+(defn absent () (option i32) (as (option i32) (option.none)))

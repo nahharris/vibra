@@ -1,0 +1,8 @@
+(deftype number (union i32 f32))
+
+(deftype nested (union number str))
+
+(deftype generic (union t str)
+  where: (t any))
+
+(defn inline (value (union (union i32 str) bool)) i32 0i32)

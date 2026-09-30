@@ -1,0 +1,11 @@
+id = "V1-TYPE-CONVERT-widening-boundaries"
+rule = "V1-TYPE-CONVERT"
+profile = "static-v1"
+operation = "type-check"
+description = "Every written expected type admits member-to-union and singleton-to-atom widening: positional and variadic parameters, a result, a def annotation, a record field, a tuple component, an enum payload, a wrapper representation, an enumof payload, a types: argument, and as."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

@@ -885,9 +885,9 @@ fn retired_syntax_and_unsupported_valid_declarations_keep_distinct_diagnostics()
         "unsupported-declaration",
         &[(
             "src/app/main.vib",
-            // A declared record is supported from M3 Step 2; a union stays
-            // unavailable until Step 6.
-            "(deftype box (union i32 str))\n(defn execute () void (do))\n",
+            // A declared record is supported from M3 Step 2; `intrinsic-type`
+            // stays unavailable outside the embedded standard library.
+            "(deftype box (intrinsic-type @box))\n(defn execute () void (do))\n",
         )],
     );
     let unsupported_snapshot =

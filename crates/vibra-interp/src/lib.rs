@@ -252,7 +252,7 @@ impl Interpreter {
             return Err(invalid());
         };
         let value_type = function.signature().result();
-        if !value_type.admits(&runtime_type(&value)) {
+        if !admits_value(&value_type, &value) {
             return Err(invalid());
         }
         let Some(value) = observe(value) else {
@@ -382,6 +382,14 @@ enum RuntimeValue {
     Map {
         value_type: Type,
         entries: Vec<(RuntimeValue, RuntimeValue)>,
+    },
+    /// A union value: its discriminant, the member type, and the member
+    /// value.
+    Union {
+        value_type: Type,
+        member: usize,
+        member_type: Type,
+        value: Box<RuntimeValue>,
     },
 }
 
@@ -644,14 +652,14 @@ impl<'a> Machine<'a> {
             } => slots
                 .get(*slot)
                 .and_then(Option::as_ref)
-                .filter(|value| value_type.admits(&runtime_type(value)))
+                .filter(|value| admits_value(value_type, value))
                 .cloned()
                 .map(Evaluation::Value),
             Expr::Global {
                 index, value_type, ..
             } => self
                 .evaluate_global(*index)
-                .filter(|value| value_type.admits(&runtime_type(value)))
+                .filter(|value| admits_value(value_type, value))
                 .map(Evaluation::Value),
             Expr::Function { function, .. } => self
                 .named_callable(*function)
@@ -660,7 +668,7 @@ impl<'a> Machine<'a> {
                 slot, value_type, ..
             } => captures
                 .get(*slot)
-                .filter(|value| value_type.admits(&runtime_type(value)))
+                .filter(|value| admits_value(value_type, value))
                 .cloned()
                 .map(Evaluation::Value),
             Expr::Closure { .. } => self.evaluate_closure(expression, slots, captures),
@@ -692,6 +700,25 @@ impl<'a> Machine<'a> {
                 Some(Evaluation::Value(RuntimeValue::Wrapper {
                     value_type: value_type.clone(),
                     value: Box::new(value),
+                }))
+            }
+            Expr::Widen {
+                value_type,
+                value,
+                member,
+                ..
+            } => {
+                let member_type = value.result_type();
+                let value = self.evaluate_value(value, slots, captures)?;
+                Some(Evaluation::Value(match member {
+                    // Atom widening is erased.
+                    None => value,
+                    Some(member) => RuntimeValue::Union {
+                        value_type: value_type.clone(),
+                        member: *member,
+                        member_type,
+                        value: Box::new(value),
+                    },
                 }))
             }
             Expr::Project { record, field, .. } => {
@@ -1262,6 +1289,15 @@ fn activation_slots(
         .collect()
 }
 
+/// Whether a slot of type `expected` may hold `value`. An atom value's own
+/// type is its singleton, which the erased `atom` type also holds.
+fn admits_value(expected: &Type, value: &RuntimeValue) -> bool {
+    matches!(
+        (expected, value),
+        (Type::Atom, RuntimeValue::Primitive(Value::Atom(_)))
+    ) || expected.admits(&runtime_type(value))
+}
+
 fn runtime_type(value: &RuntimeValue) -> Type {
     match value {
         RuntimeValue::Primitive(value) => value.ty(),
@@ -1276,7 +1312,8 @@ fn runtime_type(value: &RuntimeValue) -> Type {
         RuntimeValue::Wrapper { value_type, .. }
         | RuntimeValue::Tuple { value_type, .. }
         | RuntimeValue::Array { value_type, .. }
-        | RuntimeValue::Map { value_type, .. } => value_type.clone(),
+        | RuntimeValue::Map { value_type, .. }
+        | RuntimeValue::Union { value_type, .. } => value_type.clone(),
     }
 }
 
@@ -1292,7 +1329,7 @@ fn slots_match_signature(
         .all(|(value, expected)| {
             value
                 .as_ref()
-                .is_some_and(|value| expected.admits(&runtime_type(value)))
+                .is_some_and(|value| admits_value(&expected, value))
         })
 }
 
@@ -1304,7 +1341,7 @@ fn values_match_signature(
     values
         .iter()
         .zip(expected)
-        .all(|(value, expected)| expected.admits(&runtime_type(value)))
+        .all(|(value, expected)| admits_value(&expected, value))
 }
 
 /// The observable form of a runtime value; `None` when it is or contains a
@@ -1355,6 +1392,16 @@ fn observe(value: RuntimeValue) -> Option<ObservedValue> {
                 .map(|(key, value)| Some((observe(key)?, observe(value)?)))
                 .collect::<Option<Vec<_>>>()?,
         ),
+        RuntimeValue::Union {
+            value_type,
+            member_type,
+            value,
+            ..
+        } => ObservedValue::Union {
+            type_id: declared_id(&value_type),
+            member: Box::new(member_type),
+            value: Box::new(observe(*value)?),
+        },
     })
 }
 
@@ -1401,6 +1448,10 @@ fn pattern_matches(pattern: &Pattern, value: &RuntimeValue) -> bool {
         (Pattern::Wrap(inner), RuntimeValue::Wrapper { value, .. }) => {
             pattern_matches(inner, value)
         }
+        (
+            Pattern::Member { index, pattern, .. },
+            RuntimeValue::Union { member, value, .. },
+        ) => index == member && pattern_matches(pattern, value),
         _ => false,
     }
 }
@@ -1446,6 +1497,9 @@ fn bind_pattern(
         }
         (Pattern::Wrap(inner), RuntimeValue::Wrapper { value, .. }) => {
             bind_pattern(inner, *value, slots)
+        }
+        (Pattern::Member { pattern, .. }, RuntimeValue::Union { value, .. }) => {
+            bind_pattern(pattern, *value, slots)
         }
         _ => None,
     }
@@ -1493,6 +1547,20 @@ fn key_order(left: &RuntimeValue, right: &RuntimeValue) -> std::cmp::Ordering {
                 (Some(left), Some(right)) => key_order(left, right),
                 _ => Ordering::Equal,
             }),
+        (
+            RuntimeValue::Union {
+                member: left_member,
+                value: left,
+                ..
+            },
+            RuntimeValue::Union {
+                member: right_member,
+                value: right,
+                ..
+            },
+        ) => left_member
+            .cmp(right_member)
+            .then_with(|| key_order(left, right)),
         _ => Ordering::Equal,
     }
 }
