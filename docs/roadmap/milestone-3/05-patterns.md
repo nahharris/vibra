@@ -47,3 +47,33 @@ owns `@name.redeclaration`.
 Inventory rows `ExpressionKind::Match` and the four admitted pattern kinds
 reference cases; M2 rows C1.5 (patterns) and C5.2 are implemented; validation
 passes.
+
+## Delivery notes
+
+- The reader accepts atom patterns (`@name`): the spec grammar has always
+  counted `atom-name` as a `literal`, and D8.1 needs atom arms. The old
+  `V1-SRC-EXPR-pattern-atom-rejected` case is gone. `PatternKind::Atom` has its
+  own inventory row.
+- Checked patterns are `vibra_ir::Pattern` (wildcard, binder, literal,
+  variant, record, tuple, wrapper, array). `Expr::Match` evaluates its subject
+  once and runs the first matching arm; destructuring `let`, positional
+  parameters, and `lambda` parameters lower to a single-arm `match`, so the
+  interpreter and every IR analysis have one form to handle. Parameter
+  binders take the slots after every parameter slot.
+- `crates/vibra-types/src/pattern.rs` is the single usefulness engine
+  (Maranget). `bool`, enums, and `void` are finite spaces; records, tuples,
+  and wrappers have one constructor; arrays (by length) and the primitive
+  scalars are infinite. The non-exhaustive and refutable-binding notes spell
+  the first uncovered shape, with concrete constructors for finite spaces and
+  `-` where only a binder or discard covers the rest (the spec now says so).
+- An unreachable arm relates the earliest single arm that covers it; a
+  duplicate of an arm covered only by several earlier arms relates none.
+- Pattern types must match exactly: a constructor pattern of another declared
+  type, an anonymous pattern over a mismatched shape, and a literal of another
+  type are `@type.mismatch`. Arity and label errors reuse the constructor
+  diagnostics (`@type.argument-mismatch`, `@type.unknown-record-field`).
+- `as` patterns report `@tool.unavailable` until Step 6
+  (`V1-TYPE-CONTROL-availability-patterns`).
+- Subject-once evaluation is structural in the interpreter (the subject is
+  evaluated before any arm is tried) but not observable in the pure
+  `interpreter-v1` profile; M4 effects make it observable.

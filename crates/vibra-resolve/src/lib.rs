@@ -2732,7 +2732,7 @@ fn collect_pattern_names(pattern: &Pattern, names: &mut Vec<(String, ByteSpan)>)
         }
         PatternKind::EnumOf(variant) => collect_pattern_names(variant.pattern(), names),
         PatternKind::As { pattern, .. } => collect_pattern_names(pattern, names),
-        PatternKind::Binding(_) | PatternKind::Literal(_) => {}
+        PatternKind::Binding(_) | PatternKind::Literal(_) | PatternKind::Atom(_) => {}
     }
 }
 

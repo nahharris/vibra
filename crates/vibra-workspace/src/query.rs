@@ -853,7 +853,7 @@ impl<'a> SemanticCollector<'a> {
             PatternKind::As { pattern, .. } => {
                 self.collect_pattern_binding(pattern, locals, context);
             }
-            PatternKind::Literal(_) => {}
+            PatternKind::Literal(_) | PatternKind::Atom(_) => {}
         }
     }
 
@@ -1229,6 +1229,14 @@ impl<'a> SemanticCollector<'a> {
             Expr::Let { value, body, .. } => {
                 self.collect_ir(value);
                 self.collect_ir(body);
+            }
+            Expr::Match {
+                scrutinee, arms, ..
+            } => {
+                self.collect_ir(scrutinee);
+                for arm in arms {
+                    self.collect_ir(&arm.body);
+                }
             }
             Expr::If {
                 condition,

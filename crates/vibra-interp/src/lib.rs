@@ -19,8 +19,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use vibra_ir::{
-    CallTarget, CheckedProgram, Expr, FunctionSignature, ObservedValue, SourceOrigin,
-    TestAssertion, Type, TypeId, Value,
+    CallTarget, CheckedProgram, Expr, FunctionSignature, MatchArm, ObservedValue,
+    Pattern, SourceOrigin, TestAssertion, Type, TypeId, Value,
 };
 
 /// One successful reference-interpreter run.
@@ -715,6 +715,9 @@ impl<'a> Machine<'a> {
             Expr::Let {
                 slot, value, body, ..
             } => self.evaluate_let(*slot, value, body, slots, captures),
+            Expr::Match {
+                scrutinee, arms, ..
+            } => self.evaluate_match(scrutinee, arms, slots, captures),
             Expr::If {
                 condition,
                 then_branch,
@@ -1006,6 +1009,27 @@ impl<'a> Machine<'a> {
             *slots.get_mut(slot)? = Some(value);
         }
         self.evaluate(body, slots, captures)
+    }
+
+    /// Evaluates the subject once and runs the first arm whose pattern
+    /// matches, with that arm's binders stored in their slots. The checker
+    /// proved the arms exhaustive, so no arm matching is impossible IR.
+    #[inline(never)]
+    fn evaluate_match(
+        &mut self,
+        scrutinee: &Expr,
+        arms: &[MatchArm],
+        slots: &mut Frame,
+        captures: &[RuntimeValue],
+    ) -> Option<Evaluation> {
+        let subject = self.evaluate_value(scrutinee, slots, captures)?;
+        for arm in arms {
+            if pattern_matches(&arm.pattern, &subject) {
+                bind_pattern(&arm.pattern, subject, slots)?;
+                return self.evaluate(&arm.body, slots, captures);
+            }
+        }
+        None
     }
 
     #[inline(never)]
@@ -1332,6 +1356,99 @@ fn observe(value: RuntimeValue) -> Option<ObservedValue> {
                 .collect::<Option<Vec<_>>>()?,
         ),
     })
+}
+
+/// Whether `value` matches `pattern`. Binders and discards match anything;
+/// omitted record fields are never inspected.
+fn pattern_matches(pattern: &Pattern, value: &RuntimeValue) -> bool {
+    match (pattern, value) {
+        (Pattern::Wildcard | Pattern::Bind { .. }, _) => true,
+        (Pattern::Literal(expected), RuntimeValue::Primitive(actual)) => {
+            expected == actual
+        }
+        (
+            Pattern::Variant {
+                variant: expected,
+                payload: expected_payload,
+            },
+            RuntimeValue::Enum {
+                variant, payload, ..
+            },
+        ) => {
+            expected == variant
+                && match (expected_payload, payload) {
+                    (Some(pattern), Some(payload)) => pattern_matches(pattern, payload),
+                    (None, _) => true,
+                    (Some(_), None) => false,
+                }
+        }
+        (Pattern::Record(expected), RuntimeValue::Record { fields, .. }) => {
+            expected.iter().all(|(name, pattern)| {
+                fields
+                    .iter()
+                    .find(|(field, _)| field == name)
+                    .is_some_and(|(_, value)| pattern_matches(pattern, value))
+            })
+        }
+        (Pattern::Tuple(expected), RuntimeValue::Tuple { values, .. })
+        | (Pattern::Array(expected), RuntimeValue::Array { values, .. }) => {
+            expected.len() == values.len()
+                && expected
+                    .iter()
+                    .zip(values)
+                    .all(|(pattern, value)| pattern_matches(pattern, value))
+        }
+        (Pattern::Wrap(inner), RuntimeValue::Wrapper { value, .. }) => {
+            pattern_matches(inner, value)
+        }
+        _ => false,
+    }
+}
+
+/// Stores every binder of a pattern that already matched `value`.
+fn bind_pattern(
+    pattern: &Pattern,
+    value: RuntimeValue,
+    slots: &mut Frame,
+) -> Option<()> {
+    match (pattern, value) {
+        (Pattern::Wildcard | Pattern::Literal(_), _) => Some(()),
+        (Pattern::Bind { slot, .. }, value) => {
+            *slots.get_mut(*slot)? = Some(value);
+            Some(())
+        }
+        (
+            Pattern::Variant {
+                payload: Some(pattern),
+                ..
+            },
+            RuntimeValue::Enum {
+                payload: Some(payload),
+                ..
+            },
+        ) => bind_pattern(pattern, *payload, slots),
+        (Pattern::Variant { payload: None, .. }, RuntimeValue::Enum { .. }) => Some(()),
+        (Pattern::Record(expected), RuntimeValue::Record { fields, .. }) => {
+            let mut fields = fields;
+            for (name, pattern) in expected {
+                let index = fields.iter().position(|(field, _)| field == name)?;
+                let (_, value) = fields.swap_remove(index);
+                bind_pattern(pattern, value, slots)?;
+            }
+            Some(())
+        }
+        (Pattern::Tuple(expected), RuntimeValue::Tuple { values, .. })
+        | (Pattern::Array(expected), RuntimeValue::Array { values, .. }) => {
+            for (pattern, value) in expected.iter().zip(values) {
+                bind_pattern(pattern, value, slots)?;
+            }
+            Some(())
+        }
+        (Pattern::Wrap(inner), RuntimeValue::Wrapper { value, .. }) => {
+            bind_pattern(inner, *value, slots)
+        }
+        _ => None,
+    }
 }
 
 /// Canonical key order over admissible key values

@@ -360,6 +360,8 @@ pub enum PatternKind {
     Binding(Name),
     /// A literal pattern.
     Literal(Literal),
+    /// An atom literal pattern, `@name`.
+    Atom(Name),
     /// A qualified or named constructor pattern.
     Constructor {
         /// The written constructor path.
@@ -2422,10 +2424,10 @@ impl AstParser {
                         },
                         span: node.span(),
                     }),
-                    NameKind::Atom => {
-                        self.invalid_form(node, "atoms are not patterns");
-                        None
-                    }
+                    NameKind::Atom => Some(Pattern {
+                        kind: PatternKind::Atom(name.clone()),
+                        span: node.span(),
+                    }),
                     NameKind::Discard => Some(Pattern {
                         kind: PatternKind::Binding(name.clone()),
                         span: node.span(),

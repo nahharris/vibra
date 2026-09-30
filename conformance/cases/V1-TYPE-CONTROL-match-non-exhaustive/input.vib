@@ -1,0 +1,14 @@
+(deftype color (enum red void green void blue u8))
+
+(defn colors (value color) i32 (match value (color.red) 0i32 (color.blue 0u8) 1i32))
+
+(defn flag (value bool) i32 (match value true 1i32))
+
+(defn pair (value (tuple bool bool)) i32
+  (match value (tupleof true -) 0i32 (tupleof false true) 1i32))
+
+(defn atoms (value atom) i32 (match value @on 1i32 @off 0i32))
+
+(defn words (value str) i32 (match value "a" 1i32))
+
+(defn numbers (value i32) i32 (match value 0i32 1i32))

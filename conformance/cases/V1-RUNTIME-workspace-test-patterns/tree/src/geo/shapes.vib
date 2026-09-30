@@ -1,0 +1,13 @@
+(deftype size (enum small void large u64)
+  visibility: @public)
+
+(deftype point (record x i32 y i32)
+  visibility: @public)
+
+(defn weight (value size) u64
+  visibility: @public
+  (match value (size.small) 0u64 (size.large amount) amount))
+
+(defn x-of ((point x: x) point) i32
+  visibility: @public
+  x)

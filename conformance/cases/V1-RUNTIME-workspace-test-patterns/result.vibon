@@ -1,0 +1,10 @@
+(record
+  format: @test-run.v1
+  result: @command.ok
+  tests: (array
+    (record name: "@tests.shapes::\"matches an imported variant\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.shapes::\"calls a destructuring function\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.shapes::\"destructures in let\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.shapes::\"matches a void variant\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)

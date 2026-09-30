@@ -1,0 +1,3 @@
+(defn repeated (value bool) i32 (match value true 1i32 false 0i32 true 2i32))
+
+(defn after-binder (value i32) i32 (match value other other 0i32 1i32))

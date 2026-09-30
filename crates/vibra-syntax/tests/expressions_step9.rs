@@ -211,10 +211,6 @@ fn malformed_step9_forms_report_existing_syntax_diagnostics() {
         ),
         ("(defn bad () i32 -)", DiagnosticCode::SyntaxInvalidForm),
         (
-            "(defn bad (value i32) i32 (let @info value value))",
-            DiagnosticCode::SyntaxInvalidForm,
-        ),
-        (
             "(defn bad (value i32) i32 (let (bind x) value value))",
             DiagnosticCode::SyntaxRetiredForm,
         ),
