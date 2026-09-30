@@ -1,7 +1,7 @@
 //! Static and interpreter handlers for immutable Step 12 workspace snapshots.
 
 use vibra_diagnostics::Diagnostic;
-use vibra_types::{BootstrapVerification, verify_bootstrap};
+use vibra_types::{Stdlib, load_stdlib};
 use vibra_workspace::{WorkspaceSnapshot, project::TargetKind};
 
 use crate::corpus::Case;
@@ -268,14 +268,14 @@ fn load_workspace(case: &Case) -> Result<WorkspaceLoad, HandlerError> {
 
 fn verified_bootstrap_if_used(
     snapshot: &WorkspaceSnapshot,
-) -> Result<Option<BootstrapVerification>, HandlerError> {
+) -> Result<Option<Stdlib>, HandlerError> {
     let requires_verification = snapshot
         .requires_bootstrap_verification()
         .map_err(|error| HandlerError::new(error.to_string()))?;
     if !requires_verification {
         return Ok(None);
     }
-    verify_bootstrap().map(Some).map_err(|error| {
+    load_stdlib().map(Some).map_err(|error| {
         HandlerError::new(format!("{BOOTSTRAP_PROVENANCE_FAILURE}: {error}"))
     })
 }

@@ -83,12 +83,12 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
     )
     .with_verified_overlay(
         "vibra-stdlib",
-        "0.1.0",
+        "0.2.0",
         vec![vibra_resolve::SourceModule::new(
             "std",
             ["text"],
-            "stdlib/m2/src/std/text.vib",
-            include_bytes!("../../../stdlib/m2/src/std/text.vib"),
+            "stdlib/src/std/text.vib",
+            include_bytes!("../../../stdlib/src/std/text.vib"),
         )],
     );
     let snapshot = Resolver::resolve(input);
@@ -97,10 +97,10 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
     let module = snapshot
         .modules()
         .iter()
-        .find(|module| module.source_id() == "stdlib/m2/src/std/text.vib")
+        .find(|module| module.source_id() == "stdlib/src/std/text.vib")
         .expect("bootstrap module in overlay");
     assert_eq!(module.package().name(), "vibra-stdlib");
-    assert_eq!(module.package().version(), "0.1.0");
+    assert_eq!(module.package().version(), "0.2.0");
     assert_eq!(
         snapshot.imports()[0]
             .module()
@@ -116,7 +116,7 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
         .and_then(|reference| reference.target())
         .expect("resolved bootstrap declaration");
     assert_eq!(target.package().name(), "vibra-stdlib");
-    assert_eq!(target.package().version(), "0.1.0");
+    assert_eq!(target.package().version(), "0.2.0");
 }
 
 #[test]
@@ -148,12 +148,12 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
     )
     .with_verified_overlay(
         "vibra-stdlib",
-        "0.1.0",
+        "0.2.0",
         vec![vibra_resolve::SourceModule::new(
             "std",
             ["text"],
-            "stdlib/m2/src/std/text.vib",
-            include_bytes!("../../../stdlib/m2/src/std/text.vib"),
+            "stdlib/src/std/text.vib",
+            include_bytes!("../../../stdlib/src/std/text.vib"),
         )],
     );
     let snapshot = Resolver::resolve(input);
@@ -164,7 +164,7 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
     assert_eq!(target.unit(), "std");
     assert_eq!(target.segments(), ["text"]);
     assert!(snapshot.modules().iter().any(|module| {
-        module.source_id() == "stdlib/m2/src/std/text.vib"
+        module.source_id() == "stdlib/src/std/text.vib"
             && module.package().name() == "vibra-stdlib"
     }));
 }

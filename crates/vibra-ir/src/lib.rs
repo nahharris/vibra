@@ -24,11 +24,11 @@ use nominal::{
 };
 pub use observed::ObservedValue;
 
-/// The closed compiler intrinsic registry admitted by M2.
+/// The closed compiler intrinsic registry.
 pub mod external {
     use super::{FunctionSignature, Type};
 
-    /// The closed M2 compiler registry identity used by the runtime contract.
+    /// The compiler registry identity used by the runtime contract.
     ///
     /// `vibra_v1` is the version named by the v1 runtime specification.  The
     /// compiler registry and the host registry are separate namespaces, but
@@ -42,6 +42,19 @@ pub mod external {
         UnicodeScalarConcatenation,
         /// Count Unicode scalars, rather than UTF-8 bytes.
         UnicodeScalarLength,
+        /// Build an array from its packed variadic elements.
+        ArrayConstruction,
+        /// Build a map from its packed variadic entries in canonical key
+        /// order, a later entry replacing an equal key.
+        MapConstruction,
+        /// Count array elements.
+        ArrayLength,
+        /// A new array with one trailing element.
+        ArrayAppend,
+        /// A new array of the first array's elements, then the second's.
+        ArrayConcatenation,
+        /// Elements in a half-open range, or `none` when it is out of range.
+        ArraySlice,
     }
 
     /// One pure, compiler-owned operation.
@@ -51,6 +64,26 @@ pub mod external {
         TextConcat,
         /// Count Unicode scalars in a string.
         TextLength,
+        /// `array.of`.
+        ArrayOf,
+        /// `map.of`.
+        MapOf,
+        /// `array.length`.
+        ArrayLength,
+        /// `array.append`.
+        ArrayAppend,
+        /// `array.concat`.
+        ArrayConcat,
+        /// `array.slice`.
+        ArraySlice,
+    }
+
+    fn param(name: &str) -> Type {
+        Type::Param(name.to_owned())
+    }
+
+    fn array_of(element: Type) -> Type {
+        Type::Array(Box::new(element))
     }
 
     impl CompilerIntrinsic {
@@ -66,6 +99,12 @@ pub mod external {
             match self {
                 Self::TextConcat => SemanticIdentity::UnicodeScalarConcatenation,
                 Self::TextLength => SemanticIdentity::UnicodeScalarLength,
+                Self::ArrayOf => SemanticIdentity::ArrayConstruction,
+                Self::MapOf => SemanticIdentity::MapConstruction,
+                Self::ArrayLength => SemanticIdentity::ArrayLength,
+                Self::ArrayAppend => SemanticIdentity::ArrayAppend,
+                Self::ArrayConcat => SemanticIdentity::ArrayConcatenation,
+                Self::ArraySlice => SemanticIdentity::ArraySlice,
             }
         }
 
@@ -75,33 +114,91 @@ pub mod external {
             match self {
                 Self::TextConcat => "text.concat",
                 Self::TextLength => "text.length",
+                Self::ArrayOf => "array.of",
+                Self::MapOf => "map.of",
+                Self::ArrayLength => "array.length",
+                Self::ArrayAppend => "array.append",
+                Self::ArrayConcat => "array.concat",
+                Self::ArraySlice => "array.slice",
+            }
+        }
+
+        /// The generic parameters of the exact signature, in `where:` order.
+        #[must_use]
+        pub fn type_parameters(self) -> Vec<String> {
+            match self {
+                Self::TextConcat | Self::TextLength => Vec::new(),
+                Self::MapOf => vec!["k".to_owned(), "v".to_owned()],
+                Self::ArrayOf
+                | Self::ArrayLength
+                | Self::ArrayAppend
+                | Self::ArrayConcat
+                | Self::ArraySlice => vec!["t".to_owned()],
             }
         }
 
         /// The exact checked signature.
         #[must_use]
         pub fn signature(self) -> FunctionSignature {
+            let items = || array_of(param("t"));
             match self {
                 Self::TextConcat => {
                     FunctionSignature::new(vec![Type::Str, Type::Str], Type::Str)
                 }
                 Self::TextLength => FunctionSignature::new(vec![Type::Str], Type::U64),
+                Self::ArrayOf => {
+                    FunctionSignature::new(Vec::new(), items()).with_variadic(items())
+                }
+                Self::MapOf => {
+                    let map = Type::Map(Box::new(param("k")), Box::new(param("v")));
+                    FunctionSignature::new(Vec::new(), map.clone()).with_variadic(map)
+                }
+                Self::ArrayLength => FunctionSignature::new(vec![items()], Type::U64),
+                Self::ArrayAppend => {
+                    FunctionSignature::new(vec![items(), param("t")], items())
+                }
+                Self::ArrayConcat => {
+                    FunctionSignature::new(vec![items(), items()], items())
+                }
+                Self::ArraySlice => FunctionSignature::new(
+                    vec![items(), Type::U64, Type::U64],
+                    super::option_type(items()),
+                ),
             }
         }
 
         /// Resolves only a symbol in the closed registry.
         #[must_use]
         pub fn from_symbol(symbol: &str) -> Option<Self> {
-            match symbol {
-                "text.concat" => Some(Self::TextConcat),
-                "text.length" => Some(Self::TextLength),
-                _ => None,
-            }
+            Self::ALL
+                .into_iter()
+                .find(|intrinsic| intrinsic.symbol() == symbol)
         }
 
         /// Every compiler intrinsic in canonical registry order.
-        pub const ALL: [Self; 2] = [Self::TextConcat, Self::TextLength];
+        pub const ALL: [Self; 8] = [
+            Self::TextConcat,
+            Self::TextLength,
+            Self::ArrayOf,
+            Self::MapOf,
+            Self::ArrayLength,
+            Self::ArrayAppend,
+            Self::ArrayConcat,
+            Self::ArraySlice,
+        ];
     }
+}
+
+/// The canonical identity of the standard `@std.option` `option` type, which
+/// lookups and partial operations answer with.
+pub const OPTION_ID: &str = "@vibra-stdlib@0.2.0/std.option.option";
+/// Its canonical atom path in encodings.
+pub const OPTION_PATH: &str = "std.option.option";
+
+/// The standard `(option value)` type.
+#[must_use]
+pub fn option_type(value: Type) -> Type {
+    Type::Applied(TypeId::new(OPTION_ID, OPTION_PATH), vec![value])
 }
 
 /// One of the primitive types admitted by the M2 literal profile.
@@ -151,6 +248,12 @@ pub enum Type {
     Param(String),
     /// A generic declared type applied to its complete argument list.
     Applied(TypeId, Vec<Type>),
+    /// An anonymous tuple type; components are positional.
+    Tuple(Vec<Type>),
+    /// The builtin `(array t)` type.
+    Array(Box<Type>),
+    /// The builtin `(map k v)` type.
+    Map(Box<Type>, Box<Type>),
 }
 
 impl Type {
@@ -165,6 +268,9 @@ impl Type {
             Self::Declared(_) | Self::Param(_) | Self::Applied(_, _) => "type",
             Self::Record(_) => "record",
             Self::Enum(_) => "enum",
+            Self::Tuple(_) => "tuple",
+            Self::Array(_) => "array",
+            Self::Map(_, _) => "map",
             Self::Bool => "bool",
             Self::Void => "void",
             Self::Char => "char",
@@ -196,6 +302,17 @@ impl Type {
             (Self::Function(left), Self::Function(right)) => left.same_shape(right),
             (Self::Record(left), Self::Record(right))
             | (Self::Enum(left), Self::Enum(right)) => members_same_shape(left, right),
+            (Self::Tuple(left), Self::Tuple(right)) => {
+                left.len() == right.len()
+                    && left
+                        .iter()
+                        .zip(right)
+                        .all(|(left, right)| left.same_shape(right))
+            }
+            (Self::Array(left), Self::Array(right)) => left.same_shape(right),
+            (Self::Map(left_key, left_value), Self::Map(right_key, right_value)) => {
+                left_key.same_shape(right_key) && left_value.same_shape(right_value)
+            }
             (
                 Self::Applied(left, left_arguments),
                 Self::Applied(right, right_arguments),
@@ -229,6 +346,19 @@ impl Type {
                 Self::Record(substitute_members(members, arguments))
             }
             Self::Enum(members) => Self::Enum(substitute_members(members, arguments)),
+            Self::Tuple(values) => Self::Tuple(
+                values
+                    .iter()
+                    .map(|value| value.substitute(arguments))
+                    .collect(),
+            ),
+            Self::Array(element) => {
+                Self::Array(Box::new(element.substitute(arguments)))
+            }
+            Self::Map(key, value) => Self::Map(
+                Box::new(key.substitute(arguments)),
+                Box::new(value.substitute(arguments)),
+            ),
             Self::Function(signature) => {
                 Self::Function(Box::new(signature.substitute(arguments)))
             }
@@ -261,8 +391,41 @@ impl Type {
                         left.0 == right.0 && left.1.admits(&right.1)
                     })
             }
+            (Self::Tuple(left), Self::Tuple(right)) => {
+                left.len() == right.len()
+                    && left
+                        .iter()
+                        .zip(right)
+                        .all(|(left, right)| left.admits(right))
+            }
+            (Self::Array(left), Self::Array(right)) => left.admits(right),
+            (Self::Map(left_key, left_value), Self::Map(right_key, right_value)) => {
+                left_key.admits(right_key) && left_value.admits(right_value)
+            }
             (Self::Function(left), Self::Function(right)) => left.admits(right),
             _ => self.same_shape(actual),
+        }
+    }
+
+    /// The types this type is directly built from: applied and collection
+    /// arguments, tuple components, record fields, enum payloads, and a
+    /// function type's parameters and result. A primitive, declared type, or
+    /// generic parameter has none.
+    #[must_use]
+    pub fn components(&self) -> Vec<Self> {
+        match self {
+            Self::Applied(_, values) | Self::Tuple(values) => values.clone(),
+            Self::Array(element) => vec![element.as_ref().clone()],
+            Self::Map(key, value) => vec![key.as_ref().clone(), value.as_ref().clone()],
+            Self::Record(members) | Self::Enum(members) => {
+                members.iter().map(|(_, value)| value.clone()).collect()
+            }
+            Self::Function(signature) => {
+                let mut values = signature.slot_types();
+                values.push(signature.result());
+                values
+            }
+            _ => Vec::new(),
         }
     }
 
@@ -272,6 +435,9 @@ impl Type {
         match self {
             Self::Param(_) => true,
             Self::Applied(_, values) => values.iter().any(Self::has_params),
+            Self::Tuple(values) => values.iter().any(Self::has_params),
+            Self::Array(element) => element.has_params(),
+            Self::Map(key, value) => key.has_params() || value.has_params(),
             Self::Record(members) | Self::Enum(members) => {
                 members.iter().any(|(_, value)| value.has_params())
             }
@@ -326,6 +492,15 @@ impl fmt::Display for Type {
                 }
                 formatter.write_str(")")
             }
+            Self::Tuple(values) => {
+                formatter.write_str("(tuple")?;
+                for value in values {
+                    write!(formatter, " {value}")?;
+                }
+                formatter.write_str(")")
+            }
+            Self::Array(element) => write!(formatter, "(array {element})"),
+            Self::Map(key, value) => write!(formatter, "(map {key} {value})"),
             // Spelled like the `fn` type expression, so two function types
             // in a diagnostic are told apart by their parameters and result.
             Self::Function(signature) => {
@@ -351,6 +526,9 @@ impl fmt::Display for Type {
                         )?;
                     }
                     formatter.write_str(")")?;
+                }
+                if let Some(tail) = signature.variadic() {
+                    write!(formatter, " variadic: {tail}")?;
                 }
                 formatter.write_str(")")
             }
@@ -407,6 +585,9 @@ impl LabelledParameter {
 pub struct FunctionSignature {
     parameters: Vec<Type>,
     labelled: Vec<LabelledParameter>,
+    /// The `(array t)` or `(map k v)` type of a variadic tail. A call passes
+    /// the packed tail as one final argument after the labelled slots.
+    variadic: Option<Type>,
     result: Type,
 }
 
@@ -417,6 +598,7 @@ impl FunctionSignature {
         Self {
             parameters,
             labelled: Vec::new(),
+            variadic: None,
             result,
         }
     }
@@ -431,8 +613,17 @@ impl FunctionSignature {
         Self {
             parameters,
             labelled,
+            variadic: None,
             result,
         }
+    }
+
+    /// The same signature with a variadic tail of `tail` type, an
+    /// `(array t)` or a `(map k v)`.
+    #[must_use]
+    pub fn with_variadic(mut self, tail: Type) -> Self {
+        self.variadic = Some(tail);
+        self
     }
 
     /// Required positional parameter types in written order.
@@ -447,10 +638,31 @@ impl FunctionSignature {
         &self.labelled
     }
 
-    /// Total fixed slots after defaults have been materialized.
+    /// The variadic tail type, when the signature has one.
+    #[must_use]
+    pub const fn variadic(&self) -> Option<&Type> {
+        self.variadic.as_ref()
+    }
+
+    /// Total argument slots after defaults have been materialized and a
+    /// variadic tail packed: positional, labelled, then the tail.
     #[must_use]
     pub fn fixed_parameter_count(&self) -> usize {
-        self.parameters.len().saturating_add(self.labelled.len())
+        self.parameters
+            .len()
+            .saturating_add(self.labelled.len())
+            .saturating_add(usize::from(self.variadic.is_some()))
+    }
+
+    /// The type of every argument slot, in slot order.
+    #[must_use]
+    pub fn slot_types(&self) -> Vec<Type> {
+        self.parameters
+            .iter()
+            .cloned()
+            .chain(self.labelled.iter().map(LabelledParameter::value_type))
+            .chain(self.variadic.iter().cloned())
+            .collect()
     }
 
     /// Whether two signatures have the same callable type shape.
@@ -475,6 +687,11 @@ impl FunctionSignature {
                     left.name == right.name
                         && left.value_type.same_shape(&right.value_type)
                 })
+            && match (&self.variadic, &other.variadic) {
+                (Some(left), Some(right)) => left.same_shape(right),
+                (None, None) => true,
+                _ => false,
+            }
     }
 
     /// This signature with its generic parameters replaced; defaults are kept.
@@ -495,6 +712,10 @@ impl FunctionSignature {
                     default: parameter.default.clone(),
                 })
                 .collect(),
+            variadic: self
+                .variadic
+                .as_ref()
+                .map(|tail| tail.substitute(arguments)),
             result: self.result.substitute(arguments),
         }
     }
@@ -517,17 +738,17 @@ impl FunctionSignature {
                 .all(|(left, right)| {
                     left.name == right.name && left.value_type.admits(&right.value_type)
                 })
+            && match (&self.variadic, &other.variadic) {
+                (Some(left), Some(right)) => left.admits(right),
+                (None, None) => true,
+                _ => false,
+            }
     }
 
     /// Whether any slot mentions a generic parameter.
     #[must_use]
     pub fn has_params(&self) -> bool {
-        self.parameters.iter().any(Type::has_params)
-            || self.result.has_params()
-            || self
-                .labelled
-                .iter()
-                .any(|parameter| parameter.value_type.has_params())
+        self.slot_types().iter().any(Type::has_params) || self.result.has_params()
     }
 
     /// The declared result type.
@@ -950,6 +1171,57 @@ pub enum Expr {
         /// The source origin of the complete application.
         origin: SourceOrigin,
     },
+    /// A declared tuple constructor or an anonymous `tupleof`.
+    Tuple {
+        /// The declared or anonymous tuple type being built.
+        value_type: Type,
+        /// Component operands in order.
+        components: Vec<Self>,
+        /// The source origin of the complete form.
+        origin: SourceOrigin,
+    },
+    /// A tuple value applied to one tuple-index literal.
+    TupleProject {
+        /// The tuple operand, evaluated once.
+        tuple: Box<Self>,
+        /// The checked component index.
+        index: usize,
+        /// The statically checked component type.
+        value_type: Type,
+        /// The source origin of the complete application.
+        origin: SourceOrigin,
+    },
+    /// An array built from element operands, such as a variadic array tail.
+    Array {
+        /// The `(array t)` type being built.
+        value_type: Type,
+        /// Element operands in order.
+        elements: Vec<Self>,
+        /// The source origin of the elements.
+        origin: SourceOrigin,
+    },
+    /// A map built from key and value operands, such as a variadic map tail.
+    /// A later entry replaces an earlier entry with an equal key.
+    Map {
+        /// The `(map k v)` type being built.
+        value_type: Type,
+        /// Key and value operands, evaluated key then value, in order.
+        entries: Vec<(Self, Self)>,
+        /// The source origin of the entries.
+        origin: SourceOrigin,
+    },
+    /// An array, map, `str`, or `bytes` value applied to one key, returning
+    /// the standard `option`.
+    Lookup {
+        /// The collection operand, evaluated first.
+        collection: Box<Self>,
+        /// The index or key operand.
+        key: Box<Self>,
+        /// The `(option t)` result type.
+        value_type: Type,
+        /// The source origin of the complete application.
+        origin: SourceOrigin,
+    },
 }
 
 /// What a checked call invokes.
@@ -1244,7 +1516,12 @@ impl Expr {
             | Self::Record { origin, .. }
             | Self::Variant { origin, .. }
             | Self::Wrap { origin, .. }
-            | Self::Project { origin, .. } => origin,
+            | Self::Project { origin, .. }
+            | Self::Tuple { origin, .. }
+            | Self::TupleProject { origin, .. }
+            | Self::Array { origin, .. }
+            | Self::Map { origin, .. }
+            | Self::Lookup { origin, .. } => origin,
         }
     }
 
@@ -1271,7 +1548,12 @@ impl Expr {
             Self::Record { value_type, .. }
             | Self::Variant { value_type, .. }
             | Self::Project { value_type, .. } => value_type.clone(),
-            Self::Wrap { value_type, .. } => value_type.clone(),
+            Self::Wrap { value_type, .. }
+            | Self::Tuple { value_type, .. }
+            | Self::TupleProject { value_type, .. }
+            | Self::Array { value_type, .. }
+            | Self::Map { value_type, .. }
+            | Self::Lookup { value_type, .. } => value_type.clone(),
         }
     }
 
@@ -1288,6 +1570,16 @@ impl Expr {
             }
             Self::Wrap { value, .. } => vec![value],
             Self::Project { record, .. } => vec![record],
+            Self::Tuple { components, .. } => components.iter().collect(),
+            Self::TupleProject { tuple, .. } => vec![tuple],
+            Self::Array { elements, .. } => elements.iter().collect(),
+            Self::Map { entries, .. } => entries
+                .iter()
+                .flat_map(|(key, value)| [key, value])
+                .collect(),
+            Self::Lookup {
+                collection, key, ..
+            } => vec![collection, key],
             _ => Vec::new(),
         }
     }
@@ -1310,7 +1602,12 @@ impl Expr {
             | Self::Record { .. }
             | Self::Variant { .. }
             | Self::Wrap { .. }
-            | Self::Project { .. } => &[],
+            | Self::Project { .. }
+            | Self::Tuple { .. }
+            | Self::TupleProject { .. }
+            | Self::Array { .. }
+            | Self::Map { .. }
+            | Self::Lookup { .. } => &[],
             Self::Sequence { expressions, .. } => expressions,
         }
     }
@@ -1334,7 +1631,12 @@ impl Expr {
             | Self::Record { .. }
             | Self::Variant { .. }
             | Self::Wrap { .. }
-            | Self::Project { .. } => None,
+            | Self::Project { .. }
+            | Self::Tuple { .. }
+            | Self::TupleProject { .. }
+            | Self::Array { .. }
+            | Self::Map { .. }
+            | Self::Lookup { .. } => None,
         }
     }
 
@@ -1388,6 +1690,16 @@ impl Expr {
             }
             Self::Wrap { value, .. } => value.slot_count(),
             Self::Project { record, .. } => record.slot_count(),
+            Self::Tuple { .. }
+            | Self::TupleProject { .. }
+            | Self::Array { .. }
+            | Self::Map { .. }
+            | Self::Lookup { .. } => self
+                .data_operands()
+                .into_iter()
+                .map(Self::slot_count)
+                .max()
+                .unwrap_or(0),
         }
     }
 
@@ -1408,15 +1720,15 @@ impl Expr {
                 ..
             } => {
                 let signature = intrinsic.signature();
-                if arguments.len() != signature.parameters().len() {
+                if arguments.len() != signature.fixed_parameter_count() {
                     return Err(IrError::InvalidExpression(format!(
                         "{} expects {} arguments, got {}",
                         intrinsic.symbol(),
-                        signature.parameters().len(),
+                        signature.fixed_parameter_count(),
                         arguments.len()
                     )));
                 }
-                for (argument, expected) in arguments.iter().zip(signature.parameters())
+                for (argument, expected) in arguments.iter().zip(signature.slot_types())
                 {
                     let actual =
                         argument.validate_shape_with_captures(slots, capture_types)?;
@@ -1512,11 +1824,17 @@ impl Expr {
                         *bound = Some(value_type.clone());
                     }
                 }
-                for (offset, parameter) in signature.labelled().iter().enumerate() {
+                // Labelled slots, then a variadic tail, follow the positional ones.
+                for (offset, value_type) in signature
+                    .slot_types()
+                    .into_iter()
+                    .skip(parameters.len())
+                    .enumerate()
+                {
                     if let Some(bound) =
                         closure_slots.get_mut(parameters.len().saturating_add(offset))
                     {
-                        *bound = Some(parameter.value_type());
+                        *bound = Some(value_type);
                     }
                 }
                 let actual = body.validate_shape_with_captures(
@@ -1737,8 +2055,158 @@ impl Expr {
                 }
                 Ok(value_type.clone())
             }
+            Self::Tuple {
+                value_type,
+                components,
+                ..
+            } => {
+                let actual = components
+                    .iter()
+                    .map(|component| {
+                        component.validate_shape_with_captures(slots, capture_types)
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                match value_type {
+                    // A declared tuple is checked by the program-level pass.
+                    Type::Declared(_) | Type::Applied(_, _) => {}
+                    Type::Tuple(expected) => {
+                        if !admits_all(expected, &actual) {
+                            return Err(IrError::InvalidExpression(format!(
+                                "tuple components do not match {value_type}"
+                            )));
+                        }
+                    }
+                    _ => {
+                        return Err(IrError::InvalidExpression(format!(
+                            "tuple construction produces non-tuple type {value_type}"
+                        )));
+                    }
+                }
+                Ok(value_type.clone())
+            }
+            Self::TupleProject {
+                tuple,
+                index,
+                value_type,
+                ..
+            } => {
+                let tuple_type =
+                    tuple.validate_shape_with_captures(slots, capture_types)?;
+                match &tuple_type {
+                    Type::Declared(_) | Type::Applied(_, _) => {}
+                    Type::Tuple(components) => {
+                        if !components
+                            .get(*index)
+                            .is_some_and(|found| found.admits(value_type))
+                        {
+                            return Err(IrError::InvalidExpression(format!(
+                                "{tuple_type} has no component {index} of type {value_type}"
+                            )));
+                        }
+                    }
+                    _ => {
+                        return Err(IrError::InvalidExpression(format!(
+                            "projection of component {index} from non-tuple type {tuple_type}"
+                        )));
+                    }
+                }
+                Ok(value_type.clone())
+            }
+            Self::Array {
+                value_type,
+                elements,
+                ..
+            } => {
+                let Type::Array(element) = value_type else {
+                    return Err(IrError::InvalidExpression(format!(
+                        "array construction produces non-array type {value_type}"
+                    )));
+                };
+                for value in elements {
+                    let actual =
+                        value.validate_shape_with_captures(slots, capture_types)?;
+                    if !element.admits(&actual) {
+                        return Err(IrError::InvalidExpression(format!(
+                            "array element has type {actual}, expected {element}"
+                        )));
+                    }
+                }
+                Ok(value_type.clone())
+            }
+            Self::Map {
+                value_type,
+                entries,
+                ..
+            } => {
+                let Type::Map(key_type, entry_type) = value_type else {
+                    return Err(IrError::InvalidExpression(format!(
+                        "map construction produces non-map type {value_type}"
+                    )));
+                };
+                for (key, value) in entries {
+                    let actual_key =
+                        key.validate_shape_with_captures(slots, capture_types)?;
+                    let actual_value =
+                        value.validate_shape_with_captures(slots, capture_types)?;
+                    if !key_type.admits(&actual_key)
+                        || !entry_type.admits(&actual_value)
+                    {
+                        return Err(IrError::InvalidExpression(format!(
+                            "map entry has types {actual_key} and {actual_value}, expected {value_type}"
+                        )));
+                    }
+                }
+                Ok(value_type.clone())
+            }
+            Self::Lookup {
+                collection,
+                key,
+                value_type,
+                ..
+            } => {
+                let collection_type =
+                    collection.validate_shape_with_captures(slots, capture_types)?;
+                let key_type =
+                    key.validate_shape_with_captures(slots, capture_types)?;
+                let (expected_key, element) = match &collection_type {
+                    Type::Array(element) => (Type::U64, element.as_ref().clone()),
+                    Type::Map(key, value) => {
+                        (key.as_ref().clone(), value.as_ref().clone())
+                    }
+                    Type::Str => (Type::U64, Type::Char),
+                    Type::Bytes => (Type::U64, Type::U8),
+                    _ => {
+                        return Err(IrError::InvalidExpression(format!(
+                            "lookup into non-collection type {collection_type}"
+                        )));
+                    }
+                };
+                let option_of = match value_type {
+                    Type::Applied(_, arguments) if arguments.len() == 1 => {
+                        arguments.first()
+                    }
+                    _ => None,
+                };
+                if !expected_key.admits(&key_type)
+                    || !option_of.is_some_and(|found| found.admits(&element))
+                {
+                    return Err(IrError::InvalidExpression(format!(
+                        "lookup into {collection_type} with {key_type} cannot produce {value_type}"
+                    )));
+                }
+                Ok(value_type.clone())
+            }
         }
     }
+}
+
+/// Whether each expected type admits the actual type at the same position.
+fn admits_all(expected: &[Type], actual: &[Type]) -> bool {
+    expected.len() == actual.len()
+        && expected
+            .iter()
+            .zip(actual)
+            .all(|(expected, actual)| expected.admits(actual))
 }
 
 fn substitute_members(
@@ -1861,12 +2329,10 @@ impl CheckedFunction {
             )));
         }
         let arguments = signature
-            .parameters()
-            .iter()
+            .slot_types()
+            .into_iter()
             .enumerate()
-            .map(|(slot, value_type)| {
-                Expr::variable(slot, value_type.clone(), origin.clone())
-            })
+            .map(|(slot, value_type)| Expr::variable(slot, value_type, origin.clone()))
             .collect();
         let body = Expr::external(intrinsic, arguments, origin.clone());
         Self::with_slots_and_external(
@@ -1948,14 +2414,9 @@ impl CheckedFunction {
             });
         }
         let mut slots = vec![None; slot_count];
-        for (slot, value_type) in signature.parameters().iter().enumerate() {
+        for (slot, value_type) in signature.slot_types().into_iter().enumerate() {
             if let Some(bound) = slots.get_mut(slot) {
-                *bound = Some(value_type.clone());
-            }
-        }
-        for (offset, parameter) in signature.labelled().iter().enumerate() {
-            if let Some(bound) = slots.get_mut(signature.parameters().len() + offset) {
-                *bound = Some(parameter.value_type());
+                *bound = Some(value_type);
             }
         }
         let actual = body.validate_shape(&mut slots)?;
@@ -2134,18 +2595,11 @@ impl CheckedModuleSet {
                 )));
             }
             let mut slots = vec![None; function.slot_count];
-            for (slot, value_type) in function.signature.parameters().iter().enumerate()
+            for (slot, value_type) in
+                function.signature.slot_types().into_iter().enumerate()
             {
                 if let Some(bound) = slots.get_mut(slot) {
-                    *bound = Some(value_type.clone());
-                }
-            }
-            for (offset, parameter) in function.signature.labelled().iter().enumerate()
-            {
-                if let Some(bound) =
-                    slots.get_mut(function.signature.parameters().len() + offset)
-                {
-                    *bound = Some(parameter.value_type());
+                    *bound = Some(value_type);
                 }
             }
             let actual = function.body.validate_shape(&mut slots)?;
@@ -2537,7 +2991,12 @@ fn validate_program_expr(
         Expr::Record { .. }
         | Expr::Variant { .. }
         | Expr::Wrap { .. }
-        | Expr::Project { .. } => {
+        | Expr::Project { .. }
+        | Expr::Tuple { .. }
+        | Expr::TupleProject { .. }
+        | Expr::Array { .. }
+        | Expr::Map { .. }
+        | Expr::Lookup { .. } => {
             for operand in expression.data_operands() {
                 validate_program_expr(
                     operand,
@@ -2787,17 +3246,7 @@ fn validate_program_expr(
                     dependencies,
                 )?;
             }
-            let expected_parameters = signature
-                .parameters()
-                .iter()
-                .cloned()
-                .chain(
-                    signature
-                        .labelled()
-                        .iter()
-                        .map(|parameter| parameter.value_type()),
-                )
-                .collect::<Vec<_>>();
+            let expected_parameters = signature.slot_types();
             // A generic callee's parameters are erased: the checker fixed one
             // instantiation, and each slot must admit what it receives.
             for (argument, expected) in arguments.iter().zip(expected_parameters) {
@@ -2921,10 +3370,16 @@ fn possible_function_targets(
     match expression {
         // Constructions are never function values; a projected field may hold
         // any function stored into a record, so its targets are unbounded.
-        Expr::Record { .. } | Expr::Variant { .. } | Expr::Wrap { .. } => {
-            FunctionTargetSummary::default()
+        Expr::Record { .. }
+        | Expr::Variant { .. }
+        | Expr::Wrap { .. }
+        | Expr::Tuple { .. }
+        | Expr::Array { .. }
+        | Expr::Map { .. }
+        | Expr::Lookup { .. } => FunctionTargetSummary::default(),
+        Expr::Project { .. } | Expr::TupleProject { .. } => {
+            FunctionTargetSummary::unknown()
         }
-        Expr::Project { .. } => FunctionTargetSummary::unknown(),
         Expr::Function { function, .. } => FunctionTargetSummary::known(*function),
         // A closure is a distinct runtime callable, even when its body
         // returns a module function.  It therefore cannot be summarized as
@@ -3196,6 +3651,12 @@ struct CallFlow<'a> {
     reads: RefCell<BTreeSet<DependencyNode>>,
     /// Functions whose parameter summaries the current owner widened.
     widened_parameters: BTreeSet<usize>,
+    /// What an unknown call target stands for: every function named as a
+    /// value anywhere in the program and every closure, whose captured
+    /// callables are themselves unknown. The over-approximation keeps a call
+    /// through data, such as a function stored in a record or an array,
+    /// callable while call edges stay sound (gap G12).
+    escaping: FlowTargetSummary,
 }
 
 struct CallAnalysis {
@@ -3271,6 +3732,7 @@ fn analyze_call_flow_with_entry(
         active_closures: BTreeSet::new(),
         reads: RefCell::new(BTreeSet::new()),
         widened_parameters: BTreeSet::new(),
+        escaping: escaping_targets(globals, functions),
     };
     let roots = (0..globals.len())
         .map(DependencyNode::Global)
@@ -3485,13 +3947,8 @@ fn flow_target_summary(summary: &FlowTargetSummary) -> FunctionTargetSummary {
 
 fn function_signature_types(
     signature: &FunctionSignature,
-) -> impl Iterator<Item = Type> + '_ {
-    signature.parameters().iter().cloned().chain(
-        signature
-            .labelled()
-            .iter()
-            .map(LabelledParameter::value_type),
-    )
+) -> impl Iterator<Item = Type> {
+    signature.slot_types().into_iter()
 }
 
 fn function_argument_environment(
@@ -3564,10 +4021,16 @@ impl<'a> CallFlow<'a> {
         visiting: &mut BTreeSet<FlowCallId>,
     ) -> FlowTargetSummary {
         match expression {
-            Expr::Record { .. } | Expr::Variant { .. } | Expr::Wrap { .. } => {
-                FlowTargetSummary::default()
+            Expr::Record { .. }
+            | Expr::Variant { .. }
+            | Expr::Wrap { .. }
+            | Expr::Tuple { .. }
+            | Expr::Array { .. }
+            | Expr::Map { .. }
+            | Expr::Lookup { .. } => FlowTargetSummary::default(),
+            Expr::Project { .. } | Expr::TupleProject { .. } => {
+                FlowTargetSummary::unknown_function()
             }
-            Expr::Project { .. } => FlowTargetSummary::unknown_function(),
             Expr::Function { function, .. } => {
                 FlowTargetSummary::known_function(*function)
             }
@@ -3836,7 +4299,12 @@ impl<'a> CallFlow<'a> {
             Expr::Record { .. }
             | Expr::Variant { .. }
             | Expr::Wrap { .. }
-            | Expr::Project { .. } => {
+            | Expr::Project { .. }
+            | Expr::Tuple { .. }
+            | Expr::TupleProject { .. }
+            | Expr::Array { .. }
+            | Expr::Map { .. }
+            | Expr::Lookup { .. } => {
                 for operand in expression.data_operands() {
                     self.collect_expr(operand, owner, environment, captures)?;
                 }
@@ -3898,10 +4366,9 @@ impl<'a> CallFlow<'a> {
                     target_summary.known.insert(function_hint);
                     target_summary.is_function = true;
                 }
-                if target_summary.unknown
-                    && let Some(owner) = owner
-                {
-                    self.unresolved.insert(owner);
+                if target_summary.unknown {
+                    let escaping = self.escaping.clone();
+                    target_summary.union(&escaping);
                 }
                 let argument_summaries = arguments
                     .iter()
@@ -3909,10 +4376,9 @@ impl<'a> CallFlow<'a> {
                     .collect::<Vec<_>>();
                 for closure in &target_summary.closures {
                     let closure_id = closure.id;
+                    // A closure already being walked on this path contributes
+                    // its edges once; re-entering it adds none.
                     if !self.active_closures.insert(closure_id) {
-                        if let Some(owner) = owner {
-                            self.unresolved.insert(owner);
-                        }
                         continue;
                     }
                     let closure_environment = function_argument_environment(
@@ -4073,6 +4539,12 @@ fn validate_signature_shape(signature: &FunctionSignature) -> Result<(), String>
                 parameter.value_type()
             ));
         }
+    }
+    if let Some(tail) = signature.variadic() {
+        if !matches!(tail, Type::Array(_) | Type::Map(_, _)) {
+            return Err(format!("variadic tail type {tail} is not an array or map"));
+        }
+        validate_type_shape(tail)?;
     }
     validate_type_shape(&signature.result())
 }
@@ -4239,7 +4711,12 @@ fn validate_tail_calls(
         Expr::Record { .. }
         | Expr::Variant { .. }
         | Expr::Wrap { .. }
-        | Expr::Project { .. } => {
+        | Expr::Project { .. }
+        | Expr::Tuple { .. }
+        | Expr::TupleProject { .. }
+        | Expr::Array { .. }
+        | Expr::Map { .. }
+        | Expr::Lookup { .. } => {
             for operand in expression.data_operands() {
                 validate_tail_calls(
                     operand,
@@ -4421,6 +4898,7 @@ fn validate_tail_calls(
                 CallTarget::Direct(function) => FunctionTargetSummary::known(*function),
             };
             if targets.known.is_empty()
+                && !targets.unknown
                 && !(targets.has_closure
                     && callee.is_some_and(|expression| {
                         !matches!(expression, Expr::Closure { .. })
@@ -4574,6 +5052,61 @@ fn canonical_expr(expression: &Expr) -> String {
             canonical_type(value_type),
             canonical_expr(record)
         ),
+        Expr::Tuple {
+            value_type,
+            components,
+            ..
+        } => format!(
+            "(record kind: @tuple type: {} components: (array{}))",
+            canonical_type(value_type),
+            canonical_operands(components.iter())
+        ),
+        Expr::TupleProject {
+            tuple,
+            index,
+            value_type,
+            ..
+        } => format!(
+            "(record kind: @tuple-project index: {index} result: {} tuple: {})",
+            canonical_type(value_type),
+            canonical_expr(tuple)
+        ),
+        Expr::Array {
+            value_type,
+            elements,
+            ..
+        } => format!(
+            "(record kind: @array type: {} elements: (array{}))",
+            canonical_type(value_type),
+            canonical_operands(elements.iter())
+        ),
+        Expr::Map {
+            value_type,
+            entries,
+            ..
+        } => format!(
+            "(record kind: @map type: {} entries: (array{}))",
+            canonical_type(value_type),
+            entries
+                .iter()
+                .map(|(key, value)| format!(
+                    " (tuple {} {})",
+                    canonical_expr(key),
+                    canonical_expr(value)
+                ))
+                .collect::<String>()
+        ),
+        Expr::Lookup {
+            collection,
+            key,
+            value_type,
+            ..
+        } => format!(
+            "(record kind: @lookup result: {} collection: {} key: {})",
+            canonical_type(value_type),
+            canonical_expr(collection),
+            canonical_expr(key)
+        ),
         Expr::Literal { value, .. } => format!(
             "(record kind: @literal type: @{} value: {})",
             value.ty().as_str(),
@@ -4719,6 +5252,13 @@ pub fn canonical_type(value: &Type) -> String {
                 .collect::<String>()
         ),
         Type::Param(name) => format!("(record type: @param name: @{name})"),
+        Type::Tuple(values) => canonical_builtin_applied("tuple", values.iter()),
+        Type::Array(element) => {
+            canonical_builtin_applied("array", [element.as_ref()].into_iter())
+        }
+        Type::Map(key, value) => {
+            canonical_builtin_applied("map", [key.as_ref(), value.as_ref()].into_iter())
+        }
         Type::Record(fields) => format!(
             "(record type: @record fields: (record{}))",
             canonical_type_members(fields)
@@ -4729,6 +5269,19 @@ pub fn canonical_type(value: &Type) -> String {
         ),
         _ => format!("@{}", value.as_str()),
     }
+}
+
+/// `(record type: @name arguments: (array T...))` for a builtin type.
+fn canonical_builtin_applied<'a>(
+    name: &str,
+    arguments: impl Iterator<Item = &'a Type>,
+) -> String {
+    format!(
+        "(record type: @{name} arguments: (array{}))",
+        arguments
+            .map(|argument| format!(" {}", canonical_type(argument)))
+            .collect::<String>()
+    )
 }
 
 fn canonical_type_members(members: &[(String, Type)]) -> String {
@@ -4762,6 +5315,9 @@ fn canonical_function_signature(signature: &FunctionSignature) -> String {
             })
             .collect::<Vec<_>>();
         output.push_str(&format!(" labelled: {}", canonical_array(&labelled)));
+    }
+    if let Some(tail) = signature.variadic() {
+        output.push_str(&format!(" variadic: {}", canonical_type(tail)));
     }
     output.push(')');
     output
@@ -4835,6 +5391,61 @@ fn canonical_character(value: char) -> String {
 
 fn format_float<T: fmt::Display>(value: T, suffix: &str) -> String {
     format!("{value}{suffix}")
+}
+
+/// ` e...` for each operand's canonical encoding, in order.
+fn canonical_operands<'a>(operands: impl Iterator<Item = &'a Expr>) -> String {
+    operands
+        .map(|operand| format!(" {}", canonical_expr(operand)))
+        .collect()
+}
+
+/// Every function named as a value and every closure in the program: what an
+/// unknown call target may denote. A closure's captured callables are
+/// unknown, so a call through one widens again to this same set.
+fn escaping_targets(
+    globals: &[CheckedGlobal],
+    functions: &[CheckedFunction],
+) -> FlowTargetSummary {
+    let mut summary = FlowTargetSummary {
+        unknown: true,
+        is_function: true,
+        ..FlowTargetSummary::default()
+    };
+    let mut pending: Vec<&Expr> = globals
+        .iter()
+        .map(CheckedGlobal::initializer)
+        .chain(functions.iter().map(CheckedFunction::body))
+        .collect();
+    while let Some(expression) = pending.pop() {
+        match expression {
+            Expr::Function { function, .. } => {
+                summary.known.insert(*function);
+            }
+            Expr::Closure {
+                signature,
+                captures,
+                body,
+                ..
+            } => {
+                let id = closure_id(body);
+                if !summary.closures.iter().any(|closure| closure.id == id) {
+                    summary.closures.push(FlowClosure {
+                        id,
+                        signature: signature.clone(),
+                        body: Arc::clone(body),
+                        captures: vec![
+                            FlowTargetSummary::unknown_function();
+                            captures.len()
+                        ],
+                    });
+                }
+            }
+            _ => {}
+        }
+        pending.extend(nominal::children(expression));
+    }
+    summary
 }
 
 #[cfg(test)]
@@ -5309,7 +5920,7 @@ mod tests {
     }
 
     #[test]
-    fn program_constructor_does_not_trust_hints_for_unknown_parameters() {
+    fn program_constructor_over_approximates_unknown_parameters_despite_hints() {
         let origin = origin();
         let called_signature = FunctionSignature::new(Vec::new(), Type::I32);
         let first = CheckedFunction::new(
@@ -5345,7 +5956,10 @@ mod tests {
             CheckedFunction::new("caller", caller_signature, caller_body, origin)
                 .expect("caller function");
         let result = CheckedProgram::try_new(vec![first, second, caller], 2);
-        assert!(matches!(result, Err(IrError::RecursiveCall(_))));
+        // The hint names one target, but an unknown parameter stands for every
+        // escaping function; neither function escapes, so the call has no
+        // bounded edge to trust and the program is still well formed.
+        assert!(result.is_ok(), "{result:?}");
     }
 
     #[test]

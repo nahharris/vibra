@@ -1253,7 +1253,12 @@ impl<'a> SemanticCollector<'a> {
             Expr::Record { .. }
             | Expr::Variant { .. }
             | Expr::Wrap { .. }
-            | Expr::Project { .. } => {
+            | Expr::Project { .. }
+            | Expr::Tuple { .. }
+            | Expr::TupleProject { .. }
+            | Expr::Array { .. }
+            | Expr::Map { .. }
+            | Expr::Lookup { .. } => {
                 for operand in expression.data_operands() {
                     self.collect_ir(operand);
                 }

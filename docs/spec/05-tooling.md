@@ -135,7 +135,7 @@ from the selected entry. Errors in an unrelated local target do not affect an
 explicitly selected target. Without `TARGET`, `check` covers every local
 target. `run TARGET` uses the same checking scope, then executes only the
 selected binary target. Workspace discovery, source-graph, ordinary dependency,
-and bootstrap-provenance diagnostics still apply to the whole captured
+and standard-library provenance diagnostics still apply to the whole captured
 workspace snapshot and block checking or execution.
 
 M2 Step 12 implements `check` and pure `run` over a captured project snapshot.
@@ -151,8 +151,7 @@ remains, and prefix `project-` when the result starts with a digit.
 The initialized package is version `0.1.0` with no dependencies, one binary
 target rooted at `src/<name>` with entry `@<name>.main.main`, and source
 `src/<name>/main.vib` containing a pure `void` `main`. It also creates `src/`
-and `tests/`. The generated entry imports no standard-library module, so C8's
-stdlib bootstrap is unnecessary for this pure project. Init rejects a
+and `tests/`. The generated entry imports no standard-library module. Init rejects a
 nonempty destination and any path that escapes the canonical workspace. Its
 `workspace` result is the canonical initialized root; `created` lists every
 created file and directory relative to that root, in creation-plan order.

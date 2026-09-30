@@ -6,7 +6,7 @@ use vibra_conformance::{
     CaseStatus, ConformanceProfile, ConformanceRunner, Corpus, InterpreterV1Handler,
     ProfileDispatcher,
 };
-use vibra_types::{check_bootstrap_text_import, check_source, verify_bootstrap};
+use vibra_types::{check_bootstrap_text_import, check_source, load_stdlib};
 
 fn binary_counter_source(bit_count: usize) -> String {
     let names = (0..bit_count)
@@ -162,7 +162,7 @@ fn identity_returned_targets_remain_bounded_through_direct_and_local_calls() {
 
 #[test]
 fn mixed_source_and_external_tail_candidates_reuse_only_source_targets() {
-    let verification = verify_bootstrap().expect("bootstrap provenance");
+    let verification = load_stdlib().expect("bootstrap provenance");
     for (condition, expected, transfers, depth) in
         [("true", 99, 1, 1), ("false", 1, 0, 2)]
     {
@@ -206,7 +206,7 @@ fn lambda_activations_keep_unknown_calls_as_ordinary_invocations() {
 
 #[test]
 fn returned_external_callables_fall_back_to_ordinary_invocation() {
-    let verification = verify_bootstrap().expect("bootstrap provenance");
+    let verification = load_stdlib().expect("bootstrap provenance");
     let source = r#"
 (import text @std.text)
 (defn answer () u64 ((make) "x"))
@@ -226,7 +226,7 @@ fn returned_external_callables_fall_back_to_ordinary_invocation() {
 
 #[test]
 fn unknown_callable_branches_keep_known_recursive_and_external_fallbacks() {
-    let verification = verify_bootstrap().expect("bootstrap provenance");
+    let verification = load_stdlib().expect("bootstrap provenance");
     for (condition, expected, transfers) in [("true", 99, 1), ("false", 1, 0)] {
         let source = format!(
             "\

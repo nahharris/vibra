@@ -1,0 +1,9 @@
+(import option @std.option)
+
+(defn first (items (array i32)) (option.option i32) (items 0u64))
+
+(defn build () (array i32) (array.append (array.of 1i32) 2i32))
+
+(defn table () (map str i32) (map.of "a" 1i32))
+
+(defn missing () (array i32) (array.reverse (array.of 1i32)))

@@ -8,8 +8,7 @@ use crate::runner::{
 use std::path::Path;
 
 use vibra_types::{
-    BootstrapInputs, BootstrapVerification, check_bootstrap_text_import, check_source,
-    verify_bootstrap_bytes,
+    Stdlib, StdlibInputs, check_bootstrap_text_import, check_source, load_stdlib_bytes,
 };
 
 const BOOTSTRAP_PROVENANCE_FAILURE: &str = "bootstrap provenance verification failed";
@@ -18,13 +17,13 @@ fn check_case_source(
     source_id: &str,
     source: &str,
 ) -> Result<vibra_types::CheckResult, HandlerError> {
-    check_case_source_with(source_id, source, &BootstrapInputs::embedded())
+    check_case_source_with(source_id, source, &StdlibInputs::embedded())
 }
 
 fn check_case_source_with(
     source_id: &str,
     source: &str,
-    bootstrap: &BootstrapInputs<'_>,
+    bootstrap: &StdlibInputs<'_>,
 ) -> Result<vibra_types::CheckResult, HandlerError> {
     let document =
         vibra_syntax::parse_source(Path::new(source_id), source).map_err(|error| {
@@ -53,10 +52,8 @@ fn check_case_source_with(
     Ok(check_source(source_id, source))
 }
 
-fn verified_bootstrap(
-    bootstrap: &BootstrapInputs<'_>,
-) -> Result<BootstrapVerification, HandlerError> {
-    verify_bootstrap_bytes(bootstrap).map_err(|error| {
+fn verified_bootstrap(bootstrap: &StdlibInputs<'_>) -> Result<Stdlib, HandlerError> {
+    load_stdlib_bytes(bootstrap).map_err(|error| {
         HandlerError::new(format!("{BOOTSTRAP_PROVENANCE_FAILURE}: {error}"))
     })
 }
@@ -94,7 +91,7 @@ impl ProfileHandler for StaticV1TypeHandler {
 #[allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 mod tests {
     use super::{BOOTSTRAP_PROVENANCE_FAILURE, check_case_source_with};
-    use vibra_types::BootstrapInputs;
+    use vibra_types::StdlibInputs;
 
     const SOURCE: &str =
         "(import text @std.text)\n(defn answer () u64 (text.length \"x\"))";
@@ -102,18 +99,15 @@ mod tests {
     #[test]
     fn dispatch_parses_comments_and_multiline_imports() {
         let source = "; leading comment\n\n(import\n text\n @std.text)\n(defn answer () u64 (text.length \"😀\"))";
-        let checked = check_case_source_with(
-            "app/main.vib",
-            source,
-            &BootstrapInputs::embedded(),
-        )
-        .expect("dispatch should verify bootstrap");
+        let checked =
+            check_case_source_with("app/main.vib", source, &StdlibInputs::embedded())
+                .expect("dispatch should verify bootstrap");
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
     }
 
     #[test]
     fn dispatch_propagates_bootstrap_verification_failure() {
-        let mut inputs = BootstrapInputs::embedded();
+        let mut inputs = StdlibInputs::embedded();
         inputs.manifest = b"";
         let error = check_case_source_with("app/main.vib", SOURCE, &inputs)
             .expect_err("bootstrap failure must cross the handler boundary");
@@ -121,13 +115,12 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_propagates_tampered_bootstrap_artifact_failure() {
-        let mut inputs = BootstrapInputs::embedded();
-        inputs.artifact = b"tampered";
+    fn dispatch_propagates_tampered_stdlib_module_failure() {
+        let inputs = StdlibInputs::embedded().with_module("std/text.vib", b"tampered");
         let error = check_case_source_with("app/main.vib", SOURCE, &inputs)
             .expect_err("tampered bootstrap must cross the handler boundary");
         assert!(error.message().starts_with(BOOTSTRAP_PROVENANCE_FAILURE));
-        assert!(error.message().contains("artifact digest mismatch"));
+        assert!(error.message().contains("`@std.text` digest mismatch"));
     }
 }
 

@@ -1,4 +1,4 @@
-//! Closed M2 compiler registry contract.
+//! Closed compiler registry contract.
 
 #![allow(clippy::expect_used, clippy::indexing_slicing)]
 
@@ -9,13 +9,22 @@ use vibra_ir::{
 };
 
 #[test]
-fn registry_contains_only_the_reviewed_text_operations() {
+fn registry_contains_only_the_reviewed_operations() {
     assert_eq!(
         CompilerIntrinsic::ALL
             .iter()
             .map(|intrinsic| intrinsic.symbol())
             .collect::<Vec<_>>(),
-        ["text.concat", "text.length"]
+        [
+            "text.concat",
+            "text.length",
+            "array.of",
+            "map.of",
+            "array.length",
+            "array.append",
+            "array.concat",
+            "array.slice",
+        ]
     );
     assert!(CompilerIntrinsic::from_symbol("integer.add-checked").is_none());
     assert!(CompilerIntrinsic::from_symbol("host.read").is_none());

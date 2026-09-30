@@ -129,9 +129,9 @@ when the record is malformed.
 
 M2 decodes this record through a closed typed schema before it acquires any
 source files. Schema-selected atom roles are retained as values until the
-source graph and resolver phases have explicit inputs. M2's offline bootstrap
-is repository-owned and hash-checked; ordinary local/Git dependency sync and
-lock generation remain Milestone 5 work. A syntactically valid project feature
+source graph and resolver phases have explicit inputs. The standard library is
+embedded in the toolchain, as the standard-library input section below states;
+ordinary local/Git dependency sync and lock generation remain Milestone 5 work. A syntactically valid project feature
 outside the selected M2 profile reports `@tool.unavailable` rather than being
 silently ignored or executed through a fallback.
 
@@ -393,88 +393,6 @@ They reject a missing vendor tree, stale lock, changed vendored content, path
 escape, or undeclared dependency. Local dependencies are not copied and are
 fingerprinted on every workspace snapshot.
 
-### M2 bootstrap trust input
-
-Before ordinary dependency delivery exists, M2 has one offline standard-library
-input. The input is the repository-owned byte file
-`stdlib/m2/bootstrap.vibon`, and its authority is the adjacent
-`stdlib/m2/bootstrap-manifest.vibon`. The manifest is the only source of the
-bootstrap identity: it records the fixed package name `vibra-stdlib`, exact
-package version `0.1.0`, the artifact's exact `sha256:` digest, an Ed25519
-public key, a detached signature over the artifact bytes, and the ordered
-import map. The manifest bytes are pinned to the reviewed build-time trust
-input. Its package name MUST match the `package` string inside the signed
-artifact; its package version is the exact M2 bootstrap package version. The
-checked-in public key is the toolchain key for this repository; a project
-file, filename, source annotation, conformance profile, or copied declaration
-never supplies authority.
-
-The Step 1 artifact identity is fixed at
-`sha256:8dd00d7ecbe068205775cd74a0fdf54ffd32f8c0710da362ab938edee567e103`.
-The toolchain public-key file is
-`stdlib/m2/toolchain-ed25519.pub` with fixed digest
-`sha256:fe5736bd57729053562bf6617fbe0acd1d81f66e9cb930341556c4808f3b1509`.
-The key file is one PEM `PUBLIC KEY` block whose DER body is exactly the
-RFC 8410 Ed25519 `SubjectPublicKeyInfo` prefix followed by 32 key bytes; any
-other key shape is rejected. The detached signature is base64 Ed25519 over the
-artifact bytes; its checked
-in file has digest
-`sha256:f6bad514c77cf8dac2dc2309df174cb3f25425c681258db276e240a4af2a5e63`.
-These values are part of the M2 contract and may change only with a reviewed
-bootstrap-contract change that replaces the signature and all dependent
-evidence together.
-
-The toolchain embeds these reviewed files, including both mapped modules, at
-build time. `check`, `run`, and `test` verify the embedded bytes; they never
-read the bootstrap from the project, the build checkout, or the installation
-directory, so a relocated toolchain binary behaves identically. The verifier
-is a pure function of those bytes.
-
-The verifier reads the manifest and artifact as bytes, decodes the manifest
-through a closed typed record and checks its format and field types, computes SHA-256 over the exact artifact bytes, and
-rejects a digest mismatch before parsing or resolving any bootstrap record. It
-then verifies the detached Ed25519 signature with the fixed public key whose
-digest is above and rejects an invalid signature. The manifest's key path and
-digest must match that fixed identity; a manifest cannot select another key.
-The verifier accepts no alternate encoding,
-newline normalization, path alias, symlink, archive member, network URL, or
-environment override. A failure is an operational provenance diagnostic and
-must not fall back to a vendored or ambient standard library.
-
-The manifest's import map is closed in M2. `@std.text` maps to the trusted text
-module and `@std.assert` maps to the trusted assertion module. Each map value
-contains the canonical relative path and SHA-256 of that module's exact bytes;
-the verifier decodes the signed artifact through its own closed typed record,
-requires its `package`, import map, and symbol lists to equal the manifest's
-structurally (the same module atom, path, digest, and role in each entry, in
-order), and hashes each module's bytes against its entry before admitting any
-declaration or test registry member. An
-import is accepted only when its resolved module identity is exactly the
-mapped identity; users must write the import explicitly. No standard-library
-module is an ambient prelude, and ordinary packages cannot add, replace, or
-rebind a bootstrap map entry. After verification, the mapped modules enter the
-resolver as a distinct `vibra-stdlib@0.1.0` package with unit `@std` and their
-canonical module paths. The resolver MUST retain that package provenance in
-their declaration identities. The overlay is added only from the verified
-manifest; it is not loaded through a project dependency edge, vendor directory,
-cache, or fallback search. Ordinary project dependency edges remain explicit
-and unavailable in M2.
-
-The combined project and overlay graph MUST keep source IDs unique across all
-packages because a source ID selects the document used for diagnostic spans.
-If a project module and a verified module use the same source ID, resolution
-emits `@module.source-id-collision`; the affected selected graph is not type
-checked or executed.
-
-The bootstrap record contains the C7 pure text symbols and the C9 assertion
-member names. It is an allowlist and provenance input, not a second language
-grammar. `stdlib/m2/src/std/text.vib` is the signed pure declaration module;
-`stdlib/m2/src/std/assert.vib` is the signed marker module whose test-only
-members come from the registry list. Step 8 verifies every listed byte before
-admitting compiler declarations, and Step 13 supplies the assertion behavior.
-M2 never performs Git, registry, or network resolution while loading this
-input.
-
 ### Toolchain standard-library input
 
 M3 replaces the M2 bootstrap input, with no transition period and no fallback
@@ -507,8 +425,8 @@ directory, a vendor tree, a cache, or the network.
 The admitted modules enter the resolver as the `vibra-stdlib@0.2.0` package
 with unit `@std`, keep that provenance in every declaration identity, and are
 imported explicitly; there is no ambient prelude. A declaration outside this
-embedded package that writes `external:` is rejected exactly as the M2 input
-rejected an unverified one. The M3 module set is `@std.core`, `@std.option`,
+embedded package that writes `external:` acquires no provider authority and is
+rejected before execution. The M3 module set is `@std.core`, `@std.option`,
 `@std.result`, `@std.bool`, `@std.char`, `@std.text`, `@std.bytes`,
 the builtin-member module `@std.builtin`, and the test-registry module
 `@std.assert`. `@std.builtin` is never imported: it declares the members of the
@@ -516,6 +434,12 @@ builtin numeric, `array`, `map`, and `tuple` types, which are reached
 through those type paths; Stage 3B adds its own
 modules by the same rule. Adding a module or symbol is a specification change to
 this list and to the runtime registry.
+
+The combined project and standard-library graph MUST keep source IDs unique
+across all packages, because a source ID selects the document used for
+diagnostic spans. A project module that reuses an embedded module's source ID
+emits `@module.source-id-collision`; the affected selected graph is not type
+checked or executed.
 
 Builtin type names are reserved alias and module-level value spellings, as the
 type chapter states, because their members are reached by the same dotted path
@@ -598,7 +522,7 @@ An M2 test module MUST import `@std.assert` explicitly. If a module declares
 one or more tests but has no import targeting exactly `@std.assert`, emit one
 `@module.missing-required-import` diagnostic at the string name of its first
 test declaration. This is an ordinary source error: all selected tests are
-invalid and none execute. The verified bootstrap exports exactly these
+invalid and none execute. The embedded `@std.assert` module exports exactly these
 test-only assertion members; they are resolved by their canonical module
 identity and are not user-definable external declarations:
 

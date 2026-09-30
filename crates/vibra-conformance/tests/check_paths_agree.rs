@@ -19,7 +19,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use vibra_diagnostics::Level;
-use vibra_types::{check_bootstrap_text_import, check_source, verify_bootstrap};
+use vibra_types::{check_bootstrap_text_import, check_source, load_stdlib};
 
 /// Cases whose two verdicts legitimately differ, with the reason.
 ///
@@ -104,7 +104,7 @@ fn has_exact_text_import(source: &str) -> bool {
 
 fn single_source_verdict(source: &str) -> Verdict {
     let checked = if has_exact_text_import(source) {
-        let verification = verify_bootstrap().expect("embedded bootstrap");
+        let verification = load_stdlib().expect("embedded bootstrap");
         check_bootstrap_text_import(&verification, "input.vib", source)
     } else {
         check_source("input.vib", source)
@@ -129,7 +129,7 @@ fn workspace_verdict(id: &str, source: &str) -> Verdict {
     let verification = snapshot
         .requires_bootstrap_verification()
         .expect("bootstrap requirement")
-        .then(|| verify_bootstrap().expect("embedded bootstrap"));
+        .then(|| load_stdlib().expect("embedded bootstrap"));
     let checked = vibra_workspace::semantic::check_all_with_bootstrap(
         &snapshot,
         verification.as_ref(),

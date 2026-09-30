@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-map-order"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Map entries follow canonical key order whatever the insertion order, and a later duplicate key replaces the earlier value."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

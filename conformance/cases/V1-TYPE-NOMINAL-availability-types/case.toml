@@ -2,7 +2,7 @@ id = "V1-TYPE-NOMINAL-availability-types"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
 operation = "type-check"
-description = "Tuple, array, map, option, and result type expressions are valid syntax but unavailable until their steps land."
+description = "The standard result type is valid syntax but unavailable until typed failure lands."
 
 [inputs]
 source = "input.vib"
@@ -14,22 +14,4 @@ accepted = false
 code = "@tool.unavailable"
 level = "@error"
 source = "input.vib"
-span = [14, 35]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "input.vib"
-span = [62, 79]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "input.vib"
-span = [105, 124]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "input.vib"
-span = [152, 170]
+span = [17, 39]

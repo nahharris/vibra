@@ -249,6 +249,6 @@ fn workspace_cases_cover_higher_order_entry_selection_and_library_cycles() {
     assert!(!checked.accepted);
     assert!(checked.diagnostics.iter().any(|diagnostic| {
         diagnostic.code() == vibra_diagnostics::DiagnosticCode::ModuleSourceIdCollision
-            && diagnostic.source_id() == Some("stdlib/m2/src/std/text.vib")
+            && diagnostic.source_id() == Some("stdlib/src/std/text.vib")
     }));
 }

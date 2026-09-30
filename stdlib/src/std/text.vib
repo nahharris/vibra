@@ -1,5 +1,5 @@
-; M2 trusted pure text declarations. Their symbols are checked against the
-; compiler registry before the declarations are admitted.
+; Pure text declarations bound to the compiler registry. The toolchain checks
+; each symbol against the registry before the module is admitted.
 (defn concat (left str right str) str
   visibility: @public
   external: @compiler

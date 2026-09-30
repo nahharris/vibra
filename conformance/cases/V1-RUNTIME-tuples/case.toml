@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-tuples"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Anonymous tupleof values mix component types, a declared tuple builds from one operand per component, and projection selects a component by index."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

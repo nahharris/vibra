@@ -401,7 +401,7 @@ fn unused_let_initializer_does_not_contaminate_tail_target() {
 }
 
 #[test]
-fn rejects_unbounded_higher_order_calls_before_lowering() {
+fn unbounded_higher_order_calls_reach_every_escaping_function() {
     let source = r#"
 (defn apply (f (fn () i32)) i32
   (f))
@@ -409,17 +409,10 @@ fn rejects_unbounded_higher_order_calls_before_lowering() {
   (apply answer))
 "#;
     let checked = check_source("higher-order-recursion.vib", source);
-    assert!(
-        !checked.accepted(),
-        "unbounded higher-order calls stay unavailable"
-    );
-    assert!(checked.program().is_none());
-    assert!(
-        checked
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::ToolUnavailable })
-    );
+    // An unknown callee stands for every function named as a value, so the
+    // call through `f` joins `answer` and `apply` in one recursive group.
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    assert!(checked.program().is_some());
 }
 
 #[test]

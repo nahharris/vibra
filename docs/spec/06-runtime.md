@@ -146,7 +146,11 @@ they are the final expression inside a `do` that is itself an operand),
 
 The **recursive group** of a module-level `defn` is the set of module-level
 `defn`s in that module reachable from it through static function-call edges,
-including mutual recursion. Calls in tail position whose callee resolves to a
+including mutual recursion. An application whose callee value is not statically
+one function has an edge to every function it may denote; a callee whose value
+flows through data or a parameter that the analysis does not follow, such as a
+function stored in a record or an array, may denote every `defn` named as a
+value anywhere in the program and every `lambda`. Calls in tail position whose callee resolves to a
 member of the current function's recursive group MUST reuse the current
 activation. The interpreter and WebAssembly backend MAY implement this with
 explicit tail-call instructions or an internal trampoline; the strategy is not
@@ -266,14 +270,16 @@ The remaining operations are bound by modules, except the `array.*` rows:
 | `bytes.slice` | `bytes u64 u64 -> (option bytes)` | As `text.slice`, over bytes |
 | `bytes.to-array` | `bytes -> (array u8)` | Bytes in order |
 | `bytes.from-array` | `(array u8) -> bytes` | Bytes in order |
+| `array.of` | `-> (array t)`, `variadic: (items (array t))` | The packed tail; `where: (t any)` |
+| `map.of` | `-> (map k v)`, `variadic: (entries (map k v))` | The packed tail, in canonical key order, a later entry replacing an equal key; `where: (k any v any)` |
 | `array.length` | `(array t) -> u64` | Element count; `where: (t any)` |
 | `array.append` | `(array t) t -> (array t)` | New array with one trailing element |
 | `array.concat` | `(array t) (array t) -> (array t)` | Elements of the first, then the second |
 | `array.slice` | `(array t) u64 u64 -> (option (array t))` | As `text.slice`, over elements |
 
-The numeric rows and the `array.*` rows are static methods of builtin types,
-declared by the toolchain together with `array.of` and `map.of` in the
-`intrinsic-type` declarations of the embedded module `@std.builtin`. They are reached through the type path with
+The numeric rows and the `array.*` and `map.*` rows are static methods of
+builtin types, declared in the `intrinsic-type` declarations of the embedded
+module `@std.builtin`. They are reached through the type path with
 no import, exactly as the builtin types themselves need none, so
 `(i32.add-checked left right)` needs no `import`.
 

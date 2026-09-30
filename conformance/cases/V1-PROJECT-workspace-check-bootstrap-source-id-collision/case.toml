@@ -2,7 +2,7 @@ id = "V1-PROJECT-workspace-check-bootstrap-source-id-collision"
 rule = "V1-PROJECT"
 profile = "static-v1"
 operation = "workspace-check"
-description = "A local module cannot reuse the verified bootstrap source identity."
+description = "A local module cannot reuse an embedded standard-library source identity."
 
 [inputs]
 project = "tree/project.vibon"
@@ -14,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@module.source-id-collision"
 level = "@error"
-source = "stdlib/m2/src/std/text.vib"
+source = "stdlib/src/std/text.vib"
 span = [0, 0]

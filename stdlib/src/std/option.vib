@@ -1,0 +1,5 @@
+; The standard optional value. Lookups return it, and the checker recognizes
+; it by canonical identity.
+(deftype option (enum some t none void)
+  where: (t any)
+  visibility: @public)

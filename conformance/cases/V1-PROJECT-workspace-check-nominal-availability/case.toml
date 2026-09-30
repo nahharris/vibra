@@ -2,7 +2,7 @@ id = "V1-PROJECT-workspace-check-nominal-availability"
 rule = "V1-PROJECT"
 profile = "static-v1"
 operation = "workspace-check"
-description = "After M3 Step 2, a wrapper over a type owned by a later step, unions, interfaces and implementations, and host effects stay unavailable at their owning forms, and naming an unavailable type is unavailable at its parameter."
+description = "After M3 Step 4, unions, interfaces and implementations, and host effects stay unavailable at their owning forms, while a wrapper over an array and a parameter naming it are available."
 
 [inputs]
 project = "tree/project.vibon"
@@ -11,12 +11,6 @@ tree = "tree"
 [expect]
 accepted = false
 
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [0, 28]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
@@ -71,9 +65,3 @@ code = "@tool.unavailable"
 level = "@error"
 source = "src/main.vib"
 span = [189, 268]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [288, 300]

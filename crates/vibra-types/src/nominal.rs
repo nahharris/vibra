@@ -37,6 +37,10 @@ pub(crate) enum LowerError {
         expected: usize,
         found: usize,
     },
+    /// A map key type outside the admissible key types.
+    InvalidMapKey(Type),
+    /// A map key type that is or contains a function type.
+    FunctionMapKey(Type),
 }
 
 /// What a type expression may name besides declared types: the receiver type
@@ -280,11 +284,10 @@ impl TypeNames {
                         "nonempty function-type effect rows arrive in M4",
                     ));
                 }
-                if function.variadic().is_some() {
-                    return Err(LowerError::Unavailable(
-                        "variadic function types arrive in M3 Step 4",
-                    ));
-                }
+                let variadic = function
+                    .variadic()
+                    .map(|tail| self.lower_variadic(source_id, scope, tail))
+                    .transpose()?;
                 let parameters = function
                     .parameters()
                     .iter()
@@ -302,9 +305,12 @@ impl TypeNames {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 let result = self.lower(source_id, scope, function.result())?;
-                Ok(Type::Function(Box::new(FunctionSignature::with_labelled(
-                    parameters, labelled, result,
-                ))))
+                let signature =
+                    FunctionSignature::with_labelled(parameters, labelled, result);
+                Ok(Type::Function(Box::new(match variadic {
+                    Some(tail) => signature.with_variadic(tail),
+                    None => signature,
+                })))
             }
             TypeExpr::Record(fields) => Ok(Type::Record(vibra_ir::canonical_members(
                 self.lower_members(source_id, scope, fields)?,
@@ -313,7 +319,7 @@ impl TypeNames {
                 self.lower_members(source_id, scope, variants)?,
             ))),
             TypeExpr::Applied { head, arguments } => {
-                if matches!(head.value(), "option" | "result")
+                if head.value() == "result"
                     && matches!(
                         self.resolve(source_id, head),
                         Err(LowerError::Unknown(_))
@@ -327,15 +333,59 @@ impl TypeNames {
                     .collect::<Result<Vec<_>, _>>()?;
                 self.applied(source_id, head, arguments)
             }
-            TypeExpr::Tuple(_) | TypeExpr::Array(_) | TypeExpr::Map(_, _) => {
-                Err(LowerError::Unavailable(
-                    "tuple, array, and map types arrive in M3 Step 4",
-                ))
+            TypeExpr::Tuple(components) => Ok(Type::Tuple(
+                components
+                    .iter()
+                    .map(|component| self.lower(source_id, scope, component))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            TypeExpr::Array(element) => Ok(Type::Array(Box::new(
+                self.lower(source_id, scope, element)?,
+            ))),
+            TypeExpr::Map(key, value) => {
+                let key = self.lower(source_id, scope, key)?;
+                let value = self.lower(source_id, scope, value)?;
+                match map_key(&key) {
+                    KeyVerdict::Admissible => {}
+                    // The embedded standard library declares the generic
+                    // `map` itself; a user map keyed by a generic parameter
+                    // needs interface bounds.
+                    KeyVerdict::Generic if is_stdlib_source(source_id) => {}
+                    KeyVerdict::Generic => {
+                        return Err(LowerError::Unavailable(
+                            "map types keyed by a generic parameter arrive with interfaces in M3 Step 11",
+                        ));
+                    }
+                    KeyVerdict::Function => {
+                        return Err(LowerError::FunctionMapKey(key));
+                    }
+                    KeyVerdict::Invalid => return Err(LowerError::InvalidMapKey(key)),
+                }
+                Ok(Type::Map(Box::new(key), Box::new(value)))
             }
             TypeExpr::Union(_) => {
                 Err(LowerError::Unavailable("union types arrive in M3 Step 6"))
             }
         }
+    }
+
+    /// Lowers a variadic tail type to its `(array t)` or `(map k v)` type,
+    /// applying the map-key rules.
+    pub(crate) fn lower_variadic(
+        &self,
+        source_id: &str,
+        scope: Scope<'_>,
+        tail: &vibra_syntax::VariadicType,
+    ) -> Result<Type, LowerError> {
+        let written = match tail {
+            vibra_syntax::VariadicType::Array(element) => {
+                TypeExpr::Array(element.clone())
+            }
+            vibra_syntax::VariadicType::Map(key, value) => {
+                TypeExpr::Map(key.clone(), value.clone())
+            }
+        };
+        self.lower(source_id, scope, &written)
     }
 
     /// Lowers `value`, reporting a failure at the owning `span`.
@@ -365,11 +415,9 @@ impl TypeNames {
         arguments: Vec<Type>,
     ) -> Result<Type, LowerError> {
         let index = match self.resolve(source_id, name) {
-            Err(LowerError::Unknown(_))
-                if matches!(name.value(), "option" | "result") =>
-            {
+            Err(LowerError::Unknown(_)) if name.value() == "result" => {
                 return Err(LowerError::Unavailable(
-                    "the option and result library types arrive in M3 Steps 4 and 7",
+                    "the result library type arrives in M3 Step 7",
                 ));
             }
             resolved => resolved?,
@@ -461,14 +509,22 @@ impl TypeNames {
                         variants,
                     )
                     .map(TypeBody::Enum),
-                DeftypeBody::Type(TypeExpr::Tuple(_)) => Err(LowerError::Unavailable(
-                    "declared tuple types arrive in M3 Step 4",
-                )),
+                DeftypeBody::Type(TypeExpr::Tuple(components)) => components
+                    .iter()
+                    .map(|component| {
+                        self.lower(
+                            &source_id,
+                            Scope::new(Some(&self_type), &parameters),
+                            component,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .map(TypeBody::Tuple),
                 DeftypeBody::Type(TypeExpr::Union(_)) => Err(LowerError::Unavailable(
                     "declared union types arrive in M3 Step 6",
                 )),
                 DeftypeBody::Intrinsic(_) => Err(LowerError::Unavailable(
-                    "intrinsic-type declarations arrive with the M3 standard library in Step 4",
+                    "intrinsic-type is admissible only in the embedded standard library",
                 )),
                 // Any other body declares a wrapper type over one representation.
                 DeftypeBody::Type(representation) => self
@@ -548,35 +604,24 @@ impl TypeNames {
     }
 
     fn body_names_unavailable(&self, body: &TypeBody) -> bool {
-        match body {
-            TypeBody::Record(members) | TypeBody::Enum(members) => members
-                .iter()
-                .any(|(_, member)| self.names_unavailable(member)),
-            TypeBody::Wrapper(representation) => self.names_unavailable(representation),
-        }
+        body.slots()
+            .iter()
+            .any(|(_, slot)| self.names_unavailable(slot))
     }
 
     fn names_unavailable(&self, value: &Type) -> bool {
-        match value {
-            Type::Declared(id) => self
+        let head_unavailable = match value {
+            Type::Declared(id) | Type::Applied(id, _) => self
                 .index_of(id)
                 .and_then(|index| self.declared.get(index))
                 .is_none_or(|declared| !declared.available),
-            Type::Record(members) | Type::Enum(members) => members
-                .iter()
-                .any(|(_, member)| self.names_unavailable(member)),
-            Type::Function(signature) => {
-                signature
-                    .parameters()
-                    .iter()
-                    .any(|value| self.names_unavailable(value))
-                    || signature.labelled().iter().any(|parameter| {
-                        self.names_unavailable(&parameter.value_type())
-                    })
-                    || self.names_unavailable(&signature.result())
-            }
             _ => false,
-        }
+        };
+        head_unavailable
+            || value
+                .components()
+                .iter()
+                .any(|component| self.names_unavailable(component))
     }
 
     /// Rejects declared types whose expansion repeats without passing through
@@ -593,16 +638,8 @@ impl TypeNames {
             .iter()
             .map(|declared| {
                 let mut edges = Vec::new();
-                match &declared.body {
-                    Some(TypeBody::Record(members) | TypeBody::Enum(members)) => {
-                        for (name, member) in members {
-                            self.direct_edges(member, name, &mut edges);
-                        }
-                    }
-                    Some(TypeBody::Wrapper(representation)) => {
-                        self.direct_edges(representation, "", &mut edges);
-                    }
-                    None => {}
+                for (name, slot) in declared.body.iter().flat_map(TypeBody::slots) {
+                    self.direct_edges(&slot, &name, &mut edges);
                 }
                 edges
             })
@@ -677,9 +714,11 @@ impl TypeNames {
                     }
                 }
             }
-            Type::Record(members) | Type::Enum(members) => {
-                for (_, nested) in members {
-                    self.direct_edges(nested, member, edges);
+            // Tuple components, fields, and payloads are stored inline; array
+            // and map elements and function types are not.
+            Type::Record(_) | Type::Enum(_) | Type::Tuple(_) => {
+                for nested in value.components() {
+                    self.direct_edges(&nested, member, edges);
                 }
             }
             _ => {}
@@ -705,15 +744,11 @@ impl TypeNames {
         if !visiting.insert(index) {
             return false;
         }
-        let direct = match &declared.body {
-            Some(TypeBody::Record(members) | TypeBody::Enum(members)) => members
-                .iter()
-                .any(|(_, member)| self.contains_directly(member, name, visiting)),
-            Some(TypeBody::Wrapper(representation)) => {
-                self.contains_directly(representation, name, visiting)
-            }
-            None => false,
-        };
+        let direct = declared
+            .body
+            .iter()
+            .flat_map(TypeBody::slots)
+            .any(|(_, slot)| self.contains_directly(&slot, name, visiting));
         visiting.remove(&index);
         direct
     }
@@ -728,9 +763,10 @@ impl TypeNames {
     ) -> bool {
         match value {
             Type::Param(parameter) => parameter == name,
-            Type::Record(members) | Type::Enum(members) => members
+            Type::Record(_) | Type::Enum(_) | Type::Tuple(_) => value
+                .components()
                 .iter()
-                .any(|(_, member)| self.contains_directly(member, name, visiting)),
+                .any(|component| self.contains_directly(component, name, visiting)),
             Type::Applied(id, arguments) => {
                 let Some(index) = self.index_of(id) else {
                     return false;
@@ -843,6 +879,22 @@ pub(crate) fn report_lower_error(
             )
             .with_source_id(source_id),
         ),
+        LowerError::InvalidMapKey(key) => diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeInvalidMapKey,
+                span,
+                format!("{key} is not an admissible map key type"),
+            )
+            .with_source_id(source_id),
+        ),
+        LowerError::FunctionMapKey(key) => diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeFunctionNotEquatable,
+                span,
+                format!("{key} contains a function type and cannot key a map"),
+            )
+            .with_source_id(source_id),
+        ),
     }
 }
 
@@ -917,4 +969,68 @@ pub(crate) fn function_generics(
     let mut generics = owner.to_vec();
     generics.extend(generic_names(items));
     Some(generics)
+}
+
+/// Whether a type may key a map (`docs/spec/02-type-system.md`, "Nominal
+/// declarations").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum KeyVerdict {
+    /// A closed conformance: a key primitive or an anonymous structure of them.
+    Admissible,
+    /// A generic parameter, admissible only through an interface bound.
+    Generic,
+    /// A function type, or a structure containing one.
+    Function,
+    /// Any other type.
+    Invalid,
+}
+
+/// Classifies `key`. A function anywhere in the key wins, then a generic
+/// parameter, then any other inadmissible component.
+pub(crate) fn map_key(key: &Type) -> KeyVerdict {
+    match key {
+        Type::Bool
+        | Type::Char
+        | Type::Str
+        | Type::Bytes
+        | Type::Atom
+        | Type::I8
+        | Type::I16
+        | Type::I32
+        | Type::I64
+        | Type::U8
+        | Type::U16
+        | Type::U32
+        | Type::U64 => KeyVerdict::Admissible,
+        Type::Function(_) => KeyVerdict::Function,
+        Type::Param(_) => KeyVerdict::Generic,
+        Type::Tuple(_) | Type::Record(_) | Type::Enum(_) => {
+            // A `void` enum payload marks a nullary variant, not a component.
+            let verdicts = key
+                .components()
+                .iter()
+                .filter(|component| {
+                    !(matches!(key, Type::Enum(_)) && **component == Type::Void)
+                })
+                .map(map_key)
+                .collect::<Vec<_>>();
+            [
+                KeyVerdict::Function,
+                KeyVerdict::Generic,
+                KeyVerdict::Invalid,
+            ]
+            .into_iter()
+            .find(|verdict| verdicts.contains(verdict))
+            .unwrap_or(KeyVerdict::Admissible)
+        }
+        // `void`, floats, arrays, maps, and declared types, including
+        // `option`, have no closed conformance; a declared type is
+        // admissible only through its own implementations (Step 11).
+        _ => KeyVerdict::Invalid,
+    }
+}
+
+/// Whether `source_id` names a module of the embedded standard library.
+pub(crate) fn is_stdlib_source(source_id: &str) -> bool {
+    source_id.starts_with("stdlib/src/")
 }

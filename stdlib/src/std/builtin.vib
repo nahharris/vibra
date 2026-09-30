@@ -1,0 +1,38 @@
+; Members of the builtin collection types. They are reached through the type
+; path, such as `(array.of 1i32 2i32)`, with no import. Every member binds a
+; compiler registry operation.
+(import option @std.option)
+
+(deftype array (intrinsic-type @array)
+  where: (t any)
+  visibility: @public
+  (defn of () (array t)
+    visibility: @public
+    variadic: (items (array t))
+    external: @compiler
+    symbol: "array.of")
+  (defn length (items (array t)) u64
+    visibility: @public
+    external: @compiler
+    symbol: "array.length")
+  (defn append (items (array t) item t) (array t)
+    visibility: @public
+    external: @compiler
+    symbol: "array.append")
+  (defn concat (left (array t) right (array t)) (array t)
+    visibility: @public
+    external: @compiler
+    symbol: "array.concat")
+  (defn slice (items (array t) start u64 end u64) (option.option (array t))
+    visibility: @public
+    external: @compiler
+    symbol: "array.slice"))
+
+(deftype map (intrinsic-type @map)
+  where: (k any v any)
+  visibility: @public
+  (defn of () (map k v)
+    visibility: @public
+    variadic: (entries (map k v))
+    external: @compiler
+    symbol: "map.of"))

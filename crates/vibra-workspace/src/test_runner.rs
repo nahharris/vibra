@@ -354,7 +354,7 @@ struct TestRef<'a> {
 pub fn run_tests(
     workspace: &WorkspaceSnapshot,
     selector: Option<&TestSelector>,
-    verification: Option<&vibra_types::BootstrapVerification>,
+    verification: Option<&vibra_types::Stdlib>,
 ) -> WorkspaceTestResult {
     let graph = match workspace.source_graph() {
         Ok(graph) => graph,
@@ -373,7 +373,7 @@ pub fn run_tests(
 fn select_tests(
     resolved: &ResolvedSnapshot,
     selector: Option<&TestSelector>,
-    verification: Option<&vibra_types::BootstrapVerification>,
+    verification: Option<&vibra_types::Stdlib>,
 ) -> WorkspaceTestResult {
     let local = resolved.package();
     let modules = resolved
@@ -732,7 +732,7 @@ fn module_imports_assert(ast: &vibra_syntax::SourceAst) -> bool {
 fn module_has_verified_assertion_import(
     resolved: &ResolvedSnapshot,
     module: &vibra_resolve::ModuleRecord,
-    verification: Option<&vibra_types::BootstrapVerification>,
+    verification: Option<&vibra_types::Stdlib>,
 ) -> bool {
     let Some(verification) = verification else {
         return false;
@@ -974,7 +974,7 @@ mod provenance_tests {
             ],
         ));
         let verification =
-            vibra_types::verify_bootstrap().expect("signed bootstrap verification");
+            vibra_types::load_stdlib().expect("embedded standard library");
 
         let result = select_tests(&resolved, None, Some(&verification));
 
