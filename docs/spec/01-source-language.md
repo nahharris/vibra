@@ -267,6 +267,7 @@ generic-bound        = symbol ;
 
 declaration-attribute = "visibility:", atom-name | "doc:", string ;
 type-attribute = "where:", where-clause
+               | "role:", atom-name
                | declaration-attribute ;
 function-attribute = "where:", where-clause
                    | "labelled:", labelled-parameters
@@ -275,6 +276,7 @@ function-attribute = "where:", where-clause
                    | "effects:", effect-row
                    | "external:", atom-name
                    | "symbol:", string
+                   | "native:", string
                    | "doc:", string ;
 lambda-attribute = "where:", where-clause
                  | "labelled:", labelled-parameters
@@ -287,6 +289,11 @@ lambda-attribute = "where:", where-clause
 `union` forms, plus the toolchain-only `intrinsic-type`, which is admissible
 nowhere else. A `deftype` over any other type expression declares a wrapper
 type: a distinct identity over one representation type.
+
+`role:` names the language role a standard-library `deftype` plays, and
+`native:` names the toolchain native implementation of a standard-library
+function that keeps its Vibra body; both are admissible only in the embedded
+standard library, as the type and runtime chapters state.
 
 `def` introduces an immutable module value. There is no separate `const` form
 in v1.
@@ -310,9 +317,9 @@ neither may redeclare an inherited name. The type chapter defines that
 inheritance and the call-site `types:` list built from it.
 
 The canonical function-attribute order is `where:`, `labelled:`, `variadic:`,
-`visibility:`, `effects:`, `external:`, `symbol:`, then `doc:`; a `lambda` uses
-the same relative order. The canonical type-attribute order is `where:`,
-`visibility:`, then `doc:`. Attributes may be parsed in any unambiguous order,
+`visibility:`, `effects:`, `external:`, `symbol:`, `native:`, then `doc:`; a
+`lambda` uses the same relative order. The canonical type-attribute order is
+`where:`, `role:`, `visibility:`, then `doc:`. Attributes may be parsed in any unambiguous order,
 occur at most once, and are formatted canonically. Nested methods follow
 attributes, and `impl` blocks follow methods.
 

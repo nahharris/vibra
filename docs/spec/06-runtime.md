@@ -208,6 +208,16 @@ connectives, character classes, searching, splitting, trimming, folds — is
 ordinary standard-library Vibra over these operations and is specified by its
 reviewed source, not by this table.
 
+The registry has two tiers. A **primitive operation** is one the language core
+cannot express in Vibra: arithmetic and comparison on the scalar types,
+`char` conversions, and the construction, length, indexing, and slicing of
+`(array t)`. It is declared with `external: @compiler` and has no body. Every
+other row operates on a library type and is a **native implementation**
+(below): its meaning is a standard-library Vibra body, and the row only names
+the accelerated implementation a toolchain may run instead. Until a library
+type moves into the standard library, its rows are primitive operations over
+the toolchain's direct representation; the roadmap names each migration.
+
 The error and ordering types are standard-library enums in `@std.core`, each
 variant with a `void` payload:
 
@@ -292,6 +302,43 @@ lookup need a generic key parameter and belong to the Stage 3B registry.
 A registry signature is checked exactly, including its generic parameter list,
 against the trusted declaration that binds it. Adding, removing, or changing a
 row is a specification change.
+
+## Native implementations
+
+A standard-library function MAY carry `native: "symbol"` beside its ordinary
+Vibra body. The body is the function's meaning: checking, effects, the
+canonical value encoding, and every observable result come from it. The native
+implementation is a toolchain-owned replacement for executing that body, and
+it MUST be observationally identical to it for every input, including the
+result of every partial operation and the absence of traps and host events.
+
+Native implementations are closed exactly as the primitive operations are:
+only the embedded standard library may write `native:`, the standard-library
+manifest lists every native symbol, and a symbol the toolchain does not
+implement is a toolchain defect reported as an operational provenance
+diagnostic. A toolchain MAY execute the body instead of the native
+implementation, so a native implementation is never needed for a correct
+result. Each native implementation has one source shared by the reference
+interpreter and the WebAssembly backend, so the two cannot drift apart, and
+the conformance suite runs every native implementation against its body over
+the same inputs. This is not a foreign-function interface: packages cannot
+declare `native:`, and a native implementation reaches no host operation.
+
+## Representation latitude
+
+The language core fixes observable behavior, not representation. A toolchain
+MAY, without any observable difference and without any promise to do so:
+
+- represent a wrapper type exactly as its representation;
+- represent an enum whose variants all have `void` payloads as a small integer,
+  and choose compact layouts for other enums, such as a nullable reference for
+  an `option` of a reference type; and
+- update a value in place when no other reference to it can observe the update,
+  so that a standard-library operation over an unshared array or map avoids a
+  copy.
+
+These are implementation strategies, not guarantees; v1 makes no
+optimization promise.
 
 ## Canonical value encoding
 

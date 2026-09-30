@@ -20,6 +20,11 @@ with the enclosing-context rules; early exit from the innermost function,
 Step 9 M2 tail-call guarantee; `@type.unhandled-fallible` at ignored `result`
 positions and acceptance under each discard spelling.
 
+Per ledger D17.1–D17.2 (Step 4a), `result` is an ordinary standard-library
+`deftype` in `@std.result` that claims the `@result` role, exactly as Step 4b made
+`option` claim `@option`; `try` and unhandled-failure checking bind the role and
+never the definition.
+
 ## Test matrix
 
 - Positive: `try` in a function and a `lambda` returning `option` and

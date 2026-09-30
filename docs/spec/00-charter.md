@@ -81,6 +81,12 @@ conformance case or an explicit review-only invariant.
   effect roots are its complete execution consent; v1 has no runtime grants.
 - Project and compiler-owned persistent data use canonical, non-executable
   `.vibon` literal data. JSON is reserved for CLI and MCP interoperability.
+- The language core is minimal. The compiler owns the scalar types, `(array t)`,
+  `fn` types, and the structural type constructors; every other type, including
+  `bool`, `str`, `map`, `option`, and `result`, and every operation over one, is
+  standard-library Vibra. The compiler knows such a type only by the closed
+  language role it plays, and a toolchain accelerates library code only through
+  native implementations whose meaning stays their Vibra body.
 - Toolchain-owned external declarations use only the closed `@compiler` and
   `@host` providers; ordinary packages cannot add providers or registry symbols.
 - Diagnostic, query, edit-plan, test, and command results have versioned JSON

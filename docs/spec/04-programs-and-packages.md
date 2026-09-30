@@ -317,8 +317,10 @@ module emits `@module.unknown-path`.
 ```
 
 Every import has one explicit lexical alias and one atom entity reference whose
-resolved entity MUST be a module. The first atom component names a unit; the
-remaining components name a module beneath that unit's source root. Thus
+resolved entity MUST be a module or one public top-level declaration of a
+module. The first atom component names a unit; the remaining components name a
+module beneath that unit's source root, optionally followed by exactly one
+declaration name. Thus
 `@hello.model` resolves to the local `hello` target's `model.vib`, while
 `@std.text` resolves through the `@std` dependency alias. The resolver never
 guesses from the importing file's directory.
@@ -339,10 +341,17 @@ cycles are errors. The atom is resolved only because the import grammar expects
 an entity reference; the same atom in expression position remains an ordinary
 value.
 
-An import makes only the target module alias visible. Public declarations are
-referenced as `alias.name`; nested effect operations use
-`alias.root.operation`. The standard library is an ordinary pinned dependency,
-not an ambient prelude.
+A module import makes only the target module alias visible. Public declarations
+are referenced as `alias.name`; nested effect operations use
+`alias.root.operation`. A declaration import, such as
+`(import ordering @std.core.ordering)`, binds its alias to that one
+declaration in every namespace the declaration occupies, so `ordering` then
+names the type and `ordering.less` its variant; members of a declared type are
+reached through the alias exactly as through the type name. Because the layout
+rule makes a module a leaf, a path never denotes both a module and a
+declaration. Apart from the closed core and role vocabulary the type chapter
+lists, the standard library is imported explicitly like any other package; it
+is not an ambient prelude.
 
 ## Dependencies and lock
 
@@ -405,18 +414,21 @@ and nothing a project supplies can add to it.
 
 The input is the repository directory `stdlib/`. Its authority is
 `stdlib/manifest.vibon`, a closed `@stdlib-manifest.v1` record with fields, in
-order, `format`, `package-name`, `package-version`, `modules`, `compiler`, and
-`assertions`. `package-name` is `"vibra-stdlib"` and `package-version` is
-`"0.2.0"`. `modules` is a map from each module atom to a record with `path` (a
-`stdlib/src/`-relative slash path), `sha256` (the `sha256:` digest of the
-module's exact bytes), and `role` (`@source` or `@test-registry`). `compiler`
-lists every `@compiler` symbol the modules may bind, and `assertions` lists the
-test-only assertion members.
+order, `format`, `package-name`, `package-version`, `modules`, `compiler`,
+`native`, and `assertions`. `package-name` is `"vibra-stdlib"` and
+`package-version` is `"0.2.0"`. `modules` is a map from each module atom to a
+record with `path` (a `stdlib/src/`-relative slash path), `sha256` (the
+`sha256:` digest of the module's exact bytes), and `role` (`@source` or
+`@test-registry`). `compiler` lists every `@compiler` symbol the modules may
+bind, `native` lists every native implementation symbol the modules may name
+with `native:`, and `assertions` lists the test-only assertion members.
 
 The toolchain embeds the manifest and every listed module at build time. At
 load it decodes the manifest through its closed record, hashes each embedded
 module against its entry, and requires every `external: @compiler` declaration
-to name a listed symbol whose signature matches the registry exactly. A
+to name a listed symbol whose signature matches the registry exactly. Every
+`native:` symbol MUST likewise be listed and implemented by the toolchain, and
+every language role MUST be claimed by exactly one `role:` declaration. A
 mismatch is an internal toolchain defect reported as an operational provenance
 diagnostic, never a fallback. `check`, `run`, and `test` never read the
 standard library from the project, the build checkout, the installation
