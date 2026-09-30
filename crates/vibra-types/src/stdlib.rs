@@ -25,6 +25,10 @@ pub const STDLIB_TEXT_SOURCE_ID: &str = "stdlib/src/std/text.vib";
 pub const STDLIB_ASSERT_SOURCE_ID: &str = "stdlib/src/std/assert.vib";
 /// The source identity of the `@std.option` module.
 pub const STDLIB_OPTION_SOURCE_ID: &str = "stdlib/src/std/option.vib";
+/// The source identity of the embedded `@std.result` module.
+pub const STDLIB_RESULT_SOURCE_ID: &str = "stdlib/src/std/result.vib";
+/// The source identity of the embedded `@std.core` module.
+pub const STDLIB_CORE_SOURCE_ID: &str = "stdlib/src/std/core.vib";
 /// The source identity of the `@std.builtin` module.
 pub const STDLIB_BUILTIN_SOURCE_ID: &str = "stdlib/src/std/builtin.vib";
 
@@ -46,12 +50,20 @@ const EMBEDDED_MANIFEST: &[u8] = include_bytes!("../../../stdlib/manifest.vibon"
 /// Every module compiled into the toolchain, by `stdlib/src/`-relative path.
 const EMBEDDED_MODULES: &[(&str, &[u8])] = &[
     (
+        "std/core.vib",
+        include_bytes!("../../../stdlib/src/std/core.vib"),
+    ),
+    (
         "std/text.vib",
         include_bytes!("../../../stdlib/src/std/text.vib"),
     ),
     (
         "std/option.vib",
         include_bytes!("../../../stdlib/src/std/option.vib"),
+    ),
+    (
+        "std/result.vib",
+        include_bytes!("../../../stdlib/src/std/result.vib"),
     ),
     (
         "std/builtin.vib",

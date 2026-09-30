@@ -1,10 +1,11 @@
 //! Standard-library declarations the checker recognizes by identity.
 //!
-//! `docs/spec/06-runtime.md` makes lookups answer with the `@std.option`
-//! declaration, recognized by canonical identity. A checking run that does
-//! not import `@std.option` still needs that type, so it is declared here from
-//! the embedded module under the identity the resolver gives it, and a run
-//! that already declared it keeps its own.
+//! `docs/spec/06-runtime.md` makes lookups and `try` answer with the types
+//! playing the `@option` and `@result` roles, and `@std.core` declares the
+//! ordering and error types. A checking run that does not import those
+//! modules still needs their types, so they are declared here from the
+//! embedded modules under the identities the resolver gives them, and a run
+//! that already declared one keeps its own.
 
 use std::path::Path;
 use std::sync::OnceLock;
@@ -17,39 +18,39 @@ use vibra_syntax::{
 
 use crate::nominal::TypeNames;
 use crate::stdlib::{
-    STDLIB_BUILTIN_SOURCE_ID, STDLIB_OPTION_SOURCE_ID, embedded_module, stdlib_type_id,
+    STDLIB_BUILTIN_SOURCE_ID, STDLIB_CORE_SOURCE_ID, STDLIB_OPTION_SOURCE_ID,
+    STDLIB_RESULT_SOURCE_ID, embedded_module, stdlib_type_id,
 };
 
-fn option_module() -> Option<&'static SourceAst> {
-    static MODULE: OnceLock<Option<SourceAst>> = OnceLock::new();
-    MODULE
-        .get_or_init(|| {
-            let bytes = embedded_module("std/option.vib")?;
-            let text = std::str::from_utf8(bytes).ok()?;
-            let document =
-                vibra_syntax::parse_source(Path::new(STDLIB_OPTION_SOURCE_ID), text)
-                    .ok()?;
-            document.ast().cloned()
-        })
-        .as_ref()
+/// The embedded modules that declare types every run can reach: by path,
+/// source identity, and module name under `@std`.
+const TYPE_MODULES: [(&str, &str, &str); 3] = [
+    ("std/option.vib", STDLIB_OPTION_SOURCE_ID, "option"),
+    ("std/result.vib", STDLIB_RESULT_SOURCE_ID, "result"),
+    ("std/core.vib", STDLIB_CORE_SOURCE_ID, "core"),
+];
+
+fn type_modules() -> &'static [(&'static str, &'static str, SourceAst)] {
+    static MODULES: OnceLock<Vec<(&'static str, &'static str, SourceAst)>> =
+        OnceLock::new();
+    MODULES.get_or_init(|| {
+        TYPE_MODULES
+            .iter()
+            .filter_map(|(path, source_id, module)| {
+                let text = std::str::from_utf8(embedded_module(path)?).ok()?;
+                let document =
+                    vibra_syntax::parse_source(Path::new(source_id), text).ok()?;
+                Some((*source_id, *module, document.ast()?.clone()))
+            })
+            .collect()
+    })
 }
 
-fn option_declaration() -> Option<&'static DeftypeDeclaration> {
-    option_module()?
-        .declarations()
-        .iter()
-        .find_map(|declaration| match declaration {
-            Declaration::Deftype(value) if value.name().value() == "option" => {
-                Some(value)
-            }
-            _ => None,
-        })
-}
-
-/// Declares `@std.option`'s `option` unless a type already plays `@option`,
-/// adding it to `declarations` so its body lowers with the run's own
-/// declarations. Its identity is the one every standard-library declaration
-/// has; the compiler knows it only through the `role:` it claims.
+/// Declares every type of `@std.option`, `@std.result`, and `@std.core` that
+/// the run has not declared itself, adding each to `declarations` so its body
+/// lowers with the run's own declarations. A role-playing type the run
+/// already declared keeps the run's declaration; the compiler knows each role
+/// type only through the `role:` it claims.
 pub(crate) fn declare_standard_types<'a>(
     types: &mut TypeNames,
     declarations: &mut Vec<(usize, &'a DeftypeDeclaration)>,
@@ -58,13 +59,23 @@ pub(crate) fn declare_standard_types<'a>(
 {
     // `@std.builtin` names `option` through its own import.
     types.import(STDLIB_BUILTIN_SOURCE_ID, "option", STDLIB_OPTION_SOURCE_ID);
-    if types.role("option").is_some() {
-        return;
-    }
-    if let Some(declaration) = option_declaration() {
-        let id = stdlib_type_id(&["option"], declaration.name().value());
-        let index = types.declare(STDLIB_OPTION_SOURCE_ID, declaration, id);
-        declarations.push((index, declaration));
+    for (source_id, module, ast) in type_modules() {
+        for declaration in ast.declarations() {
+            let Declaration::Deftype(declaration) = declaration else {
+                continue;
+            };
+            let id = stdlib_type_id(&[module], declaration.name().value());
+            let role_claimed =
+                declaration.attributes().items().iter().any(|attribute| {
+                    matches!(attribute, vibra_syntax::Attribute::Role(role)
+                    if types.role(role.value()).is_some())
+                });
+            if role_claimed || types.index_of(&id).is_some() {
+                continue;
+            }
+            let index = types.declare(source_id, declaration, id);
+            declarations.push((index, declaration));
+        }
     }
 }
 

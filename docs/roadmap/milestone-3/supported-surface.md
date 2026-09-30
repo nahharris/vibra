@@ -14,12 +14,12 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `ExpressionKind::Name` | M2 | — | Nominal constructors and methods as names: Step 2 |
 | `ExpressionKind::Application` | M2 | — | Constructors and projection: Step 2; lookups, `tupleof`, `array.of`, and `map.of`: Step 4; `recordof` and `enumof`: Step 2; `types:`: Step 3 |
 | `ExpressionKind::Lambda` | M2 | — | Destructuring parameters: Step 5 (`V1-RUNTIME-match-patterns`, `V1-TYPE-CONTROL-pattern-refutable-binding`) |
-| `ExpressionKind::Do` | M2 | — | Unhandled-fallible positions: Step 7 |
+| `ExpressionKind::Do` | M2 | — | Unhandled-fallible positions: Step 7 (`V1-TYPE-CONTROL-unhandled-fallible`, `V1-TYPE-CONTROL-fallible-discards`) |
 | `ExpressionKind::Let` | M2 | — | Destructuring patterns: Step 5 (`V1-RUNTIME-match-patterns`, `V1-RUNTIME-workspace-test-patterns`) |
 | `ExpressionKind::If` | M2 | — | — |
 | `ExpressionKind::Match` | Stage 3A | Step 5 | Cases `V1-RUNTIME-match-patterns`, `V1-TYPE-CONTROL-match-exhaustive`, `V1-TYPE-CONTROL-match-non-exhaustive`, `V1-TYPE-CONTROL-match-unreachable-arm`; union arms: Step 6 (`V1-TYPE-CONVERT-narrowing-exhaustive`, `V1-TYPE-CONVERT-narrowing-rejections`) |
 | `ExpressionKind::As` | Stage 3A | Step 6 | Cases `V1-TYPE-CONVERT-ascription-erased`, `V1-TYPE-CONVERT-invalid-ascription`, `V1-RUNTIME-union-values`; interface targets: Step 12 |
-| `ExpressionKind::Try` | Stage 3A | Step 7 | — |
+| `ExpressionKind::Try` | Stage 3A | Step 7 | Cases `V1-RUNTIME-try-propagation`, `V1-TYPE-CONTROL-invalid-try`, `V1-TYPE-CONTROL-invalid-try-test-body`; host test `try_m3_step7` |
 | `ExpressionKind::TupleOf` | Stage 3A | Step 4 | Reader and formatter: Step 2; case `V1-RUNTIME-tuples` |
 | `ExpressionKind::RecordOf` | Stage 3A | Step 2 | — |
 | `ExpressionKind::EnumOf` | Stage 3A | Step 2 | — |
@@ -73,7 +73,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | M2 row | Owner |
 | --- | --- |
 | C1.3 — generics, nominal collections, interfaces, conversion | Steps 2–4, 11–13; `any`-bounded generics implemented by Step 3 (`V1-RUNTIME-generic-functions`) |
-| C1.5 — `match`, `try`, `option`, `result`, refutable patterns | Steps 4, 5, 7; `match` and refutable patterns implemented by Step 5 (`V1-TYPE-CONTROL-match-non-exhaustive`, `V1-TYPE-CONTROL-pattern-refutable-binding`) |
+| C1.5 — `match`, `try`, `option`, `result`, refutable patterns | Steps 4, 5, 7; `match` and refutable patterns implemented by Step 5 (`V1-TYPE-CONTROL-match-non-exhaustive`, `V1-TYPE-CONTROL-pattern-refutable-binding`); `try` and `result` implemented by Step 7 (`V1-RUNTIME-try-propagation`, `V1-TYPE-CONTROL-unhandled-fallible`) |
 | C1.6 — variadic array and map operands | Step 4; implemented (`V1-RUNTIME-variadics`, `V1-SRC-CALLS-variadic-map-application`) |
 | C1.7 — `as`, singleton widening, narrowing | Step 6; implemented (`V1-TYPE-CONVERT-widening-boundaries`, `V1-TYPE-CONVERT-narrowing-rejections`) |
 | C5.2 — constructor and destructuring patterns | Step 5; implemented (`V1-RUNTIME-match-patterns`, `V1-RUNTIME-workspace-test-patterns`) |

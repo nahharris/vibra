@@ -1,0 +1,12 @@
+; Ordering and the error types of the checked numeric and conversion
+; operations. Every variant has a `void` payload.
+(deftype ordering (enum less void equal void greater void)
+  visibility: @public)
+
+(deftype arithmetic-error
+  (enum overflow void division-by-zero void invalid-shift void)
+  visibility: @public)
+
+(deftype conversion-error
+  (enum out-of-range void invalid-format void unrepresentable void)
+  visibility: @public)

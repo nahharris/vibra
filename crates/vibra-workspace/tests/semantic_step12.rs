@@ -636,12 +636,12 @@ fn bootstrap_spelling_without_verification_is_unavailable_and_never_runs() {
 }
 
 #[test]
-fn valid_deferred_result_entry_is_unavailable_without_syntax_or_signature_errors() {
+fn result_entry_with_a_nominal_error_type_is_accepted() {
     let project = TempProject::new(
-        "deferred-result",
+        "result-entry",
         &[(
             "src/app/main.vib",
-            "(defn execute () (result void failure) (do))\n",
+            "(deftype failure (enum bad void))\n(defn execute () (result void failure) (result.ok))\n",
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
@@ -654,21 +654,12 @@ fn valid_deferred_result_entry_is_unavailable_without_syntax_or_signature_errors
 
     let checked = vibra_workspace::semantic::check_target(&snapshot, target);
 
-    assert_eq!(checked.status(), CheckStatus::Unavailable);
-    assert!(
-        checked
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::ToolUnavailable })
+    assert_eq!(
+        checked.status(),
+        CheckStatus::Accepted,
+        "{:?}",
+        checked.diagnostics()
     );
-    assert!(!checked.diagnostics().iter().any(|diagnostic| {
-        matches!(
-            diagnostic.code(),
-            DiagnosticCode::SyntaxInvalidForm
-                | DiagnosticCode::SyntaxInvalidAttribute
-                | DiagnosticCode::ProjectInvalidEntrySignature
-        )
-    }));
 }
 
 #[test]

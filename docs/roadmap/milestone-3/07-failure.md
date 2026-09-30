@@ -40,3 +40,29 @@ never the definition.
 
 Inventory row `ExpressionKind::Try` references cases; M2 row C1.5 is fully
 implemented; validation passes.
+
+## Delivery notes
+
+- `@std.result` declares `result` claiming `@result`, and `@std.core` declares
+  `ordering`, `arithmetic-error`, and `conversion-error`. Both are in the
+  manifest and embedded. Every run declares the types of `@std.option`,
+  `@std.result`, and `@std.core` it has not declared itself, so the role types
+  need no import and `(import core @std.core)` works in both check paths.
+- `try` lowers to `Expr::Try`, which carries the enclosing written result
+  type. The interpreter unwinds a failing `try` to the innermost function or
+  `lambda` boundary, which returns `none` or the same `err` rebuilt at that
+  type. A tail-recursive loop that exits through `try` keeps its constant
+  activation depth (`try_m3_step7`).
+- The checker tracks the enclosing written result type and its span (the
+  reader now records `result_span` for `defn` and `lambda`). A test body's
+  result is `void`, and a `def` initializer has none. `@type.invalid-try`
+  relates the written result type when there is one.
+- `@type.unhandled-fallible` is reported at every non-final element of a body
+  sequence whose type plays `@result`. `(let - …)` and the other discard
+  spellings bind the value, so they are not ignored positions. `option` is not
+  fallible.
+- A void payload is written without an operand, `(result.ok)`, as for every
+  enum.
+- An entry returning `(result void e)` now checks and runs. The command
+  result set has no atom for a program that returned `err`, so `vibra run`
+  still reports `@command.ok`. README gap G21 tracks the tooling decision.

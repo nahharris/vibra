@@ -1,0 +1,29 @@
+id = "V1-TYPE-CONTROL-unhandled-fallible"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "An ignored result in a non-final do, let body, or function body position is unhandled."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.unhandled-fallible"
+level = "@error"
+source = "input.vib"
+span = [72, 81]
+
+[[expect.diagnostics]]
+code = "@type.unhandled-fallible"
+level = "@error"
+source = "input.vib"
+span = [126, 135]
+
+[[expect.diagnostics]]
+code = "@type.unhandled-fallible"
+level = "@error"
+source = "input.vib"
+span = [168, 177]

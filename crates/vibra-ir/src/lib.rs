@@ -1172,6 +1172,19 @@ pub enum Expr {
         /// The source origin of the widened operand.
         origin: SourceOrigin,
     },
+    /// `try`: the success payload of an `option` or `result` operand, or an
+    /// early exit from the innermost function or `lambda` with its absence
+    /// or error rebuilt at that function's result type.
+    Try {
+        /// The `option` or `result` operand, never in tail position.
+        value: Box<Self>,
+        /// The success payload type.
+        value_type: Type,
+        /// The enclosing function's result type, which an early exit returns.
+        exit_type: Type,
+        /// The source origin of the `try` form.
+        origin: SourceOrigin,
+    },
     /// A boolean conditional with two already checked branches.
     If {
         /// The boolean condition.
@@ -1610,6 +1623,7 @@ impl Expr {
             | Self::Variant { origin, .. }
             | Self::Wrap { origin, .. }
             | Self::Widen { origin, .. }
+            | Self::Try { origin, .. }
             | Self::Project { origin, .. }
             | Self::Tuple { origin, .. }
             | Self::TupleProject { origin, .. }
@@ -1645,6 +1659,7 @@ impl Expr {
             | Self::Project { value_type, .. } => value_type.clone(),
             Self::Wrap { value_type, .. }
             | Self::Widen { value_type, .. }
+            | Self::Try { value_type, .. }
             | Self::Tuple { value_type, .. }
             | Self::TupleProject { value_type, .. }
             | Self::Array { value_type, .. }
@@ -1664,7 +1679,7 @@ impl Expr {
             Self::Variant { payload, .. } => {
                 payload.iter().map(|payload| &**payload).collect()
             }
-            Self::Wrap { value, .. } => vec![value],
+            Self::Wrap { value, .. } | Self::Try { value, .. } => vec![value],
             Self::Project { record, .. } => vec![record],
             Self::Tuple { components, .. } => components.iter().collect(),
             Self::TupleProject { tuple, .. } => vec![tuple],
@@ -1700,6 +1715,7 @@ impl Expr {
             | Self::Variant { .. }
             | Self::Wrap { .. }
             | Self::Widen { .. }
+            | Self::Try { .. }
             | Self::Project { .. }
             | Self::Tuple { .. }
             | Self::TupleProject { .. }
@@ -1731,6 +1747,7 @@ impl Expr {
             | Self::Variant { .. }
             | Self::Wrap { .. }
             | Self::Widen { .. }
+            | Self::Try { .. }
             | Self::Project { .. }
             | Self::Tuple { .. }
             | Self::TupleProject { .. }
@@ -1797,7 +1814,9 @@ impl Expr {
             Self::Variant { payload, .. } => {
                 payload.as_deref().map_or(0, Self::slot_count)
             }
-            Self::Wrap { value, .. } | Self::Widen { value, .. } => value.slot_count(),
+            Self::Wrap { value, .. }
+            | Self::Widen { value, .. }
+            | Self::Try { value, .. } => value.slot_count(),
             Self::Project { record, .. } => record.slot_count(),
             Self::Tuple { .. }
             | Self::TupleProject { .. }
@@ -2168,6 +2187,18 @@ impl Expr {
                 value_type, value, ..
             } => {
                 value.validate_shape_with_captures(slots, capture_types)?;
+                Ok(value_type.clone())
+            }
+            Self::Try {
+                value, value_type, ..
+            } => {
+                let container =
+                    value.validate_shape_with_captures(slots, capture_types)?;
+                if !matches!(container, Type::Applied(_, _) | Type::Param(_)) {
+                    return Err(IrError::InvalidExpression(format!(
+                        "`try` over non-container {container}"
+                    )));
+                }
                 Ok(value_type.clone())
             }
             Self::Widen {
@@ -3324,6 +3355,7 @@ fn validate_program_expr(
         | Expr::Variant { .. }
         | Expr::Wrap { .. }
         | Expr::Widen { .. }
+        | Expr::Try { .. }
         | Expr::Project { .. }
         | Expr::Tuple { .. }
         | Expr::TupleProject { .. }
@@ -3733,7 +3765,7 @@ fn possible_function_targets(
         | Expr::Array { .. }
         | Expr::Map { .. }
         | Expr::Lookup { .. } => FunctionTargetSummary::default(),
-        Expr::Project { .. } | Expr::TupleProject { .. } => {
+        Expr::Project { .. } | Expr::TupleProject { .. } | Expr::Try { .. } => {
             FunctionTargetSummary::unknown()
         }
         Expr::Function { function, .. } => FunctionTargetSummary::known(*function),
@@ -4399,7 +4431,7 @@ impl<'a> CallFlow<'a> {
             | Expr::Array { .. }
             | Expr::Map { .. }
             | Expr::Lookup { .. } => FlowTargetSummary::default(),
-            Expr::Project { .. } | Expr::TupleProject { .. } => {
+            Expr::Project { .. } | Expr::TupleProject { .. } | Expr::Try { .. } => {
                 FlowTargetSummary::unknown_function()
             }
             Expr::Function { function, .. } => {
@@ -4683,6 +4715,7 @@ impl<'a> CallFlow<'a> {
             | Expr::Variant { .. }
             | Expr::Wrap { .. }
             | Expr::Widen { .. }
+            | Expr::Try { .. }
             | Expr::Project { .. }
             | Expr::Tuple { .. }
             | Expr::TupleProject { .. }
@@ -5104,6 +5137,7 @@ fn validate_tail_calls(
         | Expr::Variant { .. }
         | Expr::Wrap { .. }
         | Expr::Widen { .. }
+        | Expr::Try { .. }
         | Expr::Project { .. }
         | Expr::Tuple { .. }
         | Expr::TupleProject { .. }
@@ -5429,6 +5463,17 @@ fn visit_dependency_graph(
 
 fn canonical_expr(expression: &Expr) -> String {
     match expression {
+        Expr::Try {
+            value,
+            value_type,
+            exit_type,
+            ..
+        } => format!(
+            "(record kind: @try type: {} exit: {} value: {})",
+            canonical_type(value_type),
+            canonical_type(exit_type),
+            canonical_expr(value)
+        ),
         Expr::Widen {
             value_type,
             value,

@@ -3,6 +3,10 @@
   package-name: "vibra-stdlib"
   package-version: "0.2.0"
   modules: (map
+    @std.core (record
+      path: "std/core.vib"
+      sha256: "sha256:544820fa58f3aa1249ac4d63a26549b9af7093d2868394146a9249b62505e6d6"
+      role: @source)
     @std.text (record
       path: "std/text.vib"
       sha256: "sha256:ab87030d3cb108fb24524e7559dd914d8f2279534039b295985906a662231439"
@@ -10,6 +14,10 @@
     @std.option (record
       path: "std/option.vib"
       sha256: "sha256:dd3d038533ebbe78f2e8bd6cdb1bf1f4b1c03dace1d58747a59d5ea1d421d28a"
+      role: @source)
+    @std.result (record
+      path: "std/result.vib"
+      sha256: "sha256:fdb4c8cc7ca94a4d8ed556b0e7e0efaf0dc43ed0ffb7ac09b32df0068a7b4b55"
       role: @source)
     @std.builtin (record
       path: "std/builtin.vib"

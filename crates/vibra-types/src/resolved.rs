@@ -620,6 +620,7 @@ pub fn check_resolved(
                 Some(index),
                 &types,
             );
+            environment.exit = Some((Type::Void, None));
             environment.resolved_targets = Some(&resolved_targets);
             environment.reports_redeclarations = false;
             let Some(body) = crate::check_sequence(
@@ -711,6 +712,8 @@ pub fn check_resolved(
         environment.resolved_targets = Some(&resolved_targets);
         environment.self_type = header.self_type.clone();
         environment.generics = header.type_parameters.clone();
+        environment.exit =
+            Some((header.signature.result(), Some(function.result_span())));
         environment.reports_redeclarations = false;
         let mut parameters_valid = true;
         let mut pending = Vec::new();
