@@ -2,7 +2,7 @@ id = "V1-TYPE-NAMES-resolve-declaration-as-module"
 rule = "V1-TYPE-NAMES-resolution"
 profile = "static-v1"
 operation = "resolve"
-description = "Step 4 resolution matrix case: V1-TYPE-NAMES-resolve-declaration-as-module."
+description = "A declaration import binds one top-level declaration, so importing a private one is private access at the import."
 
 [inputs]
 project = "tree/project.vibon"
@@ -11,7 +11,7 @@ tree = "tree"
 [expect]
 accepted = false
 [[expect.diagnostics]]
-code = "@name.wrong-entity-kind"
+code = "@name.private-access"
 level = "@error"
 source = "src/main.vib"
 span = [0, 24]

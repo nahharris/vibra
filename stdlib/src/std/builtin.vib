@@ -1,6 +1,7 @@
 ; Members of the builtin collection types. They are reached through the type
-; path, such as `(array.of 1i32 2i32)`, with no import. Every member binds a
-; compiler registry operation.
+; path, such as `(array.of 1i32 2i32)`, with no import. `external:` members
+; are primitive operations; `native:` members are Vibra whose native
+; implementation the toolchain may run instead.
 (import option @std.option)
 
 (deftype array (intrinsic-type @array)
@@ -9,8 +10,8 @@
   (defn of () (array t)
     visibility: @public
     variadic: (items (array t))
-    external: @compiler
-    symbol: "array.of")
+    native: "array.of"
+    items)
   (defn length (items (array t)) u64
     visibility: @public
     external: @compiler
@@ -34,5 +35,5 @@
   (defn of () (map k v)
     visibility: @public
     variadic: (entries (map k v))
-    external: @compiler
-    symbol: "map.of"))
+    native: "map.of"
+    entries))

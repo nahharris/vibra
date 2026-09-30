@@ -33,7 +33,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `PatternKind::As` | Stage 3A | Step 6 | — |
 | `VariadicBinding::Array` | Stage 3A | Step 4 | Cases `V1-RUNTIME-variadics`, `V1-SRC-CALLS-variadic-array-application` |
 | `VariadicBinding::Map` | Stage 3A | Step 4 | Cases `V1-RUNTIME-map-order`, `V1-SRC-CALLS-variadic-map-application` |
-| `Declaration::Import` | M2 | — | Standard-library input replacement: Step 4 (`stdlib::tests`, `V1-PROJECT-workspace-check-bootstrap-source-id-collision`) |
+| `Declaration::Import` | M2 | — | Standard-library input replacement: Step 4 (`stdlib::tests`, `V1-PROJECT-workspace-check-bootstrap-source-id-collision`); declaration imports: Step 4b (`V1-PROJECT-workspace-check-declaration-imports`) |
 | `Declaration::Def` | M2 | — | — |
 | `Declaration::Defn` | M2 | — | Generic signatures: Step 3 |
 | `Declaration::Test` | M2 | — | Generic assertion: Step 8 |
@@ -63,6 +63,8 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `Attribute::Effects` | M4 | — | Empty rows stay supported |
 | `Attribute::External` | M2 | — | `@compiler` only; `@host`: M4 |
 | `Attribute::Symbol` | M2 | — | — |
+| `Attribute::Native` | Stage 3A | Step 4b | Embedded standard library only; `natives_m3_step4b`, `V1-TYPE-NAMES-library-attributes` |
+| `Attribute::Role` | Stage 3A | Step 4b | Embedded standard library only; `V1-TYPE-NAMES-role-vocabulary`, `V1-TYPE-NAMES-library-attributes` |
 | `Attribute::Doc` | M2 | — | — |
 
 ## M2 ledger rows deferred to M3

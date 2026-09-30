@@ -1,0 +1,8 @@
+(import shape @app.shapes.shape)
+(import radius @app.shapes.radius)
+(import hidden @app.shapes.hidden)
+(import dot @app.shapes.shape.dot)
+
+(defn make () shape (radius 3u32))
+
+(defn plain () shape (shape.dot))

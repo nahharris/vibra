@@ -94,6 +94,9 @@ pub(crate) struct DeclaredType {
 struct ModuleScope {
     local: BTreeMap<String, usize>,
     imports: BTreeMap<String, String>,
+    /// Declaration imports: alias to the target module's source ID and the
+    /// declaration name.
+    declarations: BTreeMap<String, (String, String)>,
 }
 
 /// Every declared type of one checking run and the names each module sees.
@@ -104,6 +107,9 @@ pub(crate) struct TypeNames {
     scopes: BTreeMap<String, ModuleScope>,
     /// Declared type indices keyed by the source ID of their module.
     by_module: BTreeMap<String, BTreeMap<String, usize>>,
+    /// The standard-library type playing each language role, keyed by the
+    /// role atom without `@`.
+    roles: BTreeMap<String, usize>,
 }
 
 /// A value path that names a type constructor or an enum variant.
@@ -146,7 +152,31 @@ impl TypeNames {
             .entry(source_id.to_owned())
             .or_default()
             .insert(name, index);
+        // Only the embedded standard library claims a role; a project
+        // declaration writing `role:` is reported when bodies lower.
+        if is_stdlib_source(source_id) {
+            for attribute in declaration.attributes().items() {
+                if let Attribute::Role(role) = attribute {
+                    self.roles.entry(role.value().to_owned()).or_insert(index);
+                }
+            }
+        }
         index
+    }
+
+    /// The standard-library type playing `role`, such as `option`.
+    pub(crate) fn role(&self, role: &str) -> Option<usize> {
+        self.roles.get(role).copied()
+    }
+
+    /// A type that plays a role, named by its spelling: the role vocabulary
+    /// needs no import.
+    fn role_type_named(&self, name: &str) -> Option<usize> {
+        self.roles.values().copied().find(|index| {
+            self.declared
+                .get(*index)
+                .is_some_and(|declared| declared.name == name)
+        })
     }
 
     /// Makes the declared types of `target_source_id` visible from
@@ -162,6 +192,32 @@ impl TypeNames {
             .or_default()
             .imports
             .insert(alias.to_owned(), target_source_id.to_owned());
+    }
+
+    /// Makes the declared type `name` of `target_source_id` visible from
+    /// `source_id` as `alias`, for a declaration import.
+    pub(crate) fn import_declaration(
+        &mut self,
+        source_id: &str,
+        alias: &str,
+        target_source_id: &str,
+        name: &str,
+    ) {
+        self.scopes
+            .entry(source_id.to_owned())
+            .or_default()
+            .declarations
+            .insert(
+                alias.to_owned(),
+                (target_source_id.to_owned(), name.to_owned()),
+            );
+    }
+
+    /// The public declared type a declaration alias of `source_id` names.
+    fn declaration_alias(&self, source_id: &str, alias: &str) -> Option<usize> {
+        let (target, name) = self.scopes.get(source_id)?.declarations.get(alias)?;
+        let index = self.by_module.get(target)?.get(name).copied()?;
+        self.declared.get(index)?.public.then_some(index)
     }
 
     /// Declared types in registration order.
@@ -204,6 +260,8 @@ impl TypeNames {
             [local] => scope
                 .and_then(|scope| scope.local.get(local))
                 .copied()
+                .or_else(|| self.declaration_alias(source_id, local))
+                .or_else(|| self.role_type_named(local))
                 .ok_or_else(|| LowerError::Unknown(name.value().to_owned())),
             [alias, member] => {
                 let target = scope
@@ -235,18 +293,26 @@ impl TypeNames {
         name: &Name,
     ) -> Option<ConstructorTarget> {
         let segments = name.segments();
-        let scope = self.scopes.get(source_id)?;
-        let local = |segment: &String| scope.local.get(segment).copied();
+        let scope = self.scopes.get(source_id);
+        let local = |segment: &String| scope?.local.get(segment).copied();
         let imported = |alias: &String, member: &String| {
-            let target = scope.imports.get(alias)?;
+            let target = scope?.imports.get(alias)?;
             let index = self.by_module.get(target)?.get(member).copied()?;
             self.declared.get(index)?.public.then_some(index)
         };
         match segments {
-            [type_name] => local(type_name).map(ConstructorTarget::Type),
+            [type_name] => local(type_name)
+                .or_else(|| self.declaration_alias(source_id, type_name))
+                .or_else(|| self.role_type_named(type_name))
+                .map(ConstructorTarget::Type),
             [first, second] => local(first)
+                .or_else(|| self.declaration_alias(source_id, first))
                 .map(|index| ConstructorTarget::Variant(index, second.clone()))
-                .or_else(|| imported(first, second).map(ConstructorTarget::Type)),
+                .or_else(|| imported(first, second).map(ConstructorTarget::Type))
+                .or_else(|| {
+                    self.role_type_named(first)
+                        .map(|index| ConstructorTarget::Variant(index, second.clone()))
+                }),
             [alias, type_name, variant] => imported(alias, type_name)
                 .map(|index| ConstructorTarget::Variant(index, variant.clone())),
             _ => None,
@@ -483,6 +549,20 @@ impl TypeNames {
                 diagnostics,
             ) {
                 continue;
+            }
+            if !is_stdlib_source(&source_id)
+                && declaration
+                    .attributes()
+                    .items()
+                    .iter()
+                    .any(|attribute| matches!(attribute, Attribute::Role(_)))
+            {
+                unavailable(
+                    diagnostics,
+                    &source_id,
+                    declaration.span(),
+                    "role: is admissible only in the embedded standard library",
+                );
             }
             for member in declaration.members() {
                 if let TypeMember::Implementation(implementation) = member {

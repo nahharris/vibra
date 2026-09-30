@@ -47,7 +47,7 @@ fn run(result: Type, body: Expr) -> String {
     .expect("function");
     // The standard option, which lookups answer with.
     let option = TypeDefinition::new(
-        TypeId::new(vibra_ir::OPTION_ID, vibra_ir::OPTION_PATH),
+        option_id(),
         TypeBody::Enum(vec![
             ("some".to_owned(), Type::Param("t".to_owned())),
             ("none".to_owned(), Type::Void),
@@ -93,9 +93,19 @@ fn an_out_of_range_lookup_answers_none() {
             origin: origin(),
         }),
         key: Box::new(literal(Value::U64(5))),
-        value_type: vibra_ir::option_type(Type::I32),
+        value_type: option_type(Type::I32),
         origin: origin(),
     };
-    let encoding = run(vibra_ir::option_type(Type::I32), lookup);
+    let encoding = run(option_type(Type::I32), lookup);
     assert!(encoding.contains("variant: @none"), "{encoding}");
+}
+
+/// Hand-built IR names its own option type; the interpreter never depends on
+/// which declaration plays the role.
+fn option_id() -> TypeId {
+    TypeId::new("@test/option", "option")
+}
+
+fn option_type(value: Type) -> Type {
+    Type::Applied(option_id(), vec![value])
 }

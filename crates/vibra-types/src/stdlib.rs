@@ -31,6 +31,13 @@ pub const STDLIB_BUILTIN_SOURCE_ID: &str = "stdlib/src/std/builtin.vib";
 const MANIFEST_PATH: &str = "stdlib/manifest.vibon";
 const SOURCE_ROOT: &str = "stdlib/src/";
 
+/// The closed table of language roles (`docs/spec/02-type-system.md`,
+/// "Language core and standard library"). Each is claimed by at most one
+/// declaration; a role nothing claims yet is still implemented by the
+/// toolchain until its migration step.
+const LANGUAGE_ROLES: &[&str] =
+    &["bool", "str", "bytes", "option", "result", "map", "iter"];
+
 const PACKAGE_NAME: &str = "vibra-stdlib";
 const PACKAGE_VERSION: &str = "0.2.0";
 
@@ -55,6 +62,23 @@ const EMBEDDED_MODULES: &[(&str, &[u8])] = &[
         include_bytes!("../../../stdlib/src/std/assert.vib"),
     ),
 ];
+
+/// The identity of the declared type `name` in the standard-library module
+/// `@std.<module…>`: the identity the resolver gives every declaration of the
+/// embedded package.
+pub(crate) fn stdlib_type_id(module: &[&str], name: &str) -> vibra_ir::TypeId {
+    let path = std::iter::once("std")
+        .chain(module.iter().copied())
+        .chain(std::iter::once(name))
+        .collect::<Vec<_>>()
+        .join(".");
+    vibra_ir::TypeId::new(format!("@{PACKAGE_NAME}@{PACKAGE_VERSION}/{path}"), path)
+}
+
+/// Every embedded module's bytes, by `stdlib/src/`-relative path.
+pub(crate) fn embedded_modules() -> &'static [(&'static str, &'static [u8])] {
+    EMBEDDED_MODULES
+}
 
 /// The embedded bytes of the module at `path`, relative to `stdlib/src/`.
 pub(crate) fn embedded_module(path: &str) -> Option<&'static [u8]> {
@@ -139,6 +163,7 @@ pub struct Stdlib {
     package: vibra_resolve::PackageId,
     modules: Vec<StdlibModule>,
     compiler: Vec<String>,
+    native: Vec<String>,
     assertions: Vec<String>,
 }
 
@@ -165,6 +190,12 @@ impl Stdlib {
     #[must_use]
     pub fn compiler_symbols(&self) -> &[String] {
         &self.compiler
+    }
+
+    /// The native implementation symbols the modules may name.
+    #[must_use]
+    pub fn native_symbols(&self) -> &[String] {
+        &self.native
     }
 
     /// The test-only assertion members.
@@ -252,11 +283,26 @@ pub fn load_stdlib_bytes(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibErro
             manifest.package_name, manifest.package_version
         )));
     }
-    for symbol in &manifest.compiler {
-        if CompilerIntrinsic::from_symbol(symbol).is_none() {
-            return Err(StdlibError::new(format!(
-                "standard-library manifest lists `{symbol}`, which is not in the compiler registry"
-            )));
+    // The two tiers are disjoint: a primitive operation has no body, and a
+    // native implementation accelerates a Vibra body.
+    for (symbol, native) in manifest
+        .compiler
+        .iter()
+        .map(|symbol| (symbol, false))
+        .chain(manifest.native.iter().map(|symbol| (symbol, true)))
+    {
+        match CompilerIntrinsic::from_symbol(symbol) {
+            None => {
+                return Err(StdlibError::new(format!(
+                    "standard-library manifest lists `{symbol}`, which is not in the compiler registry"
+                )));
+            }
+            Some(intrinsic) if intrinsic.is_native() != native => {
+                return Err(StdlibError::new(format!(
+                    "standard-library manifest lists `{symbol}` in the wrong tier"
+                )));
+            }
+            Some(_) => {}
         }
     }
     for (path, _) in &inputs.modules {
@@ -267,6 +313,7 @@ pub fn load_stdlib_bytes(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibErro
         }
     }
     let mut modules = Vec::with_capacity(manifest.modules.len());
+    let mut claimed_roles = Vec::new();
     for entry in &manifest.modules {
         if !matches!(entry.role.as_str(), "source" | "test-registry") {
             return Err(StdlibError::new(format!(
@@ -290,7 +337,25 @@ pub fn load_stdlib_bytes(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibErro
             )));
         }
         let source_id = format!("{SOURCE_ROOT}{}", entry.path);
-        check_compiler_symbols(&source_id, bytes, &manifest.compiler)?;
+        for role in check_compiler_symbols(
+            &source_id,
+            bytes,
+            &manifest.compiler,
+            &manifest.native,
+        )? {
+            // A role is claimed once, from the closed table of the type chapter.
+            if !LANGUAGE_ROLES.contains(&role.as_str()) {
+                return Err(StdlibError::new(format!(
+                    "`{source_id}` claims `@{role}`, which is not a language role"
+                )));
+            }
+            if claimed_roles.contains(&role) {
+                return Err(StdlibError::new(format!(
+                    "`@{role}` is claimed by more than one declaration"
+                )));
+            }
+            claimed_roles.push(role);
+        }
         modules.push(StdlibModule {
             atom: entry.atom.clone(),
             source_id,
@@ -305,17 +370,21 @@ pub fn load_stdlib_bytes(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibErro
         ),
         modules,
         compiler: manifest.compiler,
+        native: manifest.native,
         assertions: manifest.assertions,
     })
 }
 
-/// Requires every `external: @compiler` symbol a module declares to be listed
-/// in the manifest. The checker binds each against the registry signature.
+/// Requires every `external: @compiler` symbol and every `native:` symbol a
+/// module declares to be listed in the manifest's matching tier. The checker
+/// binds each against the registry signature. Returns the roles the module
+/// claims with `role:`.
 fn check_compiler_symbols(
     source_id: &str,
     bytes: &[u8],
-    listed: &[String],
-) -> Result<(), StdlibError> {
+    compiler: &[String],
+    native: &[String],
+) -> Result<Vec<String>, StdlibError> {
     let text = std::str::from_utf8(bytes)
         .map_err(|_| StdlibError::new(format!("`{source_id}` is not UTF-8")))?;
     let document = vibra_syntax::parse_source(Path::new(source_id), text)
@@ -326,8 +395,9 @@ fn check_compiler_symbols(
         )));
     }
     let Some(ast) = document.ast() else {
-        return Ok(());
+        return Ok(Vec::new());
     };
+    let mut roles = Vec::new();
     let mut attribute_lists = Vec::new();
     for declaration in ast.declarations() {
         match declaration {
@@ -335,6 +405,11 @@ fn check_compiler_symbols(
                 attribute_lists.push(function.attributes().items())
             }
             Declaration::Deftype(deftype) => {
+                for attribute in deftype.attributes().items() {
+                    if let Attribute::Role(role) = attribute {
+                        roles.push(role.value().to_owned());
+                    }
+                }
                 for member in deftype.members() {
                     if let TypeMember::Method(method) = member {
                         attribute_lists.push(method.attributes().items());
@@ -346,9 +421,12 @@ fn check_compiler_symbols(
     }
     for attributes in attribute_lists {
         for attribute in attributes {
-            if let Attribute::Symbol(Literal::String(symbol)) = attribute
-                && !listed.iter().any(|listed| listed == symbol.value())
-            {
+            let (symbol, listed) = match attribute {
+                Attribute::Symbol(Literal::String(symbol)) => (symbol, compiler),
+                Attribute::Native(Literal::String(symbol)) => (symbol, native),
+                _ => continue,
+            };
+            if !listed.iter().any(|listed| listed == symbol.value()) {
                 return Err(StdlibError::new(format!(
                     "`{source_id}` binds `{}`, which the manifest does not list",
                     symbol.value()
@@ -356,7 +434,7 @@ fn check_compiler_symbols(
             }
         }
     }
-    Ok(())
+    Ok(roles)
 }
 
 /// One entry of the manifest's module map.
@@ -375,6 +453,7 @@ struct Manifest {
     package_version: String,
     modules: Vec<ModuleEntry>,
     compiler: Vec<String>,
+    native: Vec<String>,
     assertions: Vec<String>,
 }
 
@@ -400,6 +479,7 @@ fn decode_manifest(bytes: &[u8]) -> Result<Manifest, StdlibError> {
         package_version: record.string("package-version")?,
         modules: record.modules("modules")?,
         compiler: record.strings("compiler")?,
+        native: record.strings("native")?,
         assertions: record.strings("assertions")?,
     };
     record.finish()?;
@@ -619,6 +699,54 @@ mod tests {
             &inputs,
             "binds `text.length`, which the manifest does not list",
         );
+    }
+
+    #[test]
+    fn a_native_symbol_in_the_wrong_tier_or_unlisted_is_rejected() {
+        let listed = "native: (array \"array.of\" \"map.of\")";
+        let moved = manifest().replace(
+            listed,
+            "native: (array \"array.of\" \"map.of\" \"array.length\")",
+        );
+        let mut inputs = StdlibInputs::embedded();
+        inputs.manifest = moved.as_bytes();
+        rejects(&inputs, "`array.length` in the wrong tier");
+        let unlisted = manifest().replace(listed, "native: (array \"array.of\")");
+        let mut inputs = StdlibInputs::embedded();
+        inputs.manifest = unlisted.as_bytes();
+        rejects(&inputs, "binds `map.of`, which the manifest does not list");
+    }
+
+    #[test]
+    fn an_unknown_or_repeated_role_is_rejected() {
+        use sha2::Digest;
+        let embedded = StdlibInputs::embedded();
+        let option = embedded
+            .modules
+            .iter()
+            .find(|(path, _)| *path == "std/option.vib")
+            .map(|(_, bytes)| std::str::from_utf8(bytes).expect("text"))
+            .expect("option module");
+        let digest = |bytes: &[u8]| format!("{:x}", sha2::Sha256::digest(bytes));
+        let with_option = |text: &str| {
+            manifest().replace(&digest(option.as_bytes()), &digest(text.as_bytes()))
+        };
+
+        let unknown = option.replace("role: @option", "role: @maybe");
+        let manifest = with_option(&unknown);
+        let mut inputs =
+            StdlibInputs::embedded().with_module("std/option.vib", unknown.as_bytes());
+        inputs.manifest = manifest.as_bytes();
+        rejects(&inputs, "claims `@maybe`, which is not a language role");
+
+        let repeated = format!(
+            "{option}\n(deftype other (enum a void)\n  role: @option\n  visibility: @public)\n"
+        );
+        let manifest = with_option(&repeated);
+        let mut inputs =
+            StdlibInputs::embedded().with_module("std/option.vib", repeated.as_bytes());
+        inputs.manifest = manifest.as_bytes();
+        rejects(&inputs, "`@option` is claimed by more than one declaration");
     }
 
     #[test]

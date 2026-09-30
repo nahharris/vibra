@@ -844,11 +844,15 @@ fn render_attributes(attributes: &[Attribute], output: &mut String) {
                 render_variadic_type(parameter.value_type(), output);
                 output.push(')');
             }
-            Attribute::Visibility(name) | Attribute::External(name) => {
+            Attribute::Visibility(name)
+            | Attribute::External(name)
+            | Attribute::Role(name) => {
                 output.push_str(name.raw());
             }
             Attribute::Effects(row) => render_effect_row(row.references(), output),
-            Attribute::Symbol(value) | Attribute::Doc(value) => {
+            Attribute::Symbol(value)
+            | Attribute::Native(value)
+            | Attribute::Doc(value) => {
                 output.push_str(&format_leaf(value.raw()));
             }
         }

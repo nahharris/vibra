@@ -186,7 +186,17 @@ pub fn check_resolved(
                 && record.unit() == target.unit()
                 && record.segments() == target.segments()
         }) {
-            types.import(import.source_id(), import.alias(), record.source_id());
+            match import.declaration() {
+                Some(declaration) => types.import_declaration(
+                    import.source_id(),
+                    import.alias(),
+                    record.source_id(),
+                    declaration,
+                ),
+                None => {
+                    types.import(import.source_id(), import.alias(), record.source_id())
+                }
+            }
         }
     }
     crate::standard::declare_standard_types(&mut types, &mut type_declarations);
@@ -270,6 +280,7 @@ pub fn check_resolved(
                             &mut diagnostics,
                             module.trusted_bootstrap,
                             &signature,
+                            &crate::standard::role_types(&types),
                         ),
                         signature,
                         external_declared: function.attributes().items().iter().any(

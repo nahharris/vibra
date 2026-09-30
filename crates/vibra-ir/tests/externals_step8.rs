@@ -3,7 +3,9 @@
 #![allow(clippy::expect_used, clippy::indexing_slicing)]
 
 use vibra_diagnostics::ByteSpan;
-use vibra_ir::external::{CompilerIntrinsic, REGISTRY_VERSION, SemanticIdentity};
+use vibra_ir::external::{
+    CompilerIntrinsic, REGISTRY_VERSION, RoleTypes, SemanticIdentity,
+};
 use vibra_ir::{
     CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Type, Value,
 };
@@ -32,13 +34,13 @@ fn registry_contains_only_the_reviewed_operations() {
 
 #[test]
 fn registry_signatures_are_exact_and_backend_neutral() {
-    let concat = CompilerIntrinsic::TextConcat.signature();
+    let concat = CompilerIntrinsic::TextConcat.signature(&RoleTypes::default());
     assert_eq!(concat.parameters().len(), 2);
     assert_eq!(concat.parameters()[0], vibra_ir::Type::Str);
     assert_eq!(concat.parameters()[1], vibra_ir::Type::Str);
     assert_eq!(concat.result(), vibra_ir::Type::Str);
 
-    let length = CompilerIntrinsic::TextLength.signature();
+    let length = CompilerIntrinsic::TextLength.signature(&RoleTypes::default());
     assert_eq!(length.parameters(), &[vibra_ir::Type::Str]);
     assert_eq!(length.result(), vibra_ir::Type::U64);
 }

@@ -1736,6 +1736,8 @@ fn function_type(function: &FunctionDeclaration) -> Option<SemanticType> {
             Attribute::Labelled(_)
             | Attribute::Visibility(_)
             | Attribute::Symbol(_)
+            | Attribute::Native(_)
+            | Attribute::Role(_)
             | Attribute::Doc(_) => false,
         })
     {

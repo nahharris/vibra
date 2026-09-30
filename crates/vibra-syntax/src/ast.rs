@@ -1291,6 +1291,10 @@ pub enum Attribute {
     External(Name),
     /// An external registry symbol literal.
     Symbol(Literal),
+    /// The native implementation symbol of a standard-library function.
+    Native(Literal),
+    /// The language role a standard-library type plays.
+    Role(Name),
     /// Documentation text.
     Doc(Literal),
 }
@@ -1301,13 +1305,15 @@ impl Attribute {
     pub const fn canonical_order(&self) -> usize {
         match self {
             Self::Where(_) => 0,
-            Self::Labelled(_) => 1,
-            Self::Variadic(_) => 2,
-            Self::Visibility(_) => 3,
-            Self::Effects(_) => 4,
-            Self::External(_) => 5,
-            Self::Symbol(_) => 6,
-            Self::Doc(_) => 7,
+            Self::Role(_) => 1,
+            Self::Labelled(_) => 2,
+            Self::Variadic(_) => 3,
+            Self::Visibility(_) => 4,
+            Self::Effects(_) => 5,
+            Self::External(_) => 6,
+            Self::Symbol(_) => 7,
+            Self::Native(_) => 8,
+            Self::Doc(_) => 9,
         }
     }
 
@@ -1322,6 +1328,8 @@ impl Attribute {
             Self::Effects(_) => "effects",
             Self::External(_) => "external",
             Self::Symbol(_) => "symbol",
+            Self::Native(_) => "native",
+            Self::Role(_) => "role",
             Self::Doc(_) => "doc",
         }
     }
@@ -2961,7 +2969,7 @@ impl AstParser {
         inherited_generics: &[String],
     ) -> ParsedAttributes {
         let allowed = match context {
-            AttributeContext::Type => &["where", "visibility", "doc"][..],
+            AttributeContext::Type => &["where", "role", "visibility", "doc"][..],
             AttributeContext::Declaration => &["visibility", "doc"][..],
             AttributeContext::Function => &[
                 "where",
@@ -2971,6 +2979,7 @@ impl AstParser {
                 "effects",
                 "external",
                 "symbol",
+                "native",
                 "doc",
             ][..],
             AttributeContext::Lambda => {
@@ -3065,6 +3074,12 @@ impl AstParser {
             "symbol" => self
                 .parse_string_literal(value, "symbol requires a string")
                 .map(Attribute::Symbol),
+            "native" => self
+                .parse_string_literal(value, "native requires a string")
+                .map(Attribute::Native),
+            "role" => self
+                .atom_name(value, "role requires a role atom")
+                .map(Attribute::Role),
             "doc" => self
                 .parse_string_literal(value, "doc requires a string")
                 .map(Attribute::Doc),
@@ -3399,12 +3414,14 @@ fn is_label(node: &CstNode, expected: &str) -> bool {
 fn is_declaration_attribute_label(node: &CstNode) -> bool {
     [
         "where",
+        "role",
         "labelled",
         "variadic",
         "visibility",
         "effects",
         "external",
         "symbol",
+        "native",
         "doc",
     ]
     .iter()

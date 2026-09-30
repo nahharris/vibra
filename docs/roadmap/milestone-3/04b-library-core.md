@@ -55,3 +55,31 @@ The mechanisms every later migration uses, with no type moved except
 
 Inventory rows for the new attributes and declaration imports reference their
 cases; the M3 ledger rows D17.2–D17.4 point at evidence; validation passes.
+
+## Delivery notes
+
+- `role:` and `native:` are reader attributes (`Attribute::Role`,
+  `Attribute::Native`), rejected with `@tool.unavailable` outside the embedded
+  standard library, as `external:` is.
+- The checker's type table records the type claiming each role, so `option`
+  is found by role, never by identity: the IR's `OPTION_ID` is gone, registry
+  signatures take the role-bound types (`RoleTypes`), and a registry call
+  carries its checked result type so the interpreter builds `option` values
+  from it.
+- Role types resolve by their spelling in both check paths; the workspace
+  resolver leaves `option.some` to the checker, which reports an unknown
+  variant.
+- The loader rejects an unknown role and a role claimed twice. A role nothing
+  claims yet is still implemented by the toolchain until its migration step,
+  so the "missing role" check waits for Step 14, when every role is claimed.
+- `array.of` and `map.of` are the first native implementations: their bodies
+  are the packed tail. The registry classifies each entry as primitive or
+  native, the manifest lists them in `compiler` and `native`, and
+  `crates/vibra-conformance/tests/natives_m3_step4b.rs` runs every listed native
+  against its body, which is checked as standard-library code.
+- User programs call the native implementation; the body is checked by the
+  harness rather than in every program, which the spec permits because the
+  body and the native implementation agree.
+- A declaration import may bind a type or a function. Its alias names the
+  declaration in every namespace, and the privacy check happens once, at the
+  import.
