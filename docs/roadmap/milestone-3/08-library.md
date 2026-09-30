@@ -20,6 +20,13 @@ generic `assert.equal` replacing the five `assert.equal-*` members. Change the
 refresh the example inventory, and migrate every M2 case and CLI process test
 that uses a removed assertion.
 
+Per ledger D17.1–D17.3 (Step 4a), this step also moves `bool`, `str`, `bytes`,
+`ordering`, and the standard error enums into the standard library as
+`deftype`s over the core, claiming `@bool`, `@str`, and `@bytes`. The text and
+bytes operations become standard-library Vibra with native implementations,
+and the registry keeps only primitive operations over the core. A migrated
+type keeps its canonical value encoding.
+
 ## Implementation notes
 
 The registry lives with the M2 compiler registry in `vibra-ir::external`;

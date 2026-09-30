@@ -91,6 +91,10 @@ the Stage 3A items; Step 10 closes the Stage 3B items.
 | G14 | The spec gives `types:` a length rule but no diagnostic for an applied type expression whose argument count differs from its head's parameter list, such as `(box i32 str)` for a one-parameter `box` or a bare generic `box`. | Step 3 must report it with some code. | Step 3 — closed by ledger D14.1: `@type.type-argument-mismatch` |
 | G15 | The source grammar and reader admitted no `where:` on `lambda`, although a lambda is the one anonymous function form and the Step 3 scope names it. | A local generic helper could not be written. | Step 3 — closed by ledger D15.1: `lambda` takes `where:`; a `let`-bound generic lambda stays generic |
 | G16 | The type chapter gives `array.of` and `map.of` a Vibra body over their variadic tail, but the registry lists only the array operations, and a builtin member reached without an import needs one declaration shape both check paths can bind without checking a standard-library body. | Step 4 must bind every `@std.builtin` member the same way. | Step 4 — closed by ledger D16.1: `array.of` and `map.of` are registry operations |
+| G17 | The type model makes `bool`, `str`, `bytes`, `map`, `option`, and `result` compiler-owned, although the language can express every one of them over a smaller core. Each compiler-owned type is behavior that lives outside the standard library and outside Vibra. | Library steps 7, 8, and 11 would harden that split. | Step 4a — closed by ledger D17.1: the core is the scalars, `(array t)`, `fn`, and the structural constructors |
+| G18 | The compiler recognizes `option` and `result` by a hardcoded canonical identity, and syntax such as `if`, string literals, and `try` needs types it cannot define itself. | Moving a type into the library must not require compiler knowledge of its definition. | Step 4a — closed by ledger D17.2: a closed table of language roles claimed with `role:` |
+| G19 | Every library operation is either Vibra (slow in the interpreter) or a bodiless `@compiler` intrinsic (compiler-owned behavior). | Library-first needs speed without moving meaning into the compiler, and without breaking interpreter/Wasm parity. | Step 4a — closed by ledger D17.3: `native:` implementations that keep their Vibra body |
+| G20 | An import binds only a module, so a type named like its module is written `option.option`, and the only alternative anyone reaches for is a prelude. | Explicit imports read badly for single-type modules. | Step 4a — closed by ledger D17.4: single-declaration imports |
 
 ## Steps
 
@@ -103,11 +107,13 @@ failures through a nominal error union with `try`, with no interfaces.
 | 1 | [Freeze Stage 3A contracts](01-contracts.md) — specification/infrastructure prerequisite | M2 on `main`; this bootstrap | landed | PR #307, merge `23d5067` |
 | 2 | [Structural and nominal data: reader and formatter support for anonymous `tuple`/`record`/`enum`/`union` types, `tupleof`/`recordof`/`enumof`, and `intrinsic-type`; `deftype` record/enum/wrapper bodies, type-name resolution, flat member namespace, finite-size check, anonymous-body rejection, constructors, record projection, nested non-interface methods](02-nominal.md) | 1 | landed | PR #308, merge `bd15e36` |
 | 3 | [Parametric generics (scope per G1): `where:` with `any`, applied types, invariant inference, complete `types:` lists including inherited names, reserved `types` label, the shared unifier](03-generics.md) | 2 | landed | PR #310, merge `cbafc12` |
-| 4 | [Collections: anonymous and declared tuples with `tupleof`, `array`/`map` types with `array.of`/`map.of`, tuple projection, bounds/presence lookups returning `option`, variadic array/map declarations and operands, admissible map keys (per G2), canonical map order](04-collections.md) | 3 | landed | Step 4 PR (conditional on merge) |
-| 5 | [Patterns and `match`: literal, constructor, tuple, record, and array patterns; destructuring `let`, parameters, and lambdas; the shared exhaustiveness/irrefutability engine; unreachable arms](05-patterns.md) | 4 | not started | — |
+| 4 | [Collections: anonymous and declared tuples with `tupleof`, `array`/`map` types with `array.of`/`map.of`, tuple projection, bounds/presence lookups returning `option`, variadic array/map declarations and operands, admissible map keys (per G2), canonical map order](04-collections.md) | 3 | landed | PR #311, merge `15f394d` |
+| 4a | [Library architecture contracts: the library-first core, language roles, native implementations, representation latitude, single-declaration imports](04a-library-architecture.md) — specification prerequisite | 4 | landed | Step 4a PR (conditional on merge) |
+| 4b | [Library-first core mechanics: single-declaration imports, `role:` binding in place of hardcoded identities, the `native:` mechanism with the manifest `native` list and a body/native differential harness, and the primitive/native registry split](04b-library-core.md) | 4a | not started | — |
+| 5 | [Patterns and `match`: literal, constructor, tuple, record, and array patterns; destructuring `let`, parameters, and lambdas; the shared exhaustiveness/irrefutability engine; unreachable arms](05-patterns.md) | 4b | not started | — |
 | 6 | [Unions, widening, and `as`: union `deftype`s, member overlap and concreteness, union and atom-singleton widening at written expected types, `as` ascription, `as` narrowing patterns](06-unions.md) | 5 | not started | — |
-| 7 | [Typed failure: `result`, `try` propagation, unhandled-fallible-value checks, discard intent](07-failure.md) | 6 | not started | — |
-| 8 | [Core library foundation: checked integer operations and the core/text/bytes/collection/option/result library (per G3/G4), assertion extensions (per G6)](08-library.md) | 7 | not started | — |
+| 7 | [Typed failure: `result` as a standard-library `deftype` claiming `@result`, `try` propagation, unhandled-fallible-value checks, discard intent](07-failure.md) | 6 | not started | — |
+| 8 | [Core library foundation: checked integer operations; `bool`, `str`, `bytes`, `ordering`, and the error enums moved into the standard library under their roles (per D17.1); the core/text/bytes/collection/option/result library with native implementations (per G3/G4, D17.3); assertion extensions (per G6)](08-library.md) | 7 | not started | — |
 | 9 | [Stage 3A demo and corpus sub-gate — evidence step](09-stage-3a-evidence.md) | 8 | not started | — |
 
 Stage 3B — interfaces, generics, conversion, and iteration.
@@ -115,18 +121,18 @@ Stage 3B — interfaces, generics, conversion, and iteration.
 | Step | One-PR slice | Requires | Status | PR / merge evidence |
 | --- | --- | --- | --- | --- |
 | 10 | Freeze Stage 3B contracts, including the `iter.map` review (G7) and index schema (G9) — specification prerequisite | 9 | not started | — |
-| 11 | Interfaces and `impl`: `defint`, abstract and default members, nested placement and ownership, same-module rejection, completeness per block identity, target overlap, default-override rejection, static receiver dispatch, interface-bounded generics | 10 | not started | — |
+| 11 | Interfaces and `impl`: `defint`, abstract and default members, nested placement and ownership, same-module rejection, completeness per block identity, target overlap, default-override rejection, static receiver dispatch, interface-bounded generics; `map` moved into the standard library over sorted arrays under `@map`, with the standard key conformances as ordinary implementations (per D17.1) | 10 | not started | — |
 | 12 | Interface values: `any` and interfaces in type position, widening to an interface, dispatch through interface values, unions implementing interfaces | 11 | not started | — |
 | 13 | Destination dispatch and conversion: factory members, `from`/`try-from`, `conversion-error`, redundant-conversion and ambiguous-destination checks | 12 | not started | — |
 | 14 | Iteration: the `iter` contract and default methods, closed builtin conformance, adapter types, written algebraic laws for `equatable`/`ordered`/`hashable`/`iter` with conformance examples | 13 | not started | — |
 | 15 | Resolved symbol/reference/index records and type-aware query metadata with canonical identities | 14 | not started | — |
 | 16 | M3 demo and exit gate, including the M2 deferral sweep — evidence step | 15 | not started | — |
 
-Steps 1 and 10 are specification prerequisites and Steps 9 and 16 are evidence
-steps; they claim no language behavior. Guides for Steps 2–9 are written in
-Step 1 and guides for Steps 11–16 in Step 10, because their content depends on
-the contracts those steps close. Step 1 also records the
-[decision ledger](decision-ledger.md) and the
+Steps 1, 4a, and 10 are specification prerequisites and Steps 9 and 16 are
+evidence steps; they claim no language behavior. Guides for Steps 2–9 are
+written in Step 1, the guide for Step 4b in Step 4a, and guides for Steps 11–16
+in Step 10, because their content depends on the contracts those steps close.
+Step 1 also records the [decision ledger](decision-ledger.md) and the
 [M3 surface inventory](supported-surface.md). No step starts without its guide.
 
 ## Deliverable and gate coverage

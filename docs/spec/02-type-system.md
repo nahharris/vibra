@@ -21,6 +21,56 @@ u8 u16 u32 u64
 f32 f64
 ```
 
+### Language core and standard library
+
+Vibra is library-first. The compiler owns only what the language cannot build
+for itself:
+
+- the scalar types `void`, `atom`, `char`, `i8` through `i64`, `u8` through
+  `u64`, `f32`, and `f64`;
+- the one generic immutable sequence `(array t)`, whose indexed storage no
+  combination of records and enums can express in constant time;
+- `fn` types and the structural `tuple`, `record`, `enum`, and `union` type
+  constructors.
+
+Every other type, including `bool`, `str`, `bytes`, `map`, `option`, `result`,
+`ordering`, and the standard error enums, is an ordinary `deftype` in the
+embedded standard library, built on that core. The compiler never depends on
+such a type's definition, only on the **language role** it plays. Every
+operation over a library type is standard-library Vibra, which a toolchain may
+accelerate with a native implementation whose meaning is still its Vibra body
+(`docs/spec/06-runtime.md`, "Native implementations"). The names in the
+primitive list above that are outside the core are library types that play a
+role.
+
+A language role is a closed, compiler-known position that syntax or checking
+fills with a library type:
+
+| Role | Played by | What depends on it |
+| --- | --- | --- |
+| `@bool` | `bool` | `true` and `false`, `if` conditions |
+| `@str` | `str` | string literals |
+| `@bytes` | `bytes` | `bytes` lookups |
+| `@option` | `option` | collection lookups, `try` on an optional value |
+| `@result` | `result` | `try`, unhandled-failure checking |
+| `@map` | `map` | map variadic tails and `map.of` |
+| `@iter` | `iter` | iteration contracts |
+
+The standard library declares each role exactly once, with the `role:`
+attribute on the playing `deftype`; `role:` is admissible only in the embedded
+standard library, under the same rule as `external:`. A missing or repeated
+role is a toolchain defect reported as an operational provenance diagnostic.
+Adding a role is a specification change to this table.
+
+The compiler-owned types and the types that play a role are the only types a
+program names without an import, and their names are reserved spellings;
+every other standard-library declaration is reached through an explicit
+import. This closed vocabulary is not a prelude: it cannot grow without a
+specification change, and no name in it can be shadowed. Until each migration lands, the toolchain
+may still implement a library type directly; the roadmap names the step that
+moves it into the standard library, and no program can observe the
+difference.
+
 `void` has exactly one value, also spelled `void`. A function returns `void`
 when successful completion carries no information. `char` contains exactly the
 Unicode scalar values. `atom` contains interned atom values such as `@ok`;
@@ -204,6 +254,11 @@ they are admissible map keys without a written implementation:
 - an anonymous tuple, record, enum, or union type whose every component,
   field, payload, or member type is itself an admissible key.
 
+The standard library supplies these conformances for the core and library
+types as ordinary implementations once interfaces are available, and the rule
+for anonymous types is the language's own structural rule. The list is closed
+so that no other package can add to it.
+
 `void`, `f32`, `f64`, `fn` types, arrays, maps, and options are not admissible
 keys. A `deftype` is admissible only through its own written implementations
 of all three interfaces. An inadmissible key type in any written or inferred
@@ -230,16 +285,21 @@ identity over exactly one representation type. `(deftype celsius f64)` is not
 wrapper's constructor and its unwrapping constructor pattern are available only
 where visibility permits.
 
-The builtin types — every primitive, `array`, and `map` — are declared by the
-toolchain in its embedded standard-library modules with an `intrinsic-type`
-body, which binds the declaration to a closed registry of builtin type
-identities: `(deftype i32 (intrinsic-type @i32) …)`. The atom MUST name a
-registry entry whose spelling is the declaration's own name, otherwise the
-declaration emits `@external.unknown-symbol`. Such a declaration supplies the
-builtin type's static methods as ordinary nested members, which are reached
-through the type path with no import, exactly as the builtin type needs none.
-`intrinsic-type` is admissible only in the toolchain-embedded package, under
-the same rule as `external:`; users cannot declare or extend a builtin type.
+The compiler-owned types of the language core are declared by the toolchain in
+its embedded standard-library modules with an `intrinsic-type` body, which
+binds the declaration to a closed registry of builtin type identities:
+`(deftype i32 (intrinsic-type @i32) …)`. The atom MUST name a registry entry
+whose spelling is the declaration's own name, otherwise the declaration emits
+`@external.unknown-symbol`. Such a declaration supplies the builtin type's
+static methods as ordinary nested members, which are reached through the type
+path with no import, exactly as the builtin type needs none. `intrinsic-type`
+is admissible only in the toolchain-embedded package, under the same rule as
+`external:`; users cannot declare or extend a builtin type.
+
+A library type that plays a role is an ordinary `deftype` with a `role:`
+attribute instead, never an `intrinsic-type`. Its static methods and
+constructors are reached through its type path in the same way, such as
+`(map.of k v)` and `(option.some value)`, and users cannot extend it either.
 
 The applied form `(symbol type-expr+)` would otherwise read `(record …)` or
 `(union …)` as the application of a type with that name, so the head of an
