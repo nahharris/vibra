@@ -1,11 +1,11 @@
-# M3 Stage 3A decision ledger
+# M3 decision ledger
 
 Step 1's record of the contracts closed before Stage 3A implementation. Each
 row has one disposition, its canonical normative anchors, and one downstream
 proof obligation. `new` rows were written into the owning chapter in the Step 1
 PR; `settled` rows were already decided by the specification and are recorded
-only to fix their proof owner; `deferred` rows are Stage 3B work closed by
-Step 10.
+only to fix their proof owner; the `closed` rows were Stage 3B work that Step
+10 closed with the D18 rows.
 
 | ID | Disposition | Canonical anchors | Contract | Proof owner |
 | --- | --- | --- | --- | --- |
@@ -47,9 +47,12 @@ Step 10.
 | D17.3 | new | [Native implementations](../../spec/06-runtime.md#native-implementations) | A standard-library function may add `native:` beside its Vibra body, which stays its meaning; natives are toolchain-owned, manifest-listed, single-sourced for interpreter and Wasm, and checked against their bodies; the `@compiler` registry keeps only primitive operations over the core (closes G19) | Step 4b harness; Step 8c text, bytes, and fold natives (`natives_m3_step4b`); M4 Wasm lowering |
 | D17.4 | new | [Modules and imports](../../spec/04-programs-and-packages.md#modules-and-imports) | An import may bind one public top-level declaration, such as `(import ordering @std.core.ordering)`; the layout rule keeps a path from denoting both a module and a declaration (closes G20) | Step 4b corpus |
 | D17.5 | new | [Representation latitude](../../spec/06-runtime.md#representation-latitude) | Wrapper erasure, compact enum layouts, and in-place update of unshared values are unobservable implementation latitude, not promises, enabled after unoptimized parity | M7 audit |
+| D18.1 | new | [Iteration](../../spec/02-type-system.md#iteration) | The `iter` default-member table lists parameters, result, and member generics separately; `map` takes its own `where: (out any)` and returns `(iter out)`, so it can change the element type; `mapped-iter` is generic in `item` and `out` (closes G7, X1) | Step 14 |
+| D18.2 | new | [Nominal declarations](../../spec/02-type-system.md#nominal-declarations) | Map keys require only `ordered`, whose `compare` decides key identity; `@std.core` declares `equatable` and `ordered`; v1 declares no `hashable`; a generic key is bounded by `ordered` alone (closes G10, X2, and the Step 10 half of G2) | Steps 11 and 14 |
+| D18.3 | new | [Index records](../../spec/05-tooling.md#index-records) | The `@index.v1` projection of `@workspace`: sorted declaration, implementation, and reference records with byte-identical output; implementations keyed by receiver and applied interface (closes G9, X3) | Step 15 |
 | S1 | settled | [Application](../../spec/02-type-system.md#application) | Closed applicable categories, constructor application, and `tuple.of`/`array.of`/`map.of` | Steps 2 and 4 |
 | S2 | settled | [Type ascription and widening](../../spec/02-type-system.md#type-ascription-and-widening) | Three widening relations at written expected types, no least upper bound, erased `as` | Step 6: `V1-TYPE-CONVERT-widening-boundaries`, `V1-TYPE-CONVERT-widening-rejections`, `V1-TYPE-CONVERT-ascription-erased` |
 | S3 | settled | [Overlap and non-unifiability](../../spec/02-type-system.md#overlap-and-non-unifiability) | Bound-agnostic unification for union members | Steps 3 and 6 |
-| X1 | deferred | [Iteration](../../spec/02-type-system.md#iteration) | `iter` default-member table and `map` element type (G7) | Step 10 |
-| X2 | deferred | [Nominal declarations](../../spec/02-type-system.md#nominal-declarations); [Generics](../../spec/02-type-system.md#generics) | A generic key type needs three conformances but v1 allows one bound per parameter (G10) | Step 10 |
-| X3 | deferred | [Workspace queries](../../spec/05-tooling.md#workspace-queries) | Resolved symbol/reference/index schema (G9) | Step 10 |
+| X1 | closed | [Iteration](../../spec/02-type-system.md#iteration) | `iter` default-member table and `map` element type (G7) | Step 10: D18.1 |
+| X2 | closed | [Nominal declarations](../../spec/02-type-system.md#nominal-declarations); [Generics](../../spec/02-type-system.md#generics) | A generic key type needs three conformances but v1 allows one bound per parameter (G10) | Step 10: D18.2 |
+| X3 | closed | [Workspace queries](../../spec/05-tooling.md#workspace-queries) | Resolved symbol/reference/index schema (G9) | Step 10: D18.3 |

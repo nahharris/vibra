@@ -508,8 +508,8 @@ Union coverage includes a two-member declaration, rejection of a one-member
 body, rejection of a union, interface, and bare generic member, and rejection of
 `(union (array t) (array i32))` as overlapping under instantiation. It proves
 that no member method or implementation is lifted to the union, and that a union
-used as a `(map k v)` key without explicit `hashable`, `equatable`, and
-`ordered` implementations is rejected.
+used as a `(map k v)` key without an explicit `ordered` implementation is
+rejected.
 
 Structural-type coverage accepts anonymous `tuple`, `record`, `enum`, and
 `union` types in a parameter, a result, a record field, an enum payload, a

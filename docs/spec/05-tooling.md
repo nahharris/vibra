@@ -314,6 +314,61 @@ the fact is unavailable. This milestone publishes structural grammar facts
 only: it does not add resolution, type inference, effect inference, CLI, or
 MCP behavior.
 
+### Index records
+
+The `@workspace` subject with `--expand declarations` and `--include index`
+projects one `@index.v1` document: the resolved symbol, implementation, and
+reference records of the checked snapshot. It exists so that an external
+retrieval consumer can read every declaration's identity, contract, relations,
+and normalized source without a second parser. The toolchain emits records
+only; embedding, ranking, and storage stay outside it.
+
+```vibra
+(record
+  format: @index.v1
+  revision: "…"
+  declarations: (array declaration…)
+  implementations: (array implementation…)
+  references: (array reference…))
+```
+
+A **declaration** record describes one module-level or nested declaration:
+
+| Field | Value |
+| --- | --- |
+| `id` | The canonical atom identity, such as `@demo.config.parse.parse` |
+| `kind` | `@module`, `@value`, `@function`, `@method`, `@type`, `@interface`, `@effect-root`, or `@operation` |
+| `module` | The canonical atom of the owning module |
+| `owner` | The owning type, interface, or effect root for a nested member, else `void` |
+| `visibility` | `@public` or `@private` |
+| `source` | `(record source-id: "…" start: n end: n)`, the declaration's byte span |
+| `signature` | The canonical type encoding of a value, function, or method's checked type; a type's or interface's generic parameter list otherwise |
+| `effects` | The checked performed effect row, as canonical root atoms, sorted |
+| `errors` | The error types its result can carry: `e` for a result type `(result t e)`, else `(array)` |
+| `applications` | The canonical identities of every declaration its body applies — calls, constructors, and interface members — sorted and without duplicates |
+| `text` | The formatter-normalized source of the declaration, byte for byte what `vibra fmt` writes |
+
+An **implementation** record describes one `impl` block. It has no atom
+identity, since implementations are keyed by types: `receiver` and
+`interface` hold the canonical type encodings of the receiver type and the
+applied interface target, which together are the block's identity. `members`
+lists one record per implementation member with `contract` (the identity of
+the corresponding contract member), `source`, `signature`, and `text`, so a
+member's identity is the triple of `contract`, `interface`, and `receiver`.
+The block also carries its own `source` and `text`.
+
+A **reference** record is one resolved written name. It has `from` (the
+identity of the enclosing declaration), `written` (the exact spelling),
+`source`, and `to` (the resolved canonical identity, or `void` for a name the
+resolver left to the checker, such as a variant of a role type).
+
+The document is canonical VIBON. Declarations are sorted by the UTF-8 bytes of
+`id`, implementations by `receiver` and then `interface`, and references by
+`source-id`, `start`, and `end`. An identical snapshot produces a byte-identical
+document on every host. An unavailable or recovered declaration keeps its
+record with `signature`, `effects`, `errors`, and `applications` absent, and
+the envelope's fact status says why.
+
 ### M2 workspace position envelope
 
 M2 keeps `urn:vibra:schema:v1:source-position-query` unchanged. Its

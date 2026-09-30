@@ -252,11 +252,28 @@ rejected with `@type.infinite-size` at the `deftype` whose expansion first
 repeats in declaration order, relating the member or payload through which it
 repeats.
 
-Map keys must implement the standard `hashable`, `equatable`, and `ordered`
-interfaces, which the standard library declares as ordinary nominal
-interfaces. The following types receive closed toolchain conformance to all
-three, keyed by type identity in the same way as the closed `iter` registry;
-they are admissible map keys without a written implementation:
+Map keys must implement the standard `ordered` interface. A map is ordered by
+its keys, so `compare` alone decides both where a key goes and whether two keys
+are the same key; v1 has no hashed collection and therefore no `hashable`
+interface. `@std.core` declares the two comparison contracts as ordinary nominal
+interfaces:
+
+```vibra
+(defint equatable
+  visibility: @public
+  (defn equal (left self right self) bool))
+
+(defint ordered
+  visibility: @public
+  (defn compare (left self right self) ordering))
+```
+
+An `ordered` implementation MUST be a total order, and two keys are the same key
+exactly when `compare` answers `equal`; an `equatable` implementation of the
+same type MUST agree with it. The following types receive closed toolchain
+conformance to both, keyed by type identity in the same way as the closed
+`iter` registry; they are admissible map keys without a written
+implementation:
 
 - `bool`, `char`, `str`, `bytes`, `atom`, and every atom singleton type;
 - `i8` through `i64` and `u8` through `u64`; and
@@ -269,8 +286,8 @@ for anonymous types is the language's own structural rule. The list is closed
 so that no other package can add to it.
 
 `void`, `f32`, `f64`, `fn` types, arrays, maps, and options are not admissible
-keys. A `deftype` is admissible only through its own written implementations
-of all three interfaces. An inadmissible key type in any written or inferred
+keys. A `deftype` is admissible only through its own written `ordered`
+implementation. An inadmissible key type in any written or inferred
 `(map k v)` emits `@type.invalid-map-key` at the key type expression, or at the
 constructor application when the map type is inferred; an `fn` key keeps the
 more specific `@type.function-not-equatable`.
@@ -362,7 +379,7 @@ a declared union conforms to an interface other than `any` only by writing that
 implementation. `any` is satisfied by every type without one, and the closed
 `iter` registry is keyed by builtin constructor identity and so never covers a
 union. A declared union is a valid `(map k v)` key only when it explicitly
-implements `hashable`, `equatable`, and `ordered`. Unions participate in the
+implements `ordered`. Unions participate in the
 finite-size check on the same terms as records and enums.
 
 ```vibra
@@ -917,13 +934,17 @@ the adapter `deftype` or `(iter item)` after widening.
 The standard-library declaration adds these default members, each with a body
 that MUST match the semantics below:
 
-| Member | Signature |
-| --- | --- |
-| `map` | `(value self f (fn (item) item) (iter item))` |
-| `filter` | `(value self pred (fn (item) bool) (iter item))` |
-| `skip` | `(value self n u64) (iter item)` |
-| `take` | `(value self n u64) (iter item)` |
-| `collect` | `(value self) (array item)` |
+| Member | Parameters | Result | Member generics |
+| --- | --- | --- | --- |
+| `map` | `(value self f (fn (item) out))` | `(iter out)` | `where: (out any)` |
+| `filter` | `(value self pred (fn (item) bool))` | `(iter item)` | — |
+| `skip` | `(value self n u64)` | `(iter item)` | — |
+| `take` | `(value self n u64)` | `(iter item)` | — |
+| `collect` | `(value self)` | `(array item)` | — |
+
+`map` is the one member with its own generic parameter, `out`, the element type
+it produces; a callback that keeps the element type instantiates `out` as
+`item`.
 
 `next` is abstract. Default bodies MUST NOT be redeclared in user `impl` blocks.
 At an implementation site, `self` is the concrete iterator type and `item` is that
@@ -937,10 +958,10 @@ bare as `iter`.
 
 Default-method semantics:
 
-- `map` returns a `mapped-iter` value seen as `(iter item)`. Each `next` on the
+- `map` returns a `mapped-iter` value seen as `(iter out)`. Each `next` on the
   adapter calls `next` on the underlying iterator and, when an element is
   present, yields `(tuple (f x) remaining)` with `remaining` typed as
-  `(iter item)`.
+  `(iter out)`.
 - `filter` returns a `filtered-iter` value seen as `(iter item)` that yields
   only elements for which `pred` returns `true`.
 - `skip` returns a `skipped-iter` value seen as `(iter item)` that discards the
@@ -949,25 +970,27 @@ Default-method semantics:
   `n` elements and then stops.
 - `collect` eagerly drains the receiver through `next` and returns `(array item)`.
 
-The static result type of `map`, `filter`, `skip`, and `take` is always
-`(iter item)`, never the concrete receiver type.
+The static result type of `map` is always `(iter out)`, and of `filter`, `skip`,
+and `take` always `(iter item)`, never the concrete receiver type.
 
 ### Standard-library adapter types
 
-Default methods construct these public stdlib `deftype`s. Each declares
-`where: (item any)` and implements `(iter item)` through a nested
-`(impl (iter item) …)` block supplying only `next`. They are **not** part of the
+Default methods construct these public stdlib `deftype`s. `mapped-iter` declares
+`where: (item any out any)` and implements `(iter out)`; each other adapter
+declares `where: (item any)` and implements `(iter item)`. Each implementation
+is a nested `impl` block supplying only `next`. They are **not** part of the
 closed registry exception above:
 
 | Type | Role |
 | --- | --- |
-| `mapped-iter` | Holds `(iter item)` source and `(fn (item) item)`; lazy `map` |
+| `mapped-iter` | Holds `(iter item)` source and `(fn (item) out)`; lazy `map` |
 | `filtered-iter` | Holds `(iter item)` source and `(fn (item) bool)`; lazy `filter` |
 | `skipped-iter` | Holds `(iter item)` source and remaining skip count; lazy `skip` |
 | `taken-iter` | Holds `(iter item)` source and remaining take count; lazy `take` |
 
 Each adapter's `next` returns `(option (tuple item self))` with `self` equal to
-the adapter type `(mapped-iter item)`, `(filtered-iter item)`, and so on.
+the adapter type `(mapped-iter item out)`, `(filtered-iter item)`, and so on,
+whose element is `out` for `mapped-iter` and `item` for the others.
 Widening to `(iter item)` happens at the default-method result boundary.
 
 All defaults are pure and their callback parameters MUST have `effects: ()`.

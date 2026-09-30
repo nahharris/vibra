@@ -515,7 +515,7 @@ fn spec_examples_are_inventoried_and_losslessly_exercised() {
     );
     assert_eq!(
         fences.len(),
-        48,
+        50,
         "active spec fence count changed; review inventory"
     );
     assert!(
