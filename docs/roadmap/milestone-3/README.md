@@ -113,8 +113,10 @@ failures through a nominal error union with `try`, with no interfaces.
 | 4b | [Library-first core mechanics: single-declaration imports, `role:` binding in place of hardcoded identities, the `native:` mechanism with the manifest `native` list and a body/native differential harness, and the primitive/native registry split](04b-library-core.md) | 4a | landed | PR #313, merge `32649ca` |
 | 5 | [Patterns and `match`: literal, constructor, tuple, record, and array patterns; destructuring `let`, parameters, and lambdas; the shared exhaustiveness/irrefutability engine; unreachable arms](05-patterns.md) | 4b | landed | PR #314, merge `f696089` |
 | 6 | [Unions, widening, and `as`: union `deftype`s, member overlap and concreteness, union and atom-singleton widening at written expected types, `as` ascription, `as` narrowing patterns](06-unions.md) | 5 | landed | PR #315, merge `c653f39` |
-| 7 | [Typed failure: `result` as a standard-library `deftype` claiming `@result`, `try` propagation, unhandled-fallible-value checks, discard intent](07-failure.md) | 6 | landed | Step 7 PR (conditional on merge) |
-| 8 | [Core library foundation: checked integer operations; `bool`, `str`, `bytes`, `ordering`, and the error enums moved into the standard library under their roles (per D17.1); the core/text/bytes/collection/option/result library with native implementations (per G3/G4, D17.3); assertion extensions (per G6)](08-library.md) | 7 | not started | — |
+| 7 | [Typed failure: `result` as a standard-library `deftype` claiming `@result`, `try` propagation, unhandled-fallible-value checks, discard intent](07-failure.md) | 6 | landed | PR #316, merge `6f8bfe3` |
+| 8 | [Registry: every Stage 3A `@compiler` row — the numeric static methods in `@std.builtin`, and `@std.char`, `@std.text`, and `@std.bytes` — with interpreter semantics and boundary tests](08-library.md) | 7 | landed | Step 8 PR (conditional on merge) |
+| 8b | [Reviewed Vibra composites (boolean connectives, `char` classes, text search/split/trim, array folds) and the generic `assert.equal` (per G6)](08-library.md) | 8 | not started | — |
+| 8c | [`bool`, `str`, `bytes`, `ordering`, and the error enums as standard-library `deftype`s under their roles (per D17.1); the text and bytes rows become native implementations (per G3/G4, D17.3)](08-library.md) | 8b | not started | — |
 | 9 | [Stage 3A demo and corpus sub-gate — evidence step](09-stage-3a-evidence.md) | 8 | not started | — |
 
 Stage 3B — interfaces, generics, conversion, and iteration.

@@ -1,5 +1,7 @@
 ; Pure text declarations bound to the compiler registry. The toolchain checks
 ; each symbol against the registry before the module is admitted.
+(import core @std.core)
+
 (defn concat (left str right str) str
   visibility: @public
   external: @compiler
@@ -9,3 +11,38 @@
   visibility: @public
   external: @compiler
   symbol: "text.length")
+
+(defn equal (left str right str) bool
+  visibility: @public
+  external: @compiler
+  symbol: "text.equal")
+
+(defn compare (left str right str) core.ordering
+  visibility: @public
+  external: @compiler
+  symbol: "text.compare")
+
+(defn slice (value str start u64 end u64) (option str)
+  visibility: @public
+  external: @compiler
+  symbol: "text.slice")
+
+(defn to-chars (value str) (array char)
+  visibility: @public
+  external: @compiler
+  symbol: "text.to-chars")
+
+(defn from-chars (chars (array char)) str
+  visibility: @public
+  external: @compiler
+  symbol: "text.from-chars")
+
+(defn to-utf8 (value str) bytes
+  visibility: @public
+  external: @compiler
+  symbol: "text.to-utf8")
+
+(defn from-utf8 (encoded bytes) (result str core.conversion-error)
+  visibility: @public
+  external: @compiler
+  symbol: "text.from-utf8")

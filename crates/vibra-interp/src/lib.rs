@@ -15,6 +15,8 @@
     )
 )]
 
+mod registry;
+
 use std::fmt;
 use std::sync::Arc;
 
@@ -977,7 +979,7 @@ impl<'a> Machine<'a> {
                     }),
                 }
             }
-            _ => return None,
+            _ => registry::apply(intrinsic, &values, result)?,
         };
         Some(Evaluation::Value(value))
     }

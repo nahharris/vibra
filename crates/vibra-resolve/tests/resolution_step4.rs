@@ -84,12 +84,20 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
     .with_verified_overlay(
         "vibra-stdlib",
         "0.2.0",
-        vec![vibra_resolve::SourceModule::new(
-            "std",
-            ["text"],
-            "stdlib/src/std/text.vib",
-            include_bytes!("../../../stdlib/src/std/text.vib"),
-        )],
+        vec![
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["text"],
+                "stdlib/src/std/text.vib",
+                include_bytes!("../../../stdlib/src/std/text.vib"),
+            ),
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["core"],
+                "stdlib/src/std/core.vib",
+                include_bytes!("../../../stdlib/src/std/core.vib"),
+            ),
+        ],
     );
     let snapshot = Resolver::resolve(input);
 
@@ -149,12 +157,20 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
     .with_verified_overlay(
         "vibra-stdlib",
         "0.2.0",
-        vec![vibra_resolve::SourceModule::new(
-            "std",
-            ["text"],
-            "stdlib/src/std/text.vib",
-            include_bytes!("../../../stdlib/src/std/text.vib"),
-        )],
+        vec![
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["text"],
+                "stdlib/src/std/text.vib",
+                include_bytes!("../../../stdlib/src/std/text.vib"),
+            ),
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["core"],
+                "stdlib/src/std/core.vib",
+                include_bytes!("../../../stdlib/src/std/core.vib"),
+            ),
+        ],
     );
     let snapshot = Resolver::resolve(input);
 

@@ -1,0 +1,10 @@
+; Unicode scalar conversions bound to the compiler registry.
+(defn to-u32 (value char) u32
+  visibility: @public
+  external: @compiler
+  symbol: "char.to-u32")
+
+(defn from-u32 (scalar u32) (option char)
+  visibility: @public
+  external: @compiler
+  symbol: "char.from-u32")
