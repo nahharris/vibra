@@ -1,27 +1,17 @@
-; Unicode scalar conversions bound to the compiler registry, and the
-; comparisons and ASCII classes written over them.
+; Character comparison and ASCII classes, written over the builtin `char`
+; members `char.to-u32` and `char.from-u32`.
 (import core @std.core)
-
-(defn to-u32 (value char) u32
-  visibility: @public
-  external: @compiler
-  symbol: "char.to-u32")
-
-(defn from-u32 (scalar u32) (option char)
-  visibility: @public
-  external: @compiler
-  symbol: "char.from-u32")
 
 (defn equal (left char right char) bool
   visibility: @public
-  (u32.equal (to-u32 left) (to-u32 right)))
+  (u32.equal (char.to-u32 left) (char.to-u32 right)))
 
 (defn compare (left char right char) core.ordering
   visibility: @public
-  (u32.compare (to-u32 left) (to-u32 right)))
+  (u32.compare (char.to-u32 left) (char.to-u32 right)))
 
 (defn in-range (value char low u32 high u32) bool
-  (let scalar (to-u32 value)
+  (let scalar (char.to-u32 value)
     (match (u32.compare scalar low)
       (core.ordering.less) false
       - (match (u32.compare scalar high) (core.ordering.greater) false - true))))
@@ -45,4 +35,10 @@
 ; Space, tab, line feed, form feed, and carriage return.
 (defn is-ascii-whitespace (value char) bool
   visibility: @public
-  (match (to-u32 value) 32u32 true 9u32 true 10u32 true 12u32 true 13u32 true - false))
+  (match (char.to-u32 value)
+    32u32 true
+    9u32 true
+    10u32 true
+    12u32 true
+    13u32 true
+    - false))

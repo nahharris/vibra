@@ -43,7 +43,12 @@ pub(crate) fn check_constructor(
     let declared = environment.types.get(index)?.clone();
     // A declaration whose body failed to lower already reported why.
     let body = declared.body.clone()?;
-    let pattern = declared_self_type(&declared.id, &declared.parameters);
+    // A role type the compiler represents directly is built as that
+    // representation.
+    let pattern = environment
+        .types
+        .representation(index)
+        .unwrap_or_else(|| declared_self_type(&declared.id, &declared.parameters));
     let mut instantiation = start_instantiation(
         environment,
         application,

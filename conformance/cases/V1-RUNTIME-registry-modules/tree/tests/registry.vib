@@ -1,14 +1,13 @@
 (import assert @std.assert)
 (import bytes-of @std.bytes)
-(import chars @std.char)
 (import core @std.core)
 (import text @std.text)
 
 (test "char scalars"
-  (assert.true (u32.equal (chars.to-u32 \u03A9) 937u32)))
+  (assert.true (u32.equal (char.to-u32 \u03A9) 937u32)))
 
 (test "a surrogate is no char"
-  (assert.true (match (chars.from-u32 55296u32) (option.none) true - false)))
+  (assert.true (match (char.from-u32 55296u32) (option.none) true - false)))
 
 (test "text equality and order"
   (assert.true

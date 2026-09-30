@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-library-roles"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "bool, str, and bytes are standard-library deftypes under their roles: their variants and wrapper constructors build values, their patterns destructure them, and array.fold folds in order."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

@@ -18,13 +18,17 @@ use vibra_syntax::{
 
 use crate::nominal::TypeNames;
 use crate::stdlib::{
-    STDLIB_BUILTIN_SOURCE_ID, STDLIB_CORE_SOURCE_ID, STDLIB_OPTION_SOURCE_ID,
-    STDLIB_RESULT_SOURCE_ID, embedded_module, stdlib_type_id,
+    STDLIB_BOOL_SOURCE_ID, STDLIB_BUILTIN_SOURCE_ID, STDLIB_BYTES_SOURCE_ID,
+    STDLIB_CORE_SOURCE_ID, STDLIB_OPTION_SOURCE_ID, STDLIB_RESULT_SOURCE_ID,
+    STDLIB_TEXT_SOURCE_ID, embedded_module, stdlib_type_id,
 };
 
 /// The embedded modules that declare types every run can reach: by path,
 /// source identity, and module name under `@std`.
-const TYPE_MODULES: [(&str, &str, &str); 3] = [
+const TYPE_MODULES: [(&str, &str, &str); 6] = [
+    ("std/bool.vib", STDLIB_BOOL_SOURCE_ID, "bool"),
+    ("std/text.vib", STDLIB_TEXT_SOURCE_ID, "text"),
+    ("std/bytes.vib", STDLIB_BYTES_SOURCE_ID, "bytes"),
     ("std/option.vib", STDLIB_OPTION_SOURCE_ID, "option"),
     ("std/result.vib", STDLIB_RESULT_SOURCE_ID, "result"),
     ("std/core.vib", STDLIB_CORE_SOURCE_ID, "core"),
@@ -129,6 +133,7 @@ fn builtin_self_type(atom: &str, parameters: &[String]) -> Option<Type> {
     match (atom, parameters.len()) {
         ("array", 1) => Some(Type::Array(Box::new(param(0)?))),
         ("map", 2) => Some(Type::Map(Box::new(param(0)?), Box::new(param(1)?))),
+        ("char", 0) => Some(Type::Char),
         (name, 0) => vibra_ir::external::NumericType::ALL
             .into_iter()
             .find(|numeric| numeric.name() == name)
@@ -316,7 +321,8 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(bound, declared);
         // Twelve methods for each signed and eleven for each unsigned integer
-        // type, nine for each float type, and the six collection members.
-        assert_eq!(declared.len(), 4 * 12 + 4 * 11 + 2 * 9 + 6);
+        // type, nine for each float type, the two `char` members, and the seven
+        // collection members.
+        assert_eq!(declared.len(), 4 * 12 + 4 * 11 + 2 * 9 + 2 + 7);
     }
 }

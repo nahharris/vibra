@@ -306,6 +306,8 @@ pub enum SemanticIdentity {
     ArrayConcatenation,
     /// Elements in a half-open range, or `none` when it is out of range.
     ArraySlice,
+    /// A left fold of an array through a step function.
+    ArrayFold,
 }
 
 /// One pure, compiler-owned operation.
@@ -363,6 +365,8 @@ pub enum CompilerIntrinsic {
     ArrayConcat,
     /// `array.slice`.
     ArraySlice,
+    /// `array.fold`.
+    ArrayFold,
 }
 
 /// The standard-library types a registry signature names: the types playing
@@ -501,6 +505,7 @@ impl CompilerIntrinsic {
             Self::ArrayAppend => SemanticIdentity::ArrayAppend,
             Self::ArrayConcat => SemanticIdentity::ArrayConcatenation,
             Self::ArraySlice => SemanticIdentity::ArraySlice,
+            Self::ArrayFold => SemanticIdentity::ArrayFold,
         }
     }
 
@@ -536,6 +541,7 @@ impl CompilerIntrinsic {
             Self::ArrayAppend => "array.append",
             Self::ArrayConcat => "array.concat",
             Self::ArraySlice => "array.slice",
+            Self::ArrayFold => "array.fold",
         }
     }
 
@@ -544,7 +550,17 @@ impl CompilerIntrinsic {
     /// bodiless primitive operation named with `external:`.
     #[must_use]
     pub const fn is_native(self) -> bool {
-        matches!(self, Self::ArrayOf | Self::MapOf)
+        !matches!(
+            self,
+            Self::Integer(..)
+                | Self::Float(..)
+                | Self::CharToU32
+                | Self::CharFromU32
+                | Self::ArrayLength
+                | Self::ArrayAppend
+                | Self::ArrayConcat
+                | Self::ArraySlice
+        )
     }
 
     /// The generic parameters of the exact signature, in `where:` order.
@@ -552,6 +568,7 @@ impl CompilerIntrinsic {
     pub fn type_parameters(self) -> Vec<String> {
         match self {
             Self::MapOf => vec!["k".to_owned(), "v".to_owned()],
+            Self::ArrayFold => vec!["t".to_owned(), "a".to_owned()],
             Self::ArrayOf
             | Self::ArrayLength
             | Self::ArrayAppend
@@ -647,6 +664,13 @@ impl CompilerIntrinsic {
                 vec![items(), Type::U64, Type::U64],
                 roles.option_of(items()),
             ),
+            Self::ArrayFold => {
+                let step = Type::Function(Box::new(function(
+                    vec![param("a"), param("t")],
+                    param("a"),
+                )));
+                function(vec![items(), param("a"), step], param("a"))
+            }
         }
     }
 
@@ -702,6 +726,7 @@ impl CompilerIntrinsic {
             Self::ArrayAppend,
             Self::ArrayConcat,
             Self::ArraySlice,
+            Self::ArrayFold,
         ]);
         all
     }

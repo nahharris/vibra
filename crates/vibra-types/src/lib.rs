@@ -43,9 +43,10 @@ mod union;
 pub use resolved::{ResolvedCheckResult, check_resolved};
 pub use standard::{builtin_member_names, role_type_names};
 pub use stdlib::{
-    STDLIB_ASSERT_SOURCE_ID, STDLIB_BUILTIN_SOURCE_ID, STDLIB_CORE_SOURCE_ID,
-    STDLIB_OPTION_SOURCE_ID, STDLIB_RESULT_SOURCE_ID, STDLIB_TEXT_SOURCE_ID, Stdlib,
-    StdlibError, StdlibInputs, StdlibModule, load_stdlib, load_stdlib_bytes,
+    STDLIB_ASSERT_SOURCE_ID, STDLIB_BOOL_SOURCE_ID, STDLIB_BUILTIN_SOURCE_ID,
+    STDLIB_BYTES_SOURCE_ID, STDLIB_CORE_SOURCE_ID, STDLIB_OPTION_SOURCE_ID,
+    STDLIB_RESULT_SOURCE_ID, STDLIB_TEXT_SOURCE_ID, Stdlib, StdlibError, StdlibInputs,
+    StdlibModule, load_stdlib, load_stdlib_bytes,
 };
 
 /// The result of checking one source document.
@@ -159,6 +160,61 @@ pub fn check_source(source_id: impl AsRef<str>, source: &str) -> CheckResult {
         return CheckResult::new(None, diagnostics);
     }
     CheckResult::with_bindings(program, diagnostics, bindings)
+}
+
+/// Checks one source as trusted standard-library code, where `native:`,
+/// `role:`, and `external:` are admissible. The loaded [`Stdlib`] is the
+/// caller's proof that it holds the embedded library, and `source_id` must
+/// be the identity of one of its modules. The body/native harness uses it to
+/// run a module's functions with and without their native implementations.
+pub fn check_standard_library_source(
+    verification: &Stdlib,
+    source_id: &str,
+    source: &str,
+) -> CheckResult {
+    let module = source_id
+        .strip_prefix("stdlib/src/")
+        .and_then(|path| path.strip_suffix(".vib"))
+        .map(|path| path.replace('/', "."));
+    if !module.is_some_and(|module| verification.maps(&module, source_id)) {
+        return bootstrap_import_unavailable(
+            source_id,
+            ByteSpan::empty_at(0),
+            "trusted checking requires a module of the embedded standard library",
+        );
+    }
+    let document = match vibra_syntax::parse_source(Path::new(source_id), source) {
+        Ok(document) => document,
+        Err(error) => {
+            return bootstrap_import_unavailable(
+                source_id,
+                ByteSpan::empty_at(0),
+                error.to_string(),
+            );
+        }
+    };
+    let mut diagnostics = document
+        .diagnostics()
+        .iter()
+        .cloned()
+        .map(|diagnostic| diagnostic.with_source_id(source_id))
+        .collect::<Vec<_>>();
+    let Some(ast) = document
+        .ast()
+        .filter(|_| document.accepted() && !document.recovered())
+    else {
+        return CheckResult::new(None, diagnostics);
+    };
+    let (program, bindings) =
+        check_ast_with_bindings_authority(source_id, ast, &mut diagnostics, true);
+    if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.level() == vibra_diagnostics::Level::Error)
+    {
+        CheckResult::new(None, diagnostics)
+    } else {
+        CheckResult::with_bindings(program, diagnostics, bindings)
+    }
 }
 
 /// Checks an already decoded source AST.  This is useful to workspace
@@ -5035,9 +5091,9 @@ mod tests {
             r#"(defn read () str
   external: @compiler
   symbol: "text.unknown")"#,
-            r#"(defn read (value str) str
+            r#"(defn read (value char) char
   external: @compiler
-  symbol: "text.length")"#,
+  symbol: "char.to-u32")"#,
             r#"(defn negate (value u8) u8
   external: @compiler
   symbol: "u8.neg-checked")"#,

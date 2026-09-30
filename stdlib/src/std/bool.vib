@@ -1,3 +1,9 @@
+; The standard boolean type, which plays the `@bool` role: `true`, `false`, and
+; `if` conditions have this type. The toolchain represents it directly.
+(deftype bool (enum false void true void)
+  role: @bool
+  visibility: @public)
+
 ; Boolean connectives. Each is an ordinary function, so both operands are
 ; evaluated before the call; `if` is the short-circuiting form.
 (defn not (value bool) bool

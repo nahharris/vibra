@@ -173,6 +173,31 @@ impl TypeNames {
         self.roles.get(role).copied()
     }
 
+    /// The compiler's representation of the declared type `index` when it
+    /// plays `@bool`, `@str`, or `@bytes`. Representation latitude keeps
+    /// those values in the toolchain's compact form; their constructors and
+    /// patterns still go through the declared body.
+    pub(crate) fn representation(&self, index: usize) -> Option<Type> {
+        let (role, _) = self.roles.iter().find(|(_, claimed)| **claimed == index)?;
+        match role.as_str() {
+            "bool" => Some(Type::Bool),
+            "str" => Some(Type::Str),
+            "bytes" => Some(Type::Bytes),
+            _ => None,
+        }
+    }
+
+    /// The declared body a representation type is written over.
+    pub(crate) fn representation_body(&self, value_type: &Type) -> Option<TypeBody> {
+        let role = match value_type {
+            Type::Bool => "bool",
+            Type::Str => "str",
+            Type::Bytes => "bytes",
+            _ => return None,
+        };
+        self.get(self.role(role)?)?.body.clone()
+    }
+
     /// A type that plays a role, named by its spelling: the role vocabulary
     /// needs no import.
     fn role_type_named(&self, name: &str) -> Option<usize> {

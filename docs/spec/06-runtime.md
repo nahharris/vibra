@@ -267,7 +267,11 @@ For `F` among `f32` and `f64`, the builtin type `F` has:
 | `to-str` | `F -> str` | The canonical float serialization of this chapter, without a suffix |
 | `parse` | `str -> C F` | The unsuffixed decimal float literal grammar; `invalid-format` otherwise, `out-of-range` when the rounded value is infinite |
 
-The remaining operations are bound by modules, except the `array.*` rows:
+The remaining operations are bound by modules, except the `char.*`, `array.*`,
+and `map.*` rows. The `text.*` and `bytes.*` rows are native implementations of
+the `@std.text` and `@std.bytes` functions, whose Vibra bodies over the scalars
+and bytes a `str` or `bytes` value is written over are their meaning, as are
+`array.of`, `array.fold`, and `map.of`:
 
 | Symbol | Signature | Semantics |
 | --- | --- | --- |
@@ -295,10 +299,11 @@ The remaining operations are bound by modules, except the `array.*` rows:
 | `array.append` | `(array t) t -> (array t)` | New array with one trailing element |
 | `array.concat` | `(array t) (array t) -> (array t)` | Elements of the first, then the second |
 | `array.slice` | `(array t) u64 u64 -> (option (array t))` | As `text.slice`, over elements |
+| `array.fold` | `(array t) a (fn (a t) a) -> a` | The left fold: `step` applied to the accumulator and each element in order, starting from `initial`; `where: (t any)` on the type and `(a any)` on the member |
 
-The numeric rows and the `array.*` and `map.*` rows are static methods of
-builtin types, declared in the `intrinsic-type` declarations of the embedded
-module `@std.builtin`. They are reached through the type path with
+The numeric rows and the `char.*`, `array.*`, and `map.*` rows are static
+methods of builtin types, declared in the `intrinsic-type` declarations of the
+embedded module `@std.builtin`. They are reached through the type path with
 no import, exactly as the builtin types themselves need none, so
 `(i32.add-checked left right)` needs no `import`.
 

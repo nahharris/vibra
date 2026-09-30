@@ -115,8 +115,8 @@ failures through a nominal error union with `try`, with no interfaces.
 | 6 | [Unions, widening, and `as`: union `deftype`s, member overlap and concreteness, union and atom-singleton widening at written expected types, `as` ascription, `as` narrowing patterns](06-unions.md) | 5 | landed | PR #315, merge `c653f39` |
 | 7 | [Typed failure: `result` as a standard-library `deftype` claiming `@result`, `try` propagation, unhandled-fallible-value checks, discard intent](07-failure.md) | 6 | landed | PR #316, merge `6f8bfe3` |
 | 8 | [Registry: every Stage 3A `@compiler` row — the numeric static methods in `@std.builtin`, and `@std.char`, `@std.text`, and `@std.bytes` — with interpreter semantics and boundary tests](08-library.md) | 7 | landed | PR #317, merge `b0c3092` |
-| 8b | [Reviewed Vibra composites (boolean connectives, `char` comparison and classes, text search/split/trim) and the generic `assert.equal` (per G6)](08-library.md) | 8 | landed | Step 8b PR (conditional on merge) |
-| 8c | [`bool`, `str`, `bytes`, `ordering`, and the error enums as standard-library `deftype`s under their roles (per D17.1); the text and bytes rows become native implementations (per G3/G4, D17.3); array folds as Vibra-bodied `@std.builtin` members](08-library.md) | 8b | not started | — |
+| 8b | [Reviewed Vibra composites (boolean connectives, `char` comparison and classes, text search/split/trim) and the generic `assert.equal` (per G6)](08-library.md) | 8 | landed | PR #318, merge `5407632` |
+| 8c | [`bool`, `str`, `bytes`, `ordering`, and the error enums as standard-library `deftype`s under their roles (per D17.1); the text and bytes rows become native implementations (per G3/G4, D17.3); array folds as Vibra-bodied `@std.builtin` members](08-library.md) | 8b | landed | Step 8c PR (conditional on merge) |
 | 9 | [Stage 3A demo and corpus sub-gate — evidence step](09-stage-3a-evidence.md) | 8 | not started | — |
 
 Stage 3B — interfaces, generics, conversion, and iteration.

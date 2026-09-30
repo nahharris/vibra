@@ -29,6 +29,10 @@ pub const STDLIB_OPTION_SOURCE_ID: &str = "stdlib/src/std/option.vib";
 pub const STDLIB_RESULT_SOURCE_ID: &str = "stdlib/src/std/result.vib";
 /// The source identity of the embedded `@std.core` module.
 pub const STDLIB_CORE_SOURCE_ID: &str = "stdlib/src/std/core.vib";
+/// The source identity of the embedded `@std.bool` module.
+pub const STDLIB_BOOL_SOURCE_ID: &str = "stdlib/src/std/bool.vib";
+/// The source identity of the embedded `@std.bytes` module.
+pub const STDLIB_BYTES_SOURCE_ID: &str = "stdlib/src/std/bytes.vib";
 /// The source identity of the `@std.builtin` module.
 pub const STDLIB_BUILTIN_SOURCE_ID: &str = "stdlib/src/std/builtin.vib";
 
@@ -716,26 +720,25 @@ mod tests {
 
     #[test]
     fn a_module_binding_an_unlisted_symbol_is_rejected() {
-        let manifest = manifest().replace("\n    \"text.length\"", "");
+        let manifest = manifest().replace("\n    \"i32.add-checked\"", "");
         let mut inputs = StdlibInputs::embedded();
         inputs.manifest = manifest.as_bytes();
         rejects(
             &inputs,
-            "binds `text.length`, which the manifest does not list",
+            "binds `i32.add-checked`, which the manifest does not list",
         );
     }
 
     #[test]
     fn a_native_symbol_in_the_wrong_tier_or_unlisted_is_rejected() {
-        let listed = "native: (array \"array.of\" \"map.of\")";
         let moved = manifest().replace(
-            listed,
-            "native: (array \"array.of\" \"map.of\" \"array.length\")",
+            "native: (array \"array.of\"",
+            "native: (array \"array.of\" \"array.length\"",
         );
         let mut inputs = StdlibInputs::embedded();
         inputs.manifest = moved.as_bytes();
         rejects(&inputs, "`array.length` in the wrong tier");
-        let unlisted = manifest().replace(listed, "native: (array \"array.of\")");
+        let unlisted = manifest().replace(" \"map.of\"", "");
         let mut inputs = StdlibInputs::embedded();
         inputs.manifest = unlisted.as_bytes();
         rejects(&inputs, "binds `map.of`, which the manifest does not list");

@@ -28,7 +28,18 @@
   (defn slice (items (array t) start u64 end u64) (option.option (array t))
     visibility: @public
     external: @compiler
-    symbol: "array.slice"))
+    symbol: "array.slice")
+  ; The left fold: `step` combines the accumulator with each element in order.
+  (defn fold (items (array t) initial a step (fn (a t) a)) a
+    where: (a any)
+    visibility: @public
+    native: "array.fold"
+    (match (items 0u64)
+      (option.option.none) initial
+      (option.option.some first)
+        (match (array.slice items 1u64 (array.length items))
+          (option.option.some rest) (array.fold rest (step initial first) step)
+          (option.option.none) initial))))
 
 (deftype map (intrinsic-type @map)
   where: (k any v any)
@@ -508,3 +519,14 @@
     visibility: @public
     external: @compiler
     symbol: "f64.parse"))
+
+(deftype char (intrinsic-type @char)
+  visibility: @public
+  (defn to-u32 (value char) u32
+    visibility: @public
+    external: @compiler
+    symbol: "char.to-u32")
+  (defn from-u32 (scalar u32) (option char)
+    visibility: @public
+    external: @compiler
+    symbol: "char.from-u32"))

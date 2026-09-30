@@ -131,3 +131,41 @@ Step 8 lands as three PRs, like 4a/4b:
   imported. The CLI and runner tests that used a generic assertion as their
   unavailable form now use a nonempty lambda effect row, which stays
   unavailable until M4.
+
+## Delivery notes (8c)
+
+- `@std.bool` declares `(deftype bool (enum false void true void) role:
+  @bool)`, `@std.text` declares `(deftype str (array char) role: @str)`, and
+  `@std.bytes` declares `(deftype bytes (array u8) role: @bytes)`. The reader
+  admits `true` and `false` as enum variant names, and a `deftype` that claims
+  a role may take its builtin name.
+- The checker binds those three roles to the compiler's direct
+  representation (`TypeNames::representation`). Constructors and patterns go
+  through the declared body:
+  - `(bool.true)` builds `true`, and a `(bool.false)` pattern is the literal
+    `false`;
+  - `(str scalars)` wraps and unwraps the scalar array, and `(bytes items)`
+    the byte array.
+
+  The IR validates `Variant` over `bool` and `Wrap` over `str` and `bytes`
+  against those bodies. The interpreter converts at exactly those points,
+  under D17.5's representation latitude.
+- In the pattern engine, `str` and `bytes` are one-constructor wrapper
+  spaces whose literals are an infinite subset. A wrapper arm whose operand
+  binds covers every later literal arm.
+- The text and bytes rows are native implementations. Every one has a Vibra
+  body over the scalars or bytes (UTF-8 encoding and validating decoding
+  included), and the manifest lists them in `native`. The harness
+  (`natives_m3_step4b`) now runs module natives too: it checks the module
+  source as trusted standard-library code, through the new
+  `check_standard_library_source`, with and without `native:`, and compares
+  each sample. It drops the declarations that reach another module.
+- `char.to-u32` and `char.from-u32` are now static methods of the builtin
+  `char` type in `@std.builtin`, like the numeric methods, because the text
+  bodies need them and `char` is a core scalar. `@std.char` keeps the
+  composites. The runtime chapter says so.
+- `array.fold` is a native `@std.builtin` member, generic in `t` and `a`,
+  whose body folds through `array.slice`. The interpreter's implementation
+  invokes the step function. The runtime chapter lists the row.
+- The resolver accepts a bare role-type name, such as `(bytes items)`, as it
+  already accepted `option.some`.

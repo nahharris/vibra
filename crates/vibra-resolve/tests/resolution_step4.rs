@@ -82,7 +82,9 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
         )],
     )
     .with_builtin_members(builtin_members())
-    .with_role_types(["option".to_owned(), "result".to_owned()])
+    .with_role_types(
+        ["bool", "str", "bytes", "option", "result"].map(str::to_owned),
+    )
     .with_verified_overlay(
         "vibra-stdlib",
         "0.2.0",
@@ -163,7 +165,9 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
         ],
     )
     .with_builtin_members(builtin_members())
-    .with_role_types(["option".to_owned(), "result".to_owned()])
+    .with_role_types(
+        ["bool", "str", "bytes", "option", "result"].map(str::to_owned),
+    )
     .with_verified_overlay(
         "vibra-stdlib",
         "0.2.0",

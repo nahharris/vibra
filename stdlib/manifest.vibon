@@ -9,15 +9,15 @@
       role: @source)
     @std.bool (record
       path: "std/bool.vib"
-      sha256: "sha256:a607d54e9bfaf6e0c1637f672a71b4e528717a7f23eb7c1383f34ecd688b8ff3"
+      sha256: "sha256:314f2a786a399de6b0251ff5bf5d462e8e4fef03d8938c678623d963f85baee9"
       role: @source)
     @std.char (record
       path: "std/char.vib"
-      sha256: "sha256:8e5bee7a777bc4d94fdaafd7266b581557f671a1d69b441bb9aadc747d759e54"
+      sha256: "sha256:1c46c4b586e689ca93b30291f2e2d14889cf4e609cccd064177310846d9aeffd"
       role: @source)
     @std.text (record
       path: "std/text.vib"
-      sha256: "sha256:239015516f503dca04d6d95da31b6ae83baf4c87e94e51128bd6aac922e6f13b"
+      sha256: "sha256:ab80e0b2fcd07763b80c16763b1e235f778b0c2522e0a10a35b32c10c86bfc62"
       role: @source)
     @std.option (record
       path: "std/option.vib"
@@ -29,11 +29,11 @@
       role: @source)
     @std.bytes (record
       path: "std/bytes.vib"
-      sha256: "sha256:3b09a9269eab0b4aa363a02ff4ee24dd50c0eeb05820226f1efb8dadf9c5d589"
+      sha256: "sha256:22a1379efd8695767c312b06fdcbd78cc1f009abec8feae15ba1e117ce2a5ea6"
       role: @source)
     @std.builtin (record
       path: "std/builtin.vib"
-      sha256: "sha256:c9560c5471765ac5102a9731c722908a0f09c05d7ff55aca54bd7f4d8cf123f8"
+      sha256: "sha256:5acc7e3d6a2a05d42b4093aede33e1a3040fe237193501672cd251d87266c606"
       role: @source)
     @std.assert (record
       path: "std/assert.vib"
@@ -154,25 +154,9 @@
     "f64.compare-total"
     "f64.to-str"
     "f64.parse"
-    "bytes.length"
-    "bytes.concat"
-    "bytes.equal"
-    "bytes.compare"
-    "bytes.slice"
-    "bytes.to-array"
-    "bytes.from-array"
     "char.to-u32"
-    "char.from-u32"
-    "text.concat"
-    "text.length"
-    "text.equal"
-    "text.compare"
-    "text.slice"
-    "text.to-chars"
-    "text.from-chars"
-    "text.to-utf8"
-    "text.from-utf8")
-  native: (array "array.of" "map.of")
+    "char.from-u32")
+  native: (array "array.of" "array.fold" "map.of" "bytes.length" "bytes.concat" "bytes.equal" "bytes.compare" "bytes.slice" "bytes.to-array" "bytes.from-array" "text.concat" "text.length" "text.equal" "text.compare" "text.slice" "text.to-chars" "text.from-chars" "text.to-utf8" "text.from-utf8")
   assertions: (array
     "assert.true"
     "assert.false"

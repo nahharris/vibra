@@ -687,6 +687,12 @@ impl<'a> Machine<'a> {
                 payload,
                 ..
             } => {
+                // `bool` is represented directly.
+                if *value_type == Type::Bool {
+                    return Some(Evaluation::Value(RuntimeValue::Primitive(
+                        Value::Bool(variant == "true"),
+                    )));
+                }
                 let payload = match payload {
                     Some(payload) => {
                         Some(Box::new(self.evaluate_value(payload, slots, captures)?))
@@ -703,6 +709,10 @@ impl<'a> Machine<'a> {
                 value_type, value, ..
             } => {
                 let value = self.evaluate_value(value, slots, captures)?;
+                // `str` and `bytes` are represented directly over their items.
+                if let Some(value) = representation_of(value_type, &value) {
+                    return Some(Evaluation::Value(value));
+                }
                 Some(Evaluation::Value(RuntimeValue::Wrapper {
                     value_type: value_type.clone(),
                     value: Box::new(value),
@@ -922,6 +932,24 @@ impl<'a> Machine<'a> {
                 CompilerIntrinsic::TextLength,
                 [RuntimeValue::Primitive(Value::Str(value))],
             ) => RuntimeValue::Primitive(Value::U64(value.chars().count() as u64)),
+            (
+                CompilerIntrinsic::ArrayFold,
+                [
+                    RuntimeValue::Array { values, .. },
+                    initial,
+                    RuntimeValue::Function(step),
+                ],
+            ) => {
+                let mut accumulator = initial.clone();
+                for value in values {
+                    accumulator = self.invoke_callable(
+                        step.clone(),
+                        vec![accumulator, value.clone()],
+                        result,
+                    )?;
+                }
+                accumulator
+            }
             // The packed variadic tail is already the built collection.
             (CompilerIntrinsic::ArrayOf | CompilerIntrinsic::MapOf, [tail]) => {
                 tail.clone()
@@ -1444,6 +1472,62 @@ fn observe(value: RuntimeValue) -> Option<ObservedValue> {
     })
 }
 
+/// The `str` or `bytes` value an array of scalars or bytes wraps into.
+fn representation_of(value_type: &Type, value: &RuntimeValue) -> Option<RuntimeValue> {
+    let RuntimeValue::Array { values, .. } = value else {
+        return None;
+    };
+    let item = |value: &RuntimeValue| match value {
+        RuntimeValue::Primitive(value) => Some(value.clone()),
+        _ => None,
+    };
+    Some(RuntimeValue::Primitive(match value_type {
+        Type::Str => Value::Str(
+            values
+                .iter()
+                .map(|value| match item(value)? {
+                    Value::Char(value) => Some(value),
+                    _ => None,
+                })
+                .collect::<Option<String>>()?,
+        ),
+        Type::Bytes => Value::Bytes(
+            values
+                .iter()
+                .map(|value| match item(value)? {
+                    Value::U8(value) => Some(value),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?,
+        ),
+        _ => return None,
+    }))
+}
+
+/// The array of scalars or bytes a `str` or `bytes` value is written over.
+fn items_of(value: &RuntimeValue) -> Option<RuntimeValue> {
+    let (element, values) = match value {
+        RuntimeValue::Primitive(Value::Str(text)) => (
+            Type::Char,
+            text.chars()
+                .map(|value| RuntimeValue::Primitive(Value::Char(value)))
+                .collect(),
+        ),
+        RuntimeValue::Primitive(Value::Bytes(bytes)) => (
+            Type::U8,
+            bytes
+                .iter()
+                .map(|value| RuntimeValue::Primitive(Value::U8(*value)))
+                .collect(),
+        ),
+        _ => return None,
+    };
+    Some(RuntimeValue::Array {
+        value_type: Type::Array(Box::new(element)),
+        values,
+    })
+}
+
 /// Whether `value` matches `pattern`. Binders and discards match anything;
 /// omitted record fields are never inspected.
 fn pattern_matches(pattern: &Pattern, value: &RuntimeValue) -> bool {
@@ -1487,6 +1571,10 @@ fn pattern_matches(pattern: &Pattern, value: &RuntimeValue) -> bool {
         (Pattern::Wrap(inner), RuntimeValue::Wrapper { value, .. }) => {
             pattern_matches(inner, value)
         }
+        (
+            Pattern::Wrap(inner),
+            RuntimeValue::Primitive(Value::Str(_) | Value::Bytes(_)),
+        ) => items_of(value).is_some_and(|items| pattern_matches(inner, &items)),
         (
             Pattern::Member { index, pattern, .. },
             RuntimeValue::Union { member, value, .. },
@@ -1537,6 +1625,10 @@ fn bind_pattern(
         (Pattern::Wrap(inner), RuntimeValue::Wrapper { value, .. }) => {
             bind_pattern(inner, *value, slots)
         }
+        (
+            Pattern::Wrap(inner),
+            value @ RuntimeValue::Primitive(Value::Str(_) | Value::Bytes(_)),
+        ) => bind_pattern(inner, items_of(&value)?, slots),
         (Pattern::Member { pattern, .. }, RuntimeValue::Union { value, .. }) => {
             bind_pattern(pattern, *value, slots)
         }
