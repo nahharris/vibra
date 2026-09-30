@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-match-patterns"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Match selects the first matching arm over enum, literal, record, tuple, wrapper, array, atom, and anonymous patterns, and destructuring let, parameter, and lambda patterns bind their components."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

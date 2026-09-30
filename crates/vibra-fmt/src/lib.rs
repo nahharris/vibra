@@ -614,7 +614,9 @@ fn render_pattern(
     context: &mut RenderContext<'_>,
 ) {
     match pattern.kind() {
-        PatternKind::Binding(name) => output.push_str(name.raw()),
+        PatternKind::Binding(name) | PatternKind::Atom(name) => {
+            output.push_str(name.raw())
+        }
         PatternKind::Literal(literal) => output.push_str(&format_leaf(literal.raw())),
         PatternKind::Constructor { head, arguments } => {
             output.push('(');

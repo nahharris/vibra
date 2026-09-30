@@ -16,6 +16,7 @@ use vibra_diagnostics::ByteSpan;
 
 mod nominal;
 mod observed;
+mod pattern;
 
 pub use nominal::{TypeBody, TypeDefinition, TypeId, canonical_members};
 use nominal::{
@@ -23,6 +24,7 @@ use nominal::{
     validate_declared_type,
 };
 pub use observed::ObservedValue;
+pub use pattern::{MatchArm, Pattern};
 
 /// The closed compiler intrinsic registry.
 pub mod external {
@@ -1119,6 +1121,18 @@ pub enum Expr {
         /// The source origin of the complete form.
         origin: SourceOrigin,
     },
+    /// A `match`: the scrutinee is evaluated once and the first arm whose
+    /// pattern matches it is selected.
+    Match {
+        /// The scrutinee.
+        scrutinee: Box<Self>,
+        /// Arms in source order.
+        arms: Vec<MatchArm>,
+        /// The common result type of every arm.
+        value_type: Type,
+        /// The source origin of the complete form.
+        origin: SourceOrigin,
+    },
     /// A boolean conditional with two already checked branches.
     If {
         /// The boolean condition.
@@ -1550,6 +1564,7 @@ impl Expr {
             | Self::Closure { origin, .. }
             | Self::Captured { origin, .. }
             | Self::Let { origin, .. }
+            | Self::Match { origin, .. }
             | Self::If { origin, .. }
             | Self::Call { origin, .. }
             | Self::Record { origin, .. }
@@ -1582,6 +1597,7 @@ impl Expr {
             }
             Self::Captured { value_type, .. } => value_type.clone(),
             Self::Let { body, .. } => body.result_type(),
+            Self::Match { value_type, .. } => value_type.clone(),
             Self::If { then_branch, .. } => then_branch.result_type(),
             Self::Call { result, .. } => result.clone(),
             Self::Record { value_type, .. }
@@ -1636,6 +1652,7 @@ impl Expr {
             | Self::Closure { .. }
             | Self::Captured { .. }
             | Self::Let { .. }
+            | Self::Match { .. }
             | Self::If { .. }
             | Self::Call { .. }
             | Self::Record { .. }
@@ -1665,6 +1682,7 @@ impl Expr {
             | Self::Closure { .. }
             | Self::Captured { .. }
             | Self::Let { .. }
+            | Self::Match { .. }
             | Self::If { .. }
             | Self::Call { .. }
             | Self::Record { .. }
@@ -1710,6 +1728,15 @@ impl Expr {
                 .slot_count()
                 .max(then_branch.slot_count())
                 .max(else_branch.slot_count()),
+            Self::Match {
+                scrutinee, arms, ..
+            } => arms.iter().fold(scrutinee.slot_count(), |count, arm| {
+                arm.pattern
+                    .bindings()
+                    .iter()
+                    .map(|(slot, _)| slot.saturating_add(1))
+                    .fold(count.max(arm.body.slot_count()), usize::max)
+            }),
             Self::Call {
                 arguments, target, ..
             } => target
@@ -1930,6 +1957,37 @@ impl Expr {
                     *bound = Some(value_type);
                 }
                 body.validate_shape_with_captures(&mut body_slots, capture_types)
+            }
+            Self::Match {
+                scrutinee,
+                arms,
+                value_type,
+                ..
+            } => {
+                let scrutinee_type =
+                    scrutinee.validate_shape_with_captures(slots, capture_types)?;
+                if arms.is_empty() {
+                    return Err(IrError::InvalidExpression(
+                        "match has no arm".to_owned(),
+                    ));
+                }
+                for arm in arms {
+                    let mut arm_slots = slots.to_vec();
+                    validate_pattern(
+                        &arm.pattern,
+                        Some(&scrutinee_type),
+                        &mut arm_slots,
+                    )?;
+                    let actual = arm
+                        .body
+                        .validate_shape_with_captures(&mut arm_slots, capture_types)?;
+                    if !value_type.admits(&actual) {
+                        return Err(IrError::InvalidExpression(format!(
+                            "match arm has type {actual}, expected {value_type}"
+                        )));
+                    }
+                }
+                Ok(value_type.clone())
             }
             Self::If {
                 condition,
@@ -2237,6 +2295,136 @@ impl Expr {
                 }
                 Ok(value_type.clone())
             }
+        }
+    }
+}
+
+/// Checks a pattern against its expected type and binds its slots. Inside a
+/// declared type the component types belong to the definition, which the
+/// program-level pass owns, so `expected` is `None` and only binders are
+/// recorded.
+fn validate_pattern(
+    pattern: &Pattern,
+    expected: Option<&Type>,
+    slots: &mut [Option<Type>],
+) -> Result<(), IrError> {
+    let invalid = |message: String| Err(IrError::InvalidExpression(message));
+    let declared = matches!(expected, Some(Type::Declared(_) | Type::Applied(_, _)));
+    match pattern {
+        Pattern::Wildcard => Ok(()),
+        Pattern::Bind { slot, value_type } => {
+            if let Some(expected) = expected
+                && !expected.admits(value_type)
+            {
+                return invalid(format!(
+                    "pattern binder has type {value_type}, expected {expected}"
+                ));
+            }
+            let Some(bound) = slots.get_mut(*slot) else {
+                return invalid(format!(
+                    "pattern slot {slot} is outside the activation"
+                ));
+            };
+            if bound.is_some() {
+                return invalid(format!("pattern slot {slot} shadows an active slot"));
+            }
+            *bound = Some(value_type.clone());
+            Ok(())
+        }
+        Pattern::Literal(value) => match expected {
+            Some(expected) if !expected.admits(&value.ty()) => invalid(format!(
+                "literal pattern has type {}, expected {expected}",
+                value.ty()
+            )),
+            _ => Ok(()),
+        },
+        Pattern::Variant { variant, payload } => {
+            let payload_type = match expected {
+                Some(Type::Enum(variants)) => {
+                    let Some((_, payload_type)) =
+                        variants.iter().find(|(name, _)| name == variant)
+                    else {
+                        return invalid(format!(
+                            "pattern names unknown variant `{variant}`"
+                        ));
+                    };
+                    Some(payload_type)
+                }
+                None | Some(Type::Declared(_) | Type::Applied(_, _)) => None,
+                Some(expected) => {
+                    return invalid(format!(
+                        "variant pattern for non-enum type {expected}"
+                    ));
+                }
+            };
+            match payload {
+                Some(payload) => validate_pattern(payload, payload_type, slots),
+                None => Ok(()),
+            }
+        }
+        Pattern::Record(fields) => {
+            for (name, field) in fields {
+                let field_type = match expected {
+                    Some(Type::Record(members)) => {
+                        let Some((_, field_type)) =
+                            members.iter().find(|(member, _)| member == name)
+                        else {
+                            return invalid(format!(
+                                "pattern names unknown field `{name}`"
+                            ));
+                        };
+                        Some(field_type)
+                    }
+                    None | Some(Type::Declared(_) | Type::Applied(_, _)) => None,
+                    Some(expected) => {
+                        return invalid(format!(
+                            "record pattern for non-record type {expected}"
+                        ));
+                    }
+                };
+                validate_pattern(field, field_type, slots)?;
+            }
+            Ok(())
+        }
+        Pattern::Tuple(items) => {
+            let components = match expected {
+                Some(Type::Tuple(components)) if components.len() == items.len() => {
+                    Some(components)
+                }
+                None | Some(Type::Declared(_) | Type::Applied(_, _)) => None,
+                Some(expected) => {
+                    return invalid(format!("tuple pattern does not fit {expected}"));
+                }
+            };
+            for (index, item) in items.iter().enumerate() {
+                validate_pattern(
+                    item,
+                    components.and_then(|components| components.get(index)),
+                    slots,
+                )?;
+            }
+            Ok(())
+        }
+        Pattern::Wrap(inner) => {
+            if !(declared || expected.is_none()) {
+                return invalid("wrapper pattern for a non-declared type".to_owned());
+            }
+            validate_pattern(inner, None, slots)
+        }
+        Pattern::Array(items) => {
+            let element = match expected {
+                Some(Type::Array(element)) => Some(element.as_ref()),
+                None => None,
+                Some(expected) => {
+                    return invalid(format!(
+                        "array pattern for non-array type {expected}"
+                    ));
+                }
+            };
+            for item in items {
+                validate_pattern(item, element, slots)?;
+            }
+            Ok(())
         }
     }
 }
@@ -3167,6 +3355,28 @@ fn validate_program_expr(
                 dependencies,
             )?;
         }
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            validate_program_expr(
+                scrutinee,
+                globals,
+                functions,
+                owner,
+                calls,
+                dependencies,
+            )?;
+            for arm in arms {
+                validate_program_expr(
+                    &arm.body,
+                    globals,
+                    functions,
+                    owner,
+                    calls,
+                    dependencies,
+                )?;
+            }
+        }
         Expr::If {
             condition,
             then_branch,
@@ -3436,6 +3646,20 @@ fn possible_function_targets(
         // returns a module function.  It therefore cannot be summarized as
         // that function's identity for a module-level tail transfer.
         Expr::Closure { .. } => FunctionTargetSummary::closure(),
+        Expr::Match { arms, .. } => {
+            let mut summary = FunctionTargetSummary::default();
+            for arm in arms {
+                summary.union(possible_function_targets(
+                    &arm.body,
+                    aliases,
+                    globals,
+                    functions,
+                    visiting,
+                    visiting_globals,
+                ));
+            }
+            summary
+        }
         Expr::If {
             then_branch,
             else_branch,
@@ -4177,6 +4401,18 @@ impl<'a> CallFlow<'a> {
                     ),
                 }
             }
+            Expr::Match { arms, .. } => {
+                let mut summary = FlowTargetSummary::default();
+                for arm in arms {
+                    summary.union(&self.summary_expr_with_stack(
+                        &arm.body,
+                        environment,
+                        captures,
+                        visiting,
+                    ));
+                }
+                summary
+            }
             Expr::If {
                 then_branch,
                 else_branch,
@@ -4383,6 +4619,14 @@ impl<'a> CallFlow<'a> {
                         self.collect_expr(body, owner, &nested, captures)?
                     }
                     None => self.collect_expr(body, owner, environment, captures)?,
+                }
+            }
+            Expr::Match {
+                scrutinee, arms, ..
+            } => {
+                self.collect_expr(scrutinee, owner, environment, captures)?;
+                for arm in arms {
+                    self.collect_expr(&arm.body, owner, environment, captures)?;
                 }
             }
             Expr::If {
@@ -4860,6 +5104,30 @@ fn validate_tail_calls(
                 nested_aliases.as_ref().unwrap_or(aliases),
             )?;
         }
+        Expr::Match {
+            scrutinee, arms, ..
+        } => {
+            validate_tail_calls(
+                scrutinee,
+                false,
+                current_function,
+                recursive_groups,
+                globals,
+                functions,
+                aliases,
+            )?;
+            for arm in arms {
+                validate_tail_calls(
+                    &arm.body,
+                    tail_position,
+                    current_function,
+                    recursive_groups,
+                    globals,
+                    functions,
+                    aliases,
+                )?;
+            }
+        }
         Expr::If {
             condition,
             then_branch,
@@ -5243,6 +5511,23 @@ fn canonical_expr(expression: &Expr) -> String {
                 canonical_expr(body)
             )
         }
+        Expr::Match {
+            scrutinee,
+            arms,
+            value_type,
+            ..
+        } => format!(
+            "(record kind: @match type: {} scrutinee: {} arms: (array{}))",
+            canonical_type(value_type),
+            canonical_expr(scrutinee),
+            arms.iter()
+                .map(|arm| format!(
+                    " (record pattern: {} body: {})",
+                    arm.pattern.canonical_vibon(),
+                    canonical_expr(&arm.body)
+                ))
+                .collect::<String>()
+        ),
         Expr::If {
             condition,
             then_branch,

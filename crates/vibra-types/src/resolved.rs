@@ -713,6 +713,7 @@ pub fn check_resolved(
         environment.generics = header.type_parameters.clone();
         environment.reports_redeclarations = false;
         let mut parameters_valid = true;
+        let mut pending = Vec::new();
         for (parameter_index, parameter) in function.parameters().iter().enumerate() {
             match parameter.parsed_pattern().kind() {
                 vibra_syntax::PatternKind::Binding(name) if name.is_discard() => {}
@@ -726,15 +727,14 @@ pub fn check_resolved(
                         parameters_valid = false;
                     }
                 }
-                _ => {
-                    parameters_valid = false;
-                    unavailable(
-                        environment.diagnostics,
-                        environment.source_id,
-                        parameter.span(),
-                        "constructor and destructuring patterns are deferred until M3",
-                    );
-                }
+                _ => match header.signature.parameters().get(parameter_index) {
+                    Some(value_type) => pending.push((
+                        parameter_index,
+                        parameter.parsed_pattern(),
+                        value_type.clone(),
+                    )),
+                    None => parameters_valid = false,
+                },
             }
             environment.next_slot = parameter_index.saturating_add(1);
         }
@@ -762,6 +762,9 @@ pub fn check_resolved(
         {
             parameters_valid = false;
         }
+        let Some(destructured) = environment.bind_parameter_patterns(&pending) else {
+            continue;
+        };
         if !parameters_valid {
             continue;
         }
@@ -775,6 +778,7 @@ pub fn check_resolved(
             continue;
         };
         let origin = SourceOrigin::new(header.source_id.as_str(), function.span());
+        let body = crate::wrap_destructured(body, destructured, &origin);
         match CheckedFunction::with_slots(
             header.name,
             header.signature,

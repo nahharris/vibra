@@ -2,7 +2,7 @@ id = "V1-TYPE-CONTROL-availability-patterns"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
 operation = "type-check"
-description = "Literal, constructor, tupleof, array, and as parameter patterns are rejected at their parameter source forms."
+description = "An as pattern stays unavailable until unions arrive, in a parameter and in a let."
 
 [inputs]
 source = "input.vib"
@@ -14,28 +14,10 @@ accepted = false
 code = "@tool.unavailable"
 level = "@error"
 source = "input.vib"
-span = [23, 31]
+span = [18, 31]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
 source = "input.vib"
-span = [70, 85]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "input.vib"
-span = [118, 142]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "input.vib"
-span = [175, 191]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "input.vib"
-span = [221, 238]
+span = [82, 95]

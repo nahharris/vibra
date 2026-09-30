@@ -1018,7 +1018,11 @@ numeric type is therefore never closed by literals alone.
 A `match` whose arms do not cover the scrutinee type emits
 `@pattern.non-exhaustive` at the complete `match` form, with one note naming
 one uncovered value shape in canonical pattern spelling, chosen as the first
-uncovered shape in declaration order of variants, members, and fields. An arm
+uncovered shape in declaration order of variants, members, and fields. In that
+shape, a position that only a binder or discard can cover (a value of an
+infinite space such as `str`, `atom`, or a number) is spelled `-`, as is a
+record, tuple, or wrapper whose every component is `-`. A refutable binding
+pattern's `@pattern.refutable-binding` carries the same kind of note. An arm
 that no value can reach because earlier arms cover it emits
 `@pattern.unreachable-arm` at that arm's pattern, relating the earliest arm
 that alone covers it when one exists. Arms are examined in source order, so

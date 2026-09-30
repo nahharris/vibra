@@ -13,24 +13,25 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `ExpressionKind::Literal` | M2 | — | Atom singleton types: Step 6 |
 | `ExpressionKind::Name` | M2 | — | Nominal constructors and methods as names: Step 2 |
 | `ExpressionKind::Application` | M2 | — | Constructors and projection: Step 2; lookups, `tupleof`, `array.of`, and `map.of`: Step 4; `recordof` and `enumof`: Step 2; `types:`: Step 3 |
-| `ExpressionKind::Lambda` | M2 | — | Destructuring parameters: Step 5 |
+| `ExpressionKind::Lambda` | M2 | — | Destructuring parameters: Step 5 (`V1-RUNTIME-match-patterns`, `V1-TYPE-CONTROL-pattern-refutable-binding`) |
 | `ExpressionKind::Do` | M2 | — | Unhandled-fallible positions: Step 7 |
-| `ExpressionKind::Let` | M2 | — | Destructuring patterns: Step 5 |
+| `ExpressionKind::Let` | M2 | — | Destructuring patterns: Step 5 (`V1-RUNTIME-match-patterns`, `V1-RUNTIME-workspace-test-patterns`) |
 | `ExpressionKind::If` | M2 | — | — |
-| `ExpressionKind::Match` | Stage 3A | Step 5 | Union arms: Step 6 |
+| `ExpressionKind::Match` | Stage 3A | Step 5 | Cases `V1-RUNTIME-match-patterns`, `V1-TYPE-CONTROL-match-exhaustive`, `V1-TYPE-CONTROL-match-non-exhaustive`, `V1-TYPE-CONTROL-match-unreachable-arm`; union arms: Step 6 |
 | `ExpressionKind::As` | Stage 3A | Step 6 | Interface targets: Step 12 |
 | `ExpressionKind::Try` | Stage 3A | Step 7 | — |
 | `ExpressionKind::TupleOf` | Stage 3A | Step 4 | Reader and formatter: Step 2; case `V1-RUNTIME-tuples` |
 | `ExpressionKind::RecordOf` | Stage 3A | Step 2 | — |
 | `ExpressionKind::EnumOf` | Stage 3A | Step 2 | — |
-| `PatternKind::Binding` | M2 | — | — |
-| `PatternKind::Literal` | Stage 3A | Step 5 | — |
-| `PatternKind::Constructor` | Stage 3A | Step 5 | Record, tuple, enum, union, and wrapper constructors |
-| `PatternKind::Tuple` | Stage 3A | Step 5 | Spelled `(tupleof …)` from Step 2 |
-| `PatternKind::RecordOf` | Stage 3A | Step 5 | Reader and formatter: Step 2 |
-| `PatternKind::EnumOf` | Stage 3A | Step 5 | Reader and formatter: Step 2 |
-| `PatternKind::Array` | Stage 3A | Step 5 | — |
-| `PatternKind::As` | Stage 3A | Step 6 | — |
+| `PatternKind::Binding` | M2 | — | Binder rules in patterns: Step 5 (`V1-TYPE-CONTROL-pattern-redeclaration`) |
+| `PatternKind::Literal` | Stage 3A | Step 5 | Not floats or `void`; cases `V1-TYPE-CONTROL-match-exhaustive`, `V1-TYPE-CONTROL-pattern-type-mismatch` |
+| `PatternKind::Atom` | Stage 3A | Step 5 | Atom scrutinees are never closed; cases `V1-RUNTIME-match-patterns`, `V1-TYPE-CONTROL-match-non-exhaustive` |
+| `PatternKind::Constructor` | Stage 3A | Step 5 | Record, tuple, enum, and wrapper constructors (`V1-RUNTIME-match-patterns`, `V1-RUNTIME-workspace-test-patterns`); union members: Step 6 |
+| `PatternKind::Tuple` | Stage 3A | Step 5 | Spelled `(tupleof …)` from Step 2; case `V1-RUNTIME-match-patterns` |
+| `PatternKind::RecordOf` | Stage 3A | Step 5 | Reader and formatter: Step 2; case `V1-RUNTIME-match-patterns` |
+| `PatternKind::EnumOf` | Stage 3A | Step 5 | Reader and formatter: Step 2; case `V1-RUNTIME-match-patterns` |
+| `PatternKind::Array` | Stage 3A | Step 5 | Exact length; case `V1-RUNTIME-match-patterns` |
+| `PatternKind::As` | Stage 3A | Step 6 | Unavailable until then: `V1-TYPE-CONTROL-availability-patterns` |
 | `VariadicBinding::Array` | Stage 3A | Step 4 | Cases `V1-RUNTIME-variadics`, `V1-SRC-CALLS-variadic-array-application` |
 | `VariadicBinding::Map` | Stage 3A | Step 4 | Cases `V1-RUNTIME-map-order`, `V1-SRC-CALLS-variadic-map-application` |
 | `Declaration::Import` | M2 | — | Standard-library input replacement: Step 4 (`stdlib::tests`, `V1-PROJECT-workspace-check-bootstrap-source-id-collision`); declaration imports: Step 4b (`V1-PROJECT-workspace-check-declaration-imports`) |
@@ -72,9 +73,9 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | M2 row | Owner |
 | --- | --- |
 | C1.3 — generics, nominal collections, interfaces, conversion | Steps 2–4, 11–13; `any`-bounded generics implemented by Step 3 (`V1-RUNTIME-generic-functions`) |
-| C1.5 — `match`, `try`, `option`, `result`, refutable patterns | Steps 4, 5, 7 |
+| C1.5 — `match`, `try`, `option`, `result`, refutable patterns | Steps 4, 5, 7; `match` and refutable patterns implemented by Step 5 (`V1-TYPE-CONTROL-match-non-exhaustive`, `V1-TYPE-CONTROL-pattern-refutable-binding`) |
 | C1.6 — variadic array and map operands | Step 4; implemented (`V1-RUNTIME-variadics`, `V1-SRC-CALLS-variadic-map-application`) |
 | C1.7 — `as`, singleton widening, narrowing | Step 6 |
-| C5.2 — constructor and destructuring patterns | Step 5 |
+| C5.2 — constructor and destructuring patterns | Step 5; implemented (`V1-RUNTIME-match-patterns`, `V1-RUNTIME-workspace-test-patterns`) |
 | C6.2 — `types:` generic arguments | Step 3; implemented (`V1-TYPE-GENERIC-type-arguments`, `V1-TOOL-format-types-order`) |
 | Unavailable `integer.*` compiler symbols (M2 registry note) | Step 8, as static methods of the numeric primitive types |

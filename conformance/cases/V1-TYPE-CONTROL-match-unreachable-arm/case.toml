@@ -1,0 +1,31 @@
+id = "V1-TYPE-CONTROL-match-unreachable-arm"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "A repeated arm and an arm after a covering binder are unreachable and relate the earliest arm that covers them."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@pattern.unreachable-arm"
+level = "@error"
+source = "input.vib"
+span = [66, 70]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [45, 49]
+
+[[expect.diagnostics]]
+code = "@pattern.unreachable-arm"
+level = "@error"
+source = "input.vib"
+span = [139, 143]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [127, 132]

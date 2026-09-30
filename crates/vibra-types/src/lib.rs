@@ -34,6 +34,7 @@ use vibra_syntax::{
 mod construct;
 mod infer;
 mod nominal;
+mod pattern;
 mod resolved;
 mod standard;
 mod stdlib;
@@ -1036,6 +1037,7 @@ impl<'a> Checker<'a> {
             environment.self_type = header.self_type.clone();
             environment.generics = header.type_parameters.clone();
             let mut parameters_valid = true;
+            let mut pending = Vec::new();
             for (parameter_index, parameter) in function.parameters().iter().enumerate()
             {
                 match parameter.parsed_pattern().kind() {
@@ -1050,15 +1052,14 @@ impl<'a> Checker<'a> {
                             parameters_valid = false;
                         }
                     }
-                    _ => {
-                        parameters_valid = false;
-                        unavailable(
-                            environment.diagnostics,
-                            environment.source_id,
-                            parameter.span(),
-                            "constructor and destructuring patterns are deferred until M3",
-                        );
-                    }
+                    _ => match header.signature.parameters().get(parameter_index) {
+                        Some(value_type) => pending.push((
+                            parameter_index,
+                            parameter.parsed_pattern(),
+                            value_type.clone(),
+                        )),
+                        None => parameters_valid = false,
+                    },
                 }
                 environment.next_slot = parameter_index.saturating_add(1);
             }
@@ -1088,6 +1089,10 @@ impl<'a> Checker<'a> {
             {
                 parameters_valid = false;
             }
+            let destructured = environment.bind_parameter_patterns(&pending);
+            let Some(destructured) = destructured else {
+                continue;
+            };
             if !parameters_valid {
                 continue;
             }
@@ -1101,6 +1106,7 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let origin = SourceOrigin::new(self.source_id, function.span());
+            let body = wrap_destructured(body, destructured, &origin);
             match CheckedFunction::with_slots(
                 header.name,
                 header.signature,
@@ -1208,6 +1214,33 @@ pub(crate) fn initializer_cycle_diagnostic(global: &SourceOrigin) -> Diagnostic 
         "module value initializers form a cycle",
     )
     .with_source_id(global.source_id())
+}
+
+struct ScopeExit {
+    next_slot: usize,
+    captures: BTreeMap<String, CaptureBinding>,
+    capture_sources: Vec<Expr>,
+}
+
+/// Wraps a function or `lambda` body in one single-arm `match` per
+/// destructuring positional parameter, outermost first.
+fn wrap_destructured(
+    body: Expr,
+    patterns: Vec<(usize, Type, vibra_ir::Pattern)>,
+    origin: &SourceOrigin,
+) -> Expr {
+    patterns
+        .into_iter()
+        .rev()
+        .fold(body, |body, (slot, value_type, pattern)| {
+            let result = body.result_type();
+            Expr::Match {
+                scrutinee: Box::new(Expr::variable(slot, value_type, origin.clone())),
+                arms: vec![vibra_ir::MatchArm { pattern, body }],
+                value_type: result,
+                origin: origin.clone(),
+            }
+        })
 }
 
 struct CheckEnvironment<'a> {
@@ -1441,6 +1474,93 @@ impl<'a> CheckEnvironment<'a> {
             });
         }
         self.module_names.get(name).copied()
+    }
+
+    /// and captures flow back through [`Self::absorb`].
+    fn scoped(&mut self) -> CheckEnvironment<'_> {
+        CheckEnvironment {
+            source_id: self.source_id,
+            diagnostics: self.diagnostics,
+            types: self.types,
+            self_type: self.self_type.clone(),
+            generics: self.generics.clone(),
+            callee_position: false,
+            keeps_generic: false,
+            global_indices: self.global_indices,
+            globals: self.globals,
+            functions: self.functions,
+            function_indices: self.function_indices,
+            module_names: self.module_names,
+            bindings: &mut *self.bindings,
+            locals: self.locals.clone(),
+            captures: self.captures.clone(),
+            capture_sources: self.capture_sources.clone(),
+            outer: self.outer.clone(),
+            next_slot: self.next_slot,
+            current_function: self.current_function,
+            resolved_targets: self.resolved_targets,
+            reports_redeclarations: self.reports_redeclarations,
+        }
+    }
+
+    /// Takes back the slots and captures a nested scope used.
+    fn absorb(&mut self, scope: ScopeExit) {
+        self.next_slot = self.next_slot.max(scope.next_slot);
+        self.captures = scope.captures;
+        self.capture_sources = scope.capture_sources;
+    }
+
+    fn exit(&self) -> ScopeExit {
+        ScopeExit {
+            next_slot: self.next_slot,
+            captures: self.captures.clone(),
+            capture_sources: self.capture_sources.clone(),
+        }
+    }
+
+    /// Checks a binding pattern (`let`, a positional parameter, or a
+    /// `lambda` parameter), which must be irrefutable for its type.
+    fn check_binding_pattern(
+        &mut self,
+        written: &vibra_syntax::Pattern,
+        value_type: &Type,
+    ) -> Option<vibra_ir::Pattern> {
+        let checked = pattern::check_pattern(self, written, value_type)?;
+        if let Some(witness) =
+            pattern::uncovered(self.types, std::slice::from_ref(&checked), value_type)
+        {
+            self.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::PatternRefutableBinding,
+                    written.span(),
+                    "a binding pattern must match every value of its type",
+                )
+                .with_source_id(self.source_id)
+                .with_note(format!(
+                    "`{}` is not matched",
+                    pattern::spell(self.types, &witness, value_type)
+                )),
+            );
+            return None;
+        }
+        Some(checked)
+    }
+
+    /// Checks the destructuring positional parameters once every parameter
+    /// slot is bound, so their binders take the slots after them.
+    fn bind_parameter_patterns(
+        &mut self,
+        pending: &[(usize, &vibra_syntax::Pattern, Type)],
+    ) -> Option<Vec<(usize, Type, vibra_ir::Pattern)>> {
+        let mut checked = Vec::with_capacity(pending.len());
+        let mut valid = true;
+        for (slot, written, value_type) in pending {
+            match self.check_binding_pattern(written, value_type) {
+                Some(pattern) => checked.push((*slot, value_type.clone(), pattern)),
+                None => valid = false,
+            }
+        }
+        valid.then_some(checked)
     }
 
     fn visible_bindings(&self) -> VisibleBindings {
@@ -1693,6 +1813,28 @@ fn function_targets_from_expr(
             .map_or_else(FunctionTargetSet::default, |expression| {
                 function_targets_from_expr(expression, environment, aliases)
             }),
+        Expr::Match { arms, .. } => {
+            let mut targets = FunctionTargetSet::default();
+            for arm in arms {
+                // A pattern binder's targets are not tracked: a callable one is
+                // unknown, which is sound.
+                let mut nested = aliases.clone();
+                for (slot, value_type) in arm.pattern.bindings() {
+                    let bound = if matches!(value_type, Type::Function(_)) {
+                        FunctionTargetSet::unknown()
+                    } else {
+                        FunctionTargetSet::default()
+                    };
+                    nested.insert(slot, bound);
+                }
+                targets.union(&function_targets_from_expr(
+                    &arm.body,
+                    environment,
+                    &nested,
+                ));
+            }
+            targets
+        }
         Expr::If {
             then_branch,
             else_branch,
@@ -1820,6 +1962,12 @@ fn syntax_function_targets(
                     scoped.insert(name.value().to_owned(), targets);
                 }
             }
+            // Destructured binders are not tracked: a callable one is unknown.
+            if !matches!(pattern.kind(), PatternKind::Binding(_)) {
+                for name in pattern::binder_names(pattern) {
+                    scoped.insert(name, FunctionTargetSet::unknown());
+                }
+            }
             body.last()
                 .map_or_else(FunctionTargetSet::default, |expression| {
                     syntax_function_targets(
@@ -1850,6 +1998,23 @@ fn syntax_function_targets(
                 globals,
                 aliases,
             ));
+            targets
+        }
+        ExpressionKind::Match { arms, .. } => {
+            let mut targets = FunctionTargetSet::default();
+            for arm in arms {
+                let mut scoped = aliases.clone();
+                for name in pattern::binder_names(arm.pattern()) {
+                    scoped.insert(name, FunctionTargetSet::unknown());
+                }
+                targets.union(&syntax_function_targets(
+                    arm.result(),
+                    global_indices,
+                    function_indices,
+                    globals,
+                    &scoped,
+                ));
+            }
             targets
         }
         ExpressionKind::Lambda(_) => FunctionTargetSet::closure(),
@@ -3479,29 +3644,8 @@ fn check_expression_in_position(
                 .then(|| {
                     function_targets_from_expr(&value, environment, &BTreeMap::new())
                 });
-            let mut nested = CheckEnvironment {
-                source_id: environment.source_id,
-                diagnostics: environment.diagnostics,
-                types: environment.types,
-                self_type: environment.self_type.clone(),
-                generics: environment.generics.clone(),
-                callee_position: false,
-                keeps_generic: false,
-                global_indices: environment.global_indices,
-                globals: environment.globals,
-                functions: environment.functions,
-                function_indices: environment.function_indices,
-                module_names: environment.module_names,
-                bindings: &mut *environment.bindings,
-                locals: environment.locals.clone(),
-                captures: environment.captures.clone(),
-                capture_sources: environment.capture_sources.clone(),
-                outer: environment.outer.clone(),
-                next_slot: environment.next_slot,
-                current_function: environment.current_function,
-                resolved_targets: environment.resolved_targets,
-                reports_redeclarations: environment.reports_redeclarations,
-            };
+            let mut nested = environment.scoped();
+            let mut destructured = None;
             let slot = match pattern.kind() {
                 PatternKind::Binding(name) if name.is_discard() => None,
                 PatternKind::Binding(name) => {
@@ -3518,14 +3662,12 @@ fn check_expression_in_position(
                     }
                     Some(nested.next_slot.saturating_sub(1))
                 }
+                // A destructuring `let` is a single-arm `match`.
                 _ => {
-                    unavailable(
-                        nested.diagnostics,
-                        nested.source_id,
-                        pattern.span(),
-                        "constructor and destructuring patterns are deferred until M3",
+                    destructured = Some(
+                        nested.check_binding_pattern(pattern, &value.result_type())?,
                     );
-                    return None;
+                    None
                 }
             };
             let result = check_sequence(
@@ -3535,22 +3677,28 @@ fn check_expression_in_position(
                 expression.span(),
                 tail_position,
             );
-            let next_slot = nested.next_slot;
-            let captures = nested.captures.clone();
-            let capture_sources = nested.capture_sources.clone();
+            let exit = nested.exit();
             drop(nested);
-            environment.next_slot = environment.next_slot.max(next_slot);
-            environment.captures = captures;
-            environment.capture_sources = capture_sources;
-            result.map(|body| {
-                Expr::let_binding(
-                    slot,
-                    value,
-                    body,
-                    SourceOrigin::new(environment.source_id, expression.span()),
-                )
+            environment.absorb(exit);
+            let origin = SourceOrigin::new(environment.source_id, expression.span());
+            result.map(|body| match destructured {
+                Some(pattern) => Expr::Match {
+                    value_type: body.result_type(),
+                    scrutinee: Box::new(value),
+                    arms: vec![vibra_ir::MatchArm { pattern, body }],
+                    origin,
+                },
+                None => Expr::let_binding(slot, value, body, origin),
             })
         }
+        ExpressionKind::Match { scrutinee, arms } => check_match(
+            environment,
+            expression,
+            scrutinee,
+            arms,
+            expected,
+            tail_position,
+        ),
         ExpressionKind::If {
             condition,
             then_branch,
@@ -3639,6 +3787,7 @@ fn check_expression_in_position(
             }
             let mut parameters_valid = true;
             let mut parameter_types = Vec::with_capacity(lambda.parameters().len());
+            let mut pending = Vec::new();
             for (parameter_index, parameter) in lambda.parameters().iter().enumerate() {
                 // The signature already lowered and reported every parameter type.
                 let Some(value_type) =
@@ -3660,15 +3809,11 @@ fn check_expression_in_position(
                             parameters_valid = false;
                         }
                     }
-                    _ => {
-                        parameters_valid = false;
-                        unavailable(
-                            nested.diagnostics,
-                            nested.source_id,
-                            parameter.span(),
-                            "constructor and destructuring patterns are deferred until M3",
-                        );
-                    }
+                    _ => pending.push((
+                        parameter_index,
+                        parameter.parsed_pattern(),
+                        value_type,
+                    )),
                 }
                 nested.next_slot = parameter_index.saturating_add(1);
             }
@@ -3695,6 +3840,7 @@ fn check_expression_in_position(
             if !nested.bind_variadic(lambda.attributes().items(), &signature) {
                 parameters_valid = false;
             }
+            let destructured = nested.bind_parameter_patterns(&pending)?;
             if !parameters_valid {
                 return None;
             }
@@ -3705,6 +3851,11 @@ fn check_expression_in_position(
                 lambda.span(),
                 true,
             )?;
+            let body = wrap_destructured(
+                body,
+                destructured,
+                &SourceOrigin::new(nested.source_id, lambda.span()),
+            );
             let capture_sources = std::mem::take(&mut nested.capture_sources);
             let slot_count = nested.next_slot;
             drop(nested);
@@ -3780,9 +3931,7 @@ fn check_expression_in_position(
         ExpressionKind::TupleOf(components) => {
             construct::check_tupleof(environment, expression, components, expected)
         }
-        ExpressionKind::Match { .. }
-        | ExpressionKind::As { .. }
-        | ExpressionKind::Try(_) => {
+        ExpressionKind::As { .. } | ExpressionKind::Try(_) => {
             unavailable(
                 environment.diagnostics,
                 environment.source_id,
@@ -3796,6 +3945,112 @@ fn check_expression_in_position(
             None
         }
     }
+}
+
+/// Checks `match`: the subject once, then each arm's pattern against the
+/// subject type and its result against the common result type. Arms are
+/// examined in source order for reachability, then all together for
+/// exhaustiveness.
+fn check_match(
+    environment: &mut CheckEnvironment<'_>,
+    expression: &Expression,
+    scrutinee: &Expression,
+    arms: &[vibra_syntax::MatchArm],
+    expected: Option<Type>,
+    tail_position: bool,
+) -> Option<Expr> {
+    let scrutinee = check_expression(environment, scrutinee, None)?;
+    let subject_type = scrutinee.result_type();
+    let mut result_type = expected;
+    let mut checked = Vec::with_capacity(arms.len());
+    let mut valid = true;
+    for arm in arms {
+        let mut nested = environment.scoped();
+        let pattern = pattern::check_pattern(&mut nested, arm.pattern(), &subject_type);
+        let body = pattern.as_ref().and_then(|_| {
+            check_expression_in_position(
+                &mut nested,
+                arm.result(),
+                result_type.clone(),
+                tail_position,
+            )
+        });
+        let exit = nested.exit();
+        drop(nested);
+        environment.absorb(exit);
+        match (pattern, body) {
+            (Some(pattern), Some(body)) => {
+                if result_type.is_none() {
+                    result_type = Some(body.result_type());
+                }
+                checked.push((arm, vibra_ir::MatchArm { pattern, body }));
+            }
+            _ => valid = false,
+        }
+    }
+    if !valid {
+        return None;
+    }
+    let patterns: Vec<vibra_ir::Pattern> =
+        checked.iter().map(|(_, arm)| arm.pattern.clone()).collect();
+    for (index, (arm, checked_arm)) in checked.iter().enumerate() {
+        let earlier = patterns.get(..index).unwrap_or_default();
+        if pattern::reachable(
+            environment.types,
+            earlier,
+            &checked_arm.pattern,
+            &subject_type,
+        ) {
+            continue;
+        }
+        valid = false;
+        let mut diagnostic = Diagnostic::new(
+            DiagnosticCode::PatternUnreachableArm,
+            arm.pattern().span(),
+            "no value reaches this arm: earlier arms cover it",
+        )
+        .with_source_id(environment.source_id);
+        if let Some((covering, _)) = checked.get(..index).and_then(|earlier| {
+            earlier.iter().find(|(_, earlier)| {
+                !pattern::reachable(
+                    environment.types,
+                    std::slice::from_ref(&earlier.pattern),
+                    &checked_arm.pattern,
+                    &subject_type,
+                )
+            })
+        }) {
+            diagnostic = diagnostic
+                .with_related(covering.pattern().span(), "covered by this arm");
+        }
+        environment.diagnostics.push(diagnostic);
+    }
+    if let Some(witness) =
+        pattern::uncovered(environment.types, &patterns, &subject_type)
+    {
+        valid = false;
+        environment.diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::PatternNonExhaustive,
+                expression.span(),
+                "the arms do not cover every value of the subject type",
+            )
+            .with_source_id(environment.source_id)
+            .with_note(format!(
+                "`{}` is not covered",
+                pattern::spell(environment.types, &witness, &subject_type)
+            )),
+        );
+    }
+    if !valid {
+        return None;
+    }
+    Some(Expr::Match {
+        scrutinee: Box::new(scrutinee),
+        arms: checked.into_iter().map(|(_, arm)| arm).collect(),
+        value_type: result_type?,
+        origin: SourceOrigin::new(environment.source_id, expression.span()),
+    })
 }
 
 fn resolved_reference_target(

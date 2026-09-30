@@ -1,0 +1,36 @@
+(deftype color (enum red void green void blue void))
+
+(deftype point (record x i32 y i32))
+
+(deftype id u64)
+
+(defn colors (value color) i32
+  (match value (color.red) 0i32 (color.green) 1i32 (color.blue) 2i32))
+
+(defn flags (value (tuple bool bool)) i32
+  (match value
+    (tupleof true -) 0i32
+    (tupleof false true) 1i32
+    (tupleof false false) 2i32))
+
+(defn origin (value point) bool
+  (match value (point x: 0i32 y: 0i32) true (point) false))
+
+(defn raw ((id number) id) u64 number)
+
+(defn anonymous (value (record a (enum on void off void) b str)) str
+  (match value
+    (recordof a: (enumof on: -)) "on"
+    (recordof a: (enumof off: -) b: label) label))
+
+(defn items (value (array bool)) i32
+  (match value (array) 0i32 (array true) 1i32 (array false) 2i32 - 3i32))
+
+(defn words (value str) i32 (match value "a" 1i32 "b" 2i32 - 0i32))
+
+(defn numbers (value i32) i32 (match value 0i32 1i32 1i32 2i32 other other))
+
+(defn atoms (value atom) i32 (match value @on 1i32 @off 0i32 @- 2i32))
+
+(defn discards ((tupleof - @- -:) (tuple i32 i32 i32)) i32
+  (let (tupleof - -) (tupleof 1i32 2i32) 0i32))

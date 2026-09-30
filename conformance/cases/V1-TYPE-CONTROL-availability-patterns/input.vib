@@ -1,5 +1,3 @@
-(defn literal-pattern (true i32) i32 0i32)
-(defn constructor-pattern ((some item) i32) i32 0i32)
-(defn tuple-pattern ((tupleof left right) i32) i32 0i32)
-(defn array-pattern ((array item) i32) i32 0i32)
 (defn as-pattern ((as i32 item) i32) i32 0i32)
+
+(defn as-let (value i32) i32 (let (as i32 item) value item))
