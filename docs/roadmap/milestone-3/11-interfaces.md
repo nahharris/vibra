@@ -1,4 +1,4 @@
-# Step 11 — interfaces, `impl`, and the library map
+# Step 11 — interfaces and `impl`
 
 Prerequisite: Step 10 merged. Stage 3B behavior step.
 
@@ -29,31 +29,30 @@ Prerequisite: Step 10 merged. Stage 3B behavior step.
    receiver's static type. The member's dispatch class is fixed at
    declaration: receiver-dispatched, destination-dispatched (checked here,
    called in Step 13), or `@type.undispatchable-contract-member`.
-4. **Interface-bounded generics.** `where: (k ordered)`: a bounded parameter's
-   contract members are callable on its values, and an instantiation must
-   satisfy the bound.
-5. **Key contracts and the library map** (D17.1, D18.2). `@std.core` declares
-   `equatable` and `ordered`. The closed key conformances become ordinary
-   implementations in the standard library. `map` moves into the standard
-   library as a `deftype` over a sorted array of entries that claims `@map`,
-   with `map.of` and lookup as Vibra with native implementations. A user
-   `deftype` key needs its own `ordered` implementation.
+4. **Interface-bounded generic functions.** `where: (t shape)` on a `defn`: a
+   bounded parameter's contract members are callable on its values, and an
+   instantiation must satisfy the bound (`@type.unsatisfied-bound`, which also
+   reports a contract call whose receiver type has no implementation).
+
+The key contracts, bounds on `deftype` and `lambda` parameters, and the library
+`map` are [Step 11b](11b-key-contracts.md).
 
 ## Test matrix
 
 - Positive: an interface with abstract and default members implemented in each
   placement; a generic interface implemented at two non-overlapping targets; a
-  bounded generic calling a contract member; a user record keyed in a map
-  through its own `ordered`; `map.of` and lookup matching their natives.
+  bounded generic calling a contract member, in one module and across an
+  import.
 - Negative: a missing abstract member, an extra member, and a default override;
   a same-module `defint` target; a `deftype` target naming a type and a
   `defint` target naming an interface (`@name.wrong-entity-kind`); an
-  anonymous target; overlapping targets `(from t)` and `(from i32)`; an
-  undispatchable member; a bound the instantiation does not satisfy; a user
-  key without `ordered`.
+  anonymous target; overlapping targets `(convert t)` and `(convert i32)`; an
+  undispatchable member; a bound the instantiation does not satisfy; a contract
+  call on a receiver with no implementation; a written member whose signature
+  differs from the contract.
 
 ## Done
 
 Inventory rows `Declaration::Defint`, `TypeMember::Implementation`, and the
-interface-bound clause of `Attribute::Where` reference cases, and the body/native
-harness covers the map rows. Validation passes.
+interface-bound clause of `Attribute::Where` reference cases, and validation
+passes.

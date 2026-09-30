@@ -1161,6 +1161,42 @@ impl<'a> Machine<'a> {
         slots: &mut Frame,
         captures: &[RuntimeValue],
     ) -> Option<Evaluation> {
+        // A contract call selects its implementation from the receiver's
+        // runtime type, after every operand is evaluated.
+        if let CallTarget::Contract {
+            interface,
+            member,
+            receiver,
+            ..
+        } = target
+        {
+            let values = self.evaluate_all(arguments, slots, captures)?;
+            let receiver = values.get(*receiver)?;
+            // A written member for the receiver's type wins over the
+            // interface's default, whose receiver is the open `self`.
+            let candidates = self
+                .program
+                .functions()
+                .iter()
+                .enumerate()
+                .filter_map(|(index, function)| {
+                    let implements = function.implements()?;
+                    (implements.interface == *interface
+                        && implements.member == *member
+                        && admits_value(&implements.receiver, receiver))
+                    .then_some((index, matches!(implements.receiver, Type::Param(_))))
+                })
+                .collect::<Vec<_>>();
+            let (index, _) = candidates
+                .iter()
+                .find(|(_, default)| !default)
+                .or_else(|| candidates.first())
+                .copied()?;
+            let callable = self.named_callable(index)?;
+            return self
+                .invoke_callable(callable, values, result)
+                .map(Evaluation::Value);
+        }
         let callable = match target {
             CallTarget::Direct(function) => self.named_callable(*function)?,
             CallTarget::Indirect { callee, .. } => {
@@ -1171,6 +1207,7 @@ impl<'a> Machine<'a> {
                 };
                 callable
             }
+            CallTarget::Contract { .. } => return None,
         };
         let callable_signature = match &callable {
             Callable::Named { signature, .. } | Callable::Lambda { signature, .. } => {

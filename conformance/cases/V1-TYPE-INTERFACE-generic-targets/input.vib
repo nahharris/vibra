@@ -1,0 +1,9 @@
+(defint render
+  where: (out any)
+  (defn render (value self) out))
+
+(deftype celsius (record degrees i32)
+  (impl (render i32)
+    (defn render (value self) i32 (value @degrees)))
+  (impl (render str)
+    (defn render (value self) str "celsius")))

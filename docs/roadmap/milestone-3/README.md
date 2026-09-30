@@ -123,9 +123,10 @@ Stage 3B — interfaces, generics, conversion, and iteration.
 
 | Step | One-PR slice | Requires | Status | PR / merge evidence |
 | --- | --- | --- | --- | --- |
-| 10 | [Freeze Stage 3B contracts, including the `iter.map` review (G7) and index schema (G9) — specification prerequisite](10-stage-3b-contracts.md) | 9 | landed | Step 10 PR (conditional on merge) |
-| 11 | [Interfaces and `impl`: `defint`, abstract and default members, nested placement and ownership, same-module rejection, completeness per block identity, target overlap, default-override rejection, static receiver dispatch, interface-bounded generics; `map` moved into the standard library over sorted arrays under `@map`, with the standard key conformances as ordinary implementations (per D17.1)](11-interfaces.md) | 10 | not started | — |
-| 12 | [Interface values: `any` and interfaces in type position, widening to an interface, dispatch through interface values, unions implementing interfaces](12-interface-values.md) | 11 | not started | — |
+| 10 | [Freeze Stage 3B contracts, including the `iter.map` review (G7) and index schema (G9) — specification prerequisite](10-stage-3b-contracts.md) | 9 | landed | PR #321, merge `191e71d` |
+| 11 | [Interfaces and `impl`: `defint`, abstract and default members, nested placement and ownership, same-module rejection, completeness per block identity, target overlap, default-override rejection, static receiver dispatch, interface-bounded generic functions](11-interfaces.md) | 10 | landed | Step 11 PR (conditional on merge) |
+| 11b | [Key contracts and the library map: `equatable` and `ordered` in `@std.core`, the closed key conformances as ordinary implementations, interface bounds on `deftype` and `lambda` parameters, and `map` moved into the standard library over sorted arrays under `@map` (per D17.1, D18.2)](11b-key-contracts.md) | 11 | not started | — |
+| 12 | [Interface values: `any` and interfaces in type position, widening to an interface, dispatch through interface values, unions implementing interfaces](12-interface-values.md) | 11b | not started | — |
 | 13 | [Destination dispatch and conversion: factory members, `from`/`try-from`, `conversion-error`, redundant-conversion and ambiguous-destination checks](13-conversion.md) | 12 | not started | — |
 | 14 | [Iteration: the `iter` contract and default methods, closed builtin conformance, adapter types, written algebraic laws for `equatable`/`ordered`/`hashable`/`iter` with conformance examples](14-iteration.md) | 13 | not started | — |
 | 15 | [Resolved symbol/reference/index records and type-aware query metadata with canonical identities](15-index.md) | 14 | not started | — |

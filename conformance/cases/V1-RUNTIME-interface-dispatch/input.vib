@@ -1,0 +1,30 @@
+(defn main () str
+  (text.concat
+    (text.concat (describe (point x: 1i32 y: 2i32)) (describe 7i32))
+    (text.concat (shape.name (point x: 0i32 y: 0i32)) (name-of (box item: "x")))))
+
+(import text @std.text)
+
+(defint shape
+  (defn name (value self) str)
+  (defn label (value self) str
+    (text.concat "shape " (shape.name value)))
+  (impl i32
+    (defn name (value self) str "integer")))
+
+(deftype point (record x i32 y i32)
+  (impl shape
+    (defn name (value self) str "point")))
+
+(deftype box (record item t)
+  where: (t any)
+  (impl shape
+    (defn name (value self) str "box")))
+
+(defn describe (value t) str
+  where: (t shape)
+  (text.concat (shape.label value) ";"))
+
+(defn name-of (value (box t)) str
+  where: (t any)
+  (shape.name value))

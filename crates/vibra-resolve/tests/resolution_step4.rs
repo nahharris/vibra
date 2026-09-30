@@ -702,7 +702,7 @@ fn lexical_and_lambda_label_bindings_cannot_shadow_visible_names() {
 }
 
 #[test]
-fn deferred_declaration_forms_and_members_are_explicitly_unavailable() {
+fn deferred_effect_declarations_and_members_are_explicitly_unavailable() {
     let input = ResolveInput::single_module(
         "demo",
         "1.0.0",
@@ -714,16 +714,17 @@ fn deferred_declaration_forms_and_members_are_explicitly_unavailable() {
     );
     let snapshot = Resolver::resolve(input);
 
-    // Declared types, their fields, and nested methods resolve from M3 Step 2;
-    // the interface and effect declarations and their members stay unavailable.
+    // Declared types, their fields, and nested methods resolve from M3 Step 2
+    // and interfaces from Step 11; the effect declaration and its member stay
+    // unavailable.
     let unavailable: Vec<_> = snapshot
         .diagnostics()
         .iter()
         .filter(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
         .map(vibra_diagnostics::Diagnostic::primary_span)
         .collect();
-    assert_eq!(unavailable.len(), 4, "{unavailable:?}");
-    assert!(unavailable.iter().all(|span| span.start() >= 60));
+    assert_eq!(unavailable.len(), 2, "{unavailable:?}");
+    assert!(unavailable.iter().all(|span| span.start() >= 96));
 }
 
 #[test]

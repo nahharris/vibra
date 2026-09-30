@@ -1426,11 +1426,8 @@ impl Resolution {
             Declaration::Test(_) => return,
         };
         let unavailable_message = match declaration {
-            // Declared types resolve from M3 Step 2.
-            Declaration::Deftype(_) => None,
-            Declaration::Defint(_) => {
-                Some("interface resolution is unavailable in Step 4")
-            }
+            // Declared types resolve from M3 Step 2 and interfaces from Step 11.
+            Declaration::Deftype(_) | Declaration::Defint(_) => None,
             Declaration::Deffect(_) => {
                 Some("effect resolution is unavailable in Step 4")
             }
@@ -1502,7 +1499,7 @@ impl Resolution {
                     value.members(),
                     path.clone(),
                     source_id,
-                    true,
+                    None,
                 );
                 // Fields and variants have no visibility syntax of their own;
                 // they are exactly as visible as the type that declares them.
@@ -1520,7 +1517,7 @@ impl Resolution {
                     value.members(),
                     path,
                     source_id,
-                    false,
+                    Some(visibility),
                 );
             }
             Declaration::Deffect(value) => {
@@ -1550,21 +1547,14 @@ impl Resolution {
         members: &[TypeMember],
         owner: Vec<String>,
         source_id: &str,
-        deftype_owner: bool,
+        contract_visibility: Option<Visibility>,
     ) {
         let mut names = BTreeMap::<String, (ByteSpan, String)>::new();
-        for member in members {
+        for (member_index, member) in members.iter().enumerate() {
             match member {
                 TypeMember::Method(function) => {
-                    // Nested `deftype` methods resolve from M3 Step 2; interface
-                    // contract members arrive in Step 11.
-                    if !deftype_owner {
-                        self.unavailable(
-                            source_id,
-                            function.span(),
-                            "interface members are unavailable until M3 Step 11",
-                        );
-                    }
+                    // Nested `deftype` methods resolve from M3 Step 2 and
+                    // interface contract members from Step 11.
                     self.collect_member(
                         module,
                         function,
@@ -1572,6 +1562,12 @@ impl Resolution {
                         EntityKind::Function,
                         source_id,
                     );
+                    // A contract member is exactly as visible as its interface.
+                    if let Some(visibility) = contract_visibility
+                        && let Some(work) = self.declarations.last_mut()
+                    {
+                        work.declaration.visibility = visibility;
+                    }
                     self.check_member_name(
                         &mut names,
                         function.name().value(),
@@ -1579,17 +1575,15 @@ impl Resolution {
                         source_id,
                     );
                 }
+                // A written `impl` member is reached through its interface,
+                // never by name, so its path only keeps its body's names
+                // resolvable and its identity distinct per block.
                 TypeMember::Implementation(implementation) => {
-                    self.unavailable(
-                        source_id,
-                        implementation.span(),
-                        "implementation resolution is unavailable in Step 4",
-                    );
-                    for member in implementation.members() {
-                        self.unavailable(
-                            source_id,
-                            member.span(),
-                            "implementation members are unavailable in Step 4",
+                    let mut block = owner.clone();
+                    block.push(format!("impl-{member_index}"));
+                    for function in implementation.members() {
+                        self.collect_implementation_member(
+                            module, function, &block, source_id,
                         );
                     }
                 }
@@ -1666,6 +1660,35 @@ impl Resolution {
                 ),
             );
         }
+    }
+
+    /// Collects a member written in an `impl` block: its body resolves like any
+    /// function, but its path is left out of the index so no written name
+    /// reaches it.
+    fn collect_implementation_member(
+        &mut self,
+        module: &ModuleKey,
+        function: &FunctionDeclaration,
+        block: &[String],
+        source_id: &str,
+    ) {
+        let mut path = block.to_vec();
+        path.push(function.name().value().to_owned());
+        self.declarations.push(DeclarationWork {
+            declaration: ResolvedDeclaration {
+                id: DeclarationId::with_package(
+                    &module.package,
+                    &module.unit,
+                    &module.segments,
+                    path,
+                    EntityKind::Function,
+                ),
+                visibility: Visibility::Private,
+                source_id: source_id.to_owned(),
+                span: function.span(),
+            },
+            body: Some(BodyWork::Function(function.clone())),
+        });
     }
 
     fn collect_member(

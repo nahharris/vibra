@@ -301,6 +301,8 @@ diagnostic_registry! {
         "two implementations on one receiver overlap under instantiation";
     TypeAmbiguousImplementation => "@type.ambiguous-implementation", Type, Error, None,
         "a call matches more than one implementation";
+    TypeUnsatisfiedBound => "@type.unsatisfied-bound", Type, Error, None,
+        "a type does not implement the interface a bound or contract call needs";
     TypeAmbiguousDestination => "@type.ambiguous-destination", Type, Error, None,
         "a destination-dispatched member has no written expected type";
     TypeInvalidAscription => "@type.invalid-ascription", Type, Error, None,
@@ -391,7 +393,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 83;
+    const REGISTERED_CODES: usize = 84;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

@@ -1,0 +1,6 @@
+(deftype square (record side i32))
+
+(defint shape
+  (defn name (value self) str)
+  (impl square
+    (defn name (value self) str "square")))

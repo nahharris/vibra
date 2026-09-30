@@ -33,6 +33,7 @@ use vibra_syntax::{
 
 mod construct;
 mod infer;
+mod interfaces;
 mod nominal;
 mod pattern;
 mod resolved;
@@ -501,13 +502,22 @@ struct FunctionHeader {
     external_declared: bool,
     test: Option<vibra_syntax::TestDeclaration>,
     test_assertion: Option<TestAssertion>,
-    /// For a nested method, its index among the owning `deftype`'s members;
-    /// `declaration_index` then names the `deftype`.
+    /// For a nested method, default member, or `impl` block, its index among
+    /// the owning `deftype` or `defint` members; `declaration_index` then
+    /// names the owner.
     member_index: Option<usize>,
     /// The receiver type of a nested method.
     self_type: Option<Type>,
     /// The complete generic parameter list: the owner's, then the function's.
     type_parameters: Vec<String>,
+    /// The interface each bounded generic parameter needs.
+    bounds: BTreeMap<String, usize>,
+    /// For a member written in an `impl` block, its index within the block;
+    /// `member_index` then names the block among its owner's members.
+    impl_member: Option<usize>,
+    /// The contract member this function implements, for a written `impl`
+    /// member or an interface default.
+    implements: Option<vibra_ir::Implements>,
 }
 
 pub(crate) const IMPORTED_FUNCTION_DECLARATION: usize = usize::MAX;
@@ -604,6 +614,26 @@ impl<'a> Checker<'a> {
         // source has no package, so a type's identity and path are its name.
         let mut type_declarations = Vec::new();
         for declaration in self.ast.declarations() {
+            if let Declaration::Defint(value) = declaration {
+                let name = value.name().value();
+                if let Some(earlier) = self.module_names.get(name).copied() {
+                    redeclaration(
+                        self.diagnostics,
+                        self.source_id,
+                        name,
+                        name,
+                        value.span(),
+                        earlier,
+                    );
+                    continue;
+                }
+                self.module_names.insert(name.to_owned(), value.span());
+                self.types.declare_interface(
+                    self.source_id,
+                    value,
+                    vibra_ir::TypeId::new(format!("{}:{name}", self.source_id), name),
+                );
+            }
             if let Declaration::Deftype(value) = declaration {
                 let name = value.name().value();
                 if let Some(earlier) = self.module_names.get(name).copied() {
@@ -659,7 +689,8 @@ impl<'a> Checker<'a> {
                         let TypeMember::Method(method) = member else {
                             continue;
                         };
-                        let Some(generics) = nominal::function_generics(
+                        let Some((generics, bounds)) = nominal::function_generics(
+                            &self.types,
                             &owner_generics,
                             method,
                             self.source_id,
@@ -696,6 +727,9 @@ impl<'a> Checker<'a> {
                             member_index: Some(member_index),
                             self_type: Some(self_type.clone()),
                             type_parameters: generics,
+                            bounds,
+                            impl_member: None,
+                            implements: None,
                         });
                     }
                 }
@@ -736,7 +770,8 @@ impl<'a> Checker<'a> {
                     });
                 }
                 Declaration::Defn(function) => {
-                    let Some(generics) = nominal::function_generics(
+                    let Some((generics, bounds)) = nominal::function_generics(
+                        &self.types,
                         &[],
                         function,
                         self.source_id,
@@ -790,6 +825,9 @@ impl<'a> Checker<'a> {
                         member_index: None,
                         self_type: None,
                         type_parameters: generics,
+                        bounds,
+                        impl_member: None,
+                        implements: None,
                     });
                 }
                 Declaration::Import(import)
@@ -813,6 +851,8 @@ impl<'a> Checker<'a> {
                     }
                     self.text_import_span = Some(import.span());
                 }
+                // Declared with the types above; contracts lower below.
+                Declaration::Defint(_) => {}
                 // Registered with the types above.
                 Declaration::Import(import)
                     if standard_type_import(import).is_some() => {}
@@ -830,6 +870,16 @@ impl<'a> Checker<'a> {
                 ),
             }
         }
+        interfaces::materialize(
+            &mut self.types,
+            &[interfaces::PlanModule {
+                source_id: self.source_id,
+                declarations: self.ast.declarations(),
+            }],
+            &mut self.functions,
+            &|_, _| None,
+            self.diagnostics,
+        );
         if self.text_import_authorized {
             let import_span = self.text_import_span.unwrap_or_else(|| self.ast.span());
             for (name, intrinsic) in [
@@ -852,6 +902,9 @@ impl<'a> Checker<'a> {
                     member_index: None,
                     self_type: None,
                     type_parameters: Vec::new(),
+                    bounds: BTreeMap::new(),
+                    impl_member: None,
+                    implements: None,
                 });
             }
             self.text_import_span = Some(import_span);
@@ -880,6 +933,9 @@ impl<'a> Checker<'a> {
                 member_index: None,
                 self_type: None,
                 type_parameters: member.type_parameters,
+                bounds: BTreeMap::new(),
+                impl_member: None,
+                implements: None,
             });
         }
         for _ in 0..=self.globals.len() {
@@ -1036,6 +1092,7 @@ impl<'a> Checker<'a> {
             );
             environment.self_type = header.self_type.clone();
             environment.generics = header.type_parameters.clone();
+            environment.bounds = header.bounds.clone();
             environment.exit =
                 Some((header.signature.result(), Some(function.result_span())));
             let mut parameters_valid = true;
@@ -1109,13 +1166,18 @@ impl<'a> Checker<'a> {
             };
             let origin = SourceOrigin::new(self.source_id, function.span());
             let body = wrap_destructured(body, destructured, &origin);
+            let implements = header.implements.clone();
             match CheckedFunction::with_slots(
                 header.name,
                 header.signature,
                 body,
                 origin,
                 environment.next_slot,
-            ) {
+            )
+            .map(|function| match implements {
+                Some(implements) => function.with_implements(implements),
+                None => function,
+            }) {
                 Ok(function) => {
                     if let Some(slot) = self.checked_functions.get_mut(index) {
                         *slot = Some(function);
@@ -1186,22 +1248,26 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// The `defn` a header was collected from: a top-level function or a nested
-/// method of a `deftype`.
+/// The `defn` a header was collected from: a top-level function, a nested
+/// method of a `deftype`, a default member of a `defint`, or a member written
+/// in an `impl` block nested in either.
 pub(crate) fn header_function<'a>(
     declarations: &'a [Declaration],
     header: &FunctionHeader,
 ) -> Option<&'a vibra_syntax::FunctionDeclaration> {
-    match (
+    let members = match (
         declarations.get(header.declaration_index)?,
         header.member_index,
     ) {
-        (Declaration::Defn(function), None) => Some(function),
-        (Declaration::Deftype(value), Some(member)) => {
-            match value.members().get(member)? {
-                TypeMember::Method(function) => Some(function),
-                TypeMember::Implementation(_) => None,
-            }
+        (Declaration::Defn(function), None) => return Some(function),
+        (Declaration::Deftype(value), Some(_)) => value.members(),
+        (Declaration::Defint(value), Some(_)) => value.members(),
+        _ => return None,
+    };
+    match (members.get(header.member_index?)?, header.impl_member) {
+        (TypeMember::Method(function), None) => Some(function),
+        (TypeMember::Implementation(block), Some(member)) => {
+            block.members().get(member)
         }
         _ => None,
     }
@@ -1254,6 +1320,8 @@ struct CheckEnvironment<'a> {
     self_type: Option<Type>,
     /// The generic names in scope: the owner's and the function's own.
     generics: Vec<String>,
+    /// The interface each bounded generic name in scope needs.
+    bounds: BTreeMap<String, usize>,
     /// Whether the expression being checked is an application's callee, where a
     /// generic function is instantiated by the application rather than here.
     callee_position: bool,
@@ -1343,6 +1411,7 @@ impl<'a> CheckEnvironment<'a> {
             types,
             self_type: None,
             generics: Vec::new(),
+            bounds: BTreeMap::new(),
             callee_position: false,
             keeps_generic: false,
             global_indices,
@@ -1491,6 +1560,7 @@ impl<'a> CheckEnvironment<'a> {
             types: self.types,
             self_type: self.self_type.clone(),
             generics: self.generics.clone(),
+            bounds: self.bounds.clone(),
             callee_position: false,
             keeps_generic: false,
             global_indices: self.global_indices,
@@ -3468,6 +3538,21 @@ fn check_form(
             if let ExpressionKind::Name(name) = application.callee().kind()
                 && name.kind() == NameKind::Symbol
                 && !names_value(environment, application.callee(), name.value())
+                && let Some((interface, member)) = environment
+                    .types
+                    .contract_member(environment.source_id, name)
+            {
+                return interfaces::check_contract_call(
+                    environment,
+                    application,
+                    interface,
+                    member,
+                    expected,
+                );
+            }
+            if let ExpressionKind::Name(name) = application.callee().kind()
+                && name.kind() == NameKind::Symbol
+                && !names_value(environment, application.callee(), name.value())
                 && let Some(target) =
                     environment.types.constructor(environment.source_id, name)
             {
@@ -3622,6 +3707,25 @@ fn check_form(
                     &Type::Function(Box::new(instantiated.clone())),
                 ) {
                     return None;
+                }
+                if let Expr::Function { function, .. } = &callee
+                    && let Some(header) = environment.functions.get(*function)
+                    && !header.bounds.is_empty()
+                {
+                    let bounds = header.bounds.clone();
+                    let arguments = interfaces::type_arguments(
+                        &header.type_parameters,
+                        &header.signature,
+                        &instantiated,
+                    );
+                    if !interfaces::check_bounds(
+                        environment,
+                        application.span(),
+                        &bounds,
+                        &arguments,
+                    ) {
+                        return None;
+                    }
                 }
                 checked_tail = tail;
                 // A named function is rebuilt at its instantiation; a generic
@@ -3934,6 +4038,7 @@ fn check_form(
             );
             nested.self_type = environment.self_type.clone();
             nested.generics = generics;
+            nested.bounds = environment.bounds.clone();
             nested.exit = Some((signature.result(), Some(lambda.result_span())));
             nested.resolved_targets = environment.resolved_targets;
             nested.reports_redeclarations = environment.reports_redeclarations;

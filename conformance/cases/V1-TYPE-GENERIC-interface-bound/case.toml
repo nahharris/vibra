@@ -2,7 +2,7 @@ id = "V1-TYPE-GENERIC-interface-bound"
 rule = "V1-TYPE-GENERIC"
 profile = "static-v1"
 operation = "type-check"
-description = "A where: bound naming an interface other than any is unavailable until interfaces land."
+description = "A where: bound other than any must name a visible interface."
 
 [inputs]
 source = "input.vib"
@@ -11,7 +11,7 @@ source = "input.vib"
 accepted = false
 
 [[expect.diagnostics]]
-code = "@tool.unavailable"
+code = "@name.unknown-symbol"
 level = "@error"
 source = "input.vib"
 span = [36, 42]

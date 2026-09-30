@@ -1,0 +1,20 @@
+id = "V1-TYPE-INTERFACE-overlapping"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "Two implementations of one interface whose applied targets unify overlap."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.overlapping-implementation"
+level = "@error"
+source = "input.vib"
+span = [202, 278]
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [127, 199]

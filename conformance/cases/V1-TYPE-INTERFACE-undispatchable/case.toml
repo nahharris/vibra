@@ -1,0 +1,17 @@
+id = "V1-TYPE-INTERFACE-undispatchable"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "A contract member with no fixed positional self and no self in its result cannot select an implementation."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.undispatchable-contract-member"
+level = "@error"
+source = "input.vib"
+span = [47, 66]
