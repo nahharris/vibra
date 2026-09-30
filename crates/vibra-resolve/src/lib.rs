@@ -2470,7 +2470,7 @@ impl Resolution {
         source_id: &str,
     ) {
         let path = name.segments();
-        if let [type_name, _] = path
+        if let [type_name] | [type_name, _] = path
             && self.input.role_types.iter().any(|role| role == type_name)
             && !self
                 .imports
@@ -2478,7 +2478,8 @@ impl Resolution {
                 .any(|(owner, import)| owner == module && import.alias == *type_name)
         {
             // A role-playing type needs no import; the checker resolves its
-            // constructors and reports an unknown variant or member there.
+            // constructors, such as `(bytes items)` and `option.some`, and
+            // reports an unknown variant or member there.
             self.references.push(ResolvedReference {
                 from: from.clone(),
                 written: name.value().to_owned(),

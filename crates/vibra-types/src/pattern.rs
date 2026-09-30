@@ -273,9 +273,10 @@ fn check_constructor_pattern(
         ConstructorTarget::Variant(index, variant) => (*index, Some(variant.as_str())),
     };
     let declared = environment.types.get(index)?.clone();
+    let representation = environment.types.representation(index);
     let matches_expected = match expected {
         Type::Declared(id) | Type::Applied(id, _) => *id == declared.id,
-        _ => false,
+        _ => representation.as_ref() == Some(expected),
     };
     if !matches_expected {
         mismatch(
@@ -365,6 +366,10 @@ fn check_constructor_pattern(
                     payload_type,
                 )?))
             };
+            // A `bool` variant is the literal of its representation.
+            if *expected == Type::Bool && payload.is_none() {
+                return Some(Pattern::Literal(Value::Bool(variant == "true")));
+            }
             Some(Pattern::Variant {
                 variant: variant.to_owned(),
                 payload,
@@ -492,7 +497,8 @@ fn single_positional<'a>(
     }
 }
 
-/// The body of a declared or applied type with its arguments substituted.
+/// The body of a declared or applied type with its arguments substituted,
+/// or the declared body of a role type the compiler represents directly.
 pub(crate) fn instantiated_body(
     types: &TypeNames,
     value_type: &Type,
@@ -500,7 +506,7 @@ pub(crate) fn instantiated_body(
     let (id, arguments) = match value_type {
         Type::Declared(id) => (id, &[][..]),
         Type::Applied(id, arguments) => (id, arguments.as_slice()),
-        _ => return None,
+        _ => return types.representation_body(value_type),
     };
     let declared = types.get(types.index_of(id)?)?;
     let body = declared.body.clone()?;
@@ -561,6 +567,17 @@ fn space(types: &TypeNames, value_type: &Type) -> Space {
         Type::Enum(variants) => Space::Enum(variants.clone()),
         Type::Array(element) => Space::Array((**element).clone()),
         Type::Union(members) => Space::Union(members.clone()),
+        // A string or byte sequence is one wrapper over its scalars or bytes,
+        // whose literals are an infinite subset.
+        Type::Str | Type::Bytes => types
+            .representation_body(value_type)
+            .and_then(|body| match body {
+                TypeBody::Wrapper(representation) => {
+                    Some(Space::Wrapper(representation))
+                }
+                _ => None,
+            })
+            .unwrap_or(Space::Infinite),
         Type::AtomSingleton(atom) => Space::Singleton(atom.clone()),
         Type::Declared(_) | Type::Applied(_, _) => {
             match instantiated_body(types, value_type) {
@@ -655,6 +672,13 @@ fn specialize_head(
     match pattern {
         Pattern::Wildcard | Pattern::Bind { .. } => {
             Some(vec![Pattern::Wildcard; arity])
+        }
+        // A string or byte wrapper whose operand binds covers every literal.
+        Pattern::Wrap(inner)
+            if matches!(constructor, Constructor::Literal(_))
+                && matches!(**inner, Pattern::Wildcard | Pattern::Bind { .. }) =>
+        {
+            Some(Vec::new())
         }
         _ if head_constructor(pattern).as_ref() != Some(constructor) => None,
         Pattern::Literal(_) => Some(Vec::new()),

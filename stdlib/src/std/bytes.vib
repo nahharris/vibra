@@ -1,37 +1,63 @@
-; Pure byte-sequence declarations bound to the compiler registry.
+; Byte sequences. Every operation is Vibra over the bytes a `bytes` value is
+; written over; `native:` names the implementation a toolchain may run instead.
 (import core @std.core)
+
+; The standard byte-sequence type, which plays the `@bytes` role. It is written
+; over its bytes, and the toolchain represents it directly.
+(deftype bytes (array u8)
+  role: @bytes
+  visibility: @public)
 
 (defn length (value bytes) u64
   visibility: @public
-  external: @compiler
-  symbol: "bytes.length")
+  native: "bytes.length"
+  (let (bytes items) value (array.length items)))
 
 (defn concat (left bytes right bytes) bytes
   visibility: @public
-  external: @compiler
-  symbol: "bytes.concat")
+  native: "bytes.concat"
+  (let (bytes first) left
+    (let (bytes second) right (bytes (array.concat first second)))))
 
 (defn equal (left bytes right bytes) bool
   visibility: @public
-  external: @compiler
-  symbol: "bytes.equal")
+  native: "bytes.equal"
+  (match (compare left right) (core.ordering.equal) true - false))
 
 (defn compare (left bytes right bytes) core.ordering
   visibility: @public
-  external: @compiler
-  symbol: "bytes.compare")
+  native: "bytes.compare"
+  (let (bytes first) left (let (bytes second) right (order first second 0u64))))
 
 (defn slice (value bytes start u64 end u64) (option bytes)
   visibility: @public
-  external: @compiler
-  symbol: "bytes.slice")
+  native: "bytes.slice"
+  (let (bytes items) value
+    (match (array.slice items start end)
+      (option.some part) (option.some (bytes part))
+      (option.none) (option.none))))
 
 (defn to-array (value bytes) (array u8)
   visibility: @public
-  external: @compiler
-  symbol: "bytes.to-array")
+  native: "bytes.to-array"
+  (let (bytes items) value items))
 
 (defn from-array (values (array u8)) bytes
   visibility: @public
-  external: @compiler
-  symbol: "bytes.from-array")
+  native: "bytes.from-array"
+  (bytes values))
+
+; Lexicographic order from `index`: the first differing byte decides, and a
+; proper prefix is less.
+(defn order (first (array u8) second (array u8) index u64) core.ordering
+  (match (tupleof (first index) (second index))
+    (tupleof (option.none) (option.none)) (core.ordering.equal)
+    (tupleof (option.none) -) (core.ordering.less)
+    (tupleof - (option.none)) (core.ordering.greater)
+    (tupleof (option.some left) (option.some right))
+      (match (u8.compare left right)
+        (core.ordering.equal)
+          (match (u64.add-checked index 1u64)
+            (result.ok next) (order first second next)
+            (result.err -) (core.ordering.equal))
+        decided decided)))

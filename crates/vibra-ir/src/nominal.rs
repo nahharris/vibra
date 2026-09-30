@@ -331,7 +331,9 @@ pub(crate) fn validate_declared_expr(
                 }
             }
             Expr::Wrap {
-                value_type, value, ..
+                value_type: value_type @ (Type::Declared(_) | Type::Applied(_, _)),
+                value,
+                ..
             } => {
                 let TypeBody::Wrapper(expected) = declared_body(table, value_type)?
                 else {

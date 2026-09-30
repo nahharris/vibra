@@ -1561,7 +1561,18 @@ impl AstParser {
             return None;
         }
         let intrinsic = head_text(forms[2]) == Some("intrinsic-type");
-        let name = self.checked_declaration_name(forms[1], intrinsic)?;
+        // A role-playing library type such as `bool` takes its builtin name;
+        // `role:` itself is admissible only in the embedded standard library.
+        let claims_role = forms.get(3..).is_some_and(|attributes| {
+            attributes.iter().any(|form| {
+                matches!(
+                    form.name(),
+                    Some(NameClassification::Name(name))
+                        if name.kind() == NameKind::Label && name.value() == "role"
+                )
+            })
+        });
+        let name = self.checked_declaration_name(forms[1], intrinsic || claims_role)?;
         let body = self.parse_deftype_body(forms[2])?;
         let parsed = self.parse_attributes(&forms[3..], AttributeContext::Type, &[]);
         let attributes = TypeAttributes {
@@ -2700,8 +2711,17 @@ impl AstParser {
         let mut fields = Vec::with_capacity((forms.len() - 1) / 2);
         let mut seen = BTreeSet::new();
         for pair in forms[1..].chunks_exact(2) {
-            let name =
-                self.local_name(pair[0], "type body members must be local names")?;
+            // An enum may name variants `true` and `false`, as `bool` does.
+            let name = match pair[0].literal() {
+                Some(LiteralClassification::Literal(Literal::Boolean(value)))
+                    if !record =>
+                {
+                    Name::symbol(if value.value() { "true" } else { "false" })
+                }
+                _ => {
+                    self.local_name(pair[0], "type body members must be local names")?
+                }
+            };
             if !seen.insert(name.value().to_owned()) {
                 self.error(
                     DiagnosticCode::NameMemberCollision,

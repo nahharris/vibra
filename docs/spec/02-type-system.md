@@ -62,6 +62,15 @@ standard library, under the same rule as `external:`. A missing or repeated
 role is a toolchain defect reported as an operational provenance diagnostic.
 Adding a role is a specification change to this table.
 
+`@std.bool` declares `(deftype bool (enum false void true void) role: @bool)`,
+`@std.text` declares `(deftype str (array char) role: @str)`, and `@std.bytes`
+declares `(deftype bytes (array u8) role: @bytes)`. Their constructors and
+patterns are the declared ones, so `(bool.true)`, `(str scalars)`, and
+`(bytes items)` build and destructure values, while a toolchain represents the
+values directly under the representation latitude of the runtime chapter. An
+enum body admits `true` and `false` as variant names, which is how `bool` spells
+its variants.
+
 The compiler-owned types and the types that play a role are the only types a
 program names without an import, and their names are reserved spellings;
 every other standard-library declaration is reached through an explicit

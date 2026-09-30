@@ -1957,6 +1957,10 @@ impl Expr {
                     .unwrap_or(Type::Void);
                 match value_type {
                     Type::Declared(_) | Type::Applied(_, _) => {}
+                    // `bool` is represented directly; its variants are its values.
+                    Type::Bool
+                        if payload.is_none()
+                            && matches!(variant.as_str(), "false" | "true") => {}
                     Type::Enum(variants) => {
                         let declared = variants
                             .iter()
@@ -1984,7 +1988,22 @@ impl Expr {
             Self::Wrap {
                 value_type, value, ..
             } => {
-                value.validate_shape_with_captures(slots, capture_types)?;
+                let representation =
+                    value.validate_shape_with_captures(slots, capture_types)?;
+                // `str` and `bytes` are represented directly over their scalars
+                // and bytes.
+                let expected = match value_type {
+                    Type::Str => Some(Type::Array(Box::new(Type::Char))),
+                    Type::Bytes => Some(Type::Array(Box::new(Type::U8))),
+                    _ => None,
+                };
+                if expected
+                    .is_some_and(|expected| !expected.same_shape(&representation))
+                {
+                    return Err(IrError::InvalidExpression(format!(
+                        "{value_type} is not written over {representation}"
+                    )));
+                }
                 Ok(value_type.clone())
             }
             Self::Try {
@@ -2304,12 +2323,16 @@ fn validate_pattern(
             }
             Ok(())
         }
-        Pattern::Wrap(inner) => {
-            if !(declared || expected.is_none()) {
-                return invalid("wrapper pattern for a non-declared type".to_owned());
+        Pattern::Wrap(inner) => match expected {
+            Some(Type::Str) => {
+                validate_pattern(inner, Some(&Type::Array(Box::new(Type::Char))), slots)
             }
-            validate_pattern(inner, None, slots)
-        }
+            Some(Type::Bytes) => {
+                validate_pattern(inner, Some(&Type::Array(Box::new(Type::U8))), slots)
+            }
+            _ if declared || expected.is_none() => validate_pattern(inner, None, slots),
+            _ => invalid("wrapper pattern for a non-declared type".to_owned()),
+        },
         Pattern::Member {
             index,
             member,
