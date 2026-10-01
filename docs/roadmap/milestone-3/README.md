@@ -135,7 +135,7 @@ Stage 3B — interfaces, generics, conversion, and iteration.
 | 14c | [Contract laws and the role check: written algebraic laws for `equatable`, `ordered`, and `iter` with conformance examples, and the loader's missing-role check](14c-laws-and-roles.md) | 14b | landed | PR #330, merge `ebfd777` |
 | 15a | [Index records: the `@index.v1` document of declaration, implementation, and reference records, its JSON contract, and a corpus operation](15a-index-records.md) | 14c | landed | PR #331, merge `3025969` |
 | 15b | [Type-aware query metadata for the Stage 3A and 3B forms at a source position](15b-query-metadata.md) | 15a | landed | PR #332, merge `442114f` |
-| 16 | [M3 demo and exit gate, including the M2 deferral sweep — evidence step](16-exit.md) | 15b | landed | Step 16 PR (conditional on merge); [exit evidence](exit-evidence.md) |
+| 16 | [M3 demo and exit gate, including the M2 deferral sweep — evidence step](16-exit.md) | 15b | landed | PR #333 (conditional on merge); [exit evidence](exit-evidence.md) |
 
 Steps 1, 4a, and 10 are specification prerequisites and Steps 9 and 16 are
 evidence steps; they claim no language behavior. Guides for Steps 2–9 are
