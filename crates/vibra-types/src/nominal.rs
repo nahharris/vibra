@@ -146,6 +146,8 @@ pub(crate) struct ContractMember {
 #[derive(Clone, Debug)]
 pub(crate) struct Implementation {
     pub(crate) interface: usize,
+    /// The interface's type arguments, for a generic interface.
+    pub(crate) arguments: Vec<Type>,
     pub(crate) receiver: Type,
     /// Contract member name to the function header that implements it: the
     /// written member or the default instantiated for this receiver.
@@ -345,6 +347,38 @@ impl TypeNames {
                 implementation.interface == interface
                     && crate::interfaces::covers(&implementation.receiver, argument)
             })
+    }
+
+    /// Whether `value` conforms to the interface `interface` applied to
+    /// `arguments`, so it widens to that interface value in `scope`. A
+    /// generic name conforms through its bound, which names an interface
+    /// without arguments.
+    pub(crate) fn conforms(
+        &self,
+        scope: Scope<'_>,
+        interface: usize,
+        arguments: &[Type],
+        value: &Type,
+    ) -> bool {
+        if arguments.is_empty() {
+            return self.satisfies(scope, interface, value);
+        }
+        let target = |receiver: &Type, arguments: &[Type]| {
+            Type::Tuple(
+                std::iter::once(receiver.clone())
+                    .chain(arguments.iter().cloned())
+                    .collect(),
+            )
+        };
+        let wanted = target(value, arguments);
+        self.implementations.iter().any(|implementation| {
+            implementation.interface == interface
+                && implementation.arguments.len() == arguments.len()
+                && crate::interfaces::covers(
+                    &target(&implementation.receiver, &implementation.arguments),
+                    &wanted,
+                )
+        })
     }
 
     /// Whether `receiver` conforms to the key contract `interface` through the
@@ -771,6 +805,27 @@ impl TypeNames {
         }
     }
 
+    /// The interface value type `name` denotes when it names a visible
+    /// interface: a type position resolves across the type and interface
+    /// namespaces together, and a name is never both.
+    fn interface_value(
+        &self,
+        source_id: &str,
+        name: &Name,
+        arguments: Vec<Type>,
+    ) -> Option<Result<Type, LowerError>> {
+        let interface = self.interface(self.resolve_interface(source_id, name)?)?;
+        Some(if interface.parameters.len() == arguments.len() {
+            Ok(Type::Interface(interface.id.clone(), arguments))
+        } else {
+            Err(LowerError::Arity {
+                name: name.value().to_owned(),
+                expected: interface.parameters.len(),
+                found: arguments.len(),
+            })
+        })
+    }
+
     /// Lowers a type expression written in `source_id`, seeing the receiver
     /// type and generic names of `scope`.
     pub(crate) fn lower(
@@ -794,10 +849,14 @@ impl TypeNames {
                 if scope.generics.iter().any(|generic| generic == name.value()) {
                     return Ok(Type::Param(name.value().to_owned()));
                 }
+                // The predeclared empty interface, as an interface value.
                 if name.value() == "any" {
-                    return Err(LowerError::Unavailable(
-                        "interfaces in type position arrive in M3 Step 12",
-                    ));
+                    return Ok(Type::Any);
+                }
+                if let Some(interface) =
+                    self.interface_value(source_id, name, Vec::new())
+                {
+                    return interface;
                 }
                 self.applied(source_id, name, Vec::new())
             }
@@ -854,6 +913,11 @@ impl TypeNames {
                     .iter()
                     .map(|argument| self.lower(source_id, scope, argument))
                     .collect::<Result<Vec<_>, _>>()?;
+                if let Some(interface) =
+                    self.interface_value(source_id, head, arguments.clone())
+                {
+                    return interface;
+                }
                 let applied = self.applied(source_id, head, arguments)?;
                 match self.unsatisfied_argument(scope, &applied) {
                     Some(error) => Err(error),

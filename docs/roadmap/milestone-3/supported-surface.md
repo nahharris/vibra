@@ -18,7 +18,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `ExpressionKind::Let` | M2 | — | Destructuring patterns: Step 5 (`V1-RUNTIME-match-patterns`, `V1-RUNTIME-workspace-test-patterns`) |
 | `ExpressionKind::If` | M2 | — | — |
 | `ExpressionKind::Match` | Stage 3A | Step 5 | Cases `V1-RUNTIME-match-patterns`, `V1-TYPE-CONTROL-match-exhaustive`, `V1-TYPE-CONTROL-match-non-exhaustive`, `V1-TYPE-CONTROL-match-unreachable-arm`; union arms: Step 6 (`V1-TYPE-CONVERT-narrowing-exhaustive`, `V1-TYPE-CONVERT-narrowing-rejections`) |
-| `ExpressionKind::As` | Stage 3A | Step 6 | Cases `V1-TYPE-CONVERT-ascription-erased`, `V1-TYPE-CONVERT-invalid-ascription`, `V1-RUNTIME-union-values`; interface targets: Step 12 |
+| `ExpressionKind::As` | Stage 3A | Step 6 | Cases `V1-TYPE-CONVERT-ascription-erased`, `V1-TYPE-CONVERT-invalid-ascription`, `V1-RUNTIME-union-values`; interface targets: Step 12 (`V1-RUNTIME-interface-values`, `V1-TYPE-CONVERT-interface-widening-rejections`) |
 | `ExpressionKind::Try` | Stage 3A | Step 7 | Cases `V1-RUNTIME-try-propagation`, `V1-TYPE-CONTROL-invalid-try`, `V1-TYPE-CONTROL-invalid-try-test-body`; host test `try_m3_step7` |
 | `ExpressionKind::TupleOf` | Stage 3A | Step 4 | Reader and formatter: Step 2; case `V1-RUNTIME-tuples` |
 | `ExpressionKind::RecordOf` | Stage 3A | Step 2 | — |
@@ -43,7 +43,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `Declaration::Deffect` | M4 | — | — |
 | `TypeMember::Method` | Stage 3A | Step 2 | Contract members: Step 11 (`V1-RUNTIME-interface-dispatch`, `V1-TYPE-INTERFACE-default-override`) |
 | `TypeMember::Implementation` | Stage 3B | Step 11 | Both placements (`V1-RUNTIME-interface-dispatch`); `V1-TYPE-INTERFACE-missing-abstract`, `V1-TYPE-INTERFACE-extra-member`, `V1-TYPE-INTERFACE-member-signature`, `V1-TYPE-INTERFACE-redundant-implementation`, `V1-TYPE-INTERFACE-deftype-target-type`, `V1-TYPE-INTERFACE-defint-target-interface`, `V1-TYPE-INTERFACE-anonymous-target`, `V1-TYPE-INTERFACE-overlapping` |
-| `TypeExpr::Name` | M2 | — | Nominal names: Step 2; `any` and interfaces as types: Step 12 |
+| `TypeExpr::Name` | M2 | — | Nominal names: Step 2; `any` and interfaces as types: Step 12 (`V1-RUNTIME-interface-values`, `V1-RUNTIME-workspace-test-interfaces`, `V1-TYPE-GENERIC-stage-3b-types`, `V1-TYPE-INTERFACE-value-restrictions`, `V1-TYPE-INTERFACE-value-positions`) |
 | `TypeExpr::Function` | M2 | — | Generic and variadic function types: Steps 3–4 |
 | `TypeExpr::Void` | M2 | — | — |
 | `TypeExpr::Applied` | Stage 3A | Step 3 | Cases `V1-TYPE-GENERIC-applied-types`, `V1-RUNTIME-generic-types` |
@@ -52,7 +52,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `TypeExpr::Enum` | Stage 3A | Step 2 | — |
 | `TypeExpr::Union` | Stage 3A | Step 6 | Reader and formatter: Step 2; cases `V1-TYPE-NOMINAL-union-declarations`, `V1-TYPE-NOMINAL-union-member-overlap`, `V1-TYPE-NOMINAL-union-member-not-concrete` |
 | `TypeExpr::Array` | Stage 3A | Step 4 | Cases `V1-RUNTIME-lookups`, `V1-TYPE-NOMINAL-collection-construction` |
-| `TypeExpr::Map` | Stage 3A | Step 4 | Cases `V1-RUNTIME-map-order`, `V1-TYPE-NOMINAL-map-keys`; generic keys without an `ordered` bound: Step 11b (`V1-TYPE-GENERIC-stage-3b-types`); `ordered`-bounded and user `deftype` keys: Step 11c (`V1-RUNTIME-user-map-keys`, `V1-TYPE-INTERFACE-user-key-unordered`); the library declaration and `map.entries`: Step 11d (`V1-RUNTIME-library-map`) |
+| `TypeExpr::Map` | Stage 3A | Step 4 | Cases `V1-RUNTIME-map-order`, `V1-TYPE-NOMINAL-map-keys`; generic keys without an `ordered` bound: Step 11b (`V1-TYPE-INTERFACE-key-generic-unbounded`); `ordered`-bounded and user `deftype` keys: Step 11c (`V1-RUNTIME-user-map-keys`, `V1-TYPE-INTERFACE-user-key-unordered`); the library declaration and `map.entries`: Step 11d (`V1-RUNTIME-library-map`) |
 | `VariadicType::Array` | Stage 3A | Step 4 | Case `V1-SRC-CALLS-variadic-array-type` |
 | `VariadicType::Map` | Stage 3A | Step 4 | Case `V1-SRC-CALLS-variadic-map-type` |
 | `DeftypeBody::Type` | Stage 3A | Step 2 | Declared record, enum, and wrapper bodies: Step 2; tuple: Step 4; union: Step 6 (`V1-TYPE-NOMINAL-union-declarations`, `V1-RUNTIME-union-values`) |

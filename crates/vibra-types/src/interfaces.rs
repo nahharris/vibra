@@ -379,6 +379,13 @@ fn resolve_block(
                 span,
                 diagnostics,
             )?;
+            if matches!(receiver, Type::Interface(_, _) | Type::Any) {
+                wrong_kind(
+                    diagnostics,
+                    "an `impl` inside a `defint` targets a concrete type, not an interface",
+                );
+                return None;
+            }
             if let Type::Declared(id) | Type::Applied(id, _) = &receiver
                 && types
                     .index_of(id)
@@ -582,6 +589,7 @@ pub(crate) fn register(
     }
     types.add_implementation(Implementation {
         interface: plan.interface,
+        arguments: plan.arguments.clone(),
         receiver: plan.receiver.clone(),
         members,
     });
@@ -654,6 +662,25 @@ pub(crate) fn check_contract_call(
                     operands.get(position)?.value().span(),
                     &receiver,
                     &declared.name,
+                );
+                return None;
+            }
+            None
+        }
+        // An interface value dispatches from the type it holds. Its concrete
+        // type is erased, so no other operand can be required to share it.
+        Type::Interface(id, _) if *id == declared.id => {
+            let shared = contract.signature.parameters().iter().enumerate().find(
+                |(index, parameter)| *index != position && mentions_self(parameter),
+            );
+            if let Some((index, _)) = shared {
+                mismatch(
+                    environment.diagnostics,
+                    environment.source_id,
+                    operands.get(index)?.value().span(),
+                    self_type(),
+                    receiver.clone(),
+                    "a member with another `self` operand cannot be called through an interface value, which erases the type they must share",
                 );
                 return None;
             }

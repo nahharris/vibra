@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-interface-values"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A concrete value widens to an interface value at a parameter, a result, an as ascription, a record field, and a def annotation, and a contract member dispatches through it from the type it holds, including a union implementing the interface itself; any takes a value it only passes along."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

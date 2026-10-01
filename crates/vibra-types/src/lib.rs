@@ -3390,14 +3390,49 @@ fn check_expression_in_position(
     widen_to(environment, checked, &target, expression.span())
 }
 
-/// Whether a written expected type admits a widening: `atom`, or a union.
+/// Whether a written expected type admits a widening: `atom`, a union, or an
+/// interface value, including `any`.
 fn widening_target(types: &nominal::TypeNames, target: &Type) -> bool {
-    *target == Type::Atom || union::members(types, target).is_some()
+    matches!(target, Type::Atom | Type::Interface(_, _) | Type::Any)
+        || union::members(types, target).is_some()
+}
+
+/// Whether a value of type `actual` widens to the interface value type
+/// `target`: a concrete type that conforms to the interface, or any concrete
+/// type for `any`. An atom singleton and another interface value are each one
+/// widening away already, and widening does not chain.
+fn widens_to_interface(
+    environment: &CheckEnvironment<'_>,
+    target: &Type,
+    actual: &Type,
+) -> bool {
+    if matches!(
+        actual,
+        Type::AtomSingleton(_) | Type::Interface(_, _) | Type::Any
+    ) {
+        return false;
+    }
+    let scope =
+        nominal::Scope::new(environment.self_type.as_ref(), &environment.generics)
+            .with_bounds(&environment.bounds);
+    match target {
+        Type::Any => true,
+        Type::Interface(id, arguments) => environment
+            .types
+            .interface_index_of(id)
+            .is_some_and(|interface| {
+                environment
+                    .types
+                    .conforms(scope, interface, arguments, actual)
+            }),
+        _ => false,
+    }
 }
 
 /// Widens a checked operand to its written expected type once: an atom
-/// singleton to `atom`, or a member value to a union. An operand that
-/// already has the type is unchanged.
+/// singleton to `atom`, a member value to a union, or a conforming concrete
+/// value to an interface value. An operand that already has the type is
+/// unchanged.
 fn widen_to(
     environment: &mut CheckEnvironment<'_>,
     checked: Expr,
@@ -3408,7 +3443,9 @@ fn widen_to(
     if types_match(target, &actual) {
         return Some(checked);
     }
-    let member = if *target == Type::Atom && matches!(actual, Type::AtomSingleton(_)) {
+    let member = if (*target == Type::Atom && matches!(actual, Type::AtomSingleton(_)))
+        || widens_to_interface(environment, target, &actual)
+    {
         None
     } else if let Some(index) = union::discriminant(environment.types, target, &actual)
     {

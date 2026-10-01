@@ -1,0 +1,13 @@
+(defint named
+  (defn name (value self) str))
+
+(deftype either (union i32 named))
+
+(deftype anything (union str any))
+
+(defn keyed (entries (map named i32)) i32 0i32)
+
+(defint other
+  (defn label (value self) str)
+  (impl any
+    (defn label (value self) str "any")))

@@ -1,0 +1,36 @@
+(defn main () (tuple str str str str str str i32)
+  (tupleof
+    (describe (point x: 1i32 y: 2i32))
+    (shape.name (as shape 7i32))
+    (shape.name (pick true))
+    (shape.name (pick false))
+    (shape.name ((holder item: 3i32) @item))
+    (shape.name origin)
+    (keep "kept")))
+
+(defint shape
+  (defn name (value self) str)
+  (impl i32
+    (defn name (value self) str "integer")))
+
+(deftype point (record x i32 y i32)
+  (impl shape
+    (defn name (value self) str "point")))
+
+; A union implements an interface through its own block, never its members'.
+(deftype number (union i32 str)
+  (impl shape
+    (defn name (value self) str "number")))
+
+(deftype holder (record item shape))
+
+(def origin shape (point x: 0i32 y: 0i32))
+
+(defn describe (value shape) str
+  (shape.name value))
+
+(defn pick (flag bool) shape
+  (if flag (number "one") (point x: 0i32 y: 0i32)))
+
+(defn keep (value any) i32
+  1i32)

@@ -85,6 +85,12 @@ pub enum Type {
     Map(Box<Type>, Box<Type>),
     /// An anonymous union type; members are in canonical order.
     Union(Vec<Type>),
+    /// An interface value: a value of some type that implements the declared
+    /// interface applied to these arguments, reached by widening.
+    Interface(TypeId, Vec<Type>),
+    /// A value of the predeclared empty interface `any`, which every type
+    /// satisfies and which can only be passed along.
+    Any,
 }
 
 impl Type {
@@ -121,6 +127,8 @@ impl Type {
             Self::F32 => "f32",
             Self::F64 => "f64",
             Self::Function(_) => "fn",
+            Self::Interface(_, _) => "interface",
+            Self::Any => "any",
         }
     }
 
@@ -176,6 +184,13 @@ impl Type {
                     .map(|value| value.substitute(arguments))
                     .collect(),
             ),
+            Self::Interface(id, values) => Self::Interface(
+                id.clone(),
+                values
+                    .iter()
+                    .map(|value| value.substitute(arguments))
+                    .collect(),
+            ),
             Self::Record(members) => {
                 Self::Record(substitute_members(members, arguments))
             }
@@ -216,6 +231,10 @@ impl Type {
             (
                 Self::Applied(left, left_arguments),
                 Self::Applied(right, right_arguments),
+            )
+            | (
+                Self::Interface(left, left_arguments),
+                Self::Interface(right, right_arguments),
             ) => {
                 left == right
                     && left_arguments.len() == right_arguments.len()
@@ -254,9 +273,10 @@ impl Type {
     #[must_use]
     pub fn components(&self) -> Vec<Self> {
         match self {
-            Self::Applied(_, values) | Self::Tuple(values) | Self::Union(values) => {
-                values.clone()
-            }
+            Self::Applied(_, values)
+            | Self::Interface(_, values)
+            | Self::Tuple(values)
+            | Self::Union(values) => values.clone(),
             Self::Array(element) => vec![element.as_ref().clone()],
             Self::Map(key, value) => vec![key.as_ref().clone(), value.as_ref().clone()],
             Self::Record(members) | Self::Enum(members) => {
@@ -276,7 +296,9 @@ impl Type {
     pub fn has_params(&self) -> bool {
         match self {
             Self::Param(_) => true,
-            Self::Applied(_, values) => values.iter().any(Self::has_params),
+            Self::Applied(_, values) | Self::Interface(_, values) => {
+                values.iter().any(Self::has_params)
+            }
             Self::Tuple(values) | Self::Union(values) => {
                 values.iter().any(Self::has_params)
             }
@@ -318,7 +340,10 @@ impl fmt::Display for Type {
         match self {
             Self::Declared(id) => formatter.write_str(id.path()),
             Self::Param(name) => formatter.write_str(name),
-            Self::Applied(id, arguments) => {
+            Self::Interface(id, arguments) if arguments.is_empty() => {
+                formatter.write_str(id.path())
+            }
+            Self::Applied(id, arguments) | Self::Interface(id, arguments) => {
                 write!(formatter, "({}", id.path())?;
                 for argument in arguments {
                     write!(formatter, " {argument}")?;
@@ -2080,6 +2105,18 @@ impl Expr {
                         .is_some_and(|found| found.admits(&actual)),
                     // A declared union's members are checked with its definition.
                     Type::Declared(_) | Type::Applied(_, _) => true,
+                    // An interface value holds a concrete value, never an
+                    // atom singleton or another interface value: widening
+                    // does not chain. The checker proved conformance.
+                    Type::Interface(_, _) | Type::Any => {
+                        member.is_none()
+                            && !matches!(
+                                actual,
+                                Type::AtomSingleton(_)
+                                    | Type::Interface(_, _)
+                                    | Type::Any
+                            )
+                    }
                     _ => false,
                 };
                 if !widens {
@@ -5724,7 +5761,10 @@ pub fn canonical_type(value: &Type) -> String {
     match value {
         Type::Function(signature) => canonical_function_signature(signature),
         Type::Declared(id) => format!("@{}", id.path()),
-        Type::Applied(id, arguments) => format!(
+        Type::Interface(id, arguments) if arguments.is_empty() => {
+            format!("@{}", id.path())
+        }
+        Type::Applied(id, arguments) | Type::Interface(id, arguments) => format!(
             "(record type: @{} arguments: (array{}))",
             id.path(),
             arguments

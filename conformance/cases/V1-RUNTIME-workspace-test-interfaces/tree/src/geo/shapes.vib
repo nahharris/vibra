@@ -20,3 +20,7 @@
   where: (a shape b shape)
   visibility: @public
   (tupleof (shape.sides left) (shape.sides right)))
+
+(defn name-of (value shape) str
+  visibility: @public
+  (shape.name value))

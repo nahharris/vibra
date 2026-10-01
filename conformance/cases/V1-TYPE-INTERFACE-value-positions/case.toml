@@ -1,0 +1,35 @@
+id = "V1-TYPE-INTERFACE-value-positions"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "An interface value is not a concrete type: it cannot be a union member, key a map, or be the target of an impl nested in a defint."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.union-member-not-concrete"
+level = "@error"
+source = "input.vib"
+span = [47, 81]
+
+[[expect.diagnostics]]
+code = "@type.union-member-not-concrete"
+level = "@error"
+source = "input.vib"
+span = [83, 117]
+
+[[expect.diagnostics]]
+code = "@type.invalid-map-key"
+level = "@error"
+source = "input.vib"
+span = [132, 155]
+
+[[expect.diagnostics]]
+code = "@name.wrong-entity-kind"
+level = "@error"
+source = "input.vib"
+span = [216, 266]

@@ -789,6 +789,15 @@ and because the contract is empty and v1 has no runtime type test, such a value
 can only be passed along, never inspected. A signature that needs the concrete
 type MUST use a generic parameter.
 
+A contract member is called through an interface value by its receiver, and the
+implementation is the one for the type the value holds. Where the member's
+signature names `self` in its result, the result is the same interface value
+type. A member that names `self` in another parameter cannot be called through
+an interface value, because the value erases the type those operands must
+share; the call emits `@type.mismatch` at that operand. An interface value type
+implements no interface, itself included, so it never satisfies a generic
+bound and never widens again.
+
 Every `defn` name is one unqualified segment in its owner's scope, because the
 enclosing form already names that owner. A declaration therefore never spells
 its own path prefix, and no import alias can enter a declaration name.
