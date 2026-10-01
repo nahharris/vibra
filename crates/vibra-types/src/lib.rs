@@ -392,6 +392,8 @@ fn standard_type_import(
         "std.core.conversion-error" => {
             Some((STDLIB_CORE_SOURCE_ID, Some("conversion-error")))
         }
+        "std.core.equatable" => Some((STDLIB_CORE_SOURCE_ID, Some("equatable"))),
+        "std.core.ordered" => Some((STDLIB_CORE_SOURCE_ID, Some("ordered"))),
         _ => None,
     }
 }
@@ -703,7 +705,8 @@ impl<'a> Checker<'a> {
                             method,
                             self.diagnostics,
                             &self.types,
-                            nominal::Scope::new(Some(&self_type), &generics),
+                            nominal::Scope::new(Some(&self_type), &generics)
+                                .with_bounds(&bounds),
                         ) else {
                             continue;
                         };
@@ -784,7 +787,7 @@ impl<'a> Checker<'a> {
                         function,
                         self.diagnostics,
                         &self.types,
-                        nominal::Scope::new(None, &generics),
+                        nominal::Scope::new(None, &generics).with_bounds(&bounds),
                     ) else {
                         continue;
                     };
@@ -1443,7 +1446,8 @@ impl<'a> CheckEnvironment<'a> {
     ) -> bool {
         let Some(value_type) = self.types.lower_or_report(
             self.source_id,
-            nominal::Scope::new(self.self_type.as_ref(), &self.generics),
+            nominal::Scope::new(self.self_type.as_ref(), &self.generics)
+                .with_bounds(&self.bounds),
             value_type,
             parameter_span,
             self.diagnostics,
@@ -2332,7 +2336,8 @@ fn lower_type_arguments(
         .type_arguments_span()
         .unwrap_or_else(|| application.span());
     let scope =
-        nominal::Scope::new(environment.self_type.as_ref(), &environment.generics);
+        nominal::Scope::new(environment.self_type.as_ref(), &environment.generics)
+            .with_bounds(&environment.bounds);
     written
         .iter()
         .map(|value| {
@@ -4021,7 +4026,8 @@ fn check_form(
                 lambda,
                 environment.diagnostics,
                 environment.types,
-                nominal::Scope::new(environment.self_type.as_ref(), &generics),
+                nominal::Scope::new(environment.self_type.as_ref(), &generics)
+                    .with_bounds(&environment.bounds),
             )?;
             let outer = environment.visible_bindings();
             let mut nested = CheckEnvironment::new(
@@ -4310,7 +4316,8 @@ fn check_ascription(
 ) -> Option<Expr> {
     let target = environment.types.lower_or_report(
         environment.source_id,
-        nominal::Scope::new(environment.self_type.as_ref(), &environment.generics),
+        nominal::Scope::new(environment.self_type.as_ref(), &environment.generics)
+            .with_bounds(&environment.bounds),
         value_type,
         expression.span(),
         environment.diagnostics,

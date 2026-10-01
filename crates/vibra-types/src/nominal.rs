@@ -48,11 +48,13 @@ pub(crate) enum LowerError {
 }
 
 /// What a type expression may name besides declared types: the receiver type
-/// inside a nested method, and the generic names in scope.
+/// inside a nested method, the generic names in scope, and the interface each
+/// bounded one needs.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Scope<'a> {
     pub(crate) self_type: Option<&'a Type>,
     pub(crate) generics: &'a [String],
+    pub(crate) bounds: Option<&'a BTreeMap<String, usize>>,
 }
 
 impl<'a> Scope<'a> {
@@ -60,6 +62,7 @@ impl<'a> Scope<'a> {
     pub(crate) const NONE: Self = Self {
         self_type: None,
         generics: &[],
+        bounds: None,
     };
 
     /// A scope with a receiver type and generic names.
@@ -70,6 +73,15 @@ impl<'a> Scope<'a> {
         Self {
             self_type,
             generics,
+            bounds: None,
+        }
+    }
+
+    /// This scope with the interface bounds of its generic names.
+    pub(crate) const fn with_bounds(self, bounds: &'a BTreeMap<String, usize>) -> Self {
+        Self {
+            bounds: Some(bounds),
+            ..self
         }
     }
 }
@@ -161,6 +173,10 @@ pub(crate) struct TypeNames {
     /// Interface indices keyed by the source ID of their module.
     interfaces_by_module: BTreeMap<String, BTreeMap<String, usize>>,
     implementations: Vec<Implementation>,
+    /// Interfaces declared from the embedded standard library rather than by
+    /// a module of the run, with their declarations, whose contracts lower
+    /// before the run's own.
+    standard_contracts: Vec<(usize, &'static DefintDeclaration)>,
 }
 
 /// A value path that names a type constructor or an enum variant.
@@ -245,6 +261,51 @@ impl TypeNames {
             .or_default()
             .insert(name, index);
         index
+    }
+
+    /// Whether every generic name in `key` is bounded by `@std.core`'s
+    /// `ordered` in `scope`, so `key` is an admissible map key once the rest
+    /// of it is.
+    fn ordered_generics(&self, scope: Scope<'_>, key: &Type) -> bool {
+        let ordered = self
+            .interface_index_of(&crate::stdlib::stdlib_type_id(&["core"], "ordered"));
+        let mut verdict = true;
+        let mut pending = vec![key.clone()];
+        while let Some(value) = pending.pop() {
+            match &value {
+                Type::Param(name) => {
+                    verdict &= ordered.is_some()
+                        && scope.bounds.and_then(|bounds| bounds.get(name)).copied()
+                            == ordered;
+                }
+                Type::Function(_) => verdict = false,
+                _ => pending.extend(value.components()),
+            }
+        }
+        verdict
+    }
+
+    /// The index of the interface with identity `id`.
+    pub(crate) fn interface_index_of(&self, id: &TypeId) -> Option<usize> {
+        self.interfaces
+            .iter()
+            .position(|interface| interface.id == *id)
+    }
+
+    /// Records an interface declared from the embedded standard library.
+    pub(crate) fn add_standard_contract(
+        &mut self,
+        index: usize,
+        declaration: &'static DefintDeclaration,
+    ) {
+        self.standard_contracts.push((index, declaration));
+    }
+
+    /// The interfaces declared from the embedded standard library.
+    pub(crate) fn standard_contracts(
+        &self,
+    ) -> Vec<(usize, &'static DefintDeclaration)> {
+        self.standard_contracts.clone()
     }
 
     /// Every declared interface in registration order.
@@ -615,14 +676,17 @@ impl TypeNames {
                 match map_key(&key) {
                     KeyVerdict::Admissible => {}
                     // The embedded standard library declares the generic
-                    // `map` itself; a user map keyed by a generic parameter
-                    // needs interface bounds.
+                    // `map` itself; elsewhere every generic name in a key
+                    // needs an `ordered` bound. A bounded key may be a
+                    // `deftype` ordered by its own `compare`, which only the
+                    // library map honors.
                     KeyVerdict::Generic if is_stdlib_source(source_id) => {}
-                    KeyVerdict::Generic => {
+                    KeyVerdict::Generic if self.ordered_generics(scope, &key) => {
                         return Err(LowerError::Unavailable(
-                            "map types keyed by a generic parameter arrive with the key contracts in M3 Step 11b",
+                            "maps keyed by an `ordered`-bounded parameter arrive with the library map in M3 Step 11c",
                         ));
                     }
+                    KeyVerdict::Generic => return Err(LowerError::InvalidMapKey(key)),
                     KeyVerdict::Function => {
                         return Err(LowerError::FunctionMapKey(key));
                     }
@@ -1283,7 +1347,7 @@ pub(crate) fn report_interface_bounds(
                     diagnostics,
                     source_id,
                     binding.span(),
-                    "interface bounds on `deftype` and `lambda` parameters arrive in M3 Step 11b",
+                    "interface bounds on `deftype` and `lambda` parameters arrive in M3 Step 11c",
                 );
             }
         }
@@ -1355,7 +1419,8 @@ pub(crate) fn map_key(key: &Type) -> KeyVerdict {
         | Type::U8
         | Type::U16
         | Type::U32
-        | Type::U64 => KeyVerdict::Admissible,
+        | Type::U64
+        | Type::AtomSingleton(_) => KeyVerdict::Admissible,
         Type::Function(_) => KeyVerdict::Function,
         Type::Param(_) => KeyVerdict::Generic,
         Type::Tuple(_) | Type::Record(_) | Type::Enum(_) => {

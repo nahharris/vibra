@@ -1,0 +1,17 @@
+(defn main () (tuple i32 str bool bool core.ordering)
+  (tupleof
+    (largest 3i32 9i32)
+    (largest "pear" "apple")
+    (equatable.equal (tupleof 1i32 @x) (tupleof 1i32 @x))
+    (equatable.equal \a \b)
+    (ordered.compare (tupleof 2i32 "b") (tupleof 2i32 "a"))))
+
+(import core @std.core)
+(import equatable @std.core.equatable)
+(import ordered @std.core.ordered)
+
+(defn largest (left k right k) k
+  where: (k ordered)
+  (match (ordered.compare left right)
+    (core.ordering.less) right
+    - left))

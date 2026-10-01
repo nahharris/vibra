@@ -11,7 +11,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_ir::{CallTarget, Expr, FunctionSignature, Implements, SourceOrigin, Type};
+use vibra_ir::{
+    CallTarget, ClosedContract, Expr, FunctionSignature, Implements, SourceOrigin, Type,
+};
 use vibra_syntax::{
     Application, Attribute, Declaration, DefintDeclaration, FunctionDeclaration,
     TypeExpr, TypeMember,
@@ -652,6 +654,8 @@ pub(crate) fn check_contract_call(
                 .collect::<Vec<_>>();
             match candidates.as_slice() {
                 [implementation] => Some(*implementation.members.get(&contract.name)?),
+                // A closed key type conforms through the toolchain.
+                [] if closed_key(environment.types, interface, &receiver) => None,
                 [] => {
                     unsatisfied(
                         environment,
@@ -709,6 +713,7 @@ pub(crate) fn check_contract_call(
                 member: contract.name.clone(),
                 receiver: position,
                 signature: Box::new(signature),
+                closed: closed_contract(environment.types, interface, &contract.name),
             },
             arguments,
             result,
@@ -749,14 +754,15 @@ pub(crate) fn check_bounds(
         };
         let holds = match argument {
             Type::Param(caller) => environment.bounds.get(caller) == Some(interface),
-            _ => environment
-                .types
-                .implementations()
-                .iter()
-                .any(|implementation| {
-                    implementation.interface == *interface
-                        && covers(&implementation.receiver, argument)
-                }),
+            _ => {
+                closed_key(environment.types, *interface, argument)
+                    || environment.types.implementations().iter().any(
+                        |implementation| {
+                            implementation.interface == *interface
+                                && covers(&implementation.receiver, argument)
+                        },
+                    )
+            }
         };
         if !holds {
             satisfied = false;
@@ -782,6 +788,15 @@ pub(crate) fn materialize(
     name: &dyn Fn(usize, ByteSpan) -> Option<String>,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
+    for (index, declaration) in types.standard_contracts() {
+        let Some(source_id) = types
+            .interface(index)
+            .map(|interface| interface.source_id.clone())
+        else {
+            continue;
+        };
+        lower_contract(types, &source_id, index, declaration, diagnostics);
+    }
     for module in modules {
         for declaration in module.declarations {
             let Declaration::Defint(value) = declaration else {
@@ -887,7 +902,7 @@ pub(crate) fn materialize(
                 method,
                 diagnostics,
                 types,
-                Scope::new(Some(&plan.receiver), &type_parameters),
+                Scope::new(Some(&plan.receiver), &type_parameters).with_bounds(&bounds),
             ) else {
                 continue;
             };
@@ -985,4 +1000,38 @@ fn parameter_names(value: &Type, names: &mut BTreeSet<String>) {
     for component in value.components() {
         parameter_names(&component, names);
     }
+}
+
+/// The `@std.core` key contract `interface` is, with its one member.
+fn key_contract(
+    types: &TypeNames,
+    interface: usize,
+) -> Option<(&'static str, ClosedContract)> {
+    let id = &types.interface(interface)?.id;
+    [
+        ("ordered", "compare", ClosedContract::KeyCompare),
+        ("equatable", "equal", ClosedContract::KeyEqual),
+    ]
+    .into_iter()
+    .find(|(name, _, _)| *id == crate::stdlib::stdlib_type_id(&["core"], name))
+    .map(|(_, member, closed)| (member, closed))
+}
+
+/// The toolchain conformance a call of `member` of `interface` falls back to.
+fn closed_contract(
+    types: &TypeNames,
+    interface: usize,
+    member: &str,
+) -> Option<ClosedContract> {
+    key_contract(types, interface)
+        .filter(|(name, _)| *name == member)
+        .map(|(_, closed)| closed)
+}
+
+/// Whether `receiver` conforms to the key contract `interface` through the
+/// closed toolchain registry: a key primitive, an atom singleton, or an
+/// anonymous structure of admissible keys.
+fn closed_key(types: &TypeNames, interface: usize, receiver: &Type) -> bool {
+    key_contract(types, interface).is_some()
+        && crate::nominal::map_key(receiver) == crate::nominal::KeyVerdict::Admissible
 }

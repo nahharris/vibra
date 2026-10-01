@@ -21,8 +21,8 @@ use std::fmt;
 use std::sync::Arc;
 
 use vibra_ir::{
-    CallTarget, CheckedProgram, Expr, FunctionSignature, MatchArm, ObservedValue,
-    Pattern, SourceOrigin, TestAssertion, Type, TypeId, Value,
+    CallTarget, CheckedProgram, ClosedContract, Expr, FunctionSignature, MatchArm,
+    ObservedValue, Pattern, SourceOrigin, TestAssertion, Type, TypeId, Value,
 };
 
 /// One successful reference-interpreter run.
@@ -1167,6 +1167,7 @@ impl<'a> Machine<'a> {
             interface,
             member,
             receiver,
+            closed,
             ..
         } = target
         {
@@ -1187,11 +1188,15 @@ impl<'a> Machine<'a> {
                     .then_some((index, matches!(implements.receiver, Type::Param(_))))
                 })
                 .collect::<Vec<_>>();
-            let (index, _) = candidates
+            let Some((index, _)) = candidates
                 .iter()
                 .find(|(_, default)| !default)
                 .or_else(|| candidates.first())
-                .copied()?;
+                .copied()
+            else {
+                return closed_contract((*closed)?, &values, result)
+                    .map(Evaluation::Value);
+            };
             let callable = self.named_callable(index)?;
             return self
                 .invoke_callable(callable, values, result)
@@ -1731,6 +1736,32 @@ fn key_order(left: &RuntimeValue, right: &RuntimeValue) -> std::cmp::Ordering {
             .then_with(|| key_order(left, right)),
         _ => Ordering::Equal,
     }
+}
+
+/// A closed key type's `ordered.compare` or `equatable.equal`, answered by
+/// canonical key order over the two operands.
+fn closed_contract(
+    closed: ClosedContract,
+    values: &[RuntimeValue],
+    result: &Type,
+) -> Option<RuntimeValue> {
+    let [left, right] = values else {
+        return None;
+    };
+    let order = key_order(left, right);
+    Some(match closed {
+        ClosedContract::KeyEqual => RuntimeValue::Primitive(Value::Bool(order.is_eq())),
+        ClosedContract::KeyCompare => RuntimeValue::Enum {
+            value_type: result.clone(),
+            variant: match order {
+                std::cmp::Ordering::Less => "less",
+                std::cmp::Ordering::Equal => "equal",
+                std::cmp::Ordering::Greater => "greater",
+            }
+            .to_owned(),
+            payload: None,
+        },
+    })
 }
 
 fn sequence_order<'a>(

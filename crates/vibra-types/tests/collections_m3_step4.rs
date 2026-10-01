@@ -67,6 +67,12 @@ fn map_keys_follow_the_closed_conformance() {
     );
     assert_eq!(
         codes("(defn f (m (map t i32)) i32\n  where: (t any)\n  0i32)"),
+        vec![DiagnosticCode::TypeInvalidMapKey]
+    );
+    assert_eq!(
+        codes(
+            "(import ordered @std.core.ordered)\n(defn f (m (map (tuple t str) i32)) i32\n  where: (t ordered)\n  0i32)"
+        ),
         vec![DiagnosticCode::ToolUnavailable]
     );
 }

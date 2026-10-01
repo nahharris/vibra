@@ -1138,7 +1138,33 @@ pub enum CallTarget {
         receiver: usize,
         /// The member's signature at this call.
         signature: Box<FunctionSignature>,
+        /// The toolchain conformance the call falls back to when no
+        /// implementation covers the receiver.s runtime type.
+        closed: Option<ClosedContract>,
     },
+}
+
+/// A closed toolchain conformance of a standard contract: the `ordered` and
+/// `equatable` members of the closed key types
+/// (`docs/spec/02-type-system.md`, "Nominal declarations"), answered by
+/// canonical key order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ClosedContract {
+    /// `ordered.compare`.
+    KeyCompare,
+    /// `equatable.equal`.
+    KeyEqual,
+}
+
+impl ClosedContract {
+    /// The canonical spelling of the conformance.
+    #[must_use]
+    pub const fn symbol(self) -> &'static str {
+        match self {
+            Self::KeyCompare => "key.compare",
+            Self::KeyEqual => "key.equal",
+        }
+    }
 }
 
 impl CallTarget {
@@ -5624,10 +5650,14 @@ fn canonical_expr(expression: &Expr) -> String {
                     interface,
                     member,
                     receiver,
+                    closed,
                     ..
                 } => format!(
-                    "(record kind: @call contract: @{} member: @{member} receiver: {receiver}u64{} result: {} arguments: {})",
+                    "(record kind: @call contract: @{} member: @{member} receiver: {receiver}u64{}{} result: {} arguments: {})",
                     interface.path(),
+                    closed
+                        .map(|closed| format!(" closed: @{}", closed.symbol()))
+                        .unwrap_or_default(),
                     tail_field,
                     canonical_type(result),
                     canonical_array(&values)

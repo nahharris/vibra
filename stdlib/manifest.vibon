@@ -5,7 +5,7 @@
   modules: (map
     @std.core (record
       path: "std/core.vib"
-      sha256: "sha256:544820fa58f3aa1249ac4d63a26549b9af7093d2868394146a9249b62505e6d6"
+      sha256: "sha256:782861b7a7a7d13752edcbe03c64512fdea840ba7a58b1d70ac27897877b11c1"
       role: @source)
     @std.bool (record
       path: "std/bool.vib"

@@ -52,12 +52,12 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `TypeExpr::Enum` | Stage 3A | Step 2 | — |
 | `TypeExpr::Union` | Stage 3A | Step 6 | Reader and formatter: Step 2; cases `V1-TYPE-NOMINAL-union-declarations`, `V1-TYPE-NOMINAL-union-member-overlap`, `V1-TYPE-NOMINAL-union-member-not-concrete` |
 | `TypeExpr::Array` | Stage 3A | Step 4 | Cases `V1-RUNTIME-lookups`, `V1-TYPE-NOMINAL-collection-construction` |
-| `TypeExpr::Map` | Stage 3A | Step 4 | Cases `V1-RUNTIME-map-order`, `V1-TYPE-NOMINAL-map-keys`; generic key types: Step 11b |
+| `TypeExpr::Map` | Stage 3A | Step 4 | Cases `V1-RUNTIME-map-order`, `V1-TYPE-NOMINAL-map-keys`; generic keys without an `ordered` bound: Step 11b (`V1-TYPE-GENERIC-stage-3b-types`); `ordered`-bounded and user `deftype` keys: Step 11c |
 | `VariadicType::Array` | Stage 3A | Step 4 | Case `V1-SRC-CALLS-variadic-array-type` |
 | `VariadicType::Map` | Stage 3A | Step 4 | Case `V1-SRC-CALLS-variadic-map-type` |
 | `DeftypeBody::Type` | Stage 3A | Step 2 | Declared record, enum, and wrapper bodies: Step 2; tuple: Step 4; union: Step 6 (`V1-TYPE-NOMINAL-union-declarations`, `V1-RUNTIME-union-values`) |
 | `DeftypeBody::Intrinsic` | Stage 3A | Step 4 | Reader: Step 2; standard-library declarations: Steps 4 and 8 |
-| `Attribute::Where` | Stage 3A | Step 3 | `any` bounds (`V1-RUNTIME-generic-functions`, `V1-RUNTIME-generic-lambda`); interface bounds on `defn`: Step 11 (`V1-RUNTIME-workspace-test-interfaces`, `V1-TYPE-GENERIC-interface-bound`, `V1-TYPE-INTERFACE-unsatisfied-bound`, `V1-TYPE-INTERFACE-unimplemented-receiver`); on `deftype` and `lambda`: Step 11b |
+| `Attribute::Where` | Stage 3A | Step 3 | `any` bounds (`V1-RUNTIME-generic-functions`, `V1-RUNTIME-generic-lambda`); interface bounds on `defn`: Step 11 (`V1-RUNTIME-workspace-test-interfaces`, `V1-TYPE-GENERIC-interface-bound`, `V1-TYPE-INTERFACE-unsatisfied-bound`, `V1-TYPE-INTERFACE-unimplemented-receiver`); the key contracts: Step 11b (`V1-RUNTIME-key-contracts`, `V1-RUNTIME-workspace-test-key-contracts`, `V1-TYPE-INTERFACE-key-closed-registry`); on `deftype` and `lambda`: Step 11c |
 | `Attribute::Labelled` | M2 | — | — |
 | `Attribute::Variadic` | Stage 3A | Step 4 | Cases `V1-RUNTIME-variadics`, `V1-PROJECT-workspace-check-variadic-applications` |
 | `Attribute::Visibility` | M2 | — | — |

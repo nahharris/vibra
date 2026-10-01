@@ -1,0 +1,11 @@
+(import ordered @std.core.ordered)
+(import equatable @std.core.equatable)
+
+(defn largest (left k right k) k
+  where: (k ordered)
+  left)
+
+(defn use () bool
+  (do
+    (largest 1.5f64 2.5f64)
+    (equatable.equal (array.of 1i32) (array.of 2i32))))

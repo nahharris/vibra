@@ -281,7 +281,8 @@ pub fn check_resolved(
                         function,
                         &mut diagnostics,
                         &types,
-                        crate::nominal::Scope::new(None, &generics),
+                        crate::nominal::Scope::new(None, &generics)
+                            .with_bounds(&bounds),
                     ) else {
                         continue;
                     };
@@ -413,7 +414,8 @@ pub fn check_resolved(
                             method,
                             &mut diagnostics,
                             &types,
-                            crate::nominal::Scope::new(Some(&self_type), &generics),
+                            crate::nominal::Scope::new(Some(&self_type), &generics)
+                                .with_bounds(&bounds),
                         ) else {
                             continue;
                         };
