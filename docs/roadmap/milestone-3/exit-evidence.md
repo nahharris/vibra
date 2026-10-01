@@ -57,7 +57,8 @@ that uses only the public standard library and no compiler-private form.
   propagates with `try`.
 - `tests/stock.vib` has seven tests: the bounded generic, the default member,
   the map order, the pipeline, and `reserve` succeeding and failing with each
-  error member. Every test reaches its `sku` through the conversion.
+  error member. The map and `reserve` tests build each key through the
+  conversion.
 
 From a clean checkout, with no network, in `examples/m3-catalog`:
 
