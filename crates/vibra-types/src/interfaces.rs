@@ -655,7 +655,7 @@ pub(crate) fn check_contract_call(
             match candidates.as_slice() {
                 [implementation] => Some(*implementation.members.get(&contract.name)?),
                 // A closed key type conforms through the toolchain.
-                [] if closed_key(environment.types, interface, &receiver) => None,
+                [] if closed_key(environment, interface, &receiver) => None,
                 [] => {
                     unsatisfied(
                         environment,
@@ -752,18 +752,9 @@ pub(crate) fn check_bounds(
         let Some(argument) = arguments.get(name) else {
             continue;
         };
-        let holds = match argument {
-            Type::Param(caller) => environment.bounds.get(caller) == Some(interface),
-            _ => {
-                closed_key(environment.types, *interface, argument)
-                    || environment.types.implementations().iter().any(
-                        |implementation| {
-                            implementation.interface == *interface
-                                && covers(&implementation.receiver, argument)
-                        },
-                    )
-            }
-        };
+        let scope = Scope::new(environment.self_type.as_ref(), &environment.generics)
+            .with_bounds(&environment.bounds);
+        let holds = environment.types.satisfies(scope, *interface, argument);
         if !holds {
             satisfied = false;
             let interface = environment
@@ -894,6 +885,14 @@ pub(crate) fn materialize(
             ) else {
                 continue;
             };
+            // A block nested in a bounded `deftype` sees the type's bounds.
+            let mut bounds = bounds;
+            if let Type::Applied(id, _) = &plan.receiver
+                && let Some(owner) =
+                    types.index_of(id).and_then(|index| types.get(index))
+            {
+                bounds.extend(owner.bounds.clone());
+            }
             let mut type_parameters = plan.receiver_parameters.clone();
             type_parameters
                 .extend(crate::nominal::generic_names(method.attributes().items()));
@@ -943,6 +942,71 @@ pub(crate) fn materialize(
         }
         register(types, plan, &written, &defaults);
     }
+    types.set_bounds_ready();
+    check_header_bounds(types, modules, functions, diagnostics);
+}
+
+/// Checks the bounds of every applied declared type in the signatures and
+/// type bodies of `modules`, which lowered before any implementation was
+/// known; lowering checks them itself from here on.
+fn check_header_bounds(
+    types: &TypeNames,
+    modules: &[PlanModule<'_>],
+    functions: &[crate::FunctionHeader],
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    for header in functions {
+        let Some(function) = modules
+            .get(header.module_index)
+            .and_then(|module| crate::header_function(module.declarations, header))
+        else {
+            continue;
+        };
+        let scope = Scope::new(header.self_type.as_ref(), &header.type_parameters)
+            .with_bounds(&header.bounds);
+        // Body checking lowers each positional parameter again, at its own
+        // span, so only the other slots are checked here.
+        let mut slots = header
+            .signature
+            .slot_types()
+            .into_iter()
+            .skip(header.signature.parameters().len())
+            .collect::<Vec<_>>();
+        slots.push(header.signature.result());
+        for slot in slots {
+            for error in types.unsatisfied_bounds(scope, &slot) {
+                crate::nominal::report_lower_error(
+                    diagnostics,
+                    &header.source_id,
+                    function.span(),
+                    &error,
+                );
+            }
+        }
+    }
+    for declared in types.declared() {
+        if !modules
+            .iter()
+            .any(|module| module.source_id == declared.source_id)
+        {
+            continue;
+        }
+        let Some(body) = &declared.body else {
+            continue;
+        };
+        let scope =
+            Scope::new(None, &declared.parameters).with_bounds(&declared.bounds);
+        for (_, slot) in body.slots() {
+            for error in types.unsatisfied_bounds(scope, &slot) {
+                crate::nominal::report_lower_error(
+                    diagnostics,
+                    &declared.source_id,
+                    declared.span,
+                    &error,
+                );
+            }
+        }
+    }
 }
 
 /// The type argument each of `parameters` took when `generic` was
@@ -977,7 +1041,7 @@ fn target(plan: &ImplPlan) -> Type {
 /// Whether the implementation receiver `pattern`, whose generic names stand
 /// for any type, covers `actual`, whose generic names are the caller's own
 /// and so stand only for themselves.
-fn covers(pattern: &Type, actual: &Type) -> bool {
+pub(crate) fn covers(pattern: &Type, actual: &Type) -> bool {
     let mut names = BTreeSet::new();
     parameter_names(actual, &mut names);
     let rigid = names
@@ -1003,7 +1067,7 @@ fn parameter_names(value: &Type, names: &mut BTreeSet<String>) {
 }
 
 /// The `@std.core` key contract `interface` is, with its one member.
-fn key_contract(
+pub(crate) fn key_contract(
     types: &TypeNames,
     interface: usize,
 ) -> Option<(&'static str, ClosedContract)> {
@@ -1029,9 +1093,24 @@ fn closed_contract(
 }
 
 /// Whether `receiver` conforms to the key contract `interface` through the
-/// closed toolchain registry: a key primitive, an atom singleton, or an
-/// anonymous structure of admissible keys.
-fn closed_key(types: &TypeNames, interface: usize, receiver: &Type) -> bool {
-    key_contract(types, interface).is_some()
-        && crate::nominal::map_key(receiver) == crate::nominal::KeyVerdict::Admissible
+/// closed toolchain registry in the scope of `environment`.
+fn closed_key(
+    environment: &CheckEnvironment<'_>,
+    interface: usize,
+    receiver: &Type,
+) -> bool {
+    let scope = Scope::new(environment.self_type.as_ref(), &environment.generics)
+        .with_bounds(&environment.bounds);
+    environment.types.closed_key(scope, interface, receiver)
+}
+
+/// The `ordered` interface a map keyed by `key` orders its keys through:
+/// `None` for a key of the closed registry alone, whose canonical key order is
+/// its `compare`.
+pub(crate) fn key_order(types: &TypeNames, key: &Type) -> Option<vibra_ir::TypeId> {
+    if crate::nominal::map_key(key) == crate::nominal::KeyVerdict::Admissible {
+        return None;
+    }
+    let id = crate::stdlib::stdlib_type_id(&["core"], "ordered");
+    types.interface_index_of(&id).map(|_| id)
 }

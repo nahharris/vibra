@@ -820,13 +820,14 @@ impl<'a> Machine<'a> {
             Expr::Map {
                 value_type,
                 entries,
+                key_order,
                 ..
             } => {
                 let mut ordered = Vec::with_capacity(entries.len());
                 for (key, value) in entries {
                     let key = self.evaluate_value(key, slots, captures)?;
                     let value = self.evaluate_value(value, slots, captures)?;
-                    insert_entry(&mut ordered, key, value);
+                    self.insert_entry(&mut ordered, key, value, key_order.as_ref())?;
                 }
                 RuntimeValue::Map {
                     value_type: value_type.clone(),
@@ -837,11 +838,19 @@ impl<'a> Machine<'a> {
                 collection,
                 key,
                 value_type,
+                key_order,
                 ..
             } => {
                 let collection = self.evaluate_value(collection, slots, captures)?;
                 let key = self.evaluate_value(key, slots, captures)?;
-                let found = lookup(collection, &key);
+                let found = match collection {
+                    RuntimeValue::Map { entries, .. } => self
+                        .search_entries(&entries, &key, key_order.as_ref())?
+                        .ok()
+                        .and_then(|position| entries.into_iter().nth(position))
+                        .map(|(_, value)| value),
+                    collection => lookup(collection, &key),
+                };
                 RuntimeValue::Enum {
                     value_type: value_type.clone(),
                     variant: if found.is_some() { "some" } else { "none" }.to_owned(),
@@ -899,6 +908,182 @@ impl<'a> Machine<'a> {
             value_type: value_type.clone(),
             fields: values,
         }))
+    }
+
+    /// Orders two keys of one map (`docs/spec/02-type-system.md`, "Nominal
+    /// declarations"). A value of a declared type is ordered by its own
+    /// `compare` of `key_order`, the `ordered` interface; everything else
+    /// takes canonical key order, component-wise through structures.
+    fn compare_keys(
+        &mut self,
+        left: &RuntimeValue,
+        right: &RuntimeValue,
+        key_order: Option<&TypeId>,
+    ) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering;
+        let Some(interface) = key_order else {
+            return Some(key_order_canonical(left, right));
+        };
+        if let Some(function) = self.key_compare_function(interface, left) {
+            let result = self.program.functions().get(function)?.signature().result();
+            let callable = self.named_callable(function)?;
+            let RuntimeValue::Enum { variant, .. } = self.invoke_callable(
+                callable,
+                vec![left.clone(), right.clone()],
+                &result,
+            )?
+            else {
+                return None;
+            };
+            return match variant.as_str() {
+                "less" => Some(Ordering::Less),
+                "equal" => Some(Ordering::Equal),
+                "greater" => Some(Ordering::Greater),
+                _ => None,
+            };
+        }
+        match (left, right) {
+            (
+                RuntimeValue::Tuple { values: left, .. },
+                RuntimeValue::Tuple { values: right, .. },
+            ) => self.compare_sequences(left.iter(), right.iter(), key_order),
+            (
+                RuntimeValue::Record { fields: left, .. },
+                RuntimeValue::Record { fields: right, .. },
+            ) => self.compare_sequences(
+                left.iter().map(|(_, value)| value),
+                right.iter().map(|(_, value)| value),
+                key_order,
+            ),
+            (
+                RuntimeValue::Enum {
+                    variant: left_variant,
+                    payload: left_payload,
+                    ..
+                },
+                RuntimeValue::Enum {
+                    variant: right_variant,
+                    payload: right_payload,
+                    ..
+                },
+            ) => match left_variant.as_bytes().cmp(right_variant.as_bytes()) {
+                Ordering::Equal => match (left_payload, right_payload) {
+                    (Some(left), Some(right)) => {
+                        self.compare_keys(left, right, key_order)
+                    }
+                    _ => Some(Ordering::Equal),
+                },
+                order => Some(order),
+            },
+            (
+                RuntimeValue::Union {
+                    member: left_member,
+                    value: left,
+                    ..
+                },
+                RuntimeValue::Union {
+                    member: right_member,
+                    value: right,
+                    ..
+                },
+            ) => match left_member.cmp(right_member) {
+                Ordering::Equal => self.compare_keys(left, right, key_order),
+                order => Some(order),
+            },
+            _ => Some(key_order_canonical(left, right)),
+        }
+    }
+
+    fn compare_sequences<'v>(
+        &mut self,
+        left: impl Iterator<Item = &'v RuntimeValue>,
+        right: impl Iterator<Item = &'v RuntimeValue>,
+        key_order: Option<&TypeId>,
+    ) -> Option<std::cmp::Ordering> {
+        use std::cmp::Ordering;
+        let mut right = right;
+        for left in left {
+            let Some(right) = right.next() else {
+                return Some(Ordering::Greater);
+            };
+            let order = self.compare_keys(left, right, key_order)?;
+            if order.is_ne() {
+                return Some(order);
+            }
+        }
+        Some(if right.next().is_some() {
+            Ordering::Less
+        } else {
+            Ordering::Equal
+        })
+    }
+
+    /// The `compare` implementation of the `ordered` interface `interface`
+    /// whose receiver is the declared type of `value`.
+    fn key_compare_function(
+        &self,
+        interface: &TypeId,
+        value: &RuntimeValue,
+    ) -> Option<usize> {
+        let value_type = match value {
+            RuntimeValue::Record { value_type, .. }
+            | RuntimeValue::Enum { value_type, .. }
+            | RuntimeValue::Wrapper { value_type, .. }
+            | RuntimeValue::Union { value_type, .. } => value_type,
+            _ => return None,
+        };
+        if !matches!(value_type, Type::Declared(_) | Type::Applied(_, _)) {
+            return None;
+        }
+        self.program.functions().iter().position(|function| {
+            function.implements().is_some_and(|implements| {
+                implements.interface == *interface
+                    && implements.member == "compare"
+                    && !matches!(implements.receiver, Type::Param(_))
+                    && admits_value(&implements.receiver, value)
+            })
+        })
+    }
+
+    /// Inserts one entry into a map's sorted entries; a repeated key keeps
+    /// its first position and takes the later value.
+    fn insert_entry(
+        &mut self,
+        entries: &mut Vec<(RuntimeValue, RuntimeValue)>,
+        key: RuntimeValue,
+        value: RuntimeValue,
+        key_order: Option<&TypeId>,
+    ) -> Option<()> {
+        match self.search_entries(entries, &key, key_order)? {
+            Ok(position) => {
+                if let Some(entry) = entries.get_mut(position) {
+                    entry.1 = value;
+                }
+            }
+            Err(position) => entries.insert(position, (key, value)),
+        }
+        Some(())
+    }
+
+    /// Binary search over sorted map entries, with a comparison that may run
+    /// Vibra code.
+    fn search_entries(
+        &mut self,
+        entries: &[(RuntimeValue, RuntimeValue)],
+        key: &RuntimeValue,
+        key_order: Option<&TypeId>,
+    ) -> Option<Result<usize, usize>> {
+        let (mut low, mut high) = (0, entries.len());
+        while low < high {
+            let middle = low + (high - low) / 2;
+            let (existing, _) = entries.get(middle)?;
+            match self.compare_keys(existing, key, key_order)? {
+                std::cmp::Ordering::Less => low = middle + 1,
+                std::cmp::Ordering::Greater => high = middle,
+                std::cmp::Ordering::Equal => return Some(Ok(middle)),
+            }
+        }
+        Some(Err(low))
     }
 
     fn named_callable(&self, function: usize) -> Option<Callable> {
@@ -1194,8 +1379,15 @@ impl<'a> Machine<'a> {
                 .or_else(|| candidates.first())
                 .copied()
             else {
-                return closed_contract((*closed)?, &values, result)
-                    .map(Evaluation::Value);
+                let closed = (*closed)?;
+                let [left, right] = values.as_slice() else {
+                    return None;
+                };
+                // A structure holding a user key orders through its `compare`.
+                let key_order =
+                    (closed == ClosedContract::KeyCompare).then_some(interface);
+                let order = self.compare_keys(left, right, key_order)?;
+                return Some(Evaluation::Value(closed_contract(closed, order, result)));
             };
             let callable = self.named_callable(index)?;
             return self
@@ -1685,7 +1877,10 @@ fn bind_pattern(
 /// order for tuples, records in canonical field order, and enums by canonical
 /// variant then payload. Keys of one map share one type, so values of
 /// different shapes never meet; they compare equal only to stay total.
-fn key_order(left: &RuntimeValue, right: &RuntimeValue) -> std::cmp::Ordering {
+fn key_order_canonical(
+    left: &RuntimeValue,
+    right: &RuntimeValue,
+) -> std::cmp::Ordering {
     use std::cmp::Ordering;
     match (left, right) {
         (RuntimeValue::Primitive(left), RuntimeValue::Primitive(right)) => {
@@ -1717,7 +1912,7 @@ fn key_order(left: &RuntimeValue, right: &RuntimeValue) -> std::cmp::Ordering {
             .as_bytes()
             .cmp(right_variant.as_bytes())
             .then_with(|| match (left_payload, right_payload) {
-                (Some(left), Some(right)) => key_order(left, right),
+                (Some(left), Some(right)) => key_order_canonical(left, right),
                 _ => Ordering::Equal,
             }),
         (
@@ -1733,23 +1928,19 @@ fn key_order(left: &RuntimeValue, right: &RuntimeValue) -> std::cmp::Ordering {
             },
         ) => left_member
             .cmp(right_member)
-            .then_with(|| key_order(left, right)),
+            .then_with(|| key_order_canonical(left, right)),
         _ => Ordering::Equal,
     }
 }
 
-/// A closed key type's `ordered.compare` or `equatable.equal`, answered by
-/// canonical key order over the two operands.
+/// A closed key type's `ordered.compare` or `equatable.equal` from the order
+/// of its two operands.
 fn closed_contract(
     closed: ClosedContract,
-    values: &[RuntimeValue],
+    order: std::cmp::Ordering,
     result: &Type,
-) -> Option<RuntimeValue> {
-    let [left, right] = values else {
-        return None;
-    };
-    let order = key_order(left, right);
-    Some(match closed {
+) -> RuntimeValue {
+    match closed {
         ClosedContract::KeyEqual => RuntimeValue::Primitive(Value::Bool(order.is_eq())),
         ClosedContract::KeyCompare => RuntimeValue::Enum {
             value_type: result.clone(),
@@ -1761,7 +1952,7 @@ fn closed_contract(
             .to_owned(),
             payload: None,
         },
-    })
+    }
 }
 
 fn sequence_order<'a>(
@@ -1773,7 +1964,7 @@ fn sequence_order<'a>(
         let Some(right) = right.next() else {
             return std::cmp::Ordering::Greater;
         };
-        let order = key_order(left, right);
+        let order = key_order_canonical(left, right);
         if order.is_ne() {
             return order;
         }
@@ -1808,7 +1999,7 @@ fn primitive_order(left: &Value, right: &Value) -> std::cmp::Ordering {
     }
 }
 
-/// The element at `key` in an array, map, `str`, or `bytes` value. String
+/// The element at `key` in an array, `str`, or `bytes` value. String
 /// indices count Unicode scalars; byte indices count bytes.
 fn lookup(collection: RuntimeValue, key: &RuntimeValue) -> Option<RuntimeValue> {
     let index = || match key {
@@ -1817,11 +2008,6 @@ fn lookup(collection: RuntimeValue, key: &RuntimeValue) -> Option<RuntimeValue> 
     };
     match collection {
         RuntimeValue::Array { values, .. } => values.into_iter().nth(index()?),
-        RuntimeValue::Map { entries, .. } => entries
-            .binary_search_by(|(existing, _)| key_order(existing, key))
-            .ok()
-            .and_then(|position| entries.into_iter().nth(position))
-            .map(|(_, value)| value),
         RuntimeValue::Primitive(Value::Str(text)) => text
             .chars()
             .nth(index()?)
@@ -1830,23 +2016,6 @@ fn lookup(collection: RuntimeValue, key: &RuntimeValue) -> Option<RuntimeValue> 
             .get(index()?)
             .map(|byte| RuntimeValue::Primitive(Value::U8(*byte))),
         _ => None,
-    }
-}
-
-/// Inserts `key` into entries kept in canonical key order; an equal key's
-/// value is replaced, so the later entry wins.
-fn insert_entry(
-    entries: &mut Vec<(RuntimeValue, RuntimeValue)>,
-    key: RuntimeValue,
-    value: RuntimeValue,
-) {
-    match entries.binary_search_by(|(existing, _)| key_order(existing, &key)) {
-        Ok(position) => {
-            if let Some(entry) = entries.get_mut(position) {
-                entry.1 = value;
-            }
-        }
-        Err(position) => entries.insert(position, (key, value)),
     }
 }
 

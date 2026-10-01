@@ -601,11 +601,16 @@ pub(crate) fn check_lookup(
         );
         return None;
     };
+    let key_order = match collection.result_type() {
+        Type::Map(_, _) => crate::interfaces::key_order(environment.types, &key_type),
+        _ => None,
+    };
     let key = check_operand(environment, operand.value(), Some(key_type))?;
     let expression = Expr::Lookup {
         collection: Box::new(collection),
         key: Box::new(key),
         value_type: value_type.clone(),
+        key_order,
         origin: SourceOrigin::new(environment.source_id, application.span()),
     };
     finish(
@@ -762,11 +767,26 @@ fn instantiated(
     pattern: &Type,
 ) -> Option<Type> {
     let opened = instantiation.open(pattern);
-    let resolved = instantiation.resolved(&opened);
-    if resolved.is_none() {
+    let Some(resolved) = instantiation.resolved(&opened) else {
         ambiguous_generic(environment, application.span(), &instantiation.unbound());
+        return None;
+    };
+    // A bounded `deftype` is constructed only at arguments satisfying them.
+    let scope = crate::nominal::Scope::new(
+        environment.self_type.as_ref(),
+        &environment.generics,
+    )
+    .with_bounds(&environment.bounds);
+    let errors = environment.types.unsatisfied_bounds(scope, &resolved);
+    for error in &errors {
+        crate::nominal::report_lower_error(
+            environment.diagnostics,
+            environment.source_id,
+            application.span(),
+            error,
+        );
     }
-    resolved
+    errors.is_empty().then_some(resolved)
 }
 
 /// The binding facts of one constructor application, recorded only once the

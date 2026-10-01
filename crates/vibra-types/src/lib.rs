@@ -674,7 +674,7 @@ impl<'a> Checker<'a> {
                     else {
                         continue;
                     };
-                    let Some((self_type, owner_generics)) =
+                    let Some((self_type, owner_generics, owner_bounds)) =
                         self.types.get(type_index).map(|declared| {
                             (
                                 nominal::declared_self_type(
@@ -682,6 +682,7 @@ impl<'a> Checker<'a> {
                                     &declared.parameters,
                                 ),
                                 declared.parameters.clone(),
+                                declared.bounds.clone(),
                             )
                         })
                     else {
@@ -700,6 +701,11 @@ impl<'a> Checker<'a> {
                         ) else {
                             continue;
                         };
+                        let bounds = owner_bounds
+                            .clone()
+                            .into_iter()
+                            .chain(bounds)
+                            .collect::<BTreeMap<_, _>>();
                         let Some(signature) = check_signature(
                             self.source_id,
                             method,
@@ -883,6 +889,19 @@ impl<'a> Checker<'a> {
             &|_, _| None,
             self.diagnostics,
         );
+        for global in &self.globals {
+            for error in self
+                .types
+                .unsatisfied_bounds(nominal::Scope::NONE, &global.value_type)
+            {
+                nominal::report_lower_error(
+                    self.diagnostics,
+                    self.source_id,
+                    global.span,
+                    &error,
+                );
+            }
+        }
         if self.text_import_authorized {
             let import_span = self.text_import_span.unwrap_or_else(|| self.ast.span());
             for (name, intrinsic) in [
@@ -2514,7 +2533,12 @@ fn tail_patterns(tail: &Type, count: usize) -> Vec<Type> {
 }
 
 /// Packs checked tail operands into the one argument a variadic slot takes.
-fn pack_tail(tail: &Type, operands: Vec<Expr>, origin: SourceOrigin) -> Expr {
+fn pack_tail(
+    tail: &Type,
+    operands: Vec<Expr>,
+    key_order: Option<vibra_ir::TypeId>,
+    origin: SourceOrigin,
+) -> Expr {
     match tail {
         Type::Map(_, _) => {
             let mut entries = Vec::with_capacity(operands.len() / 2);
@@ -2525,6 +2549,7 @@ fn pack_tail(tail: &Type, operands: Vec<Expr>, origin: SourceOrigin) -> Expr {
             Expr::Map {
                 value_type: tail.clone(),
                 entries,
+                key_order,
                 origin,
             }
         }
@@ -2566,7 +2591,14 @@ fn check_inferred_map_keys(
     span: ByteSpan,
     value_type: &Type,
 ) -> bool {
-    let Some((code, key)) = first_invalid_map_key(value_type) else {
+    let scope =
+        nominal::Scope::new(environment.self_type.as_ref(), &environment.generics)
+            .with_bounds(&environment.bounds);
+    // The embedded standard library declares the generic `map` itself.
+    let generic_admissible = nominal::is_stdlib_source(environment.source_id);
+    let Some((code, key)) =
+        first_invalid_map_key(environment.types, scope, generic_admissible, value_type)
+    else {
         return true;
     };
     environment.diagnostics.push(
@@ -2580,25 +2612,30 @@ fn check_inferred_map_keys(
     false
 }
 
-fn first_invalid_map_key(value_type: &Type) -> Option<(DiagnosticCode, Type)> {
+fn first_invalid_map_key(
+    types: &nominal::TypeNames,
+    scope: nominal::Scope<'_>,
+    generic_admissible: bool,
+    value_type: &Type,
+) -> Option<(DiagnosticCode, Type)> {
     if let Type::Map(key, _) = value_type {
-        match nominal::map_key(key) {
-            nominal::KeyVerdict::Admissible | nominal::KeyVerdict::Generic => {}
+        match types.key_verdict(scope, key) {
+            nominal::KeyVerdict::Admissible => {}
+            nominal::KeyVerdict::Generic if generic_admissible => {}
             nominal::KeyVerdict::Function => {
                 return Some((
                     DiagnosticCode::TypeFunctionNotEquatable,
                     key.as_ref().clone(),
                 ));
             }
-            nominal::KeyVerdict::Invalid => {
+            nominal::KeyVerdict::Generic | nominal::KeyVerdict::Invalid => {
                 return Some((DiagnosticCode::TypeInvalidMapKey, key.as_ref().clone()));
             }
         }
     }
-    value_type
-        .components()
-        .iter()
-        .find_map(first_invalid_map_key)
+    value_type.components().iter().find_map(|component| {
+        first_invalid_map_key(types, scope, generic_admissible, component)
+    })
 }
 
 /// The generic callee of one application and what the call site wrote.
@@ -3731,6 +3768,26 @@ fn check_form(
                     ) {
                         return None;
                     }
+                } else if !matches!(callee, Expr::Function { .. }) {
+                    // A generic `lambda`, by its quantified names.
+                    let bounds = environment
+                        .types
+                        .lambda_bounds(environment.source_id, &parameters);
+                    if !bounds.is_empty() {
+                        let arguments = interfaces::type_arguments(
+                            &parameters,
+                            &signature,
+                            &instantiated,
+                        );
+                        if !interfaces::check_bounds(
+                            environment,
+                            application.span(),
+                            &bounds,
+                            &arguments,
+                        ) {
+                            return None;
+                        }
+                    }
                 }
                 checked_tail = tail;
                 // A named function is rebuilt at its instantiation; a generic
@@ -3832,9 +3889,14 @@ fn check_form(
                 }
             }
             if let Some(tail_type) = signature.variadic() {
+                let key_order = match tail_type {
+                    Type::Map(key, _) => interfaces::key_order(environment.types, key),
+                    _ => None,
+                };
                 arguments.push(pack_tail(
                     tail_type,
                     checked_tail,
+                    key_order,
                     SourceOrigin::new(environment.source_id, application.span()),
                 ));
             }
@@ -4011,23 +4073,34 @@ fn check_form(
         }
         ExpressionKind::Lambda(lambda) => {
             let attributes = lambda.attributes().items();
-            if !nominal::report_interface_bounds(
-                attributes,
+            let own_bounds = interfaces::generic_bounds(
+                environment.types,
                 environment.source_id,
+                attributes,
                 environment.diagnostics,
-            ) {
-                return None;
-            }
+            )?;
             let own_generics = nominal::generic_names(attributes);
+            // Each application checks the bounds of the quantified names.
+            for (index, name) in own_generics.iter().enumerate() {
+                if let Some(interface) = own_bounds.get(name) {
+                    environment.types.record_lambda_bound(
+                        environment.source_id,
+                        infer::quantified_name(name, index, lambda.span().start()),
+                        *interface,
+                    );
+                }
+            }
             let mut generics = environment.generics.clone();
             generics.extend(own_generics.iter().cloned());
+            let mut bounds = environment.bounds.clone();
+            bounds.extend(own_bounds);
             let signature = check_lambda_signature(
                 environment.source_id,
                 lambda,
                 environment.diagnostics,
                 environment.types,
                 nominal::Scope::new(environment.self_type.as_ref(), &generics)
-                    .with_bounds(&environment.bounds),
+                    .with_bounds(&bounds),
             )?;
             let outer = environment.visible_bindings();
             let mut nested = CheckEnvironment::new(
@@ -4044,7 +4117,7 @@ fn check_form(
             );
             nested.self_type = environment.self_type.clone();
             nested.generics = generics;
-            nested.bounds = environment.bounds.clone();
+            nested.bounds = bounds;
             nested.exit = Some((signature.result(), Some(lambda.result_span())));
             nested.resolved_targets = environment.resolved_targets;
             nested.reports_redeclarations = environment.reports_redeclarations;
@@ -4875,11 +4948,10 @@ fn dotted_value_paths(ast: &SourceAst) -> BTreeSet<String> {
             Declaration::Def(value) => bodies.push(value.expression()),
             Declaration::Defn(function) => bodies.extend(function.expressions()),
             Declaration::Deftype(value) => {
-                for member in value.members() {
-                    if let TypeMember::Method(method) = member {
-                        bodies.extend(method.expressions());
-                    }
-                }
+                bodies.extend(member_bodies(value.members()));
+            }
+            Declaration::Defint(value) => {
+                bodies.extend(member_bodies(value.members()));
             }
             Declaration::Test(test) => bodies.extend(test.expressions()),
             _ => {}
@@ -4897,6 +4969,24 @@ fn dotted_value_paths(ast: &SourceAst) -> BTreeSet<String> {
         });
     }
     paths
+}
+
+/// The body expressions of a `deftype` or `defint`'s methods, defaults, and
+/// `impl` members.
+fn member_bodies(members: &[TypeMember]) -> Vec<&Expression> {
+    members
+        .iter()
+        .flat_map(|member| match member {
+            TypeMember::Method(method) => {
+                method.expressions().iter().collect::<Vec<_>>()
+            }
+            TypeMember::Implementation(block) => block
+                .members()
+                .iter()
+                .flat_map(|function| function.expressions())
+                .collect(),
+        })
+        .collect()
 }
 
 #[cfg(test)]

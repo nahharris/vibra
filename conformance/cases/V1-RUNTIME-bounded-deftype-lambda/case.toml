@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-bounded-deftype-lambda"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A deftype bounded by ordered keys a map by its parameter and its methods see the bound; a generic lambda bounded by ordered calls the contract on its parameter."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

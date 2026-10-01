@@ -25,9 +25,9 @@ that the interface machinery lands before the standard library depends on it.
    `@tool.unavailable`: `k` may then be a `deftype` ordered by its own
    `compare`, which only the library map honors.
 
-Step 11c moves `map` into the standard library and brings `ordered`-bounded and
-user `deftype` keys, library-written key conformances, and bounds on `deftype`
-and `lambda` parameters.
+Step 11c brings `ordered`-bounded and user `deftype` keys and bounds on
+`deftype` and `lambda` parameters; Step 11d moves `map` into the standard
+library with library-written key conformances.
 
 ## Test matrix
 

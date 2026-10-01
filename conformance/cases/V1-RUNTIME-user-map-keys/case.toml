@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-user-map-keys"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A deftype keys a map through its own ordered implementation, which orders the map, its lookups, a tuple key holding it, and a map keyed by an ordered-bounded parameter instantiated with it."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }
