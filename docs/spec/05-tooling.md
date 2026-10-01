@@ -369,6 +369,17 @@ document on every host. An unavailable or recovered declaration keeps its
 record with `signature`, `effects`, `errors`, and `applications` absent, and
 the envelope's fact status says why.
 
+A module record's `signature` is `void` and its `text` is the whole formatted
+module. A member written in an `impl` block has no atom identity, so it has no
+declaration record, and a reference in its body names the declaration that
+owns the block as `from`. The records describe the modules of the local
+package; a standard-library declaration appears only as a target.
+
+`urn:vibra:schema:v1:index` is the JSON wire form of the same document for a
+tooling consumer: the same records in the same order, with identities as atom
+spellings without `@`, canonical type encodings as VIBON text, and absent facts
+as `null`.
+
 ### M2 workspace position envelope
 
 M2 keeps `urn:vibra:schema:v1:source-position-query` unchanged. Its

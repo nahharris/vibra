@@ -473,6 +473,7 @@ fn validate_declared_files(
         expectations.resolved.as_ref(),
         expectations.types.as_ref(),
         expectations.effects.as_ref(),
+        expectations.index.as_ref(),
     ]
     .into_iter()
     .flatten()

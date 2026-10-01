@@ -1,0 +1,8 @@
+(deffect audit
+  (defn record (message str) void
+    external: @host
+    symbol: "audit.record"))
+
+(defn unknown (value missing) i32 0i32)
+
+(defn execute () void void)

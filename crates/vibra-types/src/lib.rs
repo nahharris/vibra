@@ -41,7 +41,10 @@ mod standard;
 mod stdlib;
 mod union;
 
-pub use resolved::{ResolvedCheckResult, check_resolved};
+pub use resolved::{
+    IndexedImplementation, IndexedMember, IndexedSignature, ResolvedCheckResult,
+    check_resolved,
+};
 pub use standard::{builtin_member_names, role_type_names};
 pub use stdlib::{
     STDLIB_ASSERT_SOURCE_ID, STDLIB_BOOL_SOURCE_ID, STDLIB_BUILTIN_SOURCE_ID,
@@ -1871,7 +1874,7 @@ fn types_match(left: &Type, right: &Type) -> bool {
 /// This is the one syntax traversal the checker needs before lowering;
 /// dependency, cycle, and recursive-group analysis happen once, over checked
 /// IR, in `vibra-ir`.
-fn walk_expressions<'e>(
+pub fn walk_expressions<'e>(
     expression: &'e Expression,
     visit: &mut impl FnMut(&'e Expression),
 ) {

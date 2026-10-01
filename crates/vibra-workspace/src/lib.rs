@@ -21,6 +21,7 @@
 pub mod confined_fs;
 pub mod discovery;
 pub mod format_plan;
+pub mod index;
 pub mod project;
 pub mod query;
 pub mod semantic;

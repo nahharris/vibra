@@ -360,7 +360,7 @@ fn check_resolved_scope(
     }
 }
 
-fn import_closure(
+pub(crate) fn import_closure(
     resolved: &ResolvedSnapshot,
     initial_units: &BTreeSet<String>,
     verification: Option<&vibra_types::Stdlib>,

@@ -51,6 +51,7 @@
 )]
 
 mod diagnostic;
+mod index;
 mod query;
 mod semantic_query;
 
@@ -62,6 +63,11 @@ pub use diagnostic::{
     DIAGNOSTIC_SCHEMA, DiagnosticDocument, DiagnosticRenderError, FixDocument,
     PositionDocument, REGISTRY_ENTRY_SCHEMA, RegistryEntryDocument,
     RelatedSpanDocument, SCHEMA_VERSION, SpanDocument,
+};
+pub use index::{
+    INDEX_SCHEMA, IndexDeclarationDocument, IndexDocumentJson, IndexFactsDocument,
+    IndexImplementationDocument, IndexImplementationMemberDocument,
+    IndexReferenceDocument, IndexSourceDocument,
 };
 pub use query::{
     SOURCE_POSITION_QUERY_SCHEMA, SourcePositionQueryDocument, category_name,

@@ -37,5 +37,5 @@ guides for Steps 11–16.
   row and a single spec paragraph, so it can be revisited before its
   implementing step.
 - The guides are [11](11-interfaces.md), [12](12-interface-values.md),
-  [13](13-conversion.md), [14](14a-iter-contract.md), [15](15-index.md), and
+  [13](13-conversion.md), [14](14a-iter-contract.md), [15](15a-index-records.md), and
   [16](16-exit.md).

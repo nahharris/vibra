@@ -641,6 +641,8 @@ pub(crate) fn register(
         interface: plan.interface,
         arguments: plan.arguments.clone(),
         receiver: plan.receiver.clone(),
+        source_id: plan.source_id.clone(),
+        span: plan.span,
         members,
     });
 }

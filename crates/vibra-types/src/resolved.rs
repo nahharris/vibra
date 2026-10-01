@@ -25,6 +25,108 @@ pub struct ResolvedCheckResult {
     diagnostics: Vec<Diagnostic>,
     bindings: Vec<ApplicationBinding>,
     function_indices: BTreeMap<DeclarationId, usize>,
+    signatures: BTreeMap<DeclarationId, IndexedSignature>,
+    implementations: Vec<IndexedImplementation>,
+}
+
+/// The checked type of one value, function, or method, for an index record
+/// (`docs/spec/05-tooling.md`, "Index records").
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexedSignature {
+    signature: String,
+    errors: Vec<String>,
+}
+
+impl IndexedSignature {
+    /// The canonical type encoding of the checked type.
+    #[must_use]
+    pub fn signature(&self) -> &str {
+        &self.signature
+    }
+
+    /// The canonical encodings of the error types its result can carry: `e`
+    /// for a result type `(result t e)`.
+    #[must_use]
+    pub fn errors(&self) -> &[String] {
+        &self.errors
+    }
+}
+
+/// One `impl` block, keyed by its receiver and applied interface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexedImplementation {
+    receiver: String,
+    interface: String,
+    interface_id: String,
+    source_id: String,
+    span: ByteSpan,
+    members: Vec<IndexedMember>,
+}
+
+impl IndexedImplementation {
+    /// The canonical type encoding of the receiver type.
+    #[must_use]
+    pub fn receiver(&self) -> &str {
+        &self.receiver
+    }
+
+    /// The canonical type encoding of the applied interface target.
+    #[must_use]
+    pub fn interface(&self) -> &str {
+        &self.interface
+    }
+
+    /// The canonical declaration identity of the interface.
+    #[must_use]
+    pub fn interface_id(&self) -> &str {
+        &self.interface_id
+    }
+
+    /// The source identity of the block.
+    #[must_use]
+    pub fn source_id(&self) -> &str {
+        &self.source_id
+    }
+
+    /// The span of the block.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+
+    /// The members the block writes, by contract member name.
+    #[must_use]
+    pub fn members(&self) -> &[IndexedMember] {
+        &self.members
+    }
+}
+
+/// One member written in an `impl` block.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexedMember {
+    contract: String,
+    span: ByteSpan,
+    signature: String,
+}
+
+impl IndexedMember {
+    /// The name of the contract member it implements.
+    #[must_use]
+    pub fn contract(&self) -> &str {
+        &self.contract
+    }
+
+    /// The span of the member.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+
+    /// The canonical type encoding of its checked signature.
+    #[must_use]
+    pub fn signature(&self) -> &str {
+        &self.signature
+    }
 }
 
 impl ResolvedCheckResult {
@@ -55,6 +157,19 @@ impl ResolvedCheckResult {
         declaration: &DeclarationId,
     ) -> Option<&CheckedProgram> {
         self.programs.get(declaration)
+    }
+
+    /// The checked type of a value, function, or method, when its header
+    /// checked.
+    #[must_use]
+    pub fn signature(&self, declaration: &DeclarationId) -> Option<&IndexedSignature> {
+        self.signatures.get(declaration)
+    }
+
+    /// Every `impl` block of the selected modules, in registration order.
+    #[must_use]
+    pub fn implementations(&self) -> &[IndexedImplementation] {
+        &self.implementations
     }
 
     /// The checked function slot for a resolved declaration identity.
@@ -112,6 +227,8 @@ pub fn check_resolved(
                 .collect(),
             bindings: Vec::new(),
             function_indices: BTreeMap::new(),
+            signatures: BTreeMap::new(),
+            implementations: Vec::new(),
         };
     }
     let mut modules = snapshot
@@ -945,6 +1062,96 @@ pub fn check_resolved(
             }
         }
     }
+    // Index facts: the checked type of every header, and every `impl` block.
+    let result_id = types
+        .role("result")
+        .and_then(|index| types.get(index))
+        .map(|declared| declared.id.clone());
+    let describe = |value: &Type| IndexedSignature {
+        signature: vibra_ir::canonical_type(value),
+        errors: match value {
+            Type::Function(signature) => match signature.result() {
+                Type::Applied(id, arguments) if Some(&id) == result_id.as_ref() => {
+                    arguments
+                        .get(1)
+                        .map(vibra_ir::canonical_type)
+                        .into_iter()
+                        .collect()
+                }
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        },
+    };
+    let mut signatures = BTreeMap::new();
+    for (id, index) in &function_indices {
+        if let Some(header) = functions.get(*index) {
+            signatures.insert(
+                id.clone(),
+                describe(&Type::Function(Box::new(header.signature.clone()))),
+            );
+        }
+    }
+    for (id, index) in &global_indices {
+        if let Some(global) = globals.get(*index) {
+            signatures.insert(id.clone(), describe(&global.value_type));
+        }
+    }
+    // A contract member's signature is written over `self`.
+    for interface in types.interfaces() {
+        let Some(module) = modules
+            .iter()
+            .find(|module| module.record.source_id() == interface.source_id)
+        else {
+            continue;
+        };
+        for member in &interface.members {
+            if let Some(id) = module
+                .declarations
+                .get(&(interface.source_id.clone(), member.span))
+            {
+                signatures.insert(
+                    id.clone(),
+                    describe(&Type::Function(Box::new(member.signature.clone()))),
+                );
+            }
+        }
+    }
+    let implementations = types
+        .implementations()
+        .iter()
+        .filter_map(|implementation| {
+            let interface = types.interface(implementation.interface)?;
+            Some(IndexedImplementation {
+                receiver: vibra_ir::canonical_type(&implementation.receiver),
+                interface: vibra_ir::canonical_type(&Type::Interface(
+                    interface.id.clone(),
+                    implementation.arguments.clone(),
+                )),
+                interface_id: interface.id.id().to_owned(),
+                source_id: implementation.source_id.clone(),
+                span: implementation.span,
+                members: implementation
+                    .members
+                    .iter()
+                    .filter_map(|(name, index)| {
+                        let header = functions.get(*index)?;
+                        header.impl_member?;
+                        let module = modules.get(header.module_index)?;
+                        let function =
+                            crate::header_function(module.ast.declarations(), header)?;
+                        Some(IndexedMember {
+                            contract: name.clone(),
+                            span: function.span(),
+                            signature: vibra_ir::canonical_type(&Type::Function(
+                                Box::new(header.signature.clone()),
+                            )),
+                        })
+                    })
+                    .collect(),
+            })
+        })
+        .collect();
     let globals = checked_globals.into_iter().collect::<Option<Vec<_>>>();
     let functions = checked_functions.into_iter().collect::<Option<Vec<_>>>();
     // One validated module set serves every entry and test program; entries
@@ -1060,6 +1267,8 @@ pub fn check_resolved(
         diagnostics,
         bindings,
         function_indices,
+        signatures,
+        implementations,
     }
 }
 
