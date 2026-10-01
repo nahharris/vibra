@@ -126,7 +126,7 @@ fn unify(left: &Type, right: &Type, bindings: &mut BTreeMap<String, Type>) -> bo
                     .all(|((_, left), (_, right))| unify(left, right, bindings))
         }
         (Type::Array(left), Type::Array(right)) => unify(left, right, bindings),
-        (Type::Map(left_key, left_value), Type::Map(right_key, right_value)) => {
+        (Type::Dict(left_key, left_value), Type::Dict(right_key, right_value)) => {
             unify(left_key, right_key, bindings)
                 && unify(left_value, right_value, bindings)
         }

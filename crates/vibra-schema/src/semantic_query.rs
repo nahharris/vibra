@@ -528,7 +528,7 @@ fn parse_type(value: Value) -> Result<SemanticTypeDocument, String> {
         // Every other shape has no result. A structural shape is named by
         // its form; a declared type, an interface, a parameter, and an atom
         // carry their own name.
-        "declared" | "interface" | "param" | "atom" | "tuple" | "array" | "map"
+        "declared" | "interface" | "param" | "atom" | "tuple" | "array" | "dict"
         | "record" | "enum" | "union" => {
             if result.is_some() {
                 return Err("only function types carry a result".to_owned());
@@ -538,7 +538,7 @@ fn parse_type(value: Value) -> Result<SemanticTypeDocument, String> {
             }
             if matches!(
                 kind.as_str(),
-                "tuple" | "array" | "map" | "record" | "enum" | "union"
+                "tuple" | "array" | "dict" | "record" | "enum" | "union"
             ) && name != kind
             {
                 return Err(format!("a {kind} type must use name {kind}"));

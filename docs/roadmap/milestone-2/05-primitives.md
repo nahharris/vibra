@@ -10,7 +10,7 @@ Requires Step 4 and C1/C4/C11/C12. Read types **Model**, **Application**,
 
 1. Add `vibra-ir`, `vibra-types`, and `vibra-interp` for one complete small path:
    a fully typed module-level function returning a primitive literal. Follow
-   [the dependency map](implementation.md); do not put types in wire schemas.
+   [the dependency dict](implementation.md); do not put types in wire schemas.
 2. Represent C1's exact primitive subset and signatures in IR. Check written
    function parameter/result types before bodies. This step supports nullary
    functions/literal bodies; remaining call/binding forms stay unavailable.

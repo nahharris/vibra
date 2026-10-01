@@ -16,7 +16,7 @@ missing-role check in [Step 14c](14c-laws-and-roles.md).
 1. **The contract.** `@std.iter` declares `(defint iter where: (item any) …)`
    claiming `@iter`, with the abstract `next`. Every run declares it, and a
    module names it through `@std.iter` or `(import iter @std.iter.iter)`.
-2. **Closed builtin conformance.** `(array t)`, `(map k v)`, `str`, and
+2. **Closed builtin conformance.** `(array t)`, `(dict k v)`, `str`, and
    `(option t)` conform through the closed registry: they widen to
    `(iter item)` at their item type, and `iter.next` on them is answered by the
    toolchain.

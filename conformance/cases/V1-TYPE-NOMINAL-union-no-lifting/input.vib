@@ -2,4 +2,4 @@
 
 (defn doubled (value number) number (number.add-checked value value))
 
-(defn table (entries (map number str)) u64 0u64)
+(defn table (entries (dict number str)) u64 0u64)

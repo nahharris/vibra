@@ -298,11 +298,11 @@ pub enum SemanticIdentity {
     BytesFromArray,
     /// Build an array from its packed variadic elements.
     ArrayConstruction,
-    /// Build a map from its packed variadic entries in canonical key order, a
+    /// Build a dict from its packed variadic entries in canonical key order, a
     /// later entry replacing an equal key.
-    MapConstruction,
-    /// A map's entries as an array of key-value tuples, in key order.
-    MapEntries,
+    DictConstruction,
+    /// A dict's entries as an array of key-value tuples, in key order.
+    DictEntries,
     /// Count array elements.
     ArrayLength,
     /// A new array with one trailing element.
@@ -363,10 +363,10 @@ pub enum CompilerIntrinsic {
     BytesFromArray,
     /// `array.of`.
     ArrayOf,
-    /// `map.of`.
-    MapOf,
-    /// `map.entries`.
-    MapEntries,
+    /// `dict.of`.
+    DictOf,
+    /// `dict.entries`.
+    DictEntries,
     /// `array.length`.
     ArrayLength,
     /// `array.append`.
@@ -520,8 +520,8 @@ impl CompilerIntrinsic {
             Self::BytesToArray => SemanticIdentity::BytesToArray,
             Self::BytesFromArray => SemanticIdentity::BytesFromArray,
             Self::ArrayOf => SemanticIdentity::ArrayConstruction,
-            Self::MapOf => SemanticIdentity::MapConstruction,
-            Self::MapEntries => SemanticIdentity::MapEntries,
+            Self::DictOf => SemanticIdentity::DictConstruction,
+            Self::DictEntries => SemanticIdentity::DictEntries,
             Self::ArrayLength => SemanticIdentity::ArrayLength,
             Self::ArrayAppend => SemanticIdentity::ArrayAppend,
             Self::ArrayConcat => SemanticIdentity::ArrayConcatenation,
@@ -557,8 +557,8 @@ impl CompilerIntrinsic {
             Self::BytesToArray => "bytes.to-array",
             Self::BytesFromArray => "bytes.from-array",
             Self::ArrayOf => "array.of",
-            Self::MapOf => "map.of",
-            Self::MapEntries => "map.entries",
+            Self::DictOf => "dict.of",
+            Self::DictEntries => "dict.entries",
             Self::ArrayLength => "array.length",
             Self::ArrayAppend => "array.append",
             Self::ArrayConcat => "array.concat",
@@ -579,7 +579,7 @@ impl CompilerIntrinsic {
                 | Self::Convert(..)
                 | Self::CharToU32
                 | Self::CharFromU32
-                | Self::MapEntries
+                | Self::DictEntries
                 | Self::ArrayLength
                 | Self::ArrayAppend
                 | Self::ArrayConcat
@@ -591,7 +591,7 @@ impl CompilerIntrinsic {
     #[must_use]
     pub fn type_parameters(self) -> Vec<String> {
         match self {
-            Self::MapOf | Self::MapEntries => vec!["k".to_owned(), "v".to_owned()],
+            Self::DictOf | Self::DictEntries => vec!["k".to_owned(), "v".to_owned()],
             Self::ArrayFold => vec!["t".to_owned(), "a".to_owned()],
             Self::ArrayOf
             | Self::ArrayLength
@@ -685,12 +685,12 @@ impl CompilerIntrinsic {
             Self::BytesToArray => function(vec![Type::Bytes], array_of(Type::U8)),
             Self::BytesFromArray => function(vec![array_of(Type::U8)], Type::Bytes),
             Self::ArrayOf => function(Vec::new(), items()).with_variadic(items()),
-            Self::MapOf => {
-                let map = Type::Map(Box::new(param("k")), Box::new(param("v")));
-                function(Vec::new(), map.clone()).with_variadic(map)
+            Self::DictOf => {
+                let dict = Type::Dict(Box::new(param("k")), Box::new(param("v")));
+                function(Vec::new(), dict.clone()).with_variadic(dict)
             }
-            Self::MapEntries => function(
-                vec![Type::Map(Box::new(param("k")), Box::new(param("v")))],
+            Self::DictEntries => function(
+                vec![Type::Dict(Box::new(param("k")), Box::new(param("v")))],
                 array_of(Type::Tuple(vec![param("k"), param("v")])),
             ),
             Self::ArrayLength => function(vec![items()], Type::U64),
@@ -764,8 +764,8 @@ impl CompilerIntrinsic {
             Self::BytesToArray,
             Self::BytesFromArray,
             Self::ArrayOf,
-            Self::MapOf,
-            Self::MapEntries,
+            Self::DictOf,
+            Self::DictEntries,
             Self::ArrayLength,
             Self::ArrayAppend,
             Self::ArrayConcat,

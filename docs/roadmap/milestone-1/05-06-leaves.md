@@ -9,7 +9,7 @@ and resolution**; lexical validity and permitted binding roles are different.
 
 1. Write a table from each literal production to its classifier, decoded
    representation, invalid cases, and diagnostic. Close missing string-error
-   contracts identified in [the implementation map](implementation.md).
+   contracts identified in [the implementation dict](implementation.md).
 2. Extend the shared lexer with character-aware token boundaries before generic
    delimiter/comment handling. Exercise direct delimiter characters and quotes
    after a backslash; do not split a character into a delimiter or comment.

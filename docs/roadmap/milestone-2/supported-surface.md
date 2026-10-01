@@ -32,7 +32,7 @@ the linked topic chapters in `docs/spec/`.
 | `PatternKind::Array` | deferred | M3 collections |
 | `PatternKind::As` | deferred | M3 union narrowing |
 | `VariadicBinding::Array` | deferred | M3 collection variadics |
-| `VariadicBinding::Map` | deferred | M3 collection variadics |
+| `VariadicBinding::Dict` | deferred | M3 collection variadics |
 | `Declaration::Import` | supported | Steps 3–4 module graph |
 | `Declaration::Def` | supported | Step 6 immutable module values |
 | `Declaration::Defn` | supported | Steps 5–9 functions |
@@ -48,9 +48,9 @@ the linked topic chapters in `docs/spec/`.
 | `TypeExpr::Applied` | deferred | M3 nominal/generic applications |
 | `TypeExpr::Tuple` | deferred | M3 products |
 | `TypeExpr::Array` | deferred | M3 collections |
-| `TypeExpr::Map` | deferred | M3 collections |
+| `TypeExpr::Dict` | deferred | M3 collections |
 | `VariadicType::Array` | deferred | M3 |
-| `VariadicType::Map` | deferred | M3 |
+| `VariadicType::Dict` | deferred | M3 |
 | `DeftypeBody::Type` | deferred | M3 nominal declarations |
 | `DeftypeBody::Record` | deferred | M3 |
 | `DeftypeBody::Enum` | deferred | M3 |

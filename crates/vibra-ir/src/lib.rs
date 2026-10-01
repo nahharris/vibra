@@ -81,8 +81,8 @@ pub enum Type {
     Tuple(Vec<Type>),
     /// The builtin `(array t)` type.
     Array(Box<Type>),
-    /// The builtin `(map k v)` type.
-    Map(Box<Type>, Box<Type>),
+    /// The builtin `(dict k v)` type.
+    Dict(Box<Type>, Box<Type>),
     /// An anonymous union type; members are in canonical order.
     Union(Vec<Type>),
     /// An interface value: a value of some type that implements the declared
@@ -108,7 +108,7 @@ impl Type {
             Self::Tuple(_) => "tuple",
             Self::Union(_) => "union",
             Self::Array(_) => "array",
-            Self::Map(_, _) => "map",
+            Self::Dict(_, _) => "dict",
             Self::Bool => "bool",
             Self::Void => "void",
             Self::Char => "char",
@@ -152,7 +152,7 @@ impl Type {
                         .all(|(left, right)| left.same_shape(right))
             }
             (Self::Array(left), Self::Array(right)) => left.same_shape(right),
-            (Self::Map(left_key, left_value), Self::Map(right_key, right_value)) => {
+            (Self::Dict(left_key, left_value), Self::Dict(right_key, right_value)) => {
                 left_key.same_shape(right_key) && left_value.same_shape(right_value)
             }
             (
@@ -210,7 +210,7 @@ impl Type {
             Self::Array(element) => {
                 Self::Array(Box::new(element.substitute(arguments)))
             }
-            Self::Map(key, value) => Self::Map(
+            Self::Dict(key, value) => Self::Dict(
                 Box::new(key.substitute(arguments)),
                 Box::new(value.substitute(arguments)),
             ),
@@ -256,7 +256,7 @@ impl Type {
                         .all(|(left, right)| left.admits(right))
             }
             (Self::Array(left), Self::Array(right)) => left.admits(right),
-            (Self::Map(left_key, left_value), Self::Map(right_key, right_value)) => {
+            (Self::Dict(left_key, left_value), Self::Dict(right_key, right_value)) => {
                 left_key.admits(right_key) && left_value.admits(right_value)
             }
             (Self::Function(left), Self::Function(right)) => left.admits(right),
@@ -276,7 +276,9 @@ impl Type {
             | Self::Tuple(values)
             | Self::Union(values) => values.clone(),
             Self::Array(element) => vec![element.as_ref().clone()],
-            Self::Map(key, value) => vec![key.as_ref().clone(), value.as_ref().clone()],
+            Self::Dict(key, value) => {
+                vec![key.as_ref().clone(), value.as_ref().clone()]
+            }
             Self::Record(members) | Self::Enum(members) => {
                 members.iter().map(|(_, value)| value.clone()).collect()
             }
@@ -301,7 +303,7 @@ impl Type {
                 values.iter().any(Self::has_params)
             }
             Self::Array(element) => element.has_params(),
-            Self::Map(key, value) => key.has_params() || value.has_params(),
+            Self::Dict(key, value) => key.has_params() || value.has_params(),
             Self::Record(members) | Self::Enum(members) => {
                 members.iter().any(|(_, value)| value.has_params())
             }
@@ -375,7 +377,7 @@ impl fmt::Display for Type {
             }
             Self::AtomSingleton(name) => write!(formatter, "@{name}"),
             Self::Array(element) => write!(formatter, "(array {element})"),
-            Self::Map(key, value) => write!(formatter, "(map {key} {value})"),
+            Self::Dict(key, value) => write!(formatter, "(dict {key} {value})"),
             // Spelled like the `fn` type expression, so two function types
             // in a diagnostic are told apart by their parameters and result.
             Self::Function(signature) => {
@@ -460,7 +462,7 @@ impl LabelledParameter {
 pub struct FunctionSignature {
     parameters: Vec<Type>,
     labelled: Vec<LabelledParameter>,
-    /// The `(array t)` or `(map k v)` type of a variadic tail. A call passes
+    /// The `(array t)` or `(dict k v)` type of a variadic tail. A call passes
     /// the packed tail as one final argument after the labelled slots.
     variadic: Option<Type>,
     result: Type,
@@ -494,7 +496,7 @@ impl FunctionSignature {
     }
 
     /// The same signature with a variadic tail of `tail` type, an
-    /// `(array t)` or a `(map k v)`.
+    /// `(array t)` or a `(dict k v)`.
     #[must_use]
     pub fn with_variadic(mut self, tail: Type) -> Self {
         self.variadic = Some(tail);
@@ -1111,10 +1113,10 @@ pub enum Expr {
         /// The source origin of the elements.
         origin: SourceOrigin,
     },
-    /// A map built from key and value operands, such as a variadic map tail.
+    /// A dict built from key and value operands, such as a variadic dict tail.
     /// A later entry replaces an earlier entry with an equal key.
-    Map {
-        /// The `(map k v)` type being built.
+    Dict {
+        /// The `(dict k v)` type being built.
         value_type: Type,
         /// Key and value operands, evaluated key then value, in order.
         entries: Vec<(Self, Self)>,
@@ -1124,14 +1126,14 @@ pub enum Expr {
         /// The source origin of the entries.
         origin: SourceOrigin,
     },
-    /// An array, map, `str`, or `bytes` value applied to one key, returning
+    /// An array, dict, `str`, or `bytes` value applied to one key, returning
     /// the standard `option`.
     Lookup {
         /// The collection operand, evaluated first.
         collection: Box<Self>,
         /// The index or key operand.
         key: Box<Self>,
-        /// For a map, the `ordered` interface whose implementations order its
+        /// For a dict, the `ordered` interface whose implementations order its
         /// keys, when the key type is not closed.
         key_order: Option<TypeId>,
         /// The `(option t)` result type.
@@ -1184,7 +1186,7 @@ pub enum ClosedContract {
     KeyCompare,
     /// `equatable.equal`.
     KeyEqual,
-    /// `iter.next` of an `(array t)`, `(map k v)`, `str`, or `(option t)`.
+    /// `iter.next` of an `(array t)`, `(dict k v)`, `str`, or `(option t)`.
     IterNext,
 }
 
@@ -1498,7 +1500,7 @@ impl Expr {
             | Self::Tuple { origin, .. }
             | Self::TupleProject { origin, .. }
             | Self::Array { origin, .. }
-            | Self::Map { origin, .. }
+            | Self::Dict { origin, .. }
             | Self::Lookup { origin, .. } => origin,
         }
     }
@@ -1533,7 +1535,7 @@ impl Expr {
             | Self::Tuple { value_type, .. }
             | Self::TupleProject { value_type, .. }
             | Self::Array { value_type, .. }
-            | Self::Map { value_type, .. }
+            | Self::Dict { value_type, .. }
             | Self::Lookup { value_type, .. } => value_type.clone(),
         }
     }
@@ -1554,7 +1556,7 @@ impl Expr {
             Self::Tuple { components, .. } => components.iter().collect(),
             Self::TupleProject { tuple, .. } => vec![tuple],
             Self::Array { elements, .. } => elements.iter().collect(),
-            Self::Map { entries, .. } => entries
+            Self::Dict { entries, .. } => entries
                 .iter()
                 .flat_map(|(key, value)| [key, value])
                 .collect(),
@@ -1590,7 +1592,7 @@ impl Expr {
             | Self::Tuple { .. }
             | Self::TupleProject { .. }
             | Self::Array { .. }
-            | Self::Map { .. }
+            | Self::Dict { .. }
             | Self::Lookup { .. } => &[],
             Self::Sequence { expressions, .. } => expressions,
         }
@@ -1622,7 +1624,7 @@ impl Expr {
             | Self::Tuple { .. }
             | Self::TupleProject { .. }
             | Self::Array { .. }
-            | Self::Map { .. }
+            | Self::Dict { .. }
             | Self::Lookup { .. } => None,
         }
     }
@@ -1691,7 +1693,7 @@ impl Expr {
             Self::Tuple { .. }
             | Self::TupleProject { .. }
             | Self::Array { .. }
-            | Self::Map { .. }
+            | Self::Dict { .. }
             | Self::Lookup { .. } => self
                 .data_operands()
                 .into_iter()
@@ -2233,14 +2235,14 @@ impl Expr {
                 }
                 Ok(value_type.clone())
             }
-            Self::Map {
+            Self::Dict {
                 value_type,
                 entries,
                 ..
             } => {
-                let Type::Map(key_type, entry_type) = value_type else {
+                let Type::Dict(key_type, entry_type) = value_type else {
                     return Err(IrError::InvalidExpression(format!(
-                        "map construction produces non-map type {value_type}"
+                        "dict construction produces non-dict type {value_type}"
                     )));
                 };
                 for (key, value) in entries {
@@ -2252,7 +2254,7 @@ impl Expr {
                         || !entry_type.admits(&actual_value)
                     {
                         return Err(IrError::InvalidExpression(format!(
-                            "map entry has types {actual_key} and {actual_value}, expected {value_type}"
+                            "dict entry has types {actual_key} and {actual_value}, expected {value_type}"
                         )));
                     }
                 }
@@ -2270,7 +2272,7 @@ impl Expr {
                     key.validate_shape_with_captures(slots, capture_types)?;
                 let (expected_key, element) = match &collection_type {
                     Type::Array(element) => (Type::U64, element.as_ref().clone()),
-                    Type::Map(key, value) => {
+                    Type::Dict(key, value) => {
                         (key.as_ref().clone(), value.as_ref().clone())
                     }
                     Type::Str => (Type::U64, Type::Char),
@@ -3292,7 +3294,7 @@ fn validate_program_expr(
         | Expr::Tuple { .. }
         | Expr::TupleProject { .. }
         | Expr::Array { .. }
-        | Expr::Map { .. }
+        | Expr::Dict { .. }
         | Expr::Lookup { .. } => {
             for operand in expression.data_operands() {
                 validate_program_expr(
@@ -3718,7 +3720,7 @@ fn possible_function_targets(
         | Expr::Widen { .. }
         | Expr::Tuple { .. }
         | Expr::Array { .. }
-        | Expr::Map { .. }
+        | Expr::Dict { .. }
         | Expr::Lookup { .. } => FunctionTargetSummary::default(),
         Expr::Project { .. } | Expr::TupleProject { .. } | Expr::Try { .. } => {
             FunctionTargetSummary::unknown()
@@ -4391,7 +4393,7 @@ impl<'a> CallFlow<'a> {
             | Expr::Widen { .. }
             | Expr::Tuple { .. }
             | Expr::Array { .. }
-            | Expr::Map { .. }
+            | Expr::Dict { .. }
             | Expr::Lookup { .. } => FlowTargetSummary::default(),
             Expr::Project { .. } | Expr::TupleProject { .. } | Expr::Try { .. } => {
                 FlowTargetSummary::unknown_function()
@@ -4689,7 +4691,7 @@ impl<'a> CallFlow<'a> {
             | Expr::Tuple { .. }
             | Expr::TupleProject { .. }
             | Expr::Array { .. }
-            | Expr::Map { .. }
+            | Expr::Dict { .. }
             | Expr::Lookup { .. } => {
                 for operand in expression.data_operands() {
                     self.collect_expr(operand, owner, environment, captures)?;
@@ -4957,8 +4959,8 @@ fn validate_signature_shape(signature: &FunctionSignature) -> Result<(), String>
         }
     }
     if let Some(tail) = signature.variadic() {
-        if !matches!(tail, Type::Array(_) | Type::Map(_, _)) {
-            return Err(format!("variadic tail type {tail} is not an array or map"));
+        if !matches!(tail, Type::Array(_) | Type::Dict(_, _)) {
+            return Err(format!("variadic tail type {tail} is not an array or dict"));
         }
         validate_type_shape(tail)?;
     }
@@ -5133,7 +5135,7 @@ fn validate_tail_calls(
         | Expr::Tuple { .. }
         | Expr::TupleProject { .. }
         | Expr::Array { .. }
-        | Expr::Map { .. }
+        | Expr::Dict { .. }
         | Expr::Lookup { .. } => {
             for operand in expression.data_operands() {
                 validate_tail_calls(
@@ -5553,13 +5555,13 @@ fn canonical_expr(expression: &Expr) -> String {
             canonical_type(value_type),
             canonical_operands(elements.iter())
         ),
-        Expr::Map {
+        Expr::Dict {
             value_type,
             entries,
             key_order,
             ..
         } => format!(
-            "(record kind: @map type: {}{} entries: (array{}))",
+            "(record kind: @dict type: {}{} entries: (array{}))",
             canonical_type(value_type),
             canonical_key_order(key_order.as_ref()),
             entries
@@ -5779,9 +5781,10 @@ pub fn canonical_type(value: &Type) -> String {
         Type::Array(element) => {
             canonical_builtin_applied("array", [element.as_ref()].into_iter())
         }
-        Type::Map(key, value) => {
-            canonical_builtin_applied("map", [key.as_ref(), value.as_ref()].into_iter())
-        }
+        Type::Dict(key, value) => canonical_builtin_applied(
+            "dict",
+            [key.as_ref(), value.as_ref()].into_iter(),
+        ),
         Type::Record(fields) => format!(
             "(record type: @record fields: (record{}))",
             canonical_type_members(fields)
@@ -5964,21 +5967,21 @@ fn canonical_operands<'a>(operands: impl Iterator<Item = &'a Expr>) -> String {
 /// unknown, so a call through one widens again to this same set.
 /// The functions that implement `interface`'s `member`: the candidates of a
 /// contract call.
-/// The canonical `key-order:` field of a map construction or lookup.
+/// The canonical `key-order:` field of a dict construction or lookup.
 fn canonical_key_order(key_order: Option<&TypeId>) -> String {
     key_order
         .map(|interface| format!(" key-order: @{}", interface.path()))
         .unwrap_or_default()
 }
 
-/// The `compare` implementations a map construction or lookup orders its keys
+/// The `compare` implementations a dict construction or lookup orders its keys
 /// by, when its key type is not closed.
 fn key_order_targets(
     expression: &Expr,
     functions: &[CheckedFunction],
 ) -> BTreeSet<usize> {
     match expression {
-        Expr::Map {
+        Expr::Dict {
             key_order: Some(interface),
             ..
         }

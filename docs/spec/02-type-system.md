@@ -33,7 +33,7 @@ for itself:
 - `fn` types and the structural `tuple`, `record`, `enum`, and `union` type
   constructors.
 
-Every other type, including `bool`, `str`, `bytes`, `map`, `option`, `result`,
+Every other type, including `bool`, `str`, `bytes`, `dict`, `option`, `result`,
 `ordering`, and the standard error enums, is an ordinary `deftype` in the
 embedded standard library, built on that core. The compiler never depends on
 such a type's definition, only on the **language role** it plays. Every
@@ -53,8 +53,11 @@ fills with a library type:
 | `@bytes` | `bytes` | `bytes` lookups |
 | `@option` | `option` | collection lookups, `try` on an optional value |
 | `@result` | `result` | `try`, unhandled-failure checking |
-| `@map` | `map` | map variadic tails and `map.of` |
+| `@dict` | `dict` | dict variadic tails and `dict.of` |
 | `@iter` | `iter` | iteration contracts |
+
+The associative type is named `dict`, not `map`, so that it shares no spelling
+with the `iter` default member `map`, which transforms items.
 
 The standard library declares each role exactly once, with the `role:`
 attribute on the playing `deftype`; `role:` is admissible only in the embedded
@@ -71,12 +74,12 @@ values directly under the representation latitude of the runtime chapter. An
 enum body admits `true` and `false` as variant names, which is how `bool` spells
 its variants.
 
-`@std.builtin` declares `(deftype map (array (tuple k v)) where: (k ordered v
-any) role: @map)`: a map is its entries sorted by the `ordered.compare` of
-their keys, one entry per key. `map` is a reserved form head, so this
-declaration has no written constructor or pattern. A map is built by `map.of`
-or a map variadic tail, which sort and merge their entries, and read by lookup
-and by `map.entries`.
+`@std.builtin` declares `(deftype dict (array (tuple k v)) where: (k ordered v
+any) role: @dict)`: a dict is its entries sorted by the `ordered.compare` of
+their keys, one entry per key. `dict` is a reserved form head, so this
+declaration has no written constructor or pattern. A dict is built by `dict.of`
+or a dict variadic tail, which sort and merge their entries, and read by lookup
+and by `dict.entries`.
 
 The compiler-owned types and the types that play a role are the only types a
 program names without an import, and their names are reserved spellings;
@@ -108,15 +111,15 @@ dialect; the full rules below remain the v1 authority for later milestones.
 M3 widens the profile in two stages. The Stage 3A profile adds `deftype`
 declarations of every body form with their constructors, projections, and
 nested non-interface methods; anonymous tuple, record, enum, and union types
-with `tupleof`, `recordof`, and `enumof`; arrays and maps with `array.of`,
-`map.of`, lookups, and variadic array and map slots;
+with `tupleof`, `recordof`, and `enumof`; arrays and dicts with `array.of`,
+`dict.of`, lookups, and variadic array and dict slots;
 every pattern form with `match` and shared irrefutability; `option`, `result`,
 `try`, and unhandled-failure checking; union and atom-singleton widening, `as`
 ascription, and `as` narrowing; and generics whose every `where:` bound is the
 predeclared `any`, with applied types, inference, and `types:`. Until the
 Stage 3B profile, `defint`, nested `impl` blocks, a `where:` bound naming an
 interface other than `any`, `any` or another interface written as a type, a
-user-declared map type whose key type is a generic parameter, and the
+user-declared dict type whose key type is a generic parameter, and the
 conversion interfaces remain `@tool.unavailable`. Stage 3B admits the remainder
 of this chapter. Each behavior step moves forms from unavailable to supported;
 none reclassifies a valid form as malformed.
@@ -207,7 +210,7 @@ function-type = "(", "fn", "(", type-expr*, ")", type-expr,
 
 `fn` denotes a function type. `lambda`, not `fn`, declares an anonymous
 function. A function type records its required positional types, labelled
-names and types, optional array or map variadic type, result, and exact closed
+names and types, optional array or dict variadic type, result, and exact closed
 effect row. Effect-row entries are lexical symbols resolved in the effect
 namespace to nominal roots. Defaults belong to the function value and are not
 repeated in its type. An omitted function-type `effects:` row is empty.
@@ -216,9 +219,9 @@ repeated in its type. An omitted function-type `effects:` row is empty.
 they are type constructor forms rather than generic types. Each is an ordinary
 type expression and MUST be accepted in every type position: a parameter, a
 result, a record field, an enum payload, a union member, a `def` annotation, an
-`as` type, and a `types:` argument. `array` and `map` take a fixed number of
+`as` type, and a `types:` argument. `array` and `dict` take a fixed number of
 arguments, so they are ordinary generic builtin types, and `(array t)` and
-`(map k v)` are ordinary applied types. An applied type supplies exactly the
+`(dict k v)` are ordinary applied types. An applied type supplies exactly the
 complete generic parameter list of its head, and a bare generic head is an
 application with no arguments; any other count is
 `@type.type-argument-mismatch`.
@@ -230,7 +233,7 @@ slot; `void` in that slot declares a nullary, payloadless variant, while any
 other type declares a unary one. A generic payload slot instantiated to `void`
 is nullary in that instantiation: `(maybe.some)` constructs it, a zero-operand
 application fixes the slot's generic argument to `void`, and a `void` operand
-is rejected like any operand of a nullary variant. Tuples, arrays, maps,
+is rejected like any operand of a nullary variant. Tuples, arrays, dicts,
 records, enums, and unions are immutable values.
 
 A structural type written outside a `deftype` body is anonymous and its
@@ -253,13 +256,13 @@ An anonymous type has no owner. It declares no methods, receives no `impl`
 block, and conforms to no interface other than `any` and the closed registries
 below. It cannot refer to itself; recursion needs a `deftype` name. Recursive
 declared types MUST pass a finite-size check; recursion through a
-variable-size container (an array or a map) or through a function type, whose
+variable-size container (an array or a dict) or through a function type, whose
 values do not embed the type, is permitted, while direct infinite expansion is
 rejected with `@type.infinite-size` at the `deftype` whose expansion first
 repeats in declaration order, relating the member or payload through which it
 repeats.
 
-Map keys must implement the standard `ordered` interface. A map is ordered by
+Dict keys must implement the standard `ordered` interface. A dict is ordered by
 its keys, so `compare` alone decides both where a key goes and whether two keys
 are the same key; v1 has no hashed collection and therefore no `hashable`
 interface. `@std.core` declares the two comparison contracts as ordinary nominal
@@ -290,11 +293,11 @@ of the implementing type:
 
 Every member is pure, so the same operands always give the same answer. The
 toolchain cannot check these laws. A program whose implementation breaks them
-still evaluates deterministically, but which entry of a map a lookup finds is
+still evaluates deterministically, but which entry of a dict a lookup finds is
 then not defined by this specification. V1 declares no `hashable`, so it has no
 law. The following types receive closed toolchain
 conformance to both, keyed by type identity in the same way as the closed
-`iter` registry; they are admissible map keys without a written
+`iter` registry; they are admissible dict keys without a written
 implementation:
 
 - `bool`, `char`, `str`, `bytes`, `atom`, and every atom singleton type;
@@ -310,15 +313,15 @@ atom types have no declaration to carry one, and the rule for anonymous types
 is the language's own structural rule; both conform through the registry
 alone. The list is closed so that no other package can add to it.
 
-`void`, `f32`, `f64`, `fn` types, arrays, maps, and options are not admissible
+`void`, `f32`, `f64`, `fn` types, arrays, dicts, and options are not admissible
 keys. A `deftype` is admissible only through its own written `ordered`
 implementation. An inadmissible key type in any written or inferred
-`(map k v)` emits `@type.invalid-map-key` at the key type expression, or at the
-constructor application when the map type is inferred; an `fn` key keeps the
+`(dict k v)` emits `@type.invalid-dict-key` at the key type expression, or at the
+constructor application when the dict type is inferred; an `fn` key keeps the
 more specific `@type.function-not-equatable`.
 
 Canonical key order is a total order over admissible key values and is the
-only order in which a map is traversed, rendered, or iterated. For the closed
+only order in which a dict is traversed, rendered, or iterated. For the closed
 key types it is: `false` before `true`; numeric order for integers; Unicode
 scalar value for `char`; lexicographic by scalar for `str` and by byte for
 `bytes`; lexicographic by the UTF-8 bytes of the canonical spelling for atoms;
@@ -329,7 +332,7 @@ implementation. Hash-table order is never observable.
 
 A `deftype` whose body is any type expression other than a structural `tuple`,
 `record`, `enum`, or `union` form — a primitive, an applied or declared type,
-an array, a map, or a function type — declares a **wrapper type**: a distinct
+an array, a dict, or a function type — declares a **wrapper type**: a distinct
 identity over exactly one representation type. `(deftype celsius f64)` is not
 `f64`, and nothing converts between them implicitly. There is no separate
 `newtype` form, because every `deftype` already introduces an identity. A
@@ -350,7 +353,7 @@ is admissible only in the toolchain-embedded package, under the same rule as
 A library type that plays a role is an ordinary `deftype` with a `role:`
 attribute instead, never an `intrinsic-type`. Its static methods and
 constructors are reached through its type path in the same way, such as
-`(map.of k v)` and `(option.some value)`, and users cannot extend it either.
+`(dict.of k v)` and `(option.some value)`, and users cannot extend it either.
 
 The applied form `(symbol type-expr+)` would otherwise read `(record …)` or
 `(union …)` as the application of a type with that name, so the head of an
@@ -366,10 +369,9 @@ clause. One of those spelled with a reserved type head, or with the name of a
 builtin type outside an `intrinsic-type` declaration, emits
 `@name.reserved-declaration`. It reaches no other namespace and no member,
 because a member is only ever reached through a qualified path and is never a
-bare type head. A nested method named `map` therefore stays legal exactly as the
-source-language chapter states, which the `iter` contract's own default `map`
-member depends on. The separate value-namespace rule on builtin type names
-keeps its own `@name.reserved-value-spelling`. A generic name spelled `self`,
+bare type head. A nested method named `dict` therefore stays legal exactly as
+the source-language chapter states. The separate value-namespace rule on
+builtin type names keeps its own `@name.reserved-value-spelling`. A generic name spelled `self`,
 which names the receiver type, or `any` also emits `@name.reserved-declaration`.
 
 A union type lists at least two member types and declares no member names. A
@@ -403,7 +405,7 @@ implementation common to every member is not thereby a member of the union, and
 a declared union conforms to an interface other than `any` only by writing that
 implementation. `any` is satisfied by every type without one, and the closed
 `iter` registry is keyed by builtin constructor identity and so never covers a
-union. A declared union is a valid `(map k v)` key only when it explicitly
+union. A declared union is a valid `(dict k v)` key only when it explicitly
 implements `ordered`. Unions participate in the
 finite-size check on the same terms as records and enums.
 
@@ -424,7 +426,7 @@ categories:
 | Tuple type, declared or anonymous | One tuple-index literal | Exact selected component | `@tuple-projection` |
 | Record type, declared or anonymous | One atom field selector | Exact selected field | `@record-projection` |
 | `(array t)` | One `u64` index | `(option t)` | `@collection-lookup` |
-| `(map k v)` | One value of exact type `k` | `(option v)` | `@collection-lookup` |
+| `(dict k v)` | One value of exact type `k` | `(option v)` | `@collection-lookup` |
 | `str` | One `u64` scalar index | `(option char)` | `@collection-lookup` |
 | `bytes` | One `u64` byte index | `(option u8)` | `@collection-lookup` |
 
@@ -440,7 +442,7 @@ field identity and MUST name a visible field of the statically known record
 type. In this position the atom is a selector, not an entity reference or an
 applicable value.
 
-Array, map, string, and byte lookups accept a runtime operand and return the
+Array, dict, string, and byte lookups accept a runtime operand and return the
 standard nominal `option`; absence and out-of-bounds access never trap, return
 an implicit default, or produce null. String indices count Unicode scalar
 values, not UTF-8 bytes. Projection and lookup are pure. Evaluating their
@@ -491,8 +493,8 @@ are pure, have kind `@constructor`, evaluate their operands from left to right,
 and are mirrored by the patterns `(tupleof p…)`, `(recordof a: p …)`, which
 may omit fields, and `(enumof a: p)`.
 
-Array and map values are built by static methods of the builtin `array` and
-`map` types, reached by path exactly as a `deftype`'s nested method is. They
+Array and dict values are built by static methods of the builtin `array` and
+`dict` types, reached by path exactly as a `deftype`'s nested method is. They
 are ordinary toolchain-declared members, not special syntax, and their
 applications are ordinary `@function` applications:
 
@@ -501,12 +503,12 @@ applications are ordinary `@function` applications:
   variadic: (items (array t)))
 ```
 
-`array.of` has that signature with the type's `where: (t any)`, and `map.of`
-the corresponding one with `variadic: (entries (map k v))`, so each is a
+`array.of` has that signature with the type's `where: (t any)`, and `dict.of`
+the corresponding one with `variadic: (entries (dict k v))`, so each is a
 first-class `fn` value, its element types come from ordinary generic
 inference, an empty call needs an expected type like any uninferable generic
-result, and an odd map tail is an ordinary variadic-binding error. The key rule
-applies to each instantiated `(map k v)`. Users cannot declare further members
+result, and an odd dict tail is an ordinary variadic-binding error. The key rule
+applies to each instantiated `(dict k v)`. Users cannot declare further members
 on a builtin type. The type forms `(tuple …)`, `(record …)`, `(enum …)`, and
 `(union …)` and the array pattern `(array …)` are never value constructors.
 
@@ -589,7 +591,7 @@ scopes. Sibling scopes may reuse a named symbol when neither declaration is
 visible from the other.
 
 A module-level `def`, `defn`, or import alias MUST NOT be spelled as a builtin
-type name: a primitive type, `array`, `map`, or `tuple`. Builtin types own
+type name: a primitive type, `array`, `dict`, or `tuple`. Builtin types own
 static methods reached by dotted path, so such an alias or value would make
 `i32.add-checked` or `array.of` ambiguous. A top-level use of one of those
 spellings as a value or alias emits `@name.reserved-value-spelling`.
@@ -601,7 +603,7 @@ has a `fn` type and is a first-class function value. Application is `(path …)`
 with the receiver or operands required by that signature. Constructors,
 projections, lookups, and enum tags are not `fn` values.
 
-`fn` values are not `equatable` and MUST NOT be used as a `(map k v)` key. Using
+`fn` values are not `equatable` and MUST NOT be used as a `(dict k v)` key. Using
 one as a key emits `@type.function-not-equatable`.
 
 A module-level `defn` MAY refer to itself and to other module-level `defn`s in
@@ -634,7 +636,7 @@ resolves its receiver from an expected type that the author wrote. Inference
 MUST NOT synthesize an implementation that no package declared.
 Ambiguous inference is an error with candidate explanations, not a default.
 When no unique type follows for an unsuffixed numeric literal, an empty
-`array.of` or `map.of`, or a generic argument, the checker emits
+`array.of` or `dict.of`, or a generic argument, the checker emits
 `@type.ambiguous-inference` at that literal, application, or generic
 application, with one note per candidate or missing constraint. A
 destination-dispatched call with no written expected type keeps the more
@@ -642,7 +644,7 @@ specific `@type.ambiguous-destination`.
 
 An operand that does not fit the parameter or constructor slot it binds to, a
 wrong arity, an unknown, duplicate, or missing label or record field, an odd
-`map.of` operand count, and `array.of` or `map.of` operands with no single
+`dict.of` operand count, and `array.of` or `dict.of` operands with no single
 element type are `@type.argument-mismatch` at the operand or application.
 Every other disagreement between an expression's type and its written or
 required expected type — a `def` annotation, a result
@@ -789,7 +791,7 @@ predeclared name rather than extended to any empty interface a package might
 declare.
 
 The second exception is closed toolchain `iter` conformance for the builtin
-constructor types `(array t)`, `(map k v)`, `str`, and `(option t)` named in
+constructor types `(array t)`, `(dict k v)`, `str`, and `(option t)` named in
 the iteration section. Those implementations are keyed by constructor identity
 in a closed registry; they are not user `impl` blocks and not generic `defint`
 implementations. Standard-library iterator adapters are ordinary `deftype`s
@@ -880,7 +882,7 @@ rather than picking an order.
 Dispatch normally selects an implementation from the receiver value, which a
 contract member supplies by naming `self` as the type of a **fixed positional**
 parameter. A variadic parameter does not qualify: an `(array self)` or
-`(map k self)` tail may receive no operands at all, leaving a call with no
+`(dict k self)` tail may receive no operands at all, leaving a call with no
 receiver value to select from. A labelled parameter does not qualify either,
 since every labelled parameter requires a literal default.
 
@@ -951,7 +953,7 @@ There is no inheritance between concrete types. Interface values use explicit
 widening at a typed boundary and static, closed-world dispatch in v1. Operator
 overloading is absent. Arithmetic, comparison, and conversion use ordinary
 resolved functions or interface methods. Application-based tuple/record
-projection and array/map/string/byte lookup are the closed indexing surface
+projection and array/dict/string/byte lookup are the closed indexing surface
 defined above and cannot be overloaded.
 
 ## Iteration
@@ -1077,7 +1079,7 @@ keyed by constructor identity:
 | Type | `item` | `next` behavior |
 | --- | --- | --- |
 | `(array t)` | `t` | Index order from `0`; remaining is the suffix not yet yielded |
-| `(map k v)` | `(tuple k v)` | Canonical key order; each step yields one entry |
+| `(dict k v)` | `(tuple k v)` | Canonical key order; each step yields one entry |
 | `str` | `char` | Unicode scalar order |
 | `(option t)` | `t` | On `none`, `next` returns `none`; on `some v`, one step yields `(tuple v none)` where the remaining iterator is the exhausted `none` value |
 
@@ -1085,8 +1087,8 @@ keyed by constructor identity:
 requires an explicit `match` or conversion to `(option t)` first.
 
 Heterogeneous tuples do not implement `iter` in v1. Users cannot add methods or
-`impl` blocks to `array` or `map`. The associative `map` type MUST NOT declare a
-method named `map`.
+`impl` blocks to `array` or `dict`. The associative `dict` type MUST NOT declare a
+method named `dict`.
 
 User `deftype`s MAY implement `(iter item)` with a nested `(impl (iter item) …)`
 block supplying only `next`. The owner MUST declare `item` in its `where:`
@@ -1190,7 +1192,7 @@ Conformance in the first relation is exactly the conformance defined earlier in
 this chapter, so widening is available through each of its sources: a written
 `impl` block, the predeclared empty interface `any` that every type satisfies
 without one, and the closed toolchain `iter` registry for `(array t)`,
-`(map k v)`, `str`, and `(option t)`. Atom widening needs no declaration at all,
+`(dict k v)`, `str`, and `(option t)`. Atom widening needs no declaration at all,
 because the singleton types and `atom` are builtin, but it obeys the same
 boundary rule as the other two: `(array.of @ok @err)` has no single element
 type and is an error, while `(as (array atom) (array.of @ok @err))` supplies
@@ -1234,7 +1236,7 @@ exactly three outcomes:
 - the operand widens to that type by one of the three relations above, so
   `(as atom @ok)` is admitted; or
 - the type constrains an otherwise ambiguous inference, such as an unsuffixed
-  numeric literal, an empty `array.of` or `map.of`, or a generic result.
+  numeric literal, an empty `array.of` or `dict.of`, or a generic result.
 
 Anything else emits `@type.invalid-ascription`. In particular, ascription never
 requests a conversion and never narrows:

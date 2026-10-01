@@ -146,8 +146,8 @@ pub enum SemanticTypeKind {
     Tuple,
     /// An array, with its element type.
     Array,
-    /// A map, with its key and value types.
-    Map,
+    /// A dict, with its key and value types.
+    Dict,
     /// An anonymous record, with its fields as labelled slots.
     Record,
     /// An anonymous enum, with its variants as labelled slots.
@@ -172,7 +172,7 @@ impl SemanticTypeKind {
             Self::Declared => "declared",
             Self::Tuple => "tuple",
             Self::Array => "array",
-            Self::Map => "map",
+            Self::Dict => "dict",
             Self::Record => "record",
             Self::Enum => "enum",
             Self::Union => "union",
@@ -1595,7 +1595,7 @@ impl<'a> SemanticCollector<'a> {
             | Expr::Tuple { .. }
             | Expr::TupleProject { .. }
             | Expr::Array { .. }
-            | Expr::Map { .. }
+            | Expr::Dict { .. }
             | Expr::Lookup { .. } => {
                 for operand in expression.data_operands() {
                     self.collect_ir(operand);
@@ -2143,7 +2143,7 @@ fn semantic_type_expr(value: &TypeExpr) -> Option<SemanticType> {
         | TypeExpr::Enum(_)
         | TypeExpr::Union(_)
         | TypeExpr::Array(_)
-        | TypeExpr::Map(_, _) => None,
+        | TypeExpr::Dict(_, _) => None,
     }
 }
 
@@ -2218,9 +2218,9 @@ fn semantic_type(value: &Type) -> SemanticType {
             vec![semantic_type(element)],
             Vec::new(),
         ),
-        Type::Map(key, value) => shaped(
-            SemanticTypeKind::Map,
-            "map",
+        Type::Dict(key, value) => shaped(
+            SemanticTypeKind::Dict,
+            "dict",
             vec![semantic_type(key), semantic_type(value)],
             Vec::new(),
         ),

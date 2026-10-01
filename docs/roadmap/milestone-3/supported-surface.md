@@ -12,7 +12,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | --- | --- | --- | --- |
 | `ExpressionKind::Literal` | M2 | — | Atom singleton types: Step 6 (`V1-TYPE-INFER-primitives`, `V1-TYPE-CONVERT-widening-rejections`) |
 | `ExpressionKind::Name` | M2 | — | Nominal constructors and methods as names: Step 2 |
-| `ExpressionKind::Application` | M2 | — | Constructors and projection: Step 2; lookups, `tupleof`, `array.of`, and `map.of`: Step 4; `recordof` and `enumof`: Step 2; `types:`: Step 3 |
+| `ExpressionKind::Application` | M2 | — | Constructors and projection: Step 2; lookups, `tupleof`, `array.of`, and `dict.of`: Step 4; `recordof` and `enumof`: Step 2; `types:`: Step 3 |
 | `ExpressionKind::Lambda` | M2 | — | Destructuring parameters: Step 5 (`V1-RUNTIME-match-patterns`, `V1-TYPE-CONTROL-pattern-refutable-binding`) |
 | `ExpressionKind::Do` | M2 | — | Unhandled-fallible positions: Step 7 (`V1-TYPE-CONTROL-unhandled-fallible`, `V1-TYPE-CONTROL-fallible-discards`) |
 | `ExpressionKind::Let` | M2 | — | Destructuring patterns: Step 5 (`V1-RUNTIME-match-patterns`, `V1-RUNTIME-workspace-test-patterns`) |
@@ -33,7 +33,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `PatternKind::Array` | Stage 3A | Step 5 | Exact length; case `V1-RUNTIME-match-patterns` |
 | `PatternKind::As` | Stage 3A | Step 6 | Cases `V1-TYPE-CONVERT-narrowing-exhaustive`, `V1-TYPE-CONVERT-narrowing-rejections`, `V1-RUNTIME-union-values` |
 | `VariadicBinding::Array` | Stage 3A | Step 4 | Cases `V1-RUNTIME-variadics`, `V1-SRC-CALLS-variadic-array-application` |
-| `VariadicBinding::Map` | Stage 3A | Step 4 | Cases `V1-RUNTIME-map-order`, `V1-SRC-CALLS-variadic-map-application` |
+| `VariadicBinding::Dict` | Stage 3A | Step 4 | Cases `V1-RUNTIME-dict-order`, `V1-SRC-CALLS-variadic-dict-application` |
 | `Declaration::Import` | M2 | — | Standard-library input replacement: Step 4 (`stdlib::tests`, `V1-PROJECT-workspace-check-bootstrap-source-id-collision`); declaration imports: Step 4b (`V1-PROJECT-workspace-check-declaration-imports`) |
 | `Declaration::Def` | M2 | — | — |
 | `Declaration::Defn` | M2 | — | Generic signatures: Step 3 |
@@ -52,9 +52,9 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `TypeExpr::Enum` | Stage 3A | Step 2 | — |
 | `TypeExpr::Union` | Stage 3A | Step 6 | Reader and formatter: Step 2; cases `V1-TYPE-NOMINAL-union-declarations`, `V1-TYPE-NOMINAL-union-member-overlap`, `V1-TYPE-NOMINAL-union-member-not-concrete` |
 | `TypeExpr::Array` | Stage 3A | Step 4 | Cases `V1-RUNTIME-lookups`, `V1-TYPE-NOMINAL-collection-construction` |
-| `TypeExpr::Map` | Stage 3A | Step 4 | Cases `V1-RUNTIME-map-order`, `V1-TYPE-NOMINAL-map-keys`; generic keys without an `ordered` bound: Step 11b (`V1-TYPE-INTERFACE-key-generic-unbounded`); `ordered`-bounded and user `deftype` keys: Step 11c (`V1-RUNTIME-user-map-keys`, `V1-TYPE-INTERFACE-user-key-unordered`); the library declaration and `map.entries`: Step 11d (`V1-RUNTIME-library-map`) |
+| `TypeExpr::Dict` | Stage 3A | Step 4 | Cases `V1-RUNTIME-dict-order`, `V1-TYPE-NOMINAL-dict-keys`; generic keys without an `ordered` bound: Step 11b (`V1-TYPE-INTERFACE-key-generic-unbounded`); `ordered`-bounded and user `deftype` keys: Step 11c (`V1-RUNTIME-user-dict-keys`, `V1-TYPE-INTERFACE-user-key-unordered`); the library declaration and `dict.entries`: Step 11d (`V1-RUNTIME-library-dict`) |
 | `VariadicType::Array` | Stage 3A | Step 4 | Case `V1-SRC-CALLS-variadic-array-type` |
-| `VariadicType::Map` | Stage 3A | Step 4 | Case `V1-SRC-CALLS-variadic-map-type` |
+| `VariadicType::Dict` | Stage 3A | Step 4 | Case `V1-SRC-CALLS-variadic-dict-type` |
 | `DeftypeBody::Type` | Stage 3A | Step 2 | Declared record, enum, and wrapper bodies: Step 2; tuple: Step 4; union: Step 6 (`V1-TYPE-NOMINAL-union-declarations`, `V1-RUNTIME-union-values`) |
 | `DeftypeBody::Intrinsic` | Stage 3A | Step 4 | Reader: Step 2; standard-library declarations: Steps 4 and 8 |
 | `Attribute::Where` | Stage 3A | Step 3 | `any` bounds (`V1-RUNTIME-generic-functions`, `V1-RUNTIME-generic-lambda`); interface bounds on `defn`: Step 11 (`V1-RUNTIME-workspace-test-interfaces`, `V1-TYPE-GENERIC-interface-bound`, `V1-TYPE-INTERFACE-unsatisfied-bound`, `V1-TYPE-INTERFACE-unimplemented-receiver`); the key contracts: Step 11b (`V1-RUNTIME-key-contracts`, `V1-RUNTIME-workspace-test-key-contracts`, `V1-TYPE-INTERFACE-key-closed-registry`); on `deftype` and `lambda`: Step 11c (`V1-RUNTIME-bounded-deftype-lambda`, `V1-TYPE-INTERFACE-bounded-deftype-unsatisfied`) |
@@ -74,7 +74,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | --- | --- |
 | C1.3 — generics, nominal collections, interfaces, conversion | Steps 2–4, 11–13; `any`-bounded generics implemented by Step 3 (`V1-RUNTIME-generic-functions`); interfaces by Step 11 (`V1-RUNTIME-interface-dispatch`); conversion by Step 13 (`V1-RUNTIME-conversion`) |
 | C1.5 — `match`, `try`, `option`, `result`, refutable patterns | Steps 4, 5, 7; `match` and refutable patterns implemented by Step 5 (`V1-TYPE-CONTROL-match-non-exhaustive`, `V1-TYPE-CONTROL-pattern-refutable-binding`); `try` and `result` implemented by Step 7 (`V1-RUNTIME-try-propagation`, `V1-TYPE-CONTROL-unhandled-fallible`) |
-| C1.6 — variadic array and map operands | Step 4; implemented (`V1-RUNTIME-variadics`, `V1-SRC-CALLS-variadic-map-application`) |
+| C1.6 — variadic array and dict operands | Step 4; implemented (`V1-RUNTIME-variadics`, `V1-SRC-CALLS-variadic-dict-application`) |
 | C1.7 — `as`, singleton widening, narrowing | Step 6; implemented (`V1-TYPE-CONVERT-widening-boundaries`, `V1-TYPE-CONVERT-narrowing-rejections`) |
 | C5.2 — constructor and destructuring patterns | Step 5; implemented (`V1-RUNTIME-match-patterns`, `V1-RUNTIME-workspace-test-patterns`) |
 | C6.2 — `types:` generic arguments | Step 3; implemented (`V1-TYPE-GENERIC-type-arguments`, `V1-TOOL-format-types-order`) |

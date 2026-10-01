@@ -45,8 +45,8 @@ pub enum ObservedValue {
     },
     /// An array value.
     Array(Vec<ObservedValue>),
-    /// A map value; entries in canonical key order.
-    Map(Vec<(ObservedValue, ObservedValue)>),
+    /// A dict value; entries in canonical key order.
+    Dict(Vec<(ObservedValue, ObservedValue)>),
     /// A union value: its member type and that member's value.
     Union {
         /// The declared union, or `None` for an anonymous union.
@@ -113,8 +113,8 @@ impl ObservedValue {
                 canonical_type(member),
                 value.canonical_vibon()
             ),
-            Self::Map(entries) => format!(
-                "(record kind: @map entries: (array{}))",
+            Self::Dict(entries) => format!(
+                "(record kind: @dict entries: (array{}))",
                 entries
                     .iter()
                     .map(|(key, value)| format!(
@@ -147,7 +147,7 @@ impl ObservedValue {
             | Self::Wrapper { .. }
             | Self::Tuple { .. }
             | Self::Array(_)
-            | Self::Map(_)
+            | Self::Dict(_)
             | Self::Union { .. } => None,
         }
     }

@@ -21,7 +21,7 @@ impl TempProject {
     fn new(label: &str, sources: &[(&str, &str)]) -> Self {
         Self::with_project(
             label,
-            "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (map))\n",
+            "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict))\n",
             sources,
         )
     }
@@ -127,7 +127,7 @@ fn higher_order_helper_before_the_entry_accepts_its_known_lambda_argument() {
 fn an_unused_imported_higher_order_helper_does_not_block_the_entry() {
     let project = TempProject::with_project(
         "unused-imported-higher-order-helper",
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @util kind: @lib root: \"src/util\")) dependencies: (map))\n",
+        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n",
         &[
             (
                 "src/app/main.vib",
@@ -218,7 +218,7 @@ fn an_invoked_higher_order_closure_uses_its_known_callback_argument() {
 fn checking_a_library_without_an_entry_still_rejects_initializer_cycles() {
     let project = TempProject::with_project(
         "library-initializer-cycle",
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @util kind: @lib root: \"src/util\")) dependencies: (map))\n",
+        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n",
         &[(
             "src/util/main.vib",
             "(def first i32 second)\n(def second i32 first)\n",
@@ -307,7 +307,7 @@ fn global_initializer_may_call_a_terminating_recursive_helper() {
 fn library_initializer_cycles_flow_through_higher_order_helpers() {
     let project = TempProject::with_project(
         "library-higher-order-initializer-cycle",
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @util kind: @lib root: \"src/util\")) dependencies: (map))\n",
+        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n",
         &[(
             "src/util/main.vib",
             "(def value i32 (apply read))\n(defn apply (f (fn () i32)) i32 (f))\n(defn read () i32 value)\n",
@@ -334,7 +334,7 @@ fn library_initializer_cycles_flow_through_higher_order_helpers() {
 fn library_initializer_does_not_execute_an_uninvoked_closure_body() {
     let project = TempProject::with_project(
         "library-uninvoked-closure-initializer",
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @util kind: @lib root: \"src/util\")) dependencies: (map))\n",
+        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n",
         &[(
             "src/util/main.vib",
             "(def value i32 (let unused (lambda () i32 (read)) 0i32))\n(defn read () i32 value)\n",
@@ -362,7 +362,7 @@ fn library_initializer_does_not_execute_an_uninvoked_closure_body() {
 fn library_without_initializers_can_expose_a_higher_order_helper() {
     let project = TempProject::with_project(
         "library-higher-order-helper",
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @util kind: @lib root: \"src/util\")) dependencies: (map))\n",
+        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n",
         &[(
             "src/util/main.vib",
             "(defn apply (f (fn () i32)) i32 (f))\n",
@@ -442,7 +442,7 @@ fn checks_recursion_and_closures_in_every_module_without_running_check() {
 
 #[test]
 fn selected_target_checks_its_import_closure_and_ignores_an_unrelated_target() {
-    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @util kind: @lib root: \"src/util\") (record name: @other kind: @bin root: \"src/other\" entry: @other.main.execute effects: (array))) dependencies: (map))\n";
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @util kind: @lib root: \"src/util\") (record name: @other kind: @bin root: \"src/other\" entry: @other.main.execute effects: (array))) dependencies: (dict))\n";
     let project = TempProject::with_project(
         "target-closure",
         project_text,
@@ -489,7 +489,7 @@ fn selected_target_checks_its_import_closure_and_ignores_an_unrelated_target() {
 
 #[test]
 fn an_error_in_a_transitively_imported_unit_blocks_execution() {
-    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @util kind: @lib root: \"src/util\")) dependencies: (map))\n";
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n";
     let project = TempProject::with_project(
         "closure-error",
         project_text,
@@ -572,7 +572,7 @@ fn verified_bootstrap_imports_keep_package_identity_and_execute_through_checked_
 
 #[test]
 fn bootstrap_overlay_rejects_a_duplicate_project_source_identity() {
-    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @local kind: @lib root: \"stdlib/src/std\")) dependencies: (map))\n";
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @local kind: @lib root: \"stdlib/src/std\")) dependencies: (dict))\n";
     let project = TempProject::with_project(
         "bootstrap-source-id-collision",
         project_text,
@@ -665,7 +665,7 @@ fn result_entry_with_a_nominal_error_type_is_accepted() {
 #[test]
 fn imported_std_modules_keep_the_verified_package_and_local_std_units_resolve_locally()
 {
-    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @std kind: @lib root: \"src/std\")) dependencies: (map))\n";
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @std kind: @lib root: \"src/std\")) dependencies: (dict))\n";
     let project = TempProject::with_project(
         "exact-stdlib-overlay",
         project_text,
@@ -722,7 +722,7 @@ fn imported_std_modules_keep_the_verified_package_and_local_std_units_resolve_lo
 
 #[test]
 fn an_exact_local_std_text_target_cannot_satisfy_the_reserved_bootstrap_import() {
-    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @std kind: @lib root: \"src/std\")) dependencies: (map))\n";
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @std kind: @lib root: \"src/std\")) dependencies: (dict))\n";
     let project = TempProject::with_project(
         "local-std-text",
         project_text,
@@ -759,7 +759,7 @@ fn an_exact_local_std_text_target_cannot_satisfy_the_reserved_bootstrap_import()
 
 #[test]
 fn an_unrelated_reserved_bootstrap_import_blocks_an_explicit_target() {
-    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @other kind: @lib root: \"src/other\")) dependencies: (map))\n";
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @other kind: @lib root: \"src/other\")) dependencies: (dict))\n";
     let project = TempProject::with_project(
         "global-bootstrap-requirement",
         project_text,
@@ -821,7 +821,7 @@ fn variadic_entry_parameter_is_rejected_at_the_entry_span() {
 
 #[test]
 fn ordinary_dependency_diagnostics_apply_even_to_an_explicit_target() {
-    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (map @remote (record kind: @git git: \"https://example.com/repo.git\" rev: \"0123456789abcdef0123456789abcdef01234567\")))\n";
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict @remote (record kind: @git git: \"https://example.com/repo.git\" rev: \"0123456789abcdef0123456789abcdef01234567\")))\n";
     let project = TempProject::with_project(
         "global-dependency-diagnostic",
         project_text,

@@ -35,7 +35,7 @@ interface clauses Step 6 deferred:
 - Negative: a member value written where an interface implemented only by its
   union is expected, and an atom singleton written where `any` is expected
   (no chaining); a concrete type that does not conform; inspecting an `any`
-  value; an interface value as a `defint` target, a union member, or a map
+  value; an interface value as a `defint` target, a union member, or a dict
   key; an interface value at a generic bound; a member with another `self`
   parameter called through one.
 

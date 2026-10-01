@@ -7,7 +7,7 @@
 (import ordered @std.core.ordered)
 
 ; A stock-keeping unit. Stock is listed from the highest number down, so a
-; map keyed by `sku` follows this order, not the order of the number inside.
+; dict keyed by `sku` follows this order, not the order of the number inside.
 (deftype
   sku
   u32
@@ -130,7 +130,7 @@
 ; The count left after taking `wanted` of `key`.
 (defn
   reserve
-  (stock (map sku u64) key sku wanted u64)
+  (stock (dict sku u64) key sku wanted u64)
   (result u64 stock-error)
   visibility:
   @public

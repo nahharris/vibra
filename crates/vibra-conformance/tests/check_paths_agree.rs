@@ -120,7 +120,7 @@ fn workspace_verdict(id: &str, source: &str) -> Verdict {
     fs::create_dir_all(root.join("src/app")).expect("create workspace");
     fs::write(
         root.join("project.vibon"),
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @lib root: \"src/app\")) dependencies: (map))\n",
+        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @lib root: \"src/app\")) dependencies: (dict))\n",
     )
     .expect("write project");
     fs::write(root.join("src/app/main.vib"), source).expect("write module");

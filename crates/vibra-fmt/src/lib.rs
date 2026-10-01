@@ -739,8 +739,8 @@ fn render_type(value: &TypeExpr, output: &mut String) {
             render_type(value, output);
             output.push(')');
         }
-        TypeExpr::Map(key, value) => {
-            output.push_str("(map ");
+        TypeExpr::Dict(key, value) => {
+            output.push_str("(dict ");
             render_type(key, output);
             output.push(' ');
             render_type(value, output);
@@ -795,8 +795,8 @@ fn render_variadic_type(value: &VariadicType, output: &mut String) {
             render_type(value, output);
             output.push(')');
         }
-        VariadicType::Map(key, value) => {
-            output.push_str("(map ");
+        VariadicType::Dict(key, value) => {
+            output.push_str("(dict ");
             render_type(key, output);
             output.push(' ');
             render_type(value, output);
@@ -1992,12 +1992,12 @@ fn bound_application_groups<'source>(
     variadic.extend(positional);
     match facts.variadic() {
         Some(vibra_syntax::VariadicBinding::Array) => {}
-        Some(vibra_syntax::VariadicBinding::Map)
+        Some(vibra_syntax::VariadicBinding::Dict)
             if !variadic.len().is_multiple_of(2) =>
         {
-            return Err(BindingError::OddMapVariadic(variadic.len()));
+            return Err(BindingError::OddDictVariadic(variadic.len()));
         }
-        Some(vibra_syntax::VariadicBinding::Map) => {}
+        Some(vibra_syntax::VariadicBinding::Dict) => {}
         None if !variadic.is_empty() => {
             return Err(BindingError::UnexpectedPositional(variadic.len()));
         }

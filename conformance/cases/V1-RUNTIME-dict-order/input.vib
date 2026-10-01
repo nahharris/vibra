@@ -1,0 +1,2 @@
+(defn main () (tuple (dict str i32) (dict str i32))
+  (tupleof (dict.of "b" 2i32 "a" 1i32 "b" 3i32) (dict.of "a" 1i32 "b" 3i32)))

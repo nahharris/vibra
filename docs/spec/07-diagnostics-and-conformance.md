@@ -72,7 +72,7 @@ table governs.
 | `@type.mismatch` | `@error` |
 | `@type.ambiguous-inference` | `@error` |
 | `@type.infinite-size` | `@error` |
-| `@type.invalid-map-key` | `@error` |
+| `@type.invalid-dict-key` | `@error` |
 | `@type.invalid-try` | `@error` |
 | `@type.unhandled-fallible` | `@error` |
 | `@pattern.refutable-binding` | `@error` |
@@ -235,7 +235,7 @@ MUST NOT manufacture a typed node for an ambiguous recovery.
 Presentation that has one unambiguous semantic binding may parse with a style
 diagnostic and a safe formatter fix. Missing operands, duplicate labels,
 unknown labels on resolved forms, missing required trivia between sibling
-forms, unmatched delimiters, invalid tokens, odd map key/value tails, and
+forms, unmatched delimiters, invalid tokens, odd dict key/value tails, and
 ambiguous applications remain errors.
 
 Later phases operate on explicitly marked valid subtrees and suppress cascades
@@ -446,7 +446,7 @@ collection lookup, and proof that pure projections and lookups add neither an
 effect nor a function-call edge. Collection construction covers heterogeneous
 `tupleof` and `recordof`, `enumof` against a written anonymous enum and its
 rejection without one, homogeneous and expected-empty `array.of`, `array.of`
-passed as a function value, even and duplicate-key `map.of`, declared tuple,
+passed as a function value, even and duplicate-key `dict.of`, declared tuple,
 record, enum, union, and wrapper constructors, and rejection of the type forms
 `(tuple ...)`, `(record ...)`, `(enum ...)`, and `(union ...)` in value
 position.
@@ -480,14 +480,14 @@ written with each discard spelling, and an ignored `option` accepted.
 Inference coverage rejects an unsuffixed literal with no expected numeric type,
 an empty `array.of` with no expected type, and an uninferable generic argument
 with `@type.ambiguous-inference`, and a `def` annotation, `if` condition, and
-differing branch types with `@type.mismatch`. Map coverage accepts every closed
+differing branch types with `@type.mismatch`. Dict coverage accepts every closed
 key type, including a nested tuple key, and rejects `f64`, `void`, array, and
-record keys with `@type.invalid-map-key`; an interpreter case proves that a map
+record keys with `@type.invalid-dict-key`; an interpreter case proves that a dict
 built in two different insertion orders iterates, renders, and compares
 identically in canonical key order. Nominal coverage rejects a record that
 contains itself directly with `@type.infinite-size` and accepts one that
 contains itself through an array. `@type.mismatch`,
-`@type.ambiguous-inference`, `@type.infinite-size`, `@type.invalid-map-key`,
+`@type.ambiguous-inference`, `@type.infinite-size`, `@type.invalid-dict-key`,
 `@type.invalid-try`, `@type.unhandled-fallible`, `@pattern.non-exhaustive`,
 and `@pattern.unreachable-arm` all have fixed level `@error`.
 
@@ -497,7 +497,7 @@ An `interpret` result snapshot is the canonical result observation
 Interface coverage includes abstract and default contract members, rejection of
 `@type.default-override` and `@type.missing-abstract-member`, the canonical
 `iter` contract and default-method semantics, closed registry `iter`
-conformance for `(array t)`, `(map k v)`, `str`, and `(option t)`, explicit
+conformance for `(array t)`, `(dict k v)`, `str`, and `(option t)`, explicit
 `impl (iter item)` on `mapped-iter`, `filtered-iter`, `skipped-iter`, and
 `taken-iter`, pure `iter` default methods with `effects: ()` callbacks only,
 and effectful walks written as tail-recursive module-level functions over
@@ -509,7 +509,7 @@ Union coverage includes a two-member declaration, rejection of a one-member
 body, rejection of a union, interface, and bare generic member, and rejection of
 `(union (array t) (array i32))` as overlapping under instantiation. It proves
 that no member method or implementation is lifted to the union, and that a union
-used as a `(map k v)` key without an explicit `ordered` implementation is
+used as a `(dict k v)` key without an explicit `ordered` implementation is
 rejected.
 
 Structural-type coverage accepts anonymous `tuple`, `record`, `enum`, and
@@ -531,11 +531,11 @@ intrinsic atom with `@external.unknown-symbol`.
 The reserved-head reservation is covered on both sides. A `deftype`, a `defint`,
 and a `where:` generic name spelled with a reserved type head or with a
 builtin type name are each rejected with `@name.reserved-declaration`, as is a
-generic name spelled `any` or `self`. A nested method named `map` on an owner
-other than the associative `map` type is accepted, together with the `iter` contract's
-own default `map` member, proving the reservation does not reach members; the
+generic name spelled `any` or `self`. A nested method named `dict` on an owner
+other than the associative `dict` type is accepted, proving the reservation
+does not reach members; the
 `@name.reserved-value-spelling` cases cover module-level values and aliases
-spelled `i32`, `array`, and `map`.
+spelled `i32`, `array`, and `dict`.
 
 Unification coverage fixes the bound-agnostic reading: a union whose members are
 `(array t)` and `(array i32)` where `t` is bound by an interface `i32` does not

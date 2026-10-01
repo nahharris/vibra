@@ -1,7 +1,7 @@
 (import io @std.io)
 (deftype user (record name str)
   visibility: @public
-  (defn map (value self) self value))
+  (defn dict (value self) self value))
 (defint printable
   (defn render (value self) str))
 (deffect read

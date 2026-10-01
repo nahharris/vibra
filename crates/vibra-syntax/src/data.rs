@@ -50,7 +50,7 @@ impl Drop for DataNode {
                         ));
                     }
                 }
-                DataValue::Map(entries) => {
+                DataValue::Dict(entries) => {
                     for (mut key, mut value) in entries {
                         pending.push(std::mem::replace(
                             &mut key.value,
@@ -104,8 +104,8 @@ pub enum DataValue {
     Array(Vec<DataNode>),
     /// An ordered tuple.
     Tuple(Vec<DataNode>),
-    /// A map with key/value pairs in canonicalizable order.
-    Map(Vec<(DataNode, DataNode)>),
+    /// A dict with key/value pairs in canonicalizable order.
+    Dict(Vec<(DataNode, DataNode)>),
 }
 
 /// One labelled record field.
@@ -209,7 +209,7 @@ enum DecodeTask<'source> {
         node: &'source CstNode,
         labels: Vec<(Name, ByteSpan)>,
     },
-    BuildMap {
+    BuildDict {
         node: &'source CstNode,
         count: usize,
     },
@@ -285,7 +285,7 @@ fn decode_node_iterative(
                     raw: node.to_source(),
                 }));
             }
-            DecodeTask::BuildMap { node, count } => {
+            DecodeTask::BuildDict { node, count } => {
                 let values = take_results(&mut results, count.saturating_mul(2));
                 let pairs = values
                     .chunks_exact(2)
@@ -302,7 +302,7 @@ fn decode_node_iterative(
                                 diagnostics.push(Diagnostic::new(
                                     DiagnosticCode::DataDuplicateKey,
                                     key.span(),
-                                    "a map key occurs more than once",
+                                    "a dict key occurs more than once",
                                 ));
                                 return None;
                             }
@@ -310,7 +310,7 @@ fn decode_node_iterative(
                         Some(pairs)
                     });
                 results.push(pairs.map(|pairs| DataNode {
-                    value: DataValue::Map(pairs),
+                    value: DataValue::Dict(pairs),
                     span: node.span(),
                     raw: node.to_source(),
                 }));
@@ -394,16 +394,16 @@ fn schedule_list<'source>(
             });
             tasks.extend(items.iter().rev().copied().map(DecodeTask::Visit));
         }
-        "map" => {
+        "dict" => {
             if !items.len().is_multiple_of(2) {
                 diagnostics.push(Diagnostic::new(
                     DiagnosticCode::DataInvalidShape,
                     items.last().map_or(node.span(), |item| item.span()),
-                    "a map requires an even number of key and value forms",
+                    "a dict requires an even number of key and value forms",
                 ));
                 return false;
             }
-            tasks.push(DecodeTask::BuildMap {
+            tasks.push(DecodeTask::BuildDict {
                 node,
                 count: items.len() / 2,
             });
@@ -548,7 +548,7 @@ fn canonical_node(node: &DataNode) -> String {
                         values.iter().map(CanonicalPart::Node),
                     );
                 }
-                DataValue::Map(pairs) => {
+                DataValue::Dict(pairs) => {
                     let mut pairs = pairs.iter().collect::<Vec<_>>();
                     pairs.sort_by(|left, right| {
                         let left_key = canonical_node(&left.0);
@@ -557,7 +557,7 @@ fn canonical_node(node: &DataNode) -> String {
                     });
                     schedule_container(
                         &mut tasks,
-                        "map",
+                        "dict",
                         pairs.into_iter().flat_map(|(key, value)| {
                             [CanonicalPart::Node(key), CanonicalPart::Node(value)]
                         }),

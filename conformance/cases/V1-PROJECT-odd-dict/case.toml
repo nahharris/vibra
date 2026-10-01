@@ -1,7 +1,7 @@
-id = "V1-PROJECT-odd-map"
+id = "V1-PROJECT-odd-dict"
 rule = "V1-PROJECT"
 profile = "reader-v1"
-description = "Generic maps require alternating key and value forms."
+description = "Generic dicts require alternating key and value forms."
 
 [inputs]
 data = ["input.vibon"]
@@ -14,5 +14,5 @@ formatted = "formatted.vibon"
 code = "@data.invalid-shape"
 level = "@error"
 [expect.diagnostics.span]
-start = 5
-end = 7
+start = 6
+end = 8

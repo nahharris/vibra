@@ -1,7 +1,7 @@
 id = "V1-PROJECT-duplicate-key"
 rule = "V1-PROJECT"
 profile = "reader-v1"
-description = "Generic maps reject duplicate keys."
+description = "Generic dicts reject duplicate keys."
 
 [inputs]
 data = ["input.vibon"]
@@ -14,5 +14,5 @@ formatted = "formatted.vibon"
 code = "@data.duplicate-key"
 level = "@error"
 [expect.diagnostics.span]
-start = 10
-end = 12
+start = 11
+end = 13

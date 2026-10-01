@@ -2,7 +2,7 @@ id = "V1-TYPE-INTERFACE-user-key-unordered"
 rule = "V1-TYPE-INTERFACE"
 profile = "static-v1"
 operation = "type-check"
-description = "A deftype keys a map only through its own ordered implementation, whether the map type is written or inferred, and an ordered-bounded parameter rejects it."
+description = "A deftype keys a dict only through its own ordered implementation, whether the dict type is written or inferred, and an ordered-bounded parameter rejects it."
 
 [inputs]
 source = "input.vib"
@@ -11,19 +11,19 @@ source = "input.vib"
 accepted = false
 
 [[expect.diagnostics]]
-code = "@type.invalid-map-key"
+code = "@type.invalid-dict-key"
 level = "@error"
 source = "input.vib"
-span = [89, 112]
+span = [89, 113]
 
 [[expect.diagnostics]]
-code = "@type.invalid-map-key"
+code = "@type.invalid-dict-key"
 level = "@error"
 source = "input.vib"
-span = [162, 198]
+span = [163, 200]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "input.vib"
-span = [282, 313]
+span = [284, 315]

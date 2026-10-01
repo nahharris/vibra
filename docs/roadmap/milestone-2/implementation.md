@@ -1,4 +1,4 @@
-# Milestone 2 implementation map
+# Milestone 2 implementation dict
 
 Read this with [the step plan](README.md) and [validation](validation.md).
 Paths in code spans are repository-relative. Existing names below were checked

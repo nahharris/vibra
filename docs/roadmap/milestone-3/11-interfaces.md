@@ -6,7 +6,7 @@ Prerequisite: Step 10 merged. Stage 3B behavior step.
 
 - [Types](../../spec/02-type-system.md): **Interfaces and methods**,
   **Overlap and non-unifiability**, **Generics** (interface bounds),
-  **Nominal declarations** (map keys and the key contracts).
+  **Nominal declarations** (dict keys and the key contracts).
 - [Source](../../spec/01-source-language.md): the `defint` and `impl` grammar.
 - [Runtime](../../spec/06-runtime.md): **Evaluation** (static dispatch).
 - [Decision ledger](decision-ledger.md) rows D17.1, D18.1–D18.3.
@@ -35,7 +35,7 @@ Prerequisite: Step 10 merged. Stage 3B behavior step.
    reports a contract call whose receiver type has no implementation).
 
 The key contracts, bounds on `deftype` and `lambda` parameters, and the library
-`map` are [Step 11b](11b-key-contracts.md).
+`dict` are [Step 11b](11b-key-contracts.md).
 
 ## Test matrix
 

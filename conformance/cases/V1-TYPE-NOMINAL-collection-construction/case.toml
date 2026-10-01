@@ -2,7 +2,7 @@ id = "V1-TYPE-NOMINAL-collection-construction"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
 operation = "type-check"
-description = "An odd map.of tail and a heterogeneous array.of are argument mismatches, an empty array.of needs an expected type, and a tuple index must name a component."
+description = "An odd dict.of tail and a heterogeneous array.of are argument mismatches, an empty array.of needs an expected type, and a tuple index must name a component."
 
 [inputs]
 source = "input.vib"
@@ -14,28 +14,28 @@ accepted = false
 code = "@type.argument-mismatch"
 level = "@error"
 source = "input.vib"
-span = [27, 48]
+span = [28, 50]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
 source = "input.vib"
-span = [93, 96]
+span = [95, 98]
 
 [[expect.diagnostics]]
 code = "@type.ambiguous-inference"
 level = "@error"
 source = "input.vib"
-span = [130, 140]
+span = [132, 142]
 
 [[expect.diagnostics]]
 code = "@type.invalid-tuple-index"
 level = "@error"
 source = "input.vib"
-span = [190, 191]
+span = [192, 193]
 
 [[expect.diagnostics]]
 code = "@type.invalid-tuple-index"
 level = "@error"
 source = "input.vib"
-span = [235, 237]
+span = [237, 239]

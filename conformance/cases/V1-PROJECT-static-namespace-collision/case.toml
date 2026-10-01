@@ -14,8 +14,8 @@ code = "@name.member-collision"
 level = "@error"
 source = "project.vibon"
 [expect.diagnostics.span]
-start = 156
-end = 160
+start = 157
+end = 161
 
 [[expect.diagnostics.related]]
 source = "project.vibon"

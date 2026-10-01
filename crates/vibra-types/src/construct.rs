@@ -5,7 +5,7 @@
 //! per component, an enum through one of its variants, and a wrapper type from
 //! its representation. A record value applied to one atom selector projects a
 //! field, a tuple value applied to one index literal projects a component, and
-//! an array, map, `str`, or `bytes` value applied to one key looks it up.
+//! an array, dict, `str`, or `bytes` value applied to one key looks it up.
 //! `recordof`, `tupleof`, and `enumof` build anonymous values.
 
 use std::collections::BTreeSet;
@@ -554,11 +554,11 @@ pub(crate) fn check_tuple_projection(
     )
 }
 
-/// The key and element types of an array, map, `str`, or `bytes` lookup.
+/// The key and element types of an array, dict, `str`, or `bytes` lookup.
 pub(crate) fn lookup_types(value_type: &Type) -> Option<(Type, Type)> {
     match value_type {
         Type::Array(element) => Some((Type::U64, element.as_ref().clone())),
-        Type::Map(key, value) => Some((key.as_ref().clone(), value.as_ref().clone())),
+        Type::Dict(key, value) => Some((key.as_ref().clone(), value.as_ref().clone())),
         Type::Str => Some((Type::U64, Type::Char)),
         Type::Bytes => Some((Type::U64, Type::U8)),
         _ => None,
@@ -602,7 +602,7 @@ pub(crate) fn check_lookup(
         return None;
     };
     let key_order = match collection.result_type() {
-        Type::Map(_, _) => crate::interfaces::key_order(environment.types, &key_type),
+        Type::Dict(_, _) => crate::interfaces::key_order(environment.types, &key_type),
         _ => None,
     };
     let key = check_operand(environment, operand.value(), Some(key_type))?;

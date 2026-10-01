@@ -443,7 +443,7 @@ Types are closed objects with `kind`, `name`, `parameters`, `result`, and
 | `atom` | the atom's name | empty | empty |
 | `tuple` | `tuple` | component types, in order | empty |
 | `array` | `array` | the element type | empty |
-| `map` | `map` | the key type, then the value type | empty |
+| `dict` | `dict` | the key type, then the value type | empty |
 | `union` | `union` | member types, in declaration order | empty |
 | `record` | `record` | empty | fields, in declaration order |
 | `enum` | `enum` | empty | variants with their payload types |

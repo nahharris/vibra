@@ -48,7 +48,7 @@ fn fixture() -> (PathBuf, WorkspaceSnapshot, String) {
     fs::create_dir_all(root.join("src")).expect("source directory");
     fs::write(
         root.join("project.vibon"),
-        "(record format: @project.v1 package: (record name: \"hello\" version: \"0.1.0\") targets: (array (record name: @hello kind: @lib root: \"src\")) dependencies: (map))",
+        "(record format: @project.v1 package: (record name: \"hello\" version: \"0.1.0\") targets: (array (record name: @hello kind: @lib root: \"src\")) dependencies: (dict))",
     )
     .expect("project marker");
     let source =

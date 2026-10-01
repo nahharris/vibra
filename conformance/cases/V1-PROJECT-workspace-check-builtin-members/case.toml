@@ -15,4 +15,4 @@ accepted = false
 code = "@name.unknown-symbol"
 level = "@error"
 source = "src/app/main.vib"
-span = [240, 253]
+span = [242, 255]

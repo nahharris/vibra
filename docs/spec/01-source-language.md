@@ -211,7 +211,7 @@ projection when `value` has a record type. `(value value)` is classified by the
 same static rule. A literal-headed form such as `(1 2)` is not applicable.
 
 An array variadic parameter receives every remaining unlabelled form as one
-array. A map variadic parameter receives alternating key and value forms. The
+array. A dict variadic parameter receives alternating key and value forms. The
 call MUST contain an even number of remaining forms. Every key and value is
 evaluated, and a later duplicate key replaces the earlier value.
 
@@ -259,7 +259,7 @@ parameters           = "(", { pattern, type-expr }, ")" ;
 labelled-parameters  = "(", { local-name, type-expr, literal }, ")" ;
 variadic-parameter   = "(", binding-name, variadic-type, ")" ;
 variadic-type        = "(", "array", type-expr, ")"
-                     | "(", "map", type-expr, type-expr, ")" ;
+                     | "(", "dict", type-expr, type-expr, ")" ;
 effect-row            = "(", { effect-reference }, ")" ;
 effect-reference      = symbol ;
 where-clause         = "(", { symbol, generic-bound }, ")" ;
@@ -304,7 +304,7 @@ irrefutable for the written type. `labelled:` is one flat list of
 name/type/default triples. Every labelled parameter MUST have a literal default
 value and a real unqualified local name because its name is part of the call
 contract. `variadic:` contains exactly one name/type pair, and its type MUST be
-an `array` or `map`. A function has at most one variadic parameter. A variadic
+an `array` or `dict`. A function has at most one variadic parameter. A variadic
 parameter may use any discard spelling when its value is intentionally unused.
 
 `where:` is a flat list of generic-name/bound pairs. It is the only declaration
@@ -491,8 +491,8 @@ higher-order value requires an explicit `lambda`.
 
 A module-level `def`, `defn`, or import alias MUST NOT be spelled as a builtin
 type name, because builtin types own static methods reached by the same path.
-A nested method named `map` on some other owner is allowed; the associative
-`map` type MUST NOT declare a method named `map`.
+A nested method named `dict` on some other owner is allowed; the associative
+`dict` type MUST NOT declare a method named `dict`.
 
 ## Functions and expressions
 
@@ -564,8 +564,8 @@ pattern form and no compatibility spelling for it.
 Collections have immutable value semantics. Pure iteration uses the standard
 `iter` interface; the type chapter defines `iter.next` and its default methods.
 Effectful walks are recursive functions over `iter.next` with an explicit
-written effect ceiling. Arrays and maps are built by the static methods
-`array.of` and `map.of` of the builtin `array` and `map` types, and anonymous
+written effect ceiling. Arrays and dicts are built by the static methods
+`array.of` and `dict.of` of the builtin `array` and `dict` types, and anonymous
 tuples and records by the reserved forms `tupleof` and `recordof`. There is no
 other collection-literal form and no `entry` wrapper.
 
@@ -573,15 +573,15 @@ other collection-literal form and no `entry` wrapper.
 (tupleof "Ada" 42u64)
 (recordof name: "Ada" id: 42u64)
 (array.of 1i32 2i32 3i32)
-(map.of "name" "Ada" "role" "maintainer")
+(dict.of "name" "Ada" "role" "maintainer")
 ```
 
 `tupleof` and `recordof` may contain heterogeneous values. Every `array.of`
-element has one exact type. `map.of` contains alternating key and value
+element has one exact type. `dict.of` contains alternating key and value
 expressions and MUST have even arity; its keys share one exact type and its values share one exact
-type. An empty `array.of` or `map.of` requires an expected collection type.
-All operands are evaluated, and a later duplicate map key replaces the earlier
-value. `array.of` and `map.of` are ordinary variadic methods and first-class
+type. An empty `array.of` or `dict.of` requires an expected collection type.
+All operands are evaluated, and a later duplicate dict key replaces the earlier
+value. `array.of` and `dict.of` are ordinary variadic methods and first-class
 function values; `tupleof` and `recordof` are reserved forms, not functions.
 Users cannot declare members on the builtin types.
 

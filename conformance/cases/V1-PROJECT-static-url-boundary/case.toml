@@ -14,5 +14,5 @@ code = "@data.invalid-value"
 level = "@error"
 source = "project.vibon"
 [expect.diagnostics.span]
-start = 190
-end = 225
+start = 191
+end = 226

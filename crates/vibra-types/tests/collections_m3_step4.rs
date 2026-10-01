@@ -1,5 +1,5 @@
 //! M3 Step 4 collections through the single-source checker: tuples, lookups,
-//! map keys, variadic tails, and the builtin static methods.
+//! dict keys, variadic tails, and the builtin static methods.
 
 #![allow(clippy::expect_used)]
 
@@ -39,39 +39,39 @@ fn a_tuple_index_must_be_a_canonical_literal_within_the_arity() {
 fn lookups_answer_with_the_standard_option() {
     let source = "(import option @std.option)\n\
                   (defn items (a (array i32)) (option.option i32) (a 0u64))\n\
-                  (defn table (m (map str i32)) (option.option i32) (m \"k\"))\n\
+                  (defn table (m (dict str i32)) (option.option i32) (m \"k\"))\n\
                   (defn scalar (s str) (option.option char) (s 0u64))\n\
                   (defn byte (b bytes) (option.option u8) (b 0u64))";
     assert_eq!(codes(source), Vec::new());
     assert_eq!(
         codes(
-            "(import option @std.option)\n(defn f (m (map str i32)) (option.option i32) (m 1i32))"
+            "(import option @std.option)\n(defn f (m (dict str i32)) (option.option i32) (m 1i32))"
         ),
         vec![DiagnosticCode::TypeArgumentMismatch]
     );
 }
 
 #[test]
-fn map_keys_follow_the_closed_conformance() {
+fn dict_keys_follow_the_closed_conformance() {
     assert_eq!(
-        codes("(defn f (m (map (tuple str (enum on void off void)) i32)) i32 0i32)"),
+        codes("(defn f (m (dict (tuple str (enum on void off void)) i32)) i32 0i32)"),
         Vec::new()
     );
     assert_eq!(
-        codes("(defn f (m (map f32 i32)) i32 0i32)"),
-        vec![DiagnosticCode::TypeInvalidMapKey]
+        codes("(defn f (m (dict f32 i32)) i32 0i32)"),
+        vec![DiagnosticCode::TypeInvalidDictKey]
     );
     assert_eq!(
-        codes("(defn f (m (map (tuple str (fn () i32)) i32)) i32 0i32)"),
+        codes("(defn f (m (dict (tuple str (fn () i32)) i32)) i32 0i32)"),
         vec![DiagnosticCode::TypeFunctionNotEquatable]
     );
     assert_eq!(
-        codes("(defn f (m (map t i32)) i32\n  where: (t any)\n  0i32)"),
-        vec![DiagnosticCode::TypeInvalidMapKey]
+        codes("(defn f (m (dict t i32)) i32\n  where: (t any)\n  0i32)"),
+        vec![DiagnosticCode::TypeInvalidDictKey]
     );
     assert_eq!(
         codes(
-            "(import ordered @std.core.ordered)\n(defn f (m (map (tuple t str) i32)) i32\n  where: (t ordered)\n  0i32)"
+            "(import ordered @std.core.ordered)\n(defn f (m (dict (tuple t str) i32)) i32\n  where: (t ordered)\n  0i32)"
         ),
         Vec::new()
     );
@@ -89,7 +89,7 @@ fn builtin_methods_infer_from_their_tails_and_need_an_expected_empty_type() {
         vec![DiagnosticCode::TypeAmbiguousInference]
     );
     assert_eq!(
-        codes("(defn main () (map str i32) (map.of \"a\"))"),
+        codes("(defn main () (dict str i32) (dict.of \"a\"))"),
         vec![DiagnosticCode::TypeArgumentMismatch]
     );
     assert_eq!(

@@ -38,10 +38,10 @@ pub(crate) enum LowerError {
         expected: usize,
         found: usize,
     },
-    /// A map key type outside the admissible key types.
-    InvalidMapKey(Type),
-    /// A map key type that is or contains a function type.
-    FunctionMapKey(Type),
+    /// A dict key type outside the admissible key types.
+    InvalidDictKey(Type),
+    /// A dict key type that is or contains a function type.
+    FunctionDictKey(Type),
     /// Two union members that some substitution makes equal.
     UnionOverlap(Box<(Type, Type)>),
     /// A union member that is a union, an interface, or a generic name.
@@ -286,7 +286,7 @@ impl TypeNames {
         index
     }
 
-    /// Classifies `key` as a map key (`docs/spec/02-type-system.md`, "Nominal
+    /// Classifies `key` as a dict key (`docs/spec/02-type-system.md`, "Nominal
     /// declarations"): the closed registry, a declared type through its own
     /// `ordered` implementation, and a generic name through an `ordered`
     /// bound in `scope`.
@@ -330,7 +330,7 @@ impl TypeNames {
                 .find(|verdict| verdicts.contains(verdict))
                 .unwrap_or(KeyVerdict::Admissible)
             }
-            _ => map_key(key),
+            _ => dict_key(key),
         }
     }
 
@@ -408,11 +408,11 @@ impl TypeNames {
 
     /// The item type of a builtin constructor type that iterates through the
     /// closed registry (`docs/spec/02-type-system.md`, "Closed builtin
-    /// conformance"): `(array t)`, `(map k v)`, `str`, and `(option t)`.
+    /// conformance"): `(array t)`, `(dict k v)`, `str`, and `(option t)`.
     pub(crate) fn closed_iter_item(&self, receiver: &Type) -> Option<Type> {
         match receiver {
             Type::Array(element) => Some(element.as_ref().clone()),
-            Type::Map(key, value) => Some(Type::Tuple(vec![
+            Type::Dict(key, value) => Some(Type::Tuple(vec![
                 key.as_ref().clone(),
                 value.as_ref().clone(),
             ])),
@@ -448,7 +448,7 @@ impl TypeNames {
                 ) && self.key_verdict(scope, receiver) == KeyVerdict::Admissible
             }
             Some((_, vibra_ir::ClosedContract::KeyEqual)) => {
-                map_key(receiver) == KeyVerdict::Admissible
+                dict_key(receiver) == KeyVerdict::Admissible
             }
             Some((_, vibra_ir::ClosedContract::IterNext)) | None => false,
         }
@@ -548,7 +548,7 @@ impl TypeNames {
     }
 
     /// Records every declared type among `declarations` that writes an
-    /// `impl` of `@std.core`'s `ordered`, so it may key a map before its
+    /// `impl` of `@std.core`'s `ordered`, so it may key a dict before its
     /// implementation is checked.
     fn mark_ordered_types(&mut self, declarations: &[(usize, &DeftypeDeclaration)]) {
         let Some(ordered) = self
@@ -996,22 +996,22 @@ impl TypeNames {
             TypeExpr::Array(element) => Ok(Type::Array(Box::new(
                 self.lower(source_id, scope, element)?,
             ))),
-            TypeExpr::Map(key, value) => {
+            TypeExpr::Dict(key, value) => {
                 let key = self.lower(source_id, scope, key)?;
                 let value = self.lower(source_id, scope, value)?;
                 match self.key_verdict(scope, &key) {
                     KeyVerdict::Admissible => {}
                     // The embedded standard library declares the generic
-                    // `map` itself; elsewhere a generic name in a key needs
+                    // `dict` itself; elsewhere a generic name in a key needs
                     // an `ordered` bound.
                     KeyVerdict::Generic if is_stdlib_source(source_id) => {}
-                    KeyVerdict::Generic => return Err(LowerError::InvalidMapKey(key)),
+                    KeyVerdict::Generic => return Err(LowerError::InvalidDictKey(key)),
                     KeyVerdict::Function => {
-                        return Err(LowerError::FunctionMapKey(key));
+                        return Err(LowerError::FunctionDictKey(key));
                     }
-                    KeyVerdict::Invalid => return Err(LowerError::InvalidMapKey(key)),
+                    KeyVerdict::Invalid => return Err(LowerError::InvalidDictKey(key)),
                 }
-                Ok(Type::Map(Box::new(key), Box::new(value)))
+                Ok(Type::Dict(Box::new(key), Box::new(value)))
             }
             TypeExpr::Union(members) => {
                 let members = members
@@ -1024,8 +1024,8 @@ impl TypeNames {
         }
     }
 
-    /// Lowers a variadic tail type to its `(array t)` or `(map k v)` type,
-    /// applying the map-key rules.
+    /// Lowers a variadic tail type to its `(array t)` or `(dict k v)` type,
+    /// applying the dict-key rules.
     pub(crate) fn lower_variadic(
         &self,
         source_id: &str,
@@ -1036,8 +1036,8 @@ impl TypeNames {
             vibra_syntax::VariadicType::Array(element) => {
                 TypeExpr::Array(element.clone())
             }
-            vibra_syntax::VariadicType::Map(key, value) => {
-                TypeExpr::Map(key.clone(), value.clone())
+            vibra_syntax::VariadicType::Dict(key, value) => {
+                TypeExpr::Dict(key.clone(), value.clone())
             }
         };
         self.lower(source_id, scope, &written)
@@ -1349,7 +1349,7 @@ impl TypeNames {
     }
 
     /// Rejects declared types whose expansion repeats without passing through
-    /// an array, map, or function. Reported once per cycle, at the first
+    /// an array, dict, or function. Reported once per cycle, at the first
     /// declaration of the cycle in registration order, relating the member
     /// through which the expansion repeats.
     fn check_finite_size(
@@ -1393,7 +1393,7 @@ impl TypeNames {
                     DiagnosticCode::TypeInfiniteSize,
                     declared.span,
                     format!(
-                        "`{}` contains itself without an array, map, or function between",
+                        "`{}` contains itself without an array, dict, or function between",
                         declared.name
                     ),
                 )
@@ -1439,7 +1439,7 @@ impl TypeNames {
                 }
             }
             // Tuple components, fields, and payloads are stored inline; array
-            // and map elements and function types are not.
+            // and dict elements and function types are not.
             Type::Record(_) | Type::Enum(_) | Type::Tuple(_) => {
                 for nested in value.components() {
                     self.direct_edges(&nested, member, edges);
@@ -1603,19 +1603,19 @@ pub(crate) fn report_lower_error(
             )
             .with_source_id(source_id),
         ),
-        LowerError::InvalidMapKey(key) => diagnostics.push(
+        LowerError::InvalidDictKey(key) => diagnostics.push(
             Diagnostic::new(
-                DiagnosticCode::TypeInvalidMapKey,
+                DiagnosticCode::TypeInvalidDictKey,
                 span,
-                format!("{key} is not an admissible map key type"),
+                format!("{key} is not an admissible dict key type"),
             )
             .with_source_id(source_id),
         ),
-        LowerError::FunctionMapKey(key) => diagnostics.push(
+        LowerError::FunctionDictKey(key) => diagnostics.push(
             Diagnostic::new(
                 DiagnosticCode::TypeFunctionNotEquatable,
                 span,
-                format!("{key} contains a function type and cannot key a map"),
+                format!("{key} contains a function type and cannot key a dict"),
             )
             .with_source_id(source_id),
         ),
@@ -1696,7 +1696,7 @@ pub(crate) fn function_generics(
     Some((generics, bounds))
 }
 
-/// Whether a type may key a map (`docs/spec/02-type-system.md`, "Nominal
+/// Whether a type may key a dict (`docs/spec/02-type-system.md`, "Nominal
 /// declarations").
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum KeyVerdict {
@@ -1712,7 +1712,7 @@ pub(crate) enum KeyVerdict {
 
 /// Classifies `key`. A function anywhere in the key wins, then a generic
 /// parameter, then any other inadmissible component.
-pub(crate) fn map_key(key: &Type) -> KeyVerdict {
+pub(crate) fn dict_key(key: &Type) -> KeyVerdict {
     match key {
         Type::Bool
         | Type::Char
@@ -1738,7 +1738,7 @@ pub(crate) fn map_key(key: &Type) -> KeyVerdict {
                 .filter(|component| {
                     !(matches!(key, Type::Enum(_)) && **component == Type::Void)
                 })
-                .map(map_key)
+                .map(dict_key)
                 .collect::<Vec<_>>();
             [
                 KeyVerdict::Function,
@@ -1749,7 +1749,7 @@ pub(crate) fn map_key(key: &Type) -> KeyVerdict {
             .find(|verdict| verdicts.contains(verdict))
             .unwrap_or(KeyVerdict::Admissible)
         }
-        // `void`, floats, arrays, maps, and declared types, including
+        // `void`, floats, arrays, dicts, and declared types, including
         // `option`, have no closed conformance; a declared type is
         // admissible only through its own implementations (Step 11).
         _ => KeyVerdict::Invalid,

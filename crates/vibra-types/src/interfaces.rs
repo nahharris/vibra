@@ -1236,11 +1236,11 @@ fn closed_key(
     environment.types.closed_key(scope, interface, receiver)
 }
 
-/// The `ordered` interface a map keyed by `key` orders its keys through:
+/// The `ordered` interface a dict keyed by `key` orders its keys through:
 /// `None` for a key of the closed registry alone, whose canonical key order is
 /// its `compare`.
 pub(crate) fn key_order(types: &TypeNames, key: &Type) -> Option<vibra_ir::TypeId> {
-    if crate::nominal::map_key(key) == crate::nominal::KeyVerdict::Admissible {
+    if crate::nominal::dict_key(key) == crate::nominal::KeyVerdict::Admissible {
         return None;
     }
     let id = crate::stdlib::stdlib_type_id(&["core"], "ordered");
@@ -1456,7 +1456,7 @@ fn check_selected_call(
                 environment.diagnostics,
                 environment.source_id,
                 span,
-                "a map variadic tail on a contract member is outside the M3 profile",
+                "a dict variadic tail on a contract member is outside the M3 profile",
             );
             return None;
         };

@@ -172,7 +172,7 @@ pub(crate) fn builtin_self_type(atom: &str, parameters: &[String]) -> Option<Typ
         |index: usize| parameters.get(index).map(|name| Type::Param(name.clone()));
     match (atom, parameters.len()) {
         ("array", 1) => Some(Type::Array(Box::new(param(0)?))),
-        ("map", 2) => Some(Type::Map(Box::new(param(0)?), Box::new(param(1)?))),
+        ("dict", 2) => Some(Type::Dict(Box::new(param(0)?), Box::new(param(1)?))),
         ("char", 0) => Some(Type::Char),
         (name, 0) => vibra_ir::external::NumericType::ALL
             .into_iter()
@@ -243,7 +243,7 @@ pub(crate) fn builtin_members(types: &TypeNames) -> Vec<BuiltinMember> {
             continue;
         };
         // An intrinsic type by its registry atom, or a role type the toolchain
-        // represents directly, such as `map`, by its name.
+        // represents directly, such as `dict`, by its name.
         let identity = match value.body() {
             DeftypeBody::Intrinsic(atom) if atom.value() == value.name().value() => {
                 atom.value()

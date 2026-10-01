@@ -37,7 +37,7 @@ Evaluation is strict and deterministic:
 - function and constructor operands evaluate in resolved fixed-parameter
   order, labelled declaration order, then variadic source order;
 - an array variadic tail builds one array from its values;
-- a map variadic tail builds one map from alternating key/value forms and an
+- a dict variadic tail builds one dict from alternating key/value forms and an
   odd tail is rejected before execution;
 - function bodies and `do` forms evaluate from first to last; the value of a
   `do` is its last expression, or `void` if empty;
@@ -45,7 +45,7 @@ Evaluation is strict and deterministic:
 - `match` evaluates its subject once and selects the first matching arm, and an
   `as` arm tests only the union discriminant;
 - `tupleof`, `recordof`, and `enumof` operands evaluate from left to right,
-  and `array.of` and `map.of` follow the ordinary variadic order;
+  and `array.of` and `dict.of` follow the ordinary variadic order;
 - `try` performs only its specified early-exit propagation; and
 - a tail-position call to a function in the same recursive group reuses the
   current activation instead of growing language-level stack.
@@ -70,9 +70,9 @@ For an accepted program, a module value is evaluated lazily on its first read
 and exactly once during that execution. Later reads reuse that value. A new
 execution starts with fresh module-value state.
 
-`map.of` and map variadic tails share one construction rule. Every key and
+`dict.of` and dict variadic tails share one construction rule. Every key and
 value is evaluated even if a key repeats; the later pair replaces the earlier
-value. Map order is key order, by the `ordered.compare` of the key type, which
+value. Dict order is key order, by the `ordered.compare` of the key type, which
 is canonical key order for every closed key type; it is never insertion or
 hash-table order.
 
@@ -82,7 +82,7 @@ they do not invoke a function body, add a function-call edge, or emit a host
 event. Effects from evaluating their operands remain observable.
 
 Tuple and record projection are lowered from their compile-time selector to a
-direct component read. Array, map, string, and byte application performs one
+direct component read. Array, dict, string, and byte application performs one
 bounds-checked or presence-checked lookup and returns `option.some` or
 `option.none`. A missing key or out-of-range index does not panic, trap, return
 null, or synthesize a default value. These projection and lookup operations are
@@ -270,10 +270,10 @@ For `F` among `f32` and `f64`, the builtin type `F` has:
 | `parse` | `str -> C F` | The unsuffixed decimal float literal grammar; `invalid-format` otherwise, `out-of-range` when the rounded value is infinite |
 
 The remaining operations are bound by modules, except the `char.*`, `array.*`,
-and `map.*` rows. The `text.*` and `bytes.*` rows are native implementations of
+and `dict.*` rows. The `text.*` and `bytes.*` rows are native implementations of
 the `@std.text` and `@std.bytes` functions, whose Vibra bodies over the scalars
 and bytes a `str` or `bytes` value is written over are their meaning, as are
-`array.of`, `array.fold`, and `map.of`:
+`array.of`, `array.fold`, and `dict.of`:
 
 | Symbol | Signature | Semantics |
 | --- | --- | --- |
@@ -296,26 +296,26 @@ and bytes a `str` or `bytes` value is written over are their meaning, as are
 | `bytes.to-array` | `bytes -> (array u8)` | Bytes in order |
 | `bytes.from-array` | `(array u8) -> bytes` | Bytes in order |
 | `array.of` | `-> (array t)`, `variadic: (items (array t))` | The packed tail; `where: (t any)` |
-| `map.of` | `-> (map k v)`, `variadic: (entries (map k v))` | The packed tail, in key order, a later entry replacing an equal key; `where: (k ordered v any)` |
-| `map.entries` | `(map k v) -> (array (tuple k v))` | The entries in key order |
+| `dict.of` | `-> (dict k v)`, `variadic: (entries (dict k v))` | The packed tail, in key order, a later entry replacing an equal key; `where: (k ordered v any)` |
+| `dict.entries` | `(dict k v) -> (array (tuple k v))` | The entries in key order |
 | `array.length` | `(array t) -> u64` | Element count; `where: (t any)` |
 | `array.append` | `(array t) t -> (array t)` | New array with one trailing element |
 | `array.concat` | `(array t) (array t) -> (array t)` | Elements of the first, then the second |
 | `array.slice` | `(array t) u64 u64 -> (option (array t))` | As `text.slice`, over elements |
 | `array.fold` | `(array t) a (fn (a t) a) -> a` | The left fold: `step` applied to the accumulator and each element in order, starting from `initial`; `where: (t any)` on the type and `(a any)` on the member |
 
-The numeric rows and the `char.*`, `array.*`, and `map.*` rows are static
+The numeric rows and the `char.*`, `array.*`, and `dict.*` rows are static
 methods declared in the embedded module `@std.builtin`: in the `intrinsic-type`
-declarations of the builtin types, and in the `map` declaration that plays
-`@map`. They are reached through the type path with no import, exactly as
+declarations of the builtin types, and in the `dict` declaration that plays
+`@dict`. They are reached through the type path with no import, exactly as
 those types themselves need none, so `(i32.add-checked left right)` needs no
 `import`.
 
 `@std.option` declares `(deftype option (enum some t none void) where: (t any))`
 and `@std.result` declares `(deftype result (enum ok t err e) where: (t any)
 (e any))`; lookups, `try`, and unhandled-value checking recognize exactly these
-two declarations by canonical identity. A map is read by lookup and by
-`map.entries`, its one primitive operation: the entries a map is declared
+two declarations by canonical identity. A dict is read by lookup and by
+`dict.entries`, its one primitive operation: the entries a dict is declared
 over.
 
 A registry signature is checked exactly, including its generic parameter list,
@@ -353,7 +353,7 @@ MAY, without any observable difference and without any promise to do so:
   and choose compact layouts for other enums, such as a nullable reference for
   an `option` of a reference type; and
 - update a value in place when no other reference to it can observe the update,
-  so that a standard-library operation over an unshared array or map avoids a
+  so that a standard-library operation over an unshared array or dict avoids a
   copy.
 
 These are implementation strategies, not guarantees; v1 makes no
@@ -372,7 +372,7 @@ carries `type: P` as its second field; an anonymous structural value omits it:
 | --- | --- |
 | tuple | `(record kind: @tuple type: P values: (array v...))` |
 | array | `(record kind: @array values: (array v...))` |
-| map | `(record kind: @map entries: (array (tuple k v)...))`, in canonical key order |
+| dict | `(record kind: @dict entries: (array (tuple k v)...))`, in canonical key order |
 | record | `(record kind: @record type: P fields: (record name: v...))` |
 | enum | `(record kind: @enum type: P variant: @name)`, adding `payload: v` for a non-`void` slot |
 | wrapper | `(record kind: @wrapper type: P value: v)` |
@@ -384,7 +384,7 @@ in canonical order.
 `P` is the declaration's canonical atom path, and `T` is the canonical type
 encoding: a primitive's atom such as `@i32`; a declared type's canonical atom
 path; `(record type: P arguments: (array T...))` for an applied generic type,
-including `@array` and `@map`; `(record type: @tuple arguments: (array T...))`
+including `@array` and `@dict`; `(record type: @tuple arguments: (array T...))`
 for an anonymous tuple; `(record type: @record fields: (record name: T...))`,
 `(record type: @enum variants: (record name: T...))`, and
 `(record type: @union members: (array T...))` for the other anonymous types,

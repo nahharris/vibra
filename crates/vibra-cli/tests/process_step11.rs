@@ -445,7 +445,7 @@ fn step13_test_command_runs_an_empty_suite_after_step12_commands() {
     fs::create_dir_all(root.path().join("src/app")).expect("create source root");
     fs::write(
         root.path().join("project.vibon"),
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (map))\n",
+        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict))\n",
     )
     .expect("write project marker");
     fs::write(
@@ -495,7 +495,7 @@ fn valid_commands_validate_the_frozen_argument_grammar_first() {
     fs::create_dir_all(root.path().join("src/app")).expect("create source root");
     fs::write(
         root.path().join("project.vibon"),
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (map))\n",
+        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict))\n",
     )
     .expect("write project marker");
     fs::write(

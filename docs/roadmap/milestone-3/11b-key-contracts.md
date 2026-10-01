@@ -5,7 +5,7 @@ that the interface machinery lands before the standard library depends on it.
 
 ## Read before editing
 
-- [Types](../../spec/02-type-system.md): **Nominal declarations** (map keys and
+- [Types](../../spec/02-type-system.md): **Nominal declarations** (dict keys and
   the key contracts), **Generics** (interface bounds).
 - [Decision ledger](decision-ledger.md) row D18.2.
 
@@ -20,13 +20,13 @@ that the interface machinery lands before the standard library depends on it.
    structures of admissible keys conform to both contracts through the closed
    toolchain registry: they satisfy the bounds, and their contract calls are
    answered by canonical key order, statically and through a bounded generic.
-3. **Generic keys.** `(map k v)` whose `k` has no `ordered` bound is
-   inadmissible (`@type.invalid-map-key`). With the bound it stays
+3. **Generic keys.** `(dict k v)` whose `k` has no `ordered` bound is
+   inadmissible (`@type.invalid-dict-key`). With the bound it stays
    `@tool.unavailable`: `k` may then be a `deftype` ordered by its own
-   `compare`, which only the library map honors.
+   `compare`, which only the library dict honors.
 
 Step 11c brings `ordered`-bounded and user `deftype` keys and bounds on
-`deftype` and `lambda` parameters; Step 11d moves `map` into the standard
+`deftype` and `lambda` parameters; Step 11d moves `dict` into the standard
 library with library-written key conformances.
 
 ## Test matrix
@@ -34,9 +34,9 @@ library with library-written key conformances.
 - Positive: each contract member on a key primitive, an anonymous structure,
   and a bounded generic; the same across an import in a workspace.
 - Negative: a float and an array against the contracts
-  (`@type.unsatisfied-bound`); a map keyed by an `any`-bounded parameter.
+  (`@type.unsatisfied-bound`); a dict keyed by an `any`-bounded parameter.
 
 ## Done
 
-The `TypeExpr::Map` row references the generic-key case, and validation
+The `TypeExpr::Dict` row references the generic-key case, and validation
 passes.

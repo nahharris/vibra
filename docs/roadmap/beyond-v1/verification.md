@@ -141,7 +141,7 @@ verification conditions from typed IR and asks the solver to prove them:
   `ensures:` without reading its body;
 - bodies are translated using exact integers with range facts, sequence
   theory for arrays, strings, and bytes, and a presence-aware array theory for
-  maps. Floats start uninterpreted, apart from IEEE facts the stdlib states
+  dicts. Floats start uninterpreted, apart from IEEE facts the stdlib states
   explicitly;
 - a `match` over an enum or union yields one case split per arm, and
   exhaustiveness is already known;
@@ -230,7 +230,7 @@ additive.
 
 A law is a contract member with one identity per interface, addressable as
 `ordered.transitive`. Every `impl` must prove each law, or mark it `@assumed`.
-Laws let `map` keys, `par.reduce` (which requires associativity), and sorted
+Laws let `dict` keys, `par.reduce` (which requires associativity), and sorted
 collections rely on their interfaces soundly.
 
 **Proof status travels with packages.** The lock and `@build` metadata record,

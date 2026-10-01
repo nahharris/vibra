@@ -143,7 +143,7 @@ fn formatter_normalizes_arguments_only_with_authoritative_facts() {
 }
 
 #[test]
-fn formatter_orders_labels_by_the_supplied_signature_and_accepts_map_tails() {
+fn formatter_orders_labels_by_the_supplied_signature_and_accepts_dict_tails() {
     let source = "(defn call () i32 (call b: 2i32 a: 1i32 0i32))";
     let document =
         parse_source(Path::new("bindings.vib"), source).expect("source loader");
@@ -169,31 +169,31 @@ fn formatter_orders_labels_by_the_supplied_signature_and_accepts_map_tails() {
         "(defn call () i32 (call 0i32 a: 1i32 b: 2i32))\n"
     );
 
-    let map_source = "(defn call () i32 (call 0i32 key1 value1 key2 value2))";
-    let map_document =
-        parse_source(Path::new("bindings.vib"), map_source).expect("source loader");
-    let map_ast = map_document.ast().expect("declaration AST");
-    let Declaration::Defn(map_function) = &map_ast.declarations()[0] else {
+    let dict_source = "(defn call () i32 (call 0i32 key1 value1 key2 value2))";
+    let dict_document =
+        parse_source(Path::new("bindings.vib"), dict_source).expect("source loader");
+    let dict_ast = dict_document.ast().expect("declaration AST");
+    let Declaration::Defn(dict_function) = &dict_ast.declarations()[0] else {
         panic!("expected defn")
     };
-    let [map_expression] = map_function.expressions() else {
+    let [dict_expression] = dict_function.expressions() else {
         panic!("expected one expression")
     };
-    let ExpressionKind::Application(map_application) = map_expression.kind() else {
+    let ExpressionKind::Application(dict_application) = dict_expression.kind() else {
         panic!("expected application")
     };
-    let map_binding = ApplicationBinding::new(
-        map_application.span(),
-        BindingFacts::new(1, Vec::new(), Some(VariadicBinding::Map)),
+    let dict_binding = ApplicationBinding::new(
+        dict_application.span(),
+        BindingFacts::new(1, Vec::new(), Some(VariadicBinding::Dict)),
     );
-    let map_formatted = format_source_with_bindings(
+    let dict_formatted = format_source_with_bindings(
         Path::new("bindings.vib"),
-        map_source,
-        &[map_binding],
+        dict_source,
+        &[dict_binding],
     )
-    .expect("map binding facts");
+    .expect("dict binding facts");
     assert_eq!(
-        map_formatted.text(),
+        dict_formatted.text(),
         "(defn call () i32 (call 0i32 key1 value1 key2 value2))\n"
     );
 }
@@ -298,7 +298,7 @@ fn formatter_rejects_contradictory_binding_facts() {
         ),
         (
             "(defn call () i32 (call 1i32 2i32 3i32 4i32))",
-            BindingFacts::new(1, Vec::new(), Some(VariadicBinding::Map)),
+            BindingFacts::new(1, Vec::new(), Some(VariadicBinding::Dict)),
         ),
     ];
     for (source, facts) in cases {

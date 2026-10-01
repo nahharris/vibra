@@ -7,7 +7,7 @@ Prerequisite: Step 15b merged. Evidence step: it claims no new behavior.
 Extend or replace the Stage 3A demo so it also uses Stage 3B:
 - an interface with a default member implemented by two nominal types;
 - a generic function bounded by that interface;
-- a map keyed by a user type through its own `ordered`;
+- a dict keyed by a user type through its own `ordered`;
 - a conversion selected by a written destination;
 - an `iter` pipeline with `map`, `filter`, and `collect`.
 

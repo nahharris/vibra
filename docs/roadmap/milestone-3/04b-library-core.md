@@ -72,7 +72,7 @@ cases; the M3 ledger rows D17.2–D17.4 point at evidence; validation passes.
 - The loader rejects an unknown role and a role claimed twice. A role nothing
   claims yet is still implemented by the toolchain until its migration step,
   so the "missing role" check waits for Step 14, when every role is claimed.
-- `array.of` and `map.of` are the first native implementations: their bodies
+- `array.of` and `dict.of` are the first native implementations: their bodies
   are the packed tail. The registry classifies each entry as primitive or
   native, the manifest lists them in `compiler` and `native`, and
   `crates/vibra-conformance/tests/natives_m3_step4b.rs` runs every listed native

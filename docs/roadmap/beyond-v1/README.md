@@ -155,7 +155,7 @@ Scope:
   execution budgets;
 - a deterministic simulation scheduler with fault injection and replayable
   traces;
-- explicit pure data parallelism (`par.map`, `par.reduce`);
+- explicit pure data parallelism (`par.dict`, `par.reduce`);
 - static verification of contracts, termination checking, and invariant
   newtypes (see [Verification stage V1](verification.md#v1--static-contracts-and-termination));
   and

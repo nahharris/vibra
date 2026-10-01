@@ -187,7 +187,7 @@ impl DiagnosticDocument {
                 // A related span may point into another document. Use its own
                 // line index whenever the caller supplied one. A related span
                 // in the primary document is safe to render from the primary
-                // index even when the caller did not populate the map.
+                // index even when the caller did not populate the dict.
                 let index = match related.source_id.as_deref() {
                     None => primary_index,
                     Some(source_id) if diagnostic.source_id() == Some(source_id) => {
