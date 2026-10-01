@@ -1,0 +1,9 @@
+(import assert @std.assert)
+(import equatable @std.core.equatable)
+(import rank @geo.rank)
+
+(test "orders closed keys through an imported bound"
+  (assert.equal (rank.smallest (tupleof 2i32 "b") (tupleof 1i32 "z")) (tupleof 1i32 "z")))
+
+(test "compares closed keys for equality"
+  (assert.true (equatable.equal \x \x)))

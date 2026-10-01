@@ -2,7 +2,7 @@ id = "V1-TYPE-GENERIC-stage-3b-types"
 rule = "V1-TYPE-GENERIC"
 profile = "static-v1"
 operation = "type-check"
-description = "Interfaces in type position and maps keyed by a generic parameter stay unavailable until Stage 3B."
+description = "Interfaces in type position stay unavailable until Step 12, and a map keyed by a parameter without an ordered bound is an inadmissible key."
 
 [inputs]
 source = "input.vib"
@@ -17,7 +17,7 @@ source = "input.vib"
 span = [16, 25]
 
 [[expect.diagnostics]]
-code = "@tool.unavailable"
+code = "@type.invalid-map-key"
 level = "@error"
 source = "input.vib"
 span = [51, 70]

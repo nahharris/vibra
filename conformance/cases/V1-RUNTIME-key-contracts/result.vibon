@@ -1,0 +1,1 @@
+(record type: (record type: @tuple arguments: (array @i32 @str @bool @bool @std.core.ordering)) value: (record kind: @tuple values: (array 9i32 "pear" true false (record kind: @enum type: @std.core.ordering variant: @greater))))

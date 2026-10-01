@@ -66,6 +66,14 @@ pub(crate) fn declare_standard_types<'a>(
     types.import(STDLIB_BUILTIN_SOURCE_ID, "core", STDLIB_CORE_SOURCE_ID);
     for (source_id, module, ast) in type_modules() {
         for declaration in ast.declarations() {
+            if let Declaration::Defint(declaration) = declaration {
+                let id = stdlib_type_id(&[module], declaration.name().value());
+                if types.interface_index_of(&id).is_none() {
+                    let index = types.declare_interface(source_id, declaration, id);
+                    types.add_standard_contract(index, declaration);
+                }
+                continue;
+            }
             let Declaration::Deftype(declaration) = declaration else {
                 continue;
             };
