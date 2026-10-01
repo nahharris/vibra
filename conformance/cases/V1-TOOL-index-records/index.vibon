@@ -13,7 +13,7 @@
       effects: (array)
       errors: (array)
       applications: (array)
-      text: "(import core @std.core)\n\n(import from @std.core.from)\n\n(def limit i32 10i32)\n\n(defint\n  shape\n  visibility:\n  @public\n  (defn name (value self) str)\n  (defn label (value self) str (shape.name value)))\n\n(deftype\n  celsius\n  (record degrees i32)\n  visibility:\n  @public\n  (defn warmer (value self) self (celsius degrees: limit))\n  (impl shape (defn name (value self) str \"celsius\"))\n  (impl\n    (from i16)\n    (defn convert (value i16) self (celsius degrees: (as i32 (from.convert value)))))\n  (impl\n    (from i8)\n    (defn convert (value i8) self (celsius degrees: (as i32 (from.convert value))))))\n\n(defn\n  describe\n  (value celsius)\n  (option str)\n  visibility:\n  @public\n  (option.some (shape.label (celsius.warmer value))))\n\n(defn parse (text str) (result i32 core.conversion-error) (i32.parse text))\n\n(defn execute () void void)\n")
+      text: "(import core @std.core)\n\n(import from @std.core.from)\n\n(def limit i32 10i32)\n\n(defint shape\n  visibility: @public\n  (defn name (value self) str)\n  (defn label (value self) str (shape.name value)))\n\n(deftype celsius (record degrees i32)\n  visibility: @public\n  (defn warmer (value self) self (celsius degrees: limit))\n  (impl shape (defn name (value self) str \"celsius\"))\n  (impl (from i16)\n    (defn convert (value i16) self (celsius degrees: (as i32 (from.convert value)))))\n  (impl (from i8)\n    (defn convert (value i8) self (celsius degrees: (as i32 (from.convert value))))))\n\n(defn describe (value celsius) (option str)\n  visibility: @public\n  (option.some (shape.label (celsius.warmer value))))\n\n(defn parse (text str) (result i32 core.conversion-error) (i32.parse text))\n\n(defn execute () void void)\n")
     (record
       id: @app.main.celsius
       kind: @type
@@ -25,7 +25,7 @@
       effects: (array)
       errors: (array)
       applications: (array)
-      text: "(deftype\n  celsius\n  (record degrees i32)\n  visibility:\n  @public\n  (defn warmer (value self) self (celsius degrees: limit))\n  (impl shape (defn name (value self) str \"celsius\"))\n  (impl\n    (from i16)\n    (defn convert (value i16) self (celsius degrees: (as i32 (from.convert value)))))\n  (impl\n    (from i8)\n    (defn convert (value i8) self (celsius degrees: (as i32 (from.convert value))))))")
+      text: "(deftype celsius (record degrees i32)\n  visibility: @public\n  (defn warmer (value self) self (celsius degrees: limit))\n  (impl shape (defn name (value self) str \"celsius\"))\n  (impl (from i16)\n    (defn convert (value i16) self (celsius degrees: (as i32 (from.convert value)))))\n  (impl (from i8)\n    (defn convert (value i8) self (celsius degrees: (as i32 (from.convert value))))))")
     (record
       id: @app.main.celsius.warmer
       kind: @method
@@ -49,7 +49,7 @@
       effects: (array)
       errors: (array)
       applications: (array @app.main.celsius.warmer @app.main.shape.label)
-      text: "(defn\n  describe\n  (value celsius)\n  (option str)\n  visibility:\n  @public\n  (option.some (shape.label (celsius.warmer value))))")
+      text: "(defn describe (value celsius) (option str)\n  visibility: @public\n  (option.some (shape.label (celsius.warmer value))))")
     (record
       id: @app.main.execute
       kind: @function
@@ -97,7 +97,7 @@
       effects: (array)
       errors: (array)
       applications: (array)
-      text: "(defint\n  shape\n  visibility:\n  @public\n  (defn name (value self) str)\n  (defn label (value self) str (shape.name value)))")
+      text: "(defint shape\n  visibility: @public\n  (defn name (value self) str)\n  (defn label (value self) str (shape.name value)))")
     (record
       id: @app.main.shape.label
       kind: @method
@@ -127,7 +127,7 @@
       receiver: @app.main.celsius
       interface: (record type: @std.core.from arguments: (array @i16))
       source: (record source-id: "src/app/main.vib" start: 376u64 end: 484u64)
-      text: "(impl\n    (from i16)\n    (defn convert (value i16) self (celsius degrees: (as i32 (from.convert value)))))"
+      text: "(impl (from i16)\n    (defn convert (value i16) self (celsius degrees: (as i32 (from.convert value)))))"
       members: (array
         (record
           contract: @std.core.from.convert
@@ -138,7 +138,7 @@
       receiver: @app.main.celsius
       interface: (record type: @std.core.from arguments: (array @i8))
       source: (record source-id: "src/app/main.vib" start: 487u64 end: 593u64)
-      text: "(impl\n    (from i8)\n    (defn convert (value i8) self (celsius degrees: (as i32 (from.convert value)))))"
+      text: "(impl (from i8)\n    (defn convert (value i8) self (celsius degrees: (as i32 (from.convert value)))))"
       members: (array
         (record
           contract: @std.core.from.convert

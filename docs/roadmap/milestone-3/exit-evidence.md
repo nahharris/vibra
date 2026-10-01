@@ -162,9 +162,10 @@ and `iter` (Step 14c).
 
 Two findings are recorded for a later tooling pass, neither an M3 form:
 
-- The formatter lays out a `deftype`, `defint`, or `defn` that carries an
-  attribute with each label and value on its own line, and can leave a closing
-  parenthesis alone on a line. The demo is stored in that canonical format.
+- The formatter laid out a `deftype`, `defint`, or `defn` that carries an
+  attribute with each label and value on its own line, and could leave a
+  closing parenthesis alone on a line. [Step 18](18-declaration-layout.md)
+  changed the canonical format, and both demos are stored in the new one.
 - A position query reports a `pattern` fact for the arm pattern only, an
   expected type only where the source writes a primitive or function type,
   and no separate fact for an interface bound (D23.2).

@@ -1,5 +1,5 @@
 //! Declarations containing line comments use the same canonical layout as
-//! comment-free ones: the head joins the opening delimiter, and a closing
+//! comment-free ones: the header shares the opening line, and a closing
 //! delimiter stands alone only after a comment.
 
 #![allow(clippy::expect_used)]
@@ -24,7 +24,7 @@ fn a_commented_declaration_has_no_hanging_or_orphaned_delimiter() {
     );
     assert_eq!(
         formatted,
-        "(defn\n  commented\n  ; about the parameter\n  (value i32)\n  i32\n  0i32)\n"
+        "(defn commented\n  ; about the parameter\n  (value i32)\n  i32\n  0i32)\n"
     );
 }
 
@@ -34,8 +34,8 @@ fn a_commented_declaration_matches_the_comment_free_layout() {
     let plain = format_twice(
         "(defn f (value i32) i32 (let long-binding-name value (let another-binding-name long-binding-name another-binding-name)))\n",
     );
-    assert!(commented.starts_with("(defn\n  f\n"));
-    assert!(plain.starts_with("(defn\n  f\n"));
+    assert!(commented.starts_with("(defn f (value i32) i32\n"));
+    assert!(plain.starts_with("(defn f (value i32) i32\n"));
     assert!(commented.ends_with("  value)\n"));
 }
 

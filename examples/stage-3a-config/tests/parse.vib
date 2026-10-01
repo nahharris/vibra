@@ -2,8 +2,7 @@
 
 (import config @config.parse)
 
-(test
-  "typed entries in order"
+(test "typed entries in order"
   (assert.equal
     (config.parse "name = vibra\nport = 8080\n\n# comment\ndebug = true\noffset = -3")
     (result.ok
@@ -13,31 +12,27 @@
         (config.entry key: "debug" value: (config.value.flag true))
         (config.entry key: "offset" value: (config.value.integer -3i64))))))
 
-(test
-  "an empty document has no entries"
+(test "an empty document has no entries"
   (assert.equal (config.parse "") (result.ok (array.of))))
 
-(test
-  "a line without a separator"
+(test "a line without a separator"
   (assert.equal
     (config.parse "name = vibra\nport")
     (result.err (config.parse-error (config.missing-separator line: 2u64)))))
 
-(test
-  "an empty key"
+(test "an empty key"
   (assert.equal
     (config.parse " = 1")
     (result.err (config.parse-error (config.empty-key line: 1u64)))))
 
-(test
-  "an integer out of range"
+(test "an integer out of range"
   (assert.equal
     (config.parse "big = 99999999999999999999")
     (result.err
-      (config.parse-error (config.bad-integer line: 1u64 text: "99999999999999999999")))))
+      (config.parse-error
+        (config.bad-integer line: 1u64 text: "99999999999999999999")))))
 
-(test
-  "the first failure wins"
+(test "the first failure wins"
   (assert.equal
     (config.parse "a\n = 2")
     (result.err (config.parse-error (config.missing-separator line: 1u64)))))

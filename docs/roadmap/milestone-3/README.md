@@ -136,11 +136,12 @@ Stage 3B — interfaces, generics, conversion, and iteration.
 | 15a | [Index records: the `@index.v1` document of declaration, implementation, and reference records, its JSON contract, and a corpus operation](15a-index-records.md) | 14c | landed | PR #331, merge `3025969` |
 | 15b | [Type-aware query metadata for the Stage 3A and 3B forms at a source position](15b-query-metadata.md) | 15a | landed | PR #332, merge `442114f` |
 | 16 | [M3 demo and exit gate, including the M2 deferral sweep — evidence step](16-exit.md) | 15b | landed | PR #333, merge `00f0a02`; [exit evidence](exit-evidence.md) |
-| 17 | [The associative type is `dict`: the type, its members, role, VIBON form, encodings, and diagnostic code are renamed from `map` — mechanical step](17-dict-rename.md) | 16 | landed | Step 17 PR (conditional on merge) |
+| 17 | [The associative type is `dict`: the type, its members, role, VIBON form, encodings, and diagnostic code are renamed from `map` — mechanical step](17-dict-rename.md) | 16 | landed | PR #334, merge `36edfef` |
+| 18 | [Declaration layout in the canonical format: the header on the opening line, attributes beside their values, and no orphaned closing delimiter after a list](18-declaration-layout.md) | 17 | landed | Step 18 PR (conditional on merge) |
 
 Steps 1, 4a, and 10 are specification prerequisites, Steps 9 and 16 are
 evidence steps, and Step 17 is a mechanical rename; they claim no language
-behavior. Guides for Steps 2–9 are
+behavior. Step 18 changes only the canonical format. Guides for Steps 2–9 are
 written in Step 1, the guide for Step 4b in Step 4a, and guides for Steps 11–16
 in Step 10, because their content depends on the contracts those steps close.
 Step 1 also records the [decision ledger](decision-ledger.md) and the

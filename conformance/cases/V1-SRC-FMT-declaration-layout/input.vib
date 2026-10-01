@@ -1,0 +1,6 @@
+(deftype stack (record items (array t)) where: (t any) visibility: @public (defn push (value self item t) self visibility: @public (stack items: (array.append (value @items) item))))
+(defn a-function-with-a-long-name (first-parameter i32 second-parameter i32 third-parameter i32 fourth i32) i32 first-parameter)
+(deftype part (record name str unit-cents u64 count u64) (impl priced (defn cents (value self) u64 (times (value @unit-cents) (value @count)))))
+(defint priced
+  ; What the value is worth.
+  (defn cents (value self) u64) (defn above (value self limit u64) bool visibility: @public (above-limit (priced.cents value) limit (priced.cents value) limit)))

@@ -967,8 +967,11 @@ fn render_declaration_with_comments(
         .take(header_count)
         .map(|item| (item, false))
         .collect();
+    // The positions in `ordered` of each attribute's value.
+    let mut value_positions = Vec::new();
     for (_, label, value) in attribute_groups {
         ordered.push((label, false));
+        value_positions.push(ordered.len());
         ordered.push((value, false));
     }
     let body = items.iter().skip(cursor);
@@ -995,18 +998,78 @@ fn render_declaration_with_comments(
     // joins the last item unless a line comment ends it: a delimiter stands
     // alone only when its neighbour is a comment.
     output.push('(');
+    let inline_width = |item: &CstItem<'_>| {
+        layouts
+            .get(&node_key(item.node))
+            .filter(|layout| layout.inline)
+            .map(|layout| layout.inline_width)
+    };
+    // A declaration with no comment that fits on its line stays on it.
+    let whole_inline = !contains_line_comment(node)
+        && layouts
+            .get(&node_key(node))
+            .is_some_and(|layout| layout.inline);
+    let body_indent = indent.saturating_add(2);
+    // Where the opening line ends while the header still shares it.
+    let mut opening_column = Some(indent.saturating_add(1));
     let mut ends_in_comment = false;
+    let mut previous: Option<&CstItem<'_>> = None;
     for (index, (item, recurse_declaration)) in ordered.into_iter().enumerate() {
+        let uninterrupted = item.leading.is_empty()
+            && previous.is_none_or(|previous| previous.trailing.is_empty());
+        let lead = if index == 0 {
+            if let (Some(column), Some(width)) = (opening_column, inline_width(item)) {
+                opening_column = Some(column.saturating_add(width));
+            } else {
+                opening_column = None;
+            }
+            ItemLead::Open
+        } else if whole_inline {
+            ItemLead::Space
+        } else if index < header_count {
+            // A header form shares the opening line while every form before
+            // it does and the line stays within 88 columns.
+            let joined = opening_column
+                .zip(inline_width(item))
+                .map(|(column, width)| column.saturating_add(1).saturating_add(width))
+                .filter(|column| uninterrupted && *column <= 88);
+            opening_column = joined;
+            if joined.is_some() {
+                ItemLead::Space
+            } else {
+                ItemLead::Line
+            }
+        } else if value_positions.contains(&index) {
+            // An attribute's value shares its label's line when the pair fits.
+            let fits = previous
+                .and_then(&inline_width)
+                .zip(inline_width(item))
+                .is_some_and(|(label, value)| {
+                    body_indent
+                        .saturating_add(label)
+                        .saturating_add(1)
+                        .saturating_add(value)
+                        <= 88
+                });
+            if uninterrupted && fits {
+                ItemLead::Space
+            } else {
+                ItemLead::Line
+            }
+        } else {
+            ItemLead::Line
+        };
         ends_in_comment = render_cst_item(
             item,
             source,
-            indent.saturating_add(2),
+            body_indent,
             layouts,
             output,
             recurse_declaration,
             context,
-            index == 0,
+            lead,
         );
+        previous = Some(item);
     }
     if ends_in_comment {
         output.push('\n');
@@ -1015,10 +1078,20 @@ fn render_declaration_with_comments(
     output.push(')');
 }
 
-/// Renders one declaration item on its own line, or directly after the
-/// opening delimiter when `same_line` holds and it has no leading comment.
-/// Returns whether the item ends in a line comment, after which a closing
-/// delimiter must start a new line.
+/// How a declaration item starts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ItemLead {
+    /// Directly after the opening delimiter.
+    Open,
+    /// After one space, on the line of the item before it.
+    Space,
+    /// On its own line.
+    Line,
+}
+
+/// Renders one declaration item as `lead` says; a leading comment always puts
+/// the item on its own line. Returns whether the item ends in a line comment,
+/// after which a closing delimiter must start a new line.
 #[allow(clippy::too_many_arguments)]
 fn render_cst_item(
     item: &CstItem<'_>,
@@ -1028,16 +1101,18 @@ fn render_cst_item(
     output: &mut String,
     recurse_declaration: bool,
     context: &mut RenderContext<'_>,
-    same_line: bool,
+    lead: ItemLead,
 ) -> bool {
     for comment in &item.leading {
         output.push('\n');
         output.push_str(&" ".repeat(indent));
         output.push_str(&comment_text(comment));
     }
-    if !same_line || !item.leading.is_empty() {
+    if lead == ItemLead::Line || !item.leading.is_empty() {
         output.push('\n');
         output.push_str(&" ".repeat(indent));
+    } else if lead == ItemLead::Space {
+        output.push(' ');
     }
     if recurse_declaration {
         render_declaration_with_comments(
@@ -1317,7 +1392,71 @@ fn build_layouts(root: &CstNode) -> HashMap<*const CstNode, NodeLayout> {
         };
         layouts.insert(node_key(node), layout);
     }
+    reflow_last_forms(root, &mut layouts);
     layouts
+}
+
+/// The last form of `node`, unless a line comment follows it.
+fn last_form(node: &CstNode) -> Option<&CstNode> {
+    node.children()
+        .iter()
+        .rev()
+        .find(|child| {
+            matches!(
+                child.kind(),
+                SyntaxKind::Atom | SyntaxKind::List | SyntaxKind::LineComment
+            )
+        })
+        .filter(|child| child.kind() != SyntaxKind::LineComment)
+}
+
+/// Lays a last form out multiline when it is an inline list that leaves no
+/// room for the closing delimiters that follow it, so those delimiters stack
+/// onto its own instead of standing alone on the next line.
+fn reflow_last_forms(
+    root: &CstNode,
+    layouts: &mut HashMap<*const CstNode, NodeLayout>,
+) {
+    // Each entry is a list, its indentation, and the closing delimiters that
+    // follow its own on the same line.
+    let mut tasks = root
+        .children()
+        .iter()
+        .filter(|child| child.kind() == SyntaxKind::List)
+        .map(|child| (child, 0_usize, 0_usize))
+        .collect::<Vec<_>>();
+    while let Some((node, indent, closers)) = tasks.pop() {
+        if layouts
+            .get(&node_key(node))
+            .is_none_or(|layout| layout.inline)
+        {
+            continue;
+        }
+        let child_indent = indent.saturating_add(2);
+        let last = last_form(node);
+        for child in node.children() {
+            if child.kind() != SyntaxKind::List {
+                continue;
+            }
+            let is_last = last.is_some_and(|last| std::ptr::eq(last, child));
+            let child_closers = if is_last {
+                closers.saturating_add(1)
+            } else {
+                0
+            };
+            if is_last
+                && let Some(layout) = layouts.get_mut(&node_key(child))
+                && layout.inline
+                && child_indent
+                    .saturating_add(layout.inline_width)
+                    .saturating_add(child_closers)
+                    > 88
+            {
+                layout.inline = false;
+            }
+            tasks.push((child, child_indent, child_closers));
+        }
+    }
 }
 
 fn leaf_layout(text: &str) -> NodeLayout {
@@ -1542,6 +1681,11 @@ fn render_node(
                             }
                         }
                     } else {
+                        if is_native_declaration(node) && !contains_line_comment(node) {
+                            output.push('(');
+                            push_declaration_lines(&mut tasks, node, indent, layouts);
+                            continue;
+                        }
                         if let Some(groups) = pair_groups(node, source) {
                             output.push('(');
                             push_multiline_groups(&mut tasks, groups, indent, layouts);
@@ -1784,6 +1928,140 @@ fn render_node(
                 output.push('\n');
                 output.push_str(&" ".repeat(indent));
                 output.push(')');
+            }
+        }
+    }
+}
+
+/// The lines of a multiline declaration with no comment of its own
+/// (`docs/spec/01-source-language.md`, "Canonical format").
+///
+/// The header forms share the opening line for as long as each is inline and
+/// the line stays within 88 columns; a header form past that point takes its
+/// own line. A labelled attribute then shares one line with its value when
+/// the pair fits, and every other form takes its own line.
+fn declaration_lines<'source>(
+    node: &'source CstNode,
+    indent: usize,
+    layouts: &HashMap<*const CstNode, NodeLayout>,
+) -> Vec<Vec<&'source CstNode>> {
+    let items = node
+        .children()
+        .iter()
+        .filter(|child| matches!(child.kind(), SyntaxKind::Atom | SyntaxKind::List))
+        .collect::<Vec<_>>();
+    let inline_width = |item: &CstNode| {
+        layouts
+            .get(&node_key(item))
+            .filter(|layout| layout.inline)
+            .map(|layout| layout.inline_width)
+    };
+    let header_count = items
+        .first()
+        .and_then(|head| head.leaf_text())
+        .map_or(0, declaration_header_count)
+        .min(items.len());
+    let mut lines: Vec<Vec<&CstNode>> = Vec::new();
+    let mut opening = Vec::new();
+    // The opening delimiter takes one column.
+    let mut column = indent.saturating_add(1);
+    let mut cursor = 0;
+    while let Some(item) = items.get(cursor).filter(|_| cursor < header_count) {
+        let separator = usize::from(cursor != 0);
+        let Some(width) = inline_width(item) else {
+            break;
+        };
+        let next = column.saturating_add(separator).saturating_add(width);
+        if cursor != 0 && next > 88 {
+            break;
+        }
+        column = next;
+        opening.push(*item);
+        cursor += 1;
+    }
+    if opening.is_empty()
+        && let Some(head) = items.first()
+    {
+        // A list always starts with its first form, inline or not.
+        opening.push(*head);
+        cursor = 1;
+    }
+    lines.push(opening);
+    while cursor < header_count {
+        if let Some(item) = items.get(cursor) {
+            lines.push(vec![*item]);
+        }
+        cursor += 1;
+    }
+    let body_indent = indent.saturating_add(2);
+    while let Some(item) = items.get(cursor) {
+        let pair = cst_label(item).and_then(|_| {
+            let value = items.get(cursor + 1)?;
+            let fits = body_indent
+                .saturating_add(inline_width(item)?)
+                .saturating_add(1)
+                .saturating_add(inline_width(value)?)
+                < 88;
+            fits.then_some(*value)
+        });
+        match pair {
+            Some(value) => {
+                lines.push(vec![*item, value]);
+                cursor += 2;
+            }
+            None => {
+                lines.push(vec![*item]);
+                cursor += 1;
+            }
+        }
+    }
+    lines
+}
+
+/// Schedules a multiline declaration as its [`declaration_lines`]. The
+/// closing delimiter joins the last line unless that line is inline and
+/// leaves no room for it.
+fn push_declaration_lines<'source>(
+    tasks: &mut Vec<RenderTask<'source>>,
+    node: &'source CstNode,
+    indent: usize,
+    layouts: &HashMap<*const CstNode, NodeLayout>,
+) {
+    let lines = declaration_lines(node, indent, layouts);
+    let body_indent = indent.saturating_add(2);
+    let closes_beside = lines.last().is_some_and(|line| {
+        let start = if lines.len() == 1 {
+            indent.saturating_add(1)
+        } else {
+            body_indent
+        };
+        let mut width = line.len().saturating_sub(1);
+        for item in line {
+            match layouts.get(&node_key(item)) {
+                Some(layout) if layout.inline => {
+                    width = width.saturating_add(layout.inline_width);
+                }
+                // A multiline last form ends on its own closing delimiter,
+                // so this one stacks onto that line.
+                _ => return true,
+            }
+        }
+        start.saturating_add(width).saturating_add(1) <= 88
+    });
+    if closes_beside {
+        tasks.push(RenderTask::Raw(")"));
+    } else {
+        tasks.push(RenderTask::CloseList(indent));
+    }
+    for (line_index, line) in lines.into_iter().enumerate().rev() {
+        for (item_index, item) in line.into_iter().enumerate().rev() {
+            if item_index != 0 {
+                tasks.push(RenderTask::Node(item, body_indent));
+                tasks.push(RenderTask::Raw(" "));
+            } else if line_index == 0 {
+                tasks.push(RenderTask::Node(item, indent));
+            } else {
+                tasks.push(RenderTask::LineNode(item, body_indent));
             }
         }
     }
