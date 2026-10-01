@@ -72,7 +72,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 
 | M2 row | Owner |
 | --- | --- |
-| C1.3 — generics, nominal collections, interfaces, conversion | Steps 2–4, 11–13; `any`-bounded generics implemented by Step 3 (`V1-RUNTIME-generic-functions`) |
+| C1.3 — generics, nominal collections, interfaces, conversion | Steps 2–4, 11–13; `any`-bounded generics implemented by Step 3 (`V1-RUNTIME-generic-functions`); interfaces by Step 11 (`V1-RUNTIME-interface-dispatch`); conversion by Step 13 (`V1-RUNTIME-conversion`) |
 | C1.5 — `match`, `try`, `option`, `result`, refutable patterns | Steps 4, 5, 7; `match` and refutable patterns implemented by Step 5 (`V1-TYPE-CONTROL-match-non-exhaustive`, `V1-TYPE-CONTROL-pattern-refutable-binding`); `try` and `result` implemented by Step 7 (`V1-RUNTIME-try-propagation`, `V1-TYPE-CONTROL-unhandled-fallible`) |
 | C1.6 — variadic array and map operands | Step 4; implemented (`V1-RUNTIME-variadics`, `V1-SRC-CALLS-variadic-map-application`) |
 | C1.7 — `as`, singleton widening, narrowing | Step 6; implemented (`V1-TYPE-CONVERT-widening-boundaries`, `V1-TYPE-CONVERT-narrowing-rejections`) |

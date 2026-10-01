@@ -1,6 +1,6 @@
 # Milestone 3 step plan
 
-Status: Steps 1–2 landed
+Status: every step landed; exit evidenced in [exit-evidence.md](exit-evidence.md)
 Milestone: [Milestone 3 — complete nominal static core](../v1.md#milestone-3--complete-nominal-static-core)
 Execution model: [execution.md](../execution.md)
 Integration branch: `m3`
@@ -95,7 +95,7 @@ the Stage 3A items; Step 10 closes the Stage 3B items.
 | G18 | The compiler recognizes `option` and `result` by a hardcoded canonical identity, and syntax such as `if`, string literals, and `try` needs types it cannot define itself. | Moving a type into the library must not require compiler knowledge of its definition. | Step 4a — closed by ledger D17.2: a closed table of language roles claimed with `role:` |
 | G19 | Every library operation is either Vibra (slow in the interpreter) or a bodiless `@compiler` intrinsic (compiler-owned behavior). | Library-first needs speed without moving meaning into the compiler, and without breaking interpreter/Wasm parity. | Step 4a — closed by ledger D17.3: `native:` implementations that keep their Vibra body |
 | G20 | An import binds only a module, so a type named like its module is written `option.option`, and the only alternative anyone reaches for is a prelude. | Explicit imports read badly for single-type modules. | Step 4a — closed by ledger D17.4: single-declaration imports |
-| G21 | An entry may return `(result void e)`, and returning `err` "produces a structured nonzero program result", but the command result set has no atom for a program that returned an error, so `vibra run` reports `@command.ok` with the `err` value as its `programResult`. | Scripts cannot tell a failed program from a successful one by exit status. | Open — needs a tooling-chapter decision (a result atom and exit code); Step 7 checks and runs such entries |
+| G21 | An entry may return `(result void e)`, and returning `err` "produces a structured nonzero program result", but the command result set has no atom for a program that returned an error, so `vibra run` reports `@command.ok` with the `err` value as its `programResult`. | Scripts cannot tell a failed program from a successful one by exit status. | Reassigned to M4 by [Step 16](exit-evidence.md#reassigned-to-later-milestones): it needs a tooling-chapter decision (a result atom and exit code), which M4 must also make for host failures at the entry; Step 7 checks and runs such entries |
 
 ## Steps
 
@@ -117,7 +117,7 @@ failures through a nominal error union with `try`, with no interfaces.
 | 8 | [Registry: every Stage 3A `@compiler` row — the numeric static methods in `@std.builtin`, and `@std.char`, `@std.text`, and `@std.bytes` — with interpreter semantics and boundary tests](08-library.md) | 7 | landed | PR #317, merge `b0c3092` |
 | 8b | [Reviewed Vibra composites (boolean connectives, `char` comparison and classes, text search/split/trim) and the generic `assert.equal` (per G6)](08-library.md) | 8 | landed | PR #318, merge `5407632` |
 | 8c | [`bool`, `str`, `bytes`, `ordering`, and the error enums as standard-library `deftype`s under their roles (per D17.1); the text and bytes rows become native implementations (per G3/G4, D17.3); array folds as Vibra-bodied `@std.builtin` members](08-library.md) | 8b | landed | PR #319, merge `e5a5c08` |
-| 9 | [Stage 3A demo and corpus sub-gate — evidence step](09-stage-3a-evidence.md) | 8 | landed | Step 9 PR (conditional on merge); [Stage 3A evidence](stage-3a-evidence.md) |
+| 9 | [Stage 3A demo and corpus sub-gate — evidence step](09-stage-3a-evidence.md) | 8 | landed | PR #320, merge `7175606`; [Stage 3A evidence](stage-3a-evidence.md) |
 
 Stage 3B — interfaces, generics, conversion, and iteration.
 
@@ -134,8 +134,8 @@ Stage 3B — interfaces, generics, conversion, and iteration.
 | 14b | [Iteration defaults and adapters: `map`, `filter`, `skip`, `take`, and `collect` in Vibra, the adapter types, and contract members with their own generics](14b-iter-defaults.md) | 14a | landed | PR #329, merge `7b0252d` |
 | 14c | [Contract laws and the role check: written algebraic laws for `equatable`, `ordered`, and `iter` with conformance examples, and the loader's missing-role check](14c-laws-and-roles.md) | 14b | landed | PR #330, merge `ebfd777` |
 | 15a | [Index records: the `@index.v1` document of declaration, implementation, and reference records, its JSON contract, and a corpus operation](15a-index-records.md) | 14c | landed | PR #331, merge `3025969` |
-| 15b | [Type-aware query metadata for the Stage 3A and 3B forms at a source position](15b-query-metadata.md) | 15a | landed | Step 15b PR (conditional on merge) |
-| 16 | [M3 demo and exit gate, including the M2 deferral sweep — evidence step](16-exit.md) | 15b | not started | — |
+| 15b | [Type-aware query metadata for the Stage 3A and 3B forms at a source position](15b-query-metadata.md) | 15a | landed | PR #332, merge `442114f` |
+| 16 | [M3 demo and exit gate, including the M2 deferral sweep — evidence step](16-exit.md) | 15b | landed | Step 16 PR (conditional on merge); [exit evidence](exit-evidence.md) |
 
 Steps 1, 4a, and 10 are specification prerequisites and Steps 9 and 16 are
 evidence steps; they claim no language behavior. Guides for Steps 2–9 are

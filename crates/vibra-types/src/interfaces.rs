@@ -1456,7 +1456,7 @@ fn check_selected_call(
                 environment.diagnostics,
                 environment.source_id,
                 span,
-                "a map variadic tail on a contract member arrives with M3 Step 14",
+                "a map variadic tail on a contract member is outside the M3 profile",
             );
             return None;
         };
