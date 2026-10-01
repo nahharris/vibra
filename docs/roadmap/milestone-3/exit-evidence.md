@@ -55,8 +55,9 @@ that uses only the public standard library and no compiler-private form.
     records `unknown-sku` and `short-stock`.
 - The `app` binary's entry returns `(result void stock.stock-error)` and
   propagates with `try`.
-- `tests/stock.vib` has seven tests, one per bullet above plus each error
-  member.
+- `tests/stock.vib` has seven tests: the bounded generic, the default member,
+  the map order, the pipeline, and `reserve` succeeding and failing with each
+  error member. Every test reaches its `sku` through the conversion.
 
 From a clean checkout, with no network, in `examples/m3-catalog`:
 
