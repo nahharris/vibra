@@ -413,7 +413,7 @@ enum TailTransferAction {
         captures: Vec<RuntimeValue>,
     },
     Invoke {
-        callable: Callable,
+        callable: Box<Callable>,
         values: Vec<RuntimeValue>,
     },
     Invalid,
@@ -555,7 +555,7 @@ impl<'a> Machine<'a> {
                             captures = next_captures;
                         }
                         TailTransferAction::Invoke { callable, values } => {
-                            break self.invoke_callable(callable, values, &result);
+                            break self.invoke_callable(*callable, values, &result);
                         }
                         TailTransferAction::Invalid => break None,
                     }
@@ -599,16 +599,19 @@ impl<'a> Machine<'a> {
                     }
                 } else {
                     TailTransferAction::Invoke {
-                        callable: Callable::Named {
+                        callable: Box::new(Callable::Named {
                             index,
                             signature,
                             captures,
-                        },
+                        }),
                         values,
                     }
                 }
             }
-            callable => TailTransferAction::Invoke { callable, values },
+            callable => TailTransferAction::Invoke {
+                callable: Box::new(callable),
+                values,
+            },
         }
     }
 
@@ -727,7 +730,8 @@ impl<'a> Machine<'a> {
                 let member_type = value.result_type();
                 let value = self.evaluate_value(value, slots, captures)?;
                 Some(Evaluation::Value(match member {
-                    // Atom widening is erased.
+                    // Atom and interface widening are erased: a value keeps
+                    // its own type, which selects its implementations.
                     None => value,
                     Some(member) => RuntimeValue::Union {
                         value_type: value_type.clone(),
@@ -1616,10 +1620,14 @@ fn activation_slots(
 /// Whether a slot of type `expected` may hold `value`. An atom value's own
 /// type is its singleton, which the erased `atom` type also holds.
 fn admits_value(expected: &Type, value: &RuntimeValue) -> bool {
-    matches!(
-        (expected, value),
-        (Type::Atom, RuntimeValue::Primitive(Value::Atom(_)))
-    ) || expected.admits(&runtime_type(value))
+    // An interface value, including `any`, holds a value of whichever
+    // concrete type was widened to it.
+    matches!(expected, Type::Interface(_, _) | Type::Any)
+        || matches!(
+            (expected, value),
+            (Type::Atom, RuntimeValue::Primitive(Value::Atom(_)))
+        )
+        || expected.admits(&runtime_type(value))
 }
 
 fn runtime_type(value: &RuntimeValue) -> Type {

@@ -11,3 +11,10 @@
   (assert.equal
     (shapes.sides-of (shapes.square side: 1i32) (shapes.circle radius: 1i32))
     (tupleof 4i32 0i32)))
+
+(test "widens to an imported interface value and dispatches through it"
+  (assert.equal (shapes.name-of (shapes.circle radius: 2i32)) "circle"))
+
+(test "names an imported interface in type position"
+  (let held (as shapes.shape (shapes.square side: 1i32))
+    (assert.equal (shapes.shape.name held) "square")))

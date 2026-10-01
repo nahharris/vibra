@@ -1,0 +1,25 @@
+(import ordered @std.core.ordered)
+(import core @std.core)
+
+(defint named
+  (defn name (value self) str)
+  (impl i32
+    (defn name (value self) str "integer")))
+
+(defn bounded (value t) str
+  where: (t named)
+  (named.name value))
+
+(defn inspect (value any) i32
+  (match value
+    1i32 1i32
+    - 0i32))
+
+(defn dispatch (value any) str
+  (named.name value))
+
+(defn generic (value named) str
+  (bounded value))
+
+(defn shared (left ordered right ordered) core.ordering
+  (ordered.compare left right))

@@ -49,7 +49,11 @@ pub(crate) fn check_members(
     for member in members {
         let declared_union = matches!(member, Type::Declared(_) | Type::Applied(_, _))
             && matches!(instantiated_body(types, member), Some(TypeBody::Union(_)));
-        if matches!(member, Type::Param(_) | Type::Union(_)) || declared_union {
+        if matches!(
+            member,
+            Type::Param(_) | Type::Union(_) | Type::Interface(_, _) | Type::Any
+        ) || declared_union
+        {
             return Err(LowerError::UnionNotConcrete(member.clone()));
         }
     }

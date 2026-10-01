@@ -1,0 +1,32 @@
+(defint named
+  (defn name (value self) str))
+
+(deftype number (union i32 str)
+  (impl named
+    (defn name (value self) str "number")))
+
+(deftype point (record x i32 y i32)
+  (impl named
+    (defn name (value self) str "point")))
+
+(defn describe (value named) str
+  (named.name value))
+
+(defn keep (value any) i32 0i32)
+
+(defn all (values (array named)) i32 0i32)
+
+(defn member () str
+  (describe 1i32))
+
+(defn singleton () i32
+  (keep @ok))
+
+(defn unrelated () str
+  (describe 2.5f64))
+
+(defn invariant (points (array point)) i32
+  (all points))
+
+(defn ascribed () named
+  (as named "text"))

@@ -5,5 +5,7 @@
     (record name: "@tests.shapes::\"dispatches a written member from an imported interface\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
     (record name: "@tests.shapes::\"calls the default member\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
     (record name: "@tests.shapes::\"dispatches through bounded generics\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.shapes::\"widens to an imported interface value and dispatches through it\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.shapes::\"names an imported interface in type position\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
   )
 )
