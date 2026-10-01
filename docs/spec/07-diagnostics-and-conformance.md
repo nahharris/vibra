@@ -63,6 +63,7 @@ table governs.
 | `@type.union-member-not-concrete` | `@error` |
 | `@type.overlapping-implementation` | `@error` |
 | `@type.ambiguous-implementation` | `@error` |
+| `@type.unsatisfied-bound` | `@error` |
 | `@type.ambiguous-destination` | `@error` |
 | `@type.invalid-ascription` | `@error` |
 | `@type.narrowing-non-union` | `@error` |

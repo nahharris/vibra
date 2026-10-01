@@ -649,6 +649,12 @@ every type argument in `where:` order. Partial application, named type
 arguments, specialization by value, multiple bounds on one parameter, and
 runtime type tests are not in v1.
 
+Every type argument of an application MUST implement the bound of its
+parameter: a concrete type through an implementation of that interface, and a
+generic name of the enclosing declaration through the same bound. A violation,
+like a contract member applied to a receiver whose type implements none of its
+interface, is `@type.unsatisfied-bound`.
+
 A nested method sees the generic names of its enclosing `deftype` and declares
 only additional ones in its own `where:`. Redeclaring an inherited name is
 `@name.generic-redeclaration`, so each generic name still has exactly one

@@ -1,0 +1,4 @@
+(defint shape
+  (defn sides (value self) i32)
+  (impl (record side i32)
+    (defn sides (value self) i32 4i32)))

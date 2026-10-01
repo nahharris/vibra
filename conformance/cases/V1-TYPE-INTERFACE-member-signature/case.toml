@@ -1,0 +1,17 @@
+id = "V1-TYPE-INTERFACE-member-signature"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "A written implementation member must have its contract signature with self substituted."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [100, 134]

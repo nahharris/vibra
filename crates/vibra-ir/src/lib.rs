@@ -1126,6 +1126,19 @@ pub enum CallTarget {
         /// the target set from `callee` and rejects a hint that disagrees.
         hint: Option<usize>,
     },
+    /// A contract member dispatched at run time from the runtime type of the
+    /// operand at `receiver`: the one function whose [`Implements`] names
+    /// this interface and member and admits that type.
+    Contract {
+        /// The interface identity.
+        interface: TypeId,
+        /// The contract member name.
+        member: String,
+        /// The operand that selects the implementation.
+        receiver: usize,
+        /// The member's signature at this call.
+        signature: Box<FunctionSignature>,
+    },
 }
 
 impl CallTarget {
@@ -1133,7 +1146,7 @@ impl CallTarget {
     #[must_use]
     pub fn callee(&self) -> Option<&Expr> {
         match self {
-            Self::Direct(_) => None,
+            Self::Direct(_) | Self::Contract { .. } => None,
             Self::Indirect { callee, .. } => Some(callee),
         }
     }
@@ -1142,7 +1155,7 @@ impl CallTarget {
     #[must_use]
     pub const fn hint(&self) -> Option<usize> {
         match self {
-            Self::Direct(_) => None,
+            Self::Direct(_) | Self::Contract { .. } => None,
             Self::Indirect { hint, .. } => *hint,
         }
     }
@@ -2486,6 +2499,19 @@ pub struct CheckedFunction {
     slot_count: usize,
     external_wrapper: bool,
     test_assertion: Option<TestAssertion>,
+    implements: Option<Implements>,
+}
+
+/// The contract member a function implements for one receiver type, which
+/// a [`CallTarget::Contract`] dispatches to from the receiver's runtime type.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Implements {
+    /// The interface identity.
+    pub interface: TypeId,
+    /// The contract member name.
+    pub member: String,
+    /// The receiver type; its generic parameters match any argument.
+    pub receiver: Type,
 }
 
 impl CheckedFunction {
@@ -2618,6 +2644,7 @@ impl CheckedFunction {
             slot_count,
             external_wrapper,
             test_assertion,
+            implements: None,
         })
     }
 
@@ -2662,6 +2689,19 @@ impl CheckedFunction {
     #[must_use]
     pub const fn test_assertion(&self) -> Option<TestAssertion> {
         self.test_assertion
+    }
+
+    /// The same function marked as implementing a contract member.
+    #[must_use]
+    pub fn with_implements(mut self, implements: Implements) -> Self {
+        self.implements = Some(implements);
+        self
+    }
+
+    /// The contract member this function implements, if any.
+    #[must_use]
+    pub const fn implements(&self) -> Option<&Implements> {
+        self.implements.as_ref()
     }
 }
 
@@ -3371,6 +3411,7 @@ fn validate_program_expr(
                     };
                     callee.signature().clone()
                 }
+                CallTarget::Contract { signature, .. } => signature.as_ref().clone(),
                 CallTarget::Indirect { callee, .. } => {
                     validate_program_expr(
                         callee,
@@ -3474,6 +3515,11 @@ fn validate_program_expr(
             let mut targets = BTreeSet::new();
             if let CallTarget::Direct(function) = target {
                 targets.insert(*function);
+            } else if let CallTarget::Contract {
+                interface, member, ..
+            } = target
+            {
+                targets.extend(contract_targets(functions, interface, member));
             } else if let Some(callee_expression) = callee_expression {
                 let summary = possible_function_targets(
                     callee_expression,
@@ -3711,6 +3757,13 @@ fn possible_function_targets(
                     visiting_globals,
                 ),
                 CallTarget::Direct(function) => FunctionTargetSummary::known(*function),
+                CallTarget::Contract {
+                    interface, member, ..
+                } => FunctionTargetSummary {
+                    known: contract_targets(functions, interface, member),
+                    unknown: false,
+                    has_closure: false,
+                },
             };
             if target_summary.unknown || target_summary.has_closure {
                 return target_summary;
@@ -4405,6 +4458,13 @@ impl<'a> CallFlow<'a> {
                     CallTarget::Direct(function) => {
                         FlowTargetSummary::known_function(*function)
                     }
+                    CallTarget::Contract {
+                        interface, member, ..
+                    } => FlowTargetSummary {
+                        known: contract_targets(self.functions, interface, member),
+                        is_function: true,
+                        ..FlowTargetSummary::default()
+                    },
                     CallTarget::Indirect { callee, .. } => self
                         .summary_expr_with_stack(
                             callee,
@@ -4604,6 +4664,13 @@ impl<'a> CallFlow<'a> {
                     CallTarget::Direct(function) => {
                         FlowTargetSummary::known_function(*function)
                     }
+                    CallTarget::Contract {
+                        interface, member, ..
+                    } => FlowTargetSummary {
+                        known: contract_targets(self.functions, interface, member),
+                        is_function: true,
+                        ..FlowTargetSummary::default()
+                    },
                     CallTarget::Indirect { callee, .. } => {
                         self.summary_expr(callee, environment, captures)
                     }
@@ -5168,6 +5235,13 @@ fn validate_tail_calls(
                     &mut BTreeSet::new(),
                 ),
                 CallTarget::Direct(function) => FunctionTargetSummary::known(*function),
+                CallTarget::Contract {
+                    interface, member, ..
+                } => FunctionTargetSummary {
+                    known: contract_targets(functions, interface, member),
+                    unknown: false,
+                    has_closure: false,
+                },
             };
             if targets.known.is_empty()
                 && !targets.unknown
@@ -5546,6 +5620,18 @@ fn canonical_expr(expression: &Expr) -> String {
                     canonical_type(result),
                     canonical_array(&values)
                 ),
+                CallTarget::Contract {
+                    interface,
+                    member,
+                    receiver,
+                    ..
+                } => format!(
+                    "(record kind: @call contract: @{} member: @{member} receiver: {receiver}u64{} result: {} arguments: {})",
+                    interface.path(),
+                    tail_field,
+                    canonical_type(result),
+                    canonical_array(&values)
+                ),
             }
         }
     }
@@ -5762,6 +5848,25 @@ fn canonical_operands<'a>(operands: impl Iterator<Item = &'a Expr>) -> String {
 /// Every function named as a value and every closure in the program: what an
 /// unknown call target may denote. A closure's captured callables are
 /// unknown, so a call through one widens again to this same set.
+/// The functions that implement `interface`'s `member`: the candidates of a
+/// contract call.
+fn contract_targets(
+    functions: &[CheckedFunction],
+    interface: &TypeId,
+    member: &str,
+) -> BTreeSet<usize> {
+    functions
+        .iter()
+        .enumerate()
+        .filter(|(_, function)| {
+            function.implements().is_some_and(|implements| {
+                implements.interface == *interface && implements.member == member
+            })
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
 fn escaping_targets(
     globals: &[CheckedGlobal],
     functions: &[CheckedFunction],

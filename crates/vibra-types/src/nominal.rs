@@ -17,7 +17,7 @@ use vibra_ir::{
     FunctionSignature, LabelledParameter, Type, TypeBody, TypeDefinition, TypeId,
 };
 use vibra_syntax::{
-    Attribute, DeftypeBody, DeftypeDeclaration, Name, TypeExpr, TypeMember,
+    Attribute, DefintDeclaration, DeftypeBody, DeftypeDeclaration, Name, TypeExpr,
 };
 
 use crate::unavailable;
@@ -93,6 +93,47 @@ pub(crate) struct DeclaredType {
     pub(crate) parameters: Vec<String>,
 }
 
+/// One declared interface visible to a checking run.
+#[derive(Clone, Debug)]
+pub(crate) struct DeclaredInterface {
+    pub(crate) id: TypeId,
+    pub(crate) name: String,
+    pub(crate) source_id: String,
+    pub(crate) span: ByteSpan,
+    pub(crate) public: bool,
+    /// Generic parameter names in `where:` order.
+    pub(crate) parameters: Vec<String>,
+    /// Contract members in declaration order, filled once their signatures
+    /// lower.
+    pub(crate) members: Vec<ContractMember>,
+}
+
+/// One contract member of an interface.
+#[derive(Clone, Debug)]
+pub(crate) struct ContractMember {
+    pub(crate) name: String,
+    pub(crate) span: ByteSpan,
+    /// The signature over `self`, which it spells as `Type::Param("self")`.
+    pub(crate) signature: FunctionSignature,
+    /// The member's own generic parameters.
+    pub(crate) generics: Vec<String>,
+    /// Whether the member has a default body.
+    pub(crate) default: bool,
+    /// The position of the fixed positional `self` parameter that selects the
+    /// implementation, or `None` for a destination-dispatched member.
+    pub(crate) receiver: Option<usize>,
+}
+
+/// One `impl` block: an interface implemented for a receiver type.
+#[derive(Clone, Debug)]
+pub(crate) struct Implementation {
+    pub(crate) interface: usize,
+    pub(crate) receiver: Type,
+    /// Contract member name to the function header that implements it: the
+    /// written member or the default instantiated for this receiver.
+    pub(crate) members: BTreeMap<String, usize>,
+}
+
 /// Type names visible from one source module.
 #[derive(Clone, Debug, Default)]
 struct ModuleScope {
@@ -101,6 +142,8 @@ struct ModuleScope {
     /// Declaration imports: alias to the target module's source ID and the
     /// declaration name.
     declarations: BTreeMap<String, (String, String)>,
+    /// Interfaces declared in this module.
+    interfaces: BTreeMap<String, usize>,
 }
 
 /// Every declared type of one checking run and the names each module sees.
@@ -114,6 +157,10 @@ pub(crate) struct TypeNames {
     /// The standard-library type playing each language role, keyed by the
     /// role atom without `@`.
     roles: BTreeMap<String, usize>,
+    interfaces: Vec<DeclaredInterface>,
+    /// Interface indices keyed by the source ID of their module.
+    interfaces_by_module: BTreeMap<String, BTreeMap<String, usize>>,
+    implementations: Vec<Implementation>,
 }
 
 /// A value path that names a type constructor or an enum variant.
@@ -166,6 +213,126 @@ impl TypeNames {
             }
         }
         index
+    }
+
+    /// Registers an interface owned by `source_id`, returning its index.
+    pub(crate) fn declare_interface(
+        &mut self,
+        source_id: &str,
+        declaration: &DefintDeclaration,
+        id: TypeId,
+    ) -> usize {
+        let index = self.interfaces.len();
+        let name = declaration.name().value().to_owned();
+        self.interfaces.push(DeclaredInterface {
+            id,
+            name: name.clone(),
+            source_id: source_id.to_owned(),
+            span: declaration.span(),
+            public: declaration.attributes().items().iter().any(|attribute| {
+                matches!(attribute, Attribute::Visibility(name) if name.value() == "public")
+            }),
+            parameters: generic_names(declaration.attributes().items()),
+            members: Vec::new(),
+        });
+        self.scopes
+            .entry(source_id.to_owned())
+            .or_default()
+            .interfaces
+            .insert(name.clone(), index);
+        self.interfaces_by_module
+            .entry(source_id.to_owned())
+            .or_default()
+            .insert(name, index);
+        index
+    }
+
+    /// Every declared interface in registration order.
+    pub(crate) fn interfaces(&self) -> &[DeclaredInterface] {
+        &self.interfaces
+    }
+
+    /// The interface at `index`.
+    pub(crate) fn interface(&self, index: usize) -> Option<&DeclaredInterface> {
+        self.interfaces.get(index)
+    }
+
+    /// Records the lowered contract of the interface at `index`.
+    pub(crate) fn set_contract(&mut self, index: usize, members: Vec<ContractMember>) {
+        if let Some(interface) = self.interfaces.get_mut(index) {
+            interface.members = members;
+        }
+    }
+
+    /// Resolves an interface name written in `source_id`: `name` for one of
+    /// the same module, or `alias.name` for a public one of an imported module.
+    pub(crate) fn resolve_interface(
+        &self,
+        source_id: &str,
+        name: &Name,
+    ) -> Option<usize> {
+        self.resolve_interface_path(source_id, name.segments())
+    }
+
+    fn resolve_interface_path(
+        &self,
+        source_id: &str,
+        segments: &[String],
+    ) -> Option<usize> {
+        let scope = self.scopes.get(source_id);
+        match segments {
+            [local] => scope
+                .and_then(|scope| scope.interfaces.get(local))
+                .copied()
+                .or_else(|| {
+                    let (target, name) = scope?.declarations.get(local)?;
+                    let index =
+                        self.interfaces_by_module.get(target)?.get(name).copied()?;
+                    self.interfaces.get(index)?.public.then_some(index)
+                }),
+            [alias, member] => {
+                let target = scope?.imports.get(alias)?;
+                let index = self
+                    .interfaces_by_module
+                    .get(target)?
+                    .get(member)
+                    .copied()?;
+                self.interfaces.get(index)?.public.then_some(index)
+            }
+            _ => None,
+        }
+    }
+
+    /// The contract member a value path names: `interface.member`, or
+    /// `alias.interface.member` through a module import.
+    pub(crate) fn contract_member(
+        &self,
+        source_id: &str,
+        name: &Name,
+    ) -> Option<(usize, usize)> {
+        let (member, interface) = name.segments().split_last()?;
+        let index = self.resolve_interface_path(source_id, interface)?;
+        let position = self
+            .interfaces
+            .get(index)?
+            .members
+            .iter()
+            .position(|candidate| candidate.name == *member)?;
+        Some((index, position))
+    }
+
+    /// Records an implementation, returning its index.
+    pub(crate) fn add_implementation(
+        &mut self,
+        implementation: Implementation,
+    ) -> usize {
+        self.implementations.push(implementation);
+        self.implementations.len() - 1
+    }
+
+    /// Every implementation in registration order.
+    pub(crate) fn implementations(&self) -> &[Implementation] {
+        &self.implementations
     }
 
     /// The standard-library type playing `role`, such as `option`.
@@ -453,7 +620,7 @@ impl TypeNames {
                     KeyVerdict::Generic if is_stdlib_source(source_id) => {}
                     KeyVerdict::Generic => {
                         return Err(LowerError::Unavailable(
-                            "map types keyed by a generic parameter arrive with interfaces in M3 Step 11",
+                            "map types keyed by a generic parameter arrive with the key contracts in M3 Step 11b",
                         ));
                     }
                     KeyVerdict::Function => {
@@ -602,16 +769,6 @@ impl TypeNames {
                     declaration.span(),
                     "role: is admissible only in the embedded standard library",
                 );
-            }
-            for member in declaration.members() {
-                if let TypeMember::Implementation(implementation) = member {
-                    unavailable(
-                        diagnostics,
-                        &source_id,
-                        implementation.span(),
-                        "impl blocks arrive in M3 Step 11",
-                    );
-                }
             }
             let body = match declaration.body() {
                 DeftypeBody::Type(TypeExpr::Record(fields)) => self
@@ -1126,7 +1283,7 @@ pub(crate) fn report_interface_bounds(
                     diagnostics,
                     source_id,
                     binding.span(),
-                    "interface bounds arrive in M3 Step 11",
+                    "interface bounds on `deftype` and `lambda` parameters arrive in M3 Step 11b",
                 );
             }
         }
@@ -1150,21 +1307,22 @@ pub(crate) fn declared_self_type(id: &vibra_ir::TypeId, parameters: &[String]) -
     }
 }
 
-/// The complete generic parameter list of a function: its owner's, then its
-/// own. Returns `None`, after reporting, when a bound names an interface.
+/// The complete generic parameter list of a function, its owner's then its
+/// own, and the interface each bounded parameter needs. Returns `None`, after
+/// reporting, when a bound names no visible interface.
 pub(crate) fn function_generics(
+    types: &TypeNames,
     owner: &[String],
     function: &vibra_syntax::FunctionDeclaration,
     source_id: &str,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<Vec<String>> {
+) -> Option<(Vec<String>, BTreeMap<String, usize>)> {
     let items = function.attributes().items();
-    if !report_interface_bounds(items, source_id, diagnostics) {
-        return None;
-    }
+    let bounds =
+        crate::interfaces::generic_bounds(types, source_id, items, diagnostics)?;
     let mut generics = owner.to_vec();
     generics.extend(generic_names(items));
-    Some(generics)
+    Some((generics, bounds))
 }
 
 /// Whether a type may key a map (`docs/spec/02-type-system.md`, "Nominal

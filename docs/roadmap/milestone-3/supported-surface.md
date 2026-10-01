@@ -39,10 +39,10 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `Declaration::Defn` | M2 | — | Generic signatures: Step 3 |
 | `Declaration::Test` | M2 | — | Generic assertion: Step 8 |
 | `Declaration::Deftype` | Stage 3A | Step 2 | Unions: Step 6 (`V1-TYPE-NOMINAL-union-declarations`); generic: Step 3 |
-| `Declaration::Defint` | Stage 3B | Step 11 | — |
+| `Declaration::Defint` | Stage 3B | Step 11 | Cases `V1-RUNTIME-interface-dispatch`, `V1-RUNTIME-workspace-test-interfaces`, `V1-TYPE-INTERFACE-generic-targets`, `V1-TYPE-INTERFACE-undispatchable`; destination-dispatched calls: Step 13 |
 | `Declaration::Deffect` | M4 | — | — |
-| `TypeMember::Method` | Stage 3A | Step 2 | Non-interface methods; contract members: Step 11 |
-| `TypeMember::Implementation` | Stage 3B | Step 11 | — |
+| `TypeMember::Method` | Stage 3A | Step 2 | Contract members: Step 11 (`V1-RUNTIME-interface-dispatch`, `V1-TYPE-INTERFACE-default-override`) |
+| `TypeMember::Implementation` | Stage 3B | Step 11 | Both placements (`V1-RUNTIME-interface-dispatch`); `V1-TYPE-INTERFACE-missing-abstract`, `V1-TYPE-INTERFACE-extra-member`, `V1-TYPE-INTERFACE-member-signature`, `V1-TYPE-INTERFACE-redundant-implementation`, `V1-TYPE-INTERFACE-deftype-target-type`, `V1-TYPE-INTERFACE-defint-target-interface`, `V1-TYPE-INTERFACE-anonymous-target`, `V1-TYPE-INTERFACE-overlapping` |
 | `TypeExpr::Name` | M2 | — | Nominal names: Step 2; `any` and interfaces as types: Step 12 |
 | `TypeExpr::Function` | M2 | — | Generic and variadic function types: Steps 3–4 |
 | `TypeExpr::Void` | M2 | — | — |
@@ -52,12 +52,12 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `TypeExpr::Enum` | Stage 3A | Step 2 | — |
 | `TypeExpr::Union` | Stage 3A | Step 6 | Reader and formatter: Step 2; cases `V1-TYPE-NOMINAL-union-declarations`, `V1-TYPE-NOMINAL-union-member-overlap`, `V1-TYPE-NOMINAL-union-member-not-concrete` |
 | `TypeExpr::Array` | Stage 3A | Step 4 | Cases `V1-RUNTIME-lookups`, `V1-TYPE-NOMINAL-collection-construction` |
-| `TypeExpr::Map` | Stage 3A | Step 4 | Cases `V1-RUNTIME-map-order`, `V1-TYPE-NOMINAL-map-keys`; generic key types: Step 11 |
+| `TypeExpr::Map` | Stage 3A | Step 4 | Cases `V1-RUNTIME-map-order`, `V1-TYPE-NOMINAL-map-keys`; generic key types: Step 11b |
 | `VariadicType::Array` | Stage 3A | Step 4 | Case `V1-SRC-CALLS-variadic-array-type` |
 | `VariadicType::Map` | Stage 3A | Step 4 | Case `V1-SRC-CALLS-variadic-map-type` |
 | `DeftypeBody::Type` | Stage 3A | Step 2 | Declared record, enum, and wrapper bodies: Step 2; tuple: Step 4; union: Step 6 (`V1-TYPE-NOMINAL-union-declarations`, `V1-RUNTIME-union-values`) |
 | `DeftypeBody::Intrinsic` | Stage 3A | Step 4 | Reader: Step 2; standard-library declarations: Steps 4 and 8 |
-| `Attribute::Where` | Stage 3A | Step 3 | `any` bounds only (`V1-RUNTIME-generic-functions`, `V1-RUNTIME-generic-lambda`); interface bounds: Step 11 (`V1-TYPE-GENERIC-interface-bound`) |
+| `Attribute::Where` | Stage 3A | Step 3 | `any` bounds (`V1-RUNTIME-generic-functions`, `V1-RUNTIME-generic-lambda`); interface bounds on `defn`: Step 11 (`V1-RUNTIME-workspace-test-interfaces`, `V1-TYPE-GENERIC-interface-bound`, `V1-TYPE-INTERFACE-unsatisfied-bound`, `V1-TYPE-INTERFACE-unimplemented-receiver`); on `deftype` and `lambda`: Step 11b |
 | `Attribute::Labelled` | M2 | — | — |
 | `Attribute::Variadic` | Stage 3A | Step 4 | Cases `V1-RUNTIME-variadics`, `V1-PROJECT-workspace-check-variadic-applications` |
 | `Attribute::Visibility` | M2 | — | — |

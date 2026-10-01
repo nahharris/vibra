@@ -32,14 +32,14 @@ fn a_type_naming_an_unavailable_type_is_unavailable_at_its_declaration_and_uses(
 }
 
 #[test]
-fn impl_blocks_stay_unavailable() {
+fn impl_blocks_target_a_visible_interface() {
     let with_impl = codes(
         "(deftype user (record name str)\n  (impl printable (defn render (value self) str \"u\")))",
     );
     assert!(
         with_impl
             .iter()
-            .any(|(code, _)| *code == DiagnosticCode::ToolUnavailable)
+            .any(|(code, _)| *code == DiagnosticCode::NameUnknownSymbol)
     );
 }
 

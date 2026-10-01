@@ -1,0 +1,3 @@
+(defint shape
+  (defn name (value self) str)
+  (defn count () i32))
