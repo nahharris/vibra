@@ -71,6 +71,13 @@ values directly under the representation latitude of the runtime chapter. An
 enum body admits `true` and `false` as variant names, which is how `bool` spells
 its variants.
 
+`@std.builtin` declares `(deftype map (array (tuple k v)) where: (k ordered v
+any) role: @map)`: a map is its entries sorted by the `ordered.compare` of
+their keys, one entry per key. `map` is a reserved form head, so this
+declaration has no written constructor or pattern. A map is built by `map.of`
+or a map variadic tail, which sort and merge their entries, and read by lookup
+and by `map.entries`.
+
 The compiler-owned types and the types that play a role are the only types a
 program names without an import, and their names are reserved spellings;
 every other standard-library declaration is reached through an explicit
@@ -280,10 +287,13 @@ implementation:
 - an anonymous tuple, record, enum, or union type whose every component,
   field, payload, or member type is itself an admissible key.
 
-The standard library supplies these conformances for the core and library
-types as ordinary implementations once interfaces are available, and the rule
-for anonymous types is the language's own structural rule. The list is closed
-so that no other package can add to it.
+The standard library writes these conformances as ordinary implementations:
+`equatable` and `ordered` carry them for the builtin integers and `char`, and
+`bool`, `str`, and `bytes` implement both where they are declared. The closed
+registry is their native implementation, so it MUST answer as they do. The
+atom types have no declaration to carry one, and the rule for anonymous types
+is the language's own structural rule; both conform through the registry
+alone. The list is closed so that no other package can add to it.
 
 `void`, `f32`, `f64`, `fn` types, arrays, maps, and options are not admissible
 keys. A `deftype` is admissible only through its own written `ordered`

@@ -5,11 +5,11 @@
   modules: (map
     @std.core (record
       path: "std/core.vib"
-      sha256: "sha256:782861b7a7a7d13752edcbe03c64512fdea840ba7a58b1d70ac27897877b11c1"
+      sha256: "sha256:88f334a5da5d966a6d9862261d480689683641737abfcdc39e0734c54112cfdc"
       role: @source)
     @std.bool (record
       path: "std/bool.vib"
-      sha256: "sha256:314f2a786a399de6b0251ff5bf5d462e8e4fef03d8938c678623d963f85baee9"
+      sha256: "sha256:d17da5007d1c5408b2565e93596fd0459138d71096b58edc6a36d2c9d8b2d3b8"
       role: @source)
     @std.char (record
       path: "std/char.vib"
@@ -17,7 +17,7 @@
       role: @source)
     @std.text (record
       path: "std/text.vib"
-      sha256: "sha256:ab80e0b2fcd07763b80c16763b1e235f778b0c2522e0a10a35b32c10c86bfc62"
+      sha256: "sha256:2db16da55f337bc1b798f6c6a99d15b7d0881641c3907465617c287bca7e46b4"
       role: @source)
     @std.option (record
       path: "std/option.vib"
@@ -29,11 +29,11 @@
       role: @source)
     @std.bytes (record
       path: "std/bytes.vib"
-      sha256: "sha256:22a1379efd8695767c312b06fdcbd78cc1f009abec8feae15ba1e117ce2a5ea6"
+      sha256: "sha256:7068e2727b0e8ca14df999c35d8de6fa5423e85ecd5752cac65e481106f4fe19"
       role: @source)
     @std.builtin (record
       path: "std/builtin.vib"
-      sha256: "sha256:5acc7e3d6a2a05d42b4093aede33e1a3040fe237193501672cd251d87266c606"
+      sha256: "sha256:964bdb4f54be22dc41880398adfdd0b7b8bc6cb66e159bc27caa4209651a7cd6"
       role: @source)
     @std.assert (record
       path: "std/assert.vib"
@@ -44,6 +44,7 @@
     "array.append"
     "array.concat"
     "array.slice"
+    "map.entries"
     "i8.add-checked"
     "i8.sub-checked"
     "i8.mul-checked"

@@ -1,12 +1,18 @@
 ; Byte sequences. Every operation is Vibra over the bytes a `bytes` value is
 ; written over; `native:` names the implementation a toolchain may run instead.
 (import core @std.core)
+(import equatable @std.core.equatable)
+(import ordered @std.core.ordered)
 
 ; The standard byte-sequence type, which plays the `@bytes` role. It is written
 ; over its bytes, and the toolchain represents it directly.
 (deftype bytes (array u8)
   role: @bytes
-  visibility: @public)
+  visibility: @public
+  (impl equatable
+    (defn equal (left self right self) bool (equal left right)))
+  (impl ordered
+    (defn compare (left self right self) core.ordering (compare left right))))
 
 (defn length (value bytes) u64
   visibility: @public

@@ -1,0 +1,15 @@
+(defn main () (tuple (array (tuple str i32)) (array (tuple point str)) u64)
+  (tupleof
+    (map.entries (map.of "b" 2i32 "a" 1i32 "b" 3i32))
+    (map.entries (map.of (point x: 1i32 y: 2i32) "a" (point x: 2i32 y: 1i32) "b"))
+    (array.length (map.entries (as (map str i32) (map.of))))))
+
+(import core @std.core)
+(import ordered @std.core.ordered)
+
+(deftype point (record x i32 y i32)
+  (impl ordered
+    (defn compare (left self right self) core.ordering
+      (match (i32.compare (left @y) (right @y))
+        (core.ordering.equal) (i32.compare (left @x) (right @x))
+        order order))))

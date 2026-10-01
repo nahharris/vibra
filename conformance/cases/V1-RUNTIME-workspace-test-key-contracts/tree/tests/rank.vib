@@ -7,3 +7,6 @@
 
 (test "compares closed keys for equality"
   (assert.true (equatable.equal \x \x)))
+
+(test "reads a library map's entries in key order"
+  (assert.equal (map.entries (map.of 2u8 "b" 1u8 "a")) (array.of (tupleof 1u8 "a") (tupleof 2u8 "b"))))

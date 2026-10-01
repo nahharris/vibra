@@ -91,6 +91,20 @@ const EMBEDDED_MODULES: &[(&str, &[u8])] = &[
     ),
 ];
 
+/// The identity a single source gives its declaration `name`: the standard
+/// identity when `source_id` is a module of the embedded library, so that a
+/// library module checked on its own declares the types and interfaces every
+/// run knows; otherwise the source's own.
+pub(crate) fn source_type_id(source_id: &str, name: &str) -> vibra_ir::TypeId {
+    let module = source_id
+        .strip_prefix("stdlib/src/std/")
+        .and_then(|path| path.strip_suffix(".vib"));
+    match module {
+        Some(module) => stdlib_type_id(&module.split('/').collect::<Vec<_>>(), name),
+        None => vibra_ir::TypeId::new(format!("{source_id}:{name}"), name),
+    }
+}
+
 /// The identity of the declared type `name` in the standard-library module
 /// `@std.<module…>`: the identity the resolver gives every declaration of the
 /// embedded package.

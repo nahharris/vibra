@@ -264,7 +264,11 @@ fn module_source(module: &str, bodies: bool) -> String {
     let mut dropped: Vec<String> = declarations
         .iter()
         .filter_map(|declaration| match declaration {
-            Declaration::Import(import) if import.target().value() != "std.core" => {
+            // `@std.core` and its declarations are visible to every run.
+            Declaration::Import(import)
+                if import.target().value() != "std.core"
+                    && !import.target().value().starts_with("std.core.") =>
+            {
                 Some(import.alias().value().to_owned())
             }
             _ => None,
@@ -384,4 +388,96 @@ fn the_harness_reports_a_body_that_disagrees() {
          (defn reference () (array t)\n  where: (t any)\n  variadic: (items (array t))\n  (array.of))",
     );
     assert_ne!(native, wrong);
+}
+
+/// Operand pairs for each type whose key contracts the standard library
+/// implements: the module that writes the implementation, then the pairs.
+fn key_samples() -> Vec<(&'static str, Vec<&'static str>)> {
+    vec![
+        (
+            "std/bool.vib",
+            vec!["false true", "true false", "true true", "false false"],
+        ),
+        (
+            "std/text.vib",
+            vec!["\"ab\" \"b\"", "\"b\" \"ab\"", "\"é\" \"é\"", "\"\" \"a\""],
+        ),
+        (
+            "std/bytes.vib",
+            vec![
+                "(bytes (array.of 1u8 2u8)) (bytes (array.of 1u8 3u8))",
+                "(bytes (array.of 2u8)) (bytes (array.of 1u8 9u8))",
+                "(bytes (array.of)) (bytes (array.of))",
+            ],
+        ),
+        (
+            "std/core.vib",
+            vec![
+                "-1i8 1i8",
+                "300i16 -300i16",
+                "7i32 7i32",
+                "-9i64 -8i64",
+                "200u8 100u8",
+                "1u16 2u16",
+                "5u32 5u32",
+                "18446744073709551615u64 0u64",
+                r"\a \b",
+                r"\é \e",
+                r"\z \z",
+            ],
+        ),
+    ]
+}
+
+/// The closed registry is the native of the library's key conformances
+/// (`docs/spec/02-type-system.md`, "Nominal declarations"): each written
+/// implementation must answer as canonical key order does.
+#[test]
+fn every_library_key_conformance_matches_the_closed_registry() {
+    let stdlib = vibra_types::load_stdlib().expect("standard library");
+    let imports = "(import core @std.core)\n(import equatable @std.core.equatable)\n(import ordered @std.core.ordered)";
+    for (module, pairs) in key_samples() {
+        let source_id = format!("stdlib/src/{module}");
+        let library = module_source(module, true);
+        // `@std.core` names its own ordering without an alias.
+        let ordering = if module == "std/core.vib" {
+            "ordering"
+        } else {
+            "core.ordering"
+        };
+        for operands in pairs {
+            for (closed_result, result, member) in [
+                ("core.ordering", ordering, "ordered.compare"),
+                ("bool", "bool", "equatable.equal"),
+            ] {
+                let closed = run(
+                    "closed.vib",
+                    &format!(
+                        "(defn main () {closed_result} ({member} {operands}))\n\n{imports}"
+                    ),
+                );
+                let source = format!(
+                    "(defn main () {result} ({member} {operands}))\n\n{library}"
+                );
+                let checked = vibra_types::check_standard_library_source(
+                    &stdlib, &source_id, &source,
+                );
+                let program = checked
+                    .program()
+                    .unwrap_or_else(|| panic!("{module}\n{:?}", checked.diagnostics()));
+                // The call must reach a written implementation, not the registry.
+                assert!(
+                    !program.canonical_vibon().contains("closed: @key."),
+                    "`{member} {operands}` in {module} fell back to the closed registry"
+                );
+                let written = vibra_interp::run(program)
+                    .expect("execution")
+                    .canonical_result();
+                assert_eq!(
+                    closed, written,
+                    "`{member}` of {module} disagrees with canonical key order on `{operands}`"
+                );
+            }
+        }
+    }
 }

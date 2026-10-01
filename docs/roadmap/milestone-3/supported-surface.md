@@ -52,7 +52,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `TypeExpr::Enum` | Stage 3A | Step 2 | — |
 | `TypeExpr::Union` | Stage 3A | Step 6 | Reader and formatter: Step 2; cases `V1-TYPE-NOMINAL-union-declarations`, `V1-TYPE-NOMINAL-union-member-overlap`, `V1-TYPE-NOMINAL-union-member-not-concrete` |
 | `TypeExpr::Array` | Stage 3A | Step 4 | Cases `V1-RUNTIME-lookups`, `V1-TYPE-NOMINAL-collection-construction` |
-| `TypeExpr::Map` | Stage 3A | Step 4 | Cases `V1-RUNTIME-map-order`, `V1-TYPE-NOMINAL-map-keys`; generic keys without an `ordered` bound: Step 11b (`V1-TYPE-GENERIC-stage-3b-types`); `ordered`-bounded and user `deftype` keys: Step 11c (`V1-RUNTIME-user-map-keys`, `V1-TYPE-INTERFACE-user-key-unordered`); the library declaration: Step 11d |
+| `TypeExpr::Map` | Stage 3A | Step 4 | Cases `V1-RUNTIME-map-order`, `V1-TYPE-NOMINAL-map-keys`; generic keys without an `ordered` bound: Step 11b (`V1-TYPE-GENERIC-stage-3b-types`); `ordered`-bounded and user `deftype` keys: Step 11c (`V1-RUNTIME-user-map-keys`, `V1-TYPE-INTERFACE-user-key-unordered`); the library declaration and `map.entries`: Step 11d (`V1-RUNTIME-library-map`) |
 | `VariadicType::Array` | Stage 3A | Step 4 | Case `V1-SRC-CALLS-variadic-array-type` |
 | `VariadicType::Map` | Stage 3A | Step 4 | Case `V1-SRC-CALLS-variadic-map-type` |
 | `DeftypeBody::Type` | Stage 3A | Step 2 | Declared record, enum, and wrapper bodies: Step 2; tuple: Step 4; union: Step 6 (`V1-TYPE-NOMINAL-union-declarations`, `V1-RUNTIME-union-values`) |

@@ -2493,7 +2493,11 @@ impl Resolution {
         source_id: &str,
     ) {
         let path = name.segments();
+        // A builtin member of a role type, such as `map.of`, is a member.
+        let builtin_member = matches!(path, [type_name, member]
+            if self.input.builtin_members.iter().any(|(builtin, name)| builtin == type_name && name == member));
         if let [type_name] | [type_name, _] = path
+            && !builtin_member
             && self.input.role_types.iter().any(|role| role == type_name)
             && !self
                 .imports
