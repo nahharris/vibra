@@ -1,10 +1,7 @@
 (import stock @catalog.stock)
 
 ; Reserves three units from a fixed shelf; an `err` result names the failure.
-(defn
-  execute
-  ()
-  (result void stock.stock-error)
+(defn execute () (result void stock.stock-error)
   (let
     held
     (dict.of (stock.shelf 7u32) 4u64 (stock.shelf 12u32) 9u64)

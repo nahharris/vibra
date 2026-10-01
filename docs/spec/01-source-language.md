@@ -674,12 +674,26 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
   delimiter would have to indent its body under its own opening column
   instead of at the enclosing list's two-space step. The closing delimiter
   shares the last form's line unless that form is a line comment, which would
-  swallow it, or is inline and leaves no room for the delimiter within 88
-  columns; a multiline last form ends on its own closing delimiter, and this
-  one stacks onto that same line rather than being orphaned below it. Closing
-  delimiters carry no indentation of their own, so the asymmetry between the
-  two ends is deliberate. Each end is decided on its own;
+  swallow it, or is an atom that leaves no room for the delimiter within 88
+  columns. A last form that is a list is laid out multiline when, on one
+  line, it would leave no room for the closing delimiters that follow it; a
+  multiline last form ends on its own closing delimiter, and the ones that
+  follow stack onto that same line rather than being orphaned below it.
+  Closing delimiters carry no indentation of their own, so the asymmetry
+  between the two ends is deliberate. Each end is decided on its own;
 - declaration headers before labelled attributes and bodies;
+- in a multiline declaration, the header forms on the opening line: the
+  declaration head, then each following header form for as long as it is
+  inline, no comment separates it from the form before, and the line stays
+  within 88 columns. The header forms are the name of every declaration, the
+  body of a `deftype`, the type and value of a `def`, the parameters and
+  result of a `defn`, and the target of an `import`. A header form past that
+  point takes its own line;
+- in a multiline declaration, each labelled attribute on one line with its
+  value when both are inline, no comment separates them, and the pair leaves
+  room for one closing delimiter within 88 columns; otherwise the label and
+  the value each take a line. Every other form of the declaration takes its
+  own line;
 - fixed, labelled, then variadic function or constructor operands;
 - one pattern/result arm per line in a multiline `match`; and
 - preserved comments attached to the following form when possible.

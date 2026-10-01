@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-declaration-layout"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "A multiline declaration keeps its header on the opening line while it fits, keeps each attribute beside its value, and breaks a last form rather than orphaning a closing delimiter, with or without comments."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

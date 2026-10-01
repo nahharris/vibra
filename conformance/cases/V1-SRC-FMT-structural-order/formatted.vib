@@ -1,9 +1,7 @@
-(deftype
-  outer
+(deftype outer
   (record z (record a (enum x void y void) b str) m (union (record p i32 q i32) u8)))
 
-(defn
-  commented
+(defn commented
   (value
     (record
       b i32

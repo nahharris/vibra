@@ -14,23 +14,14 @@
 
 (deftype bad-integer (record line u64 text str) visibility: @public)
 
-(deftype
-  parse-error
-  (union missing-separator empty-key bad-integer)
-  visibility:
-  @public)
+(deftype parse-error (union missing-separator empty-key bad-integer)
+  visibility: @public)
 
-(defn
-  parse
-  (source str)
-  (result (array entry) parse-error)
-  visibility:
-  @public
+(defn parse (source str) (result (array entry) parse-error)
+  visibility: @public
   (parse-lines (text.split source "\n") 0u64 (array.of)))
 
-(defn
-  parse-lines
-  (lines (array str) index u64 entries (array entry))
+(defn parse-lines (lines (array str) index u64 entries (array entry))
   (result (array entry) parse-error)
   (match
     (lines index)
@@ -49,16 +40,10 @@
             number
             (array.append entries (try (parse-entry line number)))))))))
 
-(defn
-  skipped
-  (line str)
-  bool
+(defn skipped (line str) bool
   (if (text.equal line "") true (text.starts-with line "#")))
 
-(defn
-  parse-entry
-  (line str number u64)
-  (result entry parse-error)
+(defn parse-entry (line str number u64) (result entry parse-error)
   (match
     (text.index-of line "=")
     (option.none) (result.err (parse-error (missing-separator line: number)))
@@ -73,10 +58,7 @@
           (result.err (parse-error (empty-key line: number)))
           (result.ok (entry key: key value: (try (parse-value raw number)))))))))
 
-(defn
-  parse-value
-  (raw str number u64)
-  (result value parse-error)
+(defn parse-value (raw str number u64) (result value parse-error)
   (match
     raw
     "true" (result.ok (value.flag true))
@@ -90,23 +72,14 @@
       (result.ok (value.word raw)))))
 
 ; A value that starts like an integer is read as one.
-(defn
-  numeric
-  (raw str)
-  bool
+(defn numeric (raw str) bool
   (match
     ((text.to-chars raw) 0u64)
     (option.some first) (if (classes.is-ascii-digit first) true (classes.equal first \-))
     (option.none) false))
 
-(defn
-  part
-  (line str start u64 end u64)
-  str
+(defn part (line str start u64 end u64) str
   (match (text.slice line start end) (option.some piece) piece (option.none) ""))
 
-(defn
-  after
-  (index u64)
-  u64
+(defn after (index u64) u64
   (match (u64.add-checked index 1u64) (result.ok next) next (result.err -) index))
