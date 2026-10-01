@@ -1,0 +1,21 @@
+(import from @std.core.from)
+
+(deftype celsius (record degrees i32)
+  (impl (from i16)
+    (defn convert (value i16) self
+      (celsius degrees: (as i32 (from.convert value)))))
+  (impl (from i8)
+    (defn convert (value i8) self
+      (celsius degrees: (as i32 (from.convert value))))))
+
+(defn bare () i32
+  (let value (from.convert 1u8) 0i32))
+
+(defn literal () celsius
+  (from.convert 5))
+
+(defn narrowing () u8
+  (from.convert 300u32))
+
+(defn unimplemented () str
+  (from.convert 1u8))

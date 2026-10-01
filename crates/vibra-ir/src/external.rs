@@ -257,6 +257,9 @@ pub enum SemanticIdentity {
     Integer(IntegerOp),
     /// One IEEE 754 method, identical across widths up to their format.
     Float(FloatOp),
+    /// An integer as another integer type: its value when the target holds
+    /// it, and `out-of-range` otherwise.
+    IntegerConversion,
     /// A `char`'s Unicode scalar value.
     CharToScalar,
     /// The `char` of a Unicode scalar value, or `none`.
@@ -319,6 +322,9 @@ pub enum CompilerIntrinsic {
     Integer(NumericType, IntegerOp),
     /// A floating-point static method of `f32` or `f64`.
     Float(NumericType, FloatOp),
+    /// `S.to-T`: an integer of the first type as the second, distinct,
+    /// integer type.
+    Convert(NumericType, NumericType),
     /// `char.to-u32`.
     CharToU32,
     /// `char.from-u32`.
@@ -473,6 +479,15 @@ fn function(parameters: Vec<Type>, result: Type) -> FunctionSignature {
 }
 
 impl CompilerIntrinsic {
+    /// Whether every value of the integer type `source` is a value of the
+    /// integer type `target`, so `source.to-target` cannot fail.
+    #[must_use]
+    pub const fn conversion_is_total(source: NumericType, target: NumericType) -> bool {
+        let (source_low, source_high) = source.range();
+        let (target_low, target_high) = target.range();
+        target_low <= source_low && source_high <= target_high
+    }
+
     /// The closed registry version for this operation.
     #[must_use]
     pub const fn registry_version(self) -> &'static str {
@@ -485,6 +500,7 @@ impl CompilerIntrinsic {
         match self {
             Self::Integer(_, op) => SemanticIdentity::Integer(op),
             Self::Float(_, op) => SemanticIdentity::Float(op),
+            Self::Convert(..) => SemanticIdentity::IntegerConversion,
             Self::CharToU32 => SemanticIdentity::CharToScalar,
             Self::CharFromU32 => SemanticIdentity::CharFromScalar,
             Self::TextConcat => SemanticIdentity::UnicodeScalarConcatenation,
@@ -519,7 +535,7 @@ impl CompilerIntrinsic {
     #[must_use]
     pub fn symbol(self) -> &'static str {
         match self {
-            Self::Integer(..) | Self::Float(..) => {
+            Self::Integer(..) | Self::Float(..) | Self::Convert(..) => {
                 numeric_symbols().get(&self).map_or("", String::as_str)
             }
             Self::CharToU32 => "char.to-u32",
@@ -560,6 +576,7 @@ impl CompilerIntrinsic {
             self,
             Self::Integer(..)
                 | Self::Float(..)
+                | Self::Convert(..)
                 | Self::CharToU32
                 | Self::CharFromU32
                 | Self::MapEntries
@@ -592,6 +609,14 @@ impl CompilerIntrinsic {
         let checked = |value: Type| roles.result_of(value, roles.arithmetic_error());
         let converted = |value: Type| roles.result_of(value, roles.conversion_error());
         match self {
+            Self::Convert(source, target) => function(
+                vec![source.to_type()],
+                if Self::conversion_is_total(source, target) {
+                    target.to_type()
+                } else {
+                    converted(target.to_type())
+                },
+            ),
             Self::Integer(numeric, op) => {
                 let value = numeric.to_type();
                 match op {
@@ -712,6 +737,13 @@ impl CompilerIntrinsic {
                 all.extend(FloatOp::ALL.into_iter().map(|op| Self::Float(numeric, op)));
             }
         }
+        for source in NumericType::ALL {
+            for target in NumericType::ALL {
+                if source != target && source.is_integer() && target.is_integer() {
+                    all.push(Self::Convert(source, target));
+                }
+            }
+        }
         all.extend([
             Self::CharToU32,
             Self::CharFromU32,
@@ -760,6 +792,12 @@ fn numeric_symbols() -> &'static BTreeMap<CompilerIntrinsic, String> {
                 symbols.insert(
                     CompilerIntrinsic::Float(numeric, op),
                     format!("{}.{}", numeric.name(), op.name()),
+                );
+            }
+            for target in NumericType::ALL {
+                symbols.insert(
+                    CompilerIntrinsic::Convert(numeric, target),
+                    format!("{}.to-{}", numeric.name(), target.name()),
                 );
             }
         }

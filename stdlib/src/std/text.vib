@@ -314,12 +314,9 @@
     (result.ok remainder) remainder
     (result.err -) 0u32))
 
-; A `u32` below 256 as a byte, and a byte as a `u32`, through their decimal
-; text until numeric conversions arrive.
+; A `u32` below 256 as a byte, and a byte as a `u32`.
 (defn byte (value u32) u8
-  (match (u8.parse (u32.to-str value)) (result.ok narrow) narrow (result.err -) 0u8))
+  (match (u32.to-u8 value) (result.ok narrow) narrow (result.err -) 0u8))
 
 (defn wide (value u8) u32
-  (match (u32.parse (u8.to-str value))
-    (result.ok widened) widened
-    (result.err -) 0u32))
+  (u8.to-u32 value))

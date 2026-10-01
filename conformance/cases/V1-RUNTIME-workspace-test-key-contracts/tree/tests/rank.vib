@@ -1,5 +1,8 @@
 (import assert @std.assert)
+(import core @std.core)
 (import equatable @std.core.equatable)
+(import from @std.core.from)
+(import try-from @std.core.try-from)
 (import rank @geo.rank)
 
 (test "orders closed keys through an imported bound"
@@ -10,3 +13,10 @@
 
 (test "reads a library map's entries in key order"
   (assert.equal (map.entries (map.of 2u8 "b" 1u8 "a")) (array.of (tupleof 1u8 "a") (tupleof 2u8 "b"))))
+
+(test "converts integers through a written destination"
+  (do
+    (assert.equal (as i64 (from.convert 7u32)) 7i64)
+    (assert.equal
+      (as (result i8 core.conversion-error) (try-from.convert 200u8))
+      (result.err (core.conversion-error.out-of-range)))))

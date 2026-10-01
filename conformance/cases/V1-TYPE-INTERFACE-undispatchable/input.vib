@@ -1,3 +1,5 @@
 (defint shape
   (defn name (value self) str)
-  (defn count () i32))
+  (defn count () i32)
+  (defn count-all () u64
+    variadic: (rest (array self))))

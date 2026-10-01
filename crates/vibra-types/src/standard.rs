@@ -349,8 +349,9 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(bound, declared);
         // Twelve methods for each signed and eleven for each unsigned integer
-        // type, nine for each float type, the two `char` members, and the eight
+        // type, a conversion to each of the seven other integer types, nine
+        // for each float type, the two `char` members, and the eight
         // collection members.
-        assert_eq!(declared.len(), 4 * 12 + 4 * 11 + 2 * 9 + 2 + 8);
+        assert_eq!(declared.len(), 4 * 12 + 4 * 11 + 8 * 7 + 2 * 9 + 2 + 8);
     }
 }

@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-conversion"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "from and try-from select their implementation from a written expected type: an as ascription, a result type, and a parameter type. The builtin integers convert through the registry, one receiver implements from at two sources, and a factory member, with or without a variadic tail, is selected the same way."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

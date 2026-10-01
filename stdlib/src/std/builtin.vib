@@ -110,7 +110,35 @@
   (defn parse (text str) (result i8 core.conversion-error)
     visibility: @public
     external: @compiler
-    symbol: "i8.parse"))
+    symbol: "i8.parse")
+  (defn to-i16 (value i8) i16
+    visibility: @public
+    external: @compiler
+    symbol: "i8.to-i16")
+  (defn to-i32 (value i8) i32
+    visibility: @public
+    external: @compiler
+    symbol: "i8.to-i32")
+  (defn to-i64 (value i8) i64
+    visibility: @public
+    external: @compiler
+    symbol: "i8.to-i64")
+  (defn to-u8 (value i8) (result u8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.to-u8")
+  (defn to-u16 (value i8) (result u16 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.to-u16")
+  (defn to-u32 (value i8) (result u32 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.to-u32")
+  (defn to-u64 (value i8) (result u64 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.to-u64"))
 
 (deftype i16 (intrinsic-type @i16)
   visibility: @public
@@ -161,7 +189,35 @@
   (defn parse (text str) (result i16 core.conversion-error)
     visibility: @public
     external: @compiler
-    symbol: "i16.parse"))
+    symbol: "i16.parse")
+  (defn to-i8 (value i16) (result i8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.to-i8")
+  (defn to-i32 (value i16) i32
+    visibility: @public
+    external: @compiler
+    symbol: "i16.to-i32")
+  (defn to-i64 (value i16) i64
+    visibility: @public
+    external: @compiler
+    symbol: "i16.to-i64")
+  (defn to-u8 (value i16) (result u8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.to-u8")
+  (defn to-u16 (value i16) (result u16 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.to-u16")
+  (defn to-u32 (value i16) (result u32 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.to-u32")
+  (defn to-u64 (value i16) (result u64 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.to-u64"))
 
 (deftype i32 (intrinsic-type @i32)
   visibility: @public
@@ -212,7 +268,35 @@
   (defn parse (text str) (result i32 core.conversion-error)
     visibility: @public
     external: @compiler
-    symbol: "i32.parse"))
+    symbol: "i32.parse")
+  (defn to-i8 (value i32) (result i8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.to-i8")
+  (defn to-i16 (value i32) (result i16 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.to-i16")
+  (defn to-i64 (value i32) i64
+    visibility: @public
+    external: @compiler
+    symbol: "i32.to-i64")
+  (defn to-u8 (value i32) (result u8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.to-u8")
+  (defn to-u16 (value i32) (result u16 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.to-u16")
+  (defn to-u32 (value i32) (result u32 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.to-u32")
+  (defn to-u64 (value i32) (result u64 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.to-u64"))
 
 (deftype i64 (intrinsic-type @i64)
   visibility: @public
@@ -263,7 +347,35 @@
   (defn parse (text str) (result i64 core.conversion-error)
     visibility: @public
     external: @compiler
-    symbol: "i64.parse"))
+    symbol: "i64.parse")
+  (defn to-i8 (value i64) (result i8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.to-i8")
+  (defn to-i16 (value i64) (result i16 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.to-i16")
+  (defn to-i32 (value i64) (result i32 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.to-i32")
+  (defn to-u8 (value i64) (result u8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.to-u8")
+  (defn to-u16 (value i64) (result u16 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.to-u16")
+  (defn to-u32 (value i64) (result u32 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.to-u32")
+  (defn to-u64 (value i64) (result u64 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.to-u64"))
 
 (deftype u8 (intrinsic-type @u8)
   visibility: @public
@@ -310,7 +422,35 @@
   (defn parse (text str) (result u8 core.conversion-error)
     visibility: @public
     external: @compiler
-    symbol: "u8.parse"))
+    symbol: "u8.parse")
+  (defn to-i8 (value u8) (result i8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.to-i8")
+  (defn to-i16 (value u8) i16
+    visibility: @public
+    external: @compiler
+    symbol: "u8.to-i16")
+  (defn to-i32 (value u8) i32
+    visibility: @public
+    external: @compiler
+    symbol: "u8.to-i32")
+  (defn to-i64 (value u8) i64
+    visibility: @public
+    external: @compiler
+    symbol: "u8.to-i64")
+  (defn to-u16 (value u8) u16
+    visibility: @public
+    external: @compiler
+    symbol: "u8.to-u16")
+  (defn to-u32 (value u8) u32
+    visibility: @public
+    external: @compiler
+    symbol: "u8.to-u32")
+  (defn to-u64 (value u8) u64
+    visibility: @public
+    external: @compiler
+    symbol: "u8.to-u64"))
 
 (deftype u16 (intrinsic-type @u16)
   visibility: @public
@@ -357,7 +497,35 @@
   (defn parse (text str) (result u16 core.conversion-error)
     visibility: @public
     external: @compiler
-    symbol: "u16.parse"))
+    symbol: "u16.parse")
+  (defn to-i8 (value u16) (result i8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.to-i8")
+  (defn to-i16 (value u16) (result i16 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.to-i16")
+  (defn to-i32 (value u16) i32
+    visibility: @public
+    external: @compiler
+    symbol: "u16.to-i32")
+  (defn to-i64 (value u16) i64
+    visibility: @public
+    external: @compiler
+    symbol: "u16.to-i64")
+  (defn to-u8 (value u16) (result u8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.to-u8")
+  (defn to-u32 (value u16) u32
+    visibility: @public
+    external: @compiler
+    symbol: "u16.to-u32")
+  (defn to-u64 (value u16) u64
+    visibility: @public
+    external: @compiler
+    symbol: "u16.to-u64"))
 
 (deftype u32 (intrinsic-type @u32)
   visibility: @public
@@ -404,7 +572,35 @@
   (defn parse (text str) (result u32 core.conversion-error)
     visibility: @public
     external: @compiler
-    symbol: "u32.parse"))
+    symbol: "u32.parse")
+  (defn to-i8 (value u32) (result i8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.to-i8")
+  (defn to-i16 (value u32) (result i16 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.to-i16")
+  (defn to-i32 (value u32) (result i32 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.to-i32")
+  (defn to-i64 (value u32) i64
+    visibility: @public
+    external: @compiler
+    symbol: "u32.to-i64")
+  (defn to-u8 (value u32) (result u8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.to-u8")
+  (defn to-u16 (value u32) (result u16 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.to-u16")
+  (defn to-u64 (value u32) u64
+    visibility: @public
+    external: @compiler
+    symbol: "u32.to-u64"))
 
 (deftype u64 (intrinsic-type @u64)
   visibility: @public
@@ -451,7 +647,35 @@
   (defn parse (text str) (result u64 core.conversion-error)
     visibility: @public
     external: @compiler
-    symbol: "u64.parse"))
+    symbol: "u64.parse")
+  (defn to-i8 (value u64) (result i8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.to-i8")
+  (defn to-i16 (value u64) (result i16 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.to-i16")
+  (defn to-i32 (value u64) (result i32 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.to-i32")
+  (defn to-i64 (value u64) (result i64 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.to-i64")
+  (defn to-u8 (value u64) (result u8 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.to-u8")
+  (defn to-u16 (value u64) (result u16 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.to-u16")
+  (defn to-u32 (value u64) (result u32 core.conversion-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.to-u32"))
 
 (deftype f32 (intrinsic-type @f32)
   visibility: @public

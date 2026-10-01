@@ -35,6 +35,21 @@ pub(crate) fn apply(
         CompilerIntrinsic::Float(numeric, op) => {
             float(numeric, op, &primitives?, result)
         }
+        CompilerIntrinsic::Convert(source, target) => {
+            let primitives = primitives?;
+            let [value] = primitives.as_slice() else {
+                return None;
+            };
+            let converted = make_integer(target, integer_value(value)?).map(primitive);
+            Some(if CompilerIntrinsic::conversion_is_total(source, target) {
+                converted?
+            } else {
+                match converted {
+                    Some(value) => ok(result, value),
+                    None => err(result, "out-of-range"),
+                }
+            })
+        }
         CompilerIntrinsic::TextToChars
         | CompilerIntrinsic::TextFromChars
         | CompilerIntrinsic::BytesToArray
@@ -585,6 +600,51 @@ mod tests {
             int(I8, DivChecked, &[Value::I8(-7), Value::I8(2)])
                 .contains("payload: -3i8")
         );
+    }
+
+    #[test]
+    fn integer_conversions_keep_the_value_or_report_out_of_range() {
+        let integers = NumericType::ALL
+            .into_iter()
+            .filter(|numeric| numeric.is_integer())
+            .collect::<Vec<_>>();
+        for source in &integers {
+            for target in &integers {
+                if source == target {
+                    continue;
+                }
+                let total = CompilerIntrinsic::conversion_is_total(*source, *target);
+                let (source_low, source_high) = source.range();
+                let (target_low, target_high) = target.range();
+                // A conversion is total exactly when the target holds both of
+                // the source's bounds.
+                assert_eq!(
+                    total,
+                    target_low <= source_low && source_high <= target_high
+                );
+                for value in [source_low, source_high, 0, 1] {
+                    let operand = super::make_integer(*source, value).unwrap();
+                    let text =
+                        run(CompilerIntrinsic::Convert(*source, *target), &[operand]);
+                    let fits = target_low <= value && value <= target_high;
+                    let spelled = format!("{value}{}", target.name());
+                    if total {
+                        assert_eq!(text, spelled, "{source:?} to {target:?}");
+                    } else if fits {
+                        assert!(
+                            text.contains("variant: @ok")
+                                && text.contains(&format!("payload: {spelled}")),
+                            "{source:?} to {target:?} at {value}: {text}"
+                        );
+                    } else {
+                        assert!(
+                            is_err(&text, "out-of-range"),
+                            "{source:?} to {target:?} at {value}: {text}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

@@ -1,0 +1,50 @@
+(defn main () (tuple u32 (result u8 core.conversion-error) (result u8 core.conversion-error) celsius celsius i64 stack stack)
+  (tupleof
+    (as u32 (from.convert 42u8))
+    (narrow 200u32)
+    (narrow 300u32)
+    (warm 21i16)
+    (as celsius (from.convert 4i8))
+    (widen 7i32)
+    (as stack (factory.empty))
+    (as stack (factory.of 1i32 2i32 3i32))))
+
+(import core @std.core)
+(import from @std.core.from)
+(import try-from @std.core.try-from)
+
+; One receiver implements `from` at two sources.
+(deftype celsius (record degrees i32)
+  (impl (from i16)
+    (defn convert (value i16) self
+      (celsius degrees: (as i32 (from.convert value)))))
+  (impl (from i8)
+    (defn convert (value i8) self
+      (celsius degrees: (as i32 (from.convert value))))))
+
+; A factory is destination-dispatched like a conversion.
+(defint factory
+  (defn empty () self)
+  (defn of () self
+    variadic: (items (array i32))))
+
+(deftype stack (record depth u64)
+  (impl factory
+    (defn empty () self (stack depth: 0u64))
+    (defn of () self
+      variadic: (items (array i32))
+      (stack depth: (array.length items)))))
+
+; A written result type supplies the destination.
+(defn narrow (value u32) (result u8 core.conversion-error)
+  (try-from.convert value))
+
+; So does a written parameter type.
+(defn warm (value i16) celsius
+  (keep (from.convert value)))
+
+(defn keep (value celsius) celsius
+  value)
+
+(defn widen (value i32) i64
+  (from.convert value))

@@ -39,7 +39,7 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `Declaration::Defn` | M2 | — | Generic signatures: Step 3 |
 | `Declaration::Test` | M2 | — | Generic assertion: Step 8 |
 | `Declaration::Deftype` | Stage 3A | Step 2 | Unions: Step 6 (`V1-TYPE-NOMINAL-union-declarations`); generic: Step 3 |
-| `Declaration::Defint` | Stage 3B | Step 11 | Cases `V1-RUNTIME-interface-dispatch`, `V1-RUNTIME-workspace-test-interfaces`, `V1-TYPE-INTERFACE-generic-targets`, `V1-TYPE-INTERFACE-undispatchable`; destination-dispatched calls: Step 13 |
+| `Declaration::Defint` | Stage 3B | Step 11 | Cases `V1-RUNTIME-interface-dispatch`, `V1-RUNTIME-workspace-test-interfaces`, `V1-TYPE-INTERFACE-generic-targets`, `V1-TYPE-INTERFACE-undispatchable`; destination-dispatched calls: Step 13 (`V1-RUNTIME-conversion`, `V1-TYPE-CONVERT-destination-rejections`, `V1-TYPE-CONVERT-redundant-conversion`) |
 | `Declaration::Deffect` | M4 | — | — |
 | `TypeMember::Method` | Stage 3A | Step 2 | Contract members: Step 11 (`V1-RUNTIME-interface-dispatch`, `V1-TYPE-INTERFACE-default-override`) |
 | `TypeMember::Implementation` | Stage 3B | Step 11 | Both placements (`V1-RUNTIME-interface-dispatch`); `V1-TYPE-INTERFACE-missing-abstract`, `V1-TYPE-INTERFACE-extra-member`, `V1-TYPE-INTERFACE-member-signature`, `V1-TYPE-INTERFACE-redundant-implementation`, `V1-TYPE-INTERFACE-deftype-target-type`, `V1-TYPE-INTERFACE-defint-target-interface`, `V1-TYPE-INTERFACE-anonymous-target`, `V1-TYPE-INTERFACE-overlapping` |

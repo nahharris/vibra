@@ -256,6 +256,7 @@ spelled `T.<name>`:
 | `compare` | `T T -> ordering` | Numeric order |
 | `to-str` | `T -> str` | Shortest decimal digits, with a leading `-` only for a negative value and no suffix |
 | `parse` | `str -> C T` | Accepts an optional `-` (signed `T` only) followed by one or more ASCII decimal digits and nothing else; `invalid-format` otherwise, `out-of-range` for a well-formed value outside `T` |
+| `to-U`, for each other integer type `U` | `T -> U` when every `T` value is a `U` value, else `T -> C U` | The same integer as a `U`; `out-of-range` when `U` cannot hold it |
 
 For `F` among `f32` and `f64`, the builtin type `F` has:
 
