@@ -1,0 +1,29 @@
+id = "V1-TYPE-INTERFACE-iter-default-rejections"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "An iter implementation supplies only next: a default member cannot be redeclared. A default callback must be pure, and a default over a value that is not an iterator is rejected."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.default-override"
+level = "@error"
+source = "input.vib"
+span = [157, 207]
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [302, 306]
+
+[[expect.diagnostics]]
+code = "@type.unsatisfied-bound"
+level = "@error"
+source = "input.vib"
+span = [367, 371]

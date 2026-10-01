@@ -6,4 +6,89 @@
   where: (item any)
   role: @iter
   visibility: @public
-  (defn next (value self) (option (tuple item self))))
+  (defn next (value self) (option (tuple item self)))
+  ; The lazy defaults each return an adapter seen as an iterator. `map` may
+  ; change the element type; the others keep it.
+  (defn map (value self transform (fn (item) out)) (iter out)
+    where: (out any)
+    (mapped-iter source: value transform: transform))
+  (defn filter (value self keep (fn (item) bool)) (iter item)
+    (filtered-iter source: value keep: keep))
+  (defn skip (value self count u64) (iter item)
+    (skipped-iter source: value count: count))
+  (defn take (value self count u64) (iter item)
+    (taken-iter source: value count: count))
+  ; `collect` drains the iterator eagerly, in order.
+  (defn collect (value self) (array item)
+    (drain value (array.of))))
+
+; The items of `values` after `seen`, at constant depth.
+(defn drain (values (iter item) seen (array item)) (array item)
+  where: (item any)
+  (match (iter.next values)
+    (option.some (tupleof first rest)) (drain rest (array.append seen first))
+    (option.none) seen))
+
+; One less than `count`, which is above zero where this is called.
+(defn decrement (count u64) u64
+  (match (u64.sub-checked count 1u64)
+    (result.ok lower) lower
+    (result.err -) 0u64))
+
+; `map`: each item of `source` through `transform`.
+(deftype mapped-iter (record source (iter item) transform (fn (item) out))
+  where: (item any out any)
+  visibility: @public
+  (impl (iter out)
+    (defn next (value self) (option (tuple out self))
+      (match (iter.next (value @source))
+        (option.some (tupleof first rest))
+          (option.some
+            (tupleof
+              ((value @transform) first)
+              (mapped-iter source: rest transform: (value @transform))))
+        (option.none) (option.none)))))
+
+; `filter`: the items of `source` that `keep` accepts.
+(deftype filtered-iter (record source (iter item) keep (fn (item) bool))
+  where: (item any)
+  visibility: @public
+  (impl (iter item)
+    (defn next (value self) (option (tuple item self))
+      (match (iter.next (value @source))
+        (option.some (tupleof first rest))
+          (if ((value @keep) first)
+            (option.some
+              (tupleof first (filtered-iter source: rest keep: (value @keep))))
+            (iter.next (filtered-iter source: rest keep: (value @keep))))
+        (option.none) (option.none)))))
+
+; `skip`: the items of `source` after its first `count`.
+(deftype skipped-iter (record source (iter item) count u64)
+  where: (item any)
+  visibility: @public
+  (impl (iter item)
+    (defn next (value self) (option (tuple item self))
+      (match (iter.next (value @source))
+        (option.some (tupleof first rest))
+          (if (u64.equal (value @count) 0u64)
+            (option.some (tupleof first (skipped-iter source: rest count: 0u64)))
+            (iter.next
+              (skipped-iter source: rest count: (decrement (value @count)))))
+        (option.none) (option.none)))))
+
+; `take`: at most the first `count` items of `source`.
+(deftype taken-iter (record source (iter item) count u64)
+  where: (item any)
+  visibility: @public
+  (impl (iter item)
+    (defn next (value self) (option (tuple item self))
+      (if (u64.equal (value @count) 0u64)
+        (option.none)
+        (match (iter.next (value @source))
+          (option.some (tupleof first rest))
+            (option.some
+              (tupleof
+                first
+                (taken-iter source: rest count: (decrement (value @count)))))
+          (option.none) (option.none))))))

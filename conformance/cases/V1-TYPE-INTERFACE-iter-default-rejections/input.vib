@@ -1,0 +1,12 @@
+(import iter @std.iter.iter)
+
+(deftype counter (record from i32)
+  (impl (iter i32)
+    (defn next (value self) (option (tuple i32 self)) (option.none))
+    (defn collect (value self) (array i32) (array.of))))
+
+(defn effectful () (iter i32)
+  (iter.map (array.of 1i32) (lambda (value i32) i32 effects: (io) value)))
+
+(defn not-iterable () (array i32)
+  (iter.collect 5i32))
