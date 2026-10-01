@@ -62,3 +62,18 @@
   (impl char
     (defn compare (left self right self) ordering
       (u32.compare (char.to-u32 left) (char.to-u32 right)))))
+
+; The conversion contracts (`docs/spec/02-type-system.md`, "Conversion"). Both
+; are implemented on the destination and name `self` only in their result, so
+; a call selects its implementation from the written expected type. The
+; builtin integer types conform through the closed toolchain registry: a
+; conversion that cannot fail is a `from`, and every other one a `try-from`.
+(defint from
+  where: (source any)
+  visibility: @public
+  (defn convert (value source) self))
+
+(defint try-from
+  where: (source any)
+  visibility: @public
+  (defn convert (value source) (result self conversion-error)))

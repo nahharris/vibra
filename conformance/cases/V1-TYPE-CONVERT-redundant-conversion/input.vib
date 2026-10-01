@@ -1,0 +1,18 @@
+(import core @std.core)
+(import from @std.core.from)
+(import try-from @std.core.try-from)
+
+(deftype meters (record value i64)
+  (impl (from i32)
+    (defn convert (value i32) self (meters value: (as i64 (from.convert value)))))
+  (impl (try-from i32)
+    (defn convert (value i32) (result self core.conversion-error)
+      (result.ok (meters value: (as i64 (from.convert value)))))))
+
+(deftype cell (record value t)
+  where: (t any)
+  (impl (from t)
+    (defn convert (value t) self (cell value: value)))
+  (impl (try-from i32)
+    (defn convert (value i32) (result self core.conversion-error)
+      (result.ok (cell value: value)))))

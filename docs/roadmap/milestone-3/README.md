@@ -128,8 +128,8 @@ Stage 3B — interfaces, generics, conversion, and iteration.
 | 11b | [Key contracts: `equatable` and `ordered` in `@std.core`, the closed key conformance, and the generic-key rule (per D18.2)](11b-key-contracts.md) | 11 | landed | PR #323, merge `ec9ff93` |
 | 11c | [User and generic map keys ordered by their own `compare`, and interface bounds on `deftype` and `lambda` parameters (per D18.2)](11c-user-keys.md) | 11b | landed | PR #324, merge `587f000` |
 | 11d | [The library map: `map` declared in the standard library over sorted entries under `@map`, `map.entries`, and the closed key conformances as library implementations (per D17.1)](11d-library-map.md) | 11c | landed | PR #325, merge `2ec1749` |
-| 12 | [Interface values: `any` and interfaces in type position, widening to an interface, dispatch through interface values, unions implementing interfaces](12-interface-values.md) | 11d | landed | Step 12 PR (conditional on merge) |
-| 13 | [Destination dispatch and conversion: factory members, `from`/`try-from`, `conversion-error`, redundant-conversion and ambiguous-destination checks](13-conversion.md) | 12 | not started | — |
+| 12 | [Interface values: `any` and interfaces in type position, widening to an interface, dispatch through interface values, unions implementing interfaces](12-interface-values.md) | 11d | landed | PR #326, merge `2df633d` |
+| 13 | [Destination dispatch and conversion: factory members, `from`/`try-from`, `conversion-error`, redundant-conversion and ambiguous-destination checks](13-conversion.md) | 12 | landed | Step 13 PR (conditional on merge) |
 | 14 | [Iteration: the `iter` contract and default methods, closed builtin conformance, adapter types, written algebraic laws for `equatable`/`ordered`/`hashable`/`iter` with conformance examples](14-iteration.md) | 13 | not started | — |
 | 15 | [Resolved symbol/reference/index records and type-aware query metadata with canonical identities](15-index.md) | 14 | not started | — |
 | 16 | [M3 demo and exit gate, including the M2 deferral sweep — evidence step](16-exit.md) | 15 | not started | — |

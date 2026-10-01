@@ -1,0 +1,29 @@
+id = "V1-TYPE-CONVERT-redundant-conversion"
+rule = "V1-TYPE-CONVERT"
+profile = "static-v1"
+operation = "type-check"
+description = "Across from and try-from a receiver converts from each source one way: the same source in both, and a generic source that unifies with a written one, are redundant."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.redundant-conversion"
+level = "@error"
+source = "input.vib"
+span = [230, 382]
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [128, 227]
+
+[[expect.diagnostics]]
+code = "@type.redundant-conversion"
+level = "@error"
+source = "input.vib"
+span = [507, 633]
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [435, 504]

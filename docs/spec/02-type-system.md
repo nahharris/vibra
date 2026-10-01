@@ -1283,6 +1283,17 @@ associated types on an interface contract. A conversion needing a richer error
 is an ordinary `defn` returning `(result t e)`, which requires no new machinery.
 Per-implementation error types are a post-v1 concern recorded in the roadmap.
 
+The builtin integer types conform to both contracts through a closed toolchain
+registry, keyed by the pair of source and destination types, as the closed
+`iter` registry is keyed by constructor identity. For two distinct integer
+types, the destination implements `(from source)` exactly when it holds every
+value of the source, and `(try-from source)` otherwise, with `out-of-range` for
+a value it cannot hold. The registry is the `to-U` family of the runtime
+chapter, and a call selects its operation directly. An unsuffixed integer
+literal fits more than one source and is therefore
+`@type.ambiguous-implementation`. The floating-point types have no registry
+conversion in v1.
+
 Across `from` and `try-from` together, a receiver's source targets MUST be
 pairwise non-unifiable, as the overlap section defines. The same written source
 in both is the obvious case; `(from t)` with `(try-from i32)` is the same defect

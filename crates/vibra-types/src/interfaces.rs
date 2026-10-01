@@ -11,6 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
+use vibra_ir::external::{CompilerIntrinsic, NumericType};
 use vibra_ir::{
     CallTarget, ClosedContract, Expr, FunctionSignature, Implements, SourceOrigin, Type,
 };
@@ -19,7 +20,9 @@ use vibra_syntax::{
     FunctionDeclaration, TypeExpr, TypeMember,
 };
 
-use crate::nominal::{ContractMember, Implementation, Scope, TypeNames};
+use crate::nominal::{
+    ContractMember, DeclaredInterface, Implementation, Scope, TypeNames,
+};
 use crate::{
     CheckEnvironment, call_contract_error, check_expression, check_operand, mismatch,
 };
@@ -244,6 +247,32 @@ pub(crate) fn plan_implementations(
                     earlier.source_id.clone(),
                     earlier.span,
                     "the other implementation is here",
+                ),
+            );
+            continue;
+        }
+        // Across `from` and `try-from` a receiver converts from each source
+        // one way: totally or partially, never both.
+        let Some(total) = conversion_contract(types, plan.interface) else {
+            continue;
+        };
+        let other = plans.iter().take(later).find(|earlier| {
+            conversion_contract(types, earlier.interface) == Some(!total)
+                && crate::union::unifiable(&target(earlier), &target(plan))
+        });
+        if let Some(other) = other {
+            overlapping.insert(later);
+            diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::TypeRedundantConversion,
+                    plan.span,
+                    "this receiver already converts from this source through the other conversion contract",
+                )
+                .with_source_id(plan.source_id.clone())
+                .with_related_source(
+                    other.source_id.clone(),
+                    other.span,
+                    "the other conversion is here",
                 ),
             );
         }
@@ -616,25 +645,30 @@ pub(crate) fn check_contract_call(
             message,
         );
     };
-    let Some(position) = contract.receiver else {
-        unavailable(
-            environment,
-            "destination-dispatched contract members are called from M3 Step 13",
-        );
-        return None;
-    };
-    if !declared.parameters.is_empty()
-        || !contract.generics.is_empty()
+    if !contract.generics.is_empty()
         || !contract.signature.labelled().is_empty()
-        || contract.signature.variadic().is_some()
         || application.type_arguments().is_some()
     {
         unavailable(
             environment,
-            "contract calls with generic interfaces, member generics, labelled operands, or variadic tails arrive with Steps 13 and 14",
+            "contract members with their own generics or labelled operands arrive with M3 Step 14",
         );
         return None;
     }
+    // A destination-dispatched member, a generic interface, and a variadic
+    // member select among implementations.
+    let Some(position) = contract.receiver.filter(|_| {
+        declared.parameters.is_empty() && contract.signature.variadic().is_none()
+    }) else {
+        return check_selected_call(
+            environment,
+            application,
+            interface,
+            &declared,
+            &contract,
+            expected,
+        );
+    };
     let operands = application.arguments();
     if operands.len() != contract.signature.parameters().len()
         || operands.iter().any(|operand| operand.label().is_some())
@@ -1157,4 +1191,420 @@ pub(crate) fn key_order(types: &TypeNames, key: &Type) -> Option<vibra_ir::TypeI
     }
     let id = crate::stdlib::stdlib_type_id(&["core"], "ordered");
     types.interface_index_of(&id).map(|_| id)
+}
+
+/// One implementation a contract call may select.
+struct Candidate {
+    /// The member's signature at this implementation.
+    signature: FunctionSignature,
+    target: CandidateTarget,
+    /// The applied interface, for diagnostics.
+    spelling: String,
+}
+
+enum CandidateTarget {
+    /// A written or default member, by its function.
+    Function(usize),
+    /// A closed toolchain conformance, by its registry operation.
+    Primitive(CompilerIntrinsic),
+}
+
+/// Checks a contract call that selects among implementations: a
+/// destination-dispatched member, whose receiver is the written expected
+/// type, or a member of a generic interface, which one receiver may implement
+/// at several arguments (`docs/spec/02-type-system.md`, "Interfaces and
+/// methods"). Selection uses the written operand types and the written
+/// expected type, and never picks an order between two that remain.
+fn check_selected_call(
+    environment: &mut CheckEnvironment<'_>,
+    application: &Application,
+    interface: usize,
+    declared: &DeclaredInterface,
+    contract: &ContractMember,
+    expected: Option<Type>,
+) -> Option<Expr> {
+    let span = application.span();
+    let operands = application.arguments();
+    let fixed = contract.signature.parameters().len();
+    let variadic = contract.signature.variadic().is_some();
+    if operands.iter().any(|operand| operand.label().is_some())
+        || operands.len() < fixed
+        || (!variadic && operands.len() != fixed)
+    {
+        call_contract_error(
+            environment,
+            span,
+            format!(
+                "`{}.{}` takes {}{fixed} unlabelled operands",
+                declared.name,
+                contract.name,
+                if variadic { "at least " } else { "exactly " },
+            ),
+        );
+        return None;
+    }
+    let mut receiver_value = None;
+    let receiver = match contract.receiver {
+        Some(position) => {
+            let value =
+                check_expression(environment, operands.get(position)?.value(), None)?;
+            let receiver = value.result_type();
+            if matches!(receiver, Type::Param(_) | Type::Interface(_, _) | Type::Any) {
+                crate::unavailable(
+                    environment.diagnostics,
+                    environment.source_id,
+                    span,
+                    "a generic interface dispatched through a bounded generic or an interface value arrives with M3 Step 14",
+                );
+                return None;
+            }
+            receiver_value = Some((position, value));
+            receiver
+        }
+        None => destination(
+            environment,
+            interface,
+            declared,
+            contract,
+            expected.as_ref(),
+            span,
+        )?,
+    };
+    let candidates =
+        candidates(environment.types, interface, declared, contract, &receiver);
+    if candidates.is_empty() {
+        unsatisfied(environment, span, &receiver, &declared.name);
+        return None;
+    }
+    let position = receiver_value.as_ref().map(|(position, _)| *position);
+    let fitting = candidates
+        .iter()
+        .filter(|candidate| {
+            fits(
+                environment,
+                application,
+                candidate,
+                position,
+                expected.as_ref(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let chosen = match (fitting.as_slice(), candidates.as_slice()) {
+        ([chosen], _) => *chosen,
+        ([], [chosen]) => chosen,
+        ([], _) => {
+            let mut diagnostic = Diagnostic::new(
+                DiagnosticCode::TypeArgumentMismatch,
+                span,
+                format!(
+                    "no implementation of `{}` for {receiver} takes these operands",
+                    declared.name
+                ),
+            )
+            .with_source_id(environment.source_id);
+            for candidate in &candidates {
+                diagnostic = diagnostic.with_note(format!(
+                    "{receiver} implements `{}`",
+                    candidate.spelling
+                ));
+            }
+            environment.diagnostics.push(diagnostic);
+            return None;
+        }
+        _ => {
+            let mut diagnostic = Diagnostic::new(
+                DiagnosticCode::TypeAmbiguousImplementation,
+                span,
+                format!(
+                    "more than one implementation of `{}` for {receiver} takes these operands",
+                    declared.name
+                ),
+            )
+            .with_source_id(environment.source_id);
+            for candidate in &fitting {
+                diagnostic = diagnostic
+                    .with_note(format!("`{}` is a candidate", candidate.spelling));
+            }
+            environment.diagnostics.push(diagnostic);
+            return None;
+        }
+    };
+    let origin = SourceOrigin::new(environment.source_id, span);
+    let mut arguments = Vec::with_capacity(operands.len());
+    for (index, (operand, parameter)) in operands
+        .iter()
+        .zip(chosen.signature.parameters())
+        .enumerate()
+    {
+        match &receiver_value {
+            Some((position, value)) if *position == index => {
+                arguments.push(value.clone());
+            }
+            _ => arguments.push(check_operand(
+                environment,
+                operand.value(),
+                Some(parameter.clone()),
+            )?),
+        }
+    }
+    if let Some(tail) = chosen.signature.variadic() {
+        let Type::Array(element) = tail else {
+            crate::unavailable(
+                environment.diagnostics,
+                environment.source_id,
+                span,
+                "a map variadic tail on a contract member arrives with M3 Step 14",
+            );
+            return None;
+        };
+        let mut items = Vec::new();
+        for operand in operands.iter().skip(fixed) {
+            items.push(check_operand(
+                environment,
+                operand.value(),
+                Some(element.as_ref().clone()),
+            )?);
+        }
+        arguments.push(crate::pack_tail(tail, items, None, origin.clone()));
+    }
+    let result = chosen.signature.result();
+    crate::ensure_expected(environment, span, expected.clone(), result.clone());
+    if expected
+        .as_ref()
+        .is_some_and(|expected| !crate::types_match(expected, &result))
+    {
+        return None;
+    }
+    Some(match chosen.target {
+        CandidateTarget::Function(function) => {
+            Expr::call(function, arguments, result, origin)
+        }
+        CandidateTarget::Primitive(intrinsic) => {
+            Expr::external_with_result(intrinsic, arguments, result, origin)
+        }
+    })
+}
+
+/// The receiver of a destination-dispatched member: `self` from unifying the
+/// member's written result type with the written expected type.
+fn destination(
+    environment: &mut CheckEnvironment<'_>,
+    interface: usize,
+    declared: &DeclaredInterface,
+    contract: &ContractMember,
+    expected: Option<&Type>,
+    span: ByteSpan,
+) -> Option<Type> {
+    let Some(expected) = expected else {
+        let mut diagnostic = Diagnostic::new(
+            DiagnosticCode::TypeAmbiguousDestination,
+            span,
+            format!(
+                "`{}.{}` selects its implementation from a written expected type, and none reaches this call",
+                declared.name, contract.name
+            ),
+        )
+        .with_source_id(environment.source_id);
+        let mut receivers = environment
+            .types
+            .implementations()
+            .iter()
+            .filter(|implementation| implementation.interface == interface)
+            .map(|implementation| implementation.receiver.to_string())
+            .collect::<BTreeSet<_>>();
+        if conversion_contract(environment.types, interface).is_some() {
+            receivers.insert("each builtin integer type".to_owned());
+        }
+        for receiver in receivers {
+            diagnostic = diagnostic
+                .with_note(format!("{receiver} implements `{}`", declared.name));
+        }
+        environment
+            .diagnostics
+            .push(diagnostic.with_note("write the destination with `as`"));
+        return None;
+    };
+    let mut names = vec![SELF.to_owned()];
+    names.extend(declared.parameters.iter().cloned());
+    let mut instantiation = crate::infer::Instantiation::new(&names);
+    let written = contract.signature.result();
+    let opened = instantiation.open(&written);
+    let receiver = instantiation
+        .unify(&opened, expected)
+        .then(|| instantiation.resolved(&instantiation.open(&self_type())))
+        .flatten();
+    if receiver.is_none() {
+        mismatch(
+            environment.diagnostics,
+            environment.source_id,
+            span,
+            expected.clone(),
+            written,
+            "the written expected type does not fix the destination of this member",
+        );
+    }
+    receiver
+}
+
+/// Every implementation of `interface` whose receiver covers `receiver`, with
+/// the member's signature at that implementation.
+fn candidates(
+    types: &TypeNames,
+    interface: usize,
+    declared: &DeclaredInterface,
+    contract: &ContractMember,
+    receiver: &Type,
+) -> Vec<Candidate> {
+    let spell = |arguments: &[Type]| {
+        if arguments.is_empty() {
+            declared.name.clone()
+        } else {
+            format!(
+                "({}{})",
+                declared.name,
+                arguments
+                    .iter()
+                    .map(|argument| format!(" {argument}"))
+                    .collect::<String>()
+            )
+        }
+    };
+    let signature = |arguments: &[Type]| {
+        let mut substitution = BTreeMap::from([(SELF.to_owned(), receiver.clone())]);
+        substitution.extend(
+            declared
+                .parameters
+                .iter()
+                .cloned()
+                .zip(arguments.iter().cloned()),
+        );
+        contract.signature.substitute(&substitution)
+    };
+    let mut found = Vec::new();
+    for implementation in types.implementations() {
+        if implementation.interface != interface
+            || !covers(&implementation.receiver, receiver)
+        {
+            continue;
+        }
+        let (Some(arguments), Some(function)) = (
+            instantiate_arguments(implementation, receiver),
+            implementation.members.get(&contract.name).copied(),
+        ) else {
+            continue;
+        };
+        found.push(Candidate {
+            signature: signature(&arguments),
+            target: CandidateTarget::Function(function),
+            spelling: spell(&arguments),
+        });
+    }
+    // The builtin integer types convert through the closed registry: a
+    // conversion that cannot fail is a `from`, every other one a `try-from`.
+    if let Some(total) = conversion_contract(types, interface)
+        && let Some(target) = NumericType::ALL
+            .into_iter()
+            .find(|numeric| numeric.is_integer() && numeric.to_type() == *receiver)
+    {
+        for source in NumericType::ALL {
+            if source == target
+                || !source.is_integer()
+                || CompilerIntrinsic::conversion_is_total(source, target) != total
+            {
+                continue;
+            }
+            let arguments = [source.to_type()];
+            found.push(Candidate {
+                signature: signature(&arguments),
+                target: CandidateTarget::Primitive(CompilerIntrinsic::Convert(
+                    source, target,
+                )),
+                spelling: spell(&arguments),
+            });
+        }
+    }
+    found
+}
+
+/// The interface arguments of `implementation` at `receiver`: its own when
+/// its receiver is closed, and those its receiver's generic names take when
+/// it covers `receiver` generically.
+fn instantiate_arguments(
+    implementation: &Implementation,
+    receiver: &Type,
+) -> Option<Vec<Type>> {
+    let mut names = BTreeSet::new();
+    parameter_names(&implementation.receiver, &mut names);
+    if names.is_empty() {
+        return Some(implementation.arguments.clone());
+    }
+    let names = names.into_iter().collect::<Vec<_>>();
+    let mut instantiation = crate::infer::Instantiation::new(&names);
+    let opened = instantiation.open(&implementation.receiver);
+    if !instantiation.unify(&opened, receiver) {
+        return None;
+    }
+    implementation
+        .arguments
+        .iter()
+        .map(|argument| instantiation.resolved(&instantiation.open(argument)))
+        .collect()
+}
+
+/// Whether the operands of `application` check against `candidate`. The
+/// attempt leaves no diagnostic and no binding behind.
+fn fits(
+    environment: &mut CheckEnvironment<'_>,
+    application: &Application,
+    candidate: &Candidate,
+    receiver: Option<usize>,
+    expected: Option<&Type>,
+) -> bool {
+    if expected.is_some_and(|expected| {
+        !crate::types_match(expected, &candidate.signature.result())
+    }) {
+        return false;
+    }
+    let diagnostics = environment.diagnostics.len();
+    let bindings = environment.bindings.len();
+    let element = match candidate.signature.variadic() {
+        Some(Type::Array(element)) => Some(element.as_ref().clone()),
+        _ => None,
+    };
+    let fits = {
+        let mut scope = environment.scoped();
+        application
+            .arguments()
+            .iter()
+            .enumerate()
+            .all(|(index, operand)| {
+                if receiver == Some(index) {
+                    return true;
+                }
+                candidate
+                    .signature
+                    .parameters()
+                    .get(index)
+                    .cloned()
+                    .or_else(|| element.clone())
+                    .is_some_and(|parameter| {
+                        check_operand(&mut scope, operand.value(), Some(parameter))
+                            .is_some()
+                    })
+            })
+    };
+    environment.diagnostics.truncate(diagnostics);
+    environment.bindings.truncate(bindings);
+    fits
+}
+
+/// Whether `interface` is a conversion contract of `@std.core`: `Some(true)`
+/// for `from`, whose conversions cannot fail, and `Some(false)` for
+/// `try-from`.
+fn conversion_contract(types: &TypeNames, interface: usize) -> Option<bool> {
+    let id = &types.interface(interface)?.id;
+    [("from", true), ("try-from", false)]
+        .into_iter()
+        .find(|(name, _)| *id == crate::stdlib::stdlib_type_id(&["core"], name))
+        .map(|(_, total)| total)
 }

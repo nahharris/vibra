@@ -394,6 +394,8 @@ fn standard_type_import(
         }
         "std.core.equatable" => Some((STDLIB_CORE_SOURCE_ID, Some("equatable"))),
         "std.core.ordered" => Some((STDLIB_CORE_SOURCE_ID, Some("ordered"))),
+        "std.core.from" => Some((STDLIB_CORE_SOURCE_ID, Some("from"))),
+        "std.core.try-from" => Some((STDLIB_CORE_SOURCE_ID, Some("try-from"))),
         _ => None,
     }
 }
