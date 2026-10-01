@@ -1139,6 +1139,29 @@ impl<'a> Machine<'a> {
             (CompilerIntrinsic::ArrayOf | CompilerIntrinsic::MapOf, [tail]) => {
                 tail.clone()
             }
+            // A map keeps its entries in key order already.
+            (
+                CompilerIntrinsic::MapEntries,
+                [
+                    RuntimeValue::Map {
+                        value_type: Type::Map(key, value),
+                        entries,
+                    },
+                ],
+            ) => {
+                let entry_type =
+                    Type::Tuple(vec![key.as_ref().clone(), value.as_ref().clone()]);
+                RuntimeValue::Array {
+                    value_type: Type::Array(Box::new(entry_type.clone())),
+                    values: entries
+                        .iter()
+                        .map(|(key, value)| RuntimeValue::Tuple {
+                            value_type: entry_type.clone(),
+                            values: vec![key.clone(), value.clone()],
+                        })
+                        .collect(),
+                }
+            }
             (CompilerIntrinsic::ArrayLength, [RuntimeValue::Array { values, .. }]) => {
                 RuntimeValue::Primitive(Value::U64(values.len() as u64))
             }

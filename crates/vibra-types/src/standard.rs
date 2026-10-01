@@ -25,7 +25,8 @@ use crate::stdlib::{
 
 /// The embedded modules that declare types every run can reach: by path,
 /// source identity, and module name under `@std`.
-const TYPE_MODULES: [(&str, &str, &str); 6] = [
+const TYPE_MODULES: [(&str, &str, &str); 7] = [
+    ("std/builtin.vib", STDLIB_BUILTIN_SOURCE_ID, "builtin"),
     ("std/bool.vib", STDLIB_BOOL_SOURCE_ID, "bool"),
     ("std/text.vib", STDLIB_TEXT_SOURCE_ID, "text"),
     ("std/bytes.vib", STDLIB_BYTES_SOURCE_ID, "bytes"),
@@ -64,6 +65,12 @@ pub(crate) fn declare_standard_types<'a>(
     // `@std.builtin` names `option` through its own import.
     types.import(STDLIB_BUILTIN_SOURCE_ID, "option", STDLIB_OPTION_SOURCE_ID);
     types.import(STDLIB_BUILTIN_SOURCE_ID, "core", STDLIB_CORE_SOURCE_ID);
+    types.import_declaration(
+        STDLIB_BUILTIN_SOURCE_ID,
+        "ordered",
+        STDLIB_CORE_SOURCE_ID,
+        "ordered",
+    );
     for (source_id, module, ast) in type_modules() {
         for declaration in ast.declarations() {
             if let Declaration::Defint(declaration) = declaration {
@@ -77,6 +84,10 @@ pub(crate) fn declare_standard_types<'a>(
             let Declaration::Deftype(declaration) = declaration else {
                 continue;
             };
+            // The compiler owns the intrinsic types; their members are builtin.
+            if matches!(declaration.body(), DeftypeBody::Intrinsic(_)) {
+                continue;
+            }
             let id = stdlib_type_id(&[module], declaration.name().value());
             let role_claimed =
                 declaration.attributes().items().iter().any(|attribute| {
@@ -135,7 +146,7 @@ fn builtin_module() -> Option<&'static SourceAst> {
 
 /// The builtin types `@std.builtin` declares with `intrinsic-type`, with the
 /// type each denotes over its generic parameters.
-fn builtin_self_type(atom: &str, parameters: &[String]) -> Option<Type> {
+pub(crate) fn builtin_self_type(atom: &str, parameters: &[String]) -> Option<Type> {
     let param =
         |index: usize| parameters.get(index).map(|name| Type::Param(name.clone()));
     match (atom, parameters.len()) {
@@ -210,14 +221,23 @@ pub(crate) fn builtin_members(types: &TypeNames) -> Vec<BuiltinMember> {
         let Declaration::Deftype(value) = declaration else {
             continue;
         };
-        let DeftypeBody::Intrinsic(atom) = value.body() else {
-            continue;
+        // An intrinsic type by its registry atom, or a role type the toolchain
+        // represents directly, such as `map`, by its name.
+        let identity = match value.body() {
+            DeftypeBody::Intrinsic(atom) if atom.value() == value.name().value() => {
+                atom.value()
+            }
+            DeftypeBody::Type(_)
+                if value.attributes().items().iter().any(|attribute| {
+                    matches!(attribute, vibra_syntax::Attribute::Role(_))
+                }) =>
+            {
+                value.name().value()
+            }
+            _ => continue,
         };
-        if atom.value() != value.name().value() {
-            continue;
-        }
         let owner = crate::nominal::generic_names(value.attributes().items());
-        let Some(self_type) = builtin_self_type(atom.value(), &owner) else {
+        let Some(self_type) = builtin_self_type(identity, &owner) else {
             continue;
         };
         for member in value.members() {
@@ -329,8 +349,8 @@ mod tests {
             .collect::<Vec<_>>();
         assert_eq!(bound, declared);
         // Twelve methods for each signed and eleven for each unsigned integer
-        // type, nine for each float type, the two `char` members, and the seven
+        // type, nine for each float type, the two `char` members, and the eight
         // collection members.
-        assert_eq!(declared.len(), 4 * 12 + 4 * 11 + 2 * 9 + 2 + 7);
+        assert_eq!(declared.len(), 4 * 12 + 4 * 11 + 2 * 9 + 2 + 8);
     }
 }

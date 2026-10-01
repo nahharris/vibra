@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-library-map"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "The library map's entries come back in key order: canonical for closed keys, by its own compare for a user key, with a later entry replacing an equal key."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

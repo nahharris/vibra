@@ -12,12 +12,53 @@
   visibility: @public)
 
 ; The comparison contracts (`docs/spec/02-type-system.md`, "Nominal
-; declarations"). The key primitives, atom singletons, and anonymous
-; structures of admissible keys conform through the closed toolchain registry.
+; declarations"). Each carries its implementations for the builtin integers
+; and `char`, which orders by Unicode scalar value; `bool`, `str`, and `bytes`
+; implement them where they are declared. Atom types and anonymous structures
+; of admissible keys conform through the closed toolchain registry, which
+; answers every closed key type as these implementations do.
 (defint equatable
   visibility: @public
-  (defn equal (left self right self) bool))
+  (defn equal (left self right self) bool)
+  (impl i8
+    (defn equal (left self right self) bool (i8.equal left right)))
+  (impl i16
+    (defn equal (left self right self) bool (i16.equal left right)))
+  (impl i32
+    (defn equal (left self right self) bool (i32.equal left right)))
+  (impl i64
+    (defn equal (left self right self) bool (i64.equal left right)))
+  (impl u8
+    (defn equal (left self right self) bool (u8.equal left right)))
+  (impl u16
+    (defn equal (left self right self) bool (u16.equal left right)))
+  (impl u32
+    (defn equal (left self right self) bool (u32.equal left right)))
+  (impl u64
+    (defn equal (left self right self) bool (u64.equal left right)))
+  (impl char
+    (defn equal (left self right self) bool
+      (u32.equal (char.to-u32 left) (char.to-u32 right)))))
 
 (defint ordered
   visibility: @public
-  (defn compare (left self right self) ordering))
+  (defn compare (left self right self) ordering)
+  (impl i8
+    (defn compare (left self right self) ordering (i8.compare left right)))
+  (impl i16
+    (defn compare (left self right self) ordering (i16.compare left right)))
+  (impl i32
+    (defn compare (left self right self) ordering (i32.compare left right)))
+  (impl i64
+    (defn compare (left self right self) ordering (i64.compare left right)))
+  (impl u8
+    (defn compare (left self right self) ordering (u8.compare left right)))
+  (impl u16
+    (defn compare (left self right self) ordering (u16.compare left right)))
+  (impl u32
+    (defn compare (left self right self) ordering (u32.compare left right)))
+  (impl u64
+    (defn compare (left self right self) ordering (u64.compare left right)))
+  (impl char
+    (defn compare (left self right self) ordering
+      (u32.compare (char.to-u32 left) (char.to-u32 right)))))

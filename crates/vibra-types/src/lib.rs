@@ -633,7 +633,7 @@ impl<'a> Checker<'a> {
                 self.types.declare_interface(
                     self.source_id,
                     value,
-                    vibra_ir::TypeId::new(format!("{}:{name}", self.source_id), name),
+                    stdlib::source_type_id(self.source_id, name),
                 );
             }
             if let Declaration::Deftype(value) = declaration {
@@ -653,7 +653,7 @@ impl<'a> Checker<'a> {
                 let index = self.types.declare(
                     self.source_id,
                     value,
-                    vibra_ir::TypeId::new(format!("{}:{name}", self.source_id), name),
+                    stdlib::source_type_id(self.source_id, name),
                 );
                 type_declarations.push((index, value));
             }

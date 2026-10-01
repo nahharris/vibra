@@ -15,8 +15,8 @@ use vibra_ir::{
     CallTarget, ClosedContract, Expr, FunctionSignature, Implements, SourceOrigin, Type,
 };
 use vibra_syntax::{
-    Application, Attribute, Declaration, DefintDeclaration, FunctionDeclaration,
-    TypeExpr, TypeMember,
+    Application, Attribute, Declaration, DefintDeclaration, DeftypeBody,
+    FunctionDeclaration, TypeExpr, TypeMember,
 };
 
 use crate::nominal::{ContractMember, Implementation, Scope, TypeNames};
@@ -173,7 +173,11 @@ pub(crate) fn plan_implementations(
         for (declaration_index, declaration) in module.declarations.iter().enumerate() {
             let (members, owner) = match declaration {
                 Declaration::Deftype(value) => {
-                    (value.members(), Owner::Type(value.span()))
+                    let intrinsic = match value.body() {
+                        DeftypeBody::Intrinsic(atom) => Some(atom.value().to_owned()),
+                        DeftypeBody::Type(_) => None,
+                    };
+                    (value.members(), Owner::Type(value.span(), intrinsic))
                 }
                 Declaration::Defint(value) => {
                     (value.members(), Owner::Interface(value.span()))
@@ -253,8 +257,9 @@ pub(crate) fn plan_implementations(
 }
 
 enum Owner {
-    /// A `deftype`, identified by its span.
-    Type(ByteSpan),
+    /// A `deftype`, identified by its span, with its registry atom when it
+    /// declares an intrinsic type.
+    Type(ByteSpan, Option<String>),
     /// A `defint`, identified by its span.
     Interface(ByteSpan),
 }
@@ -275,12 +280,24 @@ fn resolve_block(
         );
     };
     match owner {
-        Owner::Type(owner_span) => {
-            let declared = types.declared().iter().find(|declared| {
+        Owner::Type(owner_span, intrinsic) => {
+            let index = types.declared().iter().position(|declared| {
                 declared.span == *owner_span && declared.source_id == source_id
             })?;
-            let receiver =
-                crate::nominal::declared_self_type(&declared.id, &declared.parameters);
+            let declared = types.get(index)?;
+            // A type the toolchain represents directly is implemented at that
+            // representation, which is the type its values have.
+            let receiver = match intrinsic {
+                Some(atom) => {
+                    crate::standard::builtin_self_type(atom, &declared.parameters)?
+                }
+                None => types.representation(index).unwrap_or_else(|| {
+                    crate::nominal::declared_self_type(
+                        &declared.id,
+                        &declared.parameters,
+                    )
+                }),
+            };
             let parameters = declared.parameters.clone();
             let (head, written) = match target {
                 TypeExpr::Name(name) => (name, &[][..]),

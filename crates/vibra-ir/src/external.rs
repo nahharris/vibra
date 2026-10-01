@@ -298,6 +298,8 @@ pub enum SemanticIdentity {
     /// Build a map from its packed variadic entries in canonical key order, a
     /// later entry replacing an equal key.
     MapConstruction,
+    /// A map's entries as an array of key-value tuples, in key order.
+    MapEntries,
     /// Count array elements.
     ArrayLength,
     /// A new array with one trailing element.
@@ -357,6 +359,8 @@ pub enum CompilerIntrinsic {
     ArrayOf,
     /// `map.of`.
     MapOf,
+    /// `map.entries`.
+    MapEntries,
     /// `array.length`.
     ArrayLength,
     /// `array.append`.
@@ -501,6 +505,7 @@ impl CompilerIntrinsic {
             Self::BytesFromArray => SemanticIdentity::BytesFromArray,
             Self::ArrayOf => SemanticIdentity::ArrayConstruction,
             Self::MapOf => SemanticIdentity::MapConstruction,
+            Self::MapEntries => SemanticIdentity::MapEntries,
             Self::ArrayLength => SemanticIdentity::ArrayLength,
             Self::ArrayAppend => SemanticIdentity::ArrayAppend,
             Self::ArrayConcat => SemanticIdentity::ArrayConcatenation,
@@ -537,6 +542,7 @@ impl CompilerIntrinsic {
             Self::BytesFromArray => "bytes.from-array",
             Self::ArrayOf => "array.of",
             Self::MapOf => "map.of",
+            Self::MapEntries => "map.entries",
             Self::ArrayLength => "array.length",
             Self::ArrayAppend => "array.append",
             Self::ArrayConcat => "array.concat",
@@ -556,6 +562,7 @@ impl CompilerIntrinsic {
                 | Self::Float(..)
                 | Self::CharToU32
                 | Self::CharFromU32
+                | Self::MapEntries
                 | Self::ArrayLength
                 | Self::ArrayAppend
                 | Self::ArrayConcat
@@ -567,7 +574,7 @@ impl CompilerIntrinsic {
     #[must_use]
     pub fn type_parameters(self) -> Vec<String> {
         match self {
-            Self::MapOf => vec!["k".to_owned(), "v".to_owned()],
+            Self::MapOf | Self::MapEntries => vec!["k".to_owned(), "v".to_owned()],
             Self::ArrayFold => vec!["t".to_owned(), "a".to_owned()],
             Self::ArrayOf
             | Self::ArrayLength
@@ -657,6 +664,10 @@ impl CompilerIntrinsic {
                 let map = Type::Map(Box::new(param("k")), Box::new(param("v")));
                 function(Vec::new(), map.clone()).with_variadic(map)
             }
+            Self::MapEntries => function(
+                vec![Type::Map(Box::new(param("k")), Box::new(param("v")))],
+                array_of(Type::Tuple(vec![param("k"), param("v")])),
+            ),
             Self::ArrayLength => function(vec![items()], Type::U64),
             Self::ArrayAppend => function(vec![items(), param("t")], items()),
             Self::ArrayConcat => function(vec![items(), items()], items()),
@@ -722,6 +733,7 @@ impl CompilerIntrinsic {
             Self::BytesFromArray,
             Self::ArrayOf,
             Self::MapOf,
+            Self::MapEntries,
             Self::ArrayLength,
             Self::ArrayAppend,
             Self::ArrayConcat,

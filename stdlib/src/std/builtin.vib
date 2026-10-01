@@ -4,6 +4,7 @@
 ; members are Vibra whose native implementation the toolchain may run instead.
 (import core @std.core)
 (import option @std.option)
+(import ordered @std.core.ordered)
 
 (deftype array (intrinsic-type @array)
   where: (t any)
@@ -41,14 +42,24 @@
           (option.option.some rest) (array.fold rest (step initial first) step)
           (option.option.none) initial))))
 
-(deftype map (intrinsic-type @map)
-  where: (k any v any)
+; The standard map, which plays the `@map` role: its entries sorted by
+; `ordered.compare` on their keys, one entry per key. The toolchain represents
+; it directly; building one sorts and merges its entries, so a later entry for
+; the same key wins.
+(deftype map (array (tuple k v))
+  where: (k ordered v any)
+  role: @map
   visibility: @public
   (defn of () (map k v)
     visibility: @public
     variadic: (entries (map k v))
     native: "map.of"
-    entries))
+    entries)
+  ; The entries in key order, which is how a map is traversed and rendered.
+  (defn entries (value (map k v)) (array (tuple k v))
+    visibility: @public
+    external: @compiler
+    symbol: "map.entries"))
 
 (deftype i8 (intrinsic-type @i8)
   visibility: @public

@@ -1,8 +1,21 @@
 ; The standard boolean type, which plays the `@bool` role: `true`, `false`, and
 ; `if` conditions have this type. The toolchain represents it directly.
+(import core @std.core)
+(import equatable @std.core.equatable)
+(import ordered @std.core.ordered)
+
+; `false` orders before `true`.
 (deftype bool (enum false void true void)
   role: @bool
-  visibility: @public)
+  visibility: @public
+  (impl equatable
+    (defn equal (left self right self) bool
+      (if left right (if right false true))))
+  (impl ordered
+    (defn compare (left self right self) core.ordering
+      (if left
+        (if right (core.ordering.equal) (core.ordering.greater))
+        (if right (core.ordering.less) (core.ordering.equal))))))
 
 ; Boolean connectives. Each is an ordinary function, so both operands are
 ; evaluated before the call; `if` is the short-circuiting form.

@@ -4,5 +4,6 @@
   tests: (array
     (record name: "@tests.rank::\"orders closed keys through an imported bound\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
     (record name: "@tests.rank::\"compares closed keys for equality\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.rank::\"reads a library map's entries in key order\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
   )
 )

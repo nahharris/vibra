@@ -18,7 +18,7 @@ fn registry_contains_only_the_reviewed_operations() {
         .collect::<Vec<_>>();
     // Twelve methods for each signed and eleven for each unsigned integer
     // type, nine for each float type, and the module and collection rows.
-    assert_eq!(symbols.len(), 4 * 12 + 4 * 11 + 2 * 9 + 25);
+    assert_eq!(symbols.len(), 4 * 12 + 4 * 11 + 2 * 9 + 26);
     let distinct = symbols.iter().collect::<std::collections::BTreeSet<_>>();
     assert_eq!(distinct.len(), symbols.len());
     for symbol in [

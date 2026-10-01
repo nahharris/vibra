@@ -72,8 +72,9 @@ execution starts with fresh module-value state.
 
 `map.of` and map variadic tails share one construction rule. Every key and
 value is evaluated even if a key repeats; the later pair replaces the earlier
-value. Map iteration order is canonical key order, not insertion or hash-table
-order.
+value. Map order is key order, by the `ordered.compare` of the key type, which
+is canonical key order for every closed key type; it is never insertion or
+hash-table order.
 
 Constructor applications and the anonymous value forms assemble immutable
 values;
@@ -294,7 +295,8 @@ and bytes a `str` or `bytes` value is written over are their meaning, as are
 | `bytes.to-array` | `bytes -> (array u8)` | Bytes in order |
 | `bytes.from-array` | `(array u8) -> bytes` | Bytes in order |
 | `array.of` | `-> (array t)`, `variadic: (items (array t))` | The packed tail; `where: (t any)` |
-| `map.of` | `-> (map k v)`, `variadic: (entries (map k v))` | The packed tail, in canonical key order, a later entry replacing an equal key; `where: (k any v any)` |
+| `map.of` | `-> (map k v)`, `variadic: (entries (map k v))` | The packed tail, in key order, a later entry replacing an equal key; `where: (k ordered v any)` |
+| `map.entries` | `(map k v) -> (array (tuple k v))` | The entries in key order |
 | `array.length` | `(array t) -> u64` | Element count; `where: (t any)` |
 | `array.append` | `(array t) t -> (array t)` | New array with one trailing element |
 | `array.concat` | `(array t) (array t) -> (array t)` | Elements of the first, then the second |
@@ -302,16 +304,18 @@ and bytes a `str` or `bytes` value is written over are their meaning, as are
 | `array.fold` | `(array t) a (fn (a t) a) -> a` | The left fold: `step` applied to the accumulator and each element in order, starting from `initial`; `where: (t any)` on the type and `(a any)` on the member |
 
 The numeric rows and the `char.*`, `array.*`, and `map.*` rows are static
-methods of builtin types, declared in the `intrinsic-type` declarations of the
-embedded module `@std.builtin`. They are reached through the type path with
-no import, exactly as the builtin types themselves need none, so
-`(i32.add-checked left right)` needs no `import`.
+methods declared in the embedded module `@std.builtin`: in the `intrinsic-type`
+declarations of the builtin types, and in the `map` declaration that plays
+`@map`. They are reached through the type path with no import, exactly as
+those types themselves need none, so `(i32.add-checked left right)` needs no
+`import`.
 
 `@std.option` declares `(deftype option (enum some t none void) where: (t any))`
 and `@std.result` declares `(deftype result (enum ok t err e) where: (t any)
 (e any))`; lookups, `try`, and unhandled-value checking recognize exactly these
-two declarations by canonical identity. Map operations other than `map.of` and
-lookup need a generic key parameter and belong to the Stage 3B registry.
+two declarations by canonical identity. A map is read by lookup and by
+`map.entries`, its one primitive operation: the entries a map is declared
+over.
 
 A registry signature is checked exactly, including its generic parameter list,
 against the trusted declaration that binds it. Adding, removing, or changing a
