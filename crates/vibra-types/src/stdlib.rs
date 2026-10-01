@@ -42,9 +42,8 @@ const MANIFEST_PATH: &str = "stdlib/manifest.vibon";
 const SOURCE_ROOT: &str = "stdlib/src/";
 
 /// The closed table of language roles (`docs/spec/02-type-system.md`,
-/// "Language core and standard library"). Each is claimed by at most one
-/// declaration; a role nothing claims yet is still implemented by the
-/// toolchain until its migration step.
+/// "Language core and standard library"). Each is claimed by exactly one
+/// declaration of the standard library.
 const LANGUAGE_ROLES: &[&str] =
     &["bool", "str", "bytes", "option", "result", "map", "iter"];
 
@@ -411,6 +410,16 @@ pub fn load_stdlib_bytes(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibErro
             bytes: bytes.to_vec(),
         });
     }
+    // Every role is claimed: syntax and checking fill each with a library
+    // declaration, so a library missing one cannot be loaded.
+    if let Some(missing) = LANGUAGE_ROLES
+        .iter()
+        .find(|role| !claimed_roles.iter().any(|claimed| claimed == *role))
+    {
+        return Err(StdlibError::new(format!(
+            "`@{missing}` is claimed by no declaration"
+        )));
+    }
     Ok(Stdlib {
         package: vibra_resolve::PackageId::new(
             manifest.package_name,
@@ -451,6 +460,14 @@ fn check_compiler_symbols(
         match declaration {
             Declaration::Defn(function) => {
                 attribute_lists.push(function.attributes().items())
+            }
+            // `iter` plays its role as an interface.
+            Declaration::Defint(defint) => {
+                for attribute in defint.attributes().items() {
+                    if let Attribute::Role(role) = attribute {
+                        roles.push(role.value().to_owned());
+                    }
+                }
             }
             Declaration::Deftype(deftype) => {
                 for attribute in deftype.attributes().items() {
@@ -794,6 +811,13 @@ mod tests {
             StdlibInputs::embedded().with_module("std/option.vib", repeated.as_bytes());
         inputs.manifest = manifest.as_bytes();
         rejects(&inputs, "`@option` is claimed by more than one declaration");
+
+        let unclaimed = option.replace("  role: @option\n", "");
+        let manifest = with_option(&unclaimed);
+        let mut inputs = StdlibInputs::embedded()
+            .with_module("std/option.vib", unclaimed.as_bytes());
+        inputs.manifest = manifest.as_bytes();
+        rejects(&inputs, "`@option` is claimed by no declaration");
     }
 
     #[test]
