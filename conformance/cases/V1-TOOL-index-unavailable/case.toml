@@ -1,0 +1,37 @@
+id = "V1-TOOL-index-unavailable"
+rule = "V1-TOOL"
+profile = "tooling-v1"
+operation = "index"
+description = "A declaration that does not check keeps its index record without checked facts: an effect root and its operation, which are unavailable until M4, and a function whose signature names an unknown type."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+index = "index.vibon"
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "src/app/main.vib"
+span = [0, 97]
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "src/app/main.vib"
+span = [0, 97]
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "src/app/main.vib"
+span = [17, 96]
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "src/app/main.vib"
+span = [114, 127]

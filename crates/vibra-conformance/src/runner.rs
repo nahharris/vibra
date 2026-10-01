@@ -47,6 +47,8 @@ pub struct CaseObservation {
     pub types: Option<String>,
     /// Effect output, if the handler provides it.
     pub effects: Option<String>,
+    /// The `@index.v1` document, if the handler provides it.
+    pub index: Option<String>,
     /// Structural source-position query observations.
     pub queries: Vec<QueryObservation>,
     /// Reference-interpreter observation.
@@ -611,6 +613,12 @@ impl CaseExpectations {
             "effects",
             self.effects.as_deref(),
             observation.effects.as_deref(),
+        )?;
+        compare_snapshot(
+            case,
+            "index",
+            self.index.as_deref(),
+            observation.index.as_deref(),
         )?;
         if self.queries.len() != observation.queries.len() {
             return Err(format!(

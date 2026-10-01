@@ -149,6 +149,9 @@ pub(crate) struct Implementation {
     /// The interface's type arguments, for a generic interface.
     pub(crate) arguments: Vec<Type>,
     pub(crate) receiver: Type,
+    /// The source and span of the `impl` block.
+    pub(crate) source_id: String,
+    pub(crate) span: ByteSpan,
     /// Contract member name to the function header that implements it: the
     /// written member or the default instantiated for this receiver.
     pub(crate) members: BTreeMap<String, usize>,

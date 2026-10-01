@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vibra:schema:v1:index",
+  "title": "Vibra workspace index",
+  "description": "The JSON wire form of the @index.v1 document: the resolved declaration, implementation, and reference records of one checked workspace snapshot. Identities are atom spellings without the leading @, and type encodings are canonical VIBON text.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "workspaceRevision",
+    "declarations",
+    "implementations",
+    "references"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "description": "Major version of this contract.",
+      "const": 1
+    },
+    "workspaceRevision": {
+      "description": "The revision of the exact immutable project and source bytes indexed.",
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "declarations": {
+      "description": "One record per module and per module-level or nested declaration, sorted by the UTF-8 bytes of id.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/declaration" }
+    },
+    "implementations": {
+      "description": "One record per impl block, sorted by receiver and then interface.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/implementation" }
+    },
+    "references": {
+      "description": "One record per resolved written name, sorted by source identity, start, and end.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/reference" }
+    }
+  },
+  "$defs": {
+    "identity": {
+      "description": "A canonical atom identity without the leading @: unit, module, and declaration path.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*(\\.[a-z][a-z0-9-]*)*$"
+    },
+    "source": {
+      "description": "A half-open byte span of one source of the snapshot.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sourceId", "start", "end"],
+      "properties": {
+        "sourceId": { "type": "string", "minLength": 1 },
+        "start": { "type": "integer", "minimum": 0 },
+        "end": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "facts": {
+      "description": "The checked facts of a declaration.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signature", "effects", "errors", "applications"],
+      "properties": {
+        "signature": {
+          "description": "Canonical VIBON: the checked type of a value, function, or method, the generic parameter list of a type or interface, or void for a module.",
+          "type": "string",
+          "minLength": 1
+        },
+        "effects": {
+          "description": "The performed effect roots, sorted.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/identity" }
+        },
+        "errors": {
+          "description": "Canonical VIBON of each error type the result can carry.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "applications": {
+          "description": "The identities of the declarations the body applies, sorted and without duplicates.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/identity" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "declaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "module",
+        "owner",
+        "visibility",
+        "source",
+        "facts",
+        "text"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/identity" },
+        "kind": {
+          "enum": [
+            "module",
+            "value",
+            "function",
+            "method",
+            "type",
+            "interface",
+            "effect-root",
+            "operation"
+          ]
+        },
+        "module": { "$ref": "#/$defs/identity" },
+        "owner": {
+          "description": "The owning type, interface, or effect root of a nested member, else null.",
+          "oneOf": [{ "$ref": "#/$defs/identity" }, { "type": "null" }]
+        },
+        "visibility": { "enum": ["public", "private"] },
+        "source": { "$ref": "#/$defs/source" },
+        "facts": {
+          "description": "The checked facts, or null for an unavailable or recovered declaration.",
+          "oneOf": [{ "$ref": "#/$defs/facts" }, { "type": "null" }]
+        },
+        "text": {
+          "description": "The formatter-normalized source of the declaration.",
+          "type": "string"
+        }
+      }
+    },
+    "implementation": {
+      "description": "An impl block. It has no atom identity: receiver and interface together identify it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["receiver", "interface", "source", "text", "members"],
+      "properties": {
+        "receiver": {
+          "description": "Canonical VIBON of the receiver type.",
+          "type": "string",
+          "minLength": 1
+        },
+        "interface": {
+          "description": "Canonical VIBON of the applied interface target.",
+          "type": "string",
+          "minLength": 1
+        },
+        "source": { "$ref": "#/$defs/source" },
+        "text": { "type": "string" },
+        "members": {
+          "type": "array",
+          "items": {
+            "description": "A member, identified by contract, interface, and receiver.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["contract", "source", "signature", "text"],
+            "properties": {
+              "contract": { "$ref": "#/$defs/identity" },
+              "source": { "$ref": "#/$defs/source" },
+              "signature": { "type": "string", "minLength": 1 },
+              "text": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "written", "source", "to"],
+      "properties": {
+        "from": { "$ref": "#/$defs/identity" },
+        "written": { "type": "string", "minLength": 1 },
+        "source": { "$ref": "#/$defs/source" },
+        "to": {
+          "description": "The resolved identity, or null for a name the resolver left to the checker.",
+          "oneOf": [{ "$ref": "#/$defs/identity" }, { "type": "null" }]
+        }
+      }
+    }
+  }
+}

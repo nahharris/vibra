@@ -115,6 +115,8 @@ pub enum ConformanceOperation {
     Interpret,
     /// Render semantic facts from one immutable workspace snapshot.
     Query,
+    /// Render the `@index.v1` document of one confined workspace snapshot.
+    Index,
     /// Format one source document using bindings from its confined snapshot.
     Format,
     /// Check every declaration in one confined workspace snapshot.
@@ -137,6 +139,7 @@ impl ConformanceOperation {
             Self::TypeCheck => "type-check",
             Self::Interpret => "interpret",
             Self::Query => "query",
+            Self::Index => "index",
             Self::Format => "format",
             Self::WorkspaceCheck => "workspace-check",
             Self::WorkspaceRun => "workspace-run",
@@ -232,6 +235,8 @@ pub struct CaseExpectations {
     pub types: Option<String>,
     /// A relative path to effect output.
     pub effects: Option<String>,
+    /// A relative path to the `@index.v1` document.
+    pub index: Option<String>,
     /// Structural source-position query snapshots.
     pub queries: Vec<ExpectedQuery>,
     /// Expected reference-interpreter output.
@@ -348,6 +353,11 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
         let operation = decode_operation(raw.operation.as_deref(), profile, &inputs)?;
 
         let expectations = decode_expectations(raw.expect)?;
+        if operation == ConformanceOperation::Index && expectations.index.is_none() {
+            return Err(ManifestError::Invalid(
+                "index cases must declare the expected index document".to_owned(),
+            ));
+        }
         if operation == ConformanceOperation::Query && expectations.queries.is_empty() {
             return Err(ManifestError::Invalid(
                 "query cases must declare at least one expected query".to_owned(),
@@ -458,6 +468,7 @@ fn decode_operation(
         Some("type-check") => ConformanceOperation::TypeCheck,
         Some("interpret") => ConformanceOperation::Interpret,
         Some("query") => ConformanceOperation::Query,
+        Some("index") => ConformanceOperation::Index,
         Some("format") => ConformanceOperation::Format,
         Some("workspace-check") => ConformanceOperation::WorkspaceCheck,
         Some("workspace-run") => ConformanceOperation::WorkspaceRun,
@@ -519,6 +530,22 @@ fn decode_operation(
             return Err(ManifestError::Invalid(format!(
                 "source-graph project input must be exactly `{expected_project}`"
             )));
+        }
+    }
+    if operation == ConformanceOperation::Index {
+        let Some(tree) = inputs.tree.as_deref() else {
+            return Err(ManifestError::Invalid(
+                "index requires one confined tree input".to_owned(),
+            ));
+        };
+        if inputs.project.as_deref() != Some(format!("{tree}/project.vibon").as_str())
+            || inputs.source.is_some()
+            || !inputs.data.is_empty()
+        {
+            return Err(ManifestError::Invalid(
+                "index cases use the confined tree and its project.vibon as their only input"
+                    .to_owned(),
+            ));
         }
     }
     if operation == ConformanceOperation::Query {
@@ -774,6 +801,7 @@ fn decode_expectations(
         resolved: raw.resolved,
         types: raw.types,
         effects: raw.effects,
+        index: raw.index,
         queries: raw
             .queries
             .into_iter()
@@ -936,6 +964,8 @@ pub(crate) struct RawExpectations {
     pub(crate) types: Option<String>,
     #[serde(default)]
     pub(crate) effects: Option<String>,
+    #[serde(default)]
+    pub(crate) index: Option<String>,
     #[serde(default)]
     pub(crate) queries: Vec<RawQuery>,
     #[serde(default)]

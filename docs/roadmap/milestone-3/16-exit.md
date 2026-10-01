@@ -1,6 +1,6 @@
 # Step 16 — M3 demo and exit gate
 
-Prerequisite: Step 15 merged. Evidence step: it claims no new behavior.
+Prerequisite: Step 15b merged. Evidence step: it claims no new behavior.
 
 ## Demo
 

@@ -12,7 +12,7 @@ use vibra_conformance::{
     InterpreterV1WorkspaceRunHandler, InterpreterV1WorkspaceTestHandler,
     ProfileDispatcher, ReaderV1Handler, StaticV1ProjectHandler, StaticV1ResolveHandler,
     StaticV1SourceGraphHandler, StaticV1TypeHandler, StaticV1WorkspaceCheckHandler,
-    ToolingV1FormatHandler, ToolingV1QueryHandler,
+    ToolingV1FormatHandler, ToolingV1IndexHandler, ToolingV1QueryHandler,
 };
 
 fn main() -> ExitCode {
@@ -63,7 +63,8 @@ fn run() -> Result<(), String> {
     );
     let dispatcher = dispatcher
         .with_handler(ConformanceProfile::ToolingV1, ToolingV1QueryHandler)
-        .with_additional_handler(ConformanceProfile::ToolingV1, ToolingV1FormatHandler);
+        .with_additional_handler(ConformanceProfile::ToolingV1, ToolingV1FormatHandler)
+        .with_additional_handler(ConformanceProfile::ToolingV1, ToolingV1IndexHandler);
     let report = ConformanceRunner::new(dispatcher).run(&corpus);
 
     for case in report.cases() {
