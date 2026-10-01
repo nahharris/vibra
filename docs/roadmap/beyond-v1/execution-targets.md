@@ -110,6 +110,36 @@ the same closed registries, meeting the tail-call and reduction rules, and
 matching the interpreter across the whole corpus. It is a third backend under
 one semantics, not an escape hatch to native FFI.
 
+## Translation validation (horizon)
+
+A source contract is proved against a semantic model; the emitted artifact
+still depends on a correct compiler and runtime. Differential execution over
+the corpus tests this boundary but does not prove semantic preservation. A
+verified compiler such as [CompCert](https://compcert.org/man/manual001.html)
+illustrates the different claim: preservation between specified source and
+target semantics, within a stated trust boundary.
+
+Vibra's first research slice should validate one transformation at a time,
+starting with a restricted typed-IR optimization. The compiler proposes an
+output; an independent checker validates the claimed relation. Later work
+can extend that relation across Wasm lowering. A well-formed-IR check alone is
+insufficient: accepted output must preserve the specified values, typed
+failures, traps, host-event order, and applicable tail-call/budget observations.
+
+The validator binds its result to the exact input, output, semantic-model
+version, pass configuration, and assumptions. Invalid, unsupported, or
+inconclusive results block a validation-required artifact; there is no silent
+fallback carrying the same claim. Ordinary compilation remains governed by
+its existing contract. The checker and its model are still trusted unless
+separately proved, and validation does not establish host security.
+
+Promotion gate: accept a supported transformation, reject deliberately
+corrupted output, report an unsupported case, and invalidate stale evidence.
+Interpreter/Wasm differential tests remain as independent execution evidence.
+A whole verified compiler and proof-carrying executable artifacts stay separate
+horizon decisions after this experiment, not promises inherited from V1's
+source-level verifier.
+
 ## Pass ordering
 
 V1 ships no optimization or hardening pass. When either arrives, on any

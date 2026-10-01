@@ -191,6 +191,33 @@ This follows FoundationDB- and TigerBeetle-style deterministic simulation. For
 agents it is the most important part of this track: concurrency bugs become
 reproducible, shrinkable test failures instead of flaky runs.
 
+## Protocol and recovery evidence
+
+Typed mailboxes constrain message shape. They do not prove the order of
+messages, deadlock freedom, eventual replies, or delivery across a partition.
+Seeded schedule exploration is test evidence. A future model checker must
+report its finite state bounds and the correspondence between the model and
+program; liveness additionally needs explicit fairness and environment
+assumptions. A bounded model with no counterexample is not an unbounded proof.
+
+Supervision contains failure and restarts work. It does not roll back a host
+write that completed before a crash. Request/reply APIs therefore distinguish
+an unknown outcome after timeout from a confirmed rejection. Retried external
+operations need application-level idempotency keys and a documented
+persistence/deduplication policy. Transport deduplication alone does not supply
+an exactly-once business operation or a durable transaction.
+
+The service demo should exercise a crash after committing a write but before
+sending its reply, then replay the retry. Its evidence states whether the
+result was deduplicated, rejected, or remains unknown, and what storage
+assumptions make that behavior possible. Distributed examples additionally
+state their consistency and availability policy during partitions; a
+three-node demo is not a claim of consensus or Byzantine fault tolerance.
+
+Session types, temporal model checking, durable transactions, and consensus
+are separate candidates in the [assurance plan](assurance.md#research-disposition).
+None is implied by introducing a process API.
+
 ## Data parallelism
 
 Pure computation can run in parallel without any observable difference, so it
@@ -198,8 +225,13 @@ needs no effect root and no process:
 
 - `par.map` over an array with a pure callback returns results in input order.
 - `par.reduce` requires a `monoid` implementation. Its associativity is a
-  documented law in line 2 and a proven one from
-  [Verification V2](verification.md#v2--lemmas-and-interface-laws).
+  documented law in line 2 and an opt-in proof obligation in
+  [Verification V2](verification.md#v2--lemmas-and-interface-laws). Until a
+  required consumer has that proof, it cannot treat documentation or tests as
+  a verified law. A canonical reduction tree is shared by the interpreter and
+  parallel backend, preserving grouping for ordinary implementations; parallel
+  evaluation cannot silently reassociate operations, especially floating-point
+  or checked arithmetic.
 - `par.both` evaluates two pure thunks.
 - If several elements trap, the trap from the lowest index is reported, so
   failure is deterministic.

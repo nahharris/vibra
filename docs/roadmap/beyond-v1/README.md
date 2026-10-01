@@ -2,7 +2,7 @@
 
 Status: long-term direction; not normative
 Applies after: the 1.0 release gate in [`../v1.md`](../v1.md)
-Last updated: 2026-09-25
+Last updated: 2026-09-27
 
 This directory records where Vibra goes after v1 and why, so the v1 design can
 avoid closing doors that later lines need. It ranks below the specification
@@ -16,6 +16,7 @@ The documents are:
 | Document | Question it answers |
 | --- | --- |
 | This file | Which release line delivers what, in which order, and what v1 must decide first |
+| [Assurance architecture](assurance.md) | Which guarantees to pursue first, how they compose, and what counts as evidence |
 | [Foundations](foundations.md) | Which language extensions every later track depends on |
 | [Verification](verification.md) | How Vibra programs carry machine-checked contracts and proofs |
 | [Concurrency and distribution](concurrency.md) | How Vibra adopts BEAM-style processes, supervision, parallelism, and clusters |
@@ -38,7 +39,11 @@ weakening the existing ones:
    testable, queryable model to programs with a user interface.
 
 The thesis stays the same: the language spends complexity on checkable
-semantics and tooling, not on surface convenience.
+semantics and tooling, not on surface convenience. The
+[assurance architecture](assurance.md) gives these tracks a shared acceptance
+model: untrusted generation, explicit claims, reproducible checks, and visible
+assumptions. Tests, proofs, runtime enforcement, and recovery keep distinct
+meanings; none alone makes arbitrary software fail-proof.
 
 ## Principles for every post-v1 line
 
@@ -51,7 +56,10 @@ These follow from the charter and constrain every track below.
   below need no new expression form.
 - **Effects stay static and complete.** Spawning, messaging, networking, UI,
   and GPU work are nominal effect roots. A binary target's effect array remains
-  its complete consent, including every process it may start.
+  its complete consent, including every process it may start. The horizon
+  [scoped-capability study](foundations.md#authority-and-state-protocols)
+  requires a separately specified authorization contract; it cannot silently
+  add runtime grants to that existing consent model.
 - **Determinism extends. It is not traded away.** Concurrency is deterministic
   for fixed source, inputs, and ordered host responses. The scheduler's choices
   and the network's deliveries become ordered host responses, which makes
@@ -63,8 +71,14 @@ These follow from the charter and constrain every track below.
   source, the ABI, or a persistent format bumps that component's major version,
   as the compatibility policy requires.
 - **Agent-facing evidence.** Every new check reports through the diagnostic
-  registry, every new fact is available to `vibra query`, and every new failure
-  mode has a structured counterexample or trace, never only prose.
+  registry, and every new fact is available to `vibra query`. A failure has a
+  structured reason and any available witness or trace. Unknown, unsupported,
+  and resource-exhausted outcomes are explicit; no checker promises a
+  counterexample when it cannot decide.
+- **Scoped acceptance.** Verification-required targets reject unresolved
+  obligations before emitting an executable artifact. Ordinary programs keep
+  their specified behavior. Assumptions and partial coverage stay visible;
+  adding a runtime guard does not turn a claim into a static proof.
 - **Decodable types.** Prefer type-system features whose well-typed
   continuations stay cheap to compute from a source prefix. Explicit
   signatures and closed dispatch keep that search small; a feature that makes
@@ -106,9 +120,13 @@ it must list each bump.
      Lean bridge, automatic parallelism)
 ```
 
-Lines 3 and 4 depend on line 2, not on each other. They are numbered in
-priority order because the charter targets services first. Maintainers may swap
-them. Nothing in line 4 requires distribution.
+Lines 3 and 4 depend on line 2's runtime foundations, not on each other. They
+are numbered in priority order because the charter targets services first.
+Maintainers may swap them. Nothing in line 4 requires distribution. The proof
+track has its own dependency order, V0 -> V1 -> V2: static pure verification
+does not require processes, and lemmas do not require clusters. The
+[delivery priorities](assurance.md#delivery-priorities) make those separable
+slices and their promotion gates explicit.
 
 ### 1.x — Foundations
 
@@ -132,7 +150,7 @@ Scope:
 
 Demo gate: a command-line tool that fetches JSON over HTTPS, transforms it
 through a generic, effect-polymorphic pipeline, and ships property tests whose
-failing inputs shrink to a reported minimal counterexample.
+failing inputs shrink to a replayable witness within a recorded budget.
 
 Component impact: source minor, registry minor within `vibra_v1`, project
 schema minor (see [what v1 carries](#what-v1-carries-for-later-lines)).
@@ -156,8 +174,9 @@ Scope:
 - a deterministic simulation scheduler with fault injection and replayable
   traces;
 - explicit pure data parallelism (`par.map`, `par.reduce`);
-- static verification of contracts, termination checking, and invariant
-  newtypes (see [Verification stage V1](verification.md#v1--static-contracts-and-termination));
+- an opt-in verified pure subset with static contracts, termination checking,
+  and nominal invariant types, plus explicit unsupported/unknown outcomes
+  (see [Verification stage V1](verification.md#v1--static-contracts-and-termination));
   and
 - the `vibra_v2` host ABI, which adds suspension, arena transfer, and
   scheduler events.
@@ -187,8 +206,9 @@ Scope:
 - lemmas, induction, and interface laws as proof obligations (see
   [Verification stage V2](verification.md#v2--lemmas-and-interface-laws));
   and
-- proof status recorded in lock and build metadata, so a dependency's verified
-  claims are auditable.
+- claim evidence bound to exact source, dependency, semantic-model, and
+  verifier fingerprints in lock/build metadata, with consumer rechecking and
+  explicit assumptions; this is provenance, not yet proof-carrying code.
 
 Demo gate: a three-node replicated store survives a partition in simulation.
 A law-carrying `ordered` implementation is proven. A dependency's proof
@@ -226,7 +246,11 @@ These tracks are unscheduled. Each needs evidence before it gets a line:
   source prefix are well-typed, built on the M6 source-position query and
   measured by the reduction in rejected generations against an unconstrained
   baseline;
-- verified or translation-validated compilation; and
+- scoped capabilities, affine handle checks, session types, and bounded
+  protocol models, each justified by a gap in the simpler shipped model;
+- translation validation of selected transformations, followed by a decision
+  on verified compilation and independently checked proof-carrying artifacts;
+  and
 - self-hosting.
 
 Macros, reader extensions, and runtime plugins remain excluded. They weaken the
@@ -259,9 +283,12 @@ A track moves from this directory into a real roadmap when:
 1. user evidence or a charter goal justifies it over the alternatives;
 2. its prerequisites have shipped;
 3. a specification change is drafted for every affected chapter, including
-   diagnostics, schemas, and conformance profiles; and
+   diagnostics, schemas, and conformance profiles;
 4. a line roadmap with milestones, demo gates, and exit gates replaces the
-   sketch here, following the [execution model](../execution.md).
+   sketch here, following the [execution model](../execution.md); and
+5. its claims, trust boundary, unsuccessful outcomes, compatibility impact,
+   and measurable benefit satisfy the
+   [common evidence rules](assurance.md#common-acceptance-and-evidence-rules).
 
 The syntax in these documents is illustrative. It shows that a design fits the
 v1 grammar. It does not reserve or specify a spelling.

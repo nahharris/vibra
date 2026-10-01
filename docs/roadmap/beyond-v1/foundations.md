@@ -116,6 +116,40 @@ linearity. It starts with a spike on whether the sharing analysis stays
 tractable over Vibra's value semantics, and it too refines the ownership model
 rather than replacing it.
 
+## Authority and state protocols
+
+Static effects, resource ownership, and capabilities answer different
+questions. An effect row records which operations may occur. Process ownership
+checks which process may use a live handle. A scoped capability would limit
+which resource or operation a holder can authorize. None implies the others.
+
+The initial resource design uses runtime checks; it makes no static claim that
+a handle cannot be copied or used after close. Nominal state types can make
+API transitions explicit, but a stale copyable value cannot prove exclusive
+state. Any later typestate or affine feature must account for aliases, closure
+capture, containers, transfers, and exceptional cleanup. The `once` study above
+is the bounded first experiment, not a general ownership-system commitment.
+
+Scoped capabilities remain an unscheduled design track. A useful prototype
+would pass an unforgeable directory handle that can be attenuated to read-only
+access, cannot be widened or recreated from a string, and is checked at every
+host entry. It must specify symlink/junction confinement, revocation, process
+transfer, and serialization restrictions. The same design needs interpreter
+and Wasm boundary tests, including stale and forged-handle attempts.
+
+This would add a new authorization condition beyond an effect ceiling. It
+requires an explicit execution/ABI contract and a compatibility decision;
+it cannot silently reinterpret v1's target effect array, which remains its
+complete execution consent. No v1 program acquires new path grants or prompts
+from this plan. Capability handles do not grant operations outside the static
+ceiling, and a sandbox still depends on the host enforcing its boundary.
+
+Runtime protocol guards belong at host and message boundaries, with structured
+violations, deterministic traces, and a specified recovery response. They are
+separate from V0's test-only contracts. Promoting a predicate to a production
+guard needs its own observable-failure and compatibility rules; erasing a
+failed static proof is never a substitute for enforcing the guard.
+
 ## Network and child processes as values
 
 The first network and process effects need no handles and fit the v1 ABI:
