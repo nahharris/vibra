@@ -45,11 +45,17 @@ impl ProfileHandler for ToolingV1QueryHandler {
                 });
             }
         };
-        let resolved = workspace
-            .resolve()
+        let stdlib = vibra_types::load_stdlib()
             .map_err(|error| HandlerError::new(error.to_string()))?;
-        let accepted = resolved.accepted();
-        let diagnostics = resolved.diagnostics().to_vec();
+        // The case is accepted when the whole workspace checks, so a query
+        // case cannot pass over a source the checker rejects.
+        let checked = vibra_workspace::semantic::check_all_with_bootstrap(
+            &workspace,
+            Some(&stdlib),
+        );
+        let accepted =
+            checked.status() == vibra_workspace::semantic::CheckStatus::Accepted;
+        let diagnostics = checked.diagnostics().to_vec();
 
         let tree_name = case.manifest().inputs.tree.as_deref().ok_or_else(|| {
             HandlerError::new("query case has no confined tree input")
@@ -76,7 +82,7 @@ impl ProfileHandler for ToolingV1QueryHandler {
                 HandlerError::new(format!("query source `{source_id}` is not UTF-8"))
             })?;
             let query = workspace
-                .query_position(source_id, expected.offset)
+                .query_position_with_bootstrap(source_id, expected.offset, &stdlib)
                 .map_err(|error| HandlerError::new(error.to_string()))?;
             let index = LineIndex::new(text);
             let rendered =

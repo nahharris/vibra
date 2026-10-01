@@ -392,9 +392,9 @@ complete structural result under `structural`.
 The workspace envelope has these required fields: `schemaVersion`,
 `workspaceRevision`, `sourceId`, `offset`, `nodeId`, `structural`, `role`,
 `context`, `identity`, `expectedType`, `observedType`, `visibleLocals`,
-`visibleImports`, `declarationCandidates`, and `application`. The envelope's
-`schemaVersion` is `1`. `sourceId` is the immutable project-relative source
-identity and `nodeId` is the canonical locator
+`visibleImports`, `declarationCandidates`, `application`, and `pattern`. The
+envelope's `schemaVersion` is `1`. `sourceId` is the immutable project-relative
+source identity and `nodeId` is the canonical locator
 `<sourceId>#<start>-<end>`, using the selected structural span. A consumer joins
 semantic observations only by the triple `(workspaceRevision, sourceId,
 nodeId)`; it never joins by token spelling or by an unversioned span.
@@ -407,6 +407,12 @@ but a recovered syntax neighbor does not change an unrelated exact field. A
 discard (`-`, `@-`, or `-:`) has an exact `role` and `context`, with
 `identity`, `expectedType`, `observedType`, `declarationCandidates`, and
 `application` unavailable; it never receives a binder identity.
+
+The checked facts (`observedType`, an expected type the source does not write,
+`application`, and `pattern`) come from checking the whole workspace against
+the standard library: every unit and its import closure. When the workspace
+does not check, they come from checking the queried source alone, so a
+self-contained module beside a broken one keeps its facts.
 
 `role` is a closed M2 vocabulary: `@atom-value`, `@entity-reference`,
 `@code-reference`, `@literal`, `@local-binding`, `@discard`, `@declaration`,
@@ -425,17 +431,65 @@ candidates are sorted by canonical identity. Private declarations are not
 candidates outside their visibility.
 
 Types are closed objects with `kind`, `name`, `parameters`, `result`, and
-`labelled`. Primitive values use `kind: "primitive"` and names such as `str`
-or `i32`; function values use `kind: "function"`, `name: "fn"`, their ordered
-parameter types, result type, and labelled slots. A primitive has empty
-`parameters` and `labelled` arrays and a null `result`.
+`labelled`. Only a function has a non-null `result`. The kinds are:
 
-M2 application facts are available only for the supported function form and
-are represented as `{ "kind": "@function", "callee": ..., "calleeType":
-..., "positional": [...], "labelled": [...], "resultType": ... }`.
-`callee` is null when resolution is unavailable. `positional` and `labelled`
-are the authoritative operand contract, in declaration order. Projection,
-lookup, effects, and later application forms remain unavailable in M2.
+| `kind` | `name` | `parameters` | `labelled` |
+|---|---|---|---|
+| `primitive` | the builtin's name, such as `str` or `i32` | empty | empty |
+| `function` | `fn` | parameter types, in order | labelled slots |
+| `declared` | the declared type's path | type arguments, in order | empty |
+| `interface` | the interface's path, or `any` | interface arguments | empty |
+| `param` | the type parameter's name | empty | empty |
+| `atom` | the atom's name | empty | empty |
+| `tuple` | `tuple` | component types, in order | empty |
+| `array` | `array` | the element type | empty |
+| `map` | `map` | the key type, then the value type | empty |
+| `union` | `union` | member types, in declaration order | empty |
+| `record` | `record` | empty | fields, in declaration order |
+| `enum` | `enum` | empty | variants with their payload types |
+
+A declared type is named, never expanded: its definition is an index record.
+
+An application fact is `{ "kind": ..., "callee": ..., "calleeType": ...,
+"positional": [...], "labelled": [...], "resultType": ..., "dispatch": ... }`.
+`positional` and `labelled` are the operand types in written order, and
+`callee` is null when the application names no single resolved function. The
+kinds are:
+
+- `@function`: a function call. `calleeType` is the callee's function type.
+- `@constructor`: a declared type's constructor. `positional` and `labelled`
+  are the payload or the fields, and `resultType` is the declared type.
+- `@contract`: a call of an interface's contract member. `calleeType` is the
+  selected member's function type, or null for a closed conformance.
+
+`dispatch` is null except on a `@contract` application, where it is
+`{ "interface": ..., "member": ..., "receiver": ..., "selection": ...,
+"destination": ... }`: the interface's path, the contract member's name, the
+type that selected the implementation, and how it was selected.
+
+| `selection` | Meaning |
+|---|---|
+| `static` | a written implementation, selected from a known type |
+| `default` | the interface's default member |
+| `dynamic` | the implementation for the type the receiver holds at run time: an interface value or a type parameter |
+| `closed` | a conformance the toolchain supplies, such as an integer conversion |
+
+`destination` is `true` when the member takes no receiver operand and the
+implementing type is the expected type at the call, as in `from.convert`.
+
+A pattern fact describes the `match` arm pattern that contains the position. It
+is `{ "kind": ..., "scrutineeType": ..., "narrowed": ..., "unionMembers":
+[...] }`. `kind` is one of `@wildcard`, `@binding`, `@literal`, `@variant`,
+`@record`, `@tuple`, `@wrapper`, `@array`, or `@as`, and `scrutineeType` is the
+type of the matched value. On an `@as` pattern, `narrowed` is the member type
+it selects and `unionMembers` lists every member of the scrutinee's union in
+declaration order; on any other kind `narrowed` is null and `unionMembers` is
+empty. A subpattern has no fact of its own, and a position outside an arm
+pattern has an unavailable `pattern`.
+
+Projection, lookup, effect operations, and lambda calls have no application
+fact. An expected type is reported where the source writes a primitive or
+function type or the checker binds an argument; elsewhere it is unavailable.
 
 `workspaceRevision` is a SHA-256 digest over a binary byte sequence with the
 exact spelling `sha256:<64 lowercase hexadecimal digits>`. The digest input is

@@ -1,50 +1,44 @@
 {
   "schemaVersion": 1,
-  "workspaceRevision": "sha256:cad1de46d849d1f71e8955b66e21725ead26f58b5f51183736125d96c44ce3d6",
+  "workspaceRevision": "sha256:c778820a5500c1f8f68d2f94d65866debc333f96674b649c7af38bbb83a5a8ab",
   "sourceId": "src/main.vib",
-  "offset": 92,
-  "nodeId": "src/main.vib#92-96",
+  "offset": 684,
+  "nodeId": "src/main.vib#684-685",
   "structural": {
     "schemaVersion": 1,
-    "offset": 92,
+    "offset": 684,
     "sourceId": "src/main.vib",
     "span": {
       "sourceId": "src/main.vib",
-      "start": 92,
-      "end": 96,
+      "start": 684,
+      "end": 685,
       "startPosition": {
-        "line": 3,
-        "column": 29
+        "line": 31,
+        "column": 5
       },
       "endPosition": {
-        "line": 3,
-        "column": 33
+        "line": 31,
+        "column": 6
       }
     },
     "mode": "source",
-    "syntaxKind": "atom",
-    "category": "expression",
+    "syntaxKind": "open-paren",
+    "category": "pattern",
     "status": "exact",
     "permittedForms": [
-      "lambda",
-      "do",
-      "let",
-      "if",
-      "match",
-      "as",
-      "try"
+      "tuple",
+      "array",
+      "as"
     ],
-    "permittedLabels": [
-      "types"
-    ]
+    "permittedLabels": []
   },
   "role": {
     "status": "exact",
-    "value": "@literal"
+    "value": "@unknown"
   },
   "context": {
     "status": "exact",
-    "value": "argument"
+    "value": "result"
   },
   "identity": {
     "status": "unavailable",
@@ -72,26 +66,39 @@
   },
   "visibleLocals": {
     "status": "exact",
-    "value": []
+    "value": [
+      {
+        "name": "value",
+        "identity": "binder:src/main.vib:648-653"
+      },
+      {
+        "name": "x",
+        "identity": "binder:src/main.vib:694-695"
+      },
+      {
+        "name": "y",
+        "identity": "binder:src/main.vib:699-700"
+      }
+    ]
   },
   "visibleImports": {
     "status": "exact",
     "value": [
       {
-        "alias": "helper",
-        "module": "@app.helper",
+        "alias": "from",
+        "module": "@std.core",
         "sourceId": "src/main.vib",
         "span": {
           "sourceId": "src/main.vib",
           "start": 0,
-          "end": 27,
+          "end": 28,
           "startPosition": {
             "line": 1,
             "column": 1
           },
           "endPosition": {
             "line": 1,
-            "column": 28
+            "column": 29
           }
         }
       }
@@ -106,7 +113,18 @@
     "value": null
   },
   "pattern": {
-    "status": "unavailable",
-    "value": null
+    "status": "exact",
+    "value": {
+      "kind": "@record",
+      "scrutineeType": {
+        "kind": "declared",
+        "name": "app.main.point",
+        "parameters": [],
+        "result": null,
+        "labelled": []
+      },
+      "narrowed": null,
+      "unionMembers": []
+    }
   }
 }

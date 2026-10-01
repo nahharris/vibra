@@ -12,6 +12,12 @@ tree = "tree"
 accepted = false
 
 [[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/damaged.vib"
+span = [26, 35]
+
+[[expect.diagnostics]]
 code = "@syntax.unmatched-delimiter"
 level = "@error"
 source = "src/damaged.vib"

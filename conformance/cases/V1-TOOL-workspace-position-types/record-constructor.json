@@ -1,24 +1,24 @@
 {
   "schemaVersion": 1,
-  "workspaceRevision": "sha256:cad1de46d849d1f71e8955b66e21725ead26f58b5f51183736125d96c44ce3d6",
+  "workspaceRevision": "sha256:c778820a5500c1f8f68d2f94d65866debc333f96674b649c7af38bbb83a5a8ab",
   "sourceId": "src/main.vib",
-  "offset": 84,
-  "nodeId": "src/main.vib#84-85",
+  "offset": 395,
+  "nodeId": "src/main.vib#395-396",
   "structural": {
     "schemaVersion": 1,
-    "offset": 84,
+    "offset": 395,
     "sourceId": "src/main.vib",
     "span": {
       "sourceId": "src/main.vib",
-      "start": 84,
-      "end": 85,
+      "start": 395,
+      "end": 396,
       "startPosition": {
-        "line": 3,
-        "column": 21
+        "line": 17,
+        "column": 23
       },
       "endPosition": {
-        "line": 3,
-        "column": 22
+        "line": 17,
+        "column": 24
       }
     },
     "mode": "source",
@@ -51,20 +51,14 @@
     "value": null
   },
   "expectedType": {
-    "status": "exact",
-    "value": {
-      "kind": "primitive",
-      "name": "i32",
-      "parameters": [],
-      "result": null,
-      "labelled": []
-    }
+    "status": "unavailable",
+    "value": null
   },
   "observedType": {
     "status": "exact",
     "value": {
-      "kind": "primitive",
-      "name": "i32",
+      "kind": "declared",
+      "name": "app.main.point",
       "parameters": [],
       "result": null,
       "labelled": []
@@ -78,20 +72,20 @@
     "status": "exact",
     "value": [
       {
-        "alias": "helper",
-        "module": "@app.helper",
+        "alias": "from",
+        "module": "@std.core",
         "sourceId": "src/main.vib",
         "span": {
           "sourceId": "src/main.vib",
           "start": 0,
-          "end": 27,
+          "end": 28,
           "startPosition": {
             "line": 1,
             "column": 1
           },
           "endPosition": {
             "line": 1,
-            "column": 28
+            "column": 29
           }
         }
       }
@@ -104,45 +98,35 @@
   "application": {
     "status": "exact",
     "value": {
-      "kind": "@function",
-      "callee": {
-        "kind": "function",
-        "canonical": "@app@0.1.0/app.main.choose"
-      },
-      "calleeType": {
-        "kind": "function",
-        "name": "fn",
-        "parameters": [
-          {
+      "kind": "@constructor",
+      "callee": null,
+      "calleeType": null,
+      "positional": [],
+      "labelled": [
+        {
+          "name": "x",
+          "type": {
             "kind": "primitive",
             "name": "i32",
             "parameters": [],
             "result": null,
             "labelled": []
           }
-        ],
-        "result": {
-          "kind": "primitive",
-          "name": "i32",
-          "parameters": [],
-          "result": null,
-          "labelled": []
         },
-        "labelled": []
-      },
-      "positional": [
         {
-          "kind": "primitive",
-          "name": "i32",
-          "parameters": [],
-          "result": null,
-          "labelled": []
+          "name": "y",
+          "type": {
+            "kind": "primitive",
+            "name": "i32",
+            "parameters": [],
+            "result": null,
+            "labelled": []
+          }
         }
       ],
-      "labelled": [],
       "resultType": {
-        "kind": "primitive",
-        "name": "i32",
+        "kind": "declared",
+        "name": "app.main.point",
         "parameters": [],
         "result": null,
         "labelled": []

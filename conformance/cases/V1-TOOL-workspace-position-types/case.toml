@@ -1,0 +1,67 @@
+id = "V1-TOOL-workspace-position-types"
+rule = "V1-TOOL-workspace-position-query"
+profile = "tooling-v1"
+operation = "query"
+description = "A position query reports constructor and pattern shapes, union members, and what a contract member call resolved to."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 395
+snapshot = "record-constructor.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 296
+snapshot = "wrapper-constructor.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 472
+snapshot = "as-narrowing.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 577
+snapshot = "variant-pattern.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 684
+snapshot = "record-pattern.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 737
+snapshot = "static-member.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 791
+snapshot = "default-member.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 844
+snapshot = "dynamic-member.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 898
+snapshot = "destination-member.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 312
+snapshot = "closed-member.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 106
+snapshot = "bounded-member.json"
