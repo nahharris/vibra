@@ -1,0 +1,68 @@
+(import assert @std.assert)
+
+(import stock @catalog.stock)
+
+(test
+  "a bounded generic totals either priced type"
+  (assert.equal
+    (tupleof
+      (stock.total
+        (array.of
+          (stock.part name: "bolt" unit-cents: 25u64 count: 40u64)
+          (stock.part name: "gear" unit-cents: 1200u64 count: 2u64)))
+      (stock.total (array.of (stock.service name: "fitting" hours: 3u64))))
+    (tupleof 3400u64 27000u64)))
+
+(test
+  "the default member dispatches to each implementation"
+  (assert.equal
+    (tupleof
+      (stock.priced.above
+        (stock.part name: "bolt" unit-cents: 25u64 count: 40u64)
+        999u64)
+      (stock.priced.above (stock.service name: "survey" hours: 0u64) 0u64))
+    (tupleof true false)))
+
+(test
+  "a map keyed by sku follows its own order"
+  (assert.equal
+    (map.entries
+      (map.of (stock.shelf 7u32) 4u64 (stock.shelf 12u32) 9u64 (stock.shelf 9u32) 1u64))
+    (array.of
+      (tupleof (stock.sku 12u32) 9u64)
+      (tupleof (stock.sku 9u32) 1u64)
+      (tupleof (stock.sku 7u32) 4u64))))
+
+(test
+  "reserving reports the count left"
+  (assert.equal
+    (stock.reserve (map.of (stock.shelf 7u32) 4u64) (stock.shelf 7u32) 3u64)
+    (result.ok 1u64)))
+
+(test
+  "reserving an unknown sku"
+  (assert.equal
+    (stock.reserve (map.of (stock.shelf 7u32) 4u64) (stock.shelf 8u32) 1u64)
+    (result.err (stock.stock-error (stock.unknown-sku key: (stock.sku 8u32))))))
+
+(test
+  "reserving more than is held"
+  (assert.equal
+    (stock.reserve (map.of (stock.shelf 7u32) 4u64) (stock.shelf 7u32) 5u64)
+    (result.err
+      (stock.stock-error
+        (stock.short-stock key: (stock.sku 7u32) held: 4u64 wanted: 5u64)))))
+
+(test
+  "a pipeline over a user iterator"
+  (assert.equal
+    (stock.costly-names
+      (stock.stack.push
+        (stock.stack.push
+          (stock.stack.push
+            (stock.stack items: (array.of))
+            (stock.part name: "bolt" unit-cents: 25u64 count: 40u64))
+          (stock.part name: "nut" unit-cents: 5u64 count: 10u64))
+        (stock.part name: "gear" unit-cents: 1200u64 count: 2u64))
+      500u64)
+    (array.of "gear" "bolt")))
