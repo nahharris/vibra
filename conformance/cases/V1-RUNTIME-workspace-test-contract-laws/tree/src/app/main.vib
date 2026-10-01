@@ -1,0 +1,27 @@
+(import core @std.core)
+(import equatable @std.core.equatable)
+(import ordered @std.core.ordered)
+
+(defn execute () void void)
+
+; A version orders by `major`, then `minor`, and is equal when both are.
+(deftype version (record major u8 minor u8)
+  visibility: @public
+  (impl equatable
+    (defn equal (left self right self) bool
+      (match (ordered.compare left right) (core.ordering.equal) true - false)))
+  (impl ordered
+    (defn compare (left self right self) core.ordering
+      (match (u8.compare (left @major) (right @major))
+        (core.ordering.equal) (u8.compare (left @minor) (right @minor))
+        order order))))
+
+(defn double (value i32) i32
+  visibility: @public
+  (match (i32.mul-checked value 2i32) (result.ok twice) twice (result.err -) 0i32))
+
+(defn odd (value i32) bool
+  visibility: @public
+  (match (i32.rem-checked value 2i32)
+    (result.ok remainder) (i32.equal remainder 1i32)
+    (result.err -) false))

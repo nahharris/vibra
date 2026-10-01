@@ -277,7 +277,22 @@ interfaces:
 
 An `ordered` implementation MUST be a total order, and two keys are the same key
 exactly when `compare` answers `equal`; an `equatable` implementation of the
-same type MUST agree with it. The following types receive closed toolchain
+same type MUST agree with it. Stated as laws over all values `a`, `b`, and `c`
+of the implementing type:
+
+- **`equatable`.** `(equal a a)` is `true`; `(equal a b)` is `(equal b a)`; and
+  `(equal a b)` with `(equal b c)` gives `(equal a c)`.
+- **`ordered`.** `(compare a a)` is `equal`; `(compare a b)` is `less` exactly
+  when `(compare b a)` is `greater`; and `(compare a b)` with `(compare b c)`
+  both `less`, or both `equal`, gives `(compare a c)` the same answer.
+- **Agreement.** For a type implementing both, `(equal a b)` is `true` exactly
+  when `(compare a b)` is `equal`.
+
+Every member is pure, so the same operands always give the same answer. The
+toolchain cannot check these laws. A program whose implementation breaks them
+still evaluates deterministically, but which entry of a map a lookup finds is
+then not defined by this specification. V1 declares no `hashable`, so it has no
+law. The following types receive closed toolchain
 conformance to both, keyed by type identity in the same way as the closed
 `iter` registry; they are admissible map keys without a written
 implementation:
@@ -1002,6 +1017,25 @@ Default-method semantics:
 
 The static result type of `map` is always `(iter out)`, and of `filter`, `skip`,
 and `take` always `(iter item)`, never the concrete receiver type.
+
+An `iter` implementation and the defaults obey these laws, over a finite
+iterator `xs` unless stated:
+
+- **`next` is a function of its iterator.** Applying `next` again to the same
+  iterator value gives the same answer, for any `xs`, so an iterator a program
+  kept can be walked again.
+- **`collect` is the walk.** `(collect xs)` is the items of successive `next`
+  steps, in order.
+- **`map` preserves structure.** `(collect (map xs f))` is `f` applied to each
+  item of `(collect xs)` in order, so mapping the identity changes nothing and
+  mapping `f` then `g` equals mapping their composition.
+- **`filter` selects in order.** `(collect (filter xs keep))` is the items of
+  `(collect xs)` that `keep` accepts, in their original order.
+- **`take` and `skip` split.** `(collect (take xs n))` followed by
+  `(collect (skip xs n))` is `(collect xs)`.
+- **The adapters are lazy.** `map`, `filter`, `skip`, and `take` call `next` on
+  their source only when `next` is called on them, so `take` over an iterator
+  that never ends is finite.
 
 ### Standard-library adapter types
 

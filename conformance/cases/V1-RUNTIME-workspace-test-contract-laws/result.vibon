@@ -1,0 +1,14 @@
+(record
+  format: @test-run.v1
+  result: @command.ok
+  tests: (array
+    (record name: "@tests.laws::\"equatable is reflexive, symmetric, and transitive\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.laws::\"ordered is reflexive, antisymmetric, and transitive\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.laws::\"equatable and ordered agree\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.laws::\"next is a function of its iterator\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.laws::\"collect is the walk\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.laws::\"map preserves structure\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.laws::\"filter selects in order\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.laws::\"take and skip split\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)

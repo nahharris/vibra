@@ -1,0 +1,68 @@
+(import assert @std.assert)
+(import core @std.core)
+(import equatable @std.core.equatable)
+(import iter @std.iter.iter)
+(import main @app.main)
+(import ordered @std.core.ordered)
+
+(test "equatable is reflexive, symmetric, and transitive"
+  (let low (main.version major: 1u8 minor: 2u8)
+    (let same (main.version major: 1u8 minor: 2u8)
+      (let again (main.version major: 1u8 minor: 2u8)
+        (do
+          (assert.true (equatable.equal low low))
+          (assert.equal (equatable.equal low same) (equatable.equal same low))
+          (assert.equal
+            (tupleof (equatable.equal low same) (equatable.equal same again) (equatable.equal low again))
+            (tupleof true true true)))))))
+
+(test "ordered is reflexive, antisymmetric, and transitive"
+  (let low (main.version major: 1u8 minor: 2u8)
+    (let middle (main.version major: 1u8 minor: 3u8)
+      (let high (main.version major: 2u8 minor: 0u8)
+        (do
+          (assert.equal (ordered.compare low low) (core.ordering.equal))
+          (assert.equal (ordered.compare low middle) (core.ordering.less))
+          (assert.equal (ordered.compare middle low) (core.ordering.greater))
+          (assert.equal (ordered.compare middle high) (core.ordering.less))
+          (assert.equal (ordered.compare low high) (core.ordering.less)))))))
+
+(test "equatable and ordered agree"
+  (let low (main.version major: 1u8 minor: 2u8)
+    (let high (main.version major: 2u8 minor: 0u8)
+      (do
+        (assert.equal
+          (equatable.equal low low)
+          (match (ordered.compare low low) (core.ordering.equal) true - false))
+        (assert.equal
+          (equatable.equal low high)
+          (match (ordered.compare low high) (core.ordering.equal) true - false))))))
+
+(test "next is a function of its iterator"
+  (let items (array.of 4i32 5i32)
+    (assert.equal (iter.next items) (iter.next items))))
+
+(test "collect is the walk"
+  (assert.equal (iter.collect (array.of 3i32 1i32 2i32)) (array.of 3i32 1i32 2i32)))
+
+(test "map preserves structure"
+  (let items (array.of 1i32 2i32 3i32)
+    (do
+      (assert.equal (iter.collect (iter.map items main.double)) (array.of 2i32 4i32 6i32))
+      (assert.equal
+        (iter.collect (iter.map items (lambda (value i32) i32 value)))
+        (iter.collect items))
+      (assert.equal
+        (iter.collect (iter.map (iter.map items main.double) main.double))
+        (iter.collect (iter.map items (lambda (value i32) i32 (main.double (main.double value)))))))))
+
+(test "filter selects in order"
+  (assert.equal
+    (iter.collect (iter.filter (array.of 5i32 2i32 3i32 4i32 1i32) main.odd))
+    (array.of 5i32 3i32 1i32)))
+
+(test "take and skip split"
+  (let items (array.of 1i32 2i32 3i32 4i32 5i32)
+    (assert.equal
+      (array.concat (iter.collect (iter.take items 2u64)) (iter.collect (iter.skip items 2u64)))
+      (iter.collect items))))
