@@ -24,6 +24,7 @@ fn map_type() -> Type {
 fn map_of(entries: &[(&str, i32)]) -> Expr {
     Expr::Map {
         value_type: map_type(),
+        key_order: None,
         entries: entries
             .iter()
             .map(|(key, value)| {
@@ -94,6 +95,7 @@ fn an_out_of_range_lookup_answers_none() {
         }),
         key: Box::new(literal(Value::U64(5))),
         value_type: option_type(Type::I32),
+        key_order: None,
         origin: origin(),
     };
     let encoding = run(option_type(Type::I32), lookup);

@@ -368,7 +368,7 @@ pub fn check_resolved(
                     });
                 }
                 Declaration::Deftype(value) => {
-                    let Some((self_type, owner_generics)) = types
+                    let Some((self_type, owner_generics, owner_bounds)) = types
                         .declared()
                         .iter()
                         .find(|declared| {
@@ -382,6 +382,7 @@ pub fn check_resolved(
                                     &declared.parameters,
                                 ),
                                 declared.parameters.clone(),
+                                declared.bounds.clone(),
                             )
                         })
                     else {
@@ -409,6 +410,11 @@ pub fn check_resolved(
                         else {
                             continue;
                         };
+                        let bounds = owner_bounds
+                            .clone()
+                            .into_iter()
+                            .chain(bounds)
+                            .collect::<BTreeMap<_, _>>();
                         let Some(signature) = check_signature(
                             module.record.source_id(),
                             method,
@@ -474,6 +480,18 @@ pub fn check_resolved(
             },
             &mut diagnostics,
         );
+    }
+    for global in &globals {
+        for error in
+            types.unsatisfied_bounds(crate::nominal::Scope::NONE, &global.value_type)
+        {
+            crate::nominal::report_lower_error(
+                &mut diagnostics,
+                &global.source_id,
+                global.span,
+                &error,
+            );
+        }
     }
 
     for declaration in snapshot.declarations().iter().filter(|declaration| {

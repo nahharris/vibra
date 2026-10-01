@@ -18,6 +18,7 @@ use vibra_ir::{
 };
 use vibra_syntax::{
     Attribute, DefintDeclaration, DeftypeBody, DeftypeDeclaration, Name, TypeExpr,
+    TypeMember,
 };
 
 use crate::unavailable;
@@ -45,6 +46,9 @@ pub(crate) enum LowerError {
     UnionOverlap(Box<(Type, Type)>),
     /// A union member that is a union, an interface, or a generic name.
     UnionNotConcrete(Type),
+    /// A type argument that does not implement its parameter's bound: the
+    /// argument and the interface name.
+    UnsatisfiedBound(Type, String),
 }
 
 /// What a type expression may name besides declared types: the receiver type
@@ -103,6 +107,8 @@ pub(crate) struct DeclaredType {
     pub(crate) available: bool,
     /// Generic parameter names in `where:` order.
     pub(crate) parameters: Vec<String>,
+    /// The interface each bounded parameter needs.
+    pub(crate) bounds: BTreeMap<String, usize>,
 }
 
 /// One declared interface visible to a checking run.
@@ -177,6 +183,15 @@ pub(crate) struct TypeNames {
     /// a module of the run, with their declarations, whose contracts lower
     /// before the run's own.
     standard_contracts: Vec<(usize, &'static DefintDeclaration)>,
+    /// Declared types that write an `impl` of `@std.core`'s `ordered`.
+    ordered_types: BTreeSet<TypeId>,
+    /// Whether implementations are registered, so lowering checks bounds.
+    bounds_ready: bool,
+    /// The interface bound of each generic `lambda`'s quantified name, keyed
+    /// by source identity and name. A quantified name carries its lambda's
+    /// site, so it is unique within a source; the lambda arm records it and
+    /// every application reads it back.
+    lambda_bounds: std::cell::RefCell<BTreeMap<(String, String), usize>>,
 }
 
 /// A value path that names a type constructor or an enum variant.
@@ -209,6 +224,7 @@ impl TypeNames {
             body: None,
             available: true,
             parameters: generic_names(declaration.attributes().items()),
+            bounds: BTreeMap::new(),
         });
         self.scopes
             .entry(source_id.to_owned())
@@ -263,26 +279,205 @@ impl TypeNames {
         index
     }
 
-    /// Whether every generic name in `key` is bounded by `@std.core`'s
-    /// `ordered` in `scope`, so `key` is an admissible map key once the rest
-    /// of it is.
-    fn ordered_generics(&self, scope: Scope<'_>, key: &Type) -> bool {
-        let ordered = self
-            .interface_index_of(&crate::stdlib::stdlib_type_id(&["core"], "ordered"));
-        let mut verdict = true;
-        let mut pending = vec![key.clone()];
-        while let Some(value) = pending.pop() {
-            match &value {
-                Type::Param(name) => {
-                    verdict &= ordered.is_some()
-                        && scope.bounds.and_then(|bounds| bounds.get(name)).copied()
-                            == ordered;
+    /// Classifies `key` as a map key (`docs/spec/02-type-system.md`, "Nominal
+    /// declarations"): the closed registry, a declared type through its own
+    /// `ordered` implementation, and a generic name through an `ordered`
+    /// bound in `scope`.
+    pub(crate) fn key_verdict(&self, scope: Scope<'_>, key: &Type) -> KeyVerdict {
+        match key {
+            Type::Declared(id) | Type::Applied(id, _)
+                if self.ordered_types.contains(id) =>
+            {
+                KeyVerdict::Admissible
+            }
+            Type::Param(name) => {
+                let ordered = self.interface_index_of(&crate::stdlib::stdlib_type_id(
+                    &["core"],
+                    "ordered",
+                ));
+                if ordered.is_some()
+                    && scope.bounds.and_then(|bounds| bounds.get(name)).copied()
+                        == ordered
+                {
+                    KeyVerdict::Admissible
+                } else {
+                    KeyVerdict::Generic
                 }
-                Type::Function(_) => verdict = false,
-                _ => pending.extend(value.components()),
+            }
+            Type::Tuple(_) | Type::Record(_) | Type::Enum(_) => {
+                // A `void` enum payload marks a nullary variant, not a component.
+                let verdicts = key
+                    .components()
+                    .iter()
+                    .filter(|component| {
+                        !(matches!(key, Type::Enum(_)) && **component == Type::Void)
+                    })
+                    .map(|component| self.key_verdict(scope, component))
+                    .collect::<Vec<_>>();
+                [
+                    KeyVerdict::Function,
+                    KeyVerdict::Generic,
+                    KeyVerdict::Invalid,
+                ]
+                .into_iter()
+                .find(|verdict| verdicts.contains(verdict))
+                .unwrap_or(KeyVerdict::Admissible)
+            }
+            _ => map_key(key),
+        }
+    }
+
+    /// Whether `argument` implements the interface `interface` in `scope`: a
+    /// generic name through its bound, a closed key type through the
+    /// toolchain registry, and any other type through an implementation.
+    pub(crate) fn satisfies(
+        &self,
+        scope: Scope<'_>,
+        interface: usize,
+        argument: &Type,
+    ) -> bool {
+        if let Type::Param(name) = argument {
+            return scope.bounds.and_then(|bounds| bounds.get(name))
+                == Some(&interface);
+        }
+        self.closed_key(scope, interface, argument)
+            || self.implementations.iter().any(|implementation| {
+                implementation.interface == interface
+                    && crate::interfaces::covers(&implementation.receiver, argument)
+            })
+    }
+
+    /// Whether `receiver` conforms to the key contract `interface` through the
+    /// closed toolchain registry: a key primitive, an atom singleton, or an
+    /// anonymous structure of admissible keys. For `ordered`, a structure may
+    /// also hold a declared type through its own `compare` and a generic name
+    /// through an `ordered` bound, which order it component-wise.
+    pub(crate) fn closed_key(
+        &self,
+        scope: Scope<'_>,
+        interface: usize,
+        receiver: &Type,
+    ) -> bool {
+        match crate::interfaces::key_contract(self, interface) {
+            Some((_, vibra_ir::ClosedContract::KeyCompare)) => {
+                !matches!(
+                    receiver,
+                    Type::Declared(_) | Type::Applied(_, _) | Type::Param(_)
+                ) && self.key_verdict(scope, receiver) == KeyVerdict::Admissible
+            }
+            Some((_, vibra_ir::ClosedContract::KeyEqual)) => {
+                map_key(receiver) == KeyVerdict::Admissible
+            }
+            None => false,
+        }
+    }
+
+    /// The first argument of an applied declared type that does not satisfy
+    /// its parameter's bound in `scope`, once implementations are known.
+    fn unsatisfied_argument(
+        &self,
+        scope: Scope<'_>,
+        value: &Type,
+    ) -> Option<LowerError> {
+        if !self.bounds_ready {
+            return None;
+        }
+        let Type::Applied(id, arguments) = value else {
+            return None;
+        };
+        let declared = self.declared.get(self.index_of(id)?)?;
+        for (parameter, argument) in declared.parameters.iter().zip(arguments) {
+            let Some(interface) = declared.bounds.get(parameter) else {
+                continue;
+            };
+            if !self.satisfies(scope, *interface, argument) {
+                let name = self.interface(*interface)?.name.clone();
+                return Some(LowerError::UnsatisfiedBound(argument.clone(), name));
             }
         }
-        verdict
+        None
+    }
+
+    /// Every applied declared type within `value` whose arguments do not
+    /// satisfy their bounds in `scope`, as lowering reports them.
+    pub(crate) fn unsatisfied_bounds(
+        &self,
+        scope: Scope<'_>,
+        value: &Type,
+    ) -> Vec<LowerError> {
+        let mut errors = Vec::new();
+        let mut pending = vec![value.clone()];
+        while let Some(value) = pending.pop() {
+            errors.extend(self.unsatisfied_argument(scope, &value));
+            pending.extend(value.components());
+        }
+        errors
+    }
+
+    /// Records the bound of a generic `lambda`'s quantified name.
+    pub(crate) fn record_lambda_bound(
+        &self,
+        source_id: &str,
+        name: String,
+        interface: usize,
+    ) {
+        self.lambda_bounds
+            .borrow_mut()
+            .insert((source_id.to_owned(), name), interface);
+    }
+
+    /// The bounds among `names`, the quantified names of a generic `lambda`
+    /// written in `source_id`.
+    pub(crate) fn lambda_bounds(
+        &self,
+        source_id: &str,
+        names: &[String],
+    ) -> BTreeMap<String, usize> {
+        let recorded = self.lambda_bounds.borrow();
+        names
+            .iter()
+            .filter_map(|name| {
+                recorded
+                    .get(&(source_id.to_owned(), name.clone()))
+                    .map(|interface| (name.clone(), *interface))
+            })
+            .collect()
+    }
+
+    /// Marks the implementations as registered, so lowering checks the bounds
+    /// of every applied declared type from now on.
+    pub(crate) fn set_bounds_ready(&mut self) {
+        self.bounds_ready = true;
+    }
+
+    /// Records every declared type among `declarations` that writes an
+    /// `impl` of `@std.core`'s `ordered`, so it may key a map before its
+    /// implementation is checked.
+    fn mark_ordered_types(&mut self, declarations: &[(usize, &DeftypeDeclaration)]) {
+        let Some(ordered) = self
+            .interface_index_of(&crate::stdlib::stdlib_type_id(&["core"], "ordered"))
+        else {
+            return;
+        };
+        for (index, declaration) in declarations {
+            let Some(declared) = self.declared.get(*index) else {
+                continue;
+            };
+            let implements = declaration.members().iter().any(|member| {
+                let TypeMember::Implementation(block) = member else {
+                    return false;
+                };
+                let head = match block.target() {
+                    TypeExpr::Name(name) => name,
+                    TypeExpr::Applied { head, .. } => head,
+                    _ => return false,
+                };
+                self.resolve_interface(&declared.source_id, head) == Some(ordered)
+            });
+            if implements {
+                self.ordered_types.insert(declared.id.clone());
+            }
+        }
     }
 
     /// The index of the interface with identity `id`.
@@ -659,7 +854,11 @@ impl TypeNames {
                     .iter()
                     .map(|argument| self.lower(source_id, scope, argument))
                     .collect::<Result<Vec<_>, _>>()?;
-                self.applied(source_id, head, arguments)
+                let applied = self.applied(source_id, head, arguments)?;
+                match self.unsatisfied_argument(scope, &applied) {
+                    Some(error) => Err(error),
+                    None => Ok(applied),
+                }
             }
             TypeExpr::Tuple(components) => Ok(Type::Tuple(
                 components
@@ -673,19 +872,12 @@ impl TypeNames {
             TypeExpr::Map(key, value) => {
                 let key = self.lower(source_id, scope, key)?;
                 let value = self.lower(source_id, scope, value)?;
-                match map_key(&key) {
+                match self.key_verdict(scope, &key) {
                     KeyVerdict::Admissible => {}
                     // The embedded standard library declares the generic
-                    // `map` itself; elsewhere every generic name in a key
-                    // needs an `ordered` bound. A bounded key may be a
-                    // `deftype` ordered by its own `compare`, which only the
-                    // library map honors.
+                    // `map` itself; elsewhere a generic name in a key needs
+                    // an `ordered` bound.
                     KeyVerdict::Generic if is_stdlib_source(source_id) => {}
-                    KeyVerdict::Generic if self.ordered_generics(scope, &key) => {
-                        return Err(LowerError::Unavailable(
-                            "maps keyed by an `ordered`-bounded parameter arrive with the library map in M3 Step 11c",
-                        ));
-                    }
                     KeyVerdict::Generic => return Err(LowerError::InvalidMapKey(key)),
                     KeyVerdict::Function => {
                         return Err(LowerError::FunctionMapKey(key));
@@ -805,6 +997,7 @@ impl TypeNames {
         declarations: &[(usize, &DeftypeDeclaration)],
         diagnostics: &mut Vec<Diagnostic>,
     ) {
+        self.mark_ordered_types(declarations);
         let mut lowered = Vec::with_capacity(declarations.len());
         for (index, declaration) in declarations {
             let Some(declared) = self.declared.get(*index) else {
@@ -813,12 +1006,16 @@ impl TypeNames {
             let source_id = declared.source_id.clone();
             let parameters = declared.parameters.clone();
             let self_type = declared_self_type(&declared.id, &parameters);
-            if !report_interface_bounds(
-                declaration.attributes().items(),
+            let Some(bounds) = crate::interfaces::generic_bounds(
+                self,
                 &source_id,
+                declaration.attributes().items(),
                 diagnostics,
-            ) {
+            ) else {
                 continue;
+            };
+            if let Some(declared) = self.declared.get_mut(*index) {
+                declared.bounds.clone_from(&bounds);
             }
             if !is_stdlib_source(&source_id)
                 && declaration
@@ -838,14 +1035,14 @@ impl TypeNames {
                 DeftypeBody::Type(TypeExpr::Record(fields)) => self
                     .lower_members(
                         &source_id,
-                        Scope::new(Some(&self_type), &parameters),
+                        Scope::new(Some(&self_type), &parameters).with_bounds(&bounds),
                         fields,
                     )
                     .map(TypeBody::Record),
                 DeftypeBody::Type(TypeExpr::Enum(variants)) => self
                     .lower_members(
                         &source_id,
-                        Scope::new(Some(&self_type), &parameters),
+                        Scope::new(Some(&self_type), &parameters).with_bounds(&bounds),
                         variants,
                     )
                     .map(TypeBody::Enum),
@@ -854,7 +1051,8 @@ impl TypeNames {
                     .map(|component| {
                         self.lower(
                             &source_id,
-                            Scope::new(Some(&self_type), &parameters),
+                            Scope::new(Some(&self_type), &parameters)
+                                .with_bounds(&bounds),
                             component,
                         )
                     })
@@ -865,7 +1063,8 @@ impl TypeNames {
                     .map(|member| {
                         self.lower(
                             &source_id,
-                            Scope::new(Some(&self_type), &parameters),
+                            Scope::new(Some(&self_type), &parameters)
+                                .with_bounds(&bounds),
                             member,
                         )
                     })
@@ -878,7 +1077,7 @@ impl TypeNames {
                 DeftypeBody::Type(representation) => self
                     .lower(
                         &source_id,
-                        Scope::new(Some(&self_type), &parameters),
+                        Scope::new(Some(&self_type), &parameters).with_bounds(&bounds),
                         representation,
                     )
                     .map(TypeBody::Wrapper),
@@ -1312,6 +1511,14 @@ pub(crate) fn report_lower_error(
             )
             .with_source_id(source_id),
         ),
+        LowerError::UnsatisfiedBound(argument, interface) => diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeUnsatisfiedBound,
+                span,
+                format!("{argument} does not implement `{interface}`"),
+            )
+            .with_source_id(source_id),
+        ),
     }
 }
 
@@ -1326,33 +1533,6 @@ pub(crate) fn generic_names(attributes: &[Attribute]) -> Vec<String> {
         .flatten()
         .map(|binding| binding.name().value().to_owned())
         .collect()
-}
-
-/// Reports every `where:` bound other than the predeclared `any`, which
-/// Stage 3A does not admit. Returns whether every bound is `any`.
-pub(crate) fn report_interface_bounds(
-    attributes: &[Attribute],
-    source_id: &str,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> bool {
-    let mut all_any = true;
-    for attribute in attributes {
-        let Attribute::Where(bindings) = attribute else {
-            continue;
-        };
-        for binding in bindings {
-            if binding.bound().value() != "any" {
-                all_any = false;
-                unavailable(
-                    diagnostics,
-                    source_id,
-                    binding.span(),
-                    "interface bounds on `deftype` and `lambda` parameters arrive in M3 Step 11c",
-                );
-            }
-        }
-    }
-    all_any
 }
 
 /// The receiver type of a declaration: the declared type, applied to its own

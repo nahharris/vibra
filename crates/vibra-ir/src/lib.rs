@@ -1095,6 +1095,9 @@ pub enum Expr {
         value_type: Type,
         /// Key and value operands, evaluated key then value, in order.
         entries: Vec<(Self, Self)>,
+        /// The `ordered` interface whose implementations order the keys, when
+        /// the key type is not closed; canonical key order otherwise.
+        key_order: Option<TypeId>,
         /// The source origin of the entries.
         origin: SourceOrigin,
     },
@@ -1105,6 +1108,9 @@ pub enum Expr {
         collection: Box<Self>,
         /// The index or key operand.
         key: Box<Self>,
+        /// For a map, the `ordered` interface whose implementations order its
+        /// keys, when the key type is not closed.
+        key_order: Option<TypeId>,
         /// The `(option t)` result type.
         value_type: Type,
         /// The source origin of the complete application.
@@ -3259,6 +3265,23 @@ fn validate_program_expr(
                     dependencies,
                 )?;
             }
+            if let Some(owner) = owner {
+                for target in key_order_targets(expression, functions) {
+                    let Some(edges) =
+                        dependencies.get_mut(owner.node_index(globals.len()))
+                    else {
+                        return Err(IrError::InvalidExpression(format!(
+                            "dependency owner {owner:?} is outside the program"
+                        )));
+                    };
+                    edges.insert(DependencyNode::Function(target));
+                    if let DependencyNode::Function(owner) = owner
+                        && let Some(edges) = calls.get_mut(owner)
+                    {
+                        edges.insert(target);
+                    }
+                }
+            }
         }
         Expr::Literal { .. }
         | Expr::Default { .. }
@@ -4632,6 +4655,21 @@ impl<'a> CallFlow<'a> {
                 for operand in expression.data_operands() {
                     self.collect_expr(operand, owner, environment, captures)?;
                 }
+                if let Some(owner) = owner {
+                    for target in key_order_targets(expression, self.functions) {
+                        if let Some(dependencies) = self
+                            .dependencies
+                            .get_mut(owner.node_index(self.globals.len()))
+                        {
+                            dependencies.insert(DependencyNode::Function(target));
+                        }
+                        if let DependencyNode::Function(owner) = owner
+                            && let Some(edges) = self.calls.get_mut(owner)
+                        {
+                            edges.insert(target);
+                        }
+                    }
+                }
             }
             Expr::Closure {
                 captures: closure_captures,
@@ -5479,10 +5517,12 @@ fn canonical_expr(expression: &Expr) -> String {
         Expr::Map {
             value_type,
             entries,
+            key_order,
             ..
         } => format!(
-            "(record kind: @map type: {} entries: (array{}))",
+            "(record kind: @map type: {}{} entries: (array{}))",
             canonical_type(value_type),
+            canonical_key_order(key_order.as_ref()),
             entries
                 .iter()
                 .map(|(key, value)| format!(
@@ -5496,10 +5536,12 @@ fn canonical_expr(expression: &Expr) -> String {
             collection,
             key,
             value_type,
+            key_order,
             ..
         } => format!(
-            "(record kind: @lookup result: {} collection: {} key: {})",
+            "(record kind: @lookup result: {}{} collection: {} key: {})",
             canonical_type(value_type),
+            canonical_key_order(key_order.as_ref()),
             canonical_expr(collection),
             canonical_expr(key)
         ),
@@ -5880,6 +5922,32 @@ fn canonical_operands<'a>(operands: impl Iterator<Item = &'a Expr>) -> String {
 /// unknown, so a call through one widens again to this same set.
 /// The functions that implement `interface`'s `member`: the candidates of a
 /// contract call.
+/// The canonical `key-order:` field of a map construction or lookup.
+fn canonical_key_order(key_order: Option<&TypeId>) -> String {
+    key_order
+        .map(|interface| format!(" key-order: @{}", interface.path()))
+        .unwrap_or_default()
+}
+
+/// The `compare` implementations a map construction or lookup orders its keys
+/// by, when its key type is not closed.
+fn key_order_targets(
+    expression: &Expr,
+    functions: &[CheckedFunction],
+) -> BTreeSet<usize> {
+    match expression {
+        Expr::Map {
+            key_order: Some(interface),
+            ..
+        }
+        | Expr::Lookup {
+            key_order: Some(interface),
+            ..
+        } => contract_targets(functions, interface, "compare"),
+        _ => BTreeSet::new(),
+    }
+}
+
 fn contract_targets(
     functions: &[CheckedFunction],
     interface: &TypeId,
