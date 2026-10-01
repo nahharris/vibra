@@ -133,13 +133,54 @@ pub struct SemanticType {
     labelled: Vec<LabelledType>,
 }
 
-/// The closed type shape used by the M2 semantic query schema.
+/// The closed type shape used by the semantic query schema.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SemanticTypeKind {
     /// A primitive type such as `str` or `i32`.
     Primitive,
-    /// A monomorphic function type.
+    /// A function type.
     Function,
+    /// A declared type, named by its path, with its type arguments.
+    Declared,
+    /// An anonymous tuple, with its components.
+    Tuple,
+    /// An array, with its element type.
+    Array,
+    /// A map, with its key and value types.
+    Map,
+    /// An anonymous record, with its fields as labelled slots.
+    Record,
+    /// An anonymous enum, with its variants as labelled slots.
+    Enum,
+    /// An anonymous union, with its members.
+    Union,
+    /// An interface value, named by its path or `any`, with its arguments.
+    Interface,
+    /// A generic parameter, by name.
+    Param,
+    /// The singleton type of one written atom.
+    Atom,
+}
+
+impl SemanticTypeKind {
+    /// The stable wire spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Primitive => "primitive",
+            Self::Function => "function",
+            Self::Declared => "declared",
+            Self::Tuple => "tuple",
+            Self::Array => "array",
+            Self::Map => "map",
+            Self::Record => "record",
+            Self::Enum => "enum",
+            Self::Union => "union",
+            Self::Interface => "interface",
+            Self::Param => "param",
+            Self::Atom => "atom",
+        }
+    }
 }
 
 impl SemanticType {
@@ -152,6 +193,24 @@ impl SemanticType {
             parameters: Vec::new(),
             result: None,
             labelled: Vec::new(),
+        }
+    }
+
+    /// Creates a type of any non-function shape: its name, its component
+    /// types, and its named slots.
+    #[must_use]
+    pub fn shaped(
+        kind: SemanticTypeKind,
+        name: impl Into<String>,
+        parameters: Vec<Self>,
+        labelled: Vec<LabelledType>,
+    ) -> Self {
+        Self {
+            kind,
+            name: name.into(),
+            parameters,
+            result: None,
+            labelled,
         }
     }
 
@@ -313,14 +372,146 @@ impl ImportAlias {
     }
 }
 
-/// The supported M2 function application contract.
+/// What an application applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ApplicationKind {
+    /// A function or method.
+    Function,
+    /// A declared type's constructor.
+    Constructor,
+    /// An interface's contract member.
+    Contract,
+}
+
+impl ApplicationKind {
+    /// The stable wire spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Function => "@function",
+            Self::Constructor => "@constructor",
+            Self::Contract => "@contract",
+        }
+    }
+}
+
+/// How a contract call found its implementation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum DispatchSelection {
+    /// A written implementation, selected from a known type.
+    Static,
+    /// The interface's default member.
+    Default,
+    /// The implementation for the type the receiver holds at run time.
+    Dynamic,
+    /// A closed toolchain conformance.
+    Closed,
+}
+
+impl DispatchSelection {
+    /// The stable wire spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Static => "static",
+            Self::Default => "default",
+            Self::Dynamic => "dynamic",
+            Self::Closed => "closed",
+        }
+    }
+}
+
+/// The interface, member, and receiver a contract call resolved to.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ContractDispatch {
+    interface: String,
+    member: String,
+    receiver: SemanticType,
+    selection: DispatchSelection,
+    destination: bool,
+}
+
+impl ContractDispatch {
+    /// The interface's path.
+    #[must_use]
+    pub fn interface(&self) -> &str {
+        &self.interface
+    }
+
+    /// The contract member's name.
+    #[must_use]
+    pub fn member(&self) -> &str {
+        &self.member
+    }
+
+    /// The type that selected the implementation: the receiver operand's
+    /// type, or the written destination.
+    #[must_use]
+    pub const fn receiver(&self) -> &SemanticType {
+        &self.receiver
+    }
+
+    /// How the implementation was found.
+    #[must_use]
+    pub const fn selection(&self) -> DispatchSelection {
+        self.selection
+    }
+
+    /// Whether the member is destination-dispatched: selected from the
+    /// written expected type, not from an operand.
+    #[must_use]
+    pub const fn destination(&self) -> bool {
+        self.destination
+    }
+}
+
+/// The shape of one `match` arm's pattern and the type it is matched against.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PatternFact {
+    kind: &'static str,
+    scrutinee_type: SemanticType,
+    narrowed: Option<SemanticType>,
+    union_members: Vec<SemanticType>,
+}
+
+impl PatternFact {
+    /// The pattern form: `@wildcard`, `@binding`, `@literal`, `@variant`,
+    /// `@record`, `@tuple`, `@wrapper`, `@array`, or `@as`.
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    /// The type of the value the pattern is matched against.
+    #[must_use]
+    pub const fn scrutinee_type(&self) -> &SemanticType {
+        &self.scrutinee_type
+    }
+
+    /// For an `as` pattern, the member type it narrows to.
+    #[must_use]
+    pub const fn narrowed(&self) -> Option<&SemanticType> {
+        self.narrowed.as_ref()
+    }
+
+    /// For an `as` pattern, every member of the scrutinee's union, in order.
+    #[must_use]
+    pub fn union_members(&self) -> &[SemanticType] {
+        &self.union_members
+    }
+}
+
+/// The contract of one application: a function call, a declared type's
+/// constructor, or an interface's contract member.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ApplicationContract {
+    kind: ApplicationKind,
     callee: Option<QueryIdentity>,
     callee_type: Option<SemanticType>,
     positional: Vec<SemanticType>,
     labelled: Vec<LabelledType>,
     result_type: SemanticType,
+    dispatch: Option<ContractDispatch>,
 }
 
 impl ApplicationContract {
@@ -334,12 +525,41 @@ impl ApplicationContract {
         result_type: SemanticType,
     ) -> Self {
         Self {
+            kind: ApplicationKind::Function,
             callee,
             callee_type,
             positional,
             labelled,
             result_type,
+            dispatch: None,
         }
+    }
+
+    /// This contract as a declared type's constructor.
+    #[must_use]
+    pub fn constructor(mut self) -> Self {
+        self.kind = ApplicationKind::Constructor;
+        self
+    }
+
+    /// This contract as a contract member call that resolved to `dispatch`.
+    #[must_use]
+    pub fn contract(mut self, dispatch: ContractDispatch) -> Self {
+        self.kind = ApplicationKind::Contract;
+        self.dispatch = Some(dispatch);
+        self
+    }
+
+    /// What the application applies.
+    #[must_use]
+    pub const fn kind(&self) -> ApplicationKind {
+        self.kind
+    }
+
+    /// For a contract member call, what it resolved to.
+    #[must_use]
+    pub const fn dispatch(&self) -> Option<&ContractDispatch> {
+        self.dispatch.as_ref()
     }
 
     /// Resolved callee identity, when available.
@@ -389,9 +609,16 @@ pub struct WorkspacePositionQuery {
     visible_imports: SemanticFact<Vec<ImportAlias>>,
     declaration_candidates: SemanticFact<Vec<QueryIdentity>>,
     application: SemanticFact<ApplicationContract>,
+    pattern: SemanticFact<PatternFact>,
 }
 
 impl WorkspacePositionQuery {
+    /// The shape of the `match` arm pattern at the position, when it is one.
+    #[must_use]
+    pub const fn pattern(&self) -> &SemanticFact<PatternFact> {
+        &self.pattern
+    }
+
     /// Embedded M1 structural result.
     #[must_use]
     pub const fn structural(&self) -> &StructuralQuery {
@@ -513,6 +740,18 @@ pub fn query_position(
     source_id: &str,
     offset: usize,
 ) -> Result<WorkspacePositionQuery, WorkspaceQueryError> {
+    query_position_with_bootstrap(workspace, source_id, offset, None)
+}
+
+/// Queries one captured source module with an optional already verified
+/// bootstrap package, so a module that imports the standard library keeps its
+/// checked facts. No filesystem access occurs in this function.
+pub fn query_position_with_bootstrap(
+    workspace: &WorkspaceSnapshot,
+    source_id: &str,
+    offset: usize,
+    verification: Option<&vibra_types::Stdlib>,
+) -> Result<WorkspacePositionQuery, WorkspaceQueryError> {
     let document = workspace
         .source()
         .documents()
@@ -525,17 +764,57 @@ pub fn query_position(
     let structural = syntax
         .query_position(offset)
         .map_err(WorkspaceQueryError::Structural)?;
-    let resolved = workspace
-        .resolve()
-        .map_err(|error| WorkspaceQueryError::Workspace(error.to_string()))?;
+    let resolved = match verification {
+        Some(verification) => workspace.resolve_with_bootstrap(verification),
+        None => workspace.resolve(),
+    }
+    .map_err(|error| WorkspaceQueryError::Workspace(error.to_string()))?;
     let catalog = CallableCatalog::build(workspace, &resolved);
     let mut collector =
         SemanticCollector::new(source_id, source, &resolved, &catalog, source.len());
     if let Some(ast) = syntax.ast() {
         collector.collect_ast(ast);
     }
+    // The checked facts come from the whole workspace when it checks: every
+    // unit and its import closure, as one module set. A workspace that does
+    // not check falls back to this source alone, which keeps the facts of a
+    // self-contained module beside a broken one.
+    let units = resolved
+        .modules()
+        .iter()
+        .filter(|module| module.package() == resolved.package())
+        .map(|module| module.unit().to_owned())
+        .collect::<std::collections::BTreeSet<_>>();
+    let (_, selected) =
+        crate::semantic::import_closure(&resolved, &units, verification);
+    let selected = selected.into_iter().collect::<Vec<_>>();
+    let workspace_checked =
+        vibra_types::check_resolved(&resolved, &selected, verification);
     let checked = check_source(source_id, source);
-    if let Some(program) = checked.program() {
+    if let Some(modules) = workspace_checked.modules() {
+        collector.functions = modules
+            .functions()
+            .iter()
+            .map(|function| {
+                (function.signature().clone(), function.implements().cloned())
+            })
+            .collect();
+        collector.types = modules.types().to_vec();
+        for global in modules.globals() {
+            collector.collect_ir(global.initializer());
+        }
+        for function in modules.functions() {
+            collector.collect_ir(function.body());
+        }
+    } else if let Some(program) = checked.program() {
+        collector.functions = program
+            .functions()
+            .iter()
+            .map(|function| {
+                (function.signature().clone(), function.implements().cloned())
+            })
+            .collect();
+        collector.types = program.types().to_vec();
         collector.collect_ir(program.entry().body());
         for global in program.globals() {
             collector.collect_ir(global.initializer());
@@ -652,6 +931,13 @@ struct SemanticCollector<'a> {
     patterns: Vec<PatternSite>,
     ir_sites: Vec<IrSite>,
     ir_expected_sites: Vec<IrExpectedSite>,
+    /// The arm pattern spans of each written `match`, by its span.
+    match_arms: BTreeMap<(usize, usize), Vec<ByteSpan>>,
+    ir_patterns: Vec<(ByteSpan, PatternFact)>,
+    /// Each checked function's signature and the contract member it
+    /// implements.
+    functions: Vec<(FunctionSignature, Option<vibra_ir::Implements>)>,
+    types: Vec<vibra_ir::TypeDefinition>,
 }
 
 impl<'a> SemanticCollector<'a> {
@@ -674,6 +960,10 @@ impl<'a> SemanticCollector<'a> {
             patterns: Vec::new(),
             ir_sites: Vec::new(),
             ir_expected_sites: Vec::new(),
+            match_arms: BTreeMap::new(),
+            ir_patterns: Vec::new(),
+            functions: Vec::new(),
+            types: Vec::new(),
         }
     }
 
@@ -704,10 +994,11 @@ impl<'a> SemanticCollector<'a> {
                         );
                     }
                 }
-                Declaration::Import(_)
-                | Declaration::Deftype(_)
-                | Declaration::Defint(_)
-                | Declaration::Deffect(_) => {}
+                // A type and an interface own functions: their methods, an
+                // interface default, and the members of each `impl` block.
+                Declaration::Deftype(owner) => self.collect_members(owner.members()),
+                Declaration::Defint(owner) => self.collect_members(owner.members()),
+                Declaration::Import(_) | Declaration::Deffect(_) => {}
             }
         }
     }
@@ -751,6 +1042,21 @@ impl<'a> SemanticCollector<'a> {
                 observed_type: None,
                 application: None,
             });
+        }
+    }
+
+    fn collect_members(&mut self, members: &[vibra_syntax::TypeMember]) {
+        for member in members {
+            match member {
+                vibra_syntax::TypeMember::Method(function) => {
+                    self.collect_function(function);
+                }
+                vibra_syntax::TypeMember::Implementation(block) => {
+                    for function in block.members() {
+                        self.collect_function(function);
+                    }
+                }
+            }
         }
     }
 
@@ -1060,6 +1366,10 @@ impl<'a> SemanticCollector<'a> {
                 self.collect_expression(operand, locals, context, expected_type);
             }
             ExpressionKind::Match { scrutinee, arms } => {
+                self.match_arms.insert(
+                    (expression.span().start(), expression.span().end()),
+                    arms.iter().map(|arm| arm.pattern().span()).collect(),
+                );
                 self.collect_expression(scrutinee, locals, "branch", None);
                 for arm in arms {
                     let mut nested = locals.to_vec();
@@ -1179,7 +1489,7 @@ impl<'a> SemanticCollector<'a> {
     }
 
     fn collect_ir(&mut self, expression: &Expr) {
-        let application = ir_application_contract(expression);
+        let application = self.ir_application(expression);
         if let Expr::Call {
             target: CallTarget::Indirect { callee, .. },
             arguments,
@@ -1233,6 +1543,24 @@ impl<'a> SemanticCollector<'a> {
             Expr::Match {
                 scrutinee, arms, ..
             } => {
+                // A written `match` pairs its arms with the checked ones in
+                // order; a destructuring `let` or parameter has no arm.
+                let span = expression.origin().span();
+                if expression.origin().source_id() == self.source_id
+                    && let Some(spans) =
+                        self.match_arms.get(&(span.start(), span.end()))
+                    && spans.len() == arms.len()
+                {
+                    let scrutinee_type = scrutinee.result_type();
+                    let facts = spans
+                        .iter()
+                        .zip(arms.iter())
+                        .map(|(span, arm)| {
+                            (*span, self.pattern_fact(&arm.pattern, &scrutinee_type))
+                        })
+                        .collect::<Vec<_>>();
+                    self.ir_patterns.extend(facts);
+                }
                 self.collect_ir(scrutinee);
                 for arm in arms {
                     self.collect_ir(&arm.body);
@@ -1445,6 +1773,19 @@ impl<'a> SemanticCollector<'a> {
         } else {
             SemanticFact::unavailable()
         };
+        let pattern = if structural_status == SemanticFactStatus::Exact {
+            self.ir_patterns
+                .iter()
+                .filter(|(span, _)| {
+                    contains(*span, structural.offset(), self.source_length)
+                })
+                .min_by_key(|(span, _)| span.len())
+                .map_or_else(SemanticFact::unavailable, |(_, fact)| {
+                    SemanticFact::exact(fact.clone())
+                })
+        } else {
+            SemanticFact::unavailable()
+        };
         WorkspacePositionQuery {
             structural,
             workspace_revision: revision,
@@ -1459,6 +1800,231 @@ impl<'a> SemanticCollector<'a> {
             visible_imports,
             declaration_candidates,
             application,
+            pattern,
+        }
+    }
+
+    /// The shape of one checked arm pattern against `scrutinee`.
+    fn pattern_fact(
+        &self,
+        pattern: &vibra_ir::Pattern,
+        scrutinee: &Type,
+    ) -> PatternFact {
+        let (kind, narrowed) = match pattern {
+            vibra_ir::Pattern::Wildcard => ("@wildcard", None),
+            vibra_ir::Pattern::Bind { .. } => ("@binding", None),
+            vibra_ir::Pattern::Literal(_) => ("@literal", None),
+            vibra_ir::Pattern::Variant { .. } => ("@variant", None),
+            vibra_ir::Pattern::Record(_) => ("@record", None),
+            vibra_ir::Pattern::Tuple(_) => ("@tuple", None),
+            vibra_ir::Pattern::Wrap(_) => ("@wrapper", None),
+            vibra_ir::Pattern::Array(_) => ("@array", None),
+            vibra_ir::Pattern::Member { member, .. } => {
+                ("@as", Some(semantic_type(member)))
+            }
+        };
+        // An `as` pattern narrows a union: an anonymous one lists its
+        // members, a declared one keeps them in its definition.
+        let union_members = if narrowed.is_some() {
+            match scrutinee {
+                Type::Union(members) => members.iter().map(semantic_type).collect(),
+                Type::Declared(id) | Type::Applied(id, _) => self
+                    .types
+                    .iter()
+                    .find(|definition| definition.id() == id)
+                    .and_then(|definition| match definition.body() {
+                        vibra_ir::TypeBody::Union(members) => {
+                            Some(members.iter().map(semantic_type).collect())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            }
+        } else {
+            Vec::new()
+        };
+        PatternFact {
+            kind,
+            scrutinee_type: semantic_type(scrutinee),
+            narrowed,
+            union_members,
+        }
+    }
+
+    /// The application contract of one checked expression: an indirect
+    /// function call, a declared type's constructor, or a contract call.
+    fn ir_application(&self, expression: &Expr) -> Option<ApplicationContract> {
+        let slots =
+            |types: Vec<Type>| types.iter().map(semantic_type).collect::<Vec<_>>();
+        let declared = |value_type: &Type| {
+            matches!(value_type, Type::Declared(_) | Type::Applied(_, _))
+        };
+        match expression {
+            Expr::Call {
+                target: CallTarget::Indirect { .. },
+                ..
+            } => ir_application_contract(expression),
+            // A constructor's contract is its fields or payload.
+            Expr::Record {
+                value_type, fields, ..
+            } if declared(value_type) => Some(
+                ApplicationContract::new(
+                    None,
+                    None,
+                    Vec::new(),
+                    fields
+                        .iter()
+                        .map(|(name, value)| {
+                            LabelledType::new(name, semantic_type(&value.result_type()))
+                        })
+                        .collect(),
+                    semantic_type(value_type),
+                )
+                .constructor(),
+            ),
+            Expr::Variant {
+                value_type,
+                payload,
+                ..
+            } if declared(value_type) => Some(
+                ApplicationContract::new(
+                    None,
+                    None,
+                    slots(payload.iter().map(|value| value.result_type()).collect()),
+                    Vec::new(),
+                    semantic_type(value_type),
+                )
+                .constructor(),
+            ),
+            Expr::Wrap {
+                value_type, value, ..
+            } if declared(value_type) => Some(
+                ApplicationContract::new(
+                    None,
+                    None,
+                    slots(vec![value.result_type()]),
+                    Vec::new(),
+                    semantic_type(value_type),
+                )
+                .constructor(),
+            ),
+            Expr::Tuple {
+                value_type,
+                components,
+                ..
+            } if declared(value_type) => Some(
+                ApplicationContract::new(
+                    None,
+                    None,
+                    slots(components.iter().map(Expr::result_type).collect()),
+                    Vec::new(),
+                    semantic_type(value_type),
+                )
+                .constructor(),
+            ),
+            // A contract member dispatched at run time from its receiver.
+            Expr::Call {
+                target:
+                    CallTarget::Contract {
+                        interface,
+                        member,
+                        receiver,
+                        signature,
+                        ..
+                    },
+                arguments,
+                result,
+                ..
+            } => Some(
+                ApplicationContract::new(
+                    None,
+                    Some(semantic_type_signature(signature)),
+                    slots(arguments.iter().map(Expr::result_type).collect()),
+                    Vec::new(),
+                    semantic_type(result),
+                )
+                .contract(ContractDispatch {
+                    interface: interface.path().to_owned(),
+                    member: member.clone(),
+                    receiver: semantic_type(&arguments.get(*receiver)?.result_type()),
+                    selection: DispatchSelection::Dynamic,
+                    destination: false,
+                }),
+            ),
+            // A contract member the checker resolved to one function: a
+            // written implementation or the interface's default.
+            Expr::Call {
+                target: CallTarget::Direct(function),
+                arguments,
+                result,
+                ..
+            } => {
+                let (signature, implements) = self.functions.get(*function)?;
+                let implements = implements.as_ref()?;
+                let position = signature
+                    .parameters()
+                    .iter()
+                    .position(|parameter| *parameter == implements.receiver);
+                let default = matches!(implements.receiver, Type::Param(_));
+                let receiver = match (default, position) {
+                    (true, Some(position)) => arguments.get(position)?.result_type(),
+                    _ => implements.receiver.clone(),
+                };
+                Some(
+                    ApplicationContract::new(
+                        None,
+                        Some(semantic_type_signature(signature)),
+                        slots(arguments.iter().map(Expr::result_type).collect()),
+                        Vec::new(),
+                        semantic_type(result),
+                    )
+                    .contract(ContractDispatch {
+                        interface: implements.interface.path().to_owned(),
+                        member: implements.member.clone(),
+                        receiver: semantic_type(&receiver),
+                        selection: if default {
+                            DispatchSelection::Default
+                        } else {
+                            DispatchSelection::Static
+                        },
+                        destination: position.is_none(),
+                    }),
+                )
+            }
+            // An integer conversion: `from` or `try-from` on a builtin
+            // destination, answered by the closed registry.
+            Expr::External {
+                intrinsic:
+                    vibra_ir::external::CompilerIntrinsic::Convert(source, target),
+                arguments,
+                result,
+                ..
+            } => Some(
+                ApplicationContract::new(
+                    None,
+                    None,
+                    slots(arguments.iter().map(Expr::result_type).collect()),
+                    Vec::new(),
+                    semantic_type(result),
+                )
+                .contract(ContractDispatch {
+                    interface:
+                        if vibra_ir::external::CompilerIntrinsic::conversion_is_total(
+                            *source, *target,
+                        ) {
+                            "std.core.from"
+                        } else {
+                            "std.core.try-from"
+                        }
+                        .to_owned(),
+                    member: "convert".to_owned(),
+                    receiver: semantic_type(&target.to_type()),
+                    selection: DispatchSelection::Closed,
+                    destination: true,
+                }),
+            ),
+            _ => None,
         }
     }
 
@@ -1603,12 +2169,77 @@ fn primitive_name(value: &str) -> Option<&'static str> {
 }
 
 fn semantic_type_primitive(value: &Type) -> Option<SemanticType> {
+    Some(semantic_type(value))
+}
+
+/// The query shape of a checked type.
+fn semantic_type(value: &Type) -> SemanticType {
+    let all = |types: &[Type]| types.iter().map(semantic_type).collect::<Vec<_>>();
+    let slots = |members: &[(String, Type)]| {
+        members
+            .iter()
+            .map(|(name, value)| LabelledType::new(name, semantic_type(value)))
+            .collect::<Vec<_>>()
+    };
+    let shaped = SemanticType::shaped;
     match value {
-        Type::Function(signature) => Some(semantic_type_signature(signature)),
-        // Declared and structural type facts are part of the M3 index and
-        // query payloads (Step 15); until then the fact is unavailable.
-        Type::Declared(_) | Type::Record(_) | Type::Enum(_) => None,
-        _ => Some(SemanticType::primitive(value.as_str())),
+        Type::Function(signature) => semantic_type_signature(signature),
+        Type::Declared(id) => shaped(
+            SemanticTypeKind::Declared,
+            id.path(),
+            Vec::new(),
+            Vec::new(),
+        ),
+        Type::Applied(id, arguments) => shaped(
+            SemanticTypeKind::Declared,
+            id.path(),
+            all(arguments),
+            Vec::new(),
+        ),
+        Type::Interface(id, arguments) => shaped(
+            SemanticTypeKind::Interface,
+            id.path(),
+            all(arguments),
+            Vec::new(),
+        ),
+        Type::Any => shaped(SemanticTypeKind::Interface, "any", Vec::new(), Vec::new()),
+        Type::Tuple(components) => shaped(
+            SemanticTypeKind::Tuple,
+            "tuple",
+            all(components),
+            Vec::new(),
+        ),
+        Type::Union(members) => {
+            shaped(SemanticTypeKind::Union, "union", all(members), Vec::new())
+        }
+        Type::Array(element) => shaped(
+            SemanticTypeKind::Array,
+            "array",
+            vec![semantic_type(element)],
+            Vec::new(),
+        ),
+        Type::Map(key, value) => shaped(
+            SemanticTypeKind::Map,
+            "map",
+            vec![semantic_type(key), semantic_type(value)],
+            Vec::new(),
+        ),
+        Type::Record(fields) => shaped(
+            SemanticTypeKind::Record,
+            "record",
+            Vec::new(),
+            slots(fields),
+        ),
+        Type::Enum(variants) => {
+            shaped(SemanticTypeKind::Enum, "enum", Vec::new(), slots(variants))
+        }
+        Type::Param(name) => {
+            shaped(SemanticTypeKind::Param, name, Vec::new(), Vec::new())
+        }
+        Type::AtomSingleton(name) => {
+            shaped(SemanticTypeKind::Atom, name, Vec::new(), Vec::new())
+        }
+        _ => SemanticType::primitive(value.as_str()),
     }
 }
 

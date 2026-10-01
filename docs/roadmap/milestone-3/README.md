@@ -133,8 +133,8 @@ Stage 3B — interfaces, generics, conversion, and iteration.
 | 14a | [The iteration contract: `iter` with `next` under `@iter`, closed builtin conformance, dispatch of a generic interface through its interface value, and inference through conformance](14a-iter-contract.md) | 13 | landed | PR #328, merge `aa6090a` |
 | 14b | [Iteration defaults and adapters: `map`, `filter`, `skip`, `take`, and `collect` in Vibra, the adapter types, and contract members with their own generics](14b-iter-defaults.md) | 14a | landed | PR #329, merge `7b0252d` |
 | 14c | [Contract laws and the role check: written algebraic laws for `equatable`, `ordered`, and `iter` with conformance examples, and the loader's missing-role check](14c-laws-and-roles.md) | 14b | landed | PR #330, merge `ebfd777` |
-| 15a | [Index records: the `@index.v1` document of declaration, implementation, and reference records, its JSON contract, and a corpus operation](15a-index-records.md) | 14c | landed | Step 15a PR (conditional on merge) |
-| 15b | [Type-aware query metadata for the Stage 3A and 3B forms at a source position](15b-query-metadata.md) | 15a | not started | — |
+| 15a | [Index records: the `@index.v1` document of declaration, implementation, and reference records, its JSON contract, and a corpus operation](15a-index-records.md) | 14c | landed | PR #331, merge `3025969` |
+| 15b | [Type-aware query metadata for the Stage 3A and 3B forms at a source position](15b-query-metadata.md) | 15a | landed | Step 15b PR (conditional on merge) |
 | 16 | [M3 demo and exit gate, including the M2 deferral sweep — evidence step](16-exit.md) | 15b | not started | — |
 
 Steps 1, 4a, and 10 are specification prerequisites and Steps 9 and 16 are

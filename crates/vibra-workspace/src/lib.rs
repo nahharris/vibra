@@ -338,4 +338,33 @@ impl WorkspaceSnapshot {
     ) -> Result<query::WorkspacePositionQuery, query::WorkspaceQueryError> {
         query::query_position(self, source_id, offset)
     }
+
+    /// Queries one captured source position with an already loaded bootstrap
+    /// package overlay.
+    pub fn query_position_with_bootstrap(
+        &self,
+        source_id: &str,
+        offset: usize,
+        verification: &vibra_types::Stdlib,
+    ) -> Result<query::WorkspacePositionQuery, query::WorkspaceQueryError> {
+        query::query_position_with_bootstrap(
+            self,
+            source_id,
+            offset,
+            Some(verification),
+        )
+    }
+
+    /// Queries one captured source position against the standard library
+    /// embedded in this toolchain.
+    pub fn query_position_with_embedded_stdlib(
+        &self,
+        source_id: &str,
+        offset: usize,
+    ) -> Result<query::WorkspacePositionQuery, query::WorkspaceQueryError> {
+        let stdlib = vibra_types::load_stdlib().map_err(|error| {
+            query::WorkspaceQueryError::Workspace(error.to_string())
+        })?;
+        query::query_position_with_bootstrap(self, source_id, offset, Some(&stdlib))
+    }
 }

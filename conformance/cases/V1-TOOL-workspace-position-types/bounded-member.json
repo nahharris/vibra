@@ -1,24 +1,24 @@
 {
   "schemaVersion": 1,
-  "workspaceRevision": "sha256:cad1de46d849d1f71e8955b66e21725ead26f58b5f51183736125d96c44ce3d6",
+  "workspaceRevision": "sha256:c778820a5500c1f8f68d2f94d65866debc333f96674b649c7af38bbb83a5a8ab",
   "sourceId": "src/main.vib",
-  "offset": 84,
-  "nodeId": "src/main.vib#84-85",
+  "offset": 106,
+  "nodeId": "src/main.vib#106-107",
   "structural": {
     "schemaVersion": 1,
-    "offset": 84,
+    "offset": 106,
     "sourceId": "src/main.vib",
     "span": {
       "sourceId": "src/main.vib",
-      "start": 84,
-      "end": 85,
+      "start": 106,
+      "end": 107,
       "startPosition": {
-        "line": 3,
-        "column": 21
+        "line": 5,
+        "column": 32
       },
       "endPosition": {
-        "line": 3,
-        "column": 22
+        "line": 5,
+        "column": 33
       }
     },
     "mode": "source",
@@ -54,7 +54,7 @@
     "status": "exact",
     "value": {
       "kind": "primitive",
-      "name": "i32",
+      "name": "str",
       "parameters": [],
       "result": null,
       "labelled": []
@@ -64,7 +64,7 @@
     "status": "exact",
     "value": {
       "kind": "primitive",
-      "name": "i32",
+      "name": "str",
       "parameters": [],
       "result": null,
       "labelled": []
@@ -72,26 +72,31 @@
   },
   "visibleLocals": {
     "status": "exact",
-    "value": []
+    "value": [
+      {
+        "name": "value",
+        "identity": "binder:src/main.vib:90-95"
+      }
+    ]
   },
   "visibleImports": {
     "status": "exact",
     "value": [
       {
-        "alias": "helper",
-        "module": "@app.helper",
+        "alias": "from",
+        "module": "@std.core",
         "sourceId": "src/main.vib",
         "span": {
           "sourceId": "src/main.vib",
           "start": 0,
-          "end": 27,
+          "end": 28,
           "startPosition": {
             "line": 1,
             "column": 1
           },
           "endPosition": {
             "line": 1,
-            "column": 28
+            "column": 29
           }
         }
       }
@@ -104,18 +109,15 @@
   "application": {
     "status": "exact",
     "value": {
-      "kind": "@function",
-      "callee": {
-        "kind": "function",
-        "canonical": "@app@0.1.0/app.main.choose"
-      },
+      "kind": "@contract",
+      "callee": null,
       "calleeType": {
         "kind": "function",
         "name": "fn",
         "parameters": [
           {
-            "kind": "primitive",
-            "name": "i32",
+            "kind": "param",
+            "name": "self",
             "parameters": [],
             "result": null,
             "labelled": []
@@ -123,7 +125,7 @@
         ],
         "result": {
           "kind": "primitive",
-          "name": "i32",
+          "name": "str",
           "parameters": [],
           "result": null,
           "labelled": []
@@ -132,8 +134,8 @@
       },
       "positional": [
         {
-          "kind": "primitive",
-          "name": "i32",
+          "kind": "param",
+          "name": "self",
           "parameters": [],
           "result": null,
           "labelled": []
@@ -142,12 +144,24 @@
       "labelled": [],
       "resultType": {
         "kind": "primitive",
-        "name": "i32",
+        "name": "str",
         "parameters": [],
         "result": null,
         "labelled": []
       },
-      "dispatch": null
+      "dispatch": {
+        "interface": "app.main.shape",
+        "member": "name",
+        "receiver": {
+          "kind": "param",
+          "name": "self",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        },
+        "selection": "dynamic",
+        "destination": false
+      }
     }
   },
   "pattern": {

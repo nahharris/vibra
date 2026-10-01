@@ -27,6 +27,7 @@ pub struct ResolvedCheckResult {
     function_indices: BTreeMap<DeclarationId, usize>,
     signatures: BTreeMap<DeclarationId, IndexedSignature>,
     implementations: Vec<IndexedImplementation>,
+    modules: Option<Arc<CheckedModuleSet>>,
 }
 
 /// The checked type of one value, function, or method, for an index record
@@ -166,6 +167,14 @@ impl ResolvedCheckResult {
         self.signatures.get(declaration)
     }
 
+    /// The validated module set of the selected modules: every checked
+    /// function, global, and type definition. Absent when a module did not
+    /// check or the scope declares no function.
+    #[must_use]
+    pub fn modules(&self) -> Option<&CheckedModuleSet> {
+        self.modules.as_deref()
+    }
+
     /// Every `impl` block of the selected modules, in registration order.
     #[must_use]
     pub fn implementations(&self) -> &[IndexedImplementation] {
@@ -229,6 +238,7 @@ pub fn check_resolved(
             function_indices: BTreeMap::new(),
             signatures: BTreeMap::new(),
             implementations: Vec::new(),
+            modules: None,
         };
     }
     let mut modules = snapshot
@@ -1269,6 +1279,7 @@ pub fn check_resolved(
         function_indices,
         signatures,
         implementations,
+        modules: module_set,
     }
 }
 

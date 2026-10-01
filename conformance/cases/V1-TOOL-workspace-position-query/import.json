@@ -98,5 +98,9 @@
   "application": {
     "status": "unavailable",
     "value": null
+  },
+  "pattern": {
+    "status": "unavailable",
+    "value": null
   }
 }
