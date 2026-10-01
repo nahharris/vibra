@@ -52,6 +52,26 @@ fn type_modules() -> &'static [(&'static str, &'static str, SourceAst)] {
     })
 }
 
+/// The standard-library module whose functions join a single-source run that
+/// imports it: `@std.iter`, whose default members and adapter types are
+/// Vibra a program calls. Its source identity and declarations.
+pub(crate) fn library_module(
+    source: &SourceAst,
+) -> Option<(&'static str, &'static SourceAst)> {
+    let imported = source.declarations().iter().any(|declaration| {
+        matches!(declaration, Declaration::Import(import)
+            if import.target().value() == "std.iter"
+                || import.target().value().starts_with("std.iter."))
+    });
+    if !imported {
+        return None;
+    }
+    type_modules()
+        .iter()
+        .find(|(source_id, _, _)| *source_id == STDLIB_ITER_SOURCE_ID)
+        .map(|(source_id, _, ast)| (*source_id, ast))
+}
+
 /// Declares every type of `@std.option`, `@std.result`, and `@std.core` that
 /// the run has not declared itself, adding each to `declarations` so its body
 /// lowers with the run's own declarations. A role-playing type the run

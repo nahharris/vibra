@@ -666,13 +666,33 @@ pub(crate) fn check_contract_call(
             message,
         );
     };
-    if !contract.generics.is_empty()
-        || !contract.signature.labelled().is_empty()
+    if !contract.signature.labelled().is_empty()
         || application.type_arguments().is_some()
     {
         unavailable(
             environment,
-            "contract members with their own generics or labelled operands arrive with M3 Step 14",
+            "labelled operands and written type arguments on a contract member are outside the M3 profile",
+        );
+        return None;
+    }
+    // A default member is one function for every receiver.
+    if contract.default
+        && let Some(position) = contract.receiver
+    {
+        return check_default_call(
+            environment,
+            application,
+            interface,
+            &declared,
+            &contract,
+            position,
+            expected,
+        );
+    }
+    if !contract.generics.is_empty() {
+        unavailable(
+            environment,
+            "an abstract contract member with its own generic parameters is outside the M3 profile",
         );
         return None;
     }
@@ -1041,6 +1061,7 @@ pub(crate) fn materialize(
         }
         register(types, plan, &written, &defaults);
     }
+    types.set_default_members(defaults);
     types.set_bounds_ready();
     check_header_bounds(types, modules, functions, diagnostics);
 }
@@ -1672,9 +1693,26 @@ fn candidates(
 /// registry of the builtin constructor types.
 pub(crate) fn conformances(
     types: &TypeNames,
+    bounds: &BTreeMap<String, usize>,
     interface: usize,
     value: &Type,
 ) -> Vec<Vec<Type>> {
+    // The `self` of a default member conforms at the interface's own
+    // parameters.
+    if let Type::Param(name) = value {
+        return match types.interface(interface) {
+            Some(declared) if bounds.get(name) == Some(&interface) => {
+                vec![
+                    declared
+                        .parameters
+                        .iter()
+                        .map(|parameter| Type::Param(parameter.clone()))
+                        .collect(),
+                ]
+            }
+            _ => Vec::new(),
+        };
+    }
     let mut found = types
         .implementations()
         .iter()
@@ -1773,4 +1811,147 @@ fn conversion_contract(types: &TypeNames, interface: usize) -> Option<bool> {
         .into_iter()
         .find(|(name, _)| *id == crate::stdlib::stdlib_type_id(&["core"], name))
         .map(|(_, total)| total)
+}
+
+/// Checks a call of a default contract member. A default is never
+/// redeclared, so the call is a direct call of the one default function,
+/// with `self` as the receiver's type, the interface's parameters as the
+/// arguments at which the receiver conforms, and the member's own generic
+/// parameters inferred from the operands and the written expected type.
+fn check_default_call(
+    environment: &mut CheckEnvironment<'_>,
+    application: &Application,
+    interface: usize,
+    declared: &DeclaredInterface,
+    contract: &ContractMember,
+    position: usize,
+    expected: Option<Type>,
+) -> Option<Expr> {
+    let span = application.span();
+    let operands = application.arguments();
+    if operands.len() != contract.signature.parameters().len()
+        || operands.iter().any(|operand| operand.label().is_some())
+    {
+        call_contract_error(
+            environment,
+            span,
+            format!(
+                "`{}.{}` takes exactly {} unlabelled operands",
+                declared.name,
+                contract.name,
+                contract.signature.parameters().len()
+            ),
+        );
+        return None;
+    }
+    let function = environment
+        .types
+        .default_member(interface, &contract.name)?;
+    let receiver_operand = operands.get(position)?.value();
+    let receiver_value = check_expression(environment, receiver_operand, None)?;
+    let receiver = receiver_value.result_type();
+    let own = || {
+        declared
+            .parameters
+            .iter()
+            .map(|parameter| Type::Param(parameter.clone()))
+            .collect::<Vec<_>>()
+    };
+    let arguments = match &receiver {
+        Type::Interface(id, arguments) if *id == declared.id => Some(arguments.clone()),
+        Type::Interface(_, _) | Type::Any => None,
+        _ if declared.parameters.is_empty() => {
+            let scope =
+                Scope::new(environment.self_type.as_ref(), &environment.generics)
+                    .with_bounds(&environment.bounds);
+            environment
+                .types
+                .satisfies(scope, interface, &receiver)
+                .then(Vec::new)
+        }
+        Type::Param(name) => {
+            (environment.bounds.get(name) == Some(&interface)).then(own)
+        }
+        _ => match conformances(
+            environment.types,
+            &environment.bounds,
+            interface,
+            &receiver,
+        )
+        .as_slice()
+        {
+            [arguments] => Some(arguments.clone()),
+            [] => None,
+            _ => {
+                environment.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::TypeAmbiguousImplementation,
+                        span,
+                        format!(
+                            "{receiver} implements `{}` at more than one argument list; write the interface value with `as`",
+                            declared.name
+                        ),
+                    )
+                    .with_source_id(environment.source_id),
+                );
+                return None;
+            }
+        },
+    };
+    let Some(arguments) = arguments else {
+        unsatisfied(
+            environment,
+            receiver_operand.span(),
+            &receiver,
+            &declared.name,
+        );
+        return None;
+    };
+    let mut substitution = BTreeMap::from([(SELF.to_owned(), receiver.clone())]);
+    substitution.extend(declared.parameters.iter().cloned().zip(arguments));
+    let signature = contract.signature.substitute(&substitution);
+    let mut instantiation = crate::infer::Instantiation::new(&contract.generics);
+    let opened = instantiation.open_signature(&signature);
+    if let Some(expected) = &expected {
+        // A written expected type may fix a generic the operands leave open.
+        let _ = instantiation.unify(&opened.result(), expected);
+    }
+    let mut checked = Vec::with_capacity(operands.len());
+    for (index, (operand, pattern)) in
+        operands.iter().zip(opened.parameters()).enumerate()
+    {
+        if index == position {
+            checked.push(receiver_value.clone());
+        } else {
+            checked.push(crate::check_inferred_operand(
+                environment,
+                &mut instantiation,
+                operand.value(),
+                pattern,
+                false,
+            )?);
+        }
+    }
+    let unbound = instantiation.unbound();
+    let Some(Type::Function(instantiated)) = instantiation
+        .resolved(&Type::Function(Box::new(opened)))
+        .filter(|_| unbound.is_empty())
+    else {
+        crate::ambiguous_generic(environment, span, &unbound);
+        return None;
+    };
+    let result = instantiated.result();
+    crate::ensure_expected(environment, span, expected.clone(), result.clone());
+    if expected
+        .as_ref()
+        .is_some_and(|expected| !crate::types_match(expected, &result))
+    {
+        return None;
+    }
+    Some(Expr::call(
+        function,
+        checked,
+        result,
+        SourceOrigin::new(environment.source_id, span),
+    ))
 }

@@ -187,6 +187,8 @@ pub(crate) struct TypeNames {
     standard_contracts: Vec<(usize, &'static DefintDeclaration)>,
     /// Declared types that write an `impl` of `@std.core`'s `ordered`.
     ordered_types: BTreeSet<TypeId>,
+    /// The function of each default contract member, by interface and name.
+    default_members: BTreeMap<(usize, String), usize>,
     /// Whether implementations are registered, so lowering checks bounds.
     bounds_ready: bool,
     /// The interface bound of each generic `lambda`'s quantified name, keyed
@@ -363,6 +365,19 @@ impl TypeNames {
         if arguments.is_empty() {
             return self.satisfies(scope, interface, value);
         }
+        // The `self` of a default member conforms at the interface's own
+        // parameters.
+        if let Type::Param(name) = value {
+            return scope.bounds.and_then(|bounds| bounds.get(name)) == Some(&interface)
+                && self.interface(interface).is_some_and(|declared| {
+                    declared.parameters.len() == arguments.len()
+                        && declared.parameters.iter().zip(arguments).all(
+                            |(parameter, argument)| {
+                                matches!(argument, Type::Param(name) if name == parameter)
+                            },
+                        )
+                });
+        }
         // The builtin constructor types iterate through the closed registry.
         if crate::interfaces::is_iter(self, interface)
             && let [item] = arguments
@@ -506,6 +521,21 @@ impl TypeNames {
                     .map(|interface| (name.clone(), *interface))
             })
             .collect()
+    }
+
+    /// Records the function of each default contract member.
+    pub(crate) fn set_default_members(
+        &mut self,
+        members: BTreeMap<(usize, String), usize>,
+    ) {
+        self.default_members = members;
+    }
+
+    /// The function of the default member `name` of `interface`.
+    pub(crate) fn default_member(&self, interface: usize, name: &str) -> Option<usize> {
+        self.default_members
+            .get(&(interface, name.to_owned()))
+            .copied()
     }
 
     /// Marks the implementations as registered, so lowering checks the bounds

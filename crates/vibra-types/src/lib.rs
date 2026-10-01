@@ -554,7 +554,18 @@ struct Checker<'a> {
     trusted_bootstrap: bool,
     text_import_authorized: bool,
     text_import_span: Option<ByteSpan>,
+    /// The standard-library module whose functions join this run, when the
+    /// source imports it: its source identity and declarations.
+    library: Option<(&'static str, &'static SourceAst)>,
+    /// The names the library module's own bodies see: its functions and the
+    /// builtin members. They are not the source's names.
+    library_indices: BTreeMap<String, usize>,
+    no_indices: BTreeMap<String, usize>,
+    no_names: BTreeMap<String, ByteSpan>,
 }
+
+/// The module index of the library module's function headers.
+const LIBRARY_MODULE: usize = 1;
 
 impl<'a> Checker<'a> {
     fn new(
@@ -579,6 +590,10 @@ impl<'a> Checker<'a> {
             trusted_bootstrap,
             text_import_authorized: false,
             text_import_span: None,
+            library: standard::library_module(ast),
+            library_indices: BTreeMap::new(),
+            no_indices: BTreeMap::new(),
+            no_names: BTreeMap::new(),
         }
     }
 
@@ -883,12 +898,67 @@ impl<'a> Checker<'a> {
                 ),
             }
         }
+        // The library module's functions, by the names its own bodies use.
+        if let Some((library_id, library)) = self.library {
+            for (declaration_index, declaration) in
+                library.declarations().iter().enumerate()
+            {
+                let Declaration::Defn(function) = declaration else {
+                    continue;
+                };
+                let Some((generics, bounds)) = nominal::function_generics(
+                    &self.types,
+                    &[],
+                    function,
+                    library_id,
+                    self.diagnostics,
+                ) else {
+                    continue;
+                };
+                let Some(signature) = check_signature(
+                    library_id,
+                    function,
+                    self.diagnostics,
+                    &self.types,
+                    nominal::Scope::new(None, &generics).with_bounds(&bounds),
+                ) else {
+                    continue;
+                };
+                let name = function.name().value();
+                self.library_indices
+                    .insert(name.to_owned(), self.functions.len());
+                self.functions.push(FunctionHeader {
+                    declaration_index,
+                    module_index: LIBRARY_MODULE,
+                    source_id: library_id.to_owned(),
+                    name: format!("std.iter.{name}"),
+                    signature,
+                    external: None,
+                    external_declared: false,
+                    test: None,
+                    test_assertion: None,
+                    member_index: None,
+                    self_type: None,
+                    type_parameters: generics,
+                    bounds,
+                    impl_member: None,
+                    implements: None,
+                });
+            }
+        }
+        let mut plan_modules = vec![interfaces::PlanModule {
+            source_id: self.source_id,
+            declarations: self.ast.declarations(),
+        }];
+        if let Some((library_id, library)) = self.library {
+            plan_modules.push(interfaces::PlanModule {
+                source_id: library_id,
+                declarations: library.declarations(),
+            });
+        }
         interfaces::materialize(
             &mut self.types,
-            &[interfaces::PlanModule {
-                source_id: self.source_id,
-                declarations: self.ast.declarations(),
-            }],
+            &plan_modules,
             &mut self.functions,
             &|_, _| None,
             self.diagnostics,
@@ -938,7 +1008,10 @@ impl<'a> Checker<'a> {
         // Builtin static methods such as `array.of` are reached through the
         // type path with no import; only the members this module names join
         // its program.
-        let paths = dotted_value_paths(self.ast);
+        let mut paths = dotted_value_paths(self.ast);
+        if let Some((_, library)) = self.library {
+            paths.extend(dotted_value_paths(library));
+        }
         for member in standard::builtin_members(&self.types) {
             let path = member.path();
             if !paths.contains(&path) || self.function_indices.contains_key(&path) {
@@ -946,6 +1019,9 @@ impl<'a> Checker<'a> {
             }
             let index = self.functions.len();
             self.function_indices.insert(path.clone(), index);
+            if self.library.is_some() {
+                self.library_indices.insert(path.clone(), index);
+            }
             self.functions.push(FunctionHeader {
                 declaration_index: IMPORTED_FUNCTION_DECLARATION,
                 module_index: 0,
@@ -1064,8 +1140,16 @@ impl<'a> Checker<'a> {
                 }
                 continue;
             }
-            let Some(function) = header_function(self.ast.declarations(), &header)
-            else {
+            // A library function is checked in its own module: its source
+            // identity, its declarations, and the names its bodies see.
+            let library = self
+                .library
+                .filter(|_| header.module_index == LIBRARY_MODULE);
+            let (source_id, declarations) = match library {
+                Some((library_id, library)) => (library_id, library.declarations()),
+                None => (self.source_id, self.ast.declarations()),
+            };
+            let Some(function) = header_function(declarations, &header) else {
                 continue;
             };
             if !header.external_declared
@@ -1073,14 +1157,14 @@ impl<'a> Checker<'a> {
             {
                 unavailable(
                     self.diagnostics,
-                    self.source_id,
+                    source_id,
                     function.span(),
                     "variadic, generic, external, and nonempty-effect attributes are unavailable in Step 7",
                 );
                 continue;
             }
             if let Some(intrinsic) = header.external {
-                let origin = SourceOrigin::new(self.source_id, function.span());
+                let origin = SourceOrigin::new(source_id, function.span());
                 match CheckedFunction::new_external(
                     header.name,
                     header.signature,
@@ -1094,7 +1178,7 @@ impl<'a> Checker<'a> {
                     }
                     Err(error) => unavailable(
                         self.diagnostics,
-                        self.source_id,
+                        source_id,
                         function.span(),
                         format!("checked IR construction failed: {error}"),
                     ),
@@ -1105,13 +1189,25 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let mut environment = CheckEnvironment::new(
-                self.source_id,
+                source_id,
                 self.diagnostics,
-                &self.global_indices,
+                if library.is_some() {
+                    &self.no_indices
+                } else {
+                    &self.global_indices
+                },
                 &self.globals,
                 &self.functions,
-                &self.function_indices,
-                &self.module_names,
+                if library.is_some() {
+                    &self.library_indices
+                } else {
+                    &self.function_indices
+                },
+                if library.is_some() {
+                    &self.no_names
+                } else {
+                    &self.module_names
+                },
                 &mut self.bindings,
                 Some(index),
                 &self.types,
@@ -1190,7 +1286,7 @@ impl<'a> Checker<'a> {
             ) else {
                 continue;
             };
-            let origin = SourceOrigin::new(self.source_id, function.span());
+            let origin = SourceOrigin::new(source_id, function.span());
             let body = wrap_destructured(body, destructured, &origin);
             let implements = header.implements.clone();
             match CheckedFunction::with_slots(
@@ -1211,7 +1307,7 @@ impl<'a> Checker<'a> {
                 }
                 Err(error) => unavailable(
                     self.diagnostics,
-                    self.source_id,
+                    source_id,
                     function.span(),
                     format!("checked IR construction failed: {error}"),
                 ),
@@ -2497,8 +2593,13 @@ pub(crate) fn check_inferred_operand(
     if let Type::Interface(id, arguments) = pattern
         && !matches!(actual, Type::Interface(_, _) | Type::Any)
         && let Some(interface) = environment.types.interface_index_of(id)
-        && let [conformance] =
-            interfaces::conformances(environment.types, interface, &actual).as_slice()
+        && let [conformance] = interfaces::conformances(
+            environment.types,
+            &environment.bounds,
+            interface,
+            &actual,
+        )
+        .as_slice()
         && conformance.len() == arguments.len()
         && arguments
             .iter()

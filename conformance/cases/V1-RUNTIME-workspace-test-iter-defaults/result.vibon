@@ -1,0 +1,11 @@
+(record
+  format: @test-run.v1
+  result: @command.ok
+  tests: (array
+    (record name: "@tests.defaults::\"collects an array\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.defaults::\"maps to another element type\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.defaults::\"filters, skips, and takes\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.defaults::\"takes from an infinite user iterator lazily\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.defaults::\"walks a str, a map, and an option\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)
