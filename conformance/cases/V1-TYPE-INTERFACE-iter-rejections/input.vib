@@ -1,0 +1,22 @@
+(import iter @std.iter.iter)
+
+(deftype bare (record count i32)
+  (impl iter
+    (defn next (value self) (option (tuple i32 self)) (option.none))))
+
+(deftype unbound (record count i32)
+  (impl (iter item)
+    (defn next (value self) (option (tuple item self)) (option.none))))
+
+(deftype mismatched (record count i32)
+  (impl (iter i32)
+    (defn next (value self) (option (tuple str self)) (option.none))))
+
+(defn typed (values iter) i32 0i32)
+
+(defn bounded (values t) i32
+  where: (t iter)
+  0i32)
+
+(defn fallible () (option (tuple i32 (result i32 str)))
+  (iter.next (as (result i32 str) (result.ok 1i32))))

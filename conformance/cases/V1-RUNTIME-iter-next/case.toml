@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-iter-next"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "iter.next yields one item and the remaining iterator: for an array, a map in key order, a str by scalar, an option once, and a user deftype implementing (iter item). Each widens to an (iter item) interface value, and a tail-recursive walk consumes it."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

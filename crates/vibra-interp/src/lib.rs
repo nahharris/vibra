@@ -1407,6 +1407,12 @@ impl<'a> Machine<'a> {
                 .copied()
             else {
                 let closed = (*closed)?;
+                if closed == ClosedContract::IterNext {
+                    let [iterator] = values.as_slice() else {
+                        return None;
+                    };
+                    return closed_next(iterator, result).map(Evaluation::Value);
+                }
                 let [left, right] = values.as_slice() else {
                     return None;
                 };
@@ -1972,7 +1978,10 @@ fn closed_contract(
     result: &Type,
 ) -> RuntimeValue {
     match closed {
-        ClosedContract::KeyEqual => RuntimeValue::Primitive(Value::Bool(order.is_eq())),
+        // `iter.next` takes one operand and is answered by `closed_next`.
+        ClosedContract::KeyEqual | ClosedContract::IterNext => {
+            RuntimeValue::Primitive(Value::Bool(order.is_eq()))
+        }
         ClosedContract::KeyCompare => RuntimeValue::Enum {
             value_type: result.clone(),
             variant: match order {
@@ -1984,6 +1993,89 @@ fn closed_contract(
             payload: None,
         },
     }
+}
+
+/// `iter.next` of a builtin constructor value
+/// (`docs/spec/02-type-system.md`, "Closed builtin conformance"): the first
+/// item with the iterator that remains, or `none` when it is exhausted. An
+/// array yields in index order, a map one entry in key order, a `str` one
+/// Unicode scalar, and an `option` its payload once.
+fn closed_next(iterator: &RuntimeValue, result: &Type) -> Option<RuntimeValue> {
+    let step = match iterator {
+        RuntimeValue::Array { value_type, values } => {
+            values.split_first().map(|(first, rest)| {
+                (
+                    first.clone(),
+                    RuntimeValue::Array {
+                        value_type: value_type.clone(),
+                        values: rest.to_vec(),
+                    },
+                )
+            })
+        }
+        RuntimeValue::Map {
+            value_type,
+            entries,
+        } => {
+            let Type::Map(key, value) = value_type else {
+                return None;
+            };
+            entries
+                .split_first()
+                .map(|((first_key, first_value), rest)| {
+                    (
+                        RuntimeValue::Tuple {
+                            value_type: Type::Tuple(vec![
+                                key.as_ref().clone(),
+                                value.as_ref().clone(),
+                            ]),
+                            values: vec![first_key.clone(), first_value.clone()],
+                        },
+                        RuntimeValue::Map {
+                            value_type: value_type.clone(),
+                            entries: rest.to_vec(),
+                        },
+                    )
+                })
+        }
+        RuntimeValue::Primitive(Value::Str(text)) => {
+            let mut scalars = text.chars();
+            scalars.next().map(|first| {
+                (
+                    RuntimeValue::Primitive(Value::Char(first)),
+                    RuntimeValue::Primitive(Value::Str(scalars.as_str().to_owned())),
+                )
+            })
+        }
+        RuntimeValue::Enum {
+            value_type,
+            payload,
+            ..
+        } => payload.as_ref().map(|payload| {
+            (
+                payload.as_ref().clone(),
+                RuntimeValue::Enum {
+                    value_type: value_type.clone(),
+                    variant: "none".to_owned(),
+                    payload: None,
+                },
+            )
+        }),
+        _ => return None,
+    };
+    let Type::Applied(_, arguments) = result else {
+        return None;
+    };
+    Some(RuntimeValue::Enum {
+        value_type: result.clone(),
+        variant: if step.is_some() { "some" } else { "none" }.to_owned(),
+        payload: step.map(|(item, remaining)| {
+            Box::new(RuntimeValue::Tuple {
+                value_type: arguments.first().cloned().unwrap_or(Type::Void),
+                values: vec![item, remaining],
+            })
+        }),
+    })
 }
 
 fn sequence_order<'a>(

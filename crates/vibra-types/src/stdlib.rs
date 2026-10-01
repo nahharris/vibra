@@ -33,6 +33,8 @@ pub const STDLIB_CORE_SOURCE_ID: &str = "stdlib/src/std/core.vib";
 pub const STDLIB_BOOL_SOURCE_ID: &str = "stdlib/src/std/bool.vib";
 /// The source identity of the embedded `@std.bytes` module.
 pub const STDLIB_BYTES_SOURCE_ID: &str = "stdlib/src/std/bytes.vib";
+/// The source identity of the embedded `@std.iter` module.
+pub(crate) const STDLIB_ITER_SOURCE_ID: &str = "stdlib/src/std/iter.vib";
 /// The source identity of the `@std.builtin` module.
 pub const STDLIB_BUILTIN_SOURCE_ID: &str = "stdlib/src/std/builtin.vib";
 
@@ -80,6 +82,10 @@ const EMBEDDED_MODULES: &[(&str, &[u8])] = &[
     (
         "std/result.vib",
         include_bytes!("../../../stdlib/src/std/result.vib"),
+    ),
+    (
+        "std/iter.vib",
+        include_bytes!("../../../stdlib/src/std/iter.vib"),
     ),
     (
         "std/builtin.vib",

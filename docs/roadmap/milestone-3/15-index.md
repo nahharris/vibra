@@ -1,6 +1,6 @@
 # Step 15 — index records and type-aware query metadata
 
-Prerequisite: Step 14 merged. Stage 3B tooling step.
+Prerequisite: Step 14c merged. Stage 3B tooling step.
 
 ## Read before editing
 

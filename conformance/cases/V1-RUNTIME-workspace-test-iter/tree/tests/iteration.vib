@@ -1,0 +1,15 @@
+(import assert @std.assert)
+(import main @app.main)
+
+(test "drains an array through its closed conformance"
+  (assert.equal (main.drain (array.of 3i32 1i32 2i32) (array.of)) (array.of 3i32 1i32 2i32)))
+
+(test "drains a map in key order"
+  (assert.equal
+    (main.drain (map.of "b" 2i32 "a" 1i32) (array.of))
+    (array.of (tupleof "a" 1i32) (tupleof "b" 2i32))))
+
+(test "drains a user iterator across an import"
+  (assert.equal
+    (main.drain (main.evens next-value: 0u8 limit: 6u8) (array.of))
+    (array.of 0u8 2u8 4u8 6u8)))

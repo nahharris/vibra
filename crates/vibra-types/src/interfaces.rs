@@ -54,6 +54,27 @@ pub(crate) fn generic_bounds(
                 continue;
             }
             match types.resolve_interface(source_id, binding.bound()) {
+                // A bound is one name, so it cannot apply a generic interface;
+                // a parameter typed as its interface value takes that role.
+                Some(interface)
+                    if types
+                        .interface(interface)
+                        .is_some_and(|declared| !declared.parameters.is_empty()) =>
+                {
+                    valid = false;
+                    diagnostics.push(
+                        Diagnostic::new(
+                            DiagnosticCode::TypeTypeArgumentMismatch,
+                            binding.span(),
+                            format!(
+                                "`{}` is a generic interface and cannot bound a parameter; take its interface value, such as `({} item)`",
+                                binding.bound().value(),
+                                binding.bound().value()
+                            ),
+                        )
+                        .with_source_id(source_id),
+                    );
+                }
                 Some(interface) => {
                     bounds.insert(binding.name().value().to_owned(), interface);
                 }
@@ -1165,9 +1186,19 @@ fn closed_contract(
     interface: usize,
     member: &str,
 ) -> Option<ClosedContract> {
+    if is_iter(types, interface) && member == "next" {
+        return Some(ClosedContract::IterNext);
+    }
     key_contract(types, interface)
         .filter(|(name, _)| *name == member)
         .map(|(_, closed)| closed)
+}
+
+/// Whether `interface` is the `iter` of `@std.iter`, which plays `@iter`.
+pub(crate) fn is_iter(types: &TypeNames, interface: usize) -> bool {
+    types.interface(interface).is_some_and(|declared| {
+        declared.id == crate::stdlib::stdlib_type_id(&["iter"], "iter")
+    })
 }
 
 /// Whether `receiver` conforms to the key contract `interface` through the
@@ -1207,6 +1238,10 @@ enum CandidateTarget {
     Function(usize),
     /// A closed toolchain conformance, by its registry operation.
     Primitive(CompilerIntrinsic),
+    /// The implementation for the type the receiver holds at run time: a
+    /// builtin constructor type through the closed registry, an interface
+    /// value, or the `self` of a default member.
+    Dispatch,
 }
 
 /// Checks a contract call that selects among implementations: a
@@ -1244,20 +1279,57 @@ fn check_selected_call(
         return None;
     }
     let mut receiver_value = None;
+    let mut dispatched = None;
     let receiver = match contract.receiver {
         Some(position) => {
             let value =
                 check_expression(environment, operands.get(position)?.value(), None)?;
             let receiver = value.result_type();
-            if matches!(receiver, Type::Param(_) | Type::Interface(_, _) | Type::Any) {
-                crate::unavailable(
-                    environment.diagnostics,
-                    environment.source_id,
-                    span,
-                    "a generic interface dispatched through a bounded generic or an interface value arrives with M3 Step 14",
-                );
-                return None;
-            }
+            // The `self` of a default member and an interface value dispatch
+            // at run time, at the interface's own or the value's arguments.
+            dispatched = match &receiver {
+                Type::Param(name)
+                    if environment.bounds.get(name) == Some(&interface) =>
+                {
+                    Some(
+                        declared
+                            .parameters
+                            .iter()
+                            .map(|parameter| Type::Param(parameter.clone()))
+                            .collect::<Vec<_>>(),
+                    )
+                }
+                Type::Interface(id, arguments) if *id == declared.id => {
+                    let shared =
+                        contract.signature.parameters().iter().enumerate().find(
+                            |(index, parameter)| {
+                                *index != position && mentions_self(parameter)
+                            },
+                        );
+                    if let Some((index, _)) = shared {
+                        mismatch(
+                            environment.diagnostics,
+                            environment.source_id,
+                            operands.get(index)?.value().span(),
+                            self_type(),
+                            receiver.clone(),
+                            "a member with another `self` operand cannot be called through an interface value, which erases the type they must share",
+                        );
+                        return None;
+                    }
+                    Some(arguments.clone())
+                }
+                Type::Param(_) | Type::Interface(_, _) | Type::Any => {
+                    unsatisfied(
+                        environment,
+                        operands.get(position)?.value().span(),
+                        &receiver,
+                        &declared.name,
+                    );
+                    return None;
+                }
+                _ => None,
+            };
             receiver_value = Some((position, value));
             receiver
         }
@@ -1270,8 +1342,16 @@ fn check_selected_call(
             span,
         )?,
     };
-    let candidates =
-        candidates(environment.types, interface, declared, contract, &receiver);
+    let candidates = match dispatched {
+        Some(arguments) => vec![candidate(
+            declared,
+            contract,
+            &receiver,
+            &arguments,
+            CandidateTarget::Dispatch,
+        )],
+        None => candidates(environment.types, interface, declared, contract, &receiver),
+    };
     if candidates.is_empty() {
         unsatisfied(environment, span, &receiver, &declared.name);
         return None;
@@ -1382,7 +1462,55 @@ fn check_selected_call(
         CandidateTarget::Primitive(intrinsic) => {
             Expr::external_with_result(intrinsic, arguments, result, origin)
         }
+        CandidateTarget::Dispatch => Expr::Call {
+            target: CallTarget::Contract {
+                interface: declared.id.clone(),
+                member: contract.name.clone(),
+                receiver: contract.receiver?,
+                signature: Box::new(chosen.signature.clone()),
+                closed: closed_contract(environment.types, interface, &contract.name),
+            },
+            arguments,
+            result,
+            tail: false,
+            origin,
+        },
     })
+}
+
+/// One candidate: `contract`'s signature with `self` as `receiver` and the
+/// interface's parameters as `arguments`.
+fn candidate(
+    declared: &DeclaredInterface,
+    contract: &ContractMember,
+    receiver: &Type,
+    arguments: &[Type],
+    target: CandidateTarget,
+) -> Candidate {
+    let mut substitution = BTreeMap::from([(SELF.to_owned(), receiver.clone())]);
+    substitution.extend(
+        declared
+            .parameters
+            .iter()
+            .cloned()
+            .zip(arguments.iter().cloned()),
+    );
+    Candidate {
+        signature: contract.signature.substitute(&substitution),
+        target,
+        spelling: if arguments.is_empty() {
+            declared.name.clone()
+        } else {
+            format!(
+                "({}{})",
+                declared.name,
+                arguments
+                    .iter()
+                    .map(|argument| format!(" {argument}"))
+                    .collect::<String>()
+            )
+        },
+    }
 }
 
 /// The receiver of a destination-dispatched member: `self` from unifying the
@@ -1499,6 +1627,19 @@ fn candidates(
             spelling: spell(&arguments),
         });
     }
+    // The builtin constructor types iterate through the closed registry.
+    if is_iter(types, interface)
+        && contract.name == "next"
+        && let Some(item) = types.closed_iter_item(receiver)
+    {
+        found.push(candidate(
+            declared,
+            contract,
+            receiver,
+            &[item],
+            CandidateTarget::Dispatch,
+        ));
+    }
     // The builtin integer types convert through the closed registry: a
     // conversion that cannot fail is a `from`, every other one a `try-from`.
     if let Some(total) = conversion_contract(types, interface)
@@ -1522,6 +1663,31 @@ fn candidates(
                 spelling: spell(&arguments),
             });
         }
+    }
+    found
+}
+
+/// Every argument list at which `value` conforms to the generic interface
+/// `interface`: through a written implementation or, for `iter`, the closed
+/// registry of the builtin constructor types.
+pub(crate) fn conformances(
+    types: &TypeNames,
+    interface: usize,
+    value: &Type,
+) -> Vec<Vec<Type>> {
+    let mut found = types
+        .implementations()
+        .iter()
+        .filter(|implementation| {
+            implementation.interface == interface
+                && covers(&implementation.receiver, value)
+        })
+        .filter_map(|implementation| instantiate_arguments(implementation, value))
+        .collect::<Vec<_>>();
+    if is_iter(types, interface)
+        && let Some(item) = types.closed_iter_item(value)
+    {
+        found.push(vec![item]);
     }
     found
 }

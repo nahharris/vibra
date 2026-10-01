@@ -223,18 +223,16 @@ impl Type {
 
     /// Whether a value of static type `self` may hold a runtime value whose
     /// recorded type is `actual`. Generic parameters are erased at run time, so
-    /// a parameter on either side matches any type.
+    /// a parameter on either side matches any type; an interface value erases
+    /// the type it holds, so an interface type admits any type, at any depth.
     #[must_use]
     pub fn admits(&self, actual: &Self) -> bool {
         match (self, actual) {
             (Self::Param(_), _) | (_, Self::Param(_)) => true,
+            (Self::Interface(_, _) | Self::Any, _) => true,
             (
                 Self::Applied(left, left_arguments),
                 Self::Applied(right, right_arguments),
-            )
-            | (
-                Self::Interface(left, left_arguments),
-                Self::Interface(right, right_arguments),
             ) => {
                 left == right
                     && left_arguments.len() == right_arguments.len()
@@ -1178,13 +1176,16 @@ pub enum CallTarget {
 /// A closed toolchain conformance of a standard contract: the `ordered` and
 /// `equatable` members of the closed key types
 /// (`docs/spec/02-type-system.md`, "Nominal declarations"), answered by
-/// canonical key order.
+/// canonical key order, and `iter.next` of the builtin constructor types
+/// ("Closed builtin conformance").
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ClosedContract {
     /// `ordered.compare`.
     KeyCompare,
     /// `equatable.equal`.
     KeyEqual,
+    /// `iter.next` of an `(array t)`, `(map k v)`, `str`, or `(option t)`.
+    IterNext,
 }
 
 impl ClosedContract {
@@ -1194,6 +1195,7 @@ impl ClosedContract {
         match self {
             Self::KeyCompare => "key.compare",
             Self::KeyEqual => "key.equal",
+            Self::IterNext => "iter.next",
         }
     }
 }

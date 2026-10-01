@@ -31,6 +31,10 @@
       path: "std/bytes.vib"
       sha256: "sha256:7068e2727b0e8ca14df999c35d8de6fa5423e85ecd5752cac65e481106f4fe19"
       role: @source)
+    @std.iter (record
+      path: "std/iter.vib"
+      sha256: "sha256:3e9417684f38068ffbfa10c71a4590d8f422efc9462c0a4c147a4ba5705ab704"
+      role: @source)
     @std.builtin (record
       path: "std/builtin.vib"
       sha256: "sha256:6666dc0340e9464673941384c4e4161536a58d73ec995d5379057d9370b10f8f"
