@@ -381,7 +381,7 @@ enum RuntimeValue {
         values: Vec<RuntimeValue>,
     },
     /// Entries in canonical key order, so no host hash order is reachable.
-    Map {
+    Dict {
         value_type: Type,
         entries: Vec<(RuntimeValue, RuntimeValue)>,
     },
@@ -758,7 +758,7 @@ impl<'a> Machine<'a> {
             Expr::Tuple { .. }
             | Expr::TupleProject { .. }
             | Expr::Array { .. }
-            | Expr::Map { .. }
+            | Expr::Dict { .. }
             | Expr::Lookup { .. } => {
                 self.evaluate_collection(expression, slots, captures)
             }
@@ -786,7 +786,7 @@ impl<'a> Machine<'a> {
         }
     }
 
-    /// Evaluates tuple, array, and map construction, tuple projection, and
+    /// Evaluates tuple, array, and dict construction, tuple projection, and
     /// lookup. Operands evaluate from left to right; lookups never trap and
     /// answer with the standard `option`.
     #[inline(never)]
@@ -821,7 +821,7 @@ impl<'a> Machine<'a> {
                 value_type: value_type.clone(),
                 values: self.evaluate_all(elements, slots, captures)?,
             },
-            Expr::Map {
+            Expr::Dict {
                 value_type,
                 entries,
                 key_order,
@@ -833,7 +833,7 @@ impl<'a> Machine<'a> {
                     let value = self.evaluate_value(value, slots, captures)?;
                     self.insert_entry(&mut ordered, key, value, key_order.as_ref())?;
                 }
-                RuntimeValue::Map {
+                RuntimeValue::Dict {
                     value_type: value_type.clone(),
                     entries: ordered,
                 }
@@ -848,7 +848,7 @@ impl<'a> Machine<'a> {
                 let collection = self.evaluate_value(collection, slots, captures)?;
                 let key = self.evaluate_value(key, slots, captures)?;
                 let found = match collection {
-                    RuntimeValue::Map { entries, .. } => self
+                    RuntimeValue::Dict { entries, .. } => self
                         .search_entries(&entries, &key, key_order.as_ref())?
                         .ok()
                         .and_then(|position| entries.into_iter().nth(position))
@@ -914,7 +914,7 @@ impl<'a> Machine<'a> {
         }))
     }
 
-    /// Orders two keys of one map (`docs/spec/02-type-system.md`, "Nominal
+    /// Orders two keys of one dict (`docs/spec/02-type-system.md`, "Nominal
     /// declarations"). A value of a declared type is ordered by its own
     /// `compare` of `key_order`, the `ordered` interface; everything else
     /// takes canonical key order, component-wise through structures.
@@ -1049,7 +1049,7 @@ impl<'a> Machine<'a> {
         })
     }
 
-    /// Inserts one entry into a map's sorted entries; a repeated key keeps
+    /// Inserts one entry into a dict's sorted entries; a repeated key keeps
     /// its first position and takes the later value.
     fn insert_entry(
         &mut self,
@@ -1069,7 +1069,7 @@ impl<'a> Machine<'a> {
         Some(())
     }
 
-    /// Binary search over sorted map entries, with a comparison that may run
+    /// Binary search over sorted dict entries, with a comparison that may run
     /// Vibra code.
     fn search_entries(
         &mut self,
@@ -1140,15 +1140,15 @@ impl<'a> Machine<'a> {
                 accumulator
             }
             // The packed variadic tail is already the built collection.
-            (CompilerIntrinsic::ArrayOf | CompilerIntrinsic::MapOf, [tail]) => {
+            (CompilerIntrinsic::ArrayOf | CompilerIntrinsic::DictOf, [tail]) => {
                 tail.clone()
             }
-            // A map keeps its entries in key order already.
+            // A dict keeps its entries in key order already.
             (
-                CompilerIntrinsic::MapEntries,
+                CompilerIntrinsic::DictEntries,
                 [
-                    RuntimeValue::Map {
-                        value_type: Type::Map(key, value),
+                    RuntimeValue::Dict {
+                        value_type: Type::Dict(key, value),
                         entries,
                     },
                 ],
@@ -1650,7 +1650,7 @@ fn runtime_type(value: &RuntimeValue) -> Type {
         RuntimeValue::Wrapper { value_type, .. }
         | RuntimeValue::Tuple { value_type, .. }
         | RuntimeValue::Array { value_type, .. }
-        | RuntimeValue::Map { value_type, .. }
+        | RuntimeValue::Dict { value_type, .. }
         | RuntimeValue::Union { value_type, .. } => value_type.clone(),
     }
 }
@@ -1724,7 +1724,7 @@ fn observe(value: RuntimeValue) -> Option<ObservedValue> {
                 .map(observe)
                 .collect::<Option<Vec<_>>>()?,
         ),
-        RuntimeValue::Map { entries, .. } => ObservedValue::Map(
+        RuntimeValue::Dict { entries, .. } => ObservedValue::Dict(
             entries
                 .into_iter()
                 .map(|(key, value)| Some((observe(key)?, observe(value)?)))
@@ -1912,7 +1912,7 @@ fn bind_pattern(
 /// `true`, numeric order for integers, scalar order for `char` and `str`,
 /// byte order for `bytes` and for an atom's spelling, and component-wise
 /// order for tuples, records in canonical field order, and enums by canonical
-/// variant then payload. Keys of one map share one type, so values of
+/// variant then payload. Keys of one dict share one type, so values of
 /// different shapes never meet; they compare equal only to stay total.
 fn key_order_canonical(
     left: &RuntimeValue,
@@ -1998,7 +1998,7 @@ fn closed_contract(
 /// `iter.next` of a builtin constructor value
 /// (`docs/spec/02-type-system.md`, "Closed builtin conformance"): the first
 /// item with the iterator that remains, or `none` when it is exhausted. An
-/// array yields in index order, a map one entry in key order, a `str` one
+/// array yields in index order, a dict one entry in key order, a `str` one
 /// Unicode scalar, and an `option` its payload once.
 fn closed_next(iterator: &RuntimeValue, result: &Type) -> Option<RuntimeValue> {
     let step = match iterator {
@@ -2013,11 +2013,11 @@ fn closed_next(iterator: &RuntimeValue, result: &Type) -> Option<RuntimeValue> {
                 )
             })
         }
-        RuntimeValue::Map {
+        RuntimeValue::Dict {
             value_type,
             entries,
         } => {
-            let Type::Map(key, value) = value_type else {
+            let Type::Dict(key, value) = value_type else {
                 return None;
             };
             entries
@@ -2031,7 +2031,7 @@ fn closed_next(iterator: &RuntimeValue, result: &Type) -> Option<RuntimeValue> {
                             ]),
                             values: vec![first_key.clone(), first_value.clone()],
                         },
-                        RuntimeValue::Map {
+                        RuntimeValue::Dict {
                             value_type: value_type.clone(),
                             entries: rest.to_vec(),
                         },

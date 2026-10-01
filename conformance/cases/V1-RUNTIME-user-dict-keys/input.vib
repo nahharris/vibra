@@ -1,10 +1,10 @@
-(defn main () (tuple (map point str) (option str) (option str) core.ordering (map (tuple point str) i32))
+(defn main () (tuple (dict point str) (option str) (option str) core.ordering (dict (tuple point str) i32))
   (tupleof
-    (map.of (point x: 1i32 y: 2i32) "a" (point x: 2i32 y: 1i32) "b")
-    (find (map.of (point x: 5i32 y: 0i32) "five") (point x: 5i32 y: 0i32))
-    (find (map.of (point x: 5i32 y: 0i32) "five") (point x: 0i32 y: 5i32))
+    (dict.of (point x: 1i32 y: 2i32) "a" (point x: 2i32 y: 1i32) "b")
+    (find (dict.of (point x: 5i32 y: 0i32) "five") (point x: 5i32 y: 0i32))
+    (find (dict.of (point x: 5i32 y: 0i32) "five") (point x: 0i32 y: 5i32))
     (ordered.compare (tupleof (point x: 9i32 y: 0i32) "z") (tupleof (point x: 0i32 y: 1i32) "a"))
-    (map.of (tupleof (point x: 1i32 y: 2i32) "q") 1i32 (tupleof (point x: 2i32 y: 1i32) "q") 2i32)))
+    (dict.of (tupleof (point x: 1i32 y: 2i32) "q") 1i32 (tupleof (point x: 2i32 y: 1i32) "q") 2i32)))
 
 (import core @std.core)
 (import ordered @std.core.ordered)
@@ -17,6 +17,6 @@
         (core.ordering.equal) (i32.compare (left @x) (right @x))
         order order))))
 
-(defn find (entries (map k v) key k) (option v)
+(defn find (entries (dict k v) key k) (option v)
   where: (k ordered v any)
   (entries key))

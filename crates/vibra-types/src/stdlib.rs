@@ -45,7 +45,7 @@ const SOURCE_ROOT: &str = "stdlib/src/";
 /// "Language core and standard library"). Each is claimed by exactly one
 /// declaration of the standard library.
 const LANGUAGE_ROLES: &[&str] =
-    &["bool", "str", "bytes", "option", "result", "map", "iter"];
+    &["bool", "str", "bytes", "option", "result", "dict", "iter"];
 
 const PACKAGE_NAME: &str = "vibra-stdlib";
 const PACKAGE_VERSION: &str = "0.2.0";
@@ -502,7 +502,7 @@ fn check_compiler_symbols(
     Ok(roles)
 }
 
-/// One entry of the manifest's module map.
+/// One entry of the manifest's module dict.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ModuleEntry {
     atom: String,
@@ -626,8 +626,8 @@ impl<'node> RecordReader<'node> {
 
     fn modules(&mut self, name: &str) -> Result<Vec<ModuleEntry>, StdlibError> {
         let label = self.label;
-        let DataValue::Map(entries) = self.field(name)?.value() else {
-            return Err(shape(label, name, "a map"));
+        let DataValue::Dict(entries) = self.field(name)?.value() else {
+            return Err(shape(label, name, "a dict"));
         };
         entries
             .iter()
@@ -775,10 +775,10 @@ mod tests {
         let mut inputs = StdlibInputs::embedded();
         inputs.manifest = moved.as_bytes();
         rejects(&inputs, "`array.length` in the wrong tier");
-        let unlisted = manifest().replace(" \"map.of\"", "");
+        let unlisted = manifest().replace(" \"dict.of\"", "");
         let mut inputs = StdlibInputs::embedded();
         inputs.manifest = unlisted.as_bytes();
-        rejects(&inputs, "binds `map.of`, which the manifest does not list");
+        rejects(&inputs, "binds `dict.of`, which the manifest does not list");
     }
 
     #[test]

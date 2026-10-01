@@ -9,12 +9,12 @@ Close the Stage 3B gaps and ledger rows deferred from Step 1, and write the
 guides for Steps 11–16.
 
 - **G7 / X1 → D18.1.** The `iter` default-member table in the type chapter
-  lists parameters, result, and member generics in separate columns. `map`
+  lists parameters, result, and member generics in separate columns. `dict`
   declares its own `where: (out any)` and returns `(iter out)`, so it can
   change the element type, and `mapped-iter` is generic in `item` and `out`.
-- **G10 / X2 and the Step 10 half of G2 → D18.2.** A map is ordered by its
+- **G10 / X2 and the Step 10 half of G2 → D18.2.** A dict is ordered by its
   keys, so `compare` alone decides where a key goes and whether two keys are
-  one. Map keys therefore require only `ordered`. `@std.core` declares
+  one. Dict keys therefore require only `ordered`. `@std.core` declares
   `equatable` and `ordered`, with an explicit total-order and agreement rule,
   and v1 declares no `hashable`. A generic key type needs one bound,
   `ordered`, which also resolves the one-bound-per-parameter conflict.

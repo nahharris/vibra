@@ -111,7 +111,7 @@ negative case.
 | `PatternKind::Array` | `V1-RUNTIME-match-patterns` | `V1-TYPE-CONTROL-pattern-refutable-binding` |
 | `PatternKind::As` | `V1-TYPE-CONVERT-narrowing-exhaustive`, `V1-RUNTIME-union-values` | `V1-TYPE-CONVERT-narrowing-rejections` |
 | `VariadicBinding::Array` | `V1-RUNTIME-variadics`, `V1-SRC-CALLS-variadic-array-application` | `V1-SRC-DECL-malformed-variadic` |
-| `VariadicBinding::Map` | `V1-RUNTIME-map-order`, `V1-SRC-CALLS-variadic-map-application` | `V1-TYPE-NOMINAL-collection-construction` (odd `map.of` tail) |
+| `VariadicBinding::Dict` | `V1-RUNTIME-dict-order`, `V1-SRC-CALLS-variadic-dict-application` | `V1-TYPE-NOMINAL-collection-construction` (odd `dict.of` tail) |
 | `Declaration::Deftype` | `V1-RUNTIME-nominal-record`, `V1-TYPE-NOMINAL-union-declarations` | `V1-TYPE-NOMINAL-infinite-size`, `V1-SRC-DECL-builtin-name-reservation` |
 | `TypeMember::Method` | `V1-RUNTIME-nominal-method` | `V1-SRC-DECL-member-collision` |
 | `TypeExpr::Applied` | `V1-RUNTIME-generic-types` | `V1-TYPE-GENERIC-applied-types` |
@@ -120,9 +120,9 @@ negative case.
 | `TypeExpr::Enum` | `V1-RUNTIME-anonymous-enum` | `V1-TYPE-INFER-anonymous-values` |
 | `TypeExpr::Union` | `V1-TYPE-NOMINAL-union-declarations` | `V1-TYPE-NOMINAL-union-member-overlap`, `V1-TYPE-NOMINAL-union-member-not-concrete`, `V1-SRC-DECL-union-arity` |
 | `TypeExpr::Array` | `V1-RUNTIME-lookups` | `V1-TYPE-NOMINAL-collection-construction` |
-| `TypeExpr::Map` | `V1-RUNTIME-map-order`, `V1-TYPE-NOMINAL-admissible-keys` | `V1-TYPE-NOMINAL-map-keys` |
+| `TypeExpr::Dict` | `V1-RUNTIME-dict-order`, `V1-TYPE-NOMINAL-admissible-keys` | `V1-TYPE-NOMINAL-dict-keys` |
 | `VariadicType::Array` | `V1-SRC-CALLS-variadic-array-type` | `V1-SRC-DECL-malformed-variadic` |
-| `VariadicType::Map` | `V1-SRC-CALLS-variadic-map-type` | `V1-SRC-DECL-malformed-variadic` |
+| `VariadicType::Dict` | `V1-SRC-CALLS-variadic-dict-type` | `V1-SRC-DECL-malformed-variadic` |
 | `DeftypeBody::Type` | `V1-RUNTIME-nominal-wrapper`, `V1-RUNTIME-union-values` | `V1-TYPE-NOMINAL-wrapper-representation` |
 | `DeftypeBody::Intrinsic` | `V1-SRC-DECL-intrinsic-type`, `V1-PROJECT-workspace-check-builtin-members` | `V1-SRC-DECL-builtin-name-reservation` |
 | `Attribute::Where` | `V1-RUNTIME-generic-functions`, `V1-RUNTIME-generic-lambda` | `V1-TYPE-GENERIC-invariance`, `V1-TYPE-GENERIC-redeclaration` |
@@ -142,7 +142,7 @@ Every Stage 3B form reports `@tool.unavailable` at its owning form:
 | --- | --- |
 | `defint`, nested `impl`, and effect declarations | `V1-PROJECT-workspace-check-nominal-availability` |
 | An interface bound in `where:` | `V1-TYPE-GENERIC-interface-bound` |
-| `any` in type position; a map keyed by a generic parameter | `V1-TYPE-GENERIC-stage-3b-types` |
+| `any` in type position; a dict keyed by a generic parameter | `V1-TYPE-GENERIC-stage-3b-types` |
 | Nonempty effect rows (M4) | `V1-EFFECT-availability-function-type`, `V1-SRC-CALLS-functions-effects` |
 
 ### Step 1 diagnostic codes
@@ -155,7 +155,7 @@ span:
 | --- | --- | --- |
 | `@type.ambiguous-inference` | `V1-TYPE-GENERIC-ambiguous` | `[206, 218]` |
 | `@type.infinite-size` | `V1-TYPE-NOMINAL-infinite-size` | `[0, 33]` |
-| `@type.invalid-map-key` | `V1-TYPE-NOMINAL-map-keys` | `[48, 63]` |
+| `@type.invalid-dict-key` | `V1-TYPE-NOMINAL-dict-keys` | `[48, 63]` |
 | `@type.invalid-try` | `V1-TYPE-CONTROL-invalid-try` | `[281, 305]` |
 | `@type.unhandled-fallible` | `V1-TYPE-CONTROL-unhandled-fallible` | `[72, 81]` |
 | `@pattern.non-exhaustive` | `V1-TYPE-CONTROL-match-non-exhaustive` | `[83, 135]` |
@@ -167,14 +167,14 @@ The Stage 3A clauses of `docs/spec/07-diagnostics-and-conformance.md`:
 
 | Clause | Cases |
 | --- | --- |
-| Collection construction: heterogeneous `tupleof`/`recordof`, `enumof` with and without a written enum, homogeneous and expected-empty `array.of`, even and duplicate-key `map.of`, declared constructors, type forms in value position | `V1-RUNTIME-tuples`, `V1-RUNTIME-anonymous-record`, `V1-RUNTIME-anonymous-enum`, `V1-TYPE-INFER-anonymous-values`, `V1-RUNTIME-variadics`, `V1-RUNTIME-map-order`, `V1-TYPE-NOMINAL-collection-construction`, `V1-TYPE-NOMINAL-constructor-fields`, `V1-SRC-EXPR-anonymous-value-shapes` |
+| Collection construction: heterogeneous `tupleof`/`recordof`, `enumof` with and without a written enum, homogeneous and expected-empty `array.of`, even and duplicate-key `dict.of`, declared constructors, type forms in value position | `V1-RUNTIME-tuples`, `V1-RUNTIME-anonymous-record`, `V1-RUNTIME-anonymous-enum`, `V1-TYPE-INFER-anonymous-values`, `V1-RUNTIME-variadics`, `V1-RUNTIME-dict-order`, `V1-TYPE-NOMINAL-collection-construction`, `V1-TYPE-NOMINAL-constructor-fields`, `V1-SRC-EXPR-anonymous-value-shapes` |
 | Pattern coverage: binders, nested destructuring in `let`, parameters, lambdas, and `match`; no-shadowing and duplicates; repeated discards; irrefutability; retired `(bind …)` | `V1-RUNTIME-match-patterns`, `V1-TYPE-CONTROL-match-exhaustive`, `V1-TYPE-CONTROL-pattern-redeclaration`, `V1-TYPE-CONTROL-pattern-refutable-binding`, `V1-SRC-EXPR-pattern-retired-form` |
 | Match coverage: non-exhaustive enum, union, `bool`, tuple, and `atom`; repeated arm and arm after a binder; `str` and integer literal sets | `V1-TYPE-CONTROL-match-non-exhaustive`, `V1-TYPE-CONVERT-narrowing-rejections`, `V1-TYPE-CONTROL-match-unreachable-arm`, `V1-TYPE-CONTROL-match-exhaustive` |
 | Failure coverage: `try` over `option` and `result`; differing error, test body, non-container; ignored `result`, discards, ignored `option` | `V1-RUNTIME-try-propagation`, `V1-TYPE-CONTROL-invalid-try`, `V1-TYPE-CONTROL-invalid-try-test-body`, `V1-TYPE-CONTROL-unhandled-fallible`, `V1-TYPE-CONTROL-fallible-discards` |
 | Inference coverage: unsuffixed literal, empty `array.of`, uninferable generic; `def`, `if` condition, and branch mismatches | `V1-TYPE-INFER-context-numeric`, `V1-TYPE-NOMINAL-collection-construction`, `V1-TYPE-GENERIC-ambiguous`, `V1-TYPE-NAMES-binding-initializer-mismatch`, `V1-TYPE-CONTROL-if-condition`, `V1-TYPE-CONTROL-branch-mismatch` |
-| Map coverage: every closed key type including nested tuples; `f64`, `void`, array, and record keys rejected; insertion-order independence | `V1-TYPE-NOMINAL-admissible-keys`, `V1-TYPE-NOMINAL-map-keys`, `V1-RUNTIME-map-order` |
+| Dict coverage: every closed key type including nested tuples; `f64`, `void`, array, and record keys rejected; insertion-order independence | `V1-TYPE-NOMINAL-admissible-keys`, `V1-TYPE-NOMINAL-dict-keys`, `V1-RUNTIME-dict-order` |
 | Nominal coverage: direct self-containment rejected; containment through an array accepted | `V1-TYPE-NOMINAL-infinite-size`, `V1-TYPE-NOMINAL-recursive-through-array` |
-| Union coverage: declarations, one-member body, non-concrete members, overlap under instantiation, no lifting, union map key | `V1-TYPE-NOMINAL-union-declarations`, `V1-SRC-DECL-union-arity`, `V1-TYPE-NOMINAL-union-member-not-concrete`, `V1-TYPE-NOMINAL-union-member-overlap`, `V1-TYPE-NOMINAL-union-no-lifting` |
+| Union coverage: declarations, one-member body, non-concrete members, overlap under instantiation, no lifting, union dict key | `V1-TYPE-NOMINAL-union-declarations`, `V1-SRC-DECL-union-arity`, `V1-TYPE-NOMINAL-union-member-not-concrete`, `V1-TYPE-NOMINAL-union-member-overlap`, `V1-TYPE-NOMINAL-union-no-lifting` |
 | Structural-type coverage: anonymous types in every position, wrapper and tuple distinctness, order-insensitive identity and formatting, reserved heads | `V1-SRC-DECL-structural-types`, `V1-TYPE-NOMINAL-distinct-identity`, `V1-TYPE-NOMINAL-wrapper-representation`, `V1-TYPE-CONVERT-widening-boundaries`, `V1-SRC-FMT-structural-order` |
 | Builtin-type coverage: `intrinsic-type` only in the embedded package | `V1-SRC-DECL-intrinsic-type`, `V1-SRC-DECL-builtin-name-reservation` |
 | Reserved heads and names | `V1-SRC-DECL-builtin-name-reservation`, `V1-TYPE-NAMES-resolve-reserved-value`, `V1-TYPE-GENERIC-redeclaration` |

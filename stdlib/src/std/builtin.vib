@@ -42,24 +42,24 @@
           (option.option.some rest) (array.fold rest (step initial first) step)
           (option.option.none) initial))))
 
-; The standard map, which plays the `@map` role: its entries sorted by
+; The standard dict, which plays the `@dict` role: its entries sorted by
 ; `ordered.compare` on their keys, one entry per key. The toolchain represents
 ; it directly; building one sorts and merges its entries, so a later entry for
 ; the same key wins.
-(deftype map (array (tuple k v))
+(deftype dict (array (tuple k v))
   where: (k ordered v any)
-  role: @map
+  role: @dict
   visibility: @public
-  (defn of () (map k v)
+  (defn of () (dict k v)
     visibility: @public
-    variadic: (entries (map k v))
-    native: "map.of"
+    variadic: (entries (dict k v))
+    native: "dict.of"
     entries)
-  ; The entries in key order, which is how a map is traversed and rendered.
-  (defn entries (value (map k v)) (array (tuple k v))
+  ; The entries in key order, which is how a dict is traversed and rendered.
+  (defn entries (value (dict k v)) (array (tuple k v))
     visibility: @public
     external: @compiler
-    symbol: "map.entries"))
+    symbol: "dict.entries"))
 
 (deftype i8 (intrinsic-type @i8)
   visibility: @public

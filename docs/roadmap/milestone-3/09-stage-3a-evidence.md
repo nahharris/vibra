@@ -33,7 +33,7 @@ Stage 3A rows are `landed`. Step 10 may then begin.
 
 - The demo is [`examples/stage-3a-config`](../../../examples/stage-3a-config).
   The commands, exits, corpus counts, inventory table, Stage 3B availability
-  cases, Step 1 code spans, and the conformance-clause map are in
+  cases, Step 1 code spans, and the conformance-clause dict are in
   [Stage 3A evidence](stage-3a-evidence.md).
 - The audit added `V1-TYPE-NOMINAL-union-no-lifting`,
   `V1-TYPE-NOMINAL-recursive-through-array`, and

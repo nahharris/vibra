@@ -580,10 +580,10 @@ fn generated_data(iteration: usize, random: &mut Lcg, deep_limit: usize) -> Stri
     match iteration % 10 {
         0 => "(record name: @hello root: \"src\")".to_owned(),
         1 => "(array 1u8 2u8 🌱)".to_owned(),
-        2 => "(map \"b\" 2 \"a\" 1)".to_owned(),
+        2 => "(dict \"b\" 2 \"a\" 1)".to_owned(),
         3 => "(tuple @one (array true false) void)".to_owned(),
         4 => "(record name: @hello name: @duplicate)".to_owned(),
-        5 => "(map \"odd\")".to_owned(),
+        5 => "(dict \"odd\")".to_owned(),
         6 => "(record root: \"src\" ; keep comment\n name: @hello)".to_owned(),
         7 => "(array (array (array value)))".to_owned(),
         8 => {

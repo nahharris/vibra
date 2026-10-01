@@ -28,7 +28,7 @@ impl TempProject {
         fs::create_dir_all(&root).expect("create project root");
         fs::write(
             root.join("project.vibon"),
-            "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (map))\n",
+            "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict))\n",
         )
         .expect("write project marker");
         for (relative, source) in sources {

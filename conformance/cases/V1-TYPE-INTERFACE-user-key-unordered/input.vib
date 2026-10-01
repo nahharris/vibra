@@ -2,10 +2,10 @@
 
 (deftype point (record x i32 y i32))
 
-(defn written (entries (map point str)) i32 0i32)
+(defn written (entries (dict point str)) i32 0i32)
 
 (defn inferred () i32
-  (let entries (map.of (point x: 1i32 y: 2i32) "a") 0i32))
+  (let entries (dict.of (point x: 1i32 y: 2i32) "a") 0i32))
 
 (defn keyed (key k) i32
   where: (k ordered)

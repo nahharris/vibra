@@ -5,7 +5,7 @@
 
 (deftype anything (union str any))
 
-(defn keyed (entries (map named i32)) i32 0i32)
+(defn keyed (entries (dict named i32)) i32 0i32)
 
 (defint other
   (defn label (value self) str)

@@ -1,4 +1,4 @@
-(defn odd () (map str i32) (map.of "a" 1i32 "b"))
+(defn odd () (dict str i32) (dict.of "a" 1i32 "b"))
 
 (defn mixed () (array i32) (array.of 1i32 "x"))
 

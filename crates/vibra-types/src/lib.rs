@@ -244,7 +244,7 @@ pub fn check_ast_with_bindings(
 /// Checks one source module with the narrowly supported explicit `@std.text`
 /// import.  This adapter is capability-backed by [`Stdlib`]; a
 /// source file cannot manufacture that authority by copying declarations.
-/// Only the exact signed `@std.text` map entry is exposed, and source external
+/// Only the exact signed `@std.text` dict entry is exposed, and source external
 /// declarations remain forbidden.
 pub fn check_bootstrap_text_import(
     verification: &Stdlib,
@@ -1961,7 +1961,7 @@ fn function_targets_from_expr(
         | Expr::Widen { .. }
         | Expr::Tuple { .. }
         | Expr::Array { .. }
-        | Expr::Map { .. }
+        | Expr::Dict { .. }
         | Expr::Lookup { .. } => FunctionTargetSet::default(),
         Expr::Project { value_type, .. }
         | Expr::TupleProject { value_type, .. }
@@ -2632,19 +2632,19 @@ pub(crate) fn check_inferred_operand(
 
 /// The binding shape of a variadic tail type.
 fn tail_binding(tail: &Type) -> vibra_syntax::VariadicBinding {
-    if matches!(tail, Type::Map(_, _)) {
-        vibra_syntax::VariadicBinding::Map
+    if matches!(tail, Type::Dict(_, _)) {
+        vibra_syntax::VariadicBinding::Dict
     } else {
         vibra_syntax::VariadicBinding::Array
     }
 }
 
 /// The expected type of each of `count` tail operands: the element type for
-/// an array tail, alternating key and value types for a map tail.
+/// an array tail, alternating key and value types for a dict tail.
 fn tail_patterns(tail: &Type, count: usize) -> Vec<Type> {
     match tail {
         Type::Array(element) => vec![element.as_ref().clone(); count],
-        Type::Map(key, value) => (0..count)
+        Type::Dict(key, value) => (0..count)
             .map(|index| {
                 if index % 2 == 0 {
                     key.as_ref().clone()
@@ -2665,13 +2665,13 @@ fn pack_tail(
     origin: SourceOrigin,
 ) -> Expr {
     match tail {
-        Type::Map(_, _) => {
+        Type::Dict(_, _) => {
             let mut entries = Vec::with_capacity(operands.len() / 2);
             let mut operands = operands.into_iter();
             while let (Some(key), Some(value)) = (operands.next(), operands.next()) {
                 entries.push((key, value));
             }
-            Expr::Map {
+            Expr::Dict {
                 value_type: tail.clone(),
                 entries,
                 key_order,
@@ -2708,10 +2708,10 @@ fn mentions_function(types: &nominal::TypeNames, value_type: &Type) -> bool {
     false
 }
 
-/// Reports the first map type in `value_type` whose key is inadmissible, as
-/// `@type.invalid-map-key` (or `@type.function-not-equatable` for a function
+/// Reports the first dict type in `value_type` whose key is inadmissible, as
+/// `@type.invalid-dict-key` (or `@type.function-not-equatable` for a function
 /// key) at the application that inferred it. Returns whether all are valid.
-fn check_inferred_map_keys(
+fn check_inferred_dict_keys(
     environment: &mut CheckEnvironment<'_>,
     span: ByteSpan,
     value_type: &Type,
@@ -2719,31 +2719,34 @@ fn check_inferred_map_keys(
     let scope =
         nominal::Scope::new(environment.self_type.as_ref(), &environment.generics)
             .with_bounds(&environment.bounds);
-    // The embedded standard library declares the generic `map` itself.
+    // The embedded standard library declares the generic `dict` itself.
     let generic_admissible = nominal::is_stdlib_source(environment.source_id);
-    let Some((code, key)) =
-        first_invalid_map_key(environment.types, scope, generic_admissible, value_type)
-    else {
+    let Some((code, key)) = first_invalid_dict_key(
+        environment.types,
+        scope,
+        generic_admissible,
+        value_type,
+    ) else {
         return true;
     };
     environment.diagnostics.push(
         Diagnostic::new(
             code,
             span,
-            format!("the inferred map key type {key} is not an admissible key"),
+            format!("the inferred dict key type {key} is not an admissible key"),
         )
         .with_source_id(environment.source_id),
     );
     false
 }
 
-fn first_invalid_map_key(
+fn first_invalid_dict_key(
     types: &nominal::TypeNames,
     scope: nominal::Scope<'_>,
     generic_admissible: bool,
     value_type: &Type,
 ) -> Option<(DiagnosticCode, Type)> {
-    if let Type::Map(key, _) = value_type {
+    if let Type::Dict(key, _) = value_type {
         match types.key_verdict(scope, key) {
             nominal::KeyVerdict::Admissible => {}
             nominal::KeyVerdict::Generic if generic_admissible => {}
@@ -2754,12 +2757,15 @@ fn first_invalid_map_key(
                 ));
             }
             nominal::KeyVerdict::Generic | nominal::KeyVerdict::Invalid => {
-                return Some((DiagnosticCode::TypeInvalidMapKey, key.as_ref().clone()));
+                return Some((
+                    DiagnosticCode::TypeInvalidDictKey,
+                    key.as_ref().clone(),
+                ));
             }
         }
     }
     value_type.components().iter().find_map(|component| {
-        first_invalid_map_key(types, scope, generic_admissible, component)
+        first_invalid_dict_key(types, scope, generic_admissible, component)
     })
 }
 
@@ -3905,7 +3911,7 @@ fn check_form(
                     &mut labelled,
                     &tail_operands,
                 )?;
-                if !check_inferred_map_keys(
+                if !check_inferred_dict_keys(
                     environment,
                     application.span(),
                     &Type::Function(Box::new(instantiated.clone())),
@@ -4052,7 +4058,7 @@ fn check_form(
             }
             if let Some(tail_type) = signature.variadic() {
                 let key_order = match tail_type {
-                    Type::Map(key, _) => interfaces::key_order(environment.types, key),
+                    Type::Dict(key, _) => interfaces::key_order(environment.types, key),
                     _ => None,
                 };
                 arguments.push(pack_tail(
@@ -5522,15 +5528,15 @@ mod tests {
     }
 
     #[test]
-    fn variadic_array_and_map_calls_bind_zero_or_more_tail_operands() {
+    fn variadic_array_and_dict_calls_bind_zero_or_more_tail_operands() {
         for (label, source) in [
             (
                 "array",
                 "(defn use-array () i32\n  (do (collect-array 1i32) (collect-array 1i32 2i32)))\n(defn collect-array (first i32) i32\n  variadic: (rest (array i32))\n  first)",
             ),
             (
-                "map",
-                "(defn use-map () i32\n  (do (collect-map 1i32) (collect-map 1i32 \"key\" 2i32)))\n(defn collect-map (first i32) i32\n  variadic: (rest (map str i32))\n  first)",
+                "dict",
+                "(defn use-dict () i32\n  (do (collect-dict 1i32) (collect-dict 1i32 \"key\" 2i32)))\n(defn collect-dict (first i32) i32\n  variadic: (rest (dict str i32))\n  first)",
             ),
         ] {
             let result = check_source(format!("{label}.vib"), source);

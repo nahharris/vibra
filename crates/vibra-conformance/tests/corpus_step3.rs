@@ -960,13 +960,13 @@ code = "@data.invalid-shape"
 level = "@error"
 source = "data.vibon"
 [expect.diagnostics.span]
-start = 5
-end = 7
+start = 6
+end = 8
 "#,
     );
     let directory = case.root.join("V1-DIAG-reader-source-identity");
     std::fs::write(directory.join("source.vib"), "-a").expect("write source");
-    std::fs::write(directory.join("data.vibon"), "(map @a)").expect("write data");
+    std::fs::write(directory.join("data.vibon"), "(dict @a)").expect("write data");
 
     let report = ConformanceRunner::new(
         ProfileDispatcher::new()

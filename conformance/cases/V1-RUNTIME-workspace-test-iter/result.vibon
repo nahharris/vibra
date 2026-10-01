@@ -3,7 +3,7 @@
   result: @command.ok
   tests: (array
     (record name: "@tests.iteration::\"drains an array through its closed conformance\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
-    (record name: "@tests.iteration::\"drains a map in key order\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.iteration::\"drains a dict in key order\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
     (record name: "@tests.iteration::\"drains a user iterator across an import\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
   )
 )

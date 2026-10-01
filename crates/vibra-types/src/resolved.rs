@@ -1311,7 +1311,7 @@ fn default_expression(value_type: &Type, origin: SourceOrigin) -> Option<Expr> {
         | Type::Union(_)
         | Type::AtomSingleton(_)
         | Type::Array(_)
-        | Type::Map(_, _)
+        | Type::Dict(_, _)
         | Type::Interface(_, _)
         | Type::Any => None,
         Type::Function(signature) => {

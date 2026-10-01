@@ -162,9 +162,9 @@ source spelling.
 ### D11 — Generic VIBON ordering is deterministic and schema-independent
 
 Generic records retain source field order because no schema supplies a field
-order. Generic maps sort keys by the canonical encoded value produced by the
+order. Generic dicts sort keys by the canonical encoded value produced by the
 data formatter, using the complete canonical bytes as the tie-breaker. A
-duplicate record label emits `@data.duplicate-field`; a duplicate map key emits
+duplicate record label emits `@data.duplicate-field`; a duplicate dict key emits
 `@data.duplicate-key`. Typed adapters may supply explicit record order and atom
 roles without resolving references.
 

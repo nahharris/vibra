@@ -19,7 +19,7 @@ fn all_seven_top_forms_and_nested_owners_have_native_structure() {
 (deftype user (record name str id u64)
   where: (t any)
   visibility: @public
-  (defn map (value self) self value))
+  (defn dict (value self) self value))
 (defint printable
   (defn render (value self) str))
 (deffect read
@@ -42,7 +42,7 @@ fn all_seven_top_forms_and_nested_owners_have_native_structure() {
     );
     assert!(matches!(
         deftype.members().first(),
-        Some(TypeMember::Method(method)) if method.name().value() == "map"
+        Some(TypeMember::Method(method)) if method.name().value() == "dict"
     ));
 
     let Declaration::Defn(function) = &ast.declarations()[5] else {
@@ -106,7 +106,7 @@ fn structural_types_are_type_expressions_and_other_bodies_are_wrappers() {
 #[test]
 fn reserved_type_heads_cannot_be_declaration_or_generic_names() {
     let source = r#"
-(deftype map i32)
+(deftype dict i32)
 (defint array)
 (deftype valid i32 where: (tuple any))
 "#;

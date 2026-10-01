@@ -2,7 +2,7 @@ id = "V1-RUNTIME-lookups"
 rule = "V1-RUNTIME"
 profile = "interpreter-v1"
 operation = "interpret"
-description = "Array, map, and string lookups answer some when the key is present and none when it is absent, including a map keyed by a tuple."
+description = "Array, dict, and string lookups answer some when the key is present and none when it is absent, including a dict keyed by a tuple."
 
 [inputs]
 source = "input.vib"

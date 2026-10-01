@@ -50,7 +50,7 @@ resolving a callee from source text. Canonical checked programs remain
 
 Use host evaluator instrumentation to count callee/operand evaluations without
 adding language effects. Pair it with source result cases; instrumentation
-alone is not the corpus oracle. Variadic array/map construction, generics,
+alone is not the corpus oracle. Variadic array/dict construction, generics,
 methods and collection application remain assigned by C1 to later work.
 Recursive execution remains unavailable until Step 9; function values must not
 bypass that admission boundary through an indirect call. Step 1's admission

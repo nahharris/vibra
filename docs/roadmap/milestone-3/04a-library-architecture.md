@@ -5,7 +5,7 @@ behavior.
 
 ## Why
 
-Step 4 made `array` and `map` builtin types and left `bool`, `str`, `bytes`,
+Step 4 made `array` and `dict` builtin types and left `bool`, `str`, `bytes`,
 `option`, and `result` compiler-owned or compiler-recognized by a hardcoded
 identity. The product direction is the opposite: the language is a small core,
 and everything else is standard-library Vibra that the toolchain may
@@ -21,7 +21,7 @@ gaps G17–G20:
   `(array t)`, `fn` types, and the structural type constructors. `(array t)`
   stays in the core because no combination of records and enums gives
   constant-time indexed storage in a language without mutation. `bool`, `str`,
-  `bytes`, `map`, `option`, `result`, `ordering`, and the error enums become
+  `bytes`, `dict`, `option`, `result`, `ordering`, and the error enums become
   standard-library `deftype`s.
 - **Language roles (D17.2).** Syntax and checking need some library types:
   `if` needs `bool`, a string literal needs `str`, a lookup and `try` need
@@ -58,7 +58,7 @@ gaps G17–G20:
 | `option` claims `@option` | Step 4b |
 | `result` claims `@result` | Step 7 |
 | `bool`, `str`, `bytes`, `ordering`, error enums; text and bytes operations as natives | Step 8 |
-| `map` over sorted arrays under `@map`; key conformances as implementations | Step 11 |
+| `dict` over sorted arrays under `@dict`; key conformances as implementations | Step 11 |
 | `iter` claims `@iter` | Step 14 |
 | Native lowering into Wasm | M4 |
 | Representation latitude | M7 |

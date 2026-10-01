@@ -17,7 +17,7 @@ higher-order function declares the exact callback row it accepts, and `iter`
 
 **Why every track needs it:** `process.spawn` must accept a body with any row
 and perform that row. An OTP-style `server` interface must let each
-implementation declare its own effects. `par.map` must be generic over
+implementation declare its own effects. `par.dict` must be generic over
 callbacks, even though it requires them to be pure. UI commands carry work
 with arbitrary rows. Without row variables, each of these becomes a family of
 monomorphic copies.
@@ -52,7 +52,7 @@ used inside effect rows:
 
 **Compatibility:** every v1 program has only closed rows, which stay valid.
 The `iter` defaults may later gain effect-polymorphic variants under new names.
-Changing `map` itself would alter accepted signatures.
+Changing `dict` itself would alter accepted signatures.
 
 **Rejected alternative:** algebraic effect handlers. They answer a different
 question (how an effect is implemented) and add resumable control flow that
@@ -124,7 +124,7 @@ The first network and process effects need no handles and fit the v1 ABI:
 | --- | --- |
 | `net.http` | request record in, response record or typed error out |
 | `net.dns` | name in, address array or typed error out |
-| `subprocess.run` | program, argument array, stdin bytes, and environment map in; exit status, stdout, and stderr out |
+| `subprocess.run` | program, argument array, stdin bytes, and environment dict in; exit status, stdout, and stderr out |
 
 Each operation is one registry entry with an owning root and an audit event.
 `subprocess.run` accepts no shell string: the program is a path and the arguments

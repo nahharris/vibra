@@ -19,10 +19,10 @@ data = string | character | boolean | integer | float | void | atom-name
      | "(", "record", { label, data }, ")"
      | "(", "array", { data }, ")"
      | "(", "tuple", { data }, ")"
-     | "(", "map", { data, data }, ")" ;
+     | "(", "dict", { data, data }, ")" ;
 ```
 
-Records contain unique labelled fields. Maps contain alternating key/value
+Records contain unique labelled fields. Dicts contain alternating key/value
 forms directly and require an even number of forms. Bare symbols, applications,
 imports, bindings, declarations, and host operations are not data and MUST be
 rejected in a VIBON document. The data is parsed and validated, never executed.
@@ -31,15 +31,15 @@ spelling and carry the same values and exact primitive types.
 
 Each compiler-owned format defines a closed record schema and a version atom.
 Unknown, duplicate, or missing fields are errors. Generic records retain source
-field order until a typed schema supplies an explicit order. Generic maps sort
+field order until a typed schema supplies an explicit order. Generic dicts sort
 keys by the complete canonical encoded key bytes. Canonical output uses the
 source formatter's whitespace rules, schema or generic field order, canonical
-key order for maps, LF endings, and one trailing newline.
+key order for dicts, LF endings, and one trailing newline.
 
 An atom parsed by the generic VIBON grammar is an atom value. A typed schema
 may declare a particular slot to be an entity reference; only then is that atom
 resolved to a canonical code identity. For example, `format: @project.v1` is a
-version atom, a dependency map key `@std` is an alias atom, and an entry in a
+version atom, a dependency dict key `@std` is an alias atom, and an entry in a
 target's `effects` array is an effect-entity reference. Every schema slot
 declares exactly one role, and an entity-reference slot additionally declares
 the one entity kind it requires. No decoder may infer the role from the atom's
@@ -83,7 +83,7 @@ A project is rooted by `project.vibon`. It contains one `@project.v1` record:
       root: "src/hello"
       entry: @hello.main.main
       effects: (array @std.fs.read @std.io.stdout)))
-  dependencies: (map
+  dependencies: (dict
     @std (record
       kind: @git
       git: "https://github.com/nahharris/vibra-stdlib.git"
@@ -97,18 +97,18 @@ The M2 decoder closes the following typed schema. Records may be written in any
 field order, but canonical formatting uses the order shown. Unknown fields,
 missing required fields, and wrong value kinds are `@data.invalid-shape`;
 duplicate record labels are `@data.duplicate-field`, and duplicate dependency
-map keys are `@data.duplicate-key`. The decoder retains each field and value
+dict keys are `@data.duplicate-key`. The decoder retains each field and value
 span with its source identity and does not resolve an atom or read a path.
 
 | Record | Field order | Type | Requiredness and constraint |
 | --- | --- | --- | --- |
-| project | `format`, `package`, `targets`, `dependencies` | atom, record, array, map | all required; `format` is exactly `@project.v1`; `targets` contains at least one target; `dependencies` may be empty |
+| project | `format`, `package`, `targets`, `dependencies` | atom, record, array, dict | all required; `format` is exactly `@project.v1`; `targets` contains at least one target; `dependencies` may be empty |
 | package | `name`, `version` | string, string | both required; `name` is kebab-case and `version` is one semantic version, never a range |
 | target | `name`, `kind`, `root`, `entry`, `effects` | atom, atom, string, atom, array | `name`, `kind`, and `root` required; `name` is one kebab-name atom component; `kind` is `@bin` or `@lib`; a binary requires `entry` and `effects`; a library omits both |
 | path dependency | `kind`, `path`, `target` | atom, string, atom | `kind` is `@path`; `path` required; `target` optional |
 | Git dependency | `kind`, `git`, `rev`, `target` | atom, string, string, atom | `kind` is `@git`; `git` is HTTPS; `rev` is exactly 40 lowercase hexadecimal characters; `target` optional |
 
-The dependency value is selected by its `kind` field. A dependency map key is
+The dependency value is selected by its `kind` field. A dependency dict key is
 an alias atom value whose spelling is one kebab-name component. `format`, target `name` and `kind`, and dependency `kind`
 are atom values selected by their schema slots. Target `entry` is an entity
 reference requiring a declaration; each target `effects` item is an entity
@@ -386,7 +386,7 @@ source identities, revisions, content hashes, and vendor paths:
 (record
   format: @project-lock.v1
   project: "sha256:..."
-  dependencies: (map
+  dependencies: (dict
     @std (record
       kind: @git
       source: "https://github.com/nahharris/vibra-stdlib.git"
@@ -416,7 +416,7 @@ The input is the repository directory `stdlib/`. Its authority is
 `stdlib/manifest.vibon`, a closed `@stdlib-manifest.v1` record with fields, in
 order, `format`, `package-name`, `package-version`, `modules`, `compiler`,
 `native`, and `assertions`. `package-name` is `"vibra-stdlib"` and
-`package-version` is `"0.2.0"`. `modules` is a map from each module atom to a
+`package-version` is `"0.2.0"`. `modules` is a dict from each module atom to a
 record with `path` (a `stdlib/src/`-relative slash path), `sha256` (the
 `sha256:` digest of the module's exact bytes), and `role` (`@source` or
 `@test-registry`). `compiler` lists every `@compiler` symbol the modules may
@@ -442,7 +442,7 @@ rejected before execution. The M3 module set is `@std.core`, `@std.option`,
 `@std.result`, `@std.bool`, `@std.char`, `@std.text`, `@std.bytes`,
 the builtin-member module `@std.builtin`, and the test-registry module
 `@std.assert`. `@std.builtin` is never imported: it declares the members of the
-builtin numeric, `array`, `map`, and `tuple` types, which are reached
+builtin numeric, `array`, `dict`, and `tuple` types, which are reached
 through those type paths; Stage 3B adds its own
 modules by the same rule. Adding a module or symbol is a specification change to
 this list and to the runtime registry.

@@ -54,7 +54,7 @@ snapshot = "query.json"
     .expect("write manifest");
     fs::write(
         tree.join("project.vibon"),
-        "(record format: @project.v1 package: (record name: \"hello\" version: \"0.1.0\") targets: (array (record name: @hello kind: @lib root: \"src\")) dependencies: (map))",
+        "(record format: @project.v1 package: (record name: \"hello\" version: \"0.1.0\") targets: (array (record name: @hello kind: @lib root: \"src\")) dependencies: (dict))",
     )
     .expect("write project marker");
     let source =
@@ -145,7 +145,7 @@ snapshot = "query.json"
     .expect("write manifest");
     fs::write(
         tree.join("project.vibon"),
-        "(record format: @project.v1 package: (record name: \"hello\" version: \"0.1.0\") targets: (array (record name: @hello kind: @lib root: \"src\")) dependencies: (map))",
+        "(record format: @project.v1 package: (record name: \"hello\" version: \"0.1.0\") targets: (array (record name: @hello kind: @lib root: \"src\")) dependencies: (dict))",
     )
     .expect("write project marker");
     fs::write(tree.join("src/main.vib"), "(defn broken () i32 (missing))")

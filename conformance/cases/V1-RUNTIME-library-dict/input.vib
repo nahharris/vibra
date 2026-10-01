@@ -1,8 +1,8 @@
 (defn main () (tuple (array (tuple str i32)) (array (tuple point str)) u64)
   (tupleof
-    (map.entries (map.of "b" 2i32 "a" 1i32 "b" 3i32))
-    (map.entries (map.of (point x: 1i32 y: 2i32) "a" (point x: 2i32 y: 1i32) "b"))
-    (array.length (map.entries (as (map str i32) (map.of))))))
+    (dict.entries (dict.of "b" 2i32 "a" 1i32 "b" 3i32))
+    (dict.entries (dict.of (point x: 1i32 y: 2i32) "a" (point x: 2i32 y: 1i32) "b"))
+    (array.length (dict.entries (as (dict str i32) (dict.of))))))
 
 (import core @std.core)
 (import ordered @std.core.ordered)

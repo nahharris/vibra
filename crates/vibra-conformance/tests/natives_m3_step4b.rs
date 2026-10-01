@@ -26,9 +26,9 @@ fn samples(symbol: &str) -> &'static [(&'static str, &'static str)] {
                 "(as (array i32) (array.of)) 7i32 (lambda (total i32 item i32) i32 item)",
             ),
         ],
-        "map.of" => &[
-            ("(map str i32)", ""),
-            ("(map str i32)", "\"b\" 2i32 \"a\" 1i32 \"b\" 3i32"),
+        "dict.of" => &[
+            ("(dict str i32)", ""),
+            ("(dict str i32)", "\"b\" 2i32 \"a\" 1i32 \"b\" 3i32"),
         ],
         "text.concat" => &[("str", "\"hé\" \"llo\""), ("str", "\"\" \"\"")],
         "text.length" => &[("u64", "\"\""), ("u64", "\"h𝄞é\"")],

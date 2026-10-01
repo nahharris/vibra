@@ -19,13 +19,13 @@ const RESERVED_TYPE_HEADS: &[&str] =
 /// Builtin type names; only an `intrinsic-type` declaration may use one.
 const BUILTIN_TYPE_NAMES: &[&str] = &[
     "bool", "void", "char", "str", "bytes", "atom", "i8", "i16", "i32", "i64", "u8",
-    "u16", "u32", "u64", "f32", "f64", "array", "map",
+    "u16", "u32", "u64", "f32", "f64", "array", "dict",
 ];
 /// Heads that are reserved forms in expression position.
 const RESERVED_EXPRESSION_TYPE_HEADS: &[&str] = &[
     "tuple",
     "array",
-    "map",
+    "dict",
     "record",
     "enum",
     "union",
@@ -216,10 +216,10 @@ impl Application {
         variadic.extend(positional);
         match facts.variadic() {
             Some(VariadicBinding::Array) => {}
-            Some(VariadicBinding::Map) if !variadic.len().is_multiple_of(2) => {
-                return Err(BindingError::OddMapVariadic(variadic.len()));
+            Some(VariadicBinding::Dict) if !variadic.len().is_multiple_of(2) => {
+                return Err(BindingError::OddDictVariadic(variadic.len()));
             }
-            Some(VariadicBinding::Map) => {}
+            Some(VariadicBinding::Dict) => {}
             None if !variadic.is_empty() => {
                 return Err(BindingError::UnexpectedPositional(variadic.len()));
             }
@@ -427,7 +427,7 @@ pub enum VariadicBinding {
     /// Remaining operands are independent array elements.
     Array,
     /// Remaining operands are alternating key/value pairs.
-    Map,
+    Dict,
 }
 
 /// Authoritative call-site binding facts supplied by a resolver or test.
@@ -515,8 +515,8 @@ pub enum BindingError {
     },
     /// Positional operands remain without a variadic tail.
     UnexpectedPositional(usize),
-    /// A map variadic tail has an odd number of operands.
-    OddMapVariadic(usize),
+    /// A dict variadic tail has an odd number of operands.
+    OddDictVariadic(usize),
 }
 
 impl std::fmt::Display for BindingError {
@@ -537,8 +537,11 @@ impl std::fmt::Display for BindingError {
             Self::UnexpectedPositional(count) => {
                 write!(formatter, "{count} unexpected positional operands")
             }
-            Self::OddMapVariadic(count) => {
-                write!(formatter, "map variadic tail has odd operand count {count}")
+            Self::OddDictVariadic(count) => {
+                write!(
+                    formatter,
+                    "dict variadic tail has odd operand count {count}"
+                )
             }
         }
     }
@@ -1070,7 +1073,7 @@ impl LabelledParameter {
     }
 }
 
-/// A single variadic binding and its array/map tail type.
+/// A single variadic binding and its array/dict tail type.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VariadicParameter {
     name: Name,
@@ -1120,8 +1123,8 @@ pub enum TypeExpr {
     Union(Vec<TypeExpr>),
     /// An array constructor.
     Array(Box<TypeExpr>),
-    /// A map constructor.
-    Map(Box<TypeExpr>, Box<TypeExpr>),
+    /// A dict constructor.
+    Dict(Box<TypeExpr>, Box<TypeExpr>),
     /// A function type.
     Function(FunctionType),
     /// The primitive `void` type.
@@ -1191,13 +1194,13 @@ impl TypeSlot {
     }
 }
 
-/// An array or map variadic type.
+/// An array or dict variadic type.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum VariadicType {
     /// An array tail.
     Array(Box<TypeExpr>),
-    /// A map tail.
-    Map(Box<TypeExpr>, Box<TypeExpr>),
+    /// A dict tail.
+    Dict(Box<TypeExpr>, Box<TypeExpr>),
 }
 
 /// A field in a nominal record or enum body.
@@ -2793,17 +2796,17 @@ impl AstParser {
                             .map(|value| TypeExpr::Array(Box::new(value)))
                     }
                 }
-                "map" => {
+                "dict" => {
                     if forms.len() != 3 {
                         self.invalid_form(
                             node,
-                            "map type requires key and value types",
+                            "dict type requires key and value types",
                         );
                         None
                     } else {
                         let key = self.parse_type_expr(forms[1])?;
                         let value = self.parse_type_expr(forms[2])?;
-                        Some(TypeExpr::Map(Box::new(key), Box::new(value)))
+                        Some(TypeExpr::Dict(Box::new(key), Box::new(value)))
                     }
                 }
                 "fn" => self.parse_function_type(node, &forms),
@@ -2975,28 +2978,28 @@ impl AstParser {
 
     fn parse_variadic_type(&mut self, node: &CstNode) -> Option<VariadicType> {
         let Some(forms) = list_items(node) else {
-            self.invalid_form(node, "variadic type must be an array or map list");
+            self.invalid_form(node, "variadic type must be an array or dict list");
             return None;
         };
         let Some(head) = forms.first().and_then(|form| form.leaf_text()) else {
-            self.invalid_form(node, "variadic type requires array or map");
+            self.invalid_form(node, "variadic type requires array or dict");
             return None;
         };
         match head {
             "array" if forms.len() == 2 => self
                 .parse_type_expr(forms[1])
                 .map(|value| VariadicType::Array(Box::new(value))),
-            "map" if forms.len() == 3 => {
+            "dict" if forms.len() == 3 => {
                 let key = self.parse_type_expr(forms[1])?;
                 let value = self.parse_type_expr(forms[2])?;
-                Some(VariadicType::Map(Box::new(key), Box::new(value)))
+                Some(VariadicType::Dict(Box::new(key), Box::new(value)))
             }
-            "array" | "map" => {
-                self.invalid_form(node, "variadic array/map type has the wrong arity");
+            "array" | "dict" => {
+                self.invalid_form(node, "variadic array/dict type has the wrong arity");
                 None
             }
             _ => {
-                self.invalid_form(node, "variadic type must be array or map");
+                self.invalid_form(node, "variadic type must be array or dict");
                 None
             }
         }

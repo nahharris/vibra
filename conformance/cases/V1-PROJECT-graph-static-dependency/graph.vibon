@@ -8,6 +8,6 @@
     ))
   )
   dependencies: (array
-    (record alias: @remote kind: @path source: "../outside" target: @core status: @unsupported source-id: "project.vibon" span: (array 166u64 219u64))
+    (record alias: @remote kind: @path source: "../outside" target: @core status: @unsupported source-id: "project.vibon" span: (array 167u64 220u64))
   )
 )

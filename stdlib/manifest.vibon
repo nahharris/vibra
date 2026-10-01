@@ -2,7 +2,7 @@
   format: @stdlib-manifest.v1
   package-name: "vibra-stdlib"
   package-version: "0.2.0"
-  modules: (map
+  modules: (dict
     @std.core (record
       path: "std/core.vib"
       sha256: "sha256:e2e5ec1c41cd32c8fee264ca958624ab276404408bbafa7bc5a64e5d1b3871af"
@@ -33,11 +33,11 @@
       role: @source)
     @std.iter (record
       path: "std/iter.vib"
-      sha256: "sha256:ce7374085bfedbab09674031eaccf8abfdb6abea91d4da9b33d368d5ee42df47"
+      sha256: "sha256:efe78b4ce33e55ca3e1401db8737b5ef07acf65047208619595dc51b4f07bcee"
       role: @source)
     @std.builtin (record
       path: "std/builtin.vib"
-      sha256: "sha256:6666dc0340e9464673941384c4e4161536a58d73ec995d5379057d9370b10f8f"
+      sha256: "sha256:974e5c71afc4162b7ba325c045a30b4cb489ebd2c9847cce281be3f14d907242"
       role: @source)
     @std.assert (record
       path: "std/assert.vib"
@@ -48,7 +48,7 @@
     "array.append"
     "array.concat"
     "array.slice"
-    "map.entries"
+    "dict.entries"
     "i8.add-checked"
     "i8.sub-checked"
     "i8.mul-checked"
@@ -217,7 +217,7 @@
     "f64.parse"
     "char.to-u32"
     "char.from-u32")
-  native: (array "array.of" "array.fold" "map.of" "bytes.length" "bytes.concat" "bytes.equal" "bytes.compare" "bytes.slice" "bytes.to-array" "bytes.from-array" "text.concat" "text.length" "text.equal" "text.compare" "text.slice" "text.to-chars" "text.from-chars" "text.to-utf8" "text.from-utf8")
+  native: (array "array.of" "array.fold" "dict.of" "bytes.length" "bytes.concat" "bytes.equal" "bytes.compare" "bytes.slice" "bytes.to-array" "bytes.from-array" "text.concat" "text.length" "text.equal" "text.compare" "text.slice" "text.to-chars" "text.from-chars" "text.to-utf8" "text.from-utf8")
   assertions: (array
     "assert.true"
     "assert.false"

@@ -1,4 +1,4 @@
-# Milestone 1 implementation map
+# Milestone 1 implementation dict
 
 Status: process guidance; the specifications remain authoritative.
 
@@ -51,10 +51,10 @@ examples, registry/schema updates, and affected roadmap guidance first.
 | Decision | Owner | Required resolution |
 | --- | --- | --- |
 | Malformed strings, invalid names, wrong arities, duplicate attributes, invalid data shapes | Steps 5–9, before each affected slice | Steps 5–6 close terminated malformed strings with `@syntax.invalid-string-literal` and malformed nonliteral leaves with `@syntax.invalid-name`, each over the complete token; unterminated leaves remain `@syntax.unmatched-delimiter`. Later slices must close their remaining mappings before implementation. Do not reuse unmatched-delimiter for unrelated errors. |
-| Generic VIBON canonical ordering | Step 7 | Generic records retain source field order; generic map keys sort by the complete canonical encoded key bytes; duplicate labels/keys emit `@data.duplicate-field`/`@data.duplicate-key`. Typed adapters may supply explicit field order and atom roles. Do not use Rust hash iteration or source collection order implicitly. |
+| Generic VIBON canonical ordering | Step 7 | Generic records retain source field order; generic dict keys sort by the complete canonical encoded key bytes; duplicate labels/keys emit `@data.duplicate-field`/`@data.duplicate-key`. Typed adapters may supply explicit field order and atom roles. Do not use Rust hash iteration or source collection order implicitly. |
 | Declaration/type contextual structure | Step 8 | The internal source AST is an owned view over the lossless CST for recognized native declaration roots. It preserves raw body/pattern nodes alongside contextual views, validates declaration/type context and fixed arities, maps errors to the closed registry, and adds no public JSON AST schema. Arbitrary nondeclaration reader fragments retain syntax-only acceptance. |
 | Expression/pattern contextual structure | Step 9 | Recognized declarations expose written literals, names, applications, control forms, patterns, and flat match arms with half-open source spans. Reserved heads dispatch before generic fallback; retired forms use the closed diagnostic; semantic resolution and type checking remain later work. |
-| Signature-dependent operand normalization | Step 9 | `BindingFacts` supplies fixed positional count, declaration-order labels, and an optional array/map variadic tail through `ApplicationBinding`. The formatter reorders only with an exact application span and authoritative facts, emits `@style.argument-order` when written order changes, and returns a binding error for duplicate/unknown/missing/extra operands. Without facts it preserves written order and never infers a signature from a callee spelling. |
+| Signature-dependent operand normalization | Step 9 | `BindingFacts` supplies fixed positional count, declaration-order labels, and an optional array/dict variadic tail through `ApplicationBinding`. The formatter reorders only with an exact application span and authoritative facts, emits `@style.argument-order` when written order changes, and returns a binding error for duplicate/unknown/missing/extra operands. Without facts it preserves written order and never infers a signature from a callee spelling. |
 | Structural metadata wire representation and boundary behavior | Step 10 | Closed by the `source-position-query` contract: EOF and UTF-8 boundary errors are explicit, recovery/trivia status is distinct, and `permittedForms`/`permittedLabels` use null for unavailable versus an empty array for a known empty set. No future semantic fields are published. |
 
 Step 10 implements that decision with a syntax-owned iterative CST query and a

@@ -41,8 +41,8 @@ that uses only the public standard library and no compiler-private form.
     records `part` and `service` each implement `cents`.
   - **A generic function bounded by that interface.** `total` sums
     `priced.cents` over `(array t)` with `where: (t priced)`.
-  - **A map keyed by a user type through its own `ordered`.** The wrapper
-    `sku` orders from the highest number down, so `(map sku u64)` lists in
+  - **A dict keyed by a user type through its own `ordered`.** The wrapper
+    `sku` orders from the highest number down, so `(dict sku u64)` lists in
     that order rather than the order of the number it wraps.
   - **A conversion selected by a written destination.** `sku` implements
     `(from u32)`, and `shelf` calls `from.convert` with only its result type
@@ -56,8 +56,8 @@ that uses only the public standard library and no compiler-private form.
 - The `app` binary's entry returns `(result void stock.stock-error)` and
   propagates with `try`.
 - `tests/stock.vib` has seven tests: the bounded generic, the default member,
-  the map order, the pipeline, and `reserve` succeeding and failing with each
-  error member. The map and `reserve` tests build each key through the
+  the dict order, the pipeline, and `reserve` succeeding and failing with each
+  error member. The dict and `reserve` tests build each key through the
   conversion.
 
 From a clean checkout, with no network, in `examples/m3-catalog`:
@@ -123,7 +123,7 @@ Stage 3A row that Stage 3B widened, has a positive and a negative case.
 | `TypeMember::Method` as a contract member | `V1-RUNTIME-interface-dispatch`, `V1-RUNTIME-conversion` | `V1-TYPE-INTERFACE-default-override`, `V1-TYPE-INTERFACE-undispatchable` |
 | `TypeExpr::Name` naming `any` or an interface | `V1-RUNTIME-interface-values`, `V1-TYPE-GENERIC-stage-3b-types` | `V1-TYPE-INTERFACE-value-restrictions`, `V1-TYPE-INTERFACE-value-positions` |
 | `TypeExpr::Applied` naming a generic interface | `V1-RUNTIME-iter-next`, `V1-RUNTIME-iter-defaults` | `V1-TYPE-INTERFACE-iter-rejections` |
-| `TypeExpr::Map` with a user or generic key | `V1-RUNTIME-user-map-keys`, `V1-RUNTIME-library-map` | `V1-TYPE-INTERFACE-user-key-unordered`, `V1-TYPE-INTERFACE-key-generic-unbounded` |
+| `TypeExpr::Dict` with a user or generic key | `V1-RUNTIME-user-dict-keys`, `V1-RUNTIME-library-dict` | `V1-TYPE-INTERFACE-user-key-unordered`, `V1-TYPE-INTERFACE-key-generic-unbounded` |
 | `Attribute::Where` with an interface bound | `V1-RUNTIME-workspace-test-interfaces`, `V1-RUNTIME-key-contracts`, `V1-RUNTIME-bounded-deftype-lambda` | `V1-TYPE-INTERFACE-unsatisfied-bound`, `V1-TYPE-INTERFACE-unimplemented-receiver`, `V1-TYPE-INTERFACE-bounded-deftype-unsatisfied`, `V1-TYPE-INTERFACE-key-closed-registry`, `V1-TYPE-GENERIC-interface-bound` |
 | `ExpressionKind::As` to an interface | `V1-RUNTIME-interface-values` | `V1-TYPE-CONVERT-interface-widening-rejections` |
 | `ExpressionKind::Application` of a destination-dispatched member | `V1-RUNTIME-conversion` | `V1-TYPE-CONVERT-destination-rejections`, `V1-TYPE-CONVERT-redundant-conversion` |
@@ -151,12 +151,12 @@ instead of implemented. These are reassigned. Each still reports
 | --- | --- | --- |
 | An abstract contract member with its own generic parameters | M4 | A default member with its own generics is checked as one function (Step 14b, `iter.map`). An abstract one needs each implementation instantiated per call, which the typed IR does not yet express; M4 lowers the same IR to Wasm and must settle that shape once for both backends. |
 | Labelled operands and written `types:` arguments on a contract member call | M4 | Same call path as the row above. |
-| A map variadic tail on a contract member | M4 | Same call path; an array tail is supported (`V1-RUNTIME-conversion`, `factory.of`). |
+| A dict variadic tail on a contract member | M4 | Same call path; an array tail is supported (`V1-RUNTIME-conversion`, `factory.of`). |
 | `from` and `try-from` between float types and between floats and integers | M4 | The conversion registry covers the 56 integer pairs (D21.1). Float conversions need a rounding and range contract in the runtime chapter that both backends must share. |
 | The public `query` command | M6 | It is M6's `query <subject>` deliverable. M3 delivers the records and the position envelope as library projections with corpus operations (D23.1, D23.2). |
 | G21: the command result for an entry that returns `err` | M4 | It needs a tooling-chapter decision on a result atom and exit code. M4 introduces host failures at the entry and must make the same decision for them. |
 
-`hashable` is not reassigned: v1 has no `hashable`, because map keys need only
+`hashable` is not reassigned: v1 has no `hashable`, because dict keys need only
 `ordered` (D18.2), so the roadmap's law clause covers `equatable`, `ordered`,
 and `iter` (Step 14c).
 
@@ -176,10 +176,10 @@ The Stage 3B clauses of `docs/spec/07-diagnostics-and-conformance.md`:
 | Clause | Cases |
 | --- | --- |
 | Interface coverage: abstract and default contract members; `@type.default-override` and `@type.missing-abstract-member` | `V1-RUNTIME-interface-dispatch`, `V1-RUNTIME-workspace-test-interfaces`, `V1-TYPE-INTERFACE-default-override`, `V1-TYPE-INTERFACE-missing-abstract` |
-| Interface coverage: the `iter` contract and default-method semantics; closed registry conformance for `(array t)`, `(map k v)`, `str`, and `(option t)`; explicit `impl (iter item)` on the four adapter types | `V1-RUNTIME-iter-next`, `V1-RUNTIME-iter-defaults`, `V1-TYPE-INTERFACE-iter-rejections`, `V1-RUNTIME-workspace-test-contract-laws` |
+| Interface coverage: the `iter` contract and default-method semantics; closed registry conformance for `(array t)`, `(dict k v)`, `str`, and `(option t)`; explicit `impl (iter item)` on the four adapter types | `V1-RUNTIME-iter-next`, `V1-RUNTIME-iter-defaults`, `V1-TYPE-INTERFACE-iter-rejections`, `V1-RUNTIME-workspace-test-contract-laws` |
 | Interface coverage: pure `iter` default methods with `effects: ()` callbacks only | `V1-TYPE-INTERFACE-iter-default-rejections` |
 | Interface coverage: effectful walks as tail-recursive functions over `iter.next` | The pure walk is `V1-RUNTIME-iter-next`; an effectful one needs M4's effect rows |
-| Map coverage over user and generic keys | `V1-RUNTIME-user-map-keys`, `V1-RUNTIME-library-map`, `V1-RUNTIME-key-contracts`, `V1-TYPE-INTERFACE-user-key-unordered`, `V1-TYPE-INTERFACE-key-generic-unbounded`, `V1-TYPE-INTERFACE-key-closed-registry` |
+| Dict coverage over user and generic keys | `V1-RUNTIME-user-dict-keys`, `V1-RUNTIME-library-dict`, `V1-RUNTIME-key-contracts`, `V1-TYPE-INTERFACE-user-key-unordered`, `V1-TYPE-INTERFACE-key-generic-unbounded`, `V1-TYPE-INTERFACE-key-closed-registry` |
 | Unification: a bound does not make two members or two targets disjoint | `V1-TYPE-NOMINAL-union-member-overlap`, `V1-TYPE-INTERFACE-overlapping` |
 | Widening: concrete-to-interface at every written boundary | `V1-RUNTIME-interface-values`: a parameter, a result, an `as` ascription, a record field, and a `def` annotation |
 | No chaining: a union member where only its union implements the interface; an atom singleton where `any` is expected | `V1-TYPE-CONVERT-interface-widening-rejections` |
@@ -201,7 +201,7 @@ The Stage 3B clauses of `docs/spec/07-diagnostics-and-conformance.md`:
 | Non-exhaustive matches | `@pattern.non-exhaustive`: `V1-TYPE-CONTROL-match-non-exhaustive`, `V1-TYPE-CONVERT-narrowing-rejections` |
 | Invalid implementation placement | `@name.wrong-entity-kind`: `V1-TYPE-INTERFACE-deftype-target-type`, `V1-TYPE-INTERFACE-defint-target-interface`, `V1-TYPE-INTERFACE-anonymous-target`; `@type.redundant-implementation`: `V1-TYPE-INTERFACE-redundant-implementation` |
 | Silently ignored fallible values | `@type.unhandled-fallible`: `V1-TYPE-CONTROL-unhandled-fallible`, with the accepted discards in `V1-TYPE-CONTROL-fallible-discards` |
-| Interpreter behavior is independent of map/hash iteration | The interpreter and the typed IR use no hash collection; a map is its sorted entry array (D19.4). `V1-RUNTIME-map-order` builds one map in two insertion orders, and `V1-RUNTIME-user-map-keys` and `V1-RUNTIME-library-map` order by a user `compare` |
+| Interpreter behavior is independent of dict/hash iteration | The interpreter and the typed IR use no hash collection; a dict is its sorted entry array (D19.4). `V1-RUNTIME-dict-order` builds one dict in two insertion orders, and `V1-RUNTIME-user-dict-keys` and `V1-RUNTIME-library-dict` order by a user `compare` |
 | Index and context output use canonical resolved identities | `V1-TOOL-index-records` (declaration, implementation, and reference identities), `V1-TOOL-workspace-position-types` (declared type paths and dispatch receivers), and `index::tests` (two source orders, identical bytes) |
 | Every M2 deferral is implemented or reassigned | The sweep below |
 | No M3-owned form reports `@tool.unavailable` | The two sections above: what still reports it, and what is reassigned |
@@ -212,7 +212,7 @@ The Stage 3B clauses of `docs/spec/07-diagnostics-and-conformance.md`:
 | --- | --- | --- |
 | C1.3 — generics, nominal collections, interfaces, conversion | implemented, Steps 2–4 and 11–13 | `V1-RUNTIME-generic-functions`, `V1-RUNTIME-nominal-record`, `V1-RUNTIME-lookups`, `V1-RUNTIME-interface-dispatch`, `V1-RUNTIME-conversion` |
 | C1.5 — `match`, `try`, `option`, `result`, refutable patterns | implemented, Steps 4, 5, and 7 | `V1-TYPE-CONTROL-match-non-exhaustive`, `V1-TYPE-CONTROL-pattern-refutable-binding`, `V1-RUNTIME-try-propagation`, `V1-TYPE-CONTROL-unhandled-fallible` |
-| C1.6 — variadic array and map operands | implemented, Step 4 | `V1-RUNTIME-variadics`, `V1-SRC-CALLS-variadic-map-application` |
+| C1.6 — variadic array and dict operands | implemented, Step 4 | `V1-RUNTIME-variadics`, `V1-SRC-CALLS-variadic-dict-application` |
 | C1.7 — `as`, singleton widening, narrowing | implemented, Steps 6 and 12 | `V1-TYPE-CONVERT-widening-boundaries`, `V1-TYPE-CONVERT-narrowing-rejections`, `V1-RUNTIME-interface-values` |
 | C5.2 — constructor and destructuring patterns | implemented, Step 5 | `V1-RUNTIME-match-patterns`, `V1-RUNTIME-workspace-test-patterns` |
 | C6.2 — `types:` generic arguments | implemented, Step 3 | `V1-TYPE-GENERIC-type-arguments`, `V1-TOOL-format-types-order` |

@@ -1,2 +1,0 @@
-(defn main () (tuple (map str i32) (map str i32))
-  (tupleof (map.of "b" 2i32 "a" 1i32 "b" 3i32) (map.of "a" 1i32 "b" 3i32)))

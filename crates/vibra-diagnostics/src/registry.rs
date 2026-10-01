@@ -319,8 +319,8 @@ diagnostic_registry! {
         "no unique type follows for a literal, empty collection, or generic argument";
     TypeInfiniteSize => "@type.infinite-size", Type, Error, None,
         "a recursive type expands without passing through a variable-size container";
-    TypeInvalidMapKey => "@type.invalid-map-key", Type, Error, None,
-        "a map key type has no `equatable`, `ordered`, and `hashable` conformance";
+    TypeInvalidDictKey => "@type.invalid-dict-key", Type, Error, None,
+        "a dict key type has no `equatable`, `ordered`, and `hashable` conformance";
     TypeInvalidTry => "@type.invalid-try", Type, Error, None,
         "`try` is outside a matching `option` or `result` context";
     TypeUnhandledFallible => "@type.unhandled-fallible", Type, Error, None,
@@ -346,7 +346,7 @@ diagnostic_registry! {
     DataDuplicateField => "@data.duplicate-field", Data, Error, None,
         "a VIBON record repeats a label";
     DataDuplicateKey => "@data.duplicate-key", Data, Error, None,
-        "a VIBON map repeats a key";
+        "a VIBON dict repeats a key";
     ProjectStaleLock => "@project.stale-lock", Project, Error, None,
         "the lock does not match the declared dependencies";
     ProjectEntryOutsideTarget => "@project.entry-outside-target", Project, Error, None,

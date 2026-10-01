@@ -31,7 +31,7 @@ impl TempProject {
         fs::create_dir_all(root.join("src/app")).expect("create project source root");
         fs::write(
             root.join("project.vibon"),
-            format!("(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array {targets}) dependencies: (map))\n"),
+            format!("(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array {targets}) dependencies: (dict))\n"),
         )
         .expect("write project marker");
         for (path, source) in sources {
@@ -421,7 +421,7 @@ fn project_load_diagnostics_keep_their_source_line_and_column() {
     );
     fs::write(
         project.path().join("project.vibon"),
-        "(record format: @project.v1\n package: (record name: \"demo\" version: \"bad\")\n targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)))\n dependencies: (map))\n",
+        "(record format: @project.v1\n package: (record name: \"demo\" version: \"bad\")\n targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)))\n dependencies: (dict))\n",
     )
     .expect("replace project marker with a line-two schema error");
     let workspace = project.path().to_string_lossy().into_owned();

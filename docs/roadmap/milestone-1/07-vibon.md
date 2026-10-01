@@ -9,10 +9,10 @@ documents**, source **Reader/Canonical format**, and diagnostics **Recovery**.
 1. Keep extension dispatch ahead of content parsing. Add a proposed `data`
    syntax module that validates the existing CST as exactly one data value.
    A valid source list must not become valid data merely because it is balanced.
-2. Represent literal, record, array, tuple, and map data explicitly, retaining
+2. Represent literal, record, array, tuple, and dict data explicitly, retaining
    source-node references/spans. Recognize only these closed data heads; recurse
    through an explicit work stack where nesting could exhaust the host stack.
-3. Validate record label/value pairs and unique fields; validate map pair arity;
+3. Validate record label/value pairs and unique fields; validate dict pair arity;
    reject bare symbols, discards, declarations, and executable applications at
    every depth. A label is valid only in its grammar slot, not as a free value.
 4. Separate generic data decoding from typed schema decoding. Generic decoding
@@ -20,7 +20,7 @@ documents**, source **Reader/Canonical format**, and diagnostics **Recovery**.
    supply field order and atom-slot roles without loading source or resolving
    identities. The actual `@project.v1` decoder remains Milestone 2 work.
 5. Implement canonical output from the specified value/order contract. Generic
-   records retain source field order; generic maps sort by complete canonical
+   records retain source field order; generic dicts sort by complete canonical
    encoded key bytes. A typed adapter may supply explicit record field order
    and atom roles. Preserve comments with their associated entries when
    reordering; retain complete original bytes on recovery. Test generic data
@@ -35,7 +35,7 @@ documents**, source **Reader/Canonical format**, and diagnostics **Recovery**.
 | Family | Positive | Negative/boundary |
 | --- | --- | --- |
 | Root | Each literal/container, comments around one value | Zero values, two values, trailing executable form |
-| Containers | Empty record/array/tuple/map, deeply nested mixed values | Odd map tail, missing record value, duplicate field, non-label field |
+| Containers | Empty record/array/tuple/dict, deeply nested mixed values | Odd dict tail, missing record value, duplicate field, non-label field |
 | Closed grammar | Nested literals and atoms | Bare symbol, arbitrary application, `import`, `let`, source constructor such as `array.of`, discard in a value slot |
 | Dispatch | `.vibon` through data loader | `.vib` through data loader and `.vibon` through source loader, even with plausible contents |
 | Ordering | Equivalent inputs produce specified canonical order | Mixed key kinds and duplicate keys according to the resolved contract; no hash-order dependence |
@@ -51,5 +51,5 @@ contract and new diagnostic mappings before marking Step 7 landed.
 Step 7 uses `@data.invalid-shape` for root/container arity and slot-shape
 errors, `@data.invalid-value` for source-only forms and forbidden atoms,
 `@data.duplicate-field` for repeated record labels, and
-`@data.duplicate-key` for repeated map keys. All four are fixed `@error`
+`@data.duplicate-key` for repeated dict keys. All four are fixed `@error`
 diagnostics; lexical literal/name failures retain their Step 5/6 codes.

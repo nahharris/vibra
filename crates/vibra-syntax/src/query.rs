@@ -15,9 +15,9 @@ const TOP_LEVEL_FORMS: &[&str] = &[
     "import", "deftype", "defint", "deffect", "def", "defn", "test",
 ];
 const EXPRESSION_FORMS: &[&str] = &["lambda", "do", "let", "if", "match", "as", "try"];
-const TYPE_FORMS: &[&str] = &["tuple", "array", "map", "fn"];
+const TYPE_FORMS: &[&str] = &["tuple", "array", "dict", "fn"];
 const PATTERN_FORMS: &[&str] = &["tuple", "array", "as"];
-const DATA_FORMS: &[&str] = &["record", "array", "tuple", "map"];
+const DATA_FORMS: &[&str] = &["record", "array", "tuple", "dict"];
 const TYPE_ATTRIBUTE_LABELS: &[&str] = &["where", "visibility", "doc"];
 const DECLARATION_ATTRIBUTE_LABELS: &[&str] = &["visibility", "doc"];
 const FUNCTION_ATTRIBUTE_LABELS: &[&str] = &[
@@ -728,7 +728,7 @@ fn type_child_context(
         }
         "tuple" | "union" => Context::Type,
         "array" => Context::Type,
-        "map" => Context::Type,
+        "dict" => Context::Type,
         "fn" => match index {
             1 => Context::TypeArgumentList,
             2 => Context::Type,

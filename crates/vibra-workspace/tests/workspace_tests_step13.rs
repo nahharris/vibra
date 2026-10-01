@@ -20,7 +20,7 @@ impl TempProject {
     fn new(label: &str, sources: &[(&str, &str)]) -> Self {
         Self::with_project(
             label,
-            "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (map))\n",
+            "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict))\n",
             sources,
         )
     }
@@ -196,7 +196,7 @@ fn target_reference_to_assertion_is_unavailable_at_the_reference() {
 fn local_std_assert_functions_are_not_promoted_to_trusted_assertions() {
     let project = TempProject::with_project(
         "local-assert-spoof",
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @std kind: @bin root: \"src/std\" entry: @std.assert.execute effects: (array))) dependencies: (map))\n",
+        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @std kind: @bin root: \"src/std\" entry: @std.assert.execute effects: (array))) dependencies: (dict))\n",
         &[(
             "src/std/assert.vib",
             "(defn equal (left i32 right i32) void void)\n(defn execute () void (equal 1i32 2i32))\n",

@@ -1,6 +1,6 @@
 (record
   format: @index.v1
-  revision: "sha256:24fe702830621e23cad9f2bc98ec78f04bd2b775f3c9fb2ac53dc67fc4cde951"
+  revision: "sha256:244bec94ec85cbef2c1d91993b3ad391159cb805882f23fecda0109c49602c0f"
   declarations: (array
     (record
       id: @app.main

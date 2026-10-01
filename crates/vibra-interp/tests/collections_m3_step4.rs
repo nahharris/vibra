@@ -1,4 +1,4 @@
-//! M3 Step 4 collections in the reference interpreter: canonical map order,
+//! M3 Step 4 collections in the reference interpreter: canonical dict order,
 //! later-key replacement, and lookups that never trap.
 
 #![allow(clippy::expect_used, clippy::indexing_slicing)]
@@ -17,13 +17,13 @@ fn literal(value: Value) -> Expr {
     Expr::literal(value, origin())
 }
 
-fn map_type() -> Type {
-    Type::Map(Box::new(Type::Str), Box::new(Type::I32))
+fn dict_type() -> Type {
+    Type::Dict(Box::new(Type::Str), Box::new(Type::I32))
 }
 
-fn map_of(entries: &[(&str, i32)]) -> Expr {
-    Expr::Map {
-        value_type: map_type(),
+fn dict_of(entries: &[(&str, i32)]) -> Expr {
+    Expr::Dict {
+        value_type: dict_type(),
         key_order: None,
         entries: entries
             .iter()
@@ -74,14 +74,14 @@ fn every_insertion_order_yields_one_canonical_encoding() {
     ];
     let encodings = orders
         .iter()
-        .map(|entries| run(map_type(), map_of(entries)))
+        .map(|entries| run(dict_type(), dict_of(entries)))
         .collect::<Vec<_>>();
     assert!(
         encodings.iter().all(|encoding| *encoding == encodings[0]),
         "{encodings:?}"
     );
     assert!(encodings[0].contains(
-        "(record kind: @map entries: (array (tuple \"a\" 1i32) (tuple \"b\" 2i32) (tuple \"c\" 3i32)))"
+        "(record kind: @dict entries: (array (tuple \"a\" 1i32) (tuple \"b\" 2i32) (tuple \"c\" 3i32)))"
     ));
 }
 

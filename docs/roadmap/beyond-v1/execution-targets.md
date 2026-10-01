@@ -79,7 +79,7 @@ build output is what makes transfer possible. It is one of the
 
 ## Parallel pure computation
 
-`par.map` splits work across scheduler threads. Each chunk's inputs are
+`par.dict` splits work across scheduler threads. Each chunk's inputs are
 transferred into a worker instance and the outputs transferred back. Copying
 makes fine-grained parallelism expensive, so the runtime owns chunk sizing
 and falls back to sequential execution below a threshold. WasmGC or shared

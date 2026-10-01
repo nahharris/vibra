@@ -1,7 +1,7 @@
 (defn main () (tuple i32 u64 u64 u64 u64 i32 (option (tuple char str)))
   (tupleof
     (sum (array.of 1i32 2i32 3i32) 0i32)
-    (count (map.of "b" 2i32 "a" 1i32) 0u64)
+    (count (dict.of "b" 2i32 "a" 1i32) 0u64)
     (count "héllo" 0u64)
     (count (option.some 9i32) 0u64)
     (count (as (option i32) (option.none)) 0u64)

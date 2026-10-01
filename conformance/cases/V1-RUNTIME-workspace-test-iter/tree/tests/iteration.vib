@@ -4,9 +4,9 @@
 (test "drains an array through its closed conformance"
   (assert.equal (main.drain (array.of 3i32 1i32 2i32) (array.of)) (array.of 3i32 1i32 2i32)))
 
-(test "drains a map in key order"
+(test "drains a dict in key order"
   (assert.equal
-    (main.drain (map.of "b" 2i32 "a" 1i32) (array.of))
+    (main.drain (dict.of "b" 2i32 "a" 1i32) (array.of))
     (array.of (tupleof "a" 1i32) (tupleof "b" 2i32))))
 
 (test "drains a user iterator across an import"

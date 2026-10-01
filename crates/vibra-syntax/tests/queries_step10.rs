@@ -50,7 +50,7 @@ fn source_queries_report_contextual_slots_and_exact_continuations() {
     assert_eq!(value_type.category(), GrammarCategory::Type);
     assert_eq!(
         value_type.permitted_forms().unwrap_or_default(),
-        ["tuple", "array", "map", "fn"]
+        ["tuple", "array", "dict", "fn"]
     );
 
     let attribute = document
@@ -148,7 +148,7 @@ fn data_queries_report_record_slots_and_container_forms() {
     assert_eq!(container.category(), GrammarCategory::DataField);
     assert_eq!(
         container.permitted_forms().unwrap_or_default(),
-        ["record", "array", "tuple", "map"]
+        ["record", "array", "tuple", "dict"]
     );
 
     let repeated = document

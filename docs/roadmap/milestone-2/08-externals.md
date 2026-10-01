@@ -11,7 +11,7 @@ projects **Dependencies and lock**: [source](../../spec/01-source-language.md),
 ## Implementation sequence
 
 1. Implement only the reviewed C7 registry entries. Store exact signature,
-   version and semantic identity in backend-neutral data; map admitted IDs to
+   version and semantic identity in backend-neutral data; dict admitted IDs to
    interpreter operations. No string-selected arbitrary host function.
 2. Verify C8's toolchain provenance before accepting an external declaration.
    Check provider/symbol pairing, no body, exact types, and empty effects.

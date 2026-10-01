@@ -4,7 +4,7 @@
     (iter.collect (iter.take (iter.skip (iter.filter (array.of 1u64 2u64 3u64 4u64 6u64 8u64) even) 1u64) 2u64))
     (iter.collect (iter.take (iter.filter (naturals from: 5u64) even) 3u64))
     (iter.collect (iter.take "héllo" 2u64))
-    (iter.collect (map.of "b" 2i32 "a" 1i32))
+    (iter.collect (dict.of "b" 2i32 "a" 1i32))
     (iter.collect (option.some 7i32))
     (array.length (iter.collect (iter.take (naturals from: 0u64) 5000u64)))))
 

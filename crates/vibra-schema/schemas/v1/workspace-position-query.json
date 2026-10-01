@@ -191,8 +191,8 @@
           "additionalProperties": false,
           "required": ["kind", "name", "parameters", "result", "labelled"],
           "properties": {
-            "kind": { "const": "map" },
-            "name": { "const": "map" },
+            "kind": { "const": "dict" },
+            "name": { "const": "dict" },
             "parameters": { "type": "array", "items": { "$ref": "#/$defs/type" } },
             "result": { "type": "null" },
             "labelled": { "type": "array", "items": { "$ref": "#/$defs/labelled" } }

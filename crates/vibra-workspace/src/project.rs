@@ -347,7 +347,7 @@ pub enum Dependency {
 }
 
 impl Dependency {
-    /// The dependency alias map key, retained as an atom value.
+    /// The dependency alias dict key, retained as an atom value.
     #[must_use]
     pub fn alias(&self) -> &ProjectAtom {
         match self {
@@ -639,7 +639,7 @@ impl Project {
         &self.targets
     }
 
-    /// Dependency entries in source map order.
+    /// Dependency entries in source dict order.
     #[must_use]
     pub fn dependencies(&self) -> &[Dependency] {
         &self.dependencies
@@ -689,7 +689,7 @@ impl Project {
             output.push(' ');
             output.push_str(&canonical_target(target));
         }
-        output.push_str(") dependencies: (map");
+        output.push_str(") dependencies: (dict");
 
         let mut dependencies = self.dependencies.iter().collect::<Vec<_>>();
         dependencies.sort_by(|left, right| {
@@ -722,7 +722,7 @@ fn canonical_commented_project(raw: &str) -> Option<String> {
     Some(format_document(&reordered_document))
 }
 
-/// Reorders only the closed project records and dependency map while retaining
+/// Reorders only the closed project records and dependency dict while retaining
 /// every trivia node. The ordinary formatter then owns whitespace and comment
 /// attachment; this pass supplies the schema order that generic data lacks.
 fn rewrite_schema_data(node: &CstNode, source: &str) -> String {
@@ -750,7 +750,7 @@ fn rewrite_schema_data(node: &CstNode, source: &str) -> String {
     };
     match head {
         "record" => reorder_record(children, &rewritten, &significant, source),
-        "map" => reorder_map(children, &rewritten, &significant, source),
+        "dict" => reorder_dict(children, &rewritten, &significant, source),
         _ => rewritten.concat(),
     }
 }
@@ -825,7 +825,7 @@ fn reorder_record(
 
 // The preceding shape checks establish these indexes from the lossless CST.
 #[allow(clippy::indexing_slicing)]
-fn reorder_map(
+fn reorder_dict(
     children: &[CstNode],
     rewritten: &[String],
     significant: &[(usize, &CstNode)],
@@ -837,7 +837,7 @@ fn reorder_map(
     let head_index = significant[0].0;
     let mut entries = Vec::new();
     for pair in significant[1..].chunks_exact(2) {
-        entries.push(MapChunk {
+        entries.push(DictChunk {
             key: pair[0].1.leaf_text().unwrap_or_default().to_owned(),
             key_index: pair[0].0,
             value_index: pair[1].0,
@@ -886,7 +886,7 @@ struct RecordChunk {
     trailing: String,
 }
 
-struct MapChunk {
+struct DictChunk {
     key: String,
     key_index: usize,
     value_index: usize,
@@ -920,7 +920,7 @@ impl ReorderChunk for RecordChunk {
     }
 }
 
-impl ReorderChunk for MapChunk {
+impl ReorderChunk for DictChunk {
     fn first_index(&self) -> usize {
         self.key_index
     }
@@ -1448,12 +1448,12 @@ fn decode_dependencies(
     origin: &ProjectOrigin,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Vec<Dependency>> {
-    let DataValue::Map(entries) = node.value() else {
+    let DataValue::Dict(entries) = node.value() else {
         invalid_shape(
             node,
             origin,
             diagnostics,
-            "project dependencies must be a map",
+            "project dependencies must be a dict",
         );
         return None;
     };

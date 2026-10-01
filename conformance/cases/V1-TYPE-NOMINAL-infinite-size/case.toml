@@ -2,7 +2,7 @@ id = "V1-TYPE-NOMINAL-infinite-size"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
 operation = "type-check"
-description = "A declared type whose expansion repeats without an array, map, or function between is rejected at the first declaration of the cycle."
+description = "A declared type whose expansion repeats without an array, dict, or function between is rejected at the first declaration of the cycle."
 
 [inputs]
 source = "input.vib"

@@ -230,7 +230,7 @@ pub(crate) fn unify(
         }
         (Type::Tuple(_), Type::Tuple(_))
         | (Type::Array(_), Type::Array(_))
-        | (Type::Map(_, _), Type::Map(_, _)) => {
+        | (Type::Dict(_, _), Type::Dict(_, _)) => {
             let (left, right) = (left.components(), right.components());
             left.len() == right.len()
                 && left

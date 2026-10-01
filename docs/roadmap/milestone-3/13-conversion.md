@@ -30,7 +30,7 @@ Prerequisite: Step 12 merged. Stage 3B behavior step.
 4. **Text bodies.** The Step 8c text bodies move between `u8` and `u32` through
    the registry conversions, not through decimal text.
 
-Member generics, labelled operands, a map variadic tail, and a generic
+Member generics, labelled operands, a dict variadic tail, and a generic
 interface dispatched through a bounded generic or an interface value arrive
 with Step 14. Floating-point conversions are not in v1's registry.
 

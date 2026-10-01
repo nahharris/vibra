@@ -2,7 +2,7 @@ id = "V1-TYPE-NOMINAL-admissible-keys"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
 operation = "type-check"
-description = "Key primitives and anonymous tuples, records, and enums of them key a map, and a lookup takes exactly the key type."
+description = "Key primitives and anonymous tuples, records, and enums of them key a dict, and a lookup takes exactly the key type."
 
 [inputs]
 source = "input.vib"
