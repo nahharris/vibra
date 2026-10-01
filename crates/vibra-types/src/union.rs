@@ -104,6 +104,10 @@ fn unify(left: &Type, right: &Type, bindings: &mut BTreeMap<String, Type>) -> bo
         (
             Type::Applied(left_id, left_arguments),
             Type::Applied(right_id, right_arguments),
+        )
+        | (
+            Type::Interface(left_id, left_arguments),
+            Type::Interface(right_id, right_arguments),
         ) => {
             left_id == right_id && unify_all(left_arguments, right_arguments, bindings)
         }

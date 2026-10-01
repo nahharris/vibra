@@ -499,6 +499,7 @@ pub(crate) fn is_bootstrap_import_path(written: &str) -> bool {
         "std.option",
         "std.result",
         "std.core",
+        "std.iter",
         "std.assert",
     ]
     .iter()

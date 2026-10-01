@@ -19,13 +19,14 @@ use vibra_syntax::{
 use crate::nominal::TypeNames;
 use crate::stdlib::{
     STDLIB_BOOL_SOURCE_ID, STDLIB_BUILTIN_SOURCE_ID, STDLIB_BYTES_SOURCE_ID,
-    STDLIB_CORE_SOURCE_ID, STDLIB_OPTION_SOURCE_ID, STDLIB_RESULT_SOURCE_ID,
-    STDLIB_TEXT_SOURCE_ID, embedded_module, stdlib_type_id,
+    STDLIB_CORE_SOURCE_ID, STDLIB_ITER_SOURCE_ID, STDLIB_OPTION_SOURCE_ID,
+    STDLIB_RESULT_SOURCE_ID, STDLIB_TEXT_SOURCE_ID, embedded_module, stdlib_type_id,
 };
 
 /// The embedded modules that declare types every run can reach: by path,
 /// source identity, and module name under `@std`.
-const TYPE_MODULES: [(&str, &str, &str); 7] = [
+const TYPE_MODULES: [(&str, &str, &str); 8] = [
+    ("std/iter.vib", STDLIB_ITER_SOURCE_ID, "iter"),
     ("std/builtin.vib", STDLIB_BUILTIN_SOURCE_ID, "builtin"),
     ("std/bool.vib", STDLIB_BOOL_SOURCE_ID, "bool"),
     ("std/text.vib", STDLIB_TEXT_SOURCE_ID, "text"),

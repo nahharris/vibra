@@ -129,9 +129,11 @@ Stage 3B — interfaces, generics, conversion, and iteration.
 | 11c | [User and generic map keys ordered by their own `compare`, and interface bounds on `deftype` and `lambda` parameters (per D18.2)](11c-user-keys.md) | 11b | landed | PR #324, merge `587f000` |
 | 11d | [The library map: `map` declared in the standard library over sorted entries under `@map`, `map.entries`, and the closed key conformances as library implementations (per D17.1)](11d-library-map.md) | 11c | landed | PR #325, merge `2ec1749` |
 | 12 | [Interface values: `any` and interfaces in type position, widening to an interface, dispatch through interface values, unions implementing interfaces](12-interface-values.md) | 11d | landed | PR #326, merge `2df633d` |
-| 13 | [Destination dispatch and conversion: factory members, `from`/`try-from`, `conversion-error`, redundant-conversion and ambiguous-destination checks](13-conversion.md) | 12 | landed | Step 13 PR (conditional on merge) |
-| 14 | [Iteration: the `iter` contract and default methods, closed builtin conformance, adapter types, written algebraic laws for `equatable`/`ordered`/`hashable`/`iter` with conformance examples](14-iteration.md) | 13 | not started | — |
-| 15 | [Resolved symbol/reference/index records and type-aware query metadata with canonical identities](15-index.md) | 14 | not started | — |
+| 13 | [Destination dispatch and conversion: factory members, `from`/`try-from`, `conversion-error`, redundant-conversion and ambiguous-destination checks](13-conversion.md) | 12 | landed | PR #327, merge `76b1b90` |
+| 14a | [The iteration contract: `iter` with `next` under `@iter`, closed builtin conformance, dispatch of a generic interface through its interface value, and inference through conformance](14a-iter-contract.md) | 13 | landed | Step 14a PR (conditional on merge) |
+| 14b | [Iteration defaults and adapters: `map`, `filter`, `skip`, `take`, and `collect` in Vibra, the adapter types, and contract members with their own generics](14b-iter-defaults.md) | 14a | not started | — |
+| 14c | [Contract laws and the role check: written algebraic laws for `equatable`, `ordered`, and `iter` with conformance examples, and the loader's missing-role check](14c-laws-and-roles.md) | 14b | not started | — |
+| 15 | [Resolved symbol/reference/index records and type-aware query metadata with canonical identities](15-index.md) | 14c | not started | — |
 | 16 | [M3 demo and exit gate, including the M2 deferral sweep — evidence step](16-exit.md) | 15 | not started | — |
 
 Steps 1, 4a, and 10 are specification prerequisites and Steps 9 and 16 are

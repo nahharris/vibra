@@ -363,6 +363,13 @@ impl TypeNames {
         if arguments.is_empty() {
             return self.satisfies(scope, interface, value);
         }
+        // The builtin constructor types iterate through the closed registry.
+        if crate::interfaces::is_iter(self, interface)
+            && let [item] = arguments
+            && self.closed_iter_item(value).as_ref() == Some(item)
+        {
+            return true;
+        }
         let target = |receiver: &Type, arguments: &[Type]| {
             Type::Tuple(
                 std::iter::once(receiver.clone())
@@ -379,6 +386,29 @@ impl TypeNames {
                     &wanted,
                 )
         })
+    }
+
+    /// The item type of a builtin constructor type that iterates through the
+    /// closed registry (`docs/spec/02-type-system.md`, "Closed builtin
+    /// conformance"): `(array t)`, `(map k v)`, `str`, and `(option t)`.
+    pub(crate) fn closed_iter_item(&self, receiver: &Type) -> Option<Type> {
+        match receiver {
+            Type::Array(element) => Some(element.as_ref().clone()),
+            Type::Map(key, value) => Some(Type::Tuple(vec![
+                key.as_ref().clone(),
+                value.as_ref().clone(),
+            ])),
+            Type::Str => Some(Type::Char),
+            Type::Applied(id, arguments)
+                if self
+                    .role("option")
+                    .and_then(|index| self.get(index))
+                    .is_some_and(|option| option.id == *id) =>
+            {
+                arguments.first().cloned()
+            }
+            _ => None,
+        }
     }
 
     /// Whether `receiver` conforms to the key contract `interface` through the
@@ -402,7 +432,7 @@ impl TypeNames {
             Some((_, vibra_ir::ClosedContract::KeyEqual)) => {
                 map_key(receiver) == KeyVerdict::Admissible
             }
-            None => false,
+            Some((_, vibra_ir::ClosedContract::IterNext)) | None => false,
         }
     }
 

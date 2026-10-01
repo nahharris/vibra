@@ -394,6 +394,8 @@ fn standard_type_import(
         }
         "std.core.equatable" => Some((STDLIB_CORE_SOURCE_ID, Some("equatable"))),
         "std.core.ordered" => Some((STDLIB_CORE_SOURCE_ID, Some("ordered"))),
+        "std.iter" => Some((stdlib::STDLIB_ITER_SOURCE_ID, None)),
+        "std.iter.iter" => Some((stdlib::STDLIB_ITER_SOURCE_ID, Some("iter"))),
         "std.core.from" => Some((STDLIB_CORE_SOURCE_ID, Some("from"))),
         "std.core.try-from" => Some((STDLIB_CORE_SOURCE_ID, Some("try-from"))),
         _ => None,
@@ -2489,6 +2491,23 @@ pub(crate) fn check_inferred_operand(
         return checked;
     }
     let checked = check_operand(environment, operand, None)?;
+    // A parameter typed as a generic interface's value takes its arguments
+    // from the one way the operand conforms, and the operand widens to it.
+    let actual = checked.result_type();
+    if let Type::Interface(id, arguments) = pattern
+        && !matches!(actual, Type::Interface(_, _) | Type::Any)
+        && let Some(interface) = environment.types.interface_index_of(id)
+        && let [conformance] =
+            interfaces::conformances(environment.types, interface, &actual).as_slice()
+        && conformance.len() == arguments.len()
+        && arguments
+            .iter()
+            .zip(conformance)
+            .all(|(argument, found)| instantiation.unify(argument, found))
+        && let Some(target) = instantiation.resolved(pattern)
+    {
+        return widen_to(environment, checked, &target, operand.span());
+    }
     if !instantiation.unify(pattern, &checked.result_type()) {
         environment.diagnostics.push(
             Diagnostic::new(

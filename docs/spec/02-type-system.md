@@ -659,6 +659,11 @@ every type argument in `where:` order. Partial application, named type
 arguments, specialization by value, multiple bounds on one parameter, and
 runtime type tests are not in v1.
 
+A bound is one name, so it cannot apply a generic interface: `where: (t iter)`
+emits `@type.type-argument-mismatch`. A parameter typed as the interface value,
+such as `(values (iter item))`, takes that role, and a generic `item` there is
+inferred from the one way the operand conforms.
+
 Every type argument of an application MUST implement the bound of its
 parameter: a concrete type through an implementation of that interface, and a
 generic name of the enclosing declaration through the same bound. A violation,

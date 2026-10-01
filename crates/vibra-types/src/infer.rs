@@ -206,6 +206,10 @@ pub(crate) fn unify(
         (
             Type::Applied(left_id, left_arguments),
             Type::Applied(right_id, right_arguments),
+        )
+        | (
+            Type::Interface(left_id, left_arguments),
+            Type::Interface(right_id, right_arguments),
         ) => {
             left_id == right_id
                 && left_arguments.len() == right_arguments.len()

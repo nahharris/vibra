@@ -1,0 +1,9 @@
+; Iteration (`docs/spec/02-type-system.md`, "Iteration"). An iterator is a
+; value whose `next` yields one item and the iterator that remains; there is
+; no mutating cursor. `(array t)`, `(map k v)`, `str`, and `(option t)` conform
+; through the closed toolchain registry.
+(defint iter
+  where: (item any)
+  role: @iter
+  visibility: @public
+  (defn next (value self) (option (tuple item self))))

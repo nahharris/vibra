@@ -1,0 +1,28 @@
+(import iter @std.iter)
+
+(defn execute () void void)
+
+; The items of any iterator, in order.
+(defn drain (values (iter.iter item) seen (array item)) (array item)
+  where: (item any)
+  visibility: @public
+  (match (iter.iter.next values)
+    (option.some (tupleof item rest)) (drain rest (array.append seen item))
+    (option.none) seen))
+
+(deftype evens (record next-value u8 limit u8)
+  visibility: @public
+  (impl (iter.iter u8)
+    (defn next (value self) (option (tuple u8 self))
+      (match (u8.compare (value @next-value) (value @limit))
+        (core.ordering.greater) (option.none)
+        - (option.some
+            (tupleof
+              (value @next-value)
+              (evens
+                next-value: (match (u8.add-checked (value @next-value) 2u8)
+                  (result.ok next) next
+                  (result.err -) 255u8)
+                limit: (value @limit))))))))
+
+(import core @std.core)
