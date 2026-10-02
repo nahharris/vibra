@@ -1,0 +1,3 @@
+(defn one () i32 visibility: @public 1i32)
+
+(defn execute () void void)

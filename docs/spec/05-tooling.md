@@ -372,8 +372,11 @@ the envelope's fact status says why.
 A module record's `signature` is `void` and its `text` is the whole formatted
 module. A member written in an `impl` block has no atom identity, so it has no
 declaration record, and a reference in its body names the declaration that
-owns the block as `from`. The records describe the modules of the local
-package; a standard-library declaration appears only as a target.
+owns the block as `from`. A `test` form has no declaration record either, and
+a reference in its body names the test module as `from`. Every `text` is the
+formatted text of the record's own declaration, wherever the formatter's
+canonical member order places it. The records describe the modules of the
+local package; a standard-library declaration appears only as a target.
 
 `urn:vibra:schema:v1:index` is the JSON wire form of the same document for a
 tooling consumer: the same records in the same order, with identities as atom

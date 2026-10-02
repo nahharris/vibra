@@ -64,3 +64,32 @@ fn record_fields_stay_in_name_type_pairs_around_comments() {
         "{formatted}"
     );
 }
+
+#[test]
+fn a_commented_declaration_orders_every_attribute_label() {
+    let formatted = format_twice(
+        "(deftype opt (enum some t none void)\n  ; c\n  visibility: @public role: @option where: (t any))\n",
+    );
+    assert_eq!(
+        formatted,
+        "(deftype opt (enum some t none void)\n  where: (t any)\n  role: @option\n  ; c\n  visibility: @public)\n"
+    );
+}
+
+#[test]
+fn a_comment_elsewhere_does_not_change_an_uncommented_declaration() {
+    let declaration = "(defn f () i32 doc: \"d\" visibility: @public 0i32)\n";
+    let alone = format_twice(declaration);
+    let beside = format_twice(&format!("; note\n(def one i32 1i32)\n\n{declaration}"));
+    assert!(beside.ends_with(&alone), "{beside}");
+}
+
+#[test]
+fn a_trailing_comment_stays_behind_its_form() {
+    let formatted =
+        format_twice("(deftype point (record x i32 ; the x\n  y i32 ; the y\n  ))\n");
+    assert_eq!(
+        formatted,
+        "(deftype point\n  (record\n    x i32\n    ; the x\n    y i32\n    ; the y\n  ))\n"
+    );
+}

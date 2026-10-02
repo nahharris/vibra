@@ -1,0 +1,4 @@
+(defn total (first i32) i32 variadic: (rest (array i32)) first)
+
+(defn pairs () i32
+  ((lambda (base i32) i32 variadic: (entries (dict str i32)) base) 1i32))

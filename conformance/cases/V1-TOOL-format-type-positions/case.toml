@@ -1,0 +1,14 @@
+id = "V1-TOOL-format-type-positions"
+rule = "V1-TOOL"
+profile = "tooling-v1"
+operation = "format"
+description = "Union members order by their laid-out text whatever spacing they were written with, a parameter list whose first parameter is named union is not a union type, and a header list whose closing delimiters would pass column 88 reflows instead of leaving them on a line of their own."
+
+[inputs]
+source = "tree/src/app/main.vib"
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

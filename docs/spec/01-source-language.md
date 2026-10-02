@@ -665,7 +665,9 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
   every remaining scalar;
 - adjacent lowercase numeric suffixes, preserved exactly when written;
 - leaf lists on one line when they fit within 88 columns;
-- multiline lists keep their line comments on their own indented lines;
+- multiline lists keep their line comments on their own indented lines. A
+  comment written on the line of a form goes on the line after that form; any
+  other comment stays before the form that follows it;
 - delimiter placement in every multiline list, commented or not. The opening
   delimiter shares the first form's line when that form is inline and fits
   beside it; a hanging opening delimiter above an inline first form is never
@@ -681,7 +683,8 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
   follow stack onto that same line rather than being orphaned below it.
   Closing delimiters carry no indentation of their own, so the asymmetry
   between the two ends is deliberate. Each end is decided on its own;
-- declaration headers before labelled attributes and bodies;
+- declaration headers before labelled attributes and bodies, in the same
+  canonical order whether or not the declaration holds a comment;
 - in a multiline declaration, the header forms on the opening line: the
   declaration head, then each following header form for as long as it is
   inline, no comment separates it from the form before, and the line stays
@@ -691,12 +694,14 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
   point takes its own line;
 - in a multiline declaration, each labelled attribute on one line with its
   value when both are inline, no comment separates them, and the pair leaves
-  room for one closing delimiter within 88 columns; otherwise the label and
-  the value each take a line. Every other form of the declaration takes its
-  own line;
+  room within 88 columns for one closing delimiter, or for every closing
+  delimiter that follows it when it ends the declaration; otherwise the label
+  and the value each take a line. Every other form of the declaration takes
+  its own line;
 - fixed, labelled, then variadic function or constructor operands;
 - one pattern/result arm per line in a multiline `match`; and
-- preserved comments attached to the following form when possible.
+- preserved comments, attached to the form whose line they were written on
+  and otherwise to the following form when possible.
 
 Formatting MUST be idempotent and semantics-preserving. The formatter MAY
 normalize recoverable presentation but MUST NOT guess through a syntax,

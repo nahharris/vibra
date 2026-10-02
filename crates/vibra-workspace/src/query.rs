@@ -15,7 +15,7 @@ use vibra_resolve::{DeclarationId, EntityKind, ResolvedReference, ResolvedSnapsh
 use vibra_syntax::{
     Application, Attribute, Declaration, Expression, ExpressionKind, FloatSuffix,
     FunctionDeclaration, GrammarCategory, IntegerSuffix, Literal, NameKind, Pattern,
-    PatternKind, SourceAst, StructuralQuery, TypeExpr,
+    PatternKind, SourceAst, StructuralQuery, TypeExpr, VariadicParameter,
 };
 use vibra_types::check_source;
 
@@ -1060,6 +1060,29 @@ impl<'a> SemanticCollector<'a> {
         }
     }
 
+    /// The variadic parameter binds a local like any other parameter.
+    fn collect_variadic(
+        &mut self,
+        parameter: &VariadicParameter,
+        locals: &mut Vec<LocalBinding>,
+    ) {
+        let span = self.name_span(parameter.span(), parameter.name().raw());
+        if parameter.name().kind() == NameKind::Discard {
+            self.patterns.push(PatternSite {
+                span,
+                role: "@discard".to_owned(),
+                context: "parameter".to_owned(),
+            });
+            return;
+        }
+        let binding = self.local_binding(parameter.name().value(), span);
+        self.binders.push(BinderSite {
+            span,
+            binding: binding.clone(),
+        });
+        locals.push(binding);
+    }
+
     fn collect_function(&mut self, function: &FunctionDeclaration) {
         let mut locals = Vec::new();
         for parameter in function.parameters() {
@@ -1091,6 +1114,9 @@ impl<'a> SemanticCollector<'a> {
                         });
                     }
                 }
+            }
+            if let Attribute::Variadic(parameter) = attribute {
+                self.collect_variadic(parameter, &mut locals);
             }
         }
         self.scopes.push(ScopeSite {
@@ -1332,6 +1358,9 @@ impl<'a> SemanticCollector<'a> {
                                 });
                             }
                         }
+                    }
+                    if let Attribute::Variadic(parameter) = attribute {
+                        self.collect_variadic(parameter, &mut nested);
                     }
                 }
                 self.scopes.push(ScopeSite {
