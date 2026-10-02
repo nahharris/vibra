@@ -135,6 +135,8 @@ pub(crate) struct ContractMember {
     pub(crate) signature: FunctionSignature,
     /// The member's own generic parameters.
     pub(crate) generics: Vec<String>,
+    /// The interface bounds of those parameters.
+    pub(crate) bounds: BTreeMap<String, usize>,
     /// Whether the member has a default body.
     pub(crate) default: bool,
     /// The position of the fixed positional `self` parameter that selects the

@@ -603,6 +603,13 @@ has a `fn` type and is a first-class function value. Application is `(path …)`
 with the receiver or operands required by that signature. Constructors,
 projections, lookups, and enum tags are not `fn` values.
 
+A contract member named as a value is instantiated from its written expected
+`fn` type, exactly as a generic function is: that type fixes the receiver, and
+calling the value selects the implementation as a call written at that
+receiver would. Without a written `fn` type it is `@type.ambiguous-inference`.
+A bounded generic function or `lambda` named as a value has each bound checked
+at the argument its expected type fixes.
+
 `fn` values are not `equatable` and MUST NOT be used as a `(dict k v)` key. Using
 one as a key emits `@type.function-not-equatable`.
 
@@ -816,7 +823,11 @@ implementation is the one for the type the value holds. Where the member's
 signature names `self` in its result, the result is the same interface value
 type. A member that names `self` in another parameter cannot be called through
 an interface value, because the value erases the type those operands must
-share; the call emits `@type.mismatch` at that operand. An interface value type
+share; the call emits `@type.mismatch` at that operand. The same holds for an
+abstract and a default member alike. A member whose result takes `self` as an
+operand of a function type cannot be called through an interface value either,
+because the returned function would accept any value of the interface; the
+call emits `@type.mismatch`. An interface value type
 implements no interface, itself included, so it never satisfies a generic
 bound and never widens again.
 

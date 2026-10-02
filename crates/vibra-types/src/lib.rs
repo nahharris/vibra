@@ -2267,6 +2267,7 @@ fn function_value(
     let header = environment.functions.get(index)?;
     let signature = header.signature.clone();
     let parameters = header.type_parameters.clone();
+    let bounds = header.bounds.clone();
     let origin = SourceOrigin::new(environment.source_id, expression.span());
     if !parameters.is_empty() && callee_position {
         return Some(Expr::function(index, signature, origin));
@@ -2278,6 +2279,7 @@ fn function_value(
             environment,
             expression.span(),
             &parameters,
+            &bounds,
             &Type::Function(Box::new(signature)),
             expected.as_ref(),
         )?
@@ -2317,10 +2319,14 @@ fn binding_value(
     let actual = if parameters.is_empty() || callee_position {
         value_type
     } else {
+        let bounds = environment
+            .types
+            .lambda_bounds(environment.source_id, &parameters);
         instantiate_value(
             environment,
             expression.span(),
             &parameters,
+            &bounds,
             &value_type,
             expected.as_ref(),
         )?
@@ -2385,6 +2391,7 @@ fn instantiate_value(
     environment: &mut CheckEnvironment<'_>,
     span: ByteSpan,
     parameters: &[String],
+    bounds: &BTreeMap<String, usize>,
     value_type: &Type,
     expected: Option<&Type>,
 ) -> Option<Type> {
@@ -2407,6 +2414,21 @@ fn instantiate_value(
         .filter(|_| unbound.is_empty());
     if resolved.is_none() {
         ambiguous_generic(environment, span, &unbound);
+        return None;
+    }
+    // A value instantiates its parameters as a call would, so each bound
+    // holds at the argument the expected type fixed.
+    if !bounds.is_empty() {
+        let fixed = parameters
+            .iter()
+            .filter_map(|name| {
+                let variable = instantiation.open(&Type::Param(name.clone()));
+                Some((name.clone(), instantiation.resolved(&variable)?))
+            })
+            .collect::<BTreeMap<_, _>>();
+        if !interfaces::check_bounds(environment, span, bounds, &fixed) {
+            return None;
+        }
     }
     resolved
 }
@@ -3652,6 +3674,21 @@ fn check_form(
         }
         ExpressionKind::Name(name) if name.kind() == NameKind::Symbol => {
             if name.segments().len() != 1 {
+                // An abstract contract member has no body of its own: as a value
+                // it is a closure that performs the contract call.
+                if let Some((interface, member)) = environment
+                    .types
+                    .contract_member(environment.source_id, name)
+                    && let Some(value) = interfaces::check_contract_value(
+                        environment,
+                        expression.span(),
+                        interface,
+                        member,
+                        expected.as_ref(),
+                    )
+                {
+                    return value;
+                }
                 if let Some(target) = resolved_reference_target(environment, expression)
                 {
                     return check_resolved_reference(
@@ -4263,7 +4300,7 @@ fn check_form(
             let mut generics = environment.generics.clone();
             generics.extend(own_generics.iter().cloned());
             let mut bounds = environment.bounds.clone();
-            bounds.extend(own_bounds);
+            bounds.extend(own_bounds.clone());
             let signature = check_lambda_signature(
                 environment.source_id,
                 lambda,
@@ -4411,6 +4448,7 @@ fn check_form(
                     environment,
                     expression.span(),
                     &own_generics,
+                    &own_bounds,
                     &Type::Function(Box::new(signature)),
                     expected.as_ref(),
                 )?
