@@ -175,7 +175,12 @@
                           "additionalProperties": false,
                           "required": ["trapCode", "origin"],
                           "properties": {
-                            "trapCode": { "const": "@runtime.invalid-checked-program" },
+                            "trapCode": {
+                              "enum": [
+                                "@runtime.invalid-checked-program",
+                                "@runtime.unobservable-function"
+                              ]
+                            },
                             "origin": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
                           }
                         }
@@ -204,7 +209,12 @@
                             "additionalProperties": false,
                             "required": ["trapCode", "origin"],
                             "properties": {
-                              "trapCode": { "const": "@runtime.invalid-checked-program" },
+                              "trapCode": {
+                              "enum": [
+                                "@runtime.invalid-checked-program",
+                                "@runtime.unobservable-function"
+                              ]
+                            },
                               "origin": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
                             }
                           },

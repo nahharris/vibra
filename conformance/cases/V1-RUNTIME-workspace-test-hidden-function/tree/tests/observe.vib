@@ -1,0 +1,21 @@
+(import assert @std.assert)
+
+(import iter @std.iter.iter)
+
+(defint shape
+  (defn name (value self) str)
+  (impl (fn (i32) i32) (defn name (value self) str "fn")))
+
+(defn inc (x i32) i32 x)
+
+(test "any holding a function" (assert.equal (as any inc) (as any inc)))
+
+(test "any holding a number" (assert.equal (as any 1i32) (as any 1i32)))
+
+(test "interface holding a function"
+  (assert.equal (as shape inc) (as shape inc)))
+
+(test "iterator holding a function"
+  (assert.equal
+    (iter.map (array.of 1i32) (lambda (x i32) i32 x))
+    (iter.map (array.of 1i32) (lambda (x i32) i32 x))))

@@ -759,10 +759,13 @@ fn decode_expectations(
 
     let accepted = raw.accepted;
 
+    // A trap happens while an accepted program runs, so its diagnostic is
+    // the one error an accepted case may expect.
     if accepted
-        && diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.level == Level::Error)
+        && diagnostics.iter().any(|diagnostic| {
+            diagnostic.level == Level::Error
+                && diagnostic.code.domain() != vibra_diagnostics::Domain::Runtime
+        })
     {
         return Err(ManifestError::Invalid(
             "an accepted case cannot expect an error diagnostic".to_owned(),

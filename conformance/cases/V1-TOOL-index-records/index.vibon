@@ -33,7 +33,7 @@
       owner: @app.main.celsius
       visibility: @private
       source: (record source-id: "src/app/main.vib" start: 259u64 end: 315u64)
-      signature: (fn (array @app.main.celsius) @app.main.celsius)
+      signature: (record type: @fn parameters: (array @app.main.celsius) labelled: (record) result: @app.main.celsius)
       effects: (array)
       errors: (array)
       applications: (array @app.main.celsius)
@@ -45,7 +45,7 @@
       owner: void
       visibility: @public
       source: (record source-id: "src/app/main.vib" start: 596u64 end: 715u64)
-      signature: (fn (array @app.main.celsius) (record type: @std.option.option arguments: (array @str)))
+      signature: (record type: @fn parameters: (array @app.main.celsius) labelled: (record) result: (record type: @std.option.option arguments: (array @str)))
       effects: (array)
       errors: (array)
       applications: (array @app.main.celsius.warmer @app.main.shape.label)
@@ -57,7 +57,7 @@
       owner: void
       visibility: @private
       source: (record source-id: "src/app/main.vib" start: 796u64 end: 823u64)
-      signature: (fn (array) @void)
+      signature: (record type: @fn parameters: (array) labelled: (record) result: @void)
       effects: (array)
       errors: (array)
       applications: (array)
@@ -81,7 +81,7 @@
       owner: void
       visibility: @private
       source: (record source-id: "src/app/main.vib" start: 717u64 end: 794u64)
-      signature: (fn (array @str) (record type: @std.result.result arguments: (array @i32 @std.core.conversion-error)))
+      signature: (record type: @fn parameters: (array @str) labelled: (record) result: (record type: @std.result.result arguments: (array @i32 @std.core.conversion-error)))
       effects: (array)
       errors: (array @std.core.conversion-error)
       applications: (array @std.builtin.i32.parse)
@@ -105,7 +105,7 @@
       owner: @app.main.shape
       visibility: @public
       source: (record source-id: "src/app/main.vib" start: 146u64 end: 194u64)
-      signature: (fn (array (record type: @param name: @self)) @str)
+      signature: (record type: @fn parameters: (array (record type: @param name: @self)) labelled: (record) result: @str)
       effects: (array)
       errors: (array)
       applications: (array @app.main.shape.name)
@@ -117,7 +117,7 @@
       owner: @app.main.shape
       visibility: @public
       source: (record source-id: "src/app/main.vib" start: 115u64 end: 143u64)
-      signature: (fn (array (record type: @param name: @self)) @str)
+      signature: (record type: @fn parameters: (array (record type: @param name: @self)) labelled: (record) result: @str)
       effects: (array)
       errors: (array)
       applications: (array)
@@ -132,7 +132,7 @@
         (record
           contract: @std.core.from.convert
           source: (record source-id: "src/app/main.vib" start: 397u64 end: 483u64)
-          signature: (fn (array @i16) @app.main.celsius)
+          signature: (record type: @fn parameters: (array @i16) labelled: (record) result: @app.main.celsius)
           text: "(defn convert (value i16) self (celsius degrees: (as i32 (from.convert value))))")))
     (record
       receiver: @app.main.celsius
@@ -143,7 +143,7 @@
         (record
           contract: @std.core.from.convert
           source: (record source-id: "src/app/main.vib" start: 507u64 end: 592u64)
-          signature: (fn (array @i8) @app.main.celsius)
+          signature: (record type: @fn parameters: (array @i8) labelled: (record) result: @app.main.celsius)
           text: "(defn convert (value i8) self (celsius degrees: (as i32 (from.convert value))))")))
     (record
       receiver: @app.main.celsius
@@ -154,7 +154,7 @@
         (record
           contract: @app.main.shape.name
           source: (record source-id: "src/app/main.vib" start: 334u64 end: 372u64)
-          signature: (fn (array @app.main.celsius) @str)
+          signature: (record type: @fn parameters: (array @app.main.celsius) labelled: (record) result: @str)
           text: "(defn name (value self) str \"celsius\")"))))
   references: (array
     (record from: @app.main.shape.label written: "shape.name" source: (record source-id: "src/app/main.vib" start: 176u64 end: 186u64) to: @app.main.shape.name)

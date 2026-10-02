@@ -98,6 +98,7 @@ table governs.
 | `@project.io-error` | `@error` |
 | `@runtime.invalid-host-value` | `@error` |
 | `@runtime.invalid-checked-program` | `@error` |
+| `@runtime.unobservable-function` | `@error` |
 | `@runtime.host-stack-exhausted` | `@error` |
 | `@style.argument-order` | `@warning` |
 | `@contract.unused-effect` | `@warning` |
@@ -192,7 +193,9 @@ the corresponding CLI `trapCode` and VIBON `trap-code` are the exact string
 `"@runtime.invalid-checked-program"`, with no source origin (`null` in JSON
 and omitted from the closed VIBON trap record). `@runtime.invalid-host-value`
 remains reserved for invalid host-value IDs and does not describe these
-checked-program failures.
+checked-program failures. `@runtime.unobservable-function` is the trap of a
+value holding a function that reaches a test assertion or the entry's result;
+in a test its diagnostic and trap origin are the assertion call.
 
 During source enumeration, `@module.invalid-segment` is attached to the empty
 span `0..0` of the affected project-relative path when a directory or file
@@ -344,7 +347,8 @@ carry those independently. No other fields are permitted. The
 `audit-trace` record has exactly `format: @audit-trace.v1` and `events: (array)`;
 M2 events are empty for every test result, including invalid, unavailable, and
 trap outcomes. For M2 checked-program execution-boundary traps, `trap-code` is
-the exact string `"@runtime.invalid-checked-program"` and `origin` is omitted.
+the exact string `"@runtime.invalid-checked-program"` and `origin` is omitted;
+for `"@runtime.unobservable-function"`, `origin` is the assertion call.
 The test records contain all per-test traces, so a second
 suite-level audit snapshot is forbidden. An empty suite is `tests: (array)`
 with result `@command.ok`.
