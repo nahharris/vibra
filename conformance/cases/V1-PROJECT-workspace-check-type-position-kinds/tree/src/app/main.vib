@@ -1,0 +1,28 @@
+(import other @app.other)
+
+(import helper @app.other.helper)
+
+(def top i32 1i32)
+
+(defn double (value i32) i32
+  value)
+
+(defn from-value (value top) i32
+  1i32)
+
+(defn from-function (value double) i32
+  1i32)
+
+(defn from-module (value other) i32
+  1i32)
+
+(defn from-imported-value (value other.limit) i32
+  1i32)
+
+(defn from-imported-function (value helper) i32
+  1i32)
+
+(defn from-nothing (value missing) i32
+  1i32)
+
+(defn execute () void void)

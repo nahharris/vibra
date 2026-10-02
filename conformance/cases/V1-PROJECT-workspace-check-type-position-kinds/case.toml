@@ -1,0 +1,48 @@
+id = "V1-PROJECT-workspace-check-type-position-kinds"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "A name in a type position that resolves to a value, a function, or a module, in its own module or through an import, is @name.wrong-entity-kind and says what it found; only a name that resolves to nothing is @name.unknown-symbol."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.wrong-entity-kind"
+level = "@error"
+source = "src/app/main.vib"
+span = [139, 148]
+
+[[expect.diagnostics]]
+code = "@name.wrong-entity-kind"
+level = "@error"
+source = "src/app/main.vib"
+span = [184, 196]
+
+[[expect.diagnostics]]
+code = "@name.wrong-entity-kind"
+level = "@error"
+source = "src/app/main.vib"
+span = [230, 241]
+
+[[expect.diagnostics]]
+code = "@name.wrong-entity-kind"
+level = "@error"
+source = "src/app/main.vib"
+span = [283, 300]
+
+[[expect.diagnostics]]
+code = "@name.wrong-entity-kind"
+level = "@error"
+source = "src/app/main.vib"
+span = [345, 357]
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "src/app/main.vib"
+span = [392, 405]

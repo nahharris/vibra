@@ -14,19 +14,19 @@ accepted = false
 code = "@type.union-member-not-concrete"
 level = "@error"
 source = "input.vib"
-span = [47, 81]
+span = [63, 80]
 
 [[expect.diagnostics]]
 code = "@type.union-member-not-concrete"
 level = "@error"
 source = "input.vib"
-span = [83, 117]
+span = [101, 116]
 
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
 source = "input.vib"
-span = [132, 156]
+span = [146, 151]
 
 [[expect.diagnostics]]
 code = "@name.wrong-entity-kind"

@@ -1276,6 +1276,20 @@ impl<'a> Machine<'a> {
         })
     }
 
+    /// The `ordered` interface of `@std.core`, when the program holds an
+    /// implementation of it.
+    fn ordered_interface(&self) -> Option<TypeId> {
+        self.program.functions().iter().find_map(|function| {
+            function
+                .implements()
+                .filter(|implements| {
+                    implements.member == "compare"
+                        && implements.interface.path() == "std.core.ordered"
+                })
+                .map(|implements| implements.interface.clone())
+        })
+    }
+
     /// The `compare` implementation of the `ordered` interface `interface`
     /// whose receiver is the declared type of `value`.
     fn key_compare_function(
@@ -1736,10 +1750,15 @@ impl<'a> Machine<'a> {
                 let [left, right] = values.as_slice() else {
                     return None;
                 };
-                // A structure holding a user key orders through its `compare`.
-                let key_order =
-                    (closed == ClosedContract::KeyCompare).then_some(interface);
-                let order = self.compare_keys(left, right, key_order)?;
+                // A structure holding a user key orders through its
+                // `compare`, and is equal exactly when that says so: the
+                // closed `equal` has no other answer for a key it cannot see
+                // into.
+                let key_order = match closed {
+                    ClosedContract::KeyCompare => Some(interface.clone()),
+                    _ => self.ordered_interface(),
+                };
+                let order = self.compare_keys(left, right, key_order.as_ref())?;
                 return Some(Evaluation::Value(closed_contract(
                     closed,
                     order,

@@ -304,7 +304,10 @@ implementation:
 - `bool`, `char`, `str`, `bytes`, `atom`, and every atom singleton type;
 - `i8` through `i64` and `u8` through `u64`; and
 - an anonymous tuple, record, enum, or union type whose every component,
-  field, payload, or member type is itself an admissible key.
+  field, payload, or member type is itself an admissible key. A declared key
+  inside such a type answers through its own `ordered` implementation for
+  both contracts: the structure's `equal` holds exactly where its `compare`
+  is `equal`.
 
 The standard library writes these conformances as ordinary implementations:
 `equatable` and `ordered` carry them for the builtin integers and `char`, and
@@ -614,7 +617,12 @@ projections, lookups, and enum tags are not `fn` values.
 A contract member named as a value is instantiated from its written expected
 `fn` type, exactly as a generic function is: that type fixes the receiver, and
 calling the value selects the implementation as a call written at that
-receiver would. Without a written `fn` type it is `@type.ambiguous-inference`.
+receiver would. The written type stands for a call's operands and expected
+type: a destination-dispatched member takes its destination from the written
+result, and a member that selects among implementations, as one of a generic
+interface does, is the one implementation with the written type; none is
+`@type.mismatch` and several are `@type.ambiguous-implementation`. Without a
+written `fn` type it is `@type.ambiguous-inference`.
 A bounded generic function or `lambda` named as a value has each bound checked
 at the argument its expected type fixes.
 
@@ -837,7 +845,9 @@ operand of a function type cannot be called through an interface value either,
 because the returned function would accept any value of the interface; the
 call emits `@type.mismatch`. An interface value type
 implements no interface, itself included, so it never satisfies a generic
-bound and never widens again.
+bound that names an interface and never widens again. The bound `any`
+constrains nothing, so it admits an interface value type like every other
+type.
 
 Every `defn` name is one unqualified segment in its owner's scope, because the
 enclosing form already names that owner. A declaration therefore never spells
@@ -960,7 +970,10 @@ applied-interface-target and receiver-type pair, the checker MUST find every
 **abstract** contract member exactly once, substitute the concrete type for
 `self`, preserve parameter and result types, preserve labelled names and
 defaults and variadic shape, and verify that the method performs no effect
-outside the contract ceiling.
+outside the contract ceiling. A default is preserved when it denotes the
+contract's value at the parameter's type, however it is spelled: `1` and
+`1i32` are one default at `i32`. Another value emits `@type.mismatch` at the
+member.
 
 A contract member with a body is a **default method**. An implementation MUST
 supply every abstract member and MUST NOT redeclare a default member; doing so
@@ -1144,12 +1157,16 @@ one uncovered value shape in canonical pattern spelling, chosen as the first
 uncovered shape in declaration order of variants, members, and fields. In that
 shape, a position that only a binder or discard can cover (a value of an
 infinite space such as `str`, `atom`, or a number) is spelled `-`, as is a
-record, tuple, or wrapper whose every component is `-`. A refutable binding
+record, tuple, or wrapper whose every component is `-`. A record shape names
+only the fields that fix it and omits each field spelled `-`, as a record
+pattern may. A refutable binding
 pattern's `@pattern.refutable-binding` carries the same kind of note. An arm
 that no value can reach because earlier arms cover it emits
 `@pattern.unreachable-arm` at that arm's pattern, relating the earliest arm
 that alone covers it when one exists. Arms are examined in source order, so
-only the later of two identical arms is unreachable.
+only the later of two identical arms is unreachable. A `str` or `bytes`
+literal is the wrapper over its scalars or bytes, so an earlier
+`(str (array …))` arm of its length makes a literal arm unreachable.
 
 `try` applies to an operand of type `(option t)` or `(result t e)` inside a
 function, `lambda`, or test whose written result type is the same standard
@@ -1272,7 +1289,9 @@ exactly three outcomes:
 - the type constrains an otherwise ambiguous inference, such as an unsuffixed
   numeric literal, an empty `array.of` or `dict.of`, or a generic result.
 
-Anything else emits `@type.invalid-ascription`. In particular, ascription never
+Anything else emits `@type.invalid-ascription`. An anonymous constructor under
+`as` checks each component at the target's component type, so a component of
+another type is that same failed ascription. In particular, ascription never
 requests a conversion and never narrows:
 
 ```vibra

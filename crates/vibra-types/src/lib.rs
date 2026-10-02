@@ -636,6 +636,7 @@ impl<'a> Checker<'a> {
         }
         // Declared types first: any signature below may name one. A single
         // source has no package, so a type's identity and path are its name.
+        self.types.note_other_names(self.source_id, self.ast);
         let mut type_declarations = Vec::new();
         for declaration in self.ast.declarations() {
             if let Declaration::Defint(value) = declaration {
@@ -4684,12 +4685,26 @@ fn check_ascription(
         // the mismatch is reported inside the operand: it is the same
         // failed ascription when it is a mismatch against the target.
         let against_target = format!("expected {target}, found");
+        // An anonymous constructor checks each component at the target's
+        // component type, so a component that is not of that type is the
+        // same failed ascription too.
+        let components: Vec<ByteSpan> = match operand.kind() {
+            ExpressionKind::TupleOf(items) => {
+                items.iter().map(Expression::span).collect()
+            }
+            ExpressionKind::RecordOf(fields) => {
+                fields.iter().map(|field| field.value().span()).collect()
+            }
+            ExpressionKind::EnumOf(payload) => vec![payload.value().span()],
+            _ => Vec::new(),
+        };
         while let Some(diagnostic) = environment.diagnostics.get(index) {
             let span = diagnostic.primary_span();
             let inside = span.start() >= operand.span().start()
                 && span.end() <= operand.span().end();
             if diagnostic.code() == DiagnosticCode::TypeMismatch
                 && (span == operand.span()
+                    || components.contains(&span)
                     || (inside && diagnostic.message().contains(&against_target)))
             {
                 environment.diagnostics.remove(index);

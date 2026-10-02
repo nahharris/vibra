@@ -1,0 +1,41 @@
+id = "V1-TYPE-NOMINAL-collection-arity"
+rule = "V1-TYPE-NOMINAL"
+profile = "static-v1"
+operation = "type-check"
+description = "array and dict are ordinary generic types: any count of type arguments other than their own, including a bare head, is @type.type-argument-mismatch."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [11, 32]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [58, 74]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [102, 126]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [159, 170]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [202, 212]

@@ -861,6 +861,59 @@ pub(crate) fn uncovered(
     .and_then(|witness| witness.into_iter().next())
 }
 
+/// `pattern` with each `str` or `bytes` literal written as the wrapper over
+/// its scalars or bytes that it denotes, so a literal and a
+/// `(str (array …))` pattern are compared as the same kind of value. Only
+/// reachability needs it: no set of literals makes a `match` exhaustive, and
+/// the witness of an uncovered string stays `-`.
+fn sequence_literals(types: &TypeNames, pattern: &Pattern) -> Pattern {
+    let wraps =
+        |value_type: &Type| matches!(space(types, value_type), Space::Wrapper(_));
+    let expand = |pattern: &Pattern| sequence_literals(types, pattern);
+    match pattern {
+        Pattern::Literal(Value::Str(text)) if wraps(&Type::Str) => {
+            Pattern::Wrap(Box::new(Pattern::Array(
+                text.chars()
+                    .map(|scalar| Pattern::Literal(Value::Char(scalar)))
+                    .collect(),
+            )))
+        }
+        Pattern::Literal(Value::Bytes(bytes)) if wraps(&Type::Bytes) => {
+            Pattern::Wrap(Box::new(Pattern::Array(
+                bytes
+                    .iter()
+                    .map(|byte| Pattern::Literal(Value::U8(*byte)))
+                    .collect(),
+            )))
+        }
+        Pattern::Wildcard | Pattern::Bind { .. } | Pattern::Literal(_) => {
+            pattern.clone()
+        }
+        Pattern::Variant { variant, payload } => Pattern::Variant {
+            variant: variant.clone(),
+            payload: payload.as_deref().map(|payload| Box::new(expand(payload))),
+        },
+        Pattern::Record(fields) => Pattern::Record(
+            fields
+                .iter()
+                .map(|(name, field)| (name.clone(), expand(field)))
+                .collect(),
+        ),
+        Pattern::Tuple(items) => Pattern::Tuple(items.iter().map(expand).collect()),
+        Pattern::Array(items) => Pattern::Array(items.iter().map(expand).collect()),
+        Pattern::Wrap(inner) => Pattern::Wrap(Box::new(expand(inner))),
+        Pattern::Member {
+            index,
+            member,
+            pattern,
+        } => Pattern::Member {
+            index: *index,
+            member: member.clone(),
+            pattern: Box::new(expand(pattern)),
+        },
+    }
+}
+
 /// Whether `pattern` matches some value no pattern of `earlier` matches.
 pub(crate) fn reachable(
     types: &TypeNames,
@@ -868,13 +921,15 @@ pub(crate) fn reachable(
     pattern: &Pattern,
     value_type: &Type,
 ) -> bool {
-    let matrix: Vec<Vec<Pattern>> =
-        earlier.iter().map(|arm| vec![arm.clone()]).collect();
+    let matrix: Vec<Vec<Pattern>> = earlier
+        .iter()
+        .map(|arm| vec![sequence_literals(types, arm)])
+        .collect();
     useful(
         types,
         &matrix,
         std::slice::from_ref(value_type),
-        std::slice::from_ref(pattern),
+        &[sequence_literals(types, pattern)],
     )
     .is_some()
 }
@@ -890,8 +945,6 @@ pub(crate) fn spell(types: &TypeNames, pattern: &Pattern, value_type: &Type) -> 
         _ => None,
     };
     let space = space(types, value_type);
-    let all_wild =
-        |items: &[&Pattern]| items.iter().all(|item| matches!(item, Pattern::Wildcard));
     match (pattern, &space) {
         (Pattern::Wildcard | Pattern::Bind { .. }, _) => "-".to_owned(),
         (Pattern::Literal(value), _) => literal_spelling(value),
@@ -912,35 +965,40 @@ pub(crate) fn spell(types: &TypeNames, pattern: &Pattern, value_type: &Type) -> 
             }
         }
         (Pattern::Record(fields), Space::Record(members)) => {
-            if all_wild(&fields.iter().map(|(_, field)| field).collect::<Vec<_>>()) {
-                return "-".to_owned();
-            }
+            // A field is decided by how it is spelled, not by its pattern: a
+            // wrapper over a discard is a discard too. A record pattern may
+            // omit a field, so the witness names only the ones that fix the
+            // shape.
             let written = fields
                 .iter()
-                .filter(|(_, field)| !matches!(field, Pattern::Wildcard))
                 .map(|(name, field)| {
                     let field_type = members
                         .iter()
                         .find(|(member, _)| member == name)
                         .map(|(_, member)| member.clone())
                         .unwrap_or(Type::Void);
-                    format!(" {name}: {}", spell(types, field, &field_type))
+                    (name, spell(types, field, &field_type))
                 })
+                .filter(|(_, spelling)| spelling != "-")
+                .map(|(name, spelling)| format!(" {name}: {spelling}"))
                 .collect::<String>();
+            if written.is_empty() {
+                return "-".to_owned();
+            }
             let head = declared_name().unwrap_or_else(|| "recordof".to_owned());
             format!("({head}{written})")
         }
         (Pattern::Tuple(items), Space::Tuple(components)) => {
-            if all_wild(&items.iter().collect::<Vec<_>>()) {
-                return "-".to_owned();
-            }
-            let head = declared_name().unwrap_or_else(|| "tupleof".to_owned());
             let operands = items
                 .iter()
                 .zip(components)
-                .map(|(item, component)| format!(" {}", spell(types, item, component)))
-                .collect::<String>();
-            format!("({head}{operands})")
+                .map(|(item, component)| spell(types, item, component))
+                .collect::<Vec<_>>();
+            if operands.iter().all(|operand| operand == "-") {
+                return "-".to_owned();
+            }
+            let head = declared_name().unwrap_or_else(|| "tupleof".to_owned());
+            format!("({head} {})", operands.join(" "))
         }
         (Pattern::Wrap(inner), Space::Wrapper(representation)) => {
             if matches!(**inner, Pattern::Wildcard) {

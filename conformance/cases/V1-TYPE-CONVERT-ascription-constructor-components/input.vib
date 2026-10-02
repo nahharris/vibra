@@ -1,0 +1,8 @@
+(defn pair () (tuple i32 str)
+  (as (tuple i32 str) (tupleof 1i32 2i32)))
+
+(defn point () (record x i32)
+  (as (record x i32) (recordof x: "s")))
+
+(defn plain () (tuple i32 str)
+  (tupleof 1i32 2i32))

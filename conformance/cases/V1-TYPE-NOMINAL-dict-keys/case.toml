@@ -14,31 +14,31 @@ accepted = false
 code = "@type.invalid-dict-key"
 level = "@error"
 source = "input.vib"
-span = [48, 64]
+span = [56, 59]
 
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
 source = "input.vib"
-span = [90, 107]
+span = [98, 102]
 
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
 source = "input.vib"
-span = [134, 158]
+span = [142, 153]
 
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
 source = "input.vib"
-span = [184, 201]
+span = [192, 196]
 
 [[expect.diagnostics]]
 code = "@type.function-not-equatable"
 level = "@error"
 source = "input.vib"
-span = [231, 255]
+span = [239, 250]
 
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"

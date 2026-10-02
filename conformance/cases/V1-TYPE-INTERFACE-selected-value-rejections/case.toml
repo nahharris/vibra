@@ -1,0 +1,29 @@
+id = "V1-TYPE-INTERFACE-selected-value-rejections"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "A contract member as a value is rejected when no implementation has the written fn type, for a source the destination does not convert from or a destination that implements nothing; a member with labelled parameters is not a value while labelled contract calls are unavailable."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [255, 267]
+
+[[expect.diagnostics]]
+code = "@type.unsatisfied-bound"
+level = "@error"
+source = "input.vib"
+span = [311, 323]
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [390, 401]

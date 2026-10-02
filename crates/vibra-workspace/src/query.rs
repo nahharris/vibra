@@ -2185,9 +2185,9 @@ fn semantic_type_expr(value: &TypeExpr) -> Option<SemanticType> {
         | TypeExpr::Tuple(_)
         | TypeExpr::Record(_)
         | TypeExpr::Enum(_)
-        | TypeExpr::Union(_)
+        | TypeExpr::Union(_, _)
         | TypeExpr::Array(_)
-        | TypeExpr::Dict(_, _) => None,
+        | TypeExpr::Dict(_, _, _) => None,
     }
 }
 

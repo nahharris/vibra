@@ -164,6 +164,8 @@ pub(crate) fn lower_contract(
             );
             continue;
         }
+        let defaults =
+            labelled_defaults(source_id, method.attributes().items(), &signature);
         members.push(ContractMember {
             name: method.name().value().to_owned(),
             span: method.span(),
@@ -171,6 +173,7 @@ pub(crate) fn lower_contract(
             generics: crate::nominal::generic_names(method.attributes().items()),
             bounds,
             default: !method.expressions().is_empty(),
+            defaults,
             receiver: position,
         });
     }
@@ -496,7 +499,7 @@ fn resolve_block(
                 TypeExpr::Record(_)
                     | TypeExpr::Enum(_)
                     | TypeExpr::Tuple(_)
-                    | TypeExpr::Union(_)
+                    | TypeExpr::Union(_, _)
             ) {
                 wrong_kind(
                     diagnostics,
@@ -665,13 +668,54 @@ pub(crate) fn contract_substitution(
     substitution
 }
 
+/// The default of each labelled parameter among `attributes`: its written
+/// spelling and the value it denotes at the parameter's type in `signature`.
+/// A default that does not check has no value; the function's own check
+/// reports it.
+fn labelled_defaults(
+    source_id: &str,
+    attributes: &[Attribute],
+    signature: &FunctionSignature,
+) -> BTreeMap<String, (String, Option<vibra_ir::Value>)> {
+    attributes
+        .iter()
+        .filter_map(|attribute| match attribute {
+            Attribute::Labelled(parameters) => Some(parameters),
+            _ => None,
+        })
+        .flatten()
+        .map(|parameter| {
+            let name = parameter.name().value();
+            let value = signature
+                .labelled()
+                .iter()
+                .find(|labelled| labelled.name() == name)
+                .and_then(|labelled| {
+                    crate::check_default(
+                        source_id,
+                        parameter.span(),
+                        parameter.default(),
+                        &labelled.value_type(),
+                        &mut Vec::new(),
+                    )
+                });
+            (
+                name.to_owned(),
+                (parameter.default().raw().to_owned(), value),
+            )
+        })
+        .collect()
+}
+
 /// Reports a written member whose signature is not the contract's with `self`
-/// and the interface arguments substituted.
+/// and the interface arguments substituted, or whose labelled defaults are
+/// not the contract's.
 pub(crate) fn check_member_signature(
     types: &TypeNames,
     plan: &ImplPlan,
     name: &str,
     written: &FunctionSignature,
+    attributes: &[Attribute],
     span: ByteSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
@@ -687,7 +731,29 @@ pub(crate) fn check_member_signature(
         &plan.arguments,
     ));
     if expected.same_shape(written) {
-        return true;
+        // Two spellings of one value, such as `1` and `1i32` at `i32`, are
+        // the same default.
+        let defaults = labelled_defaults(&plan.source_id, attributes, written);
+        let Some((label, (default, _))) =
+            contract.defaults.iter().find(|(label, (_, value))| {
+                defaults
+                    .get(*label)
+                    .is_none_or(|(_, written)| written != value)
+            })
+        else {
+            return true;
+        };
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeMismatch,
+                span,
+                format!(
+                    "an implementation member must keep its contract's labelled defaults: `{label}` defaults to `{default}` in `{name}`"
+                ),
+            )
+            .with_source_id(&plan.source_id),
+        );
+        return false;
     }
     mismatch(
         diagnostics,
@@ -1134,6 +1200,7 @@ pub(crate) fn materialize(
                 plan,
                 member_name,
                 &signature,
+                method.attributes().items(),
                 method.span(),
                 diagnostics,
             ) {
@@ -1644,6 +1711,211 @@ fn check_selected_call(
             origin,
         },
     })
+}
+
+/// Checks a contract member named as a value when calling it selects among
+/// implementations: a destination-dispatched member, a member of a generic
+/// interface, or a variadic member. The written expected `fn` type stands
+/// for the operands and the expected type of a call: its receiver operand,
+/// or its result for a destination, fixes the receiver, and the one
+/// implementation whose signature is that type is the value.
+fn check_selected_value(
+    environment: &mut CheckEnvironment<'_>,
+    span: ByteSpan,
+    interface: usize,
+    declared: &DeclaredInterface,
+    contract: &ContractMember,
+    expected: Option<&Type>,
+) -> Option<Expr> {
+    let Some(Type::Function(written)) = expected else {
+        environment.diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeAmbiguousInference,
+                span,
+                format!(
+                    "`{}.{}` as a value needs a written expected `fn` type to fix its implementation",
+                    declared.name, contract.name
+                ),
+            )
+            .with_source_id(environment.source_id),
+        );
+        return None;
+    };
+    let mut dispatched = None;
+    let receiver = match contract.receiver {
+        Some(position) => {
+            let Some(receiver) = written.parameters().get(position).cloned() else {
+                crate::ensure_expected(
+                    environment,
+                    span,
+                    expected.cloned(),
+                    Type::Function(Box::new(contract.signature.clone())),
+                );
+                return None;
+            };
+            dispatched = match &receiver {
+                Type::Param(name)
+                    if environment.bounds.get(name) == Some(&interface) =>
+                {
+                    Some(
+                        declared
+                            .parameters
+                            .iter()
+                            .map(|parameter| Type::Param(parameter.clone()))
+                            .collect::<Vec<_>>(),
+                    )
+                }
+                Type::Interface(id, arguments) if *id == declared.id => {
+                    let shared =
+                        contract.signature.parameters().iter().enumerate().any(
+                            |(index, parameter)| {
+                                index != position && mentions_self(parameter)
+                            },
+                        );
+                    if shared {
+                        mismatch(
+                            environment.diagnostics,
+                            environment.source_id,
+                            span,
+                            self_type(),
+                            receiver.clone(),
+                            "a member with another `self` operand cannot be called through an interface value, which erases the type they must share",
+                        );
+                        return None;
+                    }
+                    if reject_escaping_self(environment, span, contract, &receiver) {
+                        return None;
+                    }
+                    Some(arguments.clone())
+                }
+                Type::Param(_) | Type::Interface(_, _) | Type::Any => {
+                    unsatisfied(environment, span, &receiver, &declared.name);
+                    return None;
+                }
+                _ => None,
+            };
+            receiver
+        }
+        None => destination(
+            environment,
+            interface,
+            declared,
+            contract,
+            Some(&written.result()),
+            span,
+        )?,
+    };
+    if contract.receiver.is_none()
+        && declared.parameters.is_empty()
+        && matches!(&receiver, Type::Param(name)
+            if environment.bounds.get(name) == Some(&interface))
+    {
+        dispatched = Some(Vec::new());
+    }
+    let candidates = match dispatched {
+        Some(arguments) => vec![candidate(
+            declared,
+            contract,
+            &receiver,
+            &arguments,
+            CandidateTarget::Dispatch,
+        )],
+        None => candidates(environment.types, interface, declared, contract, &receiver),
+    };
+    if candidates.is_empty() {
+        unsatisfied(environment, span, &receiver, &declared.name);
+        return None;
+    }
+    let fitting = candidates
+        .iter()
+        .filter(|candidate| candidate.signature.same_shape(written))
+        .collect::<Vec<_>>();
+    let chosen = match fitting.as_slice() {
+        [chosen] => *chosen,
+        [] => {
+            let mut diagnostic = Diagnostic::new(
+                DiagnosticCode::TypeMismatch,
+                span,
+                format!(
+                    "no implementation of `{}` for {receiver} has the written type {}",
+                    declared.name,
+                    Type::Function(written.clone())
+                ),
+            )
+            .with_source_id(environment.source_id);
+            for candidate in &candidates {
+                diagnostic = diagnostic.with_note(format!(
+                    "`{}` has type {}",
+                    candidate.spelling,
+                    Type::Function(Box::new(candidate.signature.clone()))
+                ));
+            }
+            environment.diagnostics.push(diagnostic);
+            return None;
+        }
+        _ => {
+            let mut diagnostic = Diagnostic::new(
+                DiagnosticCode::TypeAmbiguousImplementation,
+                span,
+                format!(
+                    "more than one implementation of `{}` for {receiver} has the written type",
+                    declared.name
+                ),
+            )
+            .with_source_id(environment.source_id);
+            for candidate in &fitting {
+                diagnostic = diagnostic
+                    .with_note(format!("`{}` is a candidate", candidate.spelling));
+            }
+            environment.diagnostics.push(diagnostic);
+            return None;
+        }
+    };
+    let signature = chosen.signature.clone();
+    let origin = SourceOrigin::new(environment.source_id, span);
+    // The closure's slots are the fixed parameters and then the tail, which
+    // arrives already packed.
+    let slots = signature.slot_types();
+    let arguments = slots
+        .iter()
+        .enumerate()
+        .map(|(slot, value_type)| {
+            Expr::variable(slot, value_type.clone(), origin.clone())
+        })
+        .collect::<Vec<_>>();
+    let result = signature.result();
+    let body = match chosen.target {
+        CandidateTarget::Function(function) => {
+            Expr::call(function, arguments, result, origin.clone())
+        }
+        CandidateTarget::Primitive(intrinsic) => {
+            Expr::external_with_result(intrinsic, arguments, result, origin.clone())
+        }
+        CandidateTarget::Dispatch => Expr::Call {
+            target: CallTarget::Contract {
+                interface: declared.id.clone(),
+                member: contract.name.clone(),
+                receiver: contract.receiver.unwrap_or(0),
+                arguments: chosen.arguments.clone(),
+                destination: contract.receiver.is_none().then(|| receiver.clone()),
+                signature: Box::new(signature.clone()),
+                closed: closed_contract(environment.types, interface, &contract.name),
+            },
+            arguments,
+            result,
+            tail: false,
+            origin: origin.clone(),
+        },
+    };
+    let parameters = signature.parameters().to_vec();
+    Some(Expr::closure(
+        signature,
+        parameters,
+        Vec::new(),
+        body,
+        slots.len(),
+        origin,
+    ))
 }
 
 /// One candidate: `contract`'s signature with `self` as `receiver` and the
@@ -2181,20 +2453,28 @@ pub(crate) fn check_contract_value(
     if contract.default && contract.receiver.is_some() {
         return None;
     }
-    let position = contract.receiver.filter(|_| {
-        declared.parameters.is_empty()
-            && contract.generics.is_empty()
-            && contract.signature.labelled().is_empty()
-            && contract.signature.variadic().is_none()
-    });
-    let Some(position) = position else {
+    // The forms a contract call cannot take yet are not values either.
+    if !contract.generics.is_empty() || !contract.signature.labelled().is_empty() {
         crate::unavailable(
             environment.diagnostics,
             environment.source_id,
             span,
-            "a contract member selected by its destination, of a generic interface, or with generic, labelled, or variadic parameters is not a function value in the M3 profile; call it in a `lambda`",
+            "a contract member with its own generic parameters or with labelled parameters is not a function value in the M3 profile",
         );
         return Some(None);
+    }
+    let position = contract.receiver.filter(|_| {
+        declared.parameters.is_empty() && contract.signature.variadic().is_none()
+    });
+    let Some(position) = position else {
+        return Some(check_selected_value(
+            environment,
+            span,
+            interface,
+            &declared,
+            &contract,
+            expected,
+        ));
     };
     let Some(Type::Function(written)) = expected else {
         environment.diagnostics.push(

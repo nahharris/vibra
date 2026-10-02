@@ -1,0 +1,7 @@
+(deftype pair (tuple i32 other))
+
+(deftype other (enum more pair none void))
+
+(deftype box wrapped)
+
+(deftype wrapped (record inner box))

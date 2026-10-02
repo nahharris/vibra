@@ -14,7 +14,7 @@ accepted = false
 code = "@type.invalid-dict-key"
 level = "@error"
 source = "input.vib"
-span = [117, 142]
+span = [131, 137]
 
 [[expect.diagnostics]]
 code = "@name.unknown-symbol"

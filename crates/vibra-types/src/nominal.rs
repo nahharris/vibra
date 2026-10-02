@@ -17,8 +17,8 @@ use vibra_ir::{
     FunctionSignature, LabelledParameter, Type, TypeBody, TypeDefinition, TypeId,
 };
 use vibra_syntax::{
-    Attribute, DefintDeclaration, DeftypeBody, DeftypeDeclaration, Name, TypeExpr,
-    TypeMember,
+    Attribute, Declaration, DefintDeclaration, DeftypeBody, DeftypeDeclaration, Name,
+    SourceAst, TypeExpr, TypeMember,
 };
 
 use crate::unavailable;
@@ -32,6 +32,12 @@ pub(crate) enum LowerError {
     Unknown(String),
     /// A name that denotes a type the current module may not see.
     Private(String),
+    /// A failure of one type expression inside the lowered one, reported at
+    /// that expression rather than at the owner.
+    At(ByteSpan, Box<LowerError>),
+    /// A name that denotes a visible entity which is not a type: the name
+    /// and what it is.
+    WrongKind(String, &'static str),
     /// A declared type written with the wrong number of type arguments.
     Arity {
         name: String,
@@ -139,6 +145,10 @@ pub(crate) struct ContractMember {
     pub(crate) bounds: BTreeMap<String, usize>,
     /// Whether the member has a default body.
     pub(crate) default: bool,
+    /// The default of each labelled parameter, by name, as it is written and
+    /// as the value it denotes at the parameter's type: a default is not part
+    /// of the signature, and an implementation must keep its value.
+    pub(crate) defaults: BTreeMap<String, (String, Option<vibra_ir::Value>)>,
     /// The position of the fixed positional `self` parameter that selects the
     /// implementation, or `None` for a destination-dispatched member.
     pub(crate) receiver: Option<usize>,
@@ -169,6 +179,9 @@ struct ModuleScope {
     declarations: BTreeMap<String, (String, String)>,
     /// Interfaces declared in this module.
     interfaces: BTreeMap<String, usize>,
+    /// Module-level names that are not types or interfaces, with what each
+    /// one is, so a type position can say which kind of entity it found.
+    others: BTreeMap<String, &'static str>,
 }
 
 /// Every declared type of one checking run and the names each module sees.
@@ -254,6 +267,46 @@ impl TypeNames {
             }
         }
         index
+    }
+
+    /// Records the module-level declarations of `source_id` that are neither
+    /// types nor interfaces.
+    pub(crate) fn note_other_names(&mut self, source_id: &str, ast: &SourceAst) {
+        let others = &mut self.scopes.entry(source_id.to_owned()).or_default().others;
+        for declaration in ast.declarations() {
+            let (name, kind) = match declaration {
+                Declaration::Def(value) => (value.name(), "a value"),
+                Declaration::Defn(value) => (value.name(), "a function"),
+                Declaration::Deffect(value) => (value.name(), "an effect root"),
+                _ => continue,
+            };
+            others.insert(name.value().to_owned(), kind);
+        }
+    }
+
+    /// What `name` denotes when it is visible from `source_id` and is not a
+    /// type.
+    fn other_kind(&self, source_id: &str, name: &str) -> Option<&'static str> {
+        let scope = self.scopes.get(source_id)?;
+        let in_module = |target: &str, name: &str| {
+            self.scopes
+                .get(target)
+                .and_then(|scope| scope.others.get(name))
+                .copied()
+        };
+        match name.split('.').collect::<Vec<_>>().as_slice() {
+            [local] => scope
+                .others
+                .get(*local)
+                .copied()
+                .or_else(|| scope.imports.contains_key(*local).then_some("a module"))
+                .or_else(|| {
+                    let (target, declaration) = scope.declarations.get(*local)?;
+                    in_module(target, declaration)
+                }),
+            [alias, member] => in_module(scope.imports.get(*alias)?, member),
+            _ => None,
+        }
     }
 
     /// Registers an interface owned by `source_id`, returning its index.
@@ -443,14 +496,17 @@ impl TypeNames {
         receiver: &Type,
     ) -> bool {
         match crate::interfaces::key_contract(self, interface) {
-            Some((_, vibra_ir::ClosedContract::KeyCompare)) => {
+            // A structure of admissible keys conforms to both contracts, and
+            // a declared key inside it answers through its own `ordered`.
+            Some((
+                _,
+                vibra_ir::ClosedContract::KeyCompare
+                | vibra_ir::ClosedContract::KeyEqual,
+            )) => {
                 !matches!(
                     receiver,
                     Type::Declared(_) | Type::Applied(_, _) | Type::Param(_)
                 ) && self.key_verdict(scope, receiver) == KeyVerdict::Admissible
-            }
-            Some((_, vibra_ir::ClosedContract::KeyEqual)) => {
-                dict_key(receiver) == KeyVerdict::Admissible
             }
             Some((_, vibra_ir::ClosedContract::IterNext)) | None => false,
         }
@@ -899,6 +955,24 @@ impl TypeNames {
         scope: Scope<'_>,
         value: &TypeExpr,
     ) -> Result<Type, LowerError> {
+        // A name that resolves to an entity of another kind is reported as
+        // that, not as unknown.
+        self.lower_type(source_id, scope, value)
+            .map_err(|error| match error {
+                LowerError::Unknown(name) => match self.other_kind(source_id, &name) {
+                    Some(kind) => LowerError::WrongKind(name, kind),
+                    None => LowerError::Unknown(name),
+                },
+                error => error,
+            })
+    }
+
+    fn lower_type(
+        &self,
+        source_id: &str,
+        scope: Scope<'_>,
+        value: &TypeExpr,
+    ) -> Result<Type, LowerError> {
         match value {
             TypeExpr::Void => Ok(Type::Void),
             TypeExpr::Name(name) => {
@@ -910,6 +984,14 @@ impl TypeNames {
                         .self_type
                         .cloned()
                         .ok_or_else(|| LowerError::Unknown("self".to_owned()));
+                }
+                // A bare generic head is an application with no arguments.
+                if name.value() == "array" {
+                    return Err(LowerError::Arity {
+                        name: "array".to_owned(),
+                        expected: 1,
+                        found: 0,
+                    });
                 }
                 if scope.generics.iter().any(|generic| generic == name.value()) {
                     return Ok(Type::Param(name.value().to_owned()));
@@ -965,6 +1047,17 @@ impl TypeNames {
             TypeExpr::Enum(variants) => Ok(Type::Enum(vibra_ir::canonical_members(
                 self.lower_members(source_id, scope, variants)?,
             ))),
+            TypeExpr::Applied { head, arguments }
+                if matches!(head.value(), "array" | "dict") =>
+            {
+                // The reader builds the builtin forms at their own counts,
+                // so this one has another.
+                Err(LowerError::Arity {
+                    name: head.value().to_owned(),
+                    expected: if head.value() == "array" { 1 } else { 2 },
+                    found: arguments.len(),
+                })
+            }
             TypeExpr::Applied { head, arguments } => {
                 if head.value() == "result"
                     && matches!(
@@ -998,29 +1091,37 @@ impl TypeNames {
             TypeExpr::Array(element) => Ok(Type::Array(Box::new(
                 self.lower(source_id, scope, element)?,
             ))),
-            TypeExpr::Dict(key, value) => {
+            TypeExpr::Dict(key, value, key_span) => {
                 let key = self.lower(source_id, scope, key)?;
                 let value = self.lower(source_id, scope, value)?;
+                // A key that is not admissible is reported at the key type.
+                let at_key = |error: LowerError| {
+                    LowerError::At(key_span.span(), Box::new(error))
+                };
                 match self.key_verdict(scope, &key) {
                     KeyVerdict::Admissible => {}
                     // The embedded standard library declares the generic
                     // `dict` itself; elsewhere a generic name in a key needs
                     // an `ordered` bound.
                     KeyVerdict::Generic if is_stdlib_source(source_id) => {}
-                    KeyVerdict::Generic => return Err(LowerError::InvalidDictKey(key)),
-                    KeyVerdict::Function => {
-                        return Err(LowerError::FunctionDictKey(key));
+                    KeyVerdict::Generic | KeyVerdict::Invalid => {
+                        return Err(at_key(LowerError::InvalidDictKey(key)));
                     }
-                    KeyVerdict::Invalid => return Err(LowerError::InvalidDictKey(key)),
+                    KeyVerdict::Function => {
+                        return Err(at_key(LowerError::FunctionDictKey(key)));
+                    }
                 }
                 Ok(Type::Dict(Box::new(key), Box::new(value)))
             }
-            TypeExpr::Union(members) => {
+            TypeExpr::Union(members, union_span) => {
                 let members = members
                     .iter()
                     .map(|member| self.lower(source_id, scope, member))
                     .collect::<Result<Vec<_>, _>>()?;
-                crate::union::check_members(self, &members)?;
+                // Members that overlap are reported at the union type.
+                crate::union::check_members(self, &members).map_err(|error| {
+                    LowerError::At(union_span.span(), Box::new(error))
+                })?;
                 // An anonymous union's discriminants follow its canonical
                 // member order, which a substitution would change, so its
                 // members name no generic parameter. A declared union keeps
@@ -1048,8 +1149,8 @@ impl TypeNames {
             vibra_syntax::VariadicType::Array(element) => {
                 TypeExpr::Array(element.clone())
             }
-            vibra_syntax::VariadicType::Dict(key, value) => {
-                TypeExpr::Dict(key.clone(), value.clone())
+            vibra_syntax::VariadicType::Dict(key, value, key_span) => {
+                TypeExpr::Dict(key.clone(), value.clone(), *key_span)
             }
         };
         self.lower(source_id, scope, &written)
@@ -1197,7 +1298,7 @@ impl TypeNames {
                     })
                     .collect::<Result<Vec<_>, _>>()
                     .map(TypeBody::Tuple),
-                DeftypeBody::Type(TypeExpr::Union(members)) => members
+                DeftypeBody::Type(TypeExpr::Union(members, _)) => members
                     .iter()
                     .map(|member| {
                         self.lower(
@@ -1283,12 +1384,14 @@ impl TypeNames {
                 .iter()
                 .find_map(|members| crate::union::check_members(self, members).err())
             {
-                report_lower_error(
-                    diagnostics,
-                    &declared.source_id,
-                    declaration.span(),
-                    &error,
-                );
+                // A union body's overlap is reported at the body, which is
+                // the union type; a nested one keeps the declaration.
+                let span = if matches!(body, TypeBody::Union(_)) {
+                    declaration.body_span()
+                } else {
+                    declaration.span()
+                };
+                report_lower_error(diagnostics, &declared.source_id, span, &error);
                 failed.push(*index);
             }
         }
@@ -1410,7 +1513,18 @@ impl TypeNames {
                     ),
                 )
                 .with_source_id(&declared.source_id)
-                .with_related(span, format!("the expansion repeats through `{member}`")),
+                .with_related(
+                    span,
+                    // A field or variant has a name; a tuple component or
+                    // union member has a position, and a wrapper one slot.
+                    if member.is_empty() {
+                        "the expansion repeats through the representation".to_owned()
+                    } else if member.parse::<usize>().is_ok() {
+                        format!("the expansion repeats through operand {member}")
+                    } else {
+                        format!("the expansion repeats through `{member}`")
+                    },
+                ),
             );
             for (index, _) in &cycle {
                 reported.insert(*index);
@@ -1547,7 +1661,14 @@ fn member_span(declaration: &DeftypeDeclaration, member: &str) -> Option<ByteSpa
             .iter()
             .find(|field| field.name().value() == member)
             .map(vibra_syntax::TypeField::span),
-        _ => None,
+        // A tuple component or union member is named by its position.
+        DeftypeBody::Type(TypeExpr::Tuple(_) | TypeExpr::Union(_, _)) => member
+            .parse::<usize>()
+            .ok()
+            .and_then(|index| declaration.slot_spans().get(index).copied()),
+        // A wrapper's one slot is its representation.
+        DeftypeBody::Type(_) => Some(declaration.body_span()),
+        DeftypeBody::Intrinsic(_) => None,
     }
 }
 
@@ -1581,6 +1702,9 @@ pub(crate) fn report_lower_error(
     error: &LowerError,
 ) {
     match error {
+        LowerError::At(inner, error) => {
+            report_lower_error(diagnostics, source_id, *inner, error);
+        }
         LowerError::Unavailable(message) => {
             unavailable(diagnostics, source_id, span, *message);
         }
@@ -1597,6 +1721,14 @@ pub(crate) fn report_lower_error(
                 DiagnosticCode::NamePrivateAccess,
                 span,
                 format!("`{name}` names a private type of another module"),
+            )
+            .with_source_id(source_id),
+        ),
+        LowerError::WrongKind(name, kind) => diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::NameWrongEntityKind,
+                span,
+                format!("`{name}` is {kind}, not a type"),
             )
             .with_source_id(source_id),
         ),

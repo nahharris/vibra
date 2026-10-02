@@ -726,7 +726,7 @@ fn render_type(value: &TypeExpr, output: &mut String) {
         }
         TypeExpr::Record(fields) => render_fields("record", fields, output),
         TypeExpr::Enum(fields) => render_fields("enum", fields, output),
-        TypeExpr::Union(members) => {
+        TypeExpr::Union(members, _) => {
             output.push_str("(union");
             for member in members {
                 output.push(' ');
@@ -739,7 +739,7 @@ fn render_type(value: &TypeExpr, output: &mut String) {
             render_type(value, output);
             output.push(')');
         }
-        TypeExpr::Dict(key, value) => {
+        TypeExpr::Dict(key, value, _) => {
             output.push_str("(dict ");
             render_type(key, output);
             output.push(' ');
@@ -795,7 +795,7 @@ fn render_variadic_type(value: &VariadicType, output: &mut String) {
             render_type(value, output);
             output.push(')');
         }
-        VariadicType::Dict(key, value) => {
+        VariadicType::Dict(key, value, _) => {
             output.push_str("(dict ");
             render_type(key, output);
             output.push(' ');
@@ -1694,16 +1694,25 @@ fn render_node(
                     }
                     if layout.inline {
                         output.push('(');
-                        let items = node
-                            .children()
-                            .iter()
-                            .filter(|child| {
-                                matches!(
-                                    child.kind(),
-                                    SyntaxKind::Atom | SyntaxKind::List
-                                )
-                            })
-                            .collect::<Vec<_>>();
+                        let items = match canonical_lambda_components(node, source) {
+                            Some(components) => components
+                                .into_iter()
+                                .filter_map(|component| match component {
+                                    LineComponent::Node(child) => Some(child),
+                                    LineComponent::Comment(_) => None,
+                                })
+                                .collect::<Vec<_>>(),
+                            None => node
+                                .children()
+                                .iter()
+                                .filter(|child| {
+                                    matches!(
+                                        child.kind(),
+                                        SyntaxKind::Atom | SyntaxKind::List
+                                    )
+                                })
+                                .collect::<Vec<_>>(),
+                        };
                         tasks.push(RenderTask::Raw(")"));
                         for (index, item) in items.into_iter().enumerate().rev() {
                             tasks
@@ -1769,7 +1778,8 @@ fn render_node(
                             continue;
                         }
                         output.push('(');
-                        let components = multiline_components(node);
+                        let components = canonical_lambda_components(node, source)
+                            .unwrap_or_else(|| multiline_components(node));
                         // Delimiter placement is a property of every
                         // multiline list, not only of a commented one. A
                         // hanging `(` or an orphaned `)` is not canonical
@@ -2135,6 +2145,64 @@ fn multiline_components(node: &CstNode) -> Vec<LineComponent<'_>> {
     }
     components.extend(comments.into_iter().map(LineComponent::Comment));
     components
+}
+
+/// The forms and comments of a `lambda` whose attributes are not in canonical
+/// order, with the attributes moved into it: the parameters and result, then
+/// each label with its value by the label's canonical position, then the
+/// body. A comment stays with the form it is bound to. `None` for any other
+/// list and for a `lambda` already in order, which keep the written order.
+fn canonical_lambda_components<'source>(
+    node: &'source CstNode,
+    source: &str,
+) -> Option<Vec<LineComponent<'source>>> {
+    if meaningful_head(node) != Some("lambda") {
+        return None;
+    }
+    let mut forms = bound_nodes(node, source).into_iter();
+    let mut ordered: Vec<BoundNode<'source>> = forms.by_ref().take(3).collect();
+    let rest: Vec<BoundNode<'source>> = forms.collect();
+    let pairs = rest
+        .chunks(2)
+        .take_while(|pair| {
+            pair.len() == 2
+                && pair
+                    .first()
+                    .is_some_and(|label| is_attribute_label(label.node))
+        })
+        .count();
+    let order = |label: &BoundNode<'source>| {
+        attribute_order(label.node.leaf_text().unwrap_or_default())
+    };
+    let labels: Vec<usize> = rest.iter().step_by(2).take(pairs).map(order).collect();
+    if labels.is_sorted() {
+        return None;
+    }
+    let mut rest = rest.into_iter();
+    let mut attributes = Vec::new();
+    for _ in 0..pairs {
+        let (label, value) = (rest.next()?, rest.next()?);
+        attributes.push((order(&label), label, value));
+    }
+    attributes.sort_by_key(|(order, _, _)| *order);
+    for (_, label, value) in attributes {
+        ordered.push(label);
+        ordered.push(value);
+    }
+    ordered.extend(rest);
+    Some(
+        ordered
+            .into_iter()
+            .flat_map(|bound| {
+                bound
+                    .leading
+                    .into_iter()
+                    .map(LineComponent::Comment)
+                    .chain(std::iter::once(LineComponent::Node(bound.node)))
+                    .chain(bound.trailing.into_iter().map(LineComponent::Comment))
+            })
+            .collect(),
+    )
 }
 
 /// Schedules a multiline list rendered as line groups: the head group on the

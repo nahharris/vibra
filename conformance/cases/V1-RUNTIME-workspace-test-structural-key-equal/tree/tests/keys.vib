@@ -1,0 +1,23 @@
+(import assert @std.assert)
+(import core @std.core)
+(import ordered @std.core.ordered)
+(import equatable @std.core.equatable)
+
+; A name that compares and equals ignoring its tag.
+(deftype name (record text str tag i32)
+  (impl ordered
+    (defn compare (left self right self) core.ordering
+      (ordered.compare (left @text) (right @text))))
+  (impl equatable
+    (defn equal (left self right self) bool
+      (equatable.equal (left @text) (right @text)))))
+
+(test "direct equal"
+  (assert.true (equatable.equal (name text: "a" tag: 1i32) (name text: "a" tag: 2i32))))
+(test "tuple compare is equal"
+  (assert.equal
+    (ordered.compare (tupleof (name text: "a" tag: 1i32) 0i32) (tupleof (name text: "a" tag: 2i32) 0i32))
+    (core.ordering.equal)))
+(test "tuple equal agrees"
+  (assert.true
+    (equatable.equal (tupleof (name text: "a" tag: 1i32) 0i32) (tupleof (name text: "a" tag: 2i32) 0i32))))

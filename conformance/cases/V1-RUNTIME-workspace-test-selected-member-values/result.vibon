@@ -1,0 +1,11 @@
+(record
+  format: @test-run.v1
+  result: @command.ok
+  tests: (array
+    (record name: "@tests.values::\"a destination-selected member is a value\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.values::\"a builtin conversion is a value\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.values::\"a factory member is a value\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.values::\"a member of a generic interface is a value\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.values::\"a variadic member is a value\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)
