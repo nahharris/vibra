@@ -1,0 +1,8 @@
+(defn read-stored (value i32) i32 by-match)
+
+(deftype holder (record run (fn (i32) i32)))
+
+(defn make (flag bool) holder
+  (holder run: (match flag true read-stored false read-stored)))
+
+(def by-match i32 (((make true) @run) 1i32))
