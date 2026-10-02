@@ -110,6 +110,14 @@ the same closed registries, meeting the tail-call and reduction rules, and
 matching the interpreter across the whole corpus. It is a third backend under
 one semantics, not an escape hatch to native FFI.
 
+## Tail calls and IR shape
+
+A backend may lower a tail call to a loop or to Wasm tail-call instructions.
+Whether the typed IR is lowered through continuation-passing style, a control
+flow graph, or SSA is implementation detail with no specification surface,
+because the interpreter stays the semantic oracle and only observable behavior
+is conformance-tested.
+
 ## Pass ordering
 
 V1 ships no optimization or hardening pass. When either arrives, on any

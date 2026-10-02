@@ -116,6 +116,12 @@ linearity. It starts with a spike on whether the sharing analysis stays
 tractable over Vibra's value semantics, and it too refines the ownership model
 rather than replacing it.
 
+**Study item:** typestate for handles, a phantom state parameter on a handle
+type such as connected or closed, so an operation in the wrong state is a type
+error. It is sound only with the affine `once` qualifier listed above, because
+without it the old-state value stays usable after the transition. It refines
+the ownership model rather than replacing it.
+
 ## Network and child processes as values
 
 The first network and process effects need no handles and fit the v1 ABI:
