@@ -1,0 +1,14 @@
+(deftype holder (record value (union (tuple t i32) (tuple i64 str)))
+  where: (t any))
+
+(defn take (value (union (array t) str)) i32
+  where: (t any)
+  0i32)
+
+(defn give (value t) (union (option t) str)
+  where: (t any)
+  "s")
+
+(deftype node (record next (union node i32)))
+
+(deftype deep (record next (tuple (union (record inner deep) i32))))

@@ -77,6 +77,21 @@ pub(crate) fn unifiable(left: &Type, right: &Type) -> bool {
     unify(left, right, &mut bindings)
 }
 
+/// Whether `value` names a generic parameter anywhere.
+pub(crate) fn mentions_param(value: &Type) -> bool {
+    matches!(value, Type::Param(_)) || value.components().iter().any(mentions_param)
+}
+
+fn occurs(name: &str, value: &Type, bindings: &BTreeMap<String, Type>) -> bool {
+    match resolve(value, bindings) {
+        Type::Param(other) => other == name,
+        other => other
+            .components()
+            .iter()
+            .any(|component| occurs(name, component, bindings)),
+    }
+}
+
 fn resolve<'a>(value: &'a Type, bindings: &'a BTreeMap<String, Type>) -> &'a Type {
     let mut current = value;
     while let Type::Param(name) = current {
@@ -98,6 +113,10 @@ fn unify(left: &Type, right: &Type, bindings: &mut BTreeMap<String, Type>) -> bo
             true
         }
         (Type::Param(name), other) | (other, Type::Param(name)) => {
+            // A name never equals a type that contains it.
+            if occurs(name, other, bindings) {
+                return false;
+            }
             bindings.insert(name.clone(), other.clone());
             true
         }
