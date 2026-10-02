@@ -313,7 +313,7 @@ impl TypeNames {
                     KeyVerdict::Generic
                 }
             }
-            Type::Tuple(_) | Type::Record(_) | Type::Enum(_) => {
+            Type::Tuple(_) | Type::Record(_) | Type::Enum(_) | Type::Union(_) => {
                 // A `void` enum payload marks a nullary variant, not a component.
                 let verdicts = key
                     .components()
@@ -1021,6 +1021,16 @@ impl TypeNames {
                     .map(|member| self.lower(source_id, scope, member))
                     .collect::<Result<Vec<_>, _>>()?;
                 crate::union::check_members(self, &members)?;
+                // An anonymous union's discriminants follow its canonical
+                // member order, which a substitution would change, so its
+                // members name no generic parameter. A declared union keeps
+                // its written order and may.
+                if let Some(member) = members
+                    .iter()
+                    .find(|member| crate::union::mentions_param(member))
+                {
+                    return Err(LowerError::UnionNotConcrete(member.clone()));
+                }
                 Ok(Type::Union(vibra_ir::canonical_union(members)))
             }
         }
@@ -1442,7 +1452,7 @@ impl TypeNames {
             }
             // Tuple components, fields, and payloads are stored inline; array
             // and dict elements and function types are not.
-            Type::Record(_) | Type::Enum(_) | Type::Tuple(_) => {
+            Type::Record(_) | Type::Enum(_) | Type::Tuple(_) | Type::Union(_) => {
                 for nested in value.components() {
                     self.direct_edges(&nested, member, edges);
                 }
@@ -1489,7 +1499,7 @@ impl TypeNames {
     ) -> bool {
         match value {
             Type::Param(parameter) => parameter == name,
-            Type::Record(_) | Type::Enum(_) | Type::Tuple(_) => value
+            Type::Record(_) | Type::Enum(_) | Type::Tuple(_) | Type::Union(_) => value
                 .components()
                 .iter()
                 .any(|component| self.contains_directly(component, name, visiting)),
@@ -1732,7 +1742,7 @@ pub(crate) fn dict_key(key: &Type) -> KeyVerdict {
         | Type::AtomSingleton(_) => KeyVerdict::Admissible,
         Type::Function(_) => KeyVerdict::Function,
         Type::Param(_) => KeyVerdict::Generic,
-        Type::Tuple(_) | Type::Record(_) | Type::Enum(_) => {
+        Type::Tuple(_) | Type::Record(_) | Type::Enum(_) | Type::Union(_) => {
             // A `void` enum payload marks a nullary variant, not a component.
             let verdicts = key
                 .components()

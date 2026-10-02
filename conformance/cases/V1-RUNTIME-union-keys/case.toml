@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-union-keys"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "An anonymous union of admissible keys keys a dict and conforms to ordered, in canonical member order and then by value, alone and inside a tuple key; a generic declared union is constructed from its written expected type; and a declared union whose members cannot unify under one substitution is accepted."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

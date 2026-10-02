@@ -3539,6 +3539,24 @@ fn check_expression_in_position(
     ) {
         return check_form(environment, expression, expected, tail_position);
     }
+    // An application may produce the target itself, with the written type
+    // fixing a generic argument its operands leave open, as in a constructor
+    // of a generic union. Otherwise it is checked on its own and widened.
+    if matches!(expression.kind(), ExpressionKind::Application(_)) {
+        let diagnostics = environment.diagnostics.len();
+        let bindings = environment.bindings.len();
+        // Checked in this activation, so a successful attempt keeps the
+        // slots it allocated; a failed one leaves only unused slots behind.
+        let direct =
+            check_form(environment, expression, Some(target.clone()), tail_position);
+        if let Some(direct) = direct
+            && environment.diagnostics.len() == diagnostics
+        {
+            return Some(direct);
+        }
+        environment.diagnostics.truncate(diagnostics);
+        environment.bindings.truncate(bindings);
+    }
     let checked = check_form(environment, expression, None, tail_position)?;
     widen_to(environment, checked, &target, expression.span())
 }

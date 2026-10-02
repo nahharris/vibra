@@ -1,0 +1,49 @@
+id = "V1-TYPE-NOMINAL-union-generic-member"
+rule = "V1-TYPE-NOMINAL"
+profile = "static-v1"
+operation = "type-check"
+description = "A member of an anonymous union names no generic parameter, in a field, a parameter, and a result, and an anonymous union takes part in the finite-size check like a record or an enum."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.union-member-not-concrete"
+level = "@error"
+source = "input.vib"
+span = [0, 86]
+
+[[expect.diagnostics]]
+code = "@type.infinite-size"
+level = "@error"
+source = "input.vib"
+span = [228, 273]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [250, 271]
+
+[[expect.diagnostics]]
+code = "@type.infinite-size"
+level = "@error"
+source = "input.vib"
+span = [275, 343]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [297, 341]
+
+[[expect.diagnostics]]
+code = "@type.union-member-not-concrete"
+level = "@error"
+source = "input.vib"
+span = [100, 127]
+
+[[expect.diagnostics]]
+code = "@type.union-member-not-concrete"
+level = "@error"
+source = "input.vib"
+span = [159, 226]

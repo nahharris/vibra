@@ -393,6 +393,13 @@ forbids. An interface member would likewise leave injection ambiguous, because
 a member type that also implements that interface could inject under either
 discriminant.
 
+A member of an anonymous union MUST NOT name a generic parameter anywhere,
+as in `(union (tuple t i32) str)`; it emits `@type.union-member-not-concrete`.
+An anonymous union's discriminants follow its canonical member order, which
+would differ between a generic declaration and each of its instantiations. A
+declared union keeps its written member order, so its members may name its
+own generic parameters.
+
 Unions widen in and narrow out through the written forms defined later in this
 chapter: a value of a member type widens to the union at a written typed
 boundary, a declared union's name applied to one member value injects it, and
