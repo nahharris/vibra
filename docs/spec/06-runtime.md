@@ -457,7 +457,9 @@ at the checked-program execution boundary (no executable entry or a body that
 violates checked-IR invariants) use `@runtime.invalid-checked-program`. These
 failures have no source origin and use an unlocated diagnostic primary at
 `0..0` with no source ID. The CLI `trapCode` is the exact diagnostic-code
-spelling as a string, and its `origin` is `null`.
+spelling as a string, and its `origin` is `null`. `run` reports the trap the
+same way `test` does: the result is `@command.trap`, the diagnostic is in the
+envelope, and the payload's `trap` holds the code.
 
 `@runtime.unobservable-function` is the trap of a value that holds a function
 reaching an observation. A test assertion compares canonical value encodings

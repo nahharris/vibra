@@ -1065,11 +1065,7 @@ fn trap_item(name: String, error: vibra_interp::RuntimeError) -> TestItem {
         (DiagnosticCode::RuntimeInvalidCheckedProgram, None),
         |(code, origin)| (code, origin.cloned()),
     );
-    let message = if code == DiagnosticCode::RuntimeInvalidCheckedProgram {
-        "checked program violated M2 runtime invariants".to_owned()
-    } else {
-        error.to_string()
-    };
+    let message = error.trap_message();
     let diagnostic = match &origin {
         Some(origin) => Diagnostic::new(code, origin.span(), message)
             .with_source_id(origin.source_id()),
