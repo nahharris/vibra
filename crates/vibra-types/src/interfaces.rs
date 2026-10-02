@@ -885,6 +885,8 @@ pub(crate) fn check_contract_call(
                 interface: declared.id.clone(),
                 member: contract.name.clone(),
                 receiver: position,
+                arguments: Vec::new(),
+                destination: None,
                 signature: Box::new(signature),
                 closed: closed_contract(environment.types, interface, &contract.name),
             },
@@ -1023,6 +1025,11 @@ pub(crate) fn materialize(
                         interface: interface.id.clone(),
                         member: member.name.clone(),
                         receiver: self_type(),
+                        arguments: interface
+                            .parameters
+                            .iter()
+                            .map(|parameter| Type::Param(parameter.clone()))
+                            .collect(),
                     }),
                 });
             }
@@ -1112,6 +1119,7 @@ pub(crate) fn materialize(
                     interface: interface.id.clone(),
                     member: member_name.clone(),
                     receiver: plan.receiver.clone(),
+                    arguments: plan.arguments.clone(),
                 }),
             });
         }
@@ -1308,6 +1316,8 @@ struct Candidate {
     target: CandidateTarget,
     /// The applied interface, for diagnostics.
     spelling: String,
+    /// The interface's type arguments at this implementation.
+    arguments: Vec<Type>,
 }
 
 enum CandidateTarget {
@@ -1422,6 +1432,16 @@ fn check_selected_call(
             span,
         )?,
     };
+    // A destination that is a parameter bounded by this interface, such as
+    // the `self` of a default member, is instantiated at run time, and the
+    // implementation is selected from it there.
+    if contract.receiver.is_none()
+        && declared.parameters.is_empty()
+        && matches!(&receiver, Type::Param(name)
+            if environment.bounds.get(name) == Some(&interface))
+    {
+        dispatched = Some(Vec::new());
+    }
     let candidates = match dispatched {
         Some(arguments) => vec![candidate(
             declared,
@@ -1546,7 +1566,9 @@ fn check_selected_call(
             target: CallTarget::Contract {
                 interface: declared.id.clone(),
                 member: contract.name.clone(),
-                receiver: contract.receiver?,
+                receiver: contract.receiver.unwrap_or(0),
+                arguments: chosen.arguments.clone(),
+                destination: contract.receiver.is_none().then(|| receiver.clone()),
                 signature: Box::new(chosen.signature.clone()),
                 closed: closed_contract(environment.types, interface, &contract.name),
             },
@@ -1576,6 +1598,7 @@ fn candidate(
             .zip(arguments.iter().cloned()),
     );
     Candidate {
+        arguments: arguments.to_vec(),
         signature: contract.signature.substitute(&substitution),
         target,
         spelling: if arguments.is_empty() {
@@ -1705,6 +1728,7 @@ fn candidates(
             signature: signature(&arguments),
             target: CandidateTarget::Function(function),
             spelling: spell(&arguments),
+            arguments,
         });
     }
     // The builtin constructor types iterate through the closed registry.
@@ -1741,6 +1765,7 @@ fn candidates(
                     source, target,
                 )),
                 spelling: spell(&arguments),
+                arguments: arguments.to_vec(),
             });
         }
     }
@@ -1989,7 +2014,13 @@ fn check_default_call(
         return None;
     };
     let mut substitution = BTreeMap::from([(SELF.to_owned(), receiver.clone())]);
-    substitution.extend(declared.parameters.iter().cloned().zip(arguments));
+    substitution.extend(
+        declared
+            .parameters
+            .iter()
+            .cloned()
+            .zip(arguments.iter().cloned()),
+    );
     let signature = contract.signature.substitute(&substitution);
     let mut instantiation = crate::infer::Instantiation::new(&contract.generics);
     let opened = instantiation.open_signature(&signature);
@@ -2043,12 +2074,25 @@ fn check_default_call(
     {
         return None;
     }
-    Some(Expr::call(
-        function,
-        checked,
+    // The default is one function for every receiver. The call names the
+    // interface's arguments, which the default's own signature may not
+    // mention, so its body dispatches at them.
+    let _ = function;
+    Some(Expr::Call {
+        target: CallTarget::Contract {
+            interface: declared.id.clone(),
+            member: contract.name.clone(),
+            receiver: position,
+            arguments,
+            destination: None,
+            signature: instantiated,
+            closed: None,
+        },
+        arguments: checked,
         result,
-        SourceOrigin::new(environment.source_id, span),
-    ))
+        tail: false,
+        origin: SourceOrigin::new(environment.source_id, span),
+    })
 }
 
 /// An abstract contract member named as a function value
@@ -2164,6 +2208,8 @@ pub(crate) fn check_contract_value(
             interface: declared.id.clone(),
             member: contract.name.clone(),
             receiver: position,
+            arguments: Vec::new(),
+            destination: None,
             signature: Box::new(signature.clone()),
             closed: closed_contract(environment.types, interface, &contract.name),
         },

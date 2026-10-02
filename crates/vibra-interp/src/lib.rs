@@ -17,6 +17,7 @@
 
 mod registry;
 
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::Arc;
 
@@ -248,6 +249,7 @@ impl Interpreter {
             program.entry_index(),
             entry_frame(program),
             Vec::new(),
+            Arc::default(),
         );
         machine.check_host_budget()?;
         let Some(value) = value else {
@@ -292,6 +294,7 @@ impl Interpreter {
             program.entry_index(),
             entry_frame(program),
             Vec::new(),
+            Arc::default(),
         );
         machine.check_host_budget()?;
         if machine.assertion_failure.is_none()
@@ -411,6 +414,7 @@ enum TailTransferAction {
         index: usize,
         slots: Vec<Option<RuntimeValue>>,
         captures: Vec<RuntimeValue>,
+        types: Arc<TypeMap>,
     },
     Invoke {
         callable: Box<Callable>,
@@ -419,12 +423,23 @@ enum TailTransferAction {
     Invalid,
 }
 
+/// The type arguments of one activation: each generic parameter the running
+/// function names, at the type this call instantiated it to.
+///
+/// Generics are not erased at run time. A value built in generic code carries
+/// its instantiated type, and a contract call selects its implementation from
+/// instantiated types (`docs/spec/06-runtime.md`, "Generic instantiation").
+type TypeMap = BTreeMap<String, Type>;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Callable {
     Named {
         index: usize,
         signature: FunctionSignature,
         captures: Vec<RuntimeValue>,
+        /// The type arguments fixed so far: where the value was made, and
+        /// then by the call that invokes it.
+        types: Arc<TypeMap>,
     },
     Lambda {
         signature: FunctionSignature,
@@ -433,7 +448,98 @@ enum Callable {
         /// Shared with the checked program; creating a closure never copies it.
         body: Arc<Expr>,
         captures: Vec<RuntimeValue>,
+        /// The type arguments of the activation that made the closure, and
+        /// then its own from the call that invokes it.
+        types: Arc<TypeMap>,
     },
+}
+
+impl Callable {
+    fn signature(&self) -> &FunctionSignature {
+        match self {
+            Self::Named { signature, .. } | Self::Lambda { signature, .. } => signature,
+        }
+    }
+
+    fn types_mut(&mut self) -> &mut Arc<TypeMap> {
+        match self {
+            Self::Named { types, .. } | Self::Lambda { types, .. } => types,
+        }
+    }
+}
+
+/// Whether `value` names a generic parameter anywhere.
+fn mentions_param(value: &Type) -> bool {
+    matches!(value, Type::Param(_)) || value.components().iter().any(mentions_param)
+}
+
+/// Binds the generic parameters of `pattern` so that it equals `actual`,
+/// extending `bound`. A parameter already bound must agree. An unresolved
+/// parameter left in `actual` matches anything, as nothing fixed it.
+fn bind_type(pattern: &Type, actual: &Type, bound: &mut TypeMap) -> bool {
+    if let Type::Param(name) = pattern {
+        if matches!(actual, Type::Param(other) if other == name) {
+            return true;
+        }
+        return match bound.get(name) {
+            Some(existing) => {
+                existing == actual || mentions_param(existing) || mentions_param(actual)
+            }
+            None => {
+                bound.insert(name.clone(), actual.clone());
+                // A quantified `lambda` parameter is `name#index@site` in the
+                // signature and `name` in the body.
+                if let Some((written, _)) = name.split_once('#') {
+                    bound.insert(written.to_owned(), actual.clone());
+                }
+                true
+            }
+        };
+    }
+    if matches!(actual, Type::Param(_)) {
+        return true;
+    }
+    let all = |patterns: &[Type], actuals: &[Type], bound: &mut TypeMap| {
+        patterns.len() == actuals.len()
+            && patterns
+                .iter()
+                .zip(actuals)
+                .all(|(pattern, actual)| bind_type(pattern, actual, bound))
+    };
+    match (pattern, actual) {
+        (Type::Applied(left, patterns), Type::Applied(right, actuals))
+        | (Type::Interface(left, patterns), Type::Interface(right, actuals)) => {
+            left == right && all(patterns, actuals, bound)
+        }
+        (Type::Tuple(patterns), Type::Tuple(actuals))
+        | (Type::Union(patterns), Type::Union(actuals)) => {
+            all(patterns, actuals, bound)
+        }
+        (Type::Array(pattern), Type::Array(actual)) => {
+            bind_type(pattern, actual, bound)
+        }
+        (Type::Dict(key, value), Type::Dict(actual_key, actual_value)) => {
+            bind_type(key, actual_key, bound) && bind_type(value, actual_value, bound)
+        }
+        (Type::Record(patterns), Type::Record(actuals))
+        | (Type::Enum(patterns), Type::Enum(actuals)) => {
+            patterns.len() == actuals.len()
+                && patterns.iter().zip(actuals).all(
+                    |((name, pattern), (actual_name, actual))| {
+                        name == actual_name && bind_type(pattern, actual, bound)
+                    },
+                )
+        }
+        (Type::Function(pattern), Type::Function(actual)) => {
+            let patterns = pattern.slot_types();
+            let actuals = actual.slot_types();
+            all(&patterns, &actuals, bound)
+                && bind_type(&pattern.result(), &actual.result(), bound)
+        }
+        // An atom literal's own type is one atom of `atom`.
+        (Type::Atom, Type::AtomSingleton(_)) => true,
+        _ => pattern.admits(actual),
+    }
 }
 
 /// One activation's slots. Slots are write-once and names never shadow, so
@@ -456,6 +562,8 @@ struct Machine<'a> {
     /// The value a failing `try` returns from the innermost function or
     /// `lambda`: evaluation unwinds to that boundary, which takes it.
     pending_exit: Option<RuntimeValue>,
+    /// The type arguments of each live activation, innermost last.
+    types: Vec<Arc<TypeMap>>,
 }
 
 impl<'a> Machine<'a> {
@@ -471,7 +579,56 @@ impl<'a> Machine<'a> {
             stack_base: stack_address(),
             assertion_failure: None,
             pending_exit: None,
+            types: Vec::new(),
         }
+    }
+
+    /// The running activation's type arguments.
+    fn current_types(&self) -> Arc<TypeMap> {
+        self.types.last().cloned().unwrap_or_default()
+    }
+
+    /// `value` at the running activation's type arguments.
+    fn concrete(&self, value: &Type) -> Type {
+        match self.types.last() {
+            Some(types) if !types.is_empty() => value.substitute(types),
+            _ => value.clone(),
+        }
+    }
+
+    /// Extends `callable`'s type arguments with the ones this call fixes: its
+    /// signature against the instantiated types of the operands and result.
+    /// A parameter typed as an interface value takes the type its operand
+    /// holds, which is what the callee's own contract calls dispatch on.
+    fn bind_call(
+        &self,
+        callable: &mut Callable,
+        arguments: &[Expr],
+        values: &[RuntimeValue],
+        result: &Type,
+    ) {
+        let signature = callable.signature();
+        let slots = signature.slot_types();
+        let callee_result = signature.result();
+        if !slots.iter().any(mentions_param) && !mentions_param(&callee_result) {
+            return;
+        }
+        let mut bound = TypeMap::clone(callable.types_mut());
+        for (index, pattern) in slots.iter().enumerate() {
+            let Some(argument) = arguments.get(index) else {
+                continue;
+            };
+            let written = self.concrete(&argument.result_type());
+            let actual = match (pattern, &written, values.get(index)) {
+                (Type::Param(_), Type::Interface(_, _) | Type::Any, Some(value)) => {
+                    runtime_type(value)
+                }
+                _ => written,
+            };
+            bind_type(pattern, &actual, &mut bound);
+        }
+        bind_type(&callee_result, &self.concrete(result), &mut bound);
+        *callable.types_mut() = Arc::new(bound);
     }
 
     /// Records exhaustion when this thread's stack use nears its reservation.
@@ -517,8 +674,10 @@ impl<'a> Machine<'a> {
         index: usize,
         slots: Vec<Option<RuntimeValue>>,
         captures: Vec<RuntimeValue>,
+        types: Arc<TypeMap>,
     ) -> Option<RuntimeValue> {
         self.enter_activation()?;
+        self.types.push(types);
         let mut index = index;
         let mut slots = slots;
         let mut captures = captures;
@@ -548,11 +707,17 @@ impl<'a> Machine<'a> {
                             index: next_index,
                             slots: next_slots,
                             captures: next_captures,
+                            types: next_types,
                         } => {
                             self.tail_transfers = self.tail_transfers.saturating_add(1);
                             index = next_index;
                             slots = next_slots;
                             captures = next_captures;
+                            // The reused activation runs at the callee's
+                            // type arguments.
+                            if let Some(current) = self.types.last_mut() {
+                                *current = next_types;
+                            }
                         }
                         TailTransferAction::Invoke { callable, values } => {
                             break self.invoke_callable(*callable, values, &result);
@@ -563,6 +728,7 @@ impl<'a> Machine<'a> {
                 None => break self.pending_exit.take(),
             }
         };
+        self.types.pop();
         self.leave_activation();
         result
     }
@@ -579,6 +745,7 @@ impl<'a> Machine<'a> {
                 index,
                 signature,
                 captures,
+                types,
             } => {
                 let Some(function) = self.program.functions().get(index) else {
                     return TailTransferAction::Invalid;
@@ -596,6 +763,7 @@ impl<'a> Machine<'a> {
                         index,
                         slots: activation_slots(values, function.slot_count()),
                         captures,
+                        types,
                     }
                 } else {
                     TailTransferAction::Invoke {
@@ -603,6 +771,7 @@ impl<'a> Machine<'a> {
                             index,
                             signature,
                             captures,
+                            types,
                         }),
                         values,
                     }
@@ -651,7 +820,10 @@ impl<'a> Machine<'a> {
                 arguments,
                 result,
                 ..
-            } => self.evaluate_external(*intrinsic, arguments, result, slots, captures),
+            } => {
+                let result = self.concrete(result);
+                self.evaluate_external(*intrinsic, arguments, &result, slots, captures)
+            }
             Expr::Default { .. } => None,
             Expr::Sequence { expressions, .. } => {
                 self.evaluate_sequence(expressions, slots, captures)
@@ -670,9 +842,23 @@ impl<'a> Machine<'a> {
                 .evaluate_global(*index)
                 .filter(|value| admits_value(value_type, value))
                 .map(Evaluation::Value),
-            Expr::Function { function, .. } => self
-                .named_callable(*function)
-                .map(|callable| Evaluation::Value(RuntimeValue::Function(callable))),
+            Expr::Function {
+                function,
+                signature,
+                ..
+            } => {
+                // A generic function named as a value is instantiated by the
+                // signature written at this site.
+                let mut callable = self.named_callable(*function)?;
+                let mut bound = TypeMap::new();
+                bind_type(
+                    &Type::Function(Box::new(callable.signature().clone())),
+                    &self.concrete(&Type::Function(Box::new(signature.clone()))),
+                    &mut bound,
+                );
+                *callable.types_mut() = Arc::new(bound);
+                Some(Evaluation::Value(RuntimeValue::Function(callable)))
+            }
             Expr::Captured {
                 slot, value_type, ..
             } => captures
@@ -683,7 +869,10 @@ impl<'a> Machine<'a> {
             Expr::Closure { .. } => self.evaluate_closure(expression, slots, captures),
             Expr::Record {
                 value_type, fields, ..
-            } => self.evaluate_record(value_type, fields, slots, captures),
+            } => {
+                let value_type = self.concrete(value_type);
+                self.evaluate_record(&value_type, fields, slots, captures)
+            }
             Expr::Variant {
                 value_type,
                 variant,
@@ -705,7 +894,7 @@ impl<'a> Machine<'a> {
                     None => None,
                 };
                 Some(Evaluation::Value(RuntimeValue::Enum {
-                    value_type: value_type.clone(),
+                    value_type: self.concrete(value_type),
                     variant: variant.clone(),
                     payload,
                 }))
@@ -719,7 +908,7 @@ impl<'a> Machine<'a> {
                     return Some(Evaluation::Value(value));
                 }
                 Some(Evaluation::Value(RuntimeValue::Wrapper {
-                    value_type: value_type.clone(),
+                    value_type: self.concrete(value_type),
                     value: Box::new(value),
                 }))
             }
@@ -729,14 +918,14 @@ impl<'a> Machine<'a> {
                 member,
                 ..
             } => {
-                let member_type = value.result_type();
+                let member_type = self.concrete(&value.result_type());
                 let value = self.evaluate_value(value, slots, captures)?;
                 Some(Evaluation::Value(match member {
                     // Atom and interface widening are erased: a value keeps
                     // its own type, which selects its implementations.
                     None => value,
                     Some(member) => RuntimeValue::Union {
-                        value_type: value_type.clone(),
+                        value_type: self.concrete(value_type),
                         member: *member,
                         member_type,
                         value: Box::new(value),
@@ -745,7 +934,10 @@ impl<'a> Machine<'a> {
             }
             Expr::Try {
                 value, exit_type, ..
-            } => self.evaluate_try(value, exit_type, slots, captures),
+            } => {
+                let exit_type = self.concrete(exit_type);
+                self.evaluate_try(value, &exit_type, slots, captures)
+            }
             Expr::Project { record, field, .. } => {
                 let RuntimeValue::Record { fields, .. } =
                     self.evaluate_value(record, slots, captures)?
@@ -804,7 +996,7 @@ impl<'a> Machine<'a> {
                 components,
                 ..
             } => RuntimeValue::Tuple {
-                value_type: value_type.clone(),
+                value_type: self.concrete(value_type),
                 values: self.evaluate_all(components, slots, captures)?,
             },
             Expr::TupleProject { tuple, index, .. } => {
@@ -820,7 +1012,7 @@ impl<'a> Machine<'a> {
                 elements,
                 ..
             } => RuntimeValue::Array {
-                value_type: value_type.clone(),
+                value_type: self.concrete(value_type),
                 values: self.evaluate_all(elements, slots, captures)?,
             },
             Expr::Dict {
@@ -836,7 +1028,7 @@ impl<'a> Machine<'a> {
                     self.insert_entry(&mut ordered, key, value, key_order.as_ref())?;
                 }
                 RuntimeValue::Dict {
-                    value_type: value_type.clone(),
+                    value_type: self.concrete(value_type),
                     entries: ordered,
                 }
             }
@@ -858,7 +1050,7 @@ impl<'a> Machine<'a> {
                     collection => lookup(collection, &key),
                 };
                 RuntimeValue::Enum {
-                    value_type: value_type.clone(),
+                    value_type: self.concrete(value_type),
                     variant: if found.is_some() { "some" } else { "none" }.to_owned(),
                     payload: found.and_then(present_payload),
                 }
@@ -932,7 +1124,7 @@ impl<'a> Machine<'a> {
         };
         if let Some(function) = self.key_compare_function(interface, left) {
             let result = self.program.functions().get(function)?.signature().result();
-            let callable = self.named_callable(function)?;
+            let callable = self.implementation_callable(function, left)?;
             let RuntimeValue::Enum { variant, .. } = self.invoke_callable(
                 callable,
                 vec![left.clone(), right.clone()],
@@ -1098,7 +1290,24 @@ impl<'a> Machine<'a> {
             index: function,
             signature: self.program.functions().get(function)?.signature().clone(),
             captures: Vec::new(),
+            types: Arc::default(),
         })
+    }
+
+    /// The implementation member `function` for `receiver`, at the type
+    /// arguments the receiver's own type fixes.
+    fn implementation_callable(
+        &self,
+        function: usize,
+        receiver: &RuntimeValue,
+    ) -> Option<Callable> {
+        let mut callable = self.named_callable(function)?;
+        if let Some(implements) = self.program.functions().get(function)?.implements() {
+            let mut bound = TypeMap::new();
+            bind_type(&implements.receiver, &runtime_type(receiver), &mut bound);
+            *callable.types_mut() = Arc::new(bound);
+        }
+        Some(callable)
     }
 
     #[inline(never)]
@@ -1264,12 +1473,21 @@ impl<'a> Machine<'a> {
         for capture in capture_expressions {
             environment.push(self.evaluate_value(capture, slots, captures)?);
         }
+        // The closure runs at the type arguments of the activation that
+        // made it; its own generic parameters are fixed by each call.
+        let types = self.current_types();
+        let signature = if types.is_empty() {
+            signature.clone()
+        } else {
+            signature.substitute(&types)
+        };
         Some(Evaluation::Value(RuntimeValue::Function(
             Callable::Lambda {
-                signature: signature.clone(),
+                signature,
                 slot_count: *slot_count,
                 body: Arc::clone(body),
                 captures: environment,
+                types,
             },
         )))
     }
@@ -1386,12 +1604,26 @@ impl<'a> Machine<'a> {
             interface,
             member,
             receiver,
+            arguments: interface_arguments,
+            destination,
             closed,
             ..
         } = target
         {
             let values = self.evaluate_all(arguments, slots, captures)?;
-            let receiver = values.get(*receiver)?;
+            // The implementation is the one whose receiver and interface
+            // arguments both match, at one binding of its own parameters: a
+            // receiver may implement a generic interface more than once.
+            // A member selected by its destination dispatches on that type,
+            // at this activation's type arguments.
+            let receiver_type = match destination {
+                Some(destination) => self.concrete(destination),
+                None => runtime_type(values.get(*receiver)?),
+            };
+            let interface_arguments = interface_arguments
+                .iter()
+                .map(|argument| self.concrete(argument))
+                .collect::<Vec<_>>();
             // A written member for the receiver's type wins over the
             // interface's default, whose receiver is the open `self`.
             let candidates = self
@@ -1401,24 +1633,44 @@ impl<'a> Machine<'a> {
                 .enumerate()
                 .filter_map(|(index, function)| {
                     let implements = function.implements()?;
-                    (implements.interface == *interface
-                        && implements.member == *member
-                        && admits_value(&implements.receiver, receiver))
-                    .then_some((index, matches!(implements.receiver, Type::Param(_))))
+                    if implements.interface != *interface
+                        || implements.member != *member
+                    {
+                        return None;
+                    }
+                    let mut bound = TypeMap::new();
+                    let matches =
+                        bind_type(&implements.receiver, &receiver_type, &mut bound)
+                            && (interface_arguments.is_empty()
+                                || (implements.arguments.len()
+                                    == interface_arguments.len()
+                                    && implements
+                                        .arguments
+                                        .iter()
+                                        .zip(&interface_arguments)
+                                        .all(|(pattern, actual)| {
+                                            bind_type(pattern, actual, &mut bound)
+                                        })));
+                    matches.then_some((
+                        index,
+                        matches!(implements.receiver, Type::Param(_)),
+                        bound,
+                    ))
                 })
                 .collect::<Vec<_>>();
-            let Some((index, _)) = candidates
+            let selected = candidates
                 .iter()
-                .find(|(_, default)| !default)
+                .find(|(_, default, _)| !default)
                 .or_else(|| candidates.first())
-                .copied()
-            else {
+                .cloned();
+            let Some((index, _, bound)) = selected else {
                 let closed = (*closed)?;
                 if closed == ClosedContract::IterNext {
                     let [iterator] = values.as_slice() else {
                         return None;
                     };
-                    return closed_next(iterator, result).map(Evaluation::Value);
+                    return closed_next(iterator, &self.concrete(result))
+                        .map(Evaluation::Value);
                 }
                 let [left, right] = values.as_slice() else {
                     return None;
@@ -1427,14 +1679,21 @@ impl<'a> Machine<'a> {
                 let key_order =
                     (closed == ClosedContract::KeyCompare).then_some(interface);
                 let order = self.compare_keys(left, right, key_order)?;
-                return Some(Evaluation::Value(closed_contract(closed, order, result)));
+                return Some(Evaluation::Value(closed_contract(
+                    closed,
+                    order,
+                    &self.concrete(result),
+                )));
             };
-            let callable = self.named_callable(index)?;
+            let mut callable = self.named_callable(index)?;
+            *callable.types_mut() = Arc::new(bound);
+            // The member's own generic parameters, from this call.
+            self.bind_call(&mut callable, arguments, &values, result);
             return self
                 .invoke_callable(callable, values, result)
                 .map(Evaluation::Value);
         }
-        let callable = match target {
+        let mut callable = match target {
             CallTarget::Direct(function) => self.named_callable(*function)?,
             CallTarget::Indirect { callee, .. } => {
                 let RuntimeValue::Function(callable) =
@@ -1467,6 +1726,7 @@ impl<'a> Machine<'a> {
                 values.push(self.evaluate_value(argument, slots, captures)?);
             }
         }
+        self.bind_call(&mut callable, arguments, &values, result);
         if let Callable::Named { index, .. } = &callable
             && let Some(assertion) = self
                 .program
@@ -1562,23 +1822,27 @@ impl<'a> Machine<'a> {
                 index,
                 signature,
                 captures,
+                types,
             } => {
                 let function = self.program.functions().get(index)?;
                 if !signature.admits(function.signature()) {
                     return None;
                 }
                 let slots = activation_slots(values, function.slot_count());
-                self.evaluate_function(index, slots, captures)
+                self.evaluate_function(index, slots, captures, types)
             }
             Callable::Lambda {
                 slot_count,
                 body,
                 captures,
+                types,
                 ..
             } => {
                 let mut slots = activation_slots(values, slot_count);
                 self.enter_activation()?;
+                self.types.push(types);
                 let evaluation = self.evaluate(&body, &mut slots, &captures);
+                self.types.pop();
                 self.leave_activation();
                 match evaluation {
                     Some(Evaluation::Value(value)) => Some(value),
@@ -1602,7 +1866,10 @@ impl<'a> Machine<'a> {
         let program = self.program;
         let global = program.globals().get(index)?;
         let mut slots = vec![None; global.slot_count()];
+        // An initializer is its own activation, with no type arguments.
+        self.types.push(Arc::default());
         let value = self.evaluate_value(global.initializer(), &mut slots, &[]);
+        self.types.pop();
         if let Some(value) = &value {
             *self.globals.get_mut(index)? = GlobalState::Ready(value.clone());
         }
@@ -2258,7 +2525,12 @@ mod tests {
 
         let mut machine = super::Machine::new(&program, false);
         let result = machine
-            .evaluate_function(0, vec![None; program.entry().slot_count()], Vec::new())
+            .evaluate_function(
+                0,
+                vec![None; program.entry().slot_count()],
+                Vec::new(),
+                std::sync::Arc::default(),
+            )
             .expect("untaken branch must not execute");
 
         assert_eq!(result, super::RuntimeValue::Primitive(Value::I32(7)));

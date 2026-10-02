@@ -1931,6 +1931,7 @@ impl<'a> SemanticCollector<'a> {
                         member,
                         receiver,
                         signature,
+                        destination: selected_by,
                         ..
                     },
                 arguments,
@@ -1947,9 +1948,23 @@ impl<'a> SemanticCollector<'a> {
                 .contract(ContractDispatch {
                     interface: interface.path().to_owned(),
                     member: member.clone(),
-                    receiver: semantic_type(&arguments.get(*receiver)?.result_type()),
-                    selection: DispatchSelection::Dynamic,
-                    destination: false,
+                    receiver: semantic_type(&match selected_by {
+                        Some(destination) => destination.clone(),
+                        None => arguments.get(*receiver)?.result_type(),
+                    }),
+                    // A default member is one function for every receiver.
+                    selection: if self.functions.iter().any(|(_, implements)| {
+                        implements.as_ref().is_some_and(|implements| {
+                            implements.interface == *interface
+                                && implements.member == *member
+                                && matches!(implements.receiver, Type::Param(_))
+                        })
+                    }) {
+                        DispatchSelection::Default
+                    } else {
+                        DispatchSelection::Dynamic
+                    },
+                    destination: selected_by.is_some(),
                 }),
             ),
             // A contract member the checker resolved to one function: a

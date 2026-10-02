@@ -128,6 +128,27 @@ otherwise in scientific notation with one integral digit and no `+` sign, as in
 `100.0f64`; `to-str` does not. Every finite serialization is a valid float
 literal body.
 
+## Generic instantiation
+
+Generics are not erased from observable behavior. Every activation of a
+generic function runs at the type arguments its call instantiated, and the
+result is as if the function had been written at those types:
+
+- a value built in generic code has its instantiated type, so an `(array t)`
+  built where `t` is `i32` is an `(array i32)` wherever it flows;
+- a contract member call selects its implementation from instantiated types:
+  the type the receiver holds, and for a generic interface the interface
+  arguments of the call, because one receiver may implement the interface at
+  several argument lists;
+- a default member runs at the receiver type and the interface arguments of
+  its own call, so a contract call in its body dispatches at them;
+- a member selected by its destination whose destination is a generic
+  parameter is selected from the type that parameter is instantiated to.
+
+A closure runs at the type arguments of the activation that created it, and a
+generic `lambda` adds its own at each call. An implementation MAY monomorphize
+or pass type arguments at run time; a program cannot tell which.
+
 ## Tail calls
 
 Tail position is defined inductively relative to an enclosing activation
