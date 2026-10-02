@@ -258,8 +258,7 @@ impl RuntimeError {
 /// V1 has no portable stack-depth limit (06-runtime); this is the reference
 /// interpreter's host budget. Reaching it stops execution with
 /// [`RuntimeError::HostStackExhausted`] instead of overflowing the host
-/// stack. Tail transfers within a recursive group reuse their activation and
-/// never approach it.
+/// stack. Calls in tail position reuse their activation and never approach it.
 pub const MAX_ACTIVATION_DEPTH: usize = 4096;
 
 /// Host stack reserved for the interpreter thread, independent of the
@@ -466,9 +465,15 @@ enum Evaluation {
     },
 }
 
+/// The code an activation runs: a module function's body or a `lambda`'s.
+enum Code {
+    Function(usize),
+    Lambda(Arc<Expr>),
+}
+
 enum TailTransferAction {
     Reuse {
-        index: usize,
+        code: Code,
         slots: Vec<Option<RuntimeValue>>,
         captures: Vec<RuntimeValue>,
         types: Arc<TypeMap>,
@@ -736,24 +741,43 @@ impl<'a> Machine<'a> {
         captures: Vec<RuntimeValue>,
         types: Arc<TypeMap>,
     ) -> Option<RuntimeValue> {
+        self.run_activation(Code::Function(index), slots, captures, types)
+    }
+
+    /// Runs one activation. A call in tail position returns here as a
+    /// [`Evaluation::TailTransfer`], and the loop reuses this activation for
+    /// the callee, whatever it is, instead of entering a new one.
+    fn run_activation(
+        &mut self,
+        code: Code,
+        slots: Vec<Option<RuntimeValue>>,
+        captures: Vec<RuntimeValue>,
+        types: Arc<TypeMap>,
+    ) -> Option<RuntimeValue> {
         self.enter_activation()?;
         self.types.push(types);
-        let mut index = index;
+        let mut code = code;
         let mut slots = slots;
         let mut captures = captures;
         let result = loop {
-            // Copy the program reference before borrowing a function body so
-            // the mutable machine borrow used by evaluation remains disjoint.
-            let program = self.program;
-            let Some(function) = program.functions().get(index) else {
-                break None;
+            let evaluation = match &code {
+                Code::Function(index) => {
+                    // Copy the program reference before borrowing a function
+                    // body so the mutable machine borrow used by evaluation
+                    // remains disjoint.
+                    let program = self.program;
+                    let Some(function) = program.functions().get(*index) else {
+                        break None;
+                    };
+                    if slots.len() != function.slot_count()
+                        || !slots_match_signature(&slots, function.signature())
+                    {
+                        break None;
+                    }
+                    self.evaluate(function.body(), &mut slots, &captures)
+                }
+                Code::Lambda(body) => self.evaluate(body, &mut slots, &captures),
             };
-            if slots.len() != function.slot_count()
-                || !slots_match_signature(&slots, function.signature())
-            {
-                break None;
-            }
-            let evaluation = self.evaluate(function.body(), &mut slots, &captures);
             match evaluation {
                 Some(Evaluation::Value(value)) => break Some(value),
                 Some(Evaluation::TestAssertionFailed) => break None,
@@ -761,30 +785,28 @@ impl<'a> Machine<'a> {
                     callable,
                     values,
                     result,
-                }) => {
-                    match self.tail_transfer_action(index, callable, values, &result) {
-                        TailTransferAction::Reuse {
-                            index: next_index,
-                            slots: next_slots,
-                            captures: next_captures,
-                            types: next_types,
-                        } => {
-                            self.tail_transfers = self.tail_transfers.saturating_add(1);
-                            index = next_index;
-                            slots = next_slots;
-                            captures = next_captures;
-                            // The reused activation runs at the callee's
-                            // type arguments.
-                            if let Some(current) = self.types.last_mut() {
-                                *current = next_types;
-                            }
+                }) => match self.tail_transfer_action(callable, values, &result) {
+                    TailTransferAction::Reuse {
+                        code: next_code,
+                        slots: next_slots,
+                        captures: next_captures,
+                        types: next_types,
+                    } => {
+                        self.tail_transfers = self.tail_transfers.saturating_add(1);
+                        code = next_code;
+                        slots = next_slots;
+                        captures = next_captures;
+                        // The reused activation runs at the callee's type
+                        // arguments.
+                        if let Some(current) = self.types.last_mut() {
+                            *current = next_types;
                         }
-                        TailTransferAction::Invoke { callable, values } => {
-                            break self.invoke_callable(*callable, values, &result);
-                        }
-                        TailTransferAction::Invalid => break None,
                     }
-                }
+                    TailTransferAction::Invoke { callable, values } => {
+                        break self.invoke_callable(*callable, values, &result);
+                    }
+                    TailTransferAction::Invalid => break None,
+                },
                 None => break self.pending_exit.take(),
             }
         };
@@ -793,9 +815,11 @@ impl<'a> Machine<'a> {
         result
     }
 
+    /// Decides how a call in tail position runs: every callable that creates
+    /// a language activation reuses the current one. A compiler-intrinsic
+    /// wrapper creates none, so it is invoked as an ordinary call.
     fn tail_transfer_action(
         &self,
-        current_index: usize,
         callable: Callable,
         values: Vec<RuntimeValue>,
         result: &Type,
@@ -818,14 +842,7 @@ impl<'a> Machine<'a> {
                 {
                     return TailTransferAction::Invalid;
                 }
-                if self.program.in_recursive_group(current_index, index) {
-                    TailTransferAction::Reuse {
-                        index,
-                        slots: activation_slots(values, function.slot_count()),
-                        captures,
-                        types,
-                    }
-                } else {
+                if function.is_external_wrapper() {
                     TailTransferAction::Invoke {
                         callable: Box::new(Callable::Named {
                             index,
@@ -835,11 +852,26 @@ impl<'a> Machine<'a> {
                         }),
                         values,
                     }
+                } else {
+                    TailTransferAction::Reuse {
+                        code: Code::Function(index),
+                        slots: activation_slots(values, function.slot_count()),
+                        captures,
+                        types,
+                    }
                 }
             }
-            callable => TailTransferAction::Invoke {
-                callable: Box::new(callable),
-                values,
+            Callable::Lambda {
+                slot_count,
+                body,
+                captures,
+                types,
+                ..
+            } => TailTransferAction::Reuse {
+                code: Code::Lambda(body),
+                slots: activation_slots(values, slot_count),
+                captures,
+                types,
             },
         }
     }
@@ -1769,9 +1801,7 @@ impl<'a> Machine<'a> {
             *callable.types_mut() = Arc::new(bound);
             // The member's own generic parameters, from this call.
             self.bind_call(&mut callable, arguments, &values, result);
-            return self
-                .invoke_callable(callable, values, result)
-                .map(Evaluation::Value);
+            return self.finish_call(callable, values, result, tail);
         }
         let mut callable = match target {
             CallTarget::Direct(function) => self.named_callable(*function)?,
@@ -1827,25 +1857,36 @@ impl<'a> Machine<'a> {
                 Evaluation::Value(value)
             });
         }
-        if tail {
-            let callable_signature = match &callable {
-                Callable::Named { signature, .. }
-                | Callable::Lambda { signature, .. } => signature,
-            };
-            if callable_signature.fixed_parameter_count() != values.len()
-                || !values_match_signature(&values, callable_signature)
-                || !result.admits(&callable_signature.result())
-            {
-                return None;
-            }
-            return Some(Evaluation::TailTransfer {
-                callable,
-                values,
-                result: result.clone(),
-            });
+        self.finish_call(callable, values, result, tail)
+    }
+
+    /// Runs a call whose callable and operands are resolved: a call in tail
+    /// position is handed back to the activation loop, and any other call
+    /// enters a new activation.
+    fn finish_call(
+        &mut self,
+        callable: Callable,
+        values: Vec<RuntimeValue>,
+        result: &Type,
+        tail: bool,
+    ) -> Option<Evaluation> {
+        if !tail {
+            return self
+                .invoke_callable(callable, values, result)
+                .map(Evaluation::Value);
         }
-        self.invoke_callable(callable, values, result)
-            .map(Evaluation::Value)
+        let callable_signature = callable.signature();
+        if callable_signature.fixed_parameter_count() != values.len()
+            || !values_match_signature(&values, callable_signature)
+            || !result.admits(&callable_signature.result())
+        {
+            return None;
+        }
+        Some(Evaluation::TailTransfer {
+            callable,
+            values,
+            result: result.clone(),
+        })
     }
 
     fn invoke_test_assertion(
@@ -1925,20 +1966,8 @@ impl<'a> Machine<'a> {
                 types,
                 ..
             } => {
-                let mut slots = activation_slots(values, slot_count);
-                self.enter_activation()?;
-                self.types.push(types);
-                let evaluation = self.evaluate(&body, &mut slots, &captures);
-                self.types.pop();
-                self.leave_activation();
-                match evaluation {
-                    Some(Evaluation::Value(value)) => Some(value),
-                    Some(
-                        Evaluation::TestAssertionFailed
-                        | Evaluation::TailTransfer { .. },
-                    ) => None,
-                    None => self.pending_exit.take(),
-                }
+                let slots = activation_slots(values, slot_count);
+                self.run_activation(Code::Lambda(body), slots, captures, types)
             }
         }
     }

@@ -1,0 +1,7 @@
+(record
+  format: @test-run.v1
+  result: @command.ok
+  tests: (array
+    (record name: "@tests.loop::\"calls between two modules loop in one activation\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)

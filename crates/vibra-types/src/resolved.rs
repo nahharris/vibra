@@ -751,7 +751,6 @@ pub fn check_resolved(
             &empty_indices,
             &empty_names,
             &mut bindings,
-            None,
             &types,
         );
         environment.resolved_targets = Some(&resolved_targets);
@@ -826,7 +825,6 @@ pub fn check_resolved(
                 &empty_indices,
                 &empty_names,
                 &mut bindings,
-                Some(index),
                 &types,
             );
             environment.exit = Some((Type::Void, None));
@@ -915,7 +913,6 @@ pub fn check_resolved(
             &empty_indices,
             &empty_names,
             &mut bindings,
-            Some(index),
             &types,
         );
         environment.resolved_targets = Some(&resolved_targets);

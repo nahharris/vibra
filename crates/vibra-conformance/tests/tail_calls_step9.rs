@@ -68,9 +68,9 @@ fn direct_and_mutual_tail_transfers_reuse_one_activation() {
 }
 
 #[test]
-fn mixed_named_and_closure_tail_calls_reuse_only_the_selected_named_target() {
+fn mixed_named_and_closure_tail_calls_reuse_the_selected_target() {
     for (condition, expected, transfers, depth) in
-        [("true", 1, 1, 1), ("false", 2, 0, 2)]
+        [("true", 1, 1, 1), ("false", 2, 1, 1)]
     {
         let source = format!(
             "\
@@ -189,7 +189,7 @@ fn mixed_source_and_external_tail_candidates_reuse_only_source_targets() {
 }
 
 #[test]
-fn lambda_activations_keep_unknown_calls_as_ordinary_invocations() {
+fn lambda_activations_reuse_for_calls_through_captured_values() {
     let source = r#"
 (defn answer () i32
   (let f leaf ((lambda () i32 (f)))))
@@ -198,10 +198,13 @@ fn lambda_activations_keep_unknown_calls_as_ordinary_invocations() {
     let checked = check_source("tail-lambda-activation.vib", source);
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let program = checked.program().expect("program");
-    assert!(!program.canonical_vibon().contains("tail: true"));
+    // The call of the `lambda` and the call of `f` inside it are both tail
+    // calls, so the one activation of `answer` runs all three bodies.
+    assert_eq!(program.canonical_vibon().matches("tail: true").count(), 2);
     let execution = vibra_interp::run(program).expect("execution");
     assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(1)));
-    assert_eq!(execution.tail_transfer_count(), 0);
+    assert_eq!(execution.tail_transfer_count(), 2);
+    assert_eq!(execution.max_activation_depth(), 1);
 }
 
 #[test]
@@ -343,8 +346,9 @@ fn captured_callable_values_survive_repeated_tail_transfers() {
     let execution =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
     assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(41)));
-    assert_eq!(execution.tail_transfer_count(), 3);
-    assert_eq!(execution.max_activation_depth(), 2);
+    // `answer` to `loop`, two self transfers, and `f` itself.
+    assert_eq!(execution.tail_transfer_count(), 4);
+    assert_eq!(execution.max_activation_depth(), 1);
 }
 
 #[test]
@@ -375,4 +379,141 @@ fn callable_return_and_unused_initializer_boundaries_remain_valid() {
             .canonical_vibon()
             .contains("tail: true")
     );
+}
+
+/// The source of a corpus case, so a host test and its case cannot drift.
+fn corpus_source(case: &str) -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/cases")
+        .join(case)
+        .join("input.vib");
+    std::fs::read_to_string(path).expect("corpus case source")
+}
+
+/// Runs a corpus case source and checks the result, the transfer count, and
+/// that the activation depth stays far below the interpreter's bound.
+fn assert_constant_depth(case: &str, expected: u64, transfers: usize, depth: usize) {
+    let checked = check_source(format!("{case}.vib"), &corpus_source(case));
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    let execution =
+        vibra_interp::run(checked.program().expect("program")).expect("execution");
+    assert_eq!(execution.value(), Some(&vibra_ir::Value::U64(expected)));
+    assert_eq!(execution.tail_transfer_count(), transfers);
+    assert_eq!(execution.max_activation_depth(), depth);
+    assert!(depth < vibra_interp::MAX_ACTIVATION_DEPTH / 100);
+    assert!(execution.audit_trace().is_empty());
+}
+
+#[test]
+fn function_value_parameter_tail_calls_reuse_one_activation() {
+    // `main` into `apply`; then `apply` into `countdown` for each of the
+    // 100001 counts and `countdown` back into `apply` for each of the 100000
+    // that is not zero. `lower` is the only nested activation, and its own
+    // checked subtraction is one more.
+    assert_constant_depth("V1-RUNTIME-tail-function-value-parameter", 11, 200_002, 3);
+}
+
+#[test]
+fn closure_tail_calls_reuse_one_activation() {
+    // `main` into `spin`; `spin` into the closure for each of 100001 counts
+    // and the closure back into `spin` for each of 100000. Making the closure
+    // is the only nested call besides `lower`.
+    assert_constant_depth("V1-RUNTIME-tail-closure-captured-loop", 13, 200_002, 3);
+}
+
+#[test]
+fn contract_member_tail_calls_reuse_one_activation() {
+    // `main` into the first `walk`, then one transfer per remaining count.
+    assert_constant_depth(
+        "V1-RUNTIME-tail-contract-member-interface-value",
+        17,
+        100_001,
+        3,
+    );
+}
+
+#[test]
+fn unrelated_function_tail_calls_reuse_one_activation() {
+    // `main` into `first`, 100000 self transfers, `first` into `second`, 100000
+    // more, and `second` into `last`.
+    assert_constant_depth("V1-RUNTIME-tail-unrelated-function-loop", 19, 200_003, 3);
+}
+
+#[test]
+fn tail_calls_between_modules_reuse_one_activation() {
+    let project = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict))\n";
+    let parent =
+        std::fs::canonicalize(std::env::temp_dir()).expect("temporary directory");
+    let root = parent.join(format!("vibra-tail-modules-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(root.join("src/app")).expect("project directory");
+    std::fs::write(root.join("project.vibon"), project).expect("project marker");
+    std::fs::write(
+        root.join("src/app/main.vib"),
+        "(import steps @app.steps)\n(defn execute () void (run 100000u64))\n(defn run (count u64) void (steps.step count run))\n",
+    )
+    .expect("main module");
+    std::fs::write(
+        root.join("src/app/steps.vib"),
+        "(defn step (count u64 next (fn (u64) void)) void visibility: @public\n  (if (u64.equal count 0u64) (do) (next (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n",
+    )
+    .expect("steps module");
+    let snapshot = vibra_workspace::WorkspaceSnapshot::load(&root).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("binary target");
+    let run = vibra_workspace::semantic::run_target(&snapshot, target);
+    let _ = std::fs::remove_dir_all(&root);
+    assert_eq!(
+        run.check().status(),
+        vibra_workspace::semantic::CheckStatus::Accepted,
+        "{:?}",
+        run.check().diagnostics()
+    );
+    let execution = match run.outcome() {
+        Some(vibra_workspace::semantic::RunOutcome::Program(execution)) => {
+            Some(execution)
+        }
+        _ => None,
+    }
+    .expect("the checked program runs");
+    // `execute` into `run`; then `run` into `step` and `step` back into `run`
+    // across the module boundary.
+    assert_eq!(execution.tail_transfer_count(), 200_002);
+    assert_eq!(execution.max_activation_depth(), 3);
+}
+
+/// Deep recursion whose every call is an operand keeps its activations live,
+/// whatever the callee is, and the interpreter stops it at its bound.
+#[test]
+fn non_tail_recursion_through_every_callee_kind_still_exhausts_the_host_budget() {
+    let lower = "(defn lower (count u64) u64\n  (match (u64.add-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
+    let sources = [
+        // A function value held in a parameter.
+        format!(
+            "(defn main () u64 (again 0u64))\n(defn again (count u64) u64 (grow count again))\n(defn grow (count u64 next (fn (u64) u64)) u64 (lower (next count)))\n{lower}"
+        ),
+        // A closure and the function it captures.
+        format!(
+            "(defn main () u64 (spin 0u64))\n(defn spin (count u64) u64 (lower ((make spin) count)))\n(defn make (back (fn (u64) u64)) (fn (u64) u64) (lambda (count u64) u64 (back count)))\n{lower}"
+        ),
+        // A contract member called through an interface value.
+        format!(
+            "(defn main () u64 (walker.walk (as walker (counter left: 0u64))))\n(defint walker (defn walk (value self) u64))\n(deftype counter (record left u64)\n  (impl walker\n    (defn walk (value self) u64 (lower (walker.walk (as walker (counter left: 0u64)))))))\n{lower}"
+        ),
+    ];
+    for source in sources {
+        let checked = check_source("deep-non-tail.vib", &source);
+        assert!(checked.accepted(), "{:?}", checked.diagnostics());
+        assert_eq!(
+            vibra_interp::run(checked.program().expect("program")),
+            Err(vibra_interp::RuntimeError::HostStackExhausted {
+                limit: vibra_interp::MAX_ACTIVATION_DEPTH
+            }),
+            "{source}"
+        );
+    }
 }

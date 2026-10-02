@@ -413,7 +413,7 @@ fn unbounded_higher_order_calls_reach_every_escaping_function() {
 "#;
     let checked = check_source("higher-order-recursion.vib", source);
     // An unknown callee stands for every function named as a value, so the
-    // call through `f` joins `answer` and `apply` in one recursive group.
+    // call-flow analysis follows the call through `f` back to `answer`.
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     assert!(checked.program().is_some());
 }

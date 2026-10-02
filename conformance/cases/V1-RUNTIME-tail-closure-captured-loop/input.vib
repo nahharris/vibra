@@ -1,0 +1,12 @@
+(defn main () u64 (spin 100000u64))
+
+(defn spin (count u64) u64 ((again spin) count))
+
+(defn again (back (fn (u64) u64)) (fn (u64) u64)
+  (lambda (count u64) u64
+    (if (u64.equal count 0u64) 13u64 (back (lower count)))))
+
+(defn lower (count u64) u64
+  (match (u64.sub-checked count 1u64)
+    (result.ok value) value
+    (result.err -) 0u64))
