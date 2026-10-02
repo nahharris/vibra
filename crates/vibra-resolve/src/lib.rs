@@ -2573,14 +2573,16 @@ impl Resolution {
                     .find(|(owner, import)| owner == module && import.alias == *first);
                 if let Some((_, import)) = import {
                     match &import.declaration {
-                        // A declaration alias stands for that declaration; its
-                        // visibility was already checked at the import.
+                        // A declaration alias stands for that declaration,
+                        // whose visibility was checked at the import. A
+                        // member reached through it is checked here, as it
+                        // is through a module alias.
                         Some(declaration) => (
                             import.module.clone(),
                             std::iter::once(declaration.clone())
                                 .chain(path.iter().skip(1).cloned())
                                 .collect::<Vec<_>>(),
-                            false,
+                            path.len() > 1,
                         ),
                         None => (
                             import.module.clone(),

@@ -1,0 +1,9 @@
+(deftype any i32)
+
+(deftype option (enum some t none void)
+  where: (t any))
+
+(deftype result i32)
+
+(defint iter
+  (defn id (value self) i32))

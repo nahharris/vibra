@@ -1,0 +1,9 @@
+(import shapes @lib.shapes)
+
+(import box @lib.shapes.box)
+
+(defn hidden () i32 (box.secret (shapes.make)))
+
+(defn shown () i32 (box.open (shapes.make)))
+
+(defn execute () void void)

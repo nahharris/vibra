@@ -799,9 +799,10 @@ fn useful(
         }
     }
     let all = all_constructors(&space);
-    if let Some(all) = &all
-        && all.iter().all(|constructor| used.contains(constructor))
-    {
+    // A closed space is walked in declaration order, so the witness is the
+    // first uncovered shape: an earlier constructor that is only partly
+    // covered comes before a later one that no arm names.
+    if let Some(all) = &all {
         return all.iter().find_map(specialize_by);
     }
     // Some constructor is missing: a value built with it is useful exactly
@@ -945,7 +946,8 @@ pub(crate) fn spell(types: &TypeNames, pattern: &Pattern, value_type: &Type) -> 
             if matches!(**inner, Pattern::Wildcard) {
                 return "-".to_owned();
             }
-            let head = declared_name().unwrap_or_default();
+            // `str` and `bytes` are library wrappers named by their role.
+            let head = declared_name().unwrap_or_else(|| value_type.to_string());
             format!("({head} {})", spell(types, inner, representation))
         }
         (

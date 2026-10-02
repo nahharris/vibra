@@ -80,16 +80,31 @@ pub(crate) fn generic_bounds(
                 }
                 None => {
                     valid = false;
-                    diagnostics.push(
-                        Diagnostic::new(
+                    // A type found where an interface is required is the wrong
+                    // kind of entity, not an unknown name.
+                    let (code, message) = if types
+                        .resolve(source_id, binding.bound())
+                        .is_ok()
+                    {
+                        (
+                            DiagnosticCode::NameWrongEntityKind,
+                            format!(
+                                "`{}` is a type, not an interface; a bound names an interface",
+                                binding.bound().value()
+                            ),
+                        )
+                    } else {
+                        (
                             DiagnosticCode::NameUnknownSymbol,
-                            binding.span(),
                             format!(
                                 "`{}` does not name a visible interface",
                                 binding.bound().value()
                             ),
                         )
-                        .with_source_id(source_id),
+                    };
+                    diagnostics.push(
+                        Diagnostic::new(code, binding.span(), message)
+                            .with_source_id(source_id),
                     );
                 }
             }

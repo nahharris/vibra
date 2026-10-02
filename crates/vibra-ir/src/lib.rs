@@ -5049,8 +5049,12 @@ fn validate_signature_shape(signature: &FunctionSignature) -> Result<(), String>
             ));
         }
         validate_type_shape(&parameter.value_type())?;
+        // An atom default has its own singleton type, which is one atom of
+        // `atom`.
         if let Some(default) = parameter.default()
             && !default.ty().same_shape(&parameter.value_type())
+            && !(matches!(default, Value::Atom(_))
+                && parameter.value_type() == Type::Atom)
         {
             return Err(format!(
                 "default for labelled parameter `{}` has type {}, expected {}",

@@ -1731,7 +1731,9 @@ impl<'a> Machine<'a> {
                     .labelled()
                     .get(argument_index.checked_sub(positional)?)?;
                 let default = parameter.default()?.clone();
-                if !default.ty().same_shape(&argument.result_type()) {
+                let atom_default = matches!(default, Value::Atom(_))
+                    && argument.result_type() == Type::Atom;
+                if !atom_default && !default.ty().same_shape(&argument.result_type()) {
                     return None;
                 }
                 values.push(RuntimeValue::Primitive(default));
