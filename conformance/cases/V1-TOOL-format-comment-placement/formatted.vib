@@ -1,0 +1,14 @@
+(deftype point
+  (record
+    x i32
+    ; the x
+    y i32
+    ; the y
+  ))
+
+(deftype box (record value t)
+  where: (t any)
+  ; why it is public
+  visibility: @public)
+
+(defn execute () void void)

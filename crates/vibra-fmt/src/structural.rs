@@ -22,23 +22,42 @@ pub(crate) fn canonical_structural_order(
     source: &str,
 ) -> Option<String> {
     let mut replacements = Vec::new();
+    // Each entry is a node and whether it is a list that cannot itself be a
+    // structural type: a declared body, or a list in a position that holds
+    // names, such as a parameter list whose first parameter is named `union`.
     let mut pending = vec![(root, false)];
-    while let Some((node, declared_body)) = pending.pop() {
+    while let Some((node, not_a_type)) = pending.pop() {
         if node.kind() != SyntaxKind::List {
             // The document root is not a list; descend through it.
             pending.extend(meaningful(node).into_iter().map(|child| (child, false)));
             continue;
         }
-        if !declared_body && structural_head(node).is_some() {
+        if !not_a_type && structural_head(node).is_some() {
             let text = canonical_text(node, source);
             if text != slice(source, node) {
                 replacements.push((node.span().start(), node.span().end(), text));
             }
             continue;
         }
-        let deftype = head_text(node) == Some("deftype");
-        for (index, child) in meaningful(node).into_iter().enumerate() {
-            pending.push((child, deftype && index == 2));
+        let head = head_text(node);
+        let children = meaningful(node);
+        for (index, child) in children.iter().enumerate() {
+            // The body of a `deftype` keeps its written order; a parameter
+            // list and the entries after `labelled:`, `variadic:`, and
+            // `where:` bind names, though the types inside them are types.
+            let binds_names =
+                matches!((head, index), (Some("defn"), 2) | (Some("lambda"), 1))
+                    || index
+                        .checked_sub(1)
+                        .and_then(|before| children.get(before))
+                        .and_then(|before| before.leaf_text())
+                        .is_some_and(|label| {
+                            matches!(label, "labelled:" | "variadic:" | "where:")
+                        });
+            pending.push((
+                child,
+                (head == Some("deftype") && index == 2) || binds_names,
+            ));
         }
     }
     if replacements.is_empty() {
@@ -164,8 +183,15 @@ fn rebuild_items(
     output
 }
 
+/// `text` as the layout pass will write it: single spaces between tokens and
+/// none inside a delimiter. The sort key must not depend on written spacing,
+/// or a second pass over the laid-out text would order the members again.
 fn normalized(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace("( ", "(")
+        .replace(" )", ")")
 }
 
 fn slice<'source>(source: &'source str, node: &CstNode) -> &'source str {

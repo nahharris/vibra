@@ -1,0 +1,89 @@
+(record
+  format: @index.v1
+  revision: "sha256:8c92549ca782e5e13fe190369c2bbd576a7399e773e8d34799fe95f33506fee8"
+  declarations: (array
+    (record
+      id: @app.main
+      kind: @module
+      module: @app.main
+      owner: void
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 0u64 end: 170u64)
+      signature: void
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(defint shape (defn name (value self) str))\n\n(deftype c i32\n  (defn m (value self) str \"m\")\n  (impl shape (defn name (value self) str \"c\")))\n\n(defn execute () void void)\n")
+    (record
+      id: @app.main.c
+      kind: @type
+      module: @app.main
+      owner: void
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 45u64 end: 140u64)
+      signature: (array)
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(deftype c i32\n  (defn m (value self) str \"m\")\n  (impl shape (defn name (value self) str \"c\")))")
+    (record
+      id: @app.main.c.m
+      kind: @method
+      module: @app.main
+      owner: @app.main.c
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 110u64 end: 139u64)
+      signature: (fn (array @app.main.c) @str)
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(defn m (value self) str \"m\")")
+    (record
+      id: @app.main.execute
+      kind: @function
+      module: @app.main
+      owner: void
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 142u64 end: 169u64)
+      signature: (fn (array) @void)
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(defn execute () void void)")
+    (record
+      id: @app.main.shape
+      kind: @interface
+      module: @app.main
+      owner: void
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 0u64 end: 43u64)
+      signature: (array)
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(defint shape (defn name (value self) str))")
+    (record
+      id: @app.main.shape.name
+      kind: @method
+      module: @app.main
+      owner: @app.main.shape
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 14u64 end: 42u64)
+      signature: (fn (array (record type: @param name: @self)) @str)
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(defn name (value self) str)"))
+  implementations: (array
+    (record
+      receiver: @app.main.c
+      interface: @app.main.shape
+      source: (record source-id: "src/app/main.vib" start: 62u64 end: 107u64)
+      text: "(impl shape (defn name (value self) str \"c\"))"
+      members: (array
+        (record
+          contract: @app.main.shape.name
+          source: (record source-id: "src/app/main.vib" start: 74u64 end: 106u64)
+          signature: (fn (array @app.main.c) @str)
+          text: "(defn name (value self) str \"c\")"))))
+  references: (array))

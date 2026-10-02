@@ -1,0 +1,7 @@
+(defint shape (defn name (value self) str))
+
+(deftype c i32
+  (impl shape (defn name (value self) str "c"))
+  (defn m (value self) str "m"))
+
+(defn execute () void void)

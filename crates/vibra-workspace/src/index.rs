@@ -422,11 +422,12 @@ type Position = (usize, Option<usize>, Option<usize>);
 struct ModuleText<'a> {
     positions: BTreeMap<(usize, usize), Position>,
     original: &'a str,
+    ast: &'a SourceAst,
     formatted: Option<(String, SourceAst)>,
 }
 
 impl<'a> ModuleText<'a> {
-    fn new(source_id: &str, original: &'a str, ast: &SourceAst) -> Self {
+    fn new(source_id: &str, original: &'a str, ast: &'a SourceAst) -> Self {
         let mut positions = BTreeMap::new();
         for (index, declaration) in ast.declarations().iter().enumerate() {
             let span = declaration.span();
@@ -456,8 +457,9 @@ impl<'a> ModuleText<'a> {
                 }
             }
         }
-        // The formatter keeps declaration and member order, so a position in
-        // the source is the same position in its formatted text.
+        // The formatter keeps declaration order, and the order of methods
+        // and of `impl` blocks among themselves, but writes every method
+        // before the first block.
         let formatted = vibra_fmt::format_source(Path::new(source_id), original)
             .ok()
             .and_then(|text| {
@@ -470,6 +472,7 @@ impl<'a> ModuleText<'a> {
         Self {
             positions,
             original,
+            ast,
             formatted,
         }
     }
@@ -489,7 +492,7 @@ impl<'a> ModuleText<'a> {
         let Some(position) = self.positions.get(&(span.start(), span.end())) else {
             return written();
         };
-        formatted_span(formatted, *position)
+        formatted_span(self.ast, formatted, *position)
             .and_then(|span| text.get(span.start()..span.end()))
             .map_or_else(written, str::to_owned)
     }
@@ -510,7 +513,33 @@ fn member_span(member: &TypeMember) -> ByteSpan {
     }
 }
 
-fn formatted_span(ast: &SourceAst, position: Position) -> Option<ByteSpan> {
+/// The member of `formatted` that the member at `index` of `written` became:
+/// the method or `impl` block with the same ordinal among its own kind.
+fn formatted_member<'a>(
+    written: &Declaration,
+    formatted: &'a Declaration,
+    index: usize,
+) -> Option<&'a TypeMember> {
+    let written = members(written);
+    let is_block =
+        |member: &TypeMember| matches!(member, TypeMember::Implementation(_));
+    let block = is_block(written.get(index)?);
+    let ordinal = written
+        .iter()
+        .take(index)
+        .filter(|member| is_block(member) == block)
+        .count();
+    members(formatted)
+        .iter()
+        .filter(|member| is_block(member) == block)
+        .nth(ordinal)
+}
+
+fn formatted_span(
+    original: &SourceAst,
+    ast: &SourceAst,
+    position: Position,
+) -> Option<ByteSpan> {
     let (index, member, inner) = position;
     let declaration = ast.declarations().get(index)?;
     let Some(member) = member else {
@@ -523,7 +552,8 @@ fn formatted_span(ast: &SourceAst, position: Position) -> Option<ByteSpan> {
             .get(member)
             .map(|operation| operation.span());
     }
-    let member = members(declaration).get(member)?;
+    let member =
+        formatted_member(original.declarations().get(index)?, declaration, member)?;
     match (member, inner) {
         (_, None) => Some(member_span(member)),
         (TypeMember::Implementation(block), Some(inner)) => {
@@ -839,6 +869,13 @@ fn build(
                         .take(id.path().len().saturating_sub(2))
                         .map(String::as_str),
                 )
+                .collect::<Vec<_>>()
+                .join(".")
+        } else if id.kind() == EntityKind::Test {
+            // A test is not a declaration record; its references belong to
+            // the test module.
+            std::iter::once(id.unit())
+                .chain(id.module().iter().map(String::as_str))
                 .collect::<Vec<_>>()
                 .join(".")
         } else {

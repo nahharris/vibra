@@ -904,7 +904,9 @@ fn format_source_with_comments(
             if !group.comments.is_empty() {
                 output.push('\n');
             }
-            if is_native_declaration(form) && contains_line_comment(form) {
+            // Every declaration takes the same path, so a comment elsewhere
+            // in the file does not change how an uncommented one is ordered.
+            if is_native_declaration(form) {
                 render_declaration_with_comments(
                     form,
                     document.source(),
@@ -1010,6 +1012,13 @@ fn render_declaration_with_comments(
             .get(&node_key(node))
             .is_some_and(|layout| layout.inline);
     let body_indent = indent.saturating_add(2);
+    // The declaration's last form is followed by its own closing delimiter
+    // and those of every list it ends.
+    let closers = layouts
+        .get(&node_key(node))
+        .map_or(0, |layout| layout.closers)
+        .saturating_add(1);
+    let last_index = ordered.len().saturating_sub(1);
     // Where the opening line ends while the header still shares it.
     let mut opening_column = Some(indent.saturating_add(1));
     let mut ends_in_comment = false;
@@ -1032,7 +1041,10 @@ fn render_declaration_with_comments(
             let joined = opening_column
                 .zip(inline_width(item))
                 .map(|(column, width)| column.saturating_add(1).saturating_add(width))
-                .filter(|column| uninterrupted && *column <= 88);
+                .filter(|column| {
+                    let closing = if index == last_index { closers } else { 0 };
+                    uninterrupted && column.saturating_add(closing) <= 88
+                });
             opening_column = joined;
             if joined.is_some() {
                 ItemLead::Space
@@ -1045,10 +1057,14 @@ fn render_declaration_with_comments(
                 .and_then(&inline_width)
                 .zip(inline_width(item))
                 .is_some_and(|(label, value)| {
+                    // Room for one closing delimiter, or for all of them
+                    // when the pair ends the declaration.
+                    let room = if index == last_index { closers } else { 1 };
                     body_indent
                         .saturating_add(label)
                         .saturating_add(1)
                         .saturating_add(value)
+                        .saturating_add(room)
                         <= 88
                 });
             if uninterrupted && fits {
@@ -1225,27 +1241,33 @@ fn is_attribute_label(node: &CstNode) -> bool {
         matches!(
             text,
             "where:"
+                | "role:"
                 | "labelled:"
                 | "variadic:"
                 | "visibility:"
                 | "effects:"
                 | "external:"
                 | "symbol:"
+                | "native:"
                 | "doc:"
         )
     })
 }
 
+/// The canonical position of an attribute label, the same order as
+/// `Attribute::canonical_order` gives a declaration with no comment.
 fn attribute_order(label: &str) -> usize {
     match label {
         "where:" => 0,
-        "labelled:" => 1,
-        "variadic:" => 2,
-        "visibility:" => 3,
-        "effects:" => 4,
-        "external:" => 5,
-        "symbol:" => 6,
-        "doc:" => 7,
+        "role:" => 1,
+        "labelled:" => 2,
+        "variadic:" => 3,
+        "visibility:" => 4,
+        "effects:" => 5,
+        "external:" => 6,
+        "symbol:" => 7,
+        "native:" => 8,
+        "doc:" => 9,
         _ => usize::MAX,
     }
 }
@@ -1346,6 +1368,9 @@ fn root_groups(root: &CstNode) -> Option<Vec<RootGroup<'_>>> {
 struct NodeLayout {
     inline: bool,
     inline_width: usize,
+    /// The closing delimiters of enclosing lists that follow this list's own
+    /// on the same line, because it is the last form of each.
+    closers: usize,
 }
 
 fn node_key(node: &CstNode) -> *const CstNode {
@@ -1388,6 +1413,7 @@ fn build_layouts(root: &CstNode) -> HashMap<*const CstNode, NodeLayout> {
             _ => NodeLayout {
                 inline: false,
                 inline_width: 0,
+                closers: 0,
             },
         };
         layouts.insert(node_key(node), layout);
@@ -1444,15 +1470,17 @@ fn reflow_last_forms(
             } else {
                 0
             };
-            if is_last
-                && let Some(layout) = layouts.get_mut(&node_key(child))
-                && layout.inline
-                && child_indent
-                    .saturating_add(layout.inline_width)
-                    .saturating_add(child_closers)
-                    > 88
-            {
-                layout.inline = false;
+            if let Some(layout) = layouts.get_mut(&node_key(child)) {
+                layout.closers = child_closers;
+                if is_last
+                    && layout.inline
+                    && child_indent
+                        .saturating_add(layout.inline_width)
+                        .saturating_add(child_closers)
+                        > 88
+                {
+                    layout.inline = false;
+                }
             }
             tasks.push((child, child_indent, child_closers));
         }
@@ -1465,6 +1493,7 @@ fn leaf_layout(text: &str) -> NodeLayout {
     NodeLayout {
         inline: !has_newline,
         inline_width,
+        closers: 0,
     }
 }
 
@@ -1508,6 +1537,7 @@ fn list_layout(
                         .unwrap_or(NodeLayout {
                             inline: false,
                             inline_width: 0,
+                            closers: 0,
                         });
                 if item_count != 0 {
                     inline_width = inline_width.saturating_add(1);
@@ -1522,6 +1552,7 @@ fn list_layout(
     NodeLayout {
         inline: !has_comment && all_inline && indent.saturating_add(inline_width) <= 88,
         inline_width,
+        closers: 0,
     }
 }
 
@@ -1612,6 +1643,7 @@ fn render_node(
                         layouts.get(&node_key(node)).copied().unwrap_or(NodeLayout {
                             inline: false,
                             inline_width: 0,
+                            closers: 0,
                         });
                     if let Some(facts) = context
                         .as_deref_mut()
@@ -1963,6 +1995,12 @@ fn declaration_lines<'source>(
         .min(items.len());
     let mut lines: Vec<Vec<&CstNode>> = Vec::new();
     let mut opening = Vec::new();
+    // The declaration's last form is followed by its own closing delimiter
+    // and those of every list it ends.
+    let closers = layouts
+        .get(&node_key(node))
+        .map_or(0, |layout| layout.closers)
+        .saturating_add(1);
     // The opening delimiter takes one column.
     let mut column = indent.saturating_add(1);
     let mut cursor = 0;
@@ -1972,7 +2010,12 @@ fn declaration_lines<'source>(
             break;
         };
         let next = column.saturating_add(separator).saturating_add(width);
-        if cursor != 0 && next > 88 {
+        let closing = if cursor + 1 == items.len() {
+            closers
+        } else {
+            0
+        };
+        if cursor != 0 && next.saturating_add(closing) > 88 {
             break;
         }
         column = next;
@@ -1997,11 +2040,19 @@ fn declaration_lines<'source>(
     while let Some(item) = items.get(cursor) {
         let pair = cst_label(item).and_then(|_| {
             let value = items.get(cursor + 1)?;
+            // Room for one closing delimiter, or for all of them when the
+            // pair ends the declaration.
+            let room = if cursor + 2 == items.len() {
+                closers
+            } else {
+                1
+            };
             let fits = body_indent
                 .saturating_add(inline_width(item)?)
                 .saturating_add(1)
                 .saturating_add(inline_width(value)?)
-                < 88;
+                .saturating_add(room)
+                <= 88;
             fits.then_some(*value)
         });
         match pair {
@@ -2375,9 +2426,6 @@ fn bound_nodes<'source>(
             .flatten()
             .next()
             .copied();
-        let Some(target) = next.or(previous) else {
-            continue;
-        };
         let attach_to_previous = previous.is_some_and(|previous| {
             next.is_none()
                 || bound_nodes.get(previous).is_some_and(|bound| {
@@ -2388,6 +2436,15 @@ fn bound_nodes<'source>(
                     )
                 })
         });
+        // A comment on the line of the form before it trails that form; any
+        // other comment leads the form after it.
+        let Some(target) = (if attach_to_previous {
+            previous
+        } else {
+            next.or(previous)
+        }) else {
+            continue;
+        };
         if let Some(bound) = bound_nodes.get_mut(target) {
             if attach_to_previous {
                 bound.trailing.push(comment);

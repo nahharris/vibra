@@ -1,0 +1,56 @@
+(record
+  format: @index.v1
+  revision: "sha256:808e754d35580066cb137b775f117ca418140779d0763065ff34b9ccff1b0ef8"
+  declarations: (array
+    (record
+      id: @app.main
+      kind: @module
+      module: @app.main
+      owner: void
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 0u64 end: 72u64)
+      signature: void
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(defn one () i32 visibility: @public 1i32)\n\n(defn execute () void void)\n")
+    (record
+      id: @app.main.execute
+      kind: @function
+      module: @app.main
+      owner: void
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 44u64 end: 71u64)
+      signature: (fn (array) @void)
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(defn execute () void void)")
+    (record
+      id: @app.main.one
+      kind: @function
+      module: @app.main
+      owner: void
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 0u64 end: 42u64)
+      signature: (fn (array) @i32)
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(defn one () i32 visibility: @public 1i32)")
+    (record
+      id: @tests.t
+      kind: @module
+      module: @tests.t
+      owner: void
+      visibility: @public
+      source: (record source-id: "tests/t.vib" start: 0u64 end: 105u64)
+      signature: void
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(import assert @std.assert)\n\n(import main @app.main)\n\n(test \"one is one\" (assert.equal (main.one) 1i32))\n"))
+  implementations: (array)
+  references: (array
+    (record from: @tests.t written: "assert.equal" source: (record source-id: "tests/t.vib" start: 74u64 end: 86u64) to: @std.assert.equal)
+    (record from: @tests.t written: "main.one" source: (record source-id: "tests/t.vib" start: 88u64 end: 96u64) to: @app.main.one)))
