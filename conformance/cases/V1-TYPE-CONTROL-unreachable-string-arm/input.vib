@@ -1,0 +1,17 @@
+(defn one (value str) i32
+  (match value
+    (str (array -)) 1i32
+    "a" 2i32
+    - 0i32))
+
+(defn empty (value str) i32
+  (match value
+    (str (array)) 1i32
+    "" 2i32
+    - 0i32))
+
+(defn longer (value str) i32
+  (match value
+    (str (array -)) 1i32
+    "ab" 2i32
+    - 0i32))

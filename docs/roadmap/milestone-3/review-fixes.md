@@ -24,22 +24,27 @@ specification itself changes, the step names the ledger row.
 
 ## Confirmed and not fixed
 
-The review confirmed these too. None gives a wrong answer at run time: each
-is a wrong diagnostic code or span, a missing check whose effect cannot be
-observed yet, or a form that reports `@tool.unavailable`. They are listed so
-that the milestone's exit does not claim them.
+The review confirmed these too. After the milestone merged, a follow-up fixed
+the ones that accepted a program the specification rejects, or reported a
+wrong code, and `run` now reports an interpreter trap as `@command.trap`:
+
+| Finding | Fixed by |
+| --- | --- |
+| A value, function, or module named where a type is expected is `@name.wrong-entity-kind` | `V1-PROJECT-workspace-check-type-position-kinds` |
+| `(array i32 i32)`, `(dict i32)`, and a bare `array` are `@type.type-argument-mismatch`; `(array)` stays a syntax error, since an applied type has at least one argument | `V1-TYPE-NOMINAL-collection-arity` |
+| A `str` literal arm that an earlier `(str (array …))` arm covers is `@pattern.unreachable-arm` | `V1-TYPE-CONTROL-unreachable-string-arm` |
+| `equatable` on a tuple or structure holding a declared key answers through the key's `compare` | `V1-RUNTIME-workspace-test-structural-key-equal` |
+| An implementation member whose labelled default differs from the contract's is `@type.mismatch` | `V1-TYPE-INTERFACE-labelled-default-mismatch` |
+| A mismatched component of an anonymous constructor under `as` is `@type.invalid-ascription` | `V1-TYPE-CONVERT-ascription-constructor-components` |
+| `(id (as any 1i32))` with `where: (t any)` is accepted, and the type chapter now says why: `any` constrains nothing | The type chapter |
+
+These remain. None gives a wrong answer at run time: each is a diagnostic
+span, a formatting gap, or a form that reports `@tool.unavailable`.
 
 | Finding | Behavior now | Specification |
 | --- | --- | --- |
-| A value, function, or module named where a type is expected | `@name.unknown-symbol` | `@name.wrong-entity-kind`; Step 26 fixed only the bound position |
-| `(array)`, `(array i32 i32)`, `(dict i32)`, bare `array` as a type | A syntax or unknown-symbol diagnostic | `@type.type-argument-mismatch` |
-| A literal `str` arm after an arm that covers every string through `(str (array …))` | Accepted | `@pattern.unreachable-arm` |
-| `equatable` on a tuple or structure holding a user key type | No implementation found | The builtin conformance covers tuples of admissible keys |
-| An implementation member whose labelled default differs from the contract's | Accepted | Implementations preserve labelled names and defaults; unobservable while labelled contract calls are unavailable |
-| `@type.invalid-dict-key` and `@type.union-member-overlap` spans | The owning parameter or whole `deftype` | The key type expression and the union type expression |
-| `@type.infinite-size` through a tuple and an enum in mutual recursion | The related span repeats the primary span | The member through which the type repeats (D3.3) |
-| `(as (tuple …) (tupleof …))` with a mismatched component | A component mismatch code | `@type.invalid-ascription` |
-| The non-exhaustive witness for a record with a `bool` field | `(recordof a: false b: -)` | The witness spelling of the pattern chapter |
-| A `lambda` with attributes in a noncanonical order, in a file that holds a comment | Left as written | The canonical attribute order |
-| A contract member named as a function value when it is selected by destination, belongs to a generic interface, or has generic, labelled, or variadic parameters | `@tool.unavailable` | Member paths are first-class; Step 20 implements the plain abstract member |
-| `(id (as any 1i32))` with `where: (t any)` | Accepted | Ambiguous: an interface value type never satisfies a bound, and every type satisfies `any` |
+| `@type.invalid-dict-key` and `@type.union-member-overlap` spans | The owning parameter or whole `deftype` | The key type expression and the union type expression. A type expression carries no span of its own in the syntax tree, so this needs a reader change |
+| `@type.infinite-size` through a tuple and an enum in mutual recursion | The related span repeats the primary span | The member through which the type repeats (D3.3); same cause as the row above |
+| The non-exhaustive witness for a record whose other fields only a discard covers | `(recordof a: false)` | The chapter does not say whether a field covered only by `-` is written |
+| A `lambda` with attributes in a noncanonical order, in a file that holds a comment | Left as written | The canonical attribute order; declarations are ordered either way |
+| A contract member named as a function value when it is selected by destination, belongs to a generic interface, or has generic, labelled, or variadic parameters | `@tool.unavailable` | Member paths are first-class; Step 20 implements the plain abstract member, and these shapes share the call path of the forms reassigned to M4 |

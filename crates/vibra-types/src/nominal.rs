@@ -17,8 +17,8 @@ use vibra_ir::{
     FunctionSignature, LabelledParameter, Type, TypeBody, TypeDefinition, TypeId,
 };
 use vibra_syntax::{
-    Attribute, DefintDeclaration, DeftypeBody, DeftypeDeclaration, Name, TypeExpr,
-    TypeMember,
+    Attribute, Declaration, DefintDeclaration, DeftypeBody, DeftypeDeclaration, Name,
+    SourceAst, TypeExpr, TypeMember,
 };
 
 use crate::unavailable;
@@ -32,6 +32,9 @@ pub(crate) enum LowerError {
     Unknown(String),
     /// A name that denotes a type the current module may not see.
     Private(String),
+    /// A name that denotes a visible entity which is not a type: the name
+    /// and what it is.
+    WrongKind(String, &'static str),
     /// A declared type written with the wrong number of type arguments.
     Arity {
         name: String,
@@ -139,6 +142,9 @@ pub(crate) struct ContractMember {
     pub(crate) bounds: BTreeMap<String, usize>,
     /// Whether the member has a default body.
     pub(crate) default: bool,
+    /// The written default of each labelled parameter, by name: a default is
+    /// not part of the signature, and an implementation must keep it.
+    pub(crate) defaults: BTreeMap<String, String>,
     /// The position of the fixed positional `self` parameter that selects the
     /// implementation, or `None` for a destination-dispatched member.
     pub(crate) receiver: Option<usize>,
@@ -169,6 +175,9 @@ struct ModuleScope {
     declarations: BTreeMap<String, (String, String)>,
     /// Interfaces declared in this module.
     interfaces: BTreeMap<String, usize>,
+    /// Module-level names that are not types or interfaces, with what each
+    /// one is, so a type position can say which kind of entity it found.
+    others: BTreeMap<String, &'static str>,
 }
 
 /// Every declared type of one checking run and the names each module sees.
@@ -254,6 +263,46 @@ impl TypeNames {
             }
         }
         index
+    }
+
+    /// Records the module-level declarations of `source_id` that are neither
+    /// types nor interfaces.
+    pub(crate) fn note_other_names(&mut self, source_id: &str, ast: &SourceAst) {
+        let others = &mut self.scopes.entry(source_id.to_owned()).or_default().others;
+        for declaration in ast.declarations() {
+            let (name, kind) = match declaration {
+                Declaration::Def(value) => (value.name(), "a value"),
+                Declaration::Defn(value) => (value.name(), "a function"),
+                Declaration::Deffect(value) => (value.name(), "an effect root"),
+                _ => continue,
+            };
+            others.insert(name.value().to_owned(), kind);
+        }
+    }
+
+    /// What `name` denotes when it is visible from `source_id` and is not a
+    /// type.
+    fn other_kind(&self, source_id: &str, name: &str) -> Option<&'static str> {
+        let scope = self.scopes.get(source_id)?;
+        let in_module = |target: &str, name: &str| {
+            self.scopes
+                .get(target)
+                .and_then(|scope| scope.others.get(name))
+                .copied()
+        };
+        match name.split('.').collect::<Vec<_>>().as_slice() {
+            [local] => scope
+                .others
+                .get(*local)
+                .copied()
+                .or_else(|| scope.imports.contains_key(*local).then_some("a module"))
+                .or_else(|| {
+                    let (target, declaration) = scope.declarations.get(*local)?;
+                    in_module(target, declaration)
+                }),
+            [alias, member] => in_module(scope.imports.get(*alias)?, member),
+            _ => None,
+        }
     }
 
     /// Registers an interface owned by `source_id`, returning its index.
@@ -443,14 +492,17 @@ impl TypeNames {
         receiver: &Type,
     ) -> bool {
         match crate::interfaces::key_contract(self, interface) {
-            Some((_, vibra_ir::ClosedContract::KeyCompare)) => {
+            // A structure of admissible keys conforms to both contracts, and
+            // a declared key inside it answers through its own `ordered`.
+            Some((
+                _,
+                vibra_ir::ClosedContract::KeyCompare
+                | vibra_ir::ClosedContract::KeyEqual,
+            )) => {
                 !matches!(
                     receiver,
                     Type::Declared(_) | Type::Applied(_, _) | Type::Param(_)
                 ) && self.key_verdict(scope, receiver) == KeyVerdict::Admissible
-            }
-            Some((_, vibra_ir::ClosedContract::KeyEqual)) => {
-                dict_key(receiver) == KeyVerdict::Admissible
             }
             Some((_, vibra_ir::ClosedContract::IterNext)) | None => false,
         }
@@ -899,6 +951,24 @@ impl TypeNames {
         scope: Scope<'_>,
         value: &TypeExpr,
     ) -> Result<Type, LowerError> {
+        // A name that resolves to an entity of another kind is reported as
+        // that, not as unknown.
+        self.lower_type(source_id, scope, value)
+            .map_err(|error| match error {
+                LowerError::Unknown(name) => match self.other_kind(source_id, &name) {
+                    Some(kind) => LowerError::WrongKind(name, kind),
+                    None => LowerError::Unknown(name),
+                },
+                error => error,
+            })
+    }
+
+    fn lower_type(
+        &self,
+        source_id: &str,
+        scope: Scope<'_>,
+        value: &TypeExpr,
+    ) -> Result<Type, LowerError> {
         match value {
             TypeExpr::Void => Ok(Type::Void),
             TypeExpr::Name(name) => {
@@ -910,6 +980,14 @@ impl TypeNames {
                         .self_type
                         .cloned()
                         .ok_or_else(|| LowerError::Unknown("self".to_owned()));
+                }
+                // A bare generic head is an application with no arguments.
+                if name.value() == "array" {
+                    return Err(LowerError::Arity {
+                        name: "array".to_owned(),
+                        expected: 1,
+                        found: 0,
+                    });
                 }
                 if scope.generics.iter().any(|generic| generic == name.value()) {
                     return Ok(Type::Param(name.value().to_owned()));
@@ -965,6 +1043,17 @@ impl TypeNames {
             TypeExpr::Enum(variants) => Ok(Type::Enum(vibra_ir::canonical_members(
                 self.lower_members(source_id, scope, variants)?,
             ))),
+            TypeExpr::Applied { head, arguments }
+                if matches!(head.value(), "array" | "dict") =>
+            {
+                // The reader builds the builtin forms at their own counts,
+                // so this one has another.
+                Err(LowerError::Arity {
+                    name: head.value().to_owned(),
+                    expected: if head.value() == "array" { 1 } else { 2 },
+                    found: arguments.len(),
+                })
+            }
             TypeExpr::Applied { head, arguments } => {
                 if head.value() == "result"
                     && matches!(
@@ -1597,6 +1686,14 @@ pub(crate) fn report_lower_error(
                 DiagnosticCode::NamePrivateAccess,
                 span,
                 format!("`{name}` names a private type of another module"),
+            )
+            .with_source_id(source_id),
+        ),
+        LowerError::WrongKind(name, kind) => diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::NameWrongEntityKind,
+                span,
+                format!("`{name}` is {kind}, not a type"),
             )
             .with_source_id(source_id),
         ),

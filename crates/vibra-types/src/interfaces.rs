@@ -171,6 +171,7 @@ pub(crate) fn lower_contract(
             generics: crate::nominal::generic_names(method.attributes().items()),
             bounds,
             default: !method.expressions().is_empty(),
+            defaults: labelled_defaults(method.attributes().items()),
             receiver: position,
         });
     }
@@ -665,13 +666,33 @@ pub(crate) fn contract_substitution(
     substitution
 }
 
+/// The written default of each labelled parameter among `attributes`.
+fn labelled_defaults(attributes: &[Attribute]) -> BTreeMap<String, String> {
+    attributes
+        .iter()
+        .filter_map(|attribute| match attribute {
+            Attribute::Labelled(parameters) => Some(parameters),
+            _ => None,
+        })
+        .flatten()
+        .map(|parameter| {
+            (
+                parameter.name().value().to_owned(),
+                parameter.default().raw().to_owned(),
+            )
+        })
+        .collect()
+}
+
 /// Reports a written member whose signature is not the contract's with `self`
-/// and the interface arguments substituted.
+/// and the interface arguments substituted, or whose labelled defaults are
+/// not the contract's.
 pub(crate) fn check_member_signature(
     types: &TypeNames,
     plan: &ImplPlan,
     name: &str,
     written: &FunctionSignature,
+    attributes: &[Attribute],
     span: ByteSpan,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> bool {
@@ -687,7 +708,25 @@ pub(crate) fn check_member_signature(
         &plan.arguments,
     ));
     if expected.same_shape(written) {
-        return true;
+        let defaults = labelled_defaults(attributes);
+        let Some((label, default)) = contract
+            .defaults
+            .iter()
+            .find(|(label, default)| defaults.get(*label) != Some(*default))
+        else {
+            return true;
+        };
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeMismatch,
+                span,
+                format!(
+                    "an implementation member must keep its contract's labelled defaults: `{label}` defaults to `{default}` in `{name}`"
+                ),
+            )
+            .with_source_id(&plan.source_id),
+        );
+        return false;
     }
     mismatch(
         diagnostics,
@@ -1134,6 +1173,7 @@ pub(crate) fn materialize(
                 plan,
                 member_name,
                 &signature,
+                method.attributes().items(),
                 method.span(),
                 diagnostics,
             ) {

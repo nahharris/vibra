@@ -1,0 +1,31 @@
+id = "V1-TYPE-CONTROL-unreachable-string-arm"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "A string literal arm that an earlier (str (array ...)) arm covers is unreachable, because a literal is the wrapper over its scalars; a literal of another length stays reachable."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@pattern.unreachable-arm"
+level = "@error"
+source = "input.vib"
+span = [70, 73]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [45, 60]
+
+[[expect.diagnostics]]
+code = "@pattern.unreachable-arm"
+level = "@error"
+source = "input.vib"
+span = [163, 165]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [140, 153]

@@ -1,0 +1,14 @@
+(defn two (value (array i32 i32)) i32
+  1i32)
+
+(defn one (value (dict i32)) i32
+  1i32)
+
+(defn three (value (dict i32 i32 i32)) i32
+  1i32)
+
+(defn bare-array (value array) i32
+  1i32)
+
+(defn bare-dict (value dict) i32
+  1i32)

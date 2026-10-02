@@ -861,6 +861,59 @@ pub(crate) fn uncovered(
     .and_then(|witness| witness.into_iter().next())
 }
 
+/// `pattern` with each `str` or `bytes` literal written as the wrapper over
+/// its scalars or bytes that it denotes, so a literal and a
+/// `(str (array …))` pattern are compared as the same kind of value. Only
+/// reachability needs it: no set of literals makes a `match` exhaustive, and
+/// the witness of an uncovered string stays `-`.
+fn sequence_literals(types: &TypeNames, pattern: &Pattern) -> Pattern {
+    let wraps =
+        |value_type: &Type| matches!(space(types, value_type), Space::Wrapper(_));
+    let expand = |pattern: &Pattern| sequence_literals(types, pattern);
+    match pattern {
+        Pattern::Literal(Value::Str(text)) if wraps(&Type::Str) => {
+            Pattern::Wrap(Box::new(Pattern::Array(
+                text.chars()
+                    .map(|scalar| Pattern::Literal(Value::Char(scalar)))
+                    .collect(),
+            )))
+        }
+        Pattern::Literal(Value::Bytes(bytes)) if wraps(&Type::Bytes) => {
+            Pattern::Wrap(Box::new(Pattern::Array(
+                bytes
+                    .iter()
+                    .map(|byte| Pattern::Literal(Value::U8(*byte)))
+                    .collect(),
+            )))
+        }
+        Pattern::Wildcard | Pattern::Bind { .. } | Pattern::Literal(_) => {
+            pattern.clone()
+        }
+        Pattern::Variant { variant, payload } => Pattern::Variant {
+            variant: variant.clone(),
+            payload: payload.as_deref().map(|payload| Box::new(expand(payload))),
+        },
+        Pattern::Record(fields) => Pattern::Record(
+            fields
+                .iter()
+                .map(|(name, field)| (name.clone(), expand(field)))
+                .collect(),
+        ),
+        Pattern::Tuple(items) => Pattern::Tuple(items.iter().map(expand).collect()),
+        Pattern::Array(items) => Pattern::Array(items.iter().map(expand).collect()),
+        Pattern::Wrap(inner) => Pattern::Wrap(Box::new(expand(inner))),
+        Pattern::Member {
+            index,
+            member,
+            pattern,
+        } => Pattern::Member {
+            index: *index,
+            member: member.clone(),
+            pattern: Box::new(expand(pattern)),
+        },
+    }
+}
+
 /// Whether `pattern` matches some value no pattern of `earlier` matches.
 pub(crate) fn reachable(
     types: &TypeNames,
@@ -868,13 +921,15 @@ pub(crate) fn reachable(
     pattern: &Pattern,
     value_type: &Type,
 ) -> bool {
-    let matrix: Vec<Vec<Pattern>> =
-        earlier.iter().map(|arm| vec![arm.clone()]).collect();
+    let matrix: Vec<Vec<Pattern>> = earlier
+        .iter()
+        .map(|arm| vec![sequence_literals(types, arm)])
+        .collect();
     useful(
         types,
         &matrix,
         std::slice::from_ref(value_type),
-        std::slice::from_ref(pattern),
+        &[sequence_literals(types, pattern)],
     )
     .is_some()
 }

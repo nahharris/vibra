@@ -277,6 +277,7 @@ pub fn check_resolved(
     let mut types = crate::nominal::TypeNames::default();
     let mut type_declarations = Vec::new();
     for module in &modules {
+        types.note_other_names(module.record.source_id(), module.ast);
         for declaration in module.ast.declarations() {
             if let Declaration::Defint(value) = declaration
                 && let Some(id) = module

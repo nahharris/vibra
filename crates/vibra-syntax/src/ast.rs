@@ -2818,30 +2818,32 @@ impl AstParser {
                     }
                     Some(TypeExpr::Tuple(values))
                 }
-                "array" => {
-                    if forms.len() != 2 {
-                        self.invalid_form(
-                            node,
-                            "array type requires exactly one element type",
-                        );
-                        None
-                    } else {
-                        self.parse_type_expr(forms[1])
-                            .map(|value| TypeExpr::Array(Box::new(value)))
-                    }
+                "array" if forms.len() == 2 => self
+                    .parse_type_expr(forms[1])
+                    .map(|value| TypeExpr::Array(Box::new(value))),
+                "dict" if forms.len() == 3 => {
+                    let key = self.parse_type_expr(forms[1])?;
+                    let value = self.parse_type_expr(forms[2])?;
+                    Some(TypeExpr::Dict(Box::new(key), Box::new(value)))
                 }
-                "dict" => {
-                    if forms.len() != 3 {
-                        self.invalid_form(
-                            node,
-                            "dict type requires key and value types",
-                        );
-                        None
-                    } else {
-                        let key = self.parse_type_expr(forms[1])?;
-                        let value = self.parse_type_expr(forms[2])?;
-                        Some(TypeExpr::Dict(Box::new(key), Box::new(value)))
-                    }
+                // `array` and `dict` are ordinary generic types: another
+                // nonzero count of arguments is a well-formed applied type
+                // that the checker rejects by its arity.
+                "array" | "dict" if forms.len() >= 2 => {
+                    let arguments = forms[1..]
+                        .iter()
+                        .filter_map(|form| self.parse_type_expr(form))
+                        .collect::<Vec<_>>();
+                    let head = self.type_name(head_node)?;
+                    (arguments.len() + 1 == forms.len())
+                        .then_some(TypeExpr::Applied { head, arguments })
+                }
+                "array" | "dict" => {
+                    self.invalid_form(
+                        node,
+                        "an applied type requires at least one argument",
+                    );
+                    None
                 }
                 "fn" => self.parse_function_type(node, &forms),
                 _ => {

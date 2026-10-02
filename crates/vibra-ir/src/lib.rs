@@ -6106,12 +6106,18 @@ fn contract_targets(
     interface: &TypeId,
     member: &str,
 ) -> BTreeSet<usize> {
+    // The closed `equatable.equal` of a structure holding a user key answers
+    // through that key's `ordered.compare`.
+    let through_compare = interface.path() == "std.core.equatable" && member == "equal";
     functions
         .iter()
         .enumerate()
         .filter(|(_, function)| {
             function.implements().is_some_and(|implements| {
-                implements.interface == *interface && implements.member == member
+                (implements.interface == *interface && implements.member == member)
+                    || (through_compare
+                        && implements.interface.path() == "std.core.ordered"
+                        && implements.member == "compare")
             })
         })
         .map(|(index, _)| index)

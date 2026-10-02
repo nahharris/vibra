@@ -1,0 +1,15 @@
+(defint shape
+  (defn area (value self) i32
+    labelled: (scale i32 1i32)))
+
+(deftype doubled i32
+  (impl shape
+    (defn area (value self) i32
+      labelled: (scale i32 2i32)
+      scale)))
+
+(deftype plain i32
+  (impl shape
+    (defn area (value self) i32
+      labelled: (scale i32 1i32)
+      scale)))

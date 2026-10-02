@@ -1,0 +1,17 @@
+id = "V1-TYPE-INTERFACE-labelled-default-mismatch"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "An implementation member keeps the labelled defaults of its contract: a different default is rejected, and the same default is accepted."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [117, 190]
