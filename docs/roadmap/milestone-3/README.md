@@ -1,6 +1,9 @@
 # Milestone 3 step plan
 
-Status: Steps 1–18 and the [review fixes](review-fixes.md) (Steps 19–29) landed
+Status: complete. Steps 1–18 and the [review fixes](review-fixes.md) (Steps
+19–29) landed on `m3`, which merged to `main` through
+[PR #304](https://github.com/nahharris/vibra/pull/304) (`a72bf94`) on
+2026-10-02
 Milestone: [Milestone 3 — complete nominal static core](../v1.md#milestone-3--complete-nominal-static-core)
 Execution model: [execution.md](../execution.md)
 Integration branch: `m3`
