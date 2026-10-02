@@ -1,0 +1,7 @@
+(defint named
+  (defn name (value self) str))
+
+(defint shape
+  (defn sides (value self) i32)
+  (impl named
+    (defn sides (value self) i32 0i32)))

@@ -1,0 +1,31 @@
+(defint shape
+  (defn name (value self) str)
+  (defn with (value self other u) str
+    where: (u shape)
+    (shape.name other))
+  (impl i32
+    (defn name (value self) str "integer")))
+
+(defint broken
+  (defn id (value self) str)
+  (defn with (value self other u) str
+    where: (u missing)
+    "x"))
+
+(deftype plain (record x i32))
+
+(defn show (value t) str
+  where: (t shape)
+  (shape.name value))
+
+(defn apply (render (fn (plain) str) value plain) str
+  (render value))
+
+(defn function-value () str
+  (apply show (plain x: 1i32)))
+
+(defn lambda-value () str
+  (apply (lambda (value t) str where: (t shape) (shape.name value)) (plain x: 1i32)))
+
+(defn default-member () str
+  (shape.with 1i32 (plain x: 1i32)))

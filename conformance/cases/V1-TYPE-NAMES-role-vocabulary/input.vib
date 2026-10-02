@@ -1,0 +1,9 @@
+(import maybe @std.option.option)
+
+(defn present () (option i32) (option.some 1i32))
+
+(defn absent () (option i32) (option.none))
+
+(defn aliased () (maybe i32) (maybe.some 2i32))
+
+(defn looked-up (items (array i32)) (option i32) (items 0u64))

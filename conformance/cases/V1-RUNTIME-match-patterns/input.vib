@@ -1,0 +1,70 @@
+(defn main ()
+  (tuple u32 u32 u32 u32 str u32 atom atom atom i32 i32 i32 i32 bool str)
+  (let (single.only only) (single.only 9i32)
+    (let (tupleof picked -)
+        ((lambda ((recordof a: a) (record a i32 b str)) (tuple i32 bool)
+           (tupleof a true))
+          (recordof a: 5i32 b: "z"))
+      (tupleof
+        (describe (shape.empty))
+        (describe (shape.circle 0u32))
+        (describe (shape.circle 4u32))
+        (describe (shape.rect (dims w: 6u32 h: 7u32)))
+        (second (pair 1i32 "label"))
+        (unwrap (meters 12u32))
+        (pick (tupleof false true))
+        (size (array.of 1i32 2i32))
+        (size (array.of))
+        (color-code @green)
+        only
+        picked
+        (match (option.some 3i32) (option.some n) n (option.none) 0i32)
+        (match (maybe.some) (maybe.some) true (maybe.none) false)
+        (label-of (enumof b: "enumof"))))))
+
+(deftype shape (enum empty void circle u32 rect dims))
+
+(deftype dims (record w u32 h u32))
+
+(deftype pair (tuple i32 str))
+
+(deftype meters u32)
+
+(deftype single (enum only i32))
+
+(deftype maybe (enum some void none void))
+
+(defn describe (value shape) u32
+  (match value
+    (shape.empty) 0u32
+    (shape.circle 0u32) 1u32
+    (shape.circle radius) radius
+    (shape.rect (dims w: width)) width))
+
+(defn second ((pair - label) pair) str label)
+
+(defn unwrap ((meters length) meters) u32 length)
+
+(defn pick (flags (tuple bool bool)) atom
+  (match flags
+    (tupleof true true) @both
+    (tupleof true -) @first
+    (tupleof - true) @second
+    (tupleof false false) @neither))
+
+(defn size (items (array i32)) atom
+  (match items
+    (array) @empty
+    (array -) @one
+    - @many))
+
+(defn color-code (color atom) i32
+  (match color
+    @red 1i32
+    @green 2i32
+    -: 0i32))
+
+(defn label-of (value (enum a i32 b str)) str
+  (match value
+    (enumof a: -) "a"
+    (enumof b: text) text))

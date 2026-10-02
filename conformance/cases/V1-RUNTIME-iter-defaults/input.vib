@@ -1,0 +1,28 @@
+(defn main () (tuple (array str) (array u64) (array u64) (array char) (array (tuple str i32)) (array i32) u64)
+  (tupleof
+    (iter.collect (iter.map (array.of 1i32 2i32 3i32) (lambda (value i32) str (i32.to-str value))))
+    (iter.collect (iter.take (iter.skip (iter.filter (array.of 1u64 2u64 3u64 4u64 6u64 8u64) even) 1u64) 2u64))
+    (iter.collect (iter.take (iter.filter (naturals from: 5u64) even) 3u64))
+    (iter.collect (iter.take "héllo" 2u64))
+    (iter.collect (dict.of "b" 2i32 "a" 1i32))
+    (iter.collect (option.some 7i32))
+    (array.length (iter.collect (iter.take (naturals from: 0u64) 5000u64)))))
+
+(import iter @std.iter.iter)
+
+; The natural numbers from `from`, without end.
+(deftype naturals (record from u64)
+  (impl (iter u64)
+    (defn next (value self) (option (tuple u64 self))
+      (option.some
+        (tupleof
+          (value @from)
+          (naturals
+            from: (match (u64.add-checked (value @from) 1u64)
+              (result.ok higher) higher
+              (result.err -) 0u64)))))))
+
+(defn even (value u64) bool
+  (match (u64.rem-checked value 2u64)
+    (result.ok remainder) (u64.equal remainder 0u64)
+    (result.err -) false))

@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-iter-defaults"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "The iter defaults run over each builtin conformance and a user iterator: map changes i32 to str, take over an infinite iterator shows the adapters are lazy, and collect drains five thousand items at constant depth."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

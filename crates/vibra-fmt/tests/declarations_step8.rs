@@ -27,7 +27,7 @@ fn formatter_orders_declaration_attributes_before_body_forms() {
 #[test]
 fn formatter_reorders_complete_attribute_groups_with_comments() {
     let source = "(defn f () i32 doc: \"docs\" ; doc comment\n visibility: @public where: (t any) 0i32)";
-    let expected = "(\n  defn\n  f\n  ()\n  i32\n  where:\n  (t any)\n  visibility:\n  @public\n  doc:\n  \"docs\"\n  ; doc comment\n  0i32\n)\n";
+    let expected = "(defn f () i32\n  where: (t any)\n  visibility: @public\n  doc: \"docs\"\n  ; doc comment\n  0i32)\n";
     let formatted =
         format_source(Path::new("declarations.vib"), source).expect("source mode");
     assert_eq!(formatted, expected);

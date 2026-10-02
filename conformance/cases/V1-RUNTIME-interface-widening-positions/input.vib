@@ -1,0 +1,47 @@
+(defn main () (tuple str str str u64 u64 str str)
+  (tupleof
+    (shape.name ((pair 1i32 2i32) 0))
+    (slot-name (slot.some 1i32))
+    (boxed-name (boxed 1i32))
+    (count 1i32 2i32)
+    (count-named "a" 1i32)
+    (choice-name (enumof p: 1i32))
+    (shape.name (same types: (shape) 1i32))))
+
+(defint shape
+  (defn name (value self) str)
+  (impl i32
+    (defn name (value self) str
+      "integer")))
+
+(deftype pair (tuple shape i32))
+
+(deftype slot (enum some shape none void))
+
+(deftype boxed shape)
+
+(defn slot-name (value slot) str
+  (match value
+    (slot.some inner) (shape.name inner)
+    (slot.none) "none"))
+
+(defn boxed-name (value boxed) str
+  (match value
+    (boxed inner) (shape.name inner)))
+
+(defn count () u64
+  variadic: (items (array shape))
+  (array.length items))
+
+(defn count-named () u64
+  variadic: (items (dict str shape))
+  (array.length (dict.entries items)))
+
+(defn choice-name (value (enum p shape q void)) str
+  (match value
+    (enumof p: inner) (shape.name inner)
+    (enumof q: -) "none"))
+
+(defn same (value t) t
+  where: (t any)
+  value)

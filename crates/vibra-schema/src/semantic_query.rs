@@ -5,7 +5,7 @@ use serde_json::{Map, Value};
 use vibra_diagnostics::LineIndex;
 use vibra_workspace::query::{
     ApplicationContract, ImportAlias, LabelledType, LocalBinding, QueryIdentity,
-    SemanticFact, SemanticType, SemanticTypeKind, WorkspacePositionQuery,
+    SemanticFact, SemanticType, WorkspacePositionQuery,
 };
 
 use crate::{SCHEMA_VERSION, SourcePositionQueryDocument, SpanDocument};
@@ -177,7 +177,24 @@ impl<'de> Deserialize<'de> for ImportAliasDocument {
     }
 }
 
-/// A supported M2 function application contract.
+/// What a contract member call resolved to.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ContractDispatchDocument {
+    /// The interface's path.
+    pub interface: String,
+    /// The contract member's name.
+    pub member: String,
+    /// The type that selected the implementation.
+    pub receiver: SemanticTypeDocument,
+    /// `static`, `default`, `dynamic`, or `closed`.
+    pub selection: String,
+    /// Whether the member is selected from the written expected type.
+    pub destination: bool,
+}
+
+/// The contract of one application: a function call, a declared type's
+/// constructor, or an interface's contract member.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApplicationContractDocument {
@@ -193,6 +210,31 @@ pub struct ApplicationContractDocument {
     pub labelled: Vec<LabelledTypeDocument>,
     /// Exact application result type.
     pub result_type: SemanticTypeDocument,
+    /// For a contract member call, what it resolved to; else null.
+    pub dispatch: Option<ContractDispatchDocument>,
+}
+
+/// The shape of one `match` arm's pattern.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PatternFactDocument {
+    /// Closed pattern kind.
+    pub kind: String,
+    /// The type of the value the pattern is matched against.
+    pub scrutinee_type: SemanticTypeDocument,
+    /// For an `as` pattern, the member type it narrows to; else null.
+    pub narrowed: Option<SemanticTypeDocument>,
+    /// For an `as` pattern, every member of the scrutinee's union, in order.
+    pub union_members: Vec<SemanticTypeDocument>,
+}
+
+impl<'de> Deserialize<'de> for PatternFactDocument {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        parse_pattern(Value::deserialize(deserializer)?).map_err(D::Error::custom)
+    }
 }
 
 impl<'de> Deserialize<'de> for ApplicationContractDocument {
@@ -236,8 +278,10 @@ pub struct WorkspacePositionQueryDocument {
     pub visible_imports: SemanticFactDocument<Vec<ImportAliasDocument>>,
     /// Candidate declaration identities.
     pub declaration_candidates: SemanticFactDocument<Vec<QueryIdentityDocument>>,
-    /// Supported function application contract.
+    /// The application contract at the position, when it is one.
     pub application: SemanticFactDocument<ApplicationContractDocument>,
+    /// The `match` arm pattern at the position, when it is one.
+    pub pattern: SemanticFactDocument<PatternFactDocument>,
 }
 
 impl<'de> Deserialize<'de> for WorkspacePositionQueryDocument {
@@ -266,6 +310,22 @@ const IDENTITY_KINDS: &[&str] = &[
 const PRIMITIVE_NAMES: &[&str] = &[
     "bool", "void", "char", "str", "bytes", "atom", "i8", "i16", "i32", "i64", "u8",
     "u16", "u32", "u64", "f32", "f64",
+];
+
+const APPLICATION_KINDS: &[&str] = &["@function", "@constructor", "@contract"];
+
+const SELECTION_NAMES: &[&str] = &["static", "default", "dynamic", "closed"];
+
+const PATTERN_KINDS: &[&str] = &[
+    "@wildcard",
+    "@binding",
+    "@literal",
+    "@variant",
+    "@record",
+    "@tuple",
+    "@wrapper",
+    "@array",
+    "@as",
 ];
 
 const ROLE_NAMES: &[&str] = &[
@@ -465,6 +525,25 @@ fn parse_type(value: Value) -> Result<SemanticTypeDocument, String> {
                 return Err("function semantic types require a result".to_owned());
             }
         }
+        // Every other shape has no result. A structural shape is named by
+        // its form; a declared type, an interface, a parameter, and an atom
+        // carry their own name.
+        "declared" | "interface" | "param" | "atom" | "tuple" | "array" | "dict"
+        | "record" | "enum" | "union" => {
+            if result.is_some() {
+                return Err("only function types carry a result".to_owned());
+            }
+            if name.is_empty() {
+                return Err("a semantic type needs a name".to_owned());
+            }
+            if matches!(
+                kind.as_str(),
+                "tuple" | "array" | "dict" | "record" | "enum" | "union"
+            ) && name != kind
+            {
+                return Err(format!("a {kind} type must use name {kind}"));
+            }
+        }
         _ => return Err(format!("unknown semantic type kind {kind:?}")),
     }
     Ok(SemanticTypeDocument {
@@ -487,11 +566,22 @@ fn parse_application(value: Value) -> Result<ApplicationContractDocument, String
             "positional",
             "labelled",
             "resultType",
+            "dispatch",
         ],
     )?;
     let kind = required_string(&object, "kind")?;
-    if kind != "@function" {
+    if !APPLICATION_KINDS.contains(&kind.as_str()) {
         return Err(format!("unknown application kind {kind:?}"));
+    }
+    let dispatch_value = required(&object, "dispatch")?;
+    let dispatch = if dispatch_value.is_null() {
+        None
+    } else {
+        Some(parse_dispatch(dispatch_value.clone())?)
+    };
+    // Exactly a contract member call resolves to an implementation.
+    if (kind == "@contract") != dispatch.is_some() {
+        return Err("dispatch belongs to exactly a @contract application".to_owned());
     }
     let callee_value = required(&object, "callee")?;
     let callee = if callee_value.is_null() {
@@ -536,6 +626,81 @@ fn parse_application(value: Value) -> Result<ApplicationContractDocument, String
         positional,
         labelled,
         result_type,
+        dispatch,
+    })
+}
+
+fn parse_dispatch(value: Value) -> Result<ContractDispatchDocument, String> {
+    let object = object(value, "contract dispatch")?;
+    ensure_keys(
+        &object,
+        &[
+            "interface",
+            "member",
+            "receiver",
+            "selection",
+            "destination",
+        ],
+    )?;
+    let selection = required_string(&object, "selection")?;
+    if !SELECTION_NAMES.contains(&selection.as_str()) {
+        return Err(format!("unknown dispatch selection {selection:?}"));
+    }
+    Ok(ContractDispatchDocument {
+        interface: required_string(&object, "interface")?,
+        member: required_string(&object, "member")?,
+        receiver: serde_json::from_value(required(&object, "receiver")?.clone())
+            .map_err(|error| format!("invalid dispatch receiver: {error}"))?,
+        selection,
+        destination: required(&object, "destination")?
+            .as_bool()
+            .ok_or_else(|| "dispatch destination must be a boolean".to_owned())?,
+    })
+}
+
+fn parse_pattern(value: Value) -> Result<PatternFactDocument, String> {
+    let object = object(value, "pattern fact")?;
+    ensure_keys(
+        &object,
+        &["kind", "scrutineeType", "narrowed", "unionMembers"],
+    )?;
+    let kind = required_string(&object, "kind")?;
+    if !PATTERN_KINDS.contains(&kind.as_str()) {
+        return Err(format!("unknown pattern kind {kind:?}"));
+    }
+    let narrowed_value = required(&object, "narrowed")?;
+    let narrowed = if narrowed_value.is_null() {
+        None
+    } else {
+        Some(
+            serde_json::from_value(narrowed_value.clone())
+                .map_err(|error| format!("invalid narrowed type: {error}"))?,
+        )
+    };
+    let union_members = required(&object, "unionMembers")?
+        .as_array()
+        .ok_or_else(|| "pattern union members must be an array".to_owned())?
+        .iter()
+        .cloned()
+        .map(|value| {
+            serde_json::from_value(value)
+                .map_err(|error| format!("invalid union member type: {error}"))
+        })
+        .collect::<Result<Vec<SemanticTypeDocument>, _>>()?;
+    // Only an `as` pattern narrows a union.
+    if (kind == "@as") != narrowed.is_some()
+        || (kind != "@as" && !union_members.is_empty())
+    {
+        return Err("only an @as pattern narrows a union".to_owned());
+    }
+    Ok(PatternFactDocument {
+        kind,
+        scrutinee_type: serde_json::from_value(
+            required(&object, "scrutineeType")?.clone(),
+        )
+        .map_err(|error| format!("invalid scrutinee type: {error}"))?,
+        narrowed,
+        union_members,
     })
 }
 
@@ -559,6 +724,7 @@ fn parse_workspace(value: Value) -> Result<WorkspacePositionQueryDocument, Strin
             "visibleImports",
             "declarationCandidates",
             "application",
+            "pattern",
         ],
     )?;
     let schema_version = required(&object, "schemaVersion")?
@@ -623,6 +789,9 @@ fn parse_workspace(value: Value) -> Result<WorkspacePositionQueryDocument, Strin
     let application: SemanticFactDocument<ApplicationContractDocument> =
         serde_json::from_value(required(&object, "application")?.clone())
             .map_err(|error| format!("invalid application fact: {error}"))?;
+    let pattern: SemanticFactDocument<PatternFactDocument> =
+        serde_json::from_value(required(&object, "pattern")?.clone())
+            .map_err(|error| format!("invalid pattern fact: {error}"))?;
     let (node_start, node_end) = parse_node_id(&node_id, &source_id)?;
     validate_structural(&structural, &source_id, offset, node_start, node_end)?;
     Ok(WorkspacePositionQueryDocument {
@@ -642,6 +811,7 @@ fn parse_workspace(value: Value) -> Result<WorkspacePositionQueryDocument, Strin
         visible_imports,
         declaration_candidates,
         application,
+        pattern,
     })
 }
 
@@ -833,6 +1003,16 @@ impl WorkspacePositionQueryDocument {
             application: render_fact(query.application(), |application| {
                 render_application(application)
             }),
+            pattern: render_fact(query.pattern(), |pattern| PatternFactDocument {
+                kind: pattern.kind().to_owned(),
+                scrutinee_type: render_type(pattern.scrutinee_type()),
+                narrowed: pattern.narrowed().map(render_type),
+                union_members: pattern
+                    .union_members()
+                    .iter()
+                    .map(render_type)
+                    .collect(),
+            }),
         }
     }
 }
@@ -856,10 +1036,7 @@ fn render_identity(identity: &QueryIdentity) -> QueryIdentityDocument {
 
 fn render_type(value: &SemanticType) -> SemanticTypeDocument {
     SemanticTypeDocument {
-        kind: match value.kind() {
-            SemanticTypeKind::Primitive => "primitive".to_owned(),
-            SemanticTypeKind::Function => "function".to_owned(),
-        },
+        kind: value.kind().as_str().to_owned(),
         name: value.name().to_owned(),
         parameters: value.parameters().iter().map(render_type).collect(),
         result: value.result().map(|result| Box::new(render_type(result))),
@@ -896,11 +1073,18 @@ fn render_import(value: &ImportAlias, index: &LineIndex<'_>) -> ImportAliasDocum
 
 fn render_application(value: &ApplicationContract) -> ApplicationContractDocument {
     ApplicationContractDocument {
-        kind: "@function".to_owned(),
+        kind: value.kind().as_str().to_owned(),
         callee: value.callee().map(render_identity),
         callee_type: value.callee_type().map(render_type),
         positional: value.positional().iter().map(render_type).collect(),
         labelled: value.labelled().iter().map(render_labelled).collect(),
         result_type: render_type(value.result_type()),
+        dispatch: value.dispatch().map(|dispatch| ContractDispatchDocument {
+            interface: dispatch.interface().to_owned(),
+            member: dispatch.member().to_owned(),
+            receiver: render_type(dispatch.receiver()),
+            selection: dispatch.selection().as_str().to_owned(),
+            destination: dispatch.destination(),
+        }),
     }
 }

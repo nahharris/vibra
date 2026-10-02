@@ -1,0 +1,13 @@
+id = "V1-RUNTIME-workspace-test-key-contracts"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "Modules import @std.core's ordered and equatable by declaration, bound a generic by one across an import, and call their members on closed key types."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon" }

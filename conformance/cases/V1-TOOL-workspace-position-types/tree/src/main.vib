@@ -1,0 +1,41 @@
+(import from @std.core.from)
+
+(defint shape
+  (defn name (value self) str)
+  (defn label (value self) str (shape.name value)))
+
+(deftype point (record x i32 y i32)
+  (impl shape
+    (defn name (value self) str "point")))
+
+(deftype meters i32
+  (impl (from i16)
+    (defn convert (value i16) self (meters (as i32 (from.convert value))))))
+
+(deftype number (union i32 str))
+
+(defn origin () point (point x: 0i32 y: 0i32))
+
+(defn render (value number) str
+  (match value
+    (as i32 -) "integer"
+    (as str text) text))
+
+(defn first (value (option point)) i32
+  (match value
+    (option.some (point x: x y: -)) x
+    (option.none) 0i32))
+
+(defn sum (value point) i32
+  (match value
+    (point x: x y: y) x))
+
+(defn named (value point) str (shape.name value))
+
+(defn labelled (value point) str (shape.label value))
+
+(defn erased (value shape) str (shape.name value))
+
+(defn widened (value i16) meters (from.convert value))
+
+(defn main () str (named (origin)))

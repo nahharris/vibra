@@ -1,0 +1,35 @@
+id = "V1-TYPE-NAMES-reserved-role-names"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "The predeclared any and the role names option, result, and iter cannot be redeclared by a deftype or a defint; only the declaration that claims the role takes its name."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [9, 12]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [28, 34]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [87, 93]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [108, 112]

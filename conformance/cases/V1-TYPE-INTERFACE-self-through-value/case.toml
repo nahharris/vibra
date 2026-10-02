@@ -1,0 +1,35 @@
+id = "V1-TYPE-INTERFACE-self-through-value"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "Through an interface value a default member with a second self operand is rejected like an abstract one, as is a member whose result takes self as a function operand, while self in an array result is accepted; a contract member as a value needs a written fn type, and a member selected by its destination is not a function value."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [328, 333]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [393, 413]
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-inference"
+level = "@error"
+source = "input.vib"
+span = [535, 546]
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [595, 608]

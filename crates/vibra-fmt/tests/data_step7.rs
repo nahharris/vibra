@@ -7,11 +7,11 @@ use std::path::Path;
 use vibra_fmt::format_source;
 
 #[test]
-fn formatter_canonicalizes_valid_data_and_sorts_generic_map_keys() {
-    let source = "(map @z 2 @a \\u0061)";
+fn formatter_canonicalizes_valid_data_and_sorts_generic_dict_keys() {
+    let source = "(dict @z 2 @a \\u0061)";
     let formatted =
         format_source(Path::new("values.vibon"), source).expect("data mode");
-    assert_eq!(formatted, "(map @a \\a @z 2)\n");
+    assert_eq!(formatted, "(dict @a \\a @z 2)\n");
     assert_eq!(
         format_source(Path::new("values.vibon"), &formatted).expect("idempotent data"),
         formatted

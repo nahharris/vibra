@@ -1,0 +1,1 @@
+(record type: (record type: @tuple arguments: (array (record type: @std.option.option arguments: (array @str)) @std.core.ordering @i32)) value: (record kind: @tuple values: (array (record kind: @enum type: @std.option.option variant: @some payload: "one") (record kind: @enum type: @std.core.ordering variant: @greater) 1i32)))

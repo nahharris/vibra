@@ -1,0 +1,33 @@
+(import core @std.core)
+
+(defn main ()
+  (tuple
+    (result i32 core.arithmetic-error)
+    (result i32 core.arithmetic-error)
+    (result i8 core.arithmetic-error)
+    (result i8 core.arithmetic-error)
+    (result i16 core.arithmetic-error)
+    (result u8 core.arithmetic-error)
+    (result u32 core.arithmetic-error)
+    (result i64 core.arithmetic-error)
+    bool
+    core.ordering
+    str
+    (result u16 core.conversion-error)
+    (result i8 core.conversion-error)
+    (result u64 core.conversion-error))
+  (tupleof
+    (i32.add-checked 2147483646i32 1i32)
+    (i32.add-checked 2147483647i32 1i32)
+    (i8.div-checked -128i8 -1i8)
+    (i8.rem-checked -7i8 2i8)
+    (i16.neg-checked -32768i16)
+    (u8.div-checked 1u8 0u8)
+    (u32.shift-left-checked 1u32 32u32)
+    (i64.shift-right -9i64 1u32)
+    (u16.equal 7u16 7u16)
+    (i32.compare -1i32 1i32)
+    (i64.to-str -9223372036854775808i64)
+    (u16.parse "65535")
+    (i8.parse "-129")
+    (u64.parse "-1")))

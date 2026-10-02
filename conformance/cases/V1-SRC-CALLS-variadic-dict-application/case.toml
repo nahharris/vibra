@@ -1,0 +1,11 @@
+id = "V1-SRC-CALLS-variadic-dict-application"
+rule = "V1-SRC-CALLS"
+profile = "static-v1"
+operation = "type-check"
+description = "Dict-variadic declarations accept empty and nonempty key/value tails, packed into one dict argument."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

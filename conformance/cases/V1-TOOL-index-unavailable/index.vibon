@@ -1,0 +1,54 @@
+(record
+  format: @index.v1
+  revision: "sha256:76f278dd76f50505996444aea5ce6d6fd37a3fb1d7491a70ed1100db808e8ff4"
+  declarations: (array
+    (record
+      id: @app.main
+      kind: @module
+      module: @app.main
+      owner: void
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 0u64 end: 168u64)
+      signature: void
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(deffect audit (defn record (message str) void external: @host symbol: \"audit.record\"))\n\n(defn unknown (value missing) i32 0i32)\n\n(defn execute () void void)\n")
+    (record
+      id: @app.main.audit
+      kind: @effect-root
+      module: @app.main
+      owner: void
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 0u64 end: 97u64)
+      text: "(deffect audit (defn record (message str) void external: @host symbol: \"audit.record\"))")
+    (record
+      id: @app.main.audit.record
+      kind: @operation
+      module: @app.main
+      owner: @app.main.audit
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 17u64 end: 96u64)
+      text: "(defn record (message str) void external: @host symbol: \"audit.record\")")
+    (record
+      id: @app.main.execute
+      kind: @function
+      module: @app.main
+      owner: void
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 140u64 end: 167u64)
+      signature: (record type: @fn parameters: (array) labelled: (record) result: @void)
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(defn execute () void void)")
+    (record
+      id: @app.main.unknown
+      kind: @function
+      module: @app.main
+      owner: void
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 99u64 end: 138u64)
+      text: "(defn unknown (value missing) i32 0i32)"))
+  implementations: (array)
+  references: (array))

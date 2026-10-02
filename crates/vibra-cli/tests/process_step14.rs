@@ -279,7 +279,7 @@ fn actual_binary_positive_demo_repeats_in_two_fresh_hello_workspaces() {
 
         workspace.write(
             "tests/math.vib",
-            "(import assert @std.assert)\n(import helper @hello.helper)\n(test \"answer\" (assert.equal-i32 (helper.answer) 42i32))\n",
+            "(import assert @std.assert)\n(import helper @hello.helper)\n(test \"answer\" (assert.equal (helper.answer) 42i32))\n",
         );
 
         let checked = run(&workspace.root, &["check", "src/hello"]);
@@ -323,7 +323,7 @@ fn actual_binary_positive_demo_repeats_in_two_fresh_hello_workspaces() {
 #[test]
 fn actual_binary_run_preflight_failures_never_produce_a_program_result() {
     let mismatch = TempHello::new("negative-mismatch");
-    mismatch.write("project.vibon", &binary_project("(map)"));
+    mismatch.write("project.vibon", &binary_project("(dict)"));
     mismatch.write(
         "src/hello/main.vib",
         "(defn spin () void (spin))\n(defn value (number i32) i32 number)\n(defn main () void (let - (spin) (let - (value true) (do))))\n",
@@ -341,7 +341,7 @@ fn actual_binary_run_preflight_failures_never_produce_a_program_result() {
     );
 
     let private = TempHello::new("negative-private");
-    private.write("project.vibon", &binary_project("(map)"));
+    private.write("project.vibon", &binary_project("(dict)"));
     private.write(
         "src/hello/main.vib",
         "(import secret @hello.secret)\n(defn main () void (let - (secret.answer) (do)))\n",
@@ -355,7 +355,7 @@ fn actual_binary_run_preflight_failures_never_produce_a_program_result() {
     );
 
     let host = TempHello::new("negative-host");
-    host.write("project.vibon", &binary_project("(map)"));
+    host.write("project.vibon", &binary_project("(dict)"));
     host.write(
         "src/hello/main.vib",
         "(deffect audit (defn record (message str) void external: @host symbol: \"audit.record\"))\n(defn main () void (do))\n",
@@ -366,7 +366,7 @@ fn actual_binary_run_preflight_failures_never_produce_a_program_result() {
     dependency.write(
         "project.vibon",
         &binary_project(
-            "(map @remote (record kind: @path path: \"../outside\" target: @core))",
+            "(dict @remote (record kind: @path path: \"../outside\" target: @core))",
         ),
     );
     dependency.write("src/hello/main.vib", "(defn main () void (do))\n");
@@ -381,7 +381,7 @@ fn actual_binary_run_preflight_failures_never_produce_a_program_result() {
 #[test]
 fn actual_binary_failing_assertion_is_a_structured_test_failure() {
     let workspace = TempHello::new("negative-assertion");
-    workspace.write("project.vibon", &binary_project("(map)"));
+    workspace.write("project.vibon", &binary_project("(dict)"));
     workspace.write("src/hello/main.vib", "(defn main () void (do))\n");
     workspace.write(
         "tests/math.vib",

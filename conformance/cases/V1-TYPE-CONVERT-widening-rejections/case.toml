@@ -1,0 +1,35 @@
+id = "V1-TYPE-CONVERT-widening-rejections"
+rule = "V1-TYPE-CONVERT"
+profile = "static-v1"
+operation = "type-check"
+description = "No widening happens without a written expected type, through a container, or in two steps."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [78, 99]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [160, 166]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [214, 218]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [262, 265]

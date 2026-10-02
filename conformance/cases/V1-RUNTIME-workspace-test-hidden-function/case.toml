@@ -1,0 +1,31 @@
+id = "V1-RUNTIME-workspace-test-hidden-function"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "An assertion operand whose value holds a function behind `any`, an interface, or an iterator has no encoding to compare: the test traps with @runtime.unobservable-function at the assertion call, and an `any` holding an ordinary value still compares."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon" }
+
+[[expect.diagnostics]]
+code = "@runtime.unobservable-function"
+level = "@error"
+source = "tests/observe.vib"
+span = [221, 261]
+
+[[expect.diagnostics]]
+code = "@runtime.unobservable-function"
+level = "@error"
+source = "tests/observe.vib"
+span = [377, 421]
+
+[[expect.diagnostics]]
+code = "@runtime.unobservable-function"
+level = "@error"
+source = "tests/observe.vib"
+span = [462, 584]

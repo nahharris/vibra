@@ -1,0 +1,7 @@
+(deftype point (record y i32 x i32))
+(deftype shape (enum square u32 circle u32))
+(deftype number (union i32 f32))
+(deftype pair (tuple i32 str))
+(def origin (record y i32 x i32) (recordof x: 0i32 y: 0i32))
+(defn area (value (enum square u32 circle u32)) (union str u64) value)
+(defn nested (value (array (record b (union str i64) a (tuple)))) i32 0i32)

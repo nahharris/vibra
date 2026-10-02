@@ -1,0 +1,46 @@
+(defn main () (tuple str str str core.ordering str str)
+  (tupleof
+    (apply shape.name (point x: 1i32))
+    (through shape.name 7i32)
+    (bounded (point x: 2i32))
+    (order ordered.compare 1i32 2i32)
+    (shape.with 3i32 (point x: 0i32))
+    (apply show (point x: 3i32))))
+
+(import core @std.core)
+(import ordered @std.core.ordered)
+
+(defint shape
+  (defn name (value self) str)
+  ; The member's own bound holds in its body.
+  (defn with (value self other u) str
+    where: (u shape)
+    (shape.name other))
+  (impl i32
+    (defn name (value self) str "integer")))
+
+(deftype point (record x i32)
+  (impl shape
+    (defn name (value self) str "point")))
+
+(defn apply (render (fn (point) str) value point) str
+  (render value))
+
+(defn through (render (fn (shape) str) value shape) str
+  (render value))
+
+; The receiver is the enclosing function's bounded parameter.
+(defn bounded (value t) str
+  where: (t shape)
+  (call-with value shape.name))
+
+(defn call-with (value t render (fn (t) str)) str
+  where: (t any)
+  (render value))
+
+(defn order (compare (fn (i32 i32) core.ordering) left i32 right i32) core.ordering
+  (compare left right))
+
+(defn show (value t) str
+  where: (t shape)
+  (shape.name value))

@@ -1,0 +1,2 @@
+(defn accept-dict (callback (fn (i32) i32 variadic: (dict str i32))) i32
+  (callback 1i32 "key" 2i32))

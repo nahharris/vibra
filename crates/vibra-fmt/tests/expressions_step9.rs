@@ -20,7 +20,7 @@ use vibra_syntax::{
 fn formatter_renders_nested_step9_forms_and_is_idempotent() {
     let source = r#"
 (defn run (value (tuple i32 i32)) i32
-  (let (tuple left right) value
+  (let (tupleof left right) value
     (match left
       (as i32 n) (if true n right)
       (option.none) (try right))))
@@ -47,7 +47,7 @@ fn formatter_keeps_multiline_match_arms_as_pattern_result_units() {
     let source = r#"
 (defn choose (value i32) i32
   (match value
-    (constructor.with.a.long.name (tuple first second third fourth fifth sixth))
+    (constructor.with.a.long.name (tupleof first second third fourth fifth sixth))
       (if true first second)
     (another.constructor.with.a.long.name (array first second third fourth fifth sixth))
       (try value)))
@@ -143,7 +143,7 @@ fn formatter_normalizes_arguments_only_with_authoritative_facts() {
 }
 
 #[test]
-fn formatter_orders_labels_by_the_supplied_signature_and_accepts_map_tails() {
+fn formatter_orders_labels_by_the_supplied_signature_and_accepts_dict_tails() {
     let source = "(defn call () i32 (call b: 2i32 a: 1i32 0i32))";
     let document =
         parse_source(Path::new("bindings.vib"), source).expect("source loader");
@@ -169,31 +169,31 @@ fn formatter_orders_labels_by_the_supplied_signature_and_accepts_map_tails() {
         "(defn call () i32 (call 0i32 a: 1i32 b: 2i32))\n"
     );
 
-    let map_source = "(defn call () i32 (call 0i32 key1 value1 key2 value2))";
-    let map_document =
-        parse_source(Path::new("bindings.vib"), map_source).expect("source loader");
-    let map_ast = map_document.ast().expect("declaration AST");
-    let Declaration::Defn(map_function) = &map_ast.declarations()[0] else {
+    let dict_source = "(defn call () i32 (call 0i32 key1 value1 key2 value2))";
+    let dict_document =
+        parse_source(Path::new("bindings.vib"), dict_source).expect("source loader");
+    let dict_ast = dict_document.ast().expect("declaration AST");
+    let Declaration::Defn(dict_function) = &dict_ast.declarations()[0] else {
         panic!("expected defn")
     };
-    let [map_expression] = map_function.expressions() else {
+    let [dict_expression] = dict_function.expressions() else {
         panic!("expected one expression")
     };
-    let ExpressionKind::Application(map_application) = map_expression.kind() else {
+    let ExpressionKind::Application(dict_application) = dict_expression.kind() else {
         panic!("expected application")
     };
-    let map_binding = ApplicationBinding::new(
-        map_application.span(),
-        BindingFacts::new(1, Vec::new(), Some(VariadicBinding::Map)),
+    let dict_binding = ApplicationBinding::new(
+        dict_application.span(),
+        BindingFacts::new(1, Vec::new(), Some(VariadicBinding::Dict)),
     );
-    let map_formatted = format_source_with_bindings(
+    let dict_formatted = format_source_with_bindings(
         Path::new("bindings.vib"),
-        map_source,
-        &[map_binding],
+        dict_source,
+        &[dict_binding],
     )
-    .expect("map binding facts");
+    .expect("dict binding facts");
     assert_eq!(
-        map_formatted.text(),
+        dict_formatted.text(),
         "(defn call () i32 (call 0i32 key1 value1 key2 value2))\n"
     );
 }
@@ -298,7 +298,7 @@ fn formatter_rejects_contradictory_binding_facts() {
         ),
         (
             "(defn call () i32 (call 1i32 2i32 3i32 4i32))",
-            BindingFacts::new(1, Vec::new(), Some(VariadicBinding::Map)),
+            BindingFacts::new(1, Vec::new(), Some(VariadicBinding::Dict)),
         ),
     ];
     for (source, facts) in cases {
@@ -334,18 +334,28 @@ fn formatter_preserves_written_order_without_binding_facts() {
 #[test]
 fn formatter_moves_types_group_before_operands_and_reports_style() {
     let source = "(defn call () i32 (call 1i32 types: (i32)))";
-    let formatted = format_source_with_bindings(Path::new("bindings.vib"), source, &[])
-        .expect("source mode");
-    assert_eq!(
-        formatted.text(),
-        "(defn call () i32 (call types: (i32) 1i32))\n"
-    );
-    assert_eq!(
+    let style_count = |bindings: &[ApplicationBinding]| {
+        let formatted =
+            format_source_with_bindings(Path::new("bindings.vib"), source, bindings)
+                .expect("source mode");
+        assert_eq!(
+            formatted.text(),
+            "(defn call () i32 (call types: (i32) 1i32))\n"
+        );
         formatted
             .diagnostics()
             .iter()
-            .filter(|diagnostic| diagnostic.code() == DiagnosticCode::StyleArgumentOrder)
-            .count(),
-        1
+            .filter(|diagnostic| {
+                diagnostic.code() == DiagnosticCode::StyleArgumentOrder
+            })
+            .count()
+    };
+    // Without a complete binding the group still moves, but only a binding
+    // earns the style warning.
+    assert_eq!(style_count(&[]), 0);
+    let binding = ApplicationBinding::new(
+        vibra_diagnostics::ByteSpan::new(18, 42),
+        BindingFacts::new(1, Vec::new(), None),
     );
+    assert_eq!(style_count(&[binding]), 1);
 }

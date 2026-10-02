@@ -1,0 +1,13 @@
+(deftype user (record name str))
+
+(defn floats (m (dict f64 i32)) i32 0i32)
+
+(defn voids (m (dict void i32)) i32 0i32)
+
+(defn arrays (m (dict (array i32) i32)) i32 0i32)
+
+(defn users (m (dict user i32)) i32 0i32)
+
+(defn functions (m (dict (fn () i32) i32)) i32 0i32)
+
+(defn inferred () i32 (let m (dict.of 1.0f64 2i32) 0i32))

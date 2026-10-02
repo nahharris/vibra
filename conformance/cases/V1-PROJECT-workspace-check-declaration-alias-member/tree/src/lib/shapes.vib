@@ -1,0 +1,10 @@
+(deftype box (record width i32 height i32)
+  visibility: @public
+  (defn secret (value self) i32 (value @width))
+  (defn open (value self) i32
+    visibility: @public
+    (value @height)))
+
+(defn make () box
+  visibility: @public
+  (box width: 1i32 height: 2i32))

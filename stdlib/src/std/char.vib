@@ -1,0 +1,44 @@
+; Character comparison and ASCII classes, written over the builtin `char`
+; members `char.to-u32` and `char.from-u32`.
+(import core @std.core)
+
+(defn equal (left char right char) bool
+  visibility: @public
+  (u32.equal (char.to-u32 left) (char.to-u32 right)))
+
+(defn compare (left char right char) core.ordering
+  visibility: @public
+  (u32.compare (char.to-u32 left) (char.to-u32 right)))
+
+(defn in-range (value char low u32 high u32) bool
+  (let scalar (char.to-u32 value)
+    (match (u32.compare scalar low)
+      (core.ordering.less) false
+      - (match (u32.compare scalar high) (core.ordering.greater) false - true))))
+
+(defn is-ascii-digit (value char) bool
+  visibility: @public
+  (in-range value 48u32 57u32))
+
+(defn is-ascii-upper (value char) bool
+  visibility: @public
+  (in-range value 65u32 90u32))
+
+(defn is-ascii-lower (value char) bool
+  visibility: @public
+  (in-range value 97u32 122u32))
+
+(defn is-ascii-letter (value char) bool
+  visibility: @public
+  (if (is-ascii-upper value) true (is-ascii-lower value)))
+
+; Space, tab, line feed, form feed, and carriage return.
+(defn is-ascii-whitespace (value char) bool
+  visibility: @public
+  (match (char.to-u32 value)
+    32u32 true
+    9u32 true
+    10u32 true
+    12u32 true
+    13u32 true
+    - false))

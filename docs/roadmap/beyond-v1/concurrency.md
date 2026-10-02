@@ -196,7 +196,7 @@ reproducible, shrinkable test failures instead of flaky runs.
 Pure computation can run in parallel without any observable difference, so it
 needs no effect root and no process:
 
-- `par.map` over an array with a pure callback returns results in input order.
+- `par.dict` over an array with a pure callback returns results in input order.
 - `par.reduce` requires a `monoid` implementation. Its associativity is a
   documented law in line 2 and a proven one from
   [Verification V2](verification.md#v2--lemmas-and-interface-laws).

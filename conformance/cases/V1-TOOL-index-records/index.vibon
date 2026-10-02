@@ -1,0 +1,170 @@
+(record
+  format: @index.v1
+  revision: "sha256:244bec94ec85cbef2c1d91993b3ad391159cb805882f23fecda0109c49602c0f"
+  declarations: (array
+    (record
+      id: @app.main
+      kind: @module
+      module: @app.main
+      owner: void
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 0u64 end: 824u64)
+      signature: void
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(import core @std.core)\n\n(import from @std.core.from)\n\n(def limit i32 10i32)\n\n(defint shape\n  visibility: @public\n  (defn name (value self) str)\n  (defn label (value self) str (shape.name value)))\n\n(deftype celsius (record degrees i32)\n  visibility: @public\n  (defn warmer (value self) self (celsius degrees: limit))\n  (impl shape (defn name (value self) str \"celsius\"))\n  (impl (from i16)\n    (defn convert (value i16) self (celsius degrees: (as i32 (from.convert value)))))\n  (impl (from i8)\n    (defn convert (value i8) self (celsius degrees: (as i32 (from.convert value))))))\n\n(defn describe (value celsius) (option str)\n  visibility: @public\n  (option.some (shape.label (celsius.warmer value))))\n\n(defn parse (text str) (result i32 core.conversion-error) (i32.parse text))\n\n(defn execute () void void)\n")
+    (record
+      id: @app.main.celsius
+      kind: @type
+      module: @app.main
+      owner: void
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 197u64 end: 594u64)
+      signature: (array)
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(deftype celsius (record degrees i32)\n  visibility: @public\n  (defn warmer (value self) self (celsius degrees: limit))\n  (impl shape (defn name (value self) str \"celsius\"))\n  (impl (from i16)\n    (defn convert (value i16) self (celsius degrees: (as i32 (from.convert value)))))\n  (impl (from i8)\n    (defn convert (value i8) self (celsius degrees: (as i32 (from.convert value))))))")
+    (record
+      id: @app.main.celsius.warmer
+      kind: @method
+      module: @app.main
+      owner: @app.main.celsius
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 259u64 end: 315u64)
+      signature: (record type: @fn parameters: (array @app.main.celsius) labelled: (record) result: @app.main.celsius)
+      effects: (array)
+      errors: (array)
+      applications: (array @app.main.celsius)
+      text: "(defn warmer (value self) self (celsius degrees: limit))")
+    (record
+      id: @app.main.describe
+      kind: @function
+      module: @app.main
+      owner: void
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 596u64 end: 715u64)
+      signature: (record type: @fn parameters: (array @app.main.celsius) labelled: (record) result: (record type: @std.option.option arguments: (array @str)))
+      effects: (array)
+      errors: (array)
+      applications: (array @app.main.celsius.warmer @app.main.shape.label)
+      text: "(defn describe (value celsius) (option str)\n  visibility: @public\n  (option.some (shape.label (celsius.warmer value))))")
+    (record
+      id: @app.main.execute
+      kind: @function
+      module: @app.main
+      owner: void
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 796u64 end: 823u64)
+      signature: (record type: @fn parameters: (array) labelled: (record) result: @void)
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(defn execute () void void)")
+    (record
+      id: @app.main.limit
+      kind: @value
+      module: @app.main
+      owner: void
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 54u64 end: 75u64)
+      signature: @i32
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(def limit i32 10i32)")
+    (record
+      id: @app.main.parse
+      kind: @function
+      module: @app.main
+      owner: void
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 717u64 end: 794u64)
+      signature: (record type: @fn parameters: (array @str) labelled: (record) result: (record type: @std.result.result arguments: (array @i32 @std.core.conversion-error)))
+      effects: (array)
+      errors: (array @std.core.conversion-error)
+      applications: (array @std.builtin.i32.parse)
+      text: "(defn parse (text str) (result i32 core.conversion-error) (i32.parse text))")
+    (record
+      id: @app.main.shape
+      kind: @interface
+      module: @app.main
+      owner: void
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 77u64 end: 195u64)
+      signature: (array)
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(defint shape\n  visibility: @public\n  (defn name (value self) str)\n  (defn label (value self) str (shape.name value)))")
+    (record
+      id: @app.main.shape.label
+      kind: @method
+      module: @app.main
+      owner: @app.main.shape
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 146u64 end: 194u64)
+      signature: (record type: @fn parameters: (array (record type: @param name: @self)) labelled: (record) result: @str)
+      effects: (array)
+      errors: (array)
+      applications: (array @app.main.shape.name)
+      text: "(defn label (value self) str (shape.name value))")
+    (record
+      id: @app.main.shape.name
+      kind: @method
+      module: @app.main
+      owner: @app.main.shape
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 115u64 end: 143u64)
+      signature: (record type: @fn parameters: (array (record type: @param name: @self)) labelled: (record) result: @str)
+      effects: (array)
+      errors: (array)
+      applications: (array)
+      text: "(defn name (value self) str)"))
+  implementations: (array
+    (record
+      receiver: @app.main.celsius
+      interface: (record type: @std.core.from arguments: (array @i16))
+      source: (record source-id: "src/app/main.vib" start: 376u64 end: 484u64)
+      text: "(impl (from i16)\n    (defn convert (value i16) self (celsius degrees: (as i32 (from.convert value)))))"
+      members: (array
+        (record
+          contract: @std.core.from.convert
+          source: (record source-id: "src/app/main.vib" start: 397u64 end: 483u64)
+          signature: (record type: @fn parameters: (array @i16) labelled: (record) result: @app.main.celsius)
+          text: "(defn convert (value i16) self (celsius degrees: (as i32 (from.convert value))))")))
+    (record
+      receiver: @app.main.celsius
+      interface: (record type: @std.core.from arguments: (array @i8))
+      source: (record source-id: "src/app/main.vib" start: 487u64 end: 593u64)
+      text: "(impl (from i8)\n    (defn convert (value i8) self (celsius degrees: (as i32 (from.convert value)))))"
+      members: (array
+        (record
+          contract: @std.core.from.convert
+          source: (record source-id: "src/app/main.vib" start: 507u64 end: 592u64)
+          signature: (record type: @fn parameters: (array @i8) labelled: (record) result: @app.main.celsius)
+          text: "(defn convert (value i8) self (celsius degrees: (as i32 (from.convert value))))")))
+    (record
+      receiver: @app.main.celsius
+      interface: @app.main.shape
+      source: (record source-id: "src/app/main.vib" start: 318u64 end: 373u64)
+      text: "(impl shape (defn name (value self) str \"celsius\"))"
+      members: (array
+        (record
+          contract: @app.main.shape.name
+          source: (record source-id: "src/app/main.vib" start: 334u64 end: 372u64)
+          signature: (record type: @fn parameters: (array @app.main.celsius) labelled: (record) result: @str)
+          text: "(defn name (value self) str \"celsius\")"))))
+  references: (array
+    (record from: @app.main.shape.label written: "shape.name" source: (record source-id: "src/app/main.vib" start: 176u64 end: 186u64) to: @app.main.shape.name)
+    (record from: @app.main.celsius.warmer written: "celsius" source: (record source-id: "src/app/main.vib" start: 291u64 end: 298u64) to: @app.main.celsius)
+    (record from: @app.main.celsius.warmer written: "limit" source: (record source-id: "src/app/main.vib" start: 308u64 end: 313u64) to: @app.main.limit)
+    (record from: @app.main.celsius written: "celsius" source: (record source-id: "src/app/main.vib" start: 435u64 end: 442u64) to: @app.main.celsius)
+    (record from: @app.main.celsius written: "from.convert" source: (record source-id: "src/app/main.vib" start: 461u64 end: 473u64) to: @std.core.from.convert)
+    (record from: @app.main.celsius written: "celsius" source: (record source-id: "src/app/main.vib" start: 544u64 end: 551u64) to: @app.main.celsius)
+    (record from: @app.main.celsius written: "from.convert" source: (record source-id: "src/app/main.vib" start: 570u64 end: 582u64) to: @std.core.from.convert)
+    (record from: @app.main.describe written: "option.some" source: (record source-id: "src/app/main.vib" start: 665u64 end: 676u64) to: void)
+    (record from: @app.main.describe written: "shape.label" source: (record source-id: "src/app/main.vib" start: 678u64 end: 689u64) to: @app.main.shape.label)
+    (record from: @app.main.describe written: "celsius.warmer" source: (record source-id: "src/app/main.vib" start: 691u64 end: 705u64) to: @app.main.celsius.warmer)
+    (record from: @app.main.parse written: "i32.parse" source: (record source-id: "src/app/main.vib" start: 778u64 end: 787u64) to: @std.builtin.i32.parse)))

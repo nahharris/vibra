@@ -1,0 +1,42 @@
+(defn main () (tuple i32 u64 u64 u64 u64 i32 (option (tuple char str)))
+  (tupleof
+    (sum (array.of 1i32 2i32 3i32) 0i32)
+    (count (dict.of "b" 2i32 "a" 1i32) 0u64)
+    (count "héllo" 0u64)
+    (count (option.some 9i32) 0u64)
+    (count (as (option i32) (option.none)) 0u64)
+    (sum (countdown from: 4i32) 0i32)
+    (iter.next "ok")))
+
+(import iter @std.iter.iter)
+
+; A user iterator: `next` yields the count and the iterator one lower.
+(deftype countdown (record from i32)
+  (impl (iter i32)
+    (defn next (value self) (option (tuple i32 self))
+      (match (i32.compare (value @from) 0i32)
+        (core.ordering.greater)
+          (option.some
+            (tupleof
+              (value @from)
+              (countdown from: (lower (value @from)))))
+        - (option.none)))))
+
+(import core @std.core)
+
+(defn lower (value i32) i32
+  (match (i32.sub-checked value 1i32) (result.ok next) next (result.err -) 0i32))
+
+; A walk over any iterator of `i32`: tail-recursive, so its depth is constant.
+(defn sum (values (iter i32) total i32) i32
+  (match (iter.next values)
+    (option.some (tupleof item rest))
+      (sum rest (match (i32.add-checked total item) (result.ok next) next (result.err -) total))
+    (option.none) total))
+
+(defn count (values (iter item) seen u64) u64
+  where: (item any)
+  (match (iter.next values)
+    (option.some (tupleof - rest))
+      (count rest (match (u64.add-checked seen 1u64) (result.ok next) next (result.err -) seen))
+    (option.none) seen))

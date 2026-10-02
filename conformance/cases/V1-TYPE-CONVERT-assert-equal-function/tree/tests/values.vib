@@ -1,0 +1,4 @@
+(import assert @std.assert)
+
+(test "functions have no encoding"
+  (assert.equal (lambda () i32 1i32) (lambda () i32 1i32)))

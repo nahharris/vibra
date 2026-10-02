@@ -16,7 +16,7 @@ use vibra_syntax::{AtomRole, DataValue, TypedDataSchema, parse_data};
 fn valid_literals_and_containers_decode_as_one_data_value() {
     let document = parse_data(
         Path::new("value.vibon"),
-        "(record name: \"hello\" values: (array @a 1) empty: (map))",
+        "(record name: \"hello\" values: (array @a 1) empty: (dict))",
     )
     .expect("data loader");
 
@@ -36,16 +36,16 @@ fn trailing_trivia_does_not_invalidate_a_data_root() {
 }
 
 #[test]
-fn maps_reject_duplicate_keys_and_decode_in_source_order() {
+fn dicts_reject_duplicate_keys_and_decode_in_source_order() {
     let document =
-        parse_data(Path::new("value.vibon"), "(map @z 2 @a 1)").expect("data loader");
+        parse_data(Path::new("value.vibon"), "(dict @z 2 @a 1)").expect("data loader");
     assert!(document.accepted(), "{:?}", document.diagnostics());
     assert!(
-        matches!(document.data().map(|node| node.value()), Some(DataValue::Map(pairs)) if pairs.len() == 2)
+        matches!(document.data().map(|node| node.value()), Some(DataValue::Dict(pairs)) if pairs.len() == 2)
     );
 
     let duplicate =
-        parse_data(Path::new("value.vibon"), "(map @a 1 @a 2)").expect("data loader");
+        parse_data(Path::new("value.vibon"), "(dict @a 1 @a 2)").expect("data loader");
     assert!(!duplicate.accepted());
     assert_eq!(
         duplicate.diagnostics()[0].code(),
@@ -64,7 +64,7 @@ fn deeply_nested_data_decodes_without_using_the_host_stack() {
 
 #[test]
 fn closed_data_grammar_rejects_symbols_applications_and_odd_shapes() {
-    for source in ["symbol", "(call @a)", "(map @a)", "(record name:)"] {
+    for source in ["symbol", "(call @a)", "(dict @a)", "(record name:)"] {
         let document =
             parse_data(Path::new("value.vibon"), source).expect("data loader");
         assert!(!document.accepted(), "accepted {source:?}");

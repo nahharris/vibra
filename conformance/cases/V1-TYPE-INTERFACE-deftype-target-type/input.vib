@@ -1,0 +1,5 @@
+(deftype label (record text str))
+
+(deftype square (record side i32)
+  (impl label
+    (defn text (value self) str "square")))

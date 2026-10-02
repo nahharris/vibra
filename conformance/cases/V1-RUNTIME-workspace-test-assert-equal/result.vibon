@@ -1,0 +1,9 @@
+(record
+  format: @test-run.v1
+  result: @command.test-failed
+  tests: (array
+    (record name: "@tests.values::\"equal records pass\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.values::\"unequal arrays fail with their encodings\"" result: @test.assertion-failed failure: (record assertion: @std.assert.equal expected: "(record kind: @array values: (array 1i32 2i32))" actual: "(record kind: @array values: (array 1i32 3i32))" primary-span: (record source-id: "tests/values.vib" start: 212u64 end: 268u64)) audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.values::\"options compare by encoding\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)

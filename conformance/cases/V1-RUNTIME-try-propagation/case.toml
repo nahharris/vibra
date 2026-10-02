@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-try-propagation"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "try yields the success payload or exits the innermost function or lambda with none or the same error, over option and result, nested, and with differing success types."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

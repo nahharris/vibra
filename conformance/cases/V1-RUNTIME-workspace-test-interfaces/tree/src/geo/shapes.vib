@@ -1,0 +1,26 @@
+(defint shape
+  visibility: @public
+  (defn name (value self) str)
+  (defn sides (value self) i32)
+  (defn label (value self) str "shape"))
+
+(deftype square (record side i32)
+  visibility: @public
+  (impl shape
+    (defn name (value self) str "square")
+    (defn sides (value self) i32 4i32)))
+
+(deftype circle (record radius i32)
+  visibility: @public
+  (impl shape
+    (defn name (value self) str "circle")
+    (defn sides (value self) i32 0i32)))
+
+(defn sides-of (left a right b) (tuple i32 i32)
+  where: (a shape b shape)
+  visibility: @public
+  (tupleof (shape.sides left) (shape.sides right)))
+
+(defn name-of (value shape) str
+  visibility: @public
+  (shape.name value))

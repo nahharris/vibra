@@ -1,0 +1,11 @@
+id = "V1-TYPE-INTERFACE-generic-targets"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "A generic interface is implemented at two non-overlapping applied targets on one receiver."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

@@ -1,0 +1,8 @@
+(deftype shape (enum dot void circle u32)
+  visibility: @public)
+
+(deftype hidden (record x i32))
+
+(defn radius (value u32) shape
+  visibility: @public
+  (shape.circle value))

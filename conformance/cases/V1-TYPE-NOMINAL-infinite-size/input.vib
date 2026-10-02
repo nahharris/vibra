@@ -1,0 +1,3 @@
+(deftype node (record next link))
+(deftype link (enum more node))
+(deftype lazy (record next (fn () lazy)))

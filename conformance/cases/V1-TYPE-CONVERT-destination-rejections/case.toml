@@ -1,0 +1,35 @@
+id = "V1-TYPE-CONVERT-destination-rejections"
+rule = "V1-TYPE-CONVERT"
+profile = "static-v1"
+operation = "type-check"
+description = "A destination-dispatched call needs a written expected type, an unsuffixed literal that fits two implementations is ambiguous, and a destination that implements no matching conversion is rejected."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-destination"
+level = "@error"
+source = "input.vib"
+span = [321, 339]
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-implementation"
+level = "@error"
+source = "input.vib"
+span = [375, 391]
+
+[[expect.diagnostics]]
+code = "@type.unsatisfied-bound"
+level = "@error"
+source = "input.vib"
+span = [418, 439]
+
+[[expect.diagnostics]]
+code = "@type.unsatisfied-bound"
+level = "@error"
+source = "input.vib"
+span = [471, 489]

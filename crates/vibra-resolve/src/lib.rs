@@ -22,7 +22,8 @@ use std::path::Path;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 use vibra_syntax::{
     Attribute, Declaration, DeftypeBody, Expression, ExpressionKind,
-    FunctionDeclaration, Literal, Name, Pattern, PatternKind, TypeMember, parse_source,
+    FunctionDeclaration, Literal, Name, Pattern, PatternKind, TypeExpr, TypeMember,
+    parse_source,
 };
 
 /// Package provenance carried by every declaration identity.
@@ -249,6 +250,8 @@ pub struct ResolveInput {
     units: Vec<SourceUnit>,
     overlay: Option<PackageOverlay>,
     reserved_import_paths: Vec<(String, Vec<String>)>,
+    builtin_members: Vec<(String, String)>,
+    role_types: Vec<String>,
 }
 
 /// A verified package whose source modules are overlaid on the local graph.
@@ -274,6 +277,8 @@ impl ResolveInput {
             units,
             overlay: None,
             reserved_import_paths: Vec::new(),
+            builtin_members: Vec::new(),
+            role_types: Vec::new(),
         }
     }
 
@@ -291,6 +296,28 @@ impl ResolveInput {
         self.reserved_import_paths.extend(paths);
         self.reserved_import_paths.sort();
         self.reserved_import_paths.dedup();
+        self
+    }
+
+    /// Declares the static methods of the builtin types, as `(type, member)`
+    /// pairs. A value path `type.member` naming one resolves to the
+    /// `@std.builtin` declaration without an import; any other member of a
+    /// builtin type is an unknown symbol.
+    #[must_use]
+    pub fn with_builtin_members(
+        mut self,
+        members: impl IntoIterator<Item = (String, String)>,
+    ) -> Self {
+        self.builtin_members.extend(members);
+        self
+    }
+
+    /// Declares the spellings of the standard-library types that play a
+    /// language role. They need no import: a value path `type.member` naming
+    /// one is left to the checker, which resolves its constructors.
+    #[must_use]
+    pub fn with_role_types(mut self, names: impl IntoIterator<Item = String>) -> Self {
+        self.role_types.extend(names);
         self
     }
 
@@ -608,6 +635,7 @@ pub struct ResolvedImport {
     alias: String,
     written: String,
     module: Option<ModuleId>,
+    declaration: Option<String>,
     source_id: String,
     span: ByteSpan,
 }
@@ -629,6 +657,14 @@ impl ResolvedImport {
     #[must_use]
     pub const fn module(&self) -> Option<&ModuleId> {
         self.module.as_ref()
+    }
+
+    /// The declaration a declaration import binds within `module`, such as
+    /// `ordering` for `(import ordering @std.core.ordering)`; `None` for a
+    /// module import.
+    #[must_use]
+    pub fn declaration(&self) -> Option<&str> {
+        self.declaration.as_deref()
     }
 
     /// Import source identity.
@@ -951,6 +987,8 @@ enum BodyWork {
 #[derive(Clone, Debug)]
 struct ImportWork {
     module: Option<ModuleKey>,
+    /// The one top-level declaration a declaration import binds.
+    declaration: Option<String>,
     alias: String,
     written: String,
     source_id: String,
@@ -1037,6 +1075,7 @@ impl Resolution {
                         ModuleId::new(&module.package, &module.unit, &module.segments)
                     })
                 }),
+                declaration: import.declaration.clone(),
                 source_id: import.source_id.clone(),
                 span: import.span,
             })
@@ -1233,7 +1272,7 @@ impl Resolution {
         let Some(assert_module) = overlay.modules.iter().find(|module| {
             module.unit == "std"
                 && module.segments == ["assert"]
-                && module.source_id == "stdlib/m2/src/std/assert.vib"
+                && module.source_id == "stdlib/src/std/assert.vib"
         }) else {
             return;
         };
@@ -1242,15 +1281,7 @@ impl Resolution {
             unit: "std".to_owned(),
             segments: vec!["assert".to_owned()],
         };
-        let names = [
-            "true",
-            "false",
-            "equal-bool",
-            "equal-char",
-            "equal-str",
-            "equal-i32",
-            "equal-u64",
-        ];
+        let names = ["true", "false", "equal"];
         for name in names {
             let path = vec![name.to_owned()];
             let id = DeclarationId::with_package(
@@ -1284,12 +1315,12 @@ impl Resolution {
         span: ByteSpan,
         source_id: &str,
     ) {
-        if matches!(name, "map" | "array" | "tuple") {
+        if vibra_syntax::is_reserved_value_spelling(name) {
             self.diagnostics.push(
                 Diagnostic::new(
                     DiagnosticCode::NameReservedValueSpelling,
                     span,
-                    "a module-level import alias uses a reserved value spelling",
+                    "a module-level import alias uses a builtin type name",
                 )
                 .with_source_id(source_id),
             );
@@ -1395,12 +1426,8 @@ impl Resolution {
             Declaration::Test(_) => return,
         };
         let unavailable_message = match declaration {
-            Declaration::Deftype(_) => {
-                Some("nominal type resolution is unavailable in Step 4")
-            }
-            Declaration::Defint(_) => {
-                Some("interface resolution is unavailable in Step 4")
-            }
+            // Declared types resolve from M3 Step 2 and interfaces from Step 11.
+            Declaration::Deftype(_) | Declaration::Defint(_) => None,
             Declaration::Deffect(_) => {
                 Some("effect resolution is unavailable in Step 4")
             }
@@ -1433,7 +1460,7 @@ impl Resolution {
                 names.insert(name.to_owned(), (span, source_id.to_owned()));
             }
             if matches!(kind, EntityKind::Value | EntityKind::Function)
-                && matches!(name, "map" | "array" | "tuple")
+                && vibra_syntax::is_reserved_value_spelling(name)
             {
                 self.diagnostics.push(
                     Diagnostic::new(
@@ -1472,11 +1499,26 @@ impl Resolution {
                     value.members(),
                     path.clone(),
                     source_id,
+                    None,
                 );
-                self.collect_deftype_fields(module, value.body(), path, source_id);
+                // Fields and variants have no visibility syntax of their own;
+                // they are exactly as visible as the type that declares them.
+                self.collect_deftype_fields(
+                    module,
+                    value.body(),
+                    path,
+                    source_id,
+                    visibility,
+                );
             }
             Declaration::Defint(value) => {
-                self.collect_type_members(module, value.members(), path, source_id);
+                self.collect_type_members(
+                    module,
+                    value.members(),
+                    path,
+                    source_id,
+                    Some(visibility),
+                );
             }
             Declaration::Deffect(value) => {
                 for member in value.members() {
@@ -1505,16 +1547,14 @@ impl Resolution {
         members: &[TypeMember],
         owner: Vec<String>,
         source_id: &str,
+        contract_visibility: Option<Visibility>,
     ) {
         let mut names = BTreeMap::<String, (ByteSpan, String)>::new();
-        for member in members {
+        for (member_index, member) in members.iter().enumerate() {
             match member {
                 TypeMember::Method(function) => {
-                    self.unavailable(
-                        source_id,
-                        function.span(),
-                        "type and interface members are unavailable in Step 4",
-                    );
+                    // Nested `deftype` methods resolve from M3 Step 2 and
+                    // interface contract members from Step 11.
                     self.collect_member(
                         module,
                         function,
@@ -1522,6 +1562,12 @@ impl Resolution {
                         EntityKind::Function,
                         source_id,
                     );
+                    // A contract member is exactly as visible as its interface.
+                    if let Some(visibility) = contract_visibility
+                        && let Some(work) = self.declarations.last_mut()
+                    {
+                        work.declaration.visibility = visibility;
+                    }
                     self.check_member_name(
                         &mut names,
                         function.name().value(),
@@ -1529,17 +1575,15 @@ impl Resolution {
                         source_id,
                     );
                 }
+                // A written `impl` member is reached through its interface,
+                // never by name, so its path only keeps its body's names
+                // resolvable and its identity distinct per block.
                 TypeMember::Implementation(implementation) => {
-                    self.unavailable(
-                        source_id,
-                        implementation.span(),
-                        "implementation resolution is unavailable in Step 4",
-                    );
-                    for member in implementation.members() {
-                        self.unavailable(
-                            source_id,
-                            member.span(),
-                            "implementation members are unavailable in Step 4",
+                    let mut block = owner.clone();
+                    block.push(format!("impl-{member_index}"));
+                    for function in implementation.members() {
+                        self.collect_implementation_member(
+                            module, function, &block, source_id,
                         );
                     }
                 }
@@ -1553,18 +1597,12 @@ impl Resolution {
         body: &DeftypeBody,
         owner: Vec<String>,
         source_id: &str,
+        owner_visibility: Visibility,
     ) {
-        let fields = match body {
-            DeftypeBody::Record(fields) => fields,
-            DeftypeBody::Enum(fields) => fields,
-            DeftypeBody::Type(_) | DeftypeBody::Union(_) | DeftypeBody::Newtype(_) => {
-                return;
-            }
-        };
-        let kind = match body {
-            DeftypeBody::Record(_) => EntityKind::Field,
-            DeftypeBody::Enum(_) => EntityKind::Variant,
-            DeftypeBody::Type(_) | DeftypeBody::Union(_) | DeftypeBody::Newtype(_) => {
+        let (fields, kind) = match body {
+            DeftypeBody::Type(TypeExpr::Record(fields)) => (fields, EntityKind::Field),
+            DeftypeBody::Type(TypeExpr::Enum(fields)) => (fields, EntityKind::Variant),
+            DeftypeBody::Type(_) | DeftypeBody::Intrinsic(_) => {
                 return;
             }
         };
@@ -1572,11 +1610,6 @@ impl Resolution {
         for field in fields {
             let field_name = field.name().value();
             let field_span = field.span();
-            self.unavailable(
-                source_id,
-                field_span,
-                "nominal type members are unavailable in Step 4",
-            );
             self.check_member_name(&mut names, field_name, field_span, source_id);
             let mut path = owner.clone();
             path.push(field_name.to_owned());
@@ -1594,7 +1627,7 @@ impl Resolution {
             self.declarations.push(DeclarationWork {
                 declaration: ResolvedDeclaration {
                     id,
-                    visibility: Visibility::Private,
+                    visibility: owner_visibility,
                     source_id: source_id.to_owned(),
                     span: field_span,
                 },
@@ -1627,6 +1660,35 @@ impl Resolution {
                 ),
             );
         }
+    }
+
+    /// Collects a member written in an `impl` block: its body resolves like any
+    /// function, but its path is left out of the index so no written name
+    /// reaches it.
+    fn collect_implementation_member(
+        &mut self,
+        module: &ModuleKey,
+        function: &FunctionDeclaration,
+        block: &[String],
+        source_id: &str,
+    ) {
+        let mut path = block.to_vec();
+        path.push(function.name().value().to_owned());
+        self.declarations.push(DeclarationWork {
+            declaration: ResolvedDeclaration {
+                id: DeclarationId::with_package(
+                    &module.package,
+                    &module.unit,
+                    &module.segments,
+                    path,
+                    EntityKind::Function,
+                ),
+                visibility: Visibility::Private,
+                source_id: source_id.to_owned(),
+                span: function.span(),
+            },
+            body: Some(BodyWork::Function(function.clone())),
+        });
     }
 
     fn collect_member(
@@ -1685,17 +1747,28 @@ impl Resolution {
                 let target_span = import.target().span_or(import.span());
                 let test_unit_import_forbidden =
                     unit == "tests" && module_key.unit != "tests";
-                if test_unit_import_forbidden {
+                // The builtin types and their members are reached with no
+                // import, from every module, tests included.
+                let builtin_import = unit == "std"
+                    && target_path
+                        .first()
+                        .is_some_and(|segment| segment == "builtin");
+                if test_unit_import_forbidden || builtin_import {
                     self.diagnostics.push(
                         Diagnostic::new(
                             DiagnosticCode::ModuleUnknownPath,
                             target_span,
-                            "the reserved `@tests` unit is importable only from test modules",
+                            if builtin_import {
+                                "`@std.builtin` is never imported; its types and members need no import"
+                            } else {
+                                "the reserved `@tests` unit is importable only from test modules"
+                            },
                         )
                         .with_source_id(parsed.module.source_id.clone()),
                     );
                     let work = ImportWork {
                         module: None,
+                        declaration: None,
                         alias: import.alias().value().to_owned(),
                         written: target.value().to_owned(),
                         source_id: parsed.module.source_id.clone(),
@@ -1740,6 +1813,7 @@ impl Resolution {
                         );
                         let work = ImportWork {
                             module: None,
+                            declaration: None,
                             alias: import.alias().value().to_owned(),
                             written: target.value().to_owned(),
                             source_id: parsed.module.source_id.clone(),
@@ -1768,6 +1842,7 @@ impl Resolution {
                     );
                     let work = ImportWork {
                         module: None,
+                        declaration: None,
                         alias: import.alias().value().to_owned(),
                         written: target.value().to_owned(),
                         source_id: parsed.module.source_id.clone(),
@@ -1792,44 +1867,73 @@ impl Resolution {
                     unit: unit.clone(),
                     segments: module_segments.to_vec(),
                 };
+                let mut resolved_declaration = None;
                 if declaration_segments.is_empty() {
                     resolved_module = Some(module);
                 } else {
                     let declaration_path = declaration_segments.to_vec();
                     let target = self
                         .declaration_indexes
-                        .get(&(module.clone(), declaration_path))
+                        .get(&(module.clone(), declaration_path.clone()))
                         .and_then(|index| self.declarations.get(*index))
                         .map(|work| {
-                            (work.declaration.source_id.clone(), work.declaration.span)
+                            (
+                                work.declaration.source_id.clone(),
+                                work.declaration.span,
+                                work.declaration.visibility,
+                            )
                         });
-                    if let Some((source_id, span)) = target {
-                        self.diagnostics.push(
-                            Diagnostic::new(
-                                DiagnosticCode::NameWrongEntityKind,
-                                target_span,
-                                "import target names a declaration; imports require modules",
-                            )
-                            .with_source_id(parsed.module.source_id.clone())
-                            .with_related_source(
-                                source_id,
-                                span,
-                                "the imported entity is declared here",
-                            ),
-                        );
-                    } else {
-                        self.diagnostics.push(
-                            Diagnostic::new(
-                                DiagnosticCode::NameUnknownSymbol,
-                                target_span,
-                                "import member does not resolve to a declaration",
-                            )
-                            .with_source_id(parsed.module.source_id.clone()),
-                        );
+                    match (target, declaration_path.as_slice()) {
+                        // A declaration import binds one top-level declaration.
+                        (Some((source_id, span, visibility)), [name]) => {
+                            if visibility == Visibility::Private {
+                                self.diagnostics.push(
+                                    Diagnostic::new(
+                                        DiagnosticCode::NamePrivateAccess,
+                                        target_span,
+                                        "imported declaration is private",
+                                    )
+                                    .with_source_id(parsed.module.source_id.clone())
+                                    .with_related_source(
+                                        source_id,
+                                        span,
+                                        "the private declaration is here",
+                                    ),
+                                );
+                            }
+                            resolved_declaration = Some(name.clone());
+                            resolved_module = Some(module);
+                        }
+                        (Some((source_id, span, _)), _) => {
+                            self.diagnostics.push(
+                                Diagnostic::new(
+                                    DiagnosticCode::NameWrongEntityKind,
+                                    target_span,
+                                    "import target names a member; imports bind modules or top-level declarations",
+                                )
+                                .with_source_id(parsed.module.source_id.clone())
+                                .with_related_source(
+                                    source_id,
+                                    span,
+                                    "the imported member is declared here",
+                                ),
+                            );
+                        }
+                        (None, _) => {
+                            self.diagnostics.push(
+                                Diagnostic::new(
+                                    DiagnosticCode::NameUnknownSymbol,
+                                    target_span,
+                                    "import member does not resolve to a declaration",
+                                )
+                                .with_source_id(parsed.module.source_id.clone()),
+                            );
+                        }
                     }
                 }
                 let work = ImportWork {
                     module: resolved_module,
+                    declaration: resolved_declaration,
                     alias: import.alias().value().to_owned(),
                     written: target.value().to_owned(),
                     source_id: parsed.module.source_id.clone(),
@@ -2180,6 +2284,8 @@ impl Resolution {
                 | Attribute::Effects(_)
                 | Attribute::External(_)
                 | Attribute::Symbol(_)
+                | Attribute::Native(_)
+                | Attribute::Role(_)
                 | Attribute::Doc(_) => {}
             }
         }
@@ -2360,6 +2466,31 @@ impl Resolution {
             ExpressionKind::As { operand, .. } | ExpressionKind::Try(operand) => {
                 self.resolve_expression(module, from, operand, scope, source_id);
             }
+            ExpressionKind::TupleOf(values) => {
+                for value in values {
+                    self.resolve_expression(module, from, value, scope, source_id);
+                }
+            }
+            ExpressionKind::RecordOf(fields) => {
+                for field in fields {
+                    self.resolve_expression(
+                        module,
+                        from,
+                        field.value(),
+                        scope,
+                        source_id,
+                    );
+                }
+            }
+            ExpressionKind::EnumOf(variant) => {
+                self.resolve_expression(
+                    module,
+                    from,
+                    variant.value(),
+                    scope,
+                    source_id,
+                );
+            }
         }
     }
 
@@ -2372,6 +2503,68 @@ impl Resolution {
         source_id: &str,
     ) {
         let path = name.segments();
+        // A builtin member of a role type, such as `dict.of`, is a member.
+        let builtin_member = matches!(path, [type_name, member]
+            if self.input.builtin_members.iter().any(|(builtin, name)| builtin == type_name && name == member));
+        if let [type_name] | [type_name, _] = path
+            && !builtin_member
+            && self.input.role_types.iter().any(|role| role == type_name)
+            && !self
+                .imports
+                .iter()
+                .any(|(owner, import)| owner == module && import.alias == *type_name)
+        {
+            // A role-playing type needs no import; the checker resolves its
+            // constructors, such as `(bytes items)` and `option.some`, and
+            // reports an unknown variant or member there.
+            self.references.push(ResolvedReference {
+                from: from.clone(),
+                written: name.value().to_owned(),
+                target: None,
+                source_id: source_id.to_owned(),
+                span,
+            });
+            return;
+        }
+        if let [type_name, member] = path
+            && self
+                .input
+                .builtin_members
+                .iter()
+                .any(|(builtin, _)| builtin == type_name)
+            && !self
+                .imports
+                .iter()
+                .any(|(owner, import)| owner == module && import.alias == *type_name)
+        {
+            // A builtin type's static method is reached through the type path
+            // with no import (`docs/spec/06-runtime.md`).
+            let known = self
+                .input
+                .builtin_members
+                .iter()
+                .any(|(builtin, name)| builtin == type_name && name == member);
+            if !known {
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::NameUnknownSymbol,
+                        span,
+                        format!(
+                            "the builtin type `{type_name}` has no member `{member}`"
+                        ),
+                    )
+                    .with_source_id(source_id),
+                );
+            }
+            self.references.push(ResolvedReference {
+                from: from.clone(),
+                written: name.value().to_owned(),
+                target: known.then(|| builtin_member_id(type_name, member)),
+                source_id: source_id.to_owned(),
+                span,
+            });
+            return;
+        }
         let (target_module, declaration_path, imported) =
             if let Some(first) = path.first() {
                 let import = self
@@ -2379,11 +2572,24 @@ impl Resolution {
                     .iter()
                     .find(|(owner, import)| owner == module && import.alias == *first);
                 if let Some((_, import)) = import {
-                    (
-                        import.module.clone(),
-                        path.iter().skip(1).cloned().collect::<Vec<_>>(),
-                        true,
-                    )
+                    match &import.declaration {
+                        // A declaration alias stands for that declaration,
+                        // whose visibility was checked at the import. A
+                        // member reached through it is checked here, as it
+                        // is through a module alias.
+                        Some(declaration) => (
+                            import.module.clone(),
+                            std::iter::once(declaration.clone())
+                                .chain(path.iter().skip(1).cloned())
+                                .collect::<Vec<_>>(),
+                            path.len() > 1,
+                        ),
+                        None => (
+                            import.module.clone(),
+                            path.iter().skip(1).cloned().collect::<Vec<_>>(),
+                            true,
+                        ),
+                    }
                 } else {
                     (Some(module.clone()), path.to_vec(), false)
                 }
@@ -2425,6 +2631,19 @@ impl Resolution {
             });
             return;
         }
+        // A member path under a declared type is the checker's to resolve: it
+        // knows the type's body and reports an unknown variant or member once.
+        let owned_by_type = declaration_path.split_last().is_some_and(|(_, owner)| {
+            !owner.is_empty()
+                && target_module
+                    .as_ref()
+                    .and_then(|target_module| {
+                        self.declaration_indexes
+                            .get(&(target_module.clone(), owner.to_vec()))
+                    })
+                    .and_then(|index| self.declarations.get(*index))
+                    .is_some_and(|work| work.declaration.id.kind() == EntityKind::Type)
+        });
         let target = target_module
             .as_ref()
             .and_then(|target_module| {
@@ -2433,6 +2652,16 @@ impl Resolution {
             })
             .and_then(|index| self.declarations.get(*index))
             .map(|work| &work.declaration);
+        if target.is_none() && owned_by_type {
+            self.references.push(ResolvedReference {
+                from: from.clone(),
+                written: name.value().to_owned(),
+                target: None,
+                source_id: source_id.to_owned(),
+                span,
+            });
+            return;
+        }
         let Some(target) = target else {
             let unavailable_assertion = target_module.as_ref().is_some_and(|target| {
                 target.package.name() == "vibra-stdlib"
@@ -2551,8 +2780,14 @@ fn collect_pattern_names(pattern: &Pattern, names: &mut Vec<(String, ByteSpan)>)
                 collect_pattern_names(pattern, names);
             }
         }
+        PatternKind::RecordOf(fields) => {
+            for field in fields {
+                collect_pattern_names(field.pattern(), names);
+            }
+        }
+        PatternKind::EnumOf(variant) => collect_pattern_names(variant.pattern(), names),
         PatternKind::As { pattern, .. } => collect_pattern_names(pattern, names),
-        PatternKind::Binding(_) | PatternKind::Literal(_) => {}
+        PatternKind::Binding(_) | PatternKind::Literal(_) | PatternKind::Atom(_) => {}
     }
 }
 
@@ -2604,4 +2839,17 @@ impl SpanOr for Name {
         let _ = self;
         fallback
     }
+}
+
+/// The identity of a builtin type's static method, declared by the embedded
+/// `@std.builtin` module of `vibra-stdlib@0.2.0`.
+#[must_use]
+pub fn builtin_member_id(type_name: &str, member: &str) -> DeclarationId {
+    DeclarationId::with_package(
+        &PackageId::new("vibra-stdlib", "0.2.0"),
+        "std",
+        ["builtin"],
+        [type_name.to_owned(), member.to_owned()],
+        EntityKind::Function,
+    )
 }

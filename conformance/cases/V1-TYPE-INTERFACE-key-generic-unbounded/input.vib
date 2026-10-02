@@ -1,0 +1,3 @@
+(defn keyed (entries (dict k i32)) u64
+  where: (k any)
+  0u64)

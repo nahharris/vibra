@@ -1,0 +1,8 @@
+(import config @config.parse)
+
+; Parses a fixed document; an `err` result names the failing line.
+(defn execute () (result void config.parse-error)
+  (let
+    -
+    (try (config.parse "# service\nname = vibra\nport = 8080\ndebug = true\n"))
+    (result.ok)))

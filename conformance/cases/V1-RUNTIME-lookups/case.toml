@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-lookups"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Array, dict, and string lookups answer some when the key is present and none when it is absent, including a dict keyed by a tuple."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

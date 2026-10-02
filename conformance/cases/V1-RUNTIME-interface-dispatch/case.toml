@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-interface-dispatch"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "An interface's abstract and default members dispatch statically from a known receiver and at run time through a bounded generic, for implementations in both placements and on a generic receiver."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

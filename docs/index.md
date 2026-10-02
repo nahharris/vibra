@@ -1,6 +1,6 @@
 # Vibra v1 documentation
 
-This index is the source-of-truth map for the Vibra soft reboot. The active
+This index is the source-of-truth dict for the Vibra soft reboot. The active
 documents specify the language that will be built; they do not describe the
 archived compiler.
 

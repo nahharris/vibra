@@ -1,6 +1,6 @@
 (record
   ; project comment
-  dependencies: (map
+  dependencies: (dict
     @z (record target: @core rev: "0123456789abcdef0123456789abcdef01234567" git: "https://example.com/z.git" kind: @git)
     @a (record kind: @path path: "../a"))
   targets: (array

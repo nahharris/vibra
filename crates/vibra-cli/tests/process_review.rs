@@ -107,7 +107,7 @@ fn text(bytes: &[u8]) -> String {
     String::from_utf8(bytes.to_vec()).expect("utf-8 output")
 }
 
-const ASSERT_SUITE: &str = "(import assert @std.assert)\n(test \"passes\" (assert.true true))\n(test \"strings\" (assert.equal-str \"x\" \"y\"))\n(test \"negation\" (assert.false true))\n";
+const ASSERT_SUITE: &str = "(import assert @std.assert)\n(test \"passes\" (assert.true true))\n(test \"strings\" (assert.equal \"x\" \"y\"))\n(test \"negation\" (assert.false true))\n";
 
 #[test]
 fn a_relocated_binary_verifies_its_embedded_bootstrap() {
@@ -124,7 +124,7 @@ fn a_relocated_binary_verifies_its_embedded_bootstrap() {
     );
     project.write(
         "tests/math.vib",
-        "(import assert @std.assert)\n(test \"works\" (assert.equal-u64 2u64 2u64))\n",
+        "(import assert @std.assert)\n(test \"works\" (assert.equal 2u64 2u64))\n",
     );
 
     for arguments in [&["check"][..], &["run", "src/demo"], &["test"]] {
@@ -152,7 +152,7 @@ fn human_test_reports_each_failure_and_a_summary() {
     assert_eq!(output.status.code(), Some(1), "{output:?}");
     assert_eq!(
         text(&output.stdout),
-        "FAIL @tests.t::\"strings\" @test.assertion-failed\n  assertion @std.assert.equal-str expected=\"x\" actual=\"y\" at tests/t.vib:3:17\nFAIL @tests.t::\"negation\" @test.assertion-failed\n  assertion @std.assert.false expected=false actual=true at tests/t.vib:4:18\ntest suite @command.test-failed: 1 passed, 2 failed, 3 selected\n"
+        "FAIL @tests.t::\"strings\" @test.assertion-failed\n  assertion @std.assert.equal expected=\"x\" actual=\"y\" at tests/t.vib:3:17\nFAIL @tests.t::\"negation\" @test.assertion-failed\n  assertion @std.assert.false expected=false actual=true at tests/t.vib:4:18\ntest suite @command.test-failed: 1 passed, 2 failed, 3 selected\n"
     );
     assert!(output.stderr.is_empty(), "{output:?}");
 }
@@ -162,7 +162,7 @@ fn human_test_reports_unavailable_items_and_their_diagnostics() {
     let project = demo_project("human-unavailable", "(defn main () void (do))\n");
     project.write(
         "tests/t.vib",
-        "(import assert @std.assert)\n(test \"generic\" (assert.equal 1i32 1i32))\n",
+        "(import assert @std.assert)\n(test \"generic\" (let - (lambda () void effects: (audit) void) (assert.true true)))\n",
     );
 
     let output = vibra(project.path(), &["test"]);
@@ -228,7 +228,7 @@ fn deep_non_tail_recursion_in_a_test_stops_the_suite() {
     let project = demo_project("deep-recursion-test", "(defn main () void (do))\n");
     project.write(
         "tests/t.vib",
-        "(import assert @std.assert)\n(defn f () i32 (let v (f) v))\n(test \"deep\" (assert.equal-i32 (f) 0i32))\n",
+        "(import assert @std.assert)\n(defn f () i32 (let v (f) v))\n(test \"deep\" (assert.equal (f) 0i32))\n",
     );
 
     let output = vibra(project.path(), &["--format", "json", "test"]);

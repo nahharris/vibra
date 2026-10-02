@@ -19,10 +19,10 @@ data = string | character | boolean | integer | float | void | atom-name
      | "(", "record", { label, data }, ")"
      | "(", "array", { data }, ")"
      | "(", "tuple", { data }, ")"
-     | "(", "map", { data, data }, ")" ;
+     | "(", "dict", { data, data }, ")" ;
 ```
 
-Records contain unique labelled fields. Maps contain alternating key/value
+Records contain unique labelled fields. Dicts contain alternating key/value
 forms directly and require an even number of forms. Bare symbols, applications,
 imports, bindings, declarations, and host operations are not data and MUST be
 rejected in a VIBON document. The data is parsed and validated, never executed.
@@ -31,15 +31,15 @@ spelling and carry the same values and exact primitive types.
 
 Each compiler-owned format defines a closed record schema and a version atom.
 Unknown, duplicate, or missing fields are errors. Generic records retain source
-field order until a typed schema supplies an explicit order. Generic maps sort
+field order until a typed schema supplies an explicit order. Generic dicts sort
 keys by the complete canonical encoded key bytes. Canonical output uses the
 source formatter's whitespace rules, schema or generic field order, canonical
-key order for maps, LF endings, and one trailing newline.
+key order for dicts, LF endings, and one trailing newline.
 
 An atom parsed by the generic VIBON grammar is an atom value. A typed schema
 may declare a particular slot to be an entity reference; only then is that atom
 resolved to a canonical code identity. For example, `format: @project.v1` is a
-version atom, a dependency map key `@std` is an alias atom, and an entry in a
+version atom, a dependency dict key `@std` is an alias atom, and an entry in a
 target's `effects` array is an effect-entity reference. Every schema slot
 declares exactly one role, and an entity-reference slot additionally declares
 the one entity kind it requires. No decoder may infer the role from the atom's
@@ -83,7 +83,7 @@ A project is rooted by `project.vibon`. It contains one `@project.v1` record:
       root: "src/hello"
       entry: @hello.main.main
       effects: (array @std.fs.read @std.io.stdout)))
-  dependencies: (map
+  dependencies: (dict
     @std (record
       kind: @git
       git: "https://github.com/nahharris/vibra-stdlib.git"
@@ -97,18 +97,18 @@ The M2 decoder closes the following typed schema. Records may be written in any
 field order, but canonical formatting uses the order shown. Unknown fields,
 missing required fields, and wrong value kinds are `@data.invalid-shape`;
 duplicate record labels are `@data.duplicate-field`, and duplicate dependency
-map keys are `@data.duplicate-key`. The decoder retains each field and value
+dict keys are `@data.duplicate-key`. The decoder retains each field and value
 span with its source identity and does not resolve an atom or read a path.
 
 | Record | Field order | Type | Requiredness and constraint |
 | --- | --- | --- | --- |
-| project | `format`, `package`, `targets`, `dependencies` | atom, record, array, map | all required; `format` is exactly `@project.v1`; `targets` contains at least one target; `dependencies` may be empty |
+| project | `format`, `package`, `targets`, `dependencies` | atom, record, array, dict | all required; `format` is exactly `@project.v1`; `targets` contains at least one target; `dependencies` may be empty |
 | package | `name`, `version` | string, string | both required; `name` is kebab-case and `version` is one semantic version, never a range |
 | target | `name`, `kind`, `root`, `entry`, `effects` | atom, atom, string, atom, array | `name`, `kind`, and `root` required; `name` is one kebab-name atom component; `kind` is `@bin` or `@lib`; a binary requires `entry` and `effects`; a library omits both |
 | path dependency | `kind`, `path`, `target` | atom, string, atom | `kind` is `@path`; `path` required; `target` optional |
 | Git dependency | `kind`, `git`, `rev`, `target` | atom, string, string, atom | `kind` is `@git`; `git` is HTTPS; `rev` is exactly 40 lowercase hexadecimal characters; `target` optional |
 
-The dependency value is selected by its `kind` field. A dependency map key is
+The dependency value is selected by its `kind` field. A dependency dict key is
 an alias atom value whose spelling is one kebab-name component. `format`, target `name` and `kind`, and dependency `kind`
 are atom values selected by their schema slots. Target `entry` is an entity
 reference requiring a declaration; each target `effects` item is an entity
@@ -129,9 +129,9 @@ when the record is malformed.
 
 M2 decodes this record through a closed typed schema before it acquires any
 source files. Schema-selected atom roles are retained as values until the
-source graph and resolver phases have explicit inputs. M2's offline bootstrap
-is repository-owned and hash-checked; ordinary local/Git dependency sync and
-lock generation remain Milestone 5 work. A syntactically valid project feature
+source graph and resolver phases have explicit inputs. The standard library is
+embedded in the toolchain, as the standard-library input section below states;
+ordinary local/Git dependency sync and lock generation remain Milestone 5 work. A syntactically valid project feature
 outside the selected M2 profile reports `@tool.unavailable` rather than being
 silently ignored or executed through a fallback.
 
@@ -270,6 +270,9 @@ signature emits `@project.invalid-entry-signature`.
 An entry signature has no parameters and a result of either `void` or
 `result void e` for a nominal error type `e`. Returning an error produces a
 structured nonzero program result; traps remain distinct.
+The error type MUST NOT hold a function type, directly or through a declared
+type, because the result is observed and a function has no observable value;
+such a signature also emits `@project.invalid-entry-signature`.
 
 The entry declaration need not be public and need not be named `main`. The
 project document is a privileged referrer: naming a declaration in `entry`
@@ -317,8 +320,10 @@ module emits `@module.unknown-path`.
 ```
 
 Every import has one explicit lexical alias and one atom entity reference whose
-resolved entity MUST be a module. The first atom component names a unit; the
-remaining components name a module beneath that unit's source root. Thus
+resolved entity MUST be a module or one public top-level declaration of a
+module. The first atom component names a unit; the remaining components name a
+module beneath that unit's source root, optionally followed by exactly one
+declaration name. Thus
 `@hello.model` resolves to the local `hello` target's `model.vib`, while
 `@std.text` resolves through the `@std` dependency alias. The resolver never
 guesses from the importing file's directory.
@@ -339,10 +344,17 @@ cycles are errors. The atom is resolved only because the import grammar expects
 an entity reference; the same atom in expression position remains an ordinary
 value.
 
-An import makes only the target module alias visible. Public declarations are
-referenced as `alias.name`; nested effect operations use
-`alias.root.operation`. The standard library is an ordinary pinned dependency,
-not an ambient prelude.
+A module import makes only the target module alias visible. Public declarations
+are referenced as `alias.name`; nested effect operations use
+`alias.root.operation`. A declaration import, such as
+`(import ordering @std.core.ordering)`, binds its alias to that one
+declaration in every namespace the declaration occupies, so `ordering` then
+names the type and `ordering.less` its variant; members of a declared type are
+reached through the alias exactly as through the type name. Because the layout
+rule makes a module a leaf, a path never denotes both a module and a
+declaration. Apart from the closed core and role vocabulary the type chapter
+lists, the standard library is imported explicitly like any other package; it
+is not an ambient prelude.
 
 ## Dependencies and lock
 
@@ -377,7 +389,7 @@ source identities, revisions, content hashes, and vendor paths:
 (record
   format: @project-lock.v1
   project: "sha256:..."
-  dependencies: (map
+  dependencies: (dict
     @std (record
       kind: @git
       source: "https://github.com/nahharris/vibra-stdlib.git"
@@ -393,87 +405,60 @@ They reject a missing vendor tree, stale lock, changed vendored content, path
 escape, or undeclared dependency. Local dependencies are not copied and are
 fingerprinted on every workspace snapshot.
 
-### M2 bootstrap trust input
+### Toolchain standard-library input
 
-Before ordinary dependency delivery exists, M2 has one offline standard-library
-input. The input is the repository-owned byte file
-`stdlib/m2/bootstrap.vibon`, and its authority is the adjacent
-`stdlib/m2/bootstrap-manifest.vibon`. The manifest is the only source of the
-bootstrap identity: it records the fixed package name `vibra-stdlib`, exact
-package version `0.1.0`, the artifact's exact `sha256:` digest, an Ed25519
-public key, a detached signature over the artifact bytes, and the ordered
-import map. The manifest bytes are pinned to the reviewed build-time trust
-input. Its package name MUST match the `package` string inside the signed
-artifact; its package version is the exact M2 bootstrap package version. The
-checked-in public key is the toolchain key for this repository; a project
-file, filename, source annotation, conformance profile, or copied declaration
-never supplies authority.
+M3 replaces the M2 bootstrap input, with no transition period and no fallback
+between the two. The signed artifact, detached signature, toolchain public key,
+and their digests are retired. A signature verified against a key that is
+compiled into the same binary as the signed bytes adds no authority: whoever
+can change the embedded modules can change the embedded key. Authority instead
+comes only from embedding: the standard library is part of the toolchain build,
+and nothing a project supplies can add to it.
 
-The Step 1 artifact identity is fixed at
-`sha256:8dd00d7ecbe068205775cd74a0fdf54ffd32f8c0710da362ab938edee567e103`.
-The toolchain public-key file is
-`stdlib/m2/toolchain-ed25519.pub` with fixed digest
-`sha256:fe5736bd57729053562bf6617fbe0acd1d81f66e9cb930341556c4808f3b1509`.
-The key file is one PEM `PUBLIC KEY` block whose DER body is exactly the
-RFC 8410 Ed25519 `SubjectPublicKeyInfo` prefix followed by 32 key bytes; any
-other key shape is rejected. The detached signature is base64 Ed25519 over the
-artifact bytes; its checked
-in file has digest
-`sha256:f6bad514c77cf8dac2dc2309df174cb3f25425c681258db276e240a4af2a5e63`.
-These values are part of the M2 contract and may change only with a reviewed
-bootstrap-contract change that replaces the signature and all dependent
-evidence together.
+The input is the repository directory `stdlib/`. Its authority is
+`stdlib/manifest.vibon`, a closed `@stdlib-manifest.v1` record with fields, in
+order, `format`, `package-name`, `package-version`, `modules`, `compiler`,
+`native`, and `assertions`. `package-name` is `"vibra-stdlib"` and
+`package-version` is `"0.2.0"`. `modules` is a dict from each module atom to a
+record with `path` (a `stdlib/src/`-relative slash path), `sha256` (the
+`sha256:` digest of the module's exact bytes), and `role` (`@source` or
+`@test-registry`). `compiler` lists every `@compiler` symbol the modules may
+bind, `native` lists every native implementation symbol the modules may name
+with `native:`, and `assertions` lists the test-only assertion members.
 
-The toolchain embeds these reviewed files, including both mapped modules, at
-build time. `check`, `run`, and `test` verify the embedded bytes; they never
-read the bootstrap from the project, the build checkout, or the installation
-directory, so a relocated toolchain binary behaves identically. The verifier
-is a pure function of those bytes.
+The toolchain embeds the manifest and every listed module at build time. At
+load it decodes the manifest through its closed record, hashes each embedded
+module against its entry, and requires every `external: @compiler` declaration
+to name a listed symbol whose signature matches the registry exactly. Every
+`native:` symbol MUST likewise be listed and implemented by the toolchain, and
+every language role MUST be claimed by exactly one `role:` declaration. A
+mismatch is an internal toolchain defect reported as an operational provenance
+diagnostic, never a fallback. `check`, `run`, and `test` never read the
+standard library from the project, the build checkout, the installation
+directory, a vendor tree, a cache, or the network.
 
-The verifier reads the manifest and artifact as bytes, decodes the manifest
-through a closed typed record and checks its format and field types, computes SHA-256 over the exact artifact bytes, and
-rejects a digest mismatch before parsing or resolving any bootstrap record. It
-then verifies the detached Ed25519 signature with the fixed public key whose
-digest is above and rejects an invalid signature. The manifest's key path and
-digest must match that fixed identity; a manifest cannot select another key.
-The verifier accepts no alternate encoding,
-newline normalization, path alias, symlink, archive member, network URL, or
-environment override. A failure is an operational provenance diagnostic and
-must not fall back to a vendored or ambient standard library.
+The admitted modules enter the resolver as the `vibra-stdlib@0.2.0` package
+with unit `@std`, keep that provenance in every declaration identity, and are
+imported explicitly; there is no ambient prelude. A declaration outside this
+embedded package that writes `external:` acquires no provider authority and is
+rejected before execution. The M3 module set is `@std.core`, `@std.option`,
+`@std.result`, `@std.bool`, `@std.char`, `@std.text`, `@std.bytes`,
+the builtin-member module `@std.builtin`, and the test-registry module
+`@std.assert`. `@std.builtin` is never imported: it declares the members of the
+builtin numeric, `array`, `dict`, and `tuple` types, which are reached
+through those type paths; Stage 3B adds its own
+modules by the same rule. Adding a module or symbol is a specification change to
+this list and to the runtime registry.
 
-The manifest's import map is closed in M2. `@std.text` maps to the trusted text
-module and `@std.assert` maps to the trusted assertion module. Each map value
-contains the canonical relative path and SHA-256 of that module's exact bytes;
-the verifier decodes the signed artifact through its own closed typed record,
-requires its `package`, import map, and symbol lists to equal the manifest's
-structurally (the same module atom, path, digest, and role in each entry, in
-order), and hashes each module's bytes against its entry before admitting any
-declaration or test registry member. An
-import is accepted only when its resolved module identity is exactly the
-mapped identity; users must write the import explicitly. No standard-library
-module is an ambient prelude, and ordinary packages cannot add, replace, or
-rebind a bootstrap map entry. After verification, the mapped modules enter the
-resolver as a distinct `vibra-stdlib@0.1.0` package with unit `@std` and their
-canonical module paths. The resolver MUST retain that package provenance in
-their declaration identities. The overlay is added only from the verified
-manifest; it is not loaded through a project dependency edge, vendor directory,
-cache, or fallback search. Ordinary project dependency edges remain explicit
-and unavailable in M2.
-
-The combined project and overlay graph MUST keep source IDs unique across all
-packages because a source ID selects the document used for diagnostic spans.
-If a project module and a verified module use the same source ID, resolution
+The combined project and standard-library graph MUST keep source IDs unique
+across all packages, because a source ID selects the document used for
+diagnostic spans. A project module that reuses an embedded module's source ID
 emits `@module.source-id-collision`; the affected selected graph is not type
 checked or executed.
 
-The bootstrap record contains the C7 pure text symbols and the C9 assertion
-member names. It is an allowlist and provenance input, not a second language
-grammar. `stdlib/m2/src/std/text.vib` is the signed pure declaration module;
-`stdlib/m2/src/std/assert.vib` is the signed marker module whose test-only
-members come from the registry list. Step 8 verifies every listed byte before
-admitting compiler declarations, and Step 13 supplies the assertion behavior.
-M2 never performs Git, registry, or network resolution while loading this
-input.
+Builtin type names are reserved alias and module-level value spellings, as the
+type chapter states, because their members are reached by the same dotted path
+an alias would start.
 
 There is no registry, version range, lock auto-upgrade, lifecycle script, or
 dependency-provided executable in v1.
@@ -499,7 +484,7 @@ into a target program:
 (import assert @std.assert)
 
 (test "greets by name"
-  (assert.equal-str (greet "Ada") "hello, Ada"))
+  (assert.equal (greet "Ada") "hello, Ada"))
 ```
 
 A test's identity is its canonical module identity and decoded string name.
@@ -552,7 +537,7 @@ An M2 test module MUST import `@std.assert` explicitly. If a module declares
 one or more tests but has no import targeting exactly `@std.assert`, emit one
 `@module.missing-required-import` diagnostic at the string name of its first
 test declaration. This is an ordinary source error: all selected tests are
-invalid and none execute. The verified bootstrap exports exactly these
+invalid and none execute. The embedded `@std.assert` module exports exactly these
 test-only assertion members; they are resolved by their canonical module
 identity and are not user-definable external declarations:
 
@@ -618,6 +603,24 @@ when the selector is omitted; an unknown explicit selector is invalid input.
 The runner isolates each test's values and host event log. Time and random
 operations use deterministic providers by default. An unconsumed failure or
 unrecorded dependency on a nondeterministic provider fails the test.
+
+### M3 assertion contract
+
+Stage 3A replaces the five monomorphic `assert.equal-*` members with one
+generic member and keeps `assert.true` and `assert.false` unchanged. The
+removed members are not retained as aliases.
+
+| Member | Exact signature | Passing behavior |
+| --- | --- | --- |
+| `assert.equal` | `(expected t) (actual t) -> void`, `where: (t any)` | succeeds when both operands have the same canonical value encoding |
+
+The comparison is the canonical value encoding of the runtime chapter, so it is
+defined for every value except a function. An operand whose type is or
+contains a `fn` type emits `@type.function-not-equatable` at that operand. The
+encoding also supplies the `expected` and `actual` failure strings. Because it
+compares encodings rather than calling `equatable`, `assert.equal` is a
+test-only surface and grants no equality to ordinary code. Every other part of
+the M2 assertion contract is unchanged.
 
 ## Build products
 

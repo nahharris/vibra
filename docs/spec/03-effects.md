@@ -114,8 +114,9 @@ Effectful iteration is written as a recursive module-level function that calls
 effectful higher-order iterator combinator in v1.
 
 Nominal constructor application, tuple and record projection,
-array/map/string/byte lookup, and closed native collection construction are
-pure applications. They add no root and no edge to the function-call graph.
+array/dict/string/byte lookup, and the `tupleof`, `recordof`, and `enumof`
+forms are pure applications. They add
+no root and no edge to the function-call graph.
 Effects performed while evaluating their callee or operands still contribute
 normally.
 

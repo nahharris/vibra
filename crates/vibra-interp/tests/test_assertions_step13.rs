@@ -5,8 +5,8 @@
 use vibra_diagnostics::ByteSpan;
 use vibra_interp::Interpreter;
 use vibra_ir::{
-    CheckedFunction, CheckedProgram, Expr, FunctionSignature, PrimitiveType,
-    SourceOrigin, TestAssertion, Value,
+    CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin,
+    TestAssertion, Type, Value,
 };
 
 fn origin() -> SourceOrigin {
@@ -15,7 +15,7 @@ fn origin() -> SourceOrigin {
 
 fn program(assertion: TestAssertion, operands: Vec<Value>) -> CheckedProgram {
     let assertion_origin =
-        SourceOrigin::new("stdlib/m2/src/std/assert.vib", ByteSpan::empty_at(0));
+        SourceOrigin::new("stdlib/src/std/assert.vib", ByteSpan::empty_at(0));
     let assertion_function = CheckedFunction::new_test_assertion(
         assertion.symbol(),
         assertion,
@@ -27,10 +27,10 @@ fn program(assertion: TestAssertion, operands: Vec<Value>) -> CheckedProgram {
         .into_iter()
         .map(|value| Expr::literal(value, call_origin.clone()))
         .collect();
-    let body = Expr::call(0, arguments, PrimitiveType::Void, call_origin.clone());
+    let body = Expr::call(0, arguments, Type::Void, call_origin.clone());
     let test = CheckedFunction::new(
         "@tests.assertions::\"example\"",
-        FunctionSignature::new(Vec::new(), PrimitiveType::Void),
+        FunctionSignature::new(Vec::new(), Type::Void),
         body,
         call_origin,
     )
@@ -42,7 +42,7 @@ fn program(assertion: TestAssertion, operands: Vec<Value>) -> CheckedProgram {
 #[test]
 fn passing_assertion_is_a_void_test_completion() {
     let execution = Interpreter::run_test(&program(
-        TestAssertion::EqualI32,
+        TestAssertion::Equal,
         vec![Value::I32(7), Value::I32(7)],
     ))
     .expect("test execution");
@@ -54,7 +54,7 @@ fn passing_assertion_is_a_void_test_completion() {
 #[test]
 fn false_assertion_is_structured_and_carries_the_call_origin() {
     let execution = Interpreter::run_test(&program(
-        TestAssertion::EqualStr,
+        TestAssertion::Equal,
         vec![
             Value::Str("expected".to_owned()),
             Value::Str("actual".to_owned()),
@@ -63,9 +63,9 @@ fn false_assertion_is_structured_and_carries_the_call_origin() {
     .expect("test execution");
     let failure = execution.assertion_failure().expect("assertion failure");
 
-    assert_eq!(failure.assertion(), "@std.assert.equal-str");
-    assert_eq!(failure.expected(), &Value::Str("expected".to_owned()));
-    assert_eq!(failure.actual(), &Value::Str("actual".to_owned()));
+    assert_eq!(failure.assertion(), "@std.assert.equal");
+    assert_eq!(failure.expected(), "\"expected\"");
+    assert_eq!(failure.actual(), "\"actual\"");
     assert_eq!(failure.origin().source_id(), "tests/assertions.vib");
     assert_eq!(failure.origin().span(), ByteSpan::new(10, 25));
     assert!(execution.audit_trace().is_empty());
@@ -86,13 +86,13 @@ fn ordinary_run_allows_unused_test_assertion_markers() {
     let assertion = CheckedFunction::new_test_assertion(
         TestAssertion::True.symbol(),
         TestAssertion::True,
-        SourceOrigin::new("stdlib/m2/src/std/assert.vib", ByteSpan::empty_at(0)),
+        SourceOrigin::new("stdlib/src/std/assert.vib", ByteSpan::empty_at(0)),
     )
     .expect("closed assertion function");
     let origin = origin();
     let entry = CheckedFunction::new(
         "@demo@0.1.0/app.main.execute",
-        FunctionSignature::new(Vec::new(), PrimitiveType::Void),
+        FunctionSignature::new(Vec::new(), Type::Void),
         Expr::literal(Value::Void, origin.clone()),
         origin,
     )
@@ -106,10 +106,10 @@ fn ordinary_run_allows_unused_test_assertion_markers() {
 #[test]
 fn assertion_failure_stops_nested_helper_arguments_and_later_calls() {
     let assertion_origin =
-        SourceOrigin::new("stdlib/m2/src/std/assert.vib", ByteSpan::empty_at(0));
+        SourceOrigin::new("stdlib/src/std/assert.vib", ByteSpan::empty_at(0));
     let assertion = CheckedFunction::new_test_assertion(
-        TestAssertion::EqualStr.symbol(),
-        TestAssertion::EqualStr,
+        TestAssertion::Equal.symbol(),
+        TestAssertion::Equal,
         assertion_origin,
     )
     .expect("closed assertion function");
@@ -127,12 +127,12 @@ fn assertion_failure_stops_nested_helper_arguments_and_later_calls() {
                 first_call_origin.clone(),
             ),
         ],
-        PrimitiveType::Void,
+        Type::Void,
         first_call_origin.clone(),
     );
     let helper = CheckedFunction::new(
         "@demo@0.1.0/tests.assertions.helper",
-        FunctionSignature::new(Vec::new(), PrimitiveType::Str),
+        FunctionSignature::new(Vec::new(), Type::Str),
         Expr::sequence(
             vec![
                 first_assertion,
@@ -148,7 +148,7 @@ fn assertion_failure_stops_nested_helper_arguments_and_later_calls() {
     .expect("string helper");
     let sink = CheckedFunction::new(
         "@demo@0.1.0/tests.assertions.sink",
-        FunctionSignature::new(vec![PrimitiveType::Str], PrimitiveType::Void),
+        FunctionSignature::new(vec![Type::Str], Type::Void),
         Expr::literal(Value::Void, first_call_origin.clone()),
         first_call_origin.clone(),
     )
@@ -160,10 +160,10 @@ fn assertion_failure_stops_nested_helper_arguments_and_later_calls() {
         vec![Expr::call(
             1,
             Vec::new(),
-            PrimitiveType::Str,
+            Type::Str,
             first_call_origin.clone(),
         )],
-        PrimitiveType::Void,
+        Type::Void,
         first_call_origin,
     );
     let later_assertion = Expr::call(
@@ -178,12 +178,12 @@ fn assertion_failure_stops_nested_helper_arguments_and_later_calls() {
                 later_call_origin.clone(),
             ),
         ],
-        PrimitiveType::Void,
+        Type::Void,
         later_call_origin.clone(),
     );
     let test = CheckedFunction::new(
         "@tests.assertions::\"nested\"",
-        FunctionSignature::new(Vec::new(), PrimitiveType::Void),
+        FunctionSignature::new(Vec::new(), Type::Void),
         Expr::sequence(vec![sink_call, later_assertion], later_call_origin.clone()),
         later_call_origin,
     )
@@ -196,7 +196,7 @@ fn assertion_failure_stops_nested_helper_arguments_and_later_calls() {
         .assertion_failure()
         .expect("first assertion failure");
 
-    assert_eq!(failure.expected(), &Value::Str("first-expected".to_owned()));
-    assert_eq!(failure.actual(), &Value::Str("first-actual".to_owned()));
+    assert_eq!(failure.expected(), "\"first-expected\"");
+    assert_eq!(failure.actual(), "\"first-actual\"");
     assert_eq!(failure.origin().span(), ByteSpan::new(20, 43));
 }

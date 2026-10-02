@@ -1,0 +1,24 @@
+(defint shape
+  (defn merge (left self right self) i32)
+  (defn both (left self right self) i32
+    (shape.merge left right))
+  (defn reader (value self) (fn (self) i32))
+  (defn copy (value self) (array self)))
+
+(defint factory
+  (defn empty () self))
+
+(defn default-second-self (left shape right shape) i32
+  (shape.both left right))
+
+(defn function-operand (value shape) (fn (shape) i32)
+  (shape.reader value))
+
+(defn covariant (value shape) (array shape)
+  (shape.copy value))
+
+(defn no-written-type (value shape) i32
+  (let read shape.merge 0i32))
+
+(defn by-destination () i32
+  (let make factory.empty 0i32))

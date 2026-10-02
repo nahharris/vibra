@@ -1,0 +1,23 @@
+id = "V1-TYPE-NOMINAL-infinite-size"
+rule = "V1-TYPE-NOMINAL"
+profile = "static-v1"
+operation = "type-check"
+description = "A declared type whose expansion repeats without an array, dict, or function between is rejected at the first declaration of the cycle."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+
+
+[[expect.diagnostics]]
+code = "@type.infinite-size"
+level = "@error"
+source = "input.vib"
+span = [0, 33]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [22, 31]

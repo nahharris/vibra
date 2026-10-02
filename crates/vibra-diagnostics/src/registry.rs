@@ -250,7 +250,7 @@ diagnostic_registry! {
     NameReservedDeclaration => "@name.reserved-declaration", Name, Error, None,
         "a declaration or generic name uses a reserved type head";
     NameReservedValueSpelling => "@name.reserved-value-spelling", Name, Error, None,
-        "a module-level value is spelled `map`, `array`, or `tuple`";
+        "a module-level value or import alias is spelled as a builtin type name";
     ModuleFileDirectoryCollision => "@module.file-directory-collision", Module, Error, None,
         "a module path is claimed by both a file and a directory";
     ModuleSourceIdCollision => "@module.source-id-collision", Module, Error, None,
@@ -289,8 +289,6 @@ diagnostic_registry! {
         "a literal lies outside the range of its suffixed type";
     TypeInitializerCycle => "@type.initializer-cycle", Type, Error, None,
         "module value initializers form a cycle";
-    TypeAnonymousTypeBody => "@type.anonymous-type-body", Type, Error, None,
-        "`record`, `enum`, `union`, or `newtype` appears outside a declaration body";
     TypeUndispatchableContractMember => "@type.undispatchable-contract-member", Type, Error, None,
         "a contract member does not name `self` in a dispatchable position";
     TypeUnionTooFewMembers => "@type.union-too-few-members", Type, Error, None,
@@ -303,6 +301,8 @@ diagnostic_registry! {
         "two implementations on one receiver overlap under instantiation";
     TypeAmbiguousImplementation => "@type.ambiguous-implementation", Type, Error, None,
         "a call matches more than one implementation";
+    TypeUnsatisfiedBound => "@type.unsatisfied-bound", Type, Error, None,
+        "a type does not implement the interface a bound or contract call needs";
     TypeAmbiguousDestination => "@type.ambiguous-destination", Type, Error, None,
         "a destination-dispatched member has no written expected type";
     TypeInvalidAscription => "@type.invalid-ascription", Type, Error, None,
@@ -313,8 +313,24 @@ diagnostic_registry! {
         "an `as` pattern names a type outside the union's member set";
     TypeRedundantConversion => "@type.redundant-conversion", Type, Error, None,
         "`from` and `try-from` are both implemented for one source";
+    TypeMismatch => "@type.mismatch", Type, Error, None,
+        "an expression's type differs from its written or required expected type";
+    TypeAmbiguousInference => "@type.ambiguous-inference", Type, Error, None,
+        "no unique type follows for a literal, empty collection, or generic argument";
+    TypeInfiniteSize => "@type.infinite-size", Type, Error, None,
+        "a recursive type expands without passing through a variable-size container";
+    TypeInvalidDictKey => "@type.invalid-dict-key", Type, Error, None,
+        "a dict key type has no `equatable`, `ordered`, and `hashable` conformance";
+    TypeInvalidTry => "@type.invalid-try", Type, Error, None,
+        "`try` is outside a matching `option` or `result` context";
+    TypeUnhandledFallible => "@type.unhandled-fallible", Type, Error, None,
+        "a `result` value is ignored without an explicit discard";
     PatternRefutableBinding => "@pattern.refutable-binding", Pattern, Error, None,
         "a binding pattern is refutable for its expected type";
+    PatternNonExhaustive => "@pattern.non-exhaustive", Pattern, Error, None,
+        "the arms of a `match` do not cover every value of the scrutinee type";
+    PatternUnreachableArm => "@pattern.unreachable-arm", Pattern, Error, None,
+        "earlier arms of a `match` already cover every value this arm matches";
     EffectOutsideCeiling => "@effect.outside-ceiling", Effect, Error, None,
         "a performed effect root lies outside the written or default ceiling";
     EffectInvalidReference => "@effect.invalid-reference", Effect, Error, None,
@@ -330,7 +346,7 @@ diagnostic_registry! {
     DataDuplicateField => "@data.duplicate-field", Data, Error, None,
         "a VIBON record repeats a label";
     DataDuplicateKey => "@data.duplicate-key", Data, Error, None,
-        "a VIBON map repeats a key";
+        "a VIBON dict repeats a key";
     ProjectStaleLock => "@project.stale-lock", Project, Error, None,
         "the lock does not match the declared dependencies";
     ProjectEntryOutsideTarget => "@project.entry-outside-target", Project, Error, None,
@@ -355,6 +371,8 @@ diagnostic_registry! {
         "a host operation received or returned a value its ABI does not admit";
     RuntimeInvalidCheckedProgram => "@runtime.invalid-checked-program", Runtime, Error, None,
         "checked program execution violated an M2 runtime invariant";
+    RuntimeUnobservableFunction => "@runtime.unobservable-function", Runtime, Error, None,
+        "a value that holds a function reached an observation, which has no encoding for one";
     RuntimeHostStackExhausted => "@runtime.host-stack-exhausted", Runtime, Error, None,
         "non-tail activations exhausted the reference interpreter's host stack budget";
     StyleArgumentOrder => "@style.argument-order", Style, Warning, Safe,
@@ -377,7 +395,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 76;
+    const REGISTERED_CODES: usize = 85;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {
@@ -493,7 +511,6 @@ mod tests {
             "@pattern.refutable-binding",
             "@name.reserved-value-spelling",
             "@type.function-not-equatable",
-            "@type.anonymous-type-body",
             "@type.undispatchable-contract-member",
             "@type.union-too-few-members",
             "@type.union-member-overlap",

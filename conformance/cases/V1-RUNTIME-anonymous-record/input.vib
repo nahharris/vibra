@@ -1,0 +1,3 @@
+(defn main () (record name str id u64) (same (recordof name: "Ada" id: 7u64)))
+
+(defn same (value (record id u64 name str)) (record name str id u64) value)

@@ -15,4 +15,4 @@ graph = "graph.vibon"
 code = "@tool.unavailable"
 level = "@error"
 source = "project.vibon"
-span = [158, 165]
+span = [159, 166]

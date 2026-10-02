@@ -1,0 +1,5 @@
+(deftype point (record x i32 y i32))
+(deftype shape (enum circle u32))
+(defn unknown-field () i32 ((point x: 1i32 y: 2i32) @z))
+(defn not-a-selector () i32 ((point x: 1i32 y: 2i32) 0u64))
+(defn enum-value () i32 ((shape.circle 1u32) @x))

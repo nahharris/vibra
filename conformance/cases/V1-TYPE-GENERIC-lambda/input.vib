@@ -1,0 +1,17 @@
+(defn unfixed () void
+  (do (lambda (value t) t
+        where: (t any)
+        value)
+    void))
+
+(defn contradicts () i32
+  (let same (lambda (left t right t) t
+              where: (t any)
+              left)
+    (same 1i32 "x")))
+
+(defn late () str
+  (let keep (lambda (value t) t
+              where: (t any)
+              value)
+    (keep types: (i32) "x")))

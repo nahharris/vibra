@@ -1,0 +1,13 @@
+(defn build (value i32) (record id i32 name str) (recordof name: "Ada" id: value))
+
+(defn pair () (tuple i32 str) (tupleof 1i32 "one"))
+
+(defn unit () (tuple) (tupleof))
+
+(defn choice () (enum none void some i32) (enumof some: 1i32))
+
+(defn take ((tupleof left right) (tuple i32 i32)) i32
+  (match (recordof a: left) (recordof a: n) n))
+
+(defn pick (value (enum none void some i32)) i32
+  (match value (enumof some: n) n (enumof none: -) right))

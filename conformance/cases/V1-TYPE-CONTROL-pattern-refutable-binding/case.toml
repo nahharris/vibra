@@ -1,0 +1,32 @@
+id = "V1-TYPE-CONTROL-pattern-refutable-binding"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "Refutable let, positional parameter, and lambda parameter patterns are rejected with their first unmatched shape."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@pattern.refutable-binding"
+level = "@error"
+source = "input.vib"
+span = [84, 105]
+notes = ["`(shape.empty)` is not matched"]
+
+[[expect.diagnostics]]
+code = "@pattern.refutable-binding"
+level = "@error"
+source = "input.vib"
+span = [144, 163]
+notes = ["`(tupleof false false)` is not matched"]
+
+[[expect.diagnostics]]
+code = "@pattern.refutable-binding"
+level = "@error"
+source = "input.vib"
+span = [250, 262]
+notes = ["`(array)` is not matched"]

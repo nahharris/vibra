@@ -1,0 +1,171 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:a49f233e2bf88e71c963b624771d99fa2506112c3b24e8203ea078d58a368437",
+  "sourceId": "src/main.vib",
+  "offset": 106,
+  "nodeId": "src/main.vib#106-107",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 106,
+    "sourceId": "src/main.vib",
+    "span": {
+      "sourceId": "src/main.vib",
+      "start": 106,
+      "end": 107,
+      "startPosition": {
+        "line": 5,
+        "column": 32
+      },
+      "endPosition": {
+        "line": 5,
+        "column": 33
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "open-paren",
+    "category": "expression",
+    "status": "exact",
+    "permittedForms": [
+      "lambda",
+      "do",
+      "let",
+      "if",
+      "match",
+      "as",
+      "try"
+    ],
+    "permittedLabels": [
+      "types"
+    ]
+  },
+  "role": {
+    "status": "exact",
+    "value": "@application"
+  },
+  "context": {
+    "status": "exact",
+    "value": "result"
+  },
+  "identity": {
+    "status": "unavailable",
+    "value": null
+  },
+  "expectedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "str",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "observedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "str",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": [
+      {
+        "name": "value",
+        "identity": "binder:src/main.vib:90-95"
+      }
+    ]
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": [
+      {
+        "alias": "from",
+        "module": "@std.core",
+        "sourceId": "src/main.vib",
+        "span": {
+          "sourceId": "src/main.vib",
+          "start": 0,
+          "end": 28,
+          "startPosition": {
+            "line": 1,
+            "column": 1
+          },
+          "endPosition": {
+            "line": 1,
+            "column": 29
+          }
+        }
+      }
+    ]
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": []
+  },
+  "application": {
+    "status": "exact",
+    "value": {
+      "kind": "@contract",
+      "callee": null,
+      "calleeType": {
+        "kind": "function",
+        "name": "fn",
+        "parameters": [
+          {
+            "kind": "param",
+            "name": "self",
+            "parameters": [],
+            "result": null,
+            "labelled": []
+          }
+        ],
+        "result": {
+          "kind": "primitive",
+          "name": "str",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        },
+        "labelled": []
+      },
+      "positional": [
+        {
+          "kind": "param",
+          "name": "self",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        }
+      ],
+      "labelled": [],
+      "resultType": {
+        "kind": "primitive",
+        "name": "str",
+        "parameters": [],
+        "result": null,
+        "labelled": []
+      },
+      "dispatch": {
+        "interface": "app.main.shape",
+        "member": "name",
+        "receiver": {
+          "kind": "param",
+          "name": "self",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        },
+        "selection": "dynamic",
+        "destination": false
+      }
+    }
+  },
+  "pattern": {
+    "status": "unavailable",
+    "value": null
+  }
+}

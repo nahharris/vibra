@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:a49f233e2bf88e71c963b624771d99fa2506112c3b24e8203ea078d58a368437",
+  "sourceId": "src/main.vib",
+  "offset": 684,
+  "nodeId": "src/main.vib#684-685",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 684,
+    "sourceId": "src/main.vib",
+    "span": {
+      "sourceId": "src/main.vib",
+      "start": 684,
+      "end": 685,
+      "startPosition": {
+        "line": 31,
+        "column": 5
+      },
+      "endPosition": {
+        "line": 31,
+        "column": 6
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "open-paren",
+    "category": "pattern",
+    "status": "exact",
+    "permittedForms": [
+      "tuple",
+      "array",
+      "as"
+    ],
+    "permittedLabels": []
+  },
+  "role": {
+    "status": "exact",
+    "value": "@unknown"
+  },
+  "context": {
+    "status": "exact",
+    "value": "result"
+  },
+  "identity": {
+    "status": "unavailable",
+    "value": null
+  },
+  "expectedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "i32",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "observedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "i32",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": [
+      {
+        "name": "value",
+        "identity": "binder:src/main.vib:648-653"
+      },
+      {
+        "name": "x",
+        "identity": "binder:src/main.vib:694-695"
+      },
+      {
+        "name": "y",
+        "identity": "binder:src/main.vib:699-700"
+      }
+    ]
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": [
+      {
+        "alias": "from",
+        "module": "@std.core",
+        "sourceId": "src/main.vib",
+        "span": {
+          "sourceId": "src/main.vib",
+          "start": 0,
+          "end": 28,
+          "startPosition": {
+            "line": 1,
+            "column": 1
+          },
+          "endPosition": {
+            "line": 1,
+            "column": 29
+          }
+        }
+      }
+    ]
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": []
+  },
+  "application": {
+    "status": "unavailable",
+    "value": null
+  },
+  "pattern": {
+    "status": "exact",
+    "value": {
+      "kind": "@record",
+      "scrutineeType": {
+        "kind": "declared",
+        "name": "app.main.point",
+        "parameters": [],
+        "result": null,
+        "labelled": []
+      },
+      "narrowed": null,
+      "unionMembers": []
+    }
+  }
+}

@@ -1,0 +1,17 @@
+id = "V1-TYPE-INTERFACE-default-override"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "An impl block cannot redeclare a default contract member."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.default-override"
+level = "@error"
+source = "input.vib"
+span = [192, 232]

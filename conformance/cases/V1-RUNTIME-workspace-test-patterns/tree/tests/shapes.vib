@@ -1,0 +1,18 @@
+(import assert @std.assert)
+(import shapes @geo.shapes)
+
+(test "matches an imported variant"
+  (assert.true
+    (match (shapes.size.large 3u64)
+      (shapes.size.large 3u64) true
+      - false)))
+
+(test "calls a destructuring function"
+  (assert.equal (shapes.x-of (shapes.point x: 4i32 y: 5i32)) 4i32))
+
+(test "destructures in let"
+  (let (shapes.point y: y) (shapes.point x: 1i32 y: 2i32)
+    (assert.equal y 2i32)))
+
+(test "matches a void variant"
+  (assert.true (match (shapes.weight (shapes.size.small)) 0u64 true - false)))

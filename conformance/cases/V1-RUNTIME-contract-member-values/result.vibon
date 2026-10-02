@@ -1,0 +1,1 @@
+(record type: (record type: @tuple arguments: (array @str @str @str @std.core.ordering @str @str)) value: (record kind: @tuple values: (array "point" "integer" "point" (record kind: @enum type: @std.core.ordering variant: @less) "point" "point")))

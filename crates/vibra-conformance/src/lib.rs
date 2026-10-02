@@ -34,6 +34,7 @@ mod reader;
 mod resolve;
 mod runner;
 mod types;
+mod workspace_index;
 mod workspace_query;
 mod workspace_semantic;
 
@@ -55,6 +56,7 @@ pub use runner::{
     QueryObservation, RunReport,
 };
 pub use types::{InterpreterV1Handler, StaticV1TypeHandler};
+pub use workspace_index::ToolingV1IndexHandler;
 pub use workspace_query::ToolingV1QueryHandler;
 pub use workspace_semantic::{
     InterpreterV1WorkspaceRunHandler, InterpreterV1WorkspaceTestHandler,

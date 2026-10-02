@@ -1,0 +1,7 @@
+(import option @std.option)
+
+(defn keyed
+  (m (dict (tuple str (record id u64) (enum on void off void)) atom)
+    b bytes)
+  (option.option u8)
+  (b 0u64))

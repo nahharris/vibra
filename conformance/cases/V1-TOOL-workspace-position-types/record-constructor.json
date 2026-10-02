@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:a49f233e2bf88e71c963b624771d99fa2506112c3b24e8203ea078d58a368437",
+  "sourceId": "src/main.vib",
+  "offset": 395,
+  "nodeId": "src/main.vib#395-396",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 395,
+    "sourceId": "src/main.vib",
+    "span": {
+      "sourceId": "src/main.vib",
+      "start": 395,
+      "end": 396,
+      "startPosition": {
+        "line": 17,
+        "column": 23
+      },
+      "endPosition": {
+        "line": 17,
+        "column": 24
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "open-paren",
+    "category": "expression",
+    "status": "exact",
+    "permittedForms": [
+      "lambda",
+      "do",
+      "let",
+      "if",
+      "match",
+      "as",
+      "try"
+    ],
+    "permittedLabels": [
+      "types"
+    ]
+  },
+  "role": {
+    "status": "exact",
+    "value": "@application"
+  },
+  "context": {
+    "status": "exact",
+    "value": "result"
+  },
+  "identity": {
+    "status": "unavailable",
+    "value": null
+  },
+  "expectedType": {
+    "status": "unavailable",
+    "value": null
+  },
+  "observedType": {
+    "status": "exact",
+    "value": {
+      "kind": "declared",
+      "name": "app.main.point",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": []
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": [
+      {
+        "alias": "from",
+        "module": "@std.core",
+        "sourceId": "src/main.vib",
+        "span": {
+          "sourceId": "src/main.vib",
+          "start": 0,
+          "end": 28,
+          "startPosition": {
+            "line": 1,
+            "column": 1
+          },
+          "endPosition": {
+            "line": 1,
+            "column": 29
+          }
+        }
+      }
+    ]
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": []
+  },
+  "application": {
+    "status": "exact",
+    "value": {
+      "kind": "@constructor",
+      "callee": null,
+      "calleeType": null,
+      "positional": [],
+      "labelled": [
+        {
+          "name": "x",
+          "type": {
+            "kind": "primitive",
+            "name": "i32",
+            "parameters": [],
+            "result": null,
+            "labelled": []
+          }
+        },
+        {
+          "name": "y",
+          "type": {
+            "kind": "primitive",
+            "name": "i32",
+            "parameters": [],
+            "result": null,
+            "labelled": []
+          }
+        }
+      ],
+      "resultType": {
+        "kind": "declared",
+        "name": "app.main.point",
+        "parameters": [],
+        "result": null,
+        "labelled": []
+      },
+      "dispatch": null
+    }
+  },
+  "pattern": {
+    "status": "unavailable",
+    "value": null
+  }
+}

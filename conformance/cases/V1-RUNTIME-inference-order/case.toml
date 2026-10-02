@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-inference-order"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A generic call types an unsuffixed literal from the operand that fixes the parameter in either order, and a written result type fixes the parameter so that either operand widens to it."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

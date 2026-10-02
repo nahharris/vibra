@@ -1,0 +1,23 @@
+(defn main () (tuple (dict (union i32 str) i32) (option i32) core.ordering (dict (tuple i32 (union i32 str)) bool) (many i32) (nest i32))
+  (tupleof
+    (dict.of (as (union i32 str) "a") 1i32 (as (union i32 str) 2i32) 2i32 (as (union i32 str) 1i32) 3i32)
+    ((dict.of (as (union i32 str) "a") 1i32) (as (union i32 str) "a"))
+    (ordered.compare (as (union i32 str) 9i32) (as (union i32 str) "a"))
+    (dict.of (tupleof 1i32 (as (union i32 str) "b")) true (tupleof 1i32 (as (union i32 str) 5i32)) false)
+    (written)
+    (as (nest i32) (nest (array.of 1i32)))))
+
+(import core @std.core)
+(import ordered @std.core.ordered)
+
+; A declared union keeps its written member order, so it may be generic.
+(deftype many (union (array t) str)
+  where: (t any))
+
+; The written result type fixes `t`, which the injected member never names.
+(defn written () (many i32)
+  (many "s"))
+
+; No one substitution makes these two members equal.
+(deftype nest (union (array t) (array (array t)))
+  where: (t any))

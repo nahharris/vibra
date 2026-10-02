@@ -1,0 +1,31 @@
+id = "V1-TYPE-CONTROL-pattern-redeclaration"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "Pattern binders may neither shadow a visible name nor repeat within one pattern."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "input.vib"
+span = [63, 68]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [14, 19]
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "input.vib"
+span = [139, 143]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [134, 138]

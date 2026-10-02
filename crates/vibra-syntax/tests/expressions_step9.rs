@@ -16,7 +16,7 @@ use vibra_syntax::{Declaration, ExpressionKind, PatternKind, TypeExpr, parse_sou
 fn nested_expressions_and_patterns_have_step9_structure() {
     let source = r#"
 (defn run (value (tuple i32 i32)) i32
-  (let (tuple left right) value
+  (let (tupleof left right) value
     (match left
       (as i32 n) (if true n right)
       (option.none) (try right))))
@@ -210,10 +210,6 @@ fn malformed_step9_forms_report_existing_syntax_diagnostics() {
             DiagnosticCode::SyntaxInvalidForm,
         ),
         ("(defn bad () i32 -)", DiagnosticCode::SyntaxInvalidForm),
-        (
-            "(defn bad (value i32) i32 (let @info value value))",
-            DiagnosticCode::SyntaxInvalidForm,
-        ),
         (
             "(defn bad (value i32) i32 (let (bind x) value value))",
             DiagnosticCode::SyntaxRetiredForm,

@@ -1,0 +1,20 @@
+(defn main () (tuple (option str) core.ordering i32)
+  (tupleof
+    (index.find (index entries: (dict.of 2u8 "two" 1u8 "one")) 1u8)
+    (let order
+      (lambda (left k right k) core.ordering
+        where: (k ordered)
+        (ordered.compare left right))
+      (order "b" "a"))
+    (index.size (index entries: (dict.of (tupleof 1i32 \a) 0i32)))))
+
+(import core @std.core)
+(import ordered @std.core.ordered)
+
+; An index keyed by any ordered type, whose methods see the bound.
+(deftype index (record entries (dict k v))
+  where: (k ordered v any)
+  (defn find (value self key k) (option v)
+    ((value @entries) key))
+  (defn size (value self) i32
+    1i32))

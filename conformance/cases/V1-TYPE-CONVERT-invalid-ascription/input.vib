@@ -1,0 +1,5 @@
+(deftype number (union i32 f32))
+
+(defn widen () i64 (as i64 3i32))
+
+(defn narrow (some-number number) i32 (as i32 some-number))

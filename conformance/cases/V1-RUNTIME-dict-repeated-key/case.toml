@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-dict-repeated-key"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A repeated dict key replaces the earlier pair, key and value: under a user compare that calls two different keys equal, the dict keeps the later key."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

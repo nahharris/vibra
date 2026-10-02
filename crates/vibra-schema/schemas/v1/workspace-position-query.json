@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:vibra:schema:v1:workspace-position-query",
   "title": "Vibra semantic workspace source-position query",
-  "description": "A deterministic M2 workspace query that embeds the closed M1 structural result and independently available semantic facts.",
+  "description": "A deterministic workspace query that embeds the closed structural result and independently available semantic facts.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -20,7 +20,8 @@
     "visibleLocals",
     "visibleImports",
     "declarationCandidates",
-    "application"
+    "application",
+    "pattern"
   ],
   "properties": {
     "schemaVersion": { "const": 1 },
@@ -43,7 +44,8 @@
     "visibleLocals": { "$ref": "#/$defs/localFact" },
     "visibleImports": { "$ref": "#/$defs/importFact" },
     "declarationCandidates": { "$ref": "#/$defs/identityListFact" },
-    "application": { "$ref": "#/$defs/applicationFact" }
+    "application": { "$ref": "#/$defs/applicationFact" },
+    "pattern": { "$ref": "#/$defs/patternFact" }
   },
   "$defs": {
     "position": {
@@ -147,6 +149,90 @@
             "result": { "$ref": "#/$defs/type" },
             "labelled": { "type": "array", "items": { "$ref": "#/$defs/labelled" } }
           }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name", "parameters", "result", "labelled"],
+          "properties": {
+            "kind": { "enum": ["declared", "interface", "param", "atom"] },
+            "name": { "type": "string", "minLength": 1 },
+            "parameters": { "type": "array", "items": { "$ref": "#/$defs/type" } },
+            "result": { "type": "null" },
+            "labelled": { "type": "array", "items": { "$ref": "#/$defs/labelled" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name", "parameters", "result", "labelled"],
+          "properties": {
+            "kind": { "const": "tuple" },
+            "name": { "const": "tuple" },
+            "parameters": { "type": "array", "items": { "$ref": "#/$defs/type" } },
+            "result": { "type": "null" },
+            "labelled": { "type": "array", "items": { "$ref": "#/$defs/labelled" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name", "parameters", "result", "labelled"],
+          "properties": {
+            "kind": { "const": "array" },
+            "name": { "const": "array" },
+            "parameters": { "type": "array", "items": { "$ref": "#/$defs/type" } },
+            "result": { "type": "null" },
+            "labelled": { "type": "array", "items": { "$ref": "#/$defs/labelled" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name", "parameters", "result", "labelled"],
+          "properties": {
+            "kind": { "const": "dict" },
+            "name": { "const": "dict" },
+            "parameters": { "type": "array", "items": { "$ref": "#/$defs/type" } },
+            "result": { "type": "null" },
+            "labelled": { "type": "array", "items": { "$ref": "#/$defs/labelled" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name", "parameters", "result", "labelled"],
+          "properties": {
+            "kind": { "const": "record" },
+            "name": { "const": "record" },
+            "parameters": { "type": "array", "items": { "$ref": "#/$defs/type" } },
+            "result": { "type": "null" },
+            "labelled": { "type": "array", "items": { "$ref": "#/$defs/labelled" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name", "parameters", "result", "labelled"],
+          "properties": {
+            "kind": { "const": "enum" },
+            "name": { "const": "enum" },
+            "parameters": { "type": "array", "items": { "$ref": "#/$defs/type" } },
+            "result": { "type": "null" },
+            "labelled": { "type": "array", "items": { "$ref": "#/$defs/labelled" } }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "name", "parameters", "result", "labelled"],
+          "properties": {
+            "kind": { "const": "union" },
+            "name": { "const": "union" },
+            "parameters": { "type": "array", "items": { "$ref": "#/$defs/type" } },
+            "result": { "type": "null" },
+            "labelled": { "type": "array", "items": { "$ref": "#/$defs/labelled" } }
+          }
         }
       ]
     },
@@ -218,15 +304,54 @@
     "application": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "callee", "calleeType", "positional", "labelled", "resultType"],
+      "required": ["kind", "callee", "calleeType", "positional", "labelled", "resultType", "dispatch"],
       "properties": {
-        "kind": { "const": "@function" },
+        "kind": { "enum": ["@function", "@constructor", "@contract"] },
         "callee": { "$ref": "#/$defs/identityOrNull" },
         "calleeType": { "anyOf": [{ "$ref": "#/$defs/type" }, { "type": "null" }] },
         "positional": { "type": "array", "items": { "$ref": "#/$defs/type" } },
         "labelled": { "type": "array", "items": { "$ref": "#/$defs/labelled" } },
-        "resultType": { "$ref": "#/$defs/type" }
+        "resultType": { "$ref": "#/$defs/type" },
+        "dispatch": { "anyOf": [{ "$ref": "#/$defs/dispatch" }, { "type": "null" }] }
+      },
+      "if": { "properties": { "kind": { "const": "@contract" } } },
+      "then": { "properties": { "dispatch": { "$ref": "#/$defs/dispatch" } } },
+      "else": { "properties": { "dispatch": { "type": "null" } } }
+    },
+    "dispatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["interface", "member", "receiver", "selection", "destination"],
+      "properties": {
+        "interface": { "type": "string", "minLength": 1 },
+        "member": { "type": "string", "minLength": 1 },
+        "receiver": { "$ref": "#/$defs/type" },
+        "selection": { "enum": ["static", "default", "dynamic", "closed"] },
+        "destination": { "type": "boolean" }
       }
+    },
+    "pattern": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "scrutineeType", "narrowed", "unionMembers"],
+      "properties": {
+        "kind": { "enum": ["@wildcard", "@binding", "@literal", "@variant", "@record", "@tuple", "@wrapper", "@array", "@as"] },
+        "scrutineeType": { "$ref": "#/$defs/type" },
+        "narrowed": { "anyOf": [{ "$ref": "#/$defs/type" }, { "type": "null" }] },
+        "unionMembers": { "type": "array", "items": { "$ref": "#/$defs/type" } }
+      },
+      "if": { "properties": { "kind": { "const": "@as" } } },
+      "then": { "properties": { "narrowed": { "$ref": "#/$defs/type" } } },
+      "else": { "properties": { "narrowed": { "type": "null" }, "unionMembers": { "const": [] } } }
+    },
+    "patternFact": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "oneOf": [
+        { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "$ref": "#/$defs/pattern" } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "anyOf": [{ "$ref": "#/$defs/pattern" }, { "type": "null" }] } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "unavailable" }, "value": { "type": "null" } } }
+      ]
     },
     "applicationFact": {
       "type": "object",

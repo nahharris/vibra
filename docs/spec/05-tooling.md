@@ -135,7 +135,7 @@ from the selected entry. Errors in an unrelated local target do not affect an
 explicitly selected target. Without `TARGET`, `check` covers every local
 target. `run TARGET` uses the same checking scope, then executes only the
 selected binary target. Workspace discovery, source-graph, ordinary dependency,
-and bootstrap-provenance diagnostics still apply to the whole captured
+and standard-library provenance diagnostics still apply to the whole captured
 workspace snapshot and block checking or execution.
 
 M2 Step 12 implements `check` and pure `run` over a captured project snapshot.
@@ -151,8 +151,7 @@ remains, and prefix `project-` when the result starts with a digit.
 The initialized package is version `0.1.0` with no dependencies, one binary
 target rooted at `src/<name>` with entry `@<name>.main.main`, and source
 `src/<name>/main.vib` containing a pure `void` `main`. It also creates `src/`
-and `tests/`. The generated entry imports no standard-library module, so C8's
-stdlib bootstrap is unnecessary for this pure project. Init rejects a
+and `tests/`. The generated entry imports no standard-library module. Init rejects a
 nonempty destination and any path that escapes the canonical workspace. Its
 `workspace` result is the canonical initialized root; `created` lists every
 created file and directory relative to that root, in creation-plan order.
@@ -203,7 +202,8 @@ has `{ "path": string, "changed": boolean, "written": boolean,
 "primarySpan": SpanDocument }|null, "trap": { "trapCode": string,
 "origin": SpanDocument|null }|null, "auditTrace": string[],
 "diagnostics": DiagnosticDocument[] }] }`.
-`programResult` is the pure value result; a runtime trap is represented by
+`programResult` is the pure value result in the runtime chapter's canonical
+value encoding; a runtime trap is represented by
 `@command.trap` and its structured diagnostic, never as a successful value.
 The trap payload has `trapCode: string` and `origin: SpanDocument|null` when
 the command owns a program result. In JSON mode
@@ -220,6 +220,9 @@ N selected`.
 For M2 checked-program execution failures, `trapCode` is exactly the string
 `"@runtime.invalid-checked-program"`; their diagnostic uses that code with
 primary span `0..0` and no source ID, and the CLI trap `origin` is `null`.
+The other trap code is `"@runtime.unobservable-function"`, whose origin in a
+test is the assertion call; `run` reports it in its payload's `trap` with a
+`null` origin.
 
 The process exit mapping is fixed: `0` for `@command.ok`, `1` for
 `@command.diagnostics` or `@command.test-failed`, `2` for
@@ -314,6 +317,75 @@ the fact is unavailable. This milestone publishes structural grammar facts
 only: it does not add resolution, type inference, effect inference, CLI, or
 MCP behavior.
 
+### Index records
+
+The `@workspace` subject with `--expand declarations` and `--include index`
+projects one `@index.v1` document: the resolved symbol, implementation, and
+reference records of the checked snapshot. It exists so that an external
+retrieval consumer can read every declaration's identity, contract, relations,
+and normalized source without a second parser. The toolchain emits records
+only; embedding, ranking, and storage stay outside it.
+
+```vibra
+(record
+  format: @index.v1
+  revision: "…"
+  declarations: (array declaration…)
+  implementations: (array implementation…)
+  references: (array reference…))
+```
+
+A **declaration** record describes one module-level or nested declaration:
+
+| Field | Value |
+| --- | --- |
+| `id` | The canonical atom identity, such as `@demo.config.parse.parse` |
+| `kind` | `@module`, `@value`, `@function`, `@method`, `@type`, `@interface`, `@effect-root`, or `@operation` |
+| `module` | The canonical atom of the owning module |
+| `owner` | The owning type, interface, or effect root for a nested member, else `void` |
+| `visibility` | `@public` or `@private` |
+| `source` | `(record source-id: "…" start: n end: n)`, the declaration's byte span |
+| `signature` | The canonical type encoding of a value, function, or method's checked type; a type's or interface's generic parameter list otherwise |
+| `effects` | The checked performed effect row, as canonical root atoms, sorted |
+| `errors` | The error types its result can carry: `e` for a result type `(result t e)`, else `(array)` |
+| `applications` | The canonical identities of every declaration its body applies — calls, constructors, and interface members — sorted and without duplicates |
+| `text` | The formatter-normalized source of the declaration, byte for byte what `vibra fmt` writes |
+
+An **implementation** record describes one `impl` block. It has no atom
+identity, since implementations are keyed by types: `receiver` and
+`interface` hold the canonical type encodings of the receiver type and the
+applied interface target, which together are the block's identity. `members`
+lists one record per implementation member with `contract` (the identity of
+the corresponding contract member), `source`, `signature`, and `text`, so a
+member's identity is the triple of `contract`, `interface`, and `receiver`.
+The block also carries its own `source` and `text`.
+
+A **reference** record is one resolved written name. It has `from` (the
+identity of the enclosing declaration), `written` (the exact spelling),
+`source`, and `to` (the resolved canonical identity, or `void` for a name the
+resolver left to the checker, such as a variant of a role type).
+
+The document is canonical VIBON. Declarations are sorted by the UTF-8 bytes of
+`id`, implementations by `receiver` and then `interface`, and references by
+`source-id`, `start`, and `end`. An identical snapshot produces a byte-identical
+document on every host. An unavailable or recovered declaration keeps its
+record with `signature`, `effects`, `errors`, and `applications` absent, and
+the envelope's fact status says why.
+
+A module record's `signature` is `void` and its `text` is the whole formatted
+module. A member written in an `impl` block has no atom identity, so it has no
+declaration record, and a reference in its body names the declaration that
+owns the block as `from`. A `test` form has no declaration record either, and
+a reference in its body names the test module as `from`. Every `text` is the
+formatted text of the record's own declaration, wherever the formatter's
+canonical member order places it. The records describe the modules of the
+local package; a standard-library declaration appears only as a target.
+
+`urn:vibra:schema:v1:index` is the JSON wire form of the same document for a
+tooling consumer: the same records in the same order, with identities as atom
+spellings without `@`, canonical type encodings as VIBON text, and absent facts
+as `null`.
+
 ### M2 workspace position envelope
 
 M2 keeps `urn:vibra:schema:v1:source-position-query` unchanged. Its
@@ -326,9 +398,9 @@ complete structural result under `structural`.
 The workspace envelope has these required fields: `schemaVersion`,
 `workspaceRevision`, `sourceId`, `offset`, `nodeId`, `structural`, `role`,
 `context`, `identity`, `expectedType`, `observedType`, `visibleLocals`,
-`visibleImports`, `declarationCandidates`, and `application`. The envelope's
-`schemaVersion` is `1`. `sourceId` is the immutable project-relative source
-identity and `nodeId` is the canonical locator
+`visibleImports`, `declarationCandidates`, `application`, and `pattern`. The
+envelope's `schemaVersion` is `1`. `sourceId` is the immutable project-relative
+source identity and `nodeId` is the canonical locator
 `<sourceId>#<start>-<end>`, using the selected structural span. A consumer joins
 semantic observations only by the triple `(workspaceRevision, sourceId,
 nodeId)`; it never joins by token spelling or by an unversioned span.
@@ -341,6 +413,12 @@ but a recovered syntax neighbor does not change an unrelated exact field. A
 discard (`-`, `@-`, or `-:`) has an exact `role` and `context`, with
 `identity`, `expectedType`, `observedType`, `declarationCandidates`, and
 `application` unavailable; it never receives a binder identity.
+
+The checked facts (`observedType`, an expected type the source does not write,
+`application`, and `pattern`) come from checking the whole workspace against
+the standard library: every unit and its import closure. When the workspace
+does not check, they come from checking the queried source alone, so a
+self-contained module beside a broken one keeps its facts.
 
 `role` is a closed M2 vocabulary: `@atom-value`, `@entity-reference`,
 `@code-reference`, `@literal`, `@local-binding`, `@discard`, `@declaration`,
@@ -359,17 +437,65 @@ candidates are sorted by canonical identity. Private declarations are not
 candidates outside their visibility.
 
 Types are closed objects with `kind`, `name`, `parameters`, `result`, and
-`labelled`. Primitive values use `kind: "primitive"` and names such as `str`
-or `i32`; function values use `kind: "function"`, `name: "fn"`, their ordered
-parameter types, result type, and labelled slots. A primitive has empty
-`parameters` and `labelled` arrays and a null `result`.
+`labelled`. Only a function has a non-null `result`. The kinds are:
 
-M2 application facts are available only for the supported function form and
-are represented as `{ "kind": "@function", "callee": ..., "calleeType":
-..., "positional": [...], "labelled": [...], "resultType": ... }`.
-`callee` is null when resolution is unavailable. `positional` and `labelled`
-are the authoritative operand contract, in declaration order. Projection,
-lookup, effects, and later application forms remain unavailable in M2.
+| `kind` | `name` | `parameters` | `labelled` |
+|---|---|---|---|
+| `primitive` | the builtin's name, such as `str` or `i32` | empty | empty |
+| `function` | `fn` | parameter types, in order | labelled slots |
+| `declared` | the declared type's path | type arguments, in order | empty |
+| `interface` | the interface's path, or `any` | interface arguments | empty |
+| `param` | the type parameter's name | empty | empty |
+| `atom` | the atom's name | empty | empty |
+| `tuple` | `tuple` | component types, in order | empty |
+| `array` | `array` | the element type | empty |
+| `dict` | `dict` | the key type, then the value type | empty |
+| `union` | `union` | member types, in declaration order | empty |
+| `record` | `record` | empty | fields, in declaration order |
+| `enum` | `enum` | empty | variants with their payload types |
+
+A declared type is named, never expanded: its definition is an index record.
+
+An application fact is `{ "kind": ..., "callee": ..., "calleeType": ...,
+"positional": [...], "labelled": [...], "resultType": ..., "dispatch": ... }`.
+`positional` and `labelled` are the operand types in written order, and
+`callee` is null when the application names no single resolved function. The
+kinds are:
+
+- `@function`: a function call. `calleeType` is the callee's function type.
+- `@constructor`: a declared type's constructor. `positional` and `labelled`
+  are the payload or the fields, and `resultType` is the declared type.
+- `@contract`: a call of an interface's contract member. `calleeType` is the
+  selected member's function type, or null for a closed conformance.
+
+`dispatch` is null except on a `@contract` application, where it is
+`{ "interface": ..., "member": ..., "receiver": ..., "selection": ...,
+"destination": ... }`: the interface's path, the contract member's name, the
+type that selected the implementation, and how it was selected.
+
+| `selection` | Meaning |
+|---|---|
+| `static` | a written implementation, selected from a known type |
+| `default` | the interface's default member |
+| `dynamic` | the implementation for the type the receiver holds at run time: an interface value or a type parameter |
+| `closed` | a conformance the toolchain supplies, such as an integer conversion |
+
+`destination` is `true` when the member takes no receiver operand and the
+implementing type is the expected type at the call, as in `from.convert`.
+
+A pattern fact describes the `match` arm pattern that contains the position. It
+is `{ "kind": ..., "scrutineeType": ..., "narrowed": ..., "unionMembers":
+[...] }`. `kind` is one of `@wildcard`, `@binding`, `@literal`, `@variant`,
+`@record`, `@tuple`, `@wrapper`, `@array`, or `@as`, and `scrutineeType` is the
+type of the matched value. On an `@as` pattern, `narrowed` is the member type
+it selects and `unionMembers` lists every member of the scrutinee's union in
+declaration order; on any other kind `narrowed` is null and `unionMembers` is
+empty. A subpattern has no fact of its own, and a position outside an arm
+pattern has an unavailable `pattern`.
+
+Projection, lookup, effect operations, and lambda calls have no application
+fact. An expected type is reported where the source writes a primitive or
+function type or the checker binds an argument; elsewhere it is unavailable.
 
 `workspaceRevision` is a SHA-256 digest over a binary byte sequence with the
 exact spelling `sha256:<64 lowercase hexadecimal digits>`. The digest input is

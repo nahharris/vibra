@@ -1,0 +1,1 @@
+(record type: @point value: (record kind: @record type: @point fields: (record x: 2i32 y: 1i32)))

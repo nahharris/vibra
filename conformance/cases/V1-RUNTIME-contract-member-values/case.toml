@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-contract-member-values"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "An abstract contract member named as a function value performs the contract call for the receiver its written fn type fixes: a concrete type, an interface value, a bounded parameter, and a closed key type. A default member's own bounded parameter is usable in its body, and a bounded function is a value at a type satisfying its bound."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

@@ -31,7 +31,7 @@ fn write(path: &Path, contents: impl AsRef<[u8]>) {
 
 fn project(target_name: &str, target_root: &str, dependencies: &str) -> String {
     format!(
-        "(record format: @project.v1 package: (record name: \"hello\" version: \"0.1.0\") targets: (array (record name: @{target_name} kind: @lib root: \"{target_root}\")) dependencies: (map {dependencies}))"
+        "(record format: @project.v1 package: (record name: \"hello\" version: \"0.1.0\") targets: (array (record name: @{target_name} kind: @lib root: \"{target_root}\")) dependencies: (dict {dependencies}))"
     )
 }
 

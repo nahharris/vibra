@@ -1,0 +1,30 @@
+(import core @std.core)
+(import from @std.core.from)
+
+(def limit i32 10i32)
+
+(defint shape
+  visibility: @public
+  (defn name (value self) str)
+  (defn label (value self) str (shape.name value)))
+
+(deftype celsius (record degrees i32)
+  visibility: @public
+  (defn warmer (value self) self (celsius degrees: limit))
+  (impl shape
+    (defn name (value self) str "celsius"))
+  (impl (from i16)
+    (defn convert (value i16) self
+      (celsius degrees: (as i32 (from.convert value)))))
+  (impl (from i8)
+    (defn convert (value i8) self
+      (celsius degrees: (as i32 (from.convert value))))))
+
+(defn describe (value celsius) (option str)
+  visibility: @public
+  (option.some (shape.label (celsius.warmer value))))
+
+(defn parse (text str) (result i32 core.conversion-error)
+  (i32.parse text))
+
+(defn execute () void void)

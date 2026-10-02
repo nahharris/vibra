@@ -1,0 +1,23 @@
+id = "V1-TYPE-NOMINAL-union-member-overlap"
+rule = "V1-TYPE-NOMINAL"
+profile = "static-v1"
+operation = "type-check"
+description = "Union members that some substitution makes equal overlap, even when the generic name carries a bound."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.union-member-overlap"
+level = "@error"
+source = "input.vib"
+span = [0, 62]
+
+[[expect.diagnostics]]
+code = "@type.union-member-overlap"
+level = "@error"
+source = "input.vib"
+span = [77, 98]

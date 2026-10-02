@@ -1,0 +1,37 @@
+(import core @std.core)
+
+(defn main ()
+  (tuple
+    (option str)
+    (option str)
+    (result i32 str)
+    (result i32 str)
+    (option i32)
+    (option i32)
+    (result u8 core.arithmetic-error)
+    (option i32))
+  (tupleof
+    (describe (array.of 4i32))
+    (describe (array.of))
+    (checked true)
+    (checked false)
+    (flatten (option.some (option.some 7i32)))
+    (flatten (option.some (option.none)))
+    (guarded (result.err (core.arithmetic-error.overflow)))
+    ((lambda (items (array i32)) (option i32) (option.some (try (items 1u64))))
+      (array.of 1i32 2i32))))
+
+(defn describe (items (array i32)) (option str)
+  (let - (try (items 0u64)) (option.some "has a first element")))
+
+(defn parse (flag bool) (result i32 str)
+  (if flag (result.ok 1i32) (result.err "bad flag")))
+
+(defn checked (flag bool) (result i32 str)
+  (let value (try (parse flag)) (result.ok value)))
+
+(defn flatten (nested (option (option i32))) (option i32)
+  (option.some (try (try nested))))
+
+(defn guarded (outcome (result bool core.arithmetic-error)) (result u8 core.arithmetic-error)
+  (let - (try outcome) (result.ok 1u8)))

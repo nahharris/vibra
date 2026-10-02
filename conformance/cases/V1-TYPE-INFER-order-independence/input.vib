@@ -1,0 +1,42 @@
+(import from @std.core.from)
+
+(deftype number (union i32 str))
+
+(defn pick (left t right t) t
+  where: (t any)
+  left)
+
+(defn member () number 1i32)
+
+(defn arms-first (flag bool) i32
+  (let value (match flag true (member) false 2i32) 0i32))
+
+(defn arms-second (flag bool) i32
+  (let value (match flag true 2i32 false (member)) 0i32))
+
+(defn operand-first () i32
+  (let value (pick (as number 2i32) 1i32) 0i32))
+
+(defn operand-second () i32
+  (let value (pick 1i32 (as number 2i32)) 0i32))
+
+(defn atom-first () i32
+  (let value (array.of (as atom @ok) @err) 0i32))
+
+(defn atom-second () i32
+  (let value (array.of @err (as atom @ok)) 0i32))
+
+(defn destination-arm (flag bool) i32
+  (let value (match flag true 1u32 false (from.convert 2u8)) 0i32))
+
+(defn destination-first () i32
+  (let value (pick 1u32 (from.convert 2u8)) 0i32))
+
+(defn destination-second () i32
+  (let value (pick (from.convert 2u8) 1u32) 0i32))
+
+(defn literal-two-sources () i16
+  (from.convert 5))
+
+(defn literal-by-value () i16
+  (from.convert -5))

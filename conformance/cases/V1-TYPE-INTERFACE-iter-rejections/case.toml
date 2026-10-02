@@ -1,0 +1,47 @@
+id = "V1-TYPE-INTERFACE-iter-rejections"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "iter is always written applied: a bare iter is rejected as an impl target, a type, and a bound. An impl must take its item from its owner, its next must name that item, and a result is not iterable."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [420, 431]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [483, 489]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [65, 145]
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "input.vib"
+span = [186, 274]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [339, 403]
+
+[[expect.diagnostics]]
+code = "@type.unsatisfied-bound"
+level = "@error"
+source = "input.vib"
+span = [558, 608]

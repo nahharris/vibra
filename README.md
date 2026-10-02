@@ -29,7 +29,7 @@ Vibra v1 is defined by five inseparable surfaces:
 - a deterministic reference runtime with a closed host ABI and a WebAssembly
   production backend.
 
-The complete source-of-truth map starts at [`docs/index.md`](docs/index.md).
+The complete source-of-truth dict starts at [`docs/index.md`](docs/index.md).
 The delivery sequence and measurable release gates are in
 [`docs/roadmap/v1.md`](docs/roadmap/v1.md).
 

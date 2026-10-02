@@ -21,6 +21,7 @@
 pub mod confined_fs;
 pub mod discovery;
 pub mod format_plan;
+pub mod index;
 pub mod project;
 pub mod query;
 pub mod semantic;
@@ -147,11 +148,11 @@ impl WorkspaceSnapshot {
         self.resolve_graph(&graph, None)
     }
 
-    /// Resolves the captured local source graph with an already verified M2
+    /// Resolves the captured local source graph with an already loaded
     /// bootstrap package overlay.
     pub fn resolve_with_bootstrap(
         &self,
-        verification: &vibra_types::BootstrapVerification,
+        verification: &vibra_types::Stdlib,
     ) -> Result<vibra_resolve::ResolvedSnapshot, WorkspaceError> {
         let graph = self.source_graph()?;
         self.resolve_graph(&graph, Some(verification))
@@ -255,7 +256,7 @@ impl WorkspaceSnapshot {
     pub(crate) fn resolve_graph(
         &self,
         graph: &source_graph::SourceGraph,
-        verification: Option<&vibra_types::BootstrapVerification>,
+        verification: Option<&vibra_types::Stdlib>,
     ) -> Result<vibra_resolve::ResolvedSnapshot, WorkspaceError> {
         let package = self.project.project().package();
         let units = graph
@@ -296,15 +297,28 @@ impl WorkspaceSnapshot {
                 vibra_resolve::SourceUnit::new(unit.name(), kind, entry, modules)
             })
             .collect();
-        let mut input = vibra_resolve::ResolveInput::new(
+        let input = vibra_resolve::ResolveInput::new(
             package.name().value(),
             package.version().value(),
             units,
         )
         .with_reserved_import_paths([
             ("std".to_owned(), vec!["text".to_owned()]),
+            ("std".to_owned(), vec!["option".to_owned()]),
+            ("std".to_owned(), vec!["result".to_owned()]),
+            ("std".to_owned(), vec!["core".to_owned()]),
+            ("std".to_owned(), vec!["bool".to_owned()]),
+            ("std".to_owned(), vec!["char".to_owned()]),
+            ("std".to_owned(), vec!["bytes".to_owned()]),
             ("std".to_owned(), vec!["assert".to_owned()]),
         ]);
+        let mut input = input
+            .with_builtin_members(vibra_types::builtin_member_names())
+            .with_role_types(
+                vibra_types::role_type_names()
+                    .into_iter()
+                    .map(|(_, name)| name),
+            );
         if let Some(verification) = verification {
             let (overlay_package, modules) = verification.resolver_overlay();
             input = input.with_verified_overlay(
@@ -323,5 +337,34 @@ impl WorkspaceSnapshot {
         offset: usize,
     ) -> Result<query::WorkspacePositionQuery, query::WorkspaceQueryError> {
         query::query_position(self, source_id, offset)
+    }
+
+    /// Queries one captured source position with an already loaded bootstrap
+    /// package overlay.
+    pub fn query_position_with_bootstrap(
+        &self,
+        source_id: &str,
+        offset: usize,
+        verification: &vibra_types::Stdlib,
+    ) -> Result<query::WorkspacePositionQuery, query::WorkspaceQueryError> {
+        query::query_position_with_bootstrap(
+            self,
+            source_id,
+            offset,
+            Some(verification),
+        )
+    }
+
+    /// Queries one captured source position against the standard library
+    /// embedded in this toolchain.
+    pub fn query_position_with_embedded_stdlib(
+        &self,
+        source_id: &str,
+        offset: usize,
+    ) -> Result<query::WorkspacePositionQuery, query::WorkspaceQueryError> {
+        let stdlib = vibra_types::load_stdlib().map_err(|error| {
+            query::WorkspaceQueryError::Workspace(error.to_string())
+        })?;
+        query::query_position_with_bootstrap(self, source_id, offset, Some(&stdlib))
     }
 }

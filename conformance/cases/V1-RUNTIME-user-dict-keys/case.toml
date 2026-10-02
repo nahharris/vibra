@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-user-dict-keys"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A deftype keys a dict through its own ordered implementation, which orders the dict, its lookups, a tuple key holding it, and a dict keyed by an ordered-bounded parameter instantiated with it."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

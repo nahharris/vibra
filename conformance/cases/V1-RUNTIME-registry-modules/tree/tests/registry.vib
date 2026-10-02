@@ -1,0 +1,49 @@
+(import assert @std.assert)
+(import bytes-of @std.bytes)
+(import core @std.core)
+(import text @std.text)
+
+(test "char scalars"
+  (assert.true (u32.equal (char.to-u32 \u03A9) 937u32)))
+
+(test "a surrogate is no char"
+  (assert.true (match (char.from-u32 55296u32) (option.none) true - false)))
+
+(test "text equality and order"
+  (assert.true
+    (match (text.compare "ab" "b")
+      (core.ordering.less) (text.equal "é" "é")
+      - false)))
+
+(test "text slices count scalars"
+  (assert.equal
+    (match (text.slice "héllo" 1u64 3u64) (option.some part) part - "")
+    "él"))
+
+(test "an out-of-range text slice is none"
+  (assert.true (match (text.slice "abc" 2u64 1u64) (option.none) true - false)))
+
+(test "text and chars round-trip"
+  (assert.equal (text.from-chars (text.to-chars "Ωmega")) "Ωmega"))
+
+(test "utf-8 encodes scalars"
+  (assert.equal (bytes-of.length (text.to-utf8 "é")) 2u64))
+
+(test "ill-formed utf-8 is invalid"
+  (assert.true
+    (match (text.from-utf8 (bytes-of.from-array (array.of 255u8)))
+      (result.err (core.conversion-error.invalid-format)) true
+      - false)))
+
+(test "bytes concatenate, compare, and slice"
+  (let joined (bytes-of.concat (text.to-utf8 "ab") (text.to-utf8 "c"))
+    (assert.true
+      (match (bytes-of.slice joined 1u64 3u64)
+        (option.some part)
+          (match (bytes-of.compare part (text.to-utf8 "bc"))
+            (core.ordering.equal) (bytes-of.equal part (text.to-utf8 "bc"))
+            - false)
+        - false))))
+
+(test "bytes as an array"
+  (assert.equal (array.length (bytes-of.to-array (text.to-utf8 "hey"))) 3u64))

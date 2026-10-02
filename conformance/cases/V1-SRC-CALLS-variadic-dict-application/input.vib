@@ -1,0 +1,5 @@
+(defn collect-dict (first i32) i32
+  variadic: (rest (dict str i32))
+  first)
+(defn use-dict () i32
+  (do (collect-dict 1i32) (collect-dict 1i32 "key" 2i32)))

@@ -1,0 +1,5 @@
+(deftype number (union i32 u8))
+
+(defn doubled (value number) number (number.add-checked value value))
+
+(defn table (entries (dict number str)) u64 0u64)

@@ -1,0 +1,53 @@
+id = "V1-TYPE-CONTROL-match-non-exhaustive"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "Non-exhaustive enum, bool, tuple, atom, str, and integer matches name their first uncovered shape."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@pattern.non-exhaustive"
+level = "@error"
+source = "input.vib"
+span = [83, 135]
+notes = ["`(color.green)` is not covered"]
+
+[[expect.diagnostics]]
+code = "@pattern.non-exhaustive"
+level = "@error"
+source = "input.vib"
+span = [166, 189]
+notes = ["`false` is not covered"]
+
+[[expect.diagnostics]]
+code = "@pattern.non-exhaustive"
+level = "@error"
+source = "input.vib"
+span = [235, 296]
+notes = ["`(tupleof false false)` is not covered"]
+
+[[expect.diagnostics]]
+code = "@pattern.non-exhaustive"
+level = "@error"
+source = "input.vib"
+span = [328, 360]
+notes = ["`-` is not covered"]
+
+[[expect.diagnostics]]
+code = "@pattern.non-exhaustive"
+level = "@error"
+source = "input.vib"
+span = [391, 413]
+notes = ["`-` is not covered"]
+
+[[expect.diagnostics]]
+code = "@pattern.non-exhaustive"
+level = "@error"
+source = "input.vib"
+span = [446, 469]
+notes = ["`-` is not covered"]

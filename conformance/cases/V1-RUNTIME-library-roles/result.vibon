@@ -1,0 +1,1 @@
+(record type: (record type: @tuple arguments: (array @bool @bool @str (record type: @array arguments: (array @char)) @bytes @u64 @i32 @str @bool)) value: (record kind: @tuple values: (array true true "hi" (record kind: @array values: (array \h \é \l \l \o)) (record kind: @bytes values: (array 104u8 105u8)) 3u64 4i32 "pair" true)))

@@ -1,0 +1,23 @@
+id = "V1-TYPE-INTERFACE-key-closed-registry"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "Floats and arrays are outside the closed key registry, so they satisfy neither ordered nor equatable."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.unsatisfied-bound"
+level = "@error"
+source = "input.vib"
+span = [166, 189]
+
+[[expect.diagnostics]]
+code = "@type.unsatisfied-bound"
+level = "@error"
+source = "input.vib"
+span = [211, 226]

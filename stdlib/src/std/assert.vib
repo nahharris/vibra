@@ -1,0 +1,2 @@
+; Assertion members are test-runner registry entries listed in the standard
+; library manifest. This marker module has no user-definable declarations.

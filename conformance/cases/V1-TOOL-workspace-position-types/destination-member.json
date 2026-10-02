@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:a49f233e2bf88e71c963b624771d99fa2506112c3b24e8203ea078d58a368437",
+  "sourceId": "src/main.vib",
+  "offset": 898,
+  "nodeId": "src/main.vib#898-899",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 898,
+    "sourceId": "src/main.vib",
+    "span": {
+      "sourceId": "src/main.vib",
+      "start": 898,
+      "end": 899,
+      "startPosition": {
+        "line": 39,
+        "column": 34
+      },
+      "endPosition": {
+        "line": 39,
+        "column": 35
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "open-paren",
+    "category": "expression",
+    "status": "exact",
+    "permittedForms": [
+      "lambda",
+      "do",
+      "let",
+      "if",
+      "match",
+      "as",
+      "try"
+    ],
+    "permittedLabels": [
+      "types"
+    ]
+  },
+  "role": {
+    "status": "exact",
+    "value": "@application"
+  },
+  "context": {
+    "status": "exact",
+    "value": "result"
+  },
+  "identity": {
+    "status": "unavailable",
+    "value": null
+  },
+  "expectedType": {
+    "status": "unavailable",
+    "value": null
+  },
+  "observedType": {
+    "status": "exact",
+    "value": {
+      "kind": "declared",
+      "name": "app.main.meters",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": [
+      {
+        "name": "value",
+        "identity": "binder:src/main.vib:880-885"
+      }
+    ]
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": [
+      {
+        "alias": "from",
+        "module": "@std.core",
+        "sourceId": "src/main.vib",
+        "span": {
+          "sourceId": "src/main.vib",
+          "start": 0,
+          "end": 28,
+          "startPosition": {
+            "line": 1,
+            "column": 1
+          },
+          "endPosition": {
+            "line": 1,
+            "column": 29
+          }
+        }
+      }
+    ]
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": []
+  },
+  "application": {
+    "status": "exact",
+    "value": {
+      "kind": "@contract",
+      "callee": null,
+      "calleeType": {
+        "kind": "function",
+        "name": "fn",
+        "parameters": [
+          {
+            "kind": "primitive",
+            "name": "i16",
+            "parameters": [],
+            "result": null,
+            "labelled": []
+          }
+        ],
+        "result": {
+          "kind": "declared",
+          "name": "app.main.meters",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        },
+        "labelled": []
+      },
+      "positional": [
+        {
+          "kind": "primitive",
+          "name": "i16",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        }
+      ],
+      "labelled": [],
+      "resultType": {
+        "kind": "declared",
+        "name": "app.main.meters",
+        "parameters": [],
+        "result": null,
+        "labelled": []
+      },
+      "dispatch": {
+        "interface": "std.core.from",
+        "member": "convert",
+        "receiver": {
+          "kind": "declared",
+          "name": "app.main.meters",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        },
+        "selection": "static",
+        "destination": true
+      }
+    }
+  },
+  "pattern": {
+    "status": "unavailable",
+    "value": null
+  }
+}

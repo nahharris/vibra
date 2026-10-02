@@ -1,0 +1,13 @@
+(defn main () (tuple (dict point str) (dict str i32))
+  (tupleof
+    (dict.of (point x: 1i32 y: 5i32) "first" (point x: 3i32 y: 5i32) "second")
+    (dict.of "a" 1i32 "a" 2i32)))
+
+(import core @std.core)
+(import ordered @std.core.ordered)
+
+; Points are the same key when their `y` is equal.
+(deftype point (record x i32 y i32)
+  (impl ordered
+    (defn compare (left self right self) core.ordering
+      (i32.compare (left @y) (right @y)))))

@@ -2,28 +2,10 @@ id = "V1-SRC-CALLS-variadic-array-application"
 rule = "V1-SRC-CALLS"
 profile = "static-v1"
 operation = "type-check"
-description = "Array-variadic declarations and both empty and nonempty applications are unavailable in M2."
+description = "Array-variadic declarations accept empty and nonempty tails, packed into one array argument."
 
 [inputs]
 source = "input.vib"
 
 [expect]
-accepted = false
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "input.vib"
-span = [0, 75]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "input.vib"
-span = [105, 125]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "input.vib"
-span = [126, 151]
+accepted = true

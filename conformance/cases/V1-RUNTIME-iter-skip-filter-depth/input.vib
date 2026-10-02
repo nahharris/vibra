@@ -1,0 +1,24 @@
+(defn main () (tuple (array u64) (array u64))
+  (tupleof
+    (iter.collect (iter.take (iter.skip (naturals from: 0u64) 10000u64) 2u64))
+    (iter.collect (iter.take (iter.filter (naturals from: 0u64) large) 2u64))))
+
+(import core @std.core)
+(import iter @std.iter.iter)
+
+; The natural numbers from `from`, without end.
+(deftype naturals (record from u64)
+  (impl (iter u64)
+    (defn next (value self) (option (tuple u64 self))
+      (option.some
+        (tupleof
+          (value @from)
+          (naturals
+            from: (match (u64.add-checked (value @from) 1u64)
+              (result.ok higher) higher
+              (result.err -) 0u64)))))))
+
+(defn large (value u64) bool
+  (match (u64.compare value 10000u64)
+    (core.ordering.less) false
+    - true))

@@ -1,0 +1,9 @@
+(deftype meters u32)
+
+(deftype seconds u32)
+
+(defn literal (value i32) i32 (match value true 1i32 - 0i32))
+
+(defn nominal ((seconds count) meters) u32 count)
+
+(defn components (value i32) i32 (let (tupleof left right) value left))

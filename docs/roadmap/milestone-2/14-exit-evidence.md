@@ -60,7 +60,7 @@ full workspace suite reports 527 passed, 0 failed, and 5 ignored; cumulative
 M2 CI on head `0e89b56d275058f016e9684a7aaa36b56d59d86f` passed all five jobs in
 [run 35928991639](https://github.com/nahharris/vibra/actions/runs/35928991639).
 
-## Gate-to-test map
+## Gate-to-test dict
 
 The final Step 14 PR run covers its candidate head; the snapshot-extension row
 also links cumulative M2 CI after the post-merge guard. Both runs include the

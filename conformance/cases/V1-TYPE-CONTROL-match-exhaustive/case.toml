@@ -1,0 +1,11 @@
+id = "V1-TYPE-CONTROL-match-exhaustive"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "Enum, bool, tuple, record, wrapper, anonymous, and array arm sets are exhaustive, literal sets over atom, str, and integers close with a binder, and all three discards repeat."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

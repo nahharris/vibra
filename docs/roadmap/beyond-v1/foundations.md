@@ -17,7 +17,7 @@ higher-order function declares the exact callback row it accepts, and `iter`
 
 **Why every track needs it:** `process.spawn` must accept a body with any row
 and perform that row. An OTP-style `server` interface must let each
-implementation declare its own effects. `par.map` must be generic over
+implementation declare its own effects. `par.dict` must be generic over
 callbacks, even though it requires them to be pure. UI commands carry work
 with arbitrary rows. Without row variables, each of these becomes a family of
 monomorphic copies.
@@ -109,6 +109,13 @@ implicit root process.
 logic error, such as a one-shot reply. It would be a checked refinement on top
 of the ownership model above, not a replacement.
 
+**Study item:** a static use-after-close check by in-danger propagation, which
+taints every value that may share a closed handle and rejects its later use.
+It would move some `@closed` results from test time to check time without
+linearity. It starts with a spike on whether the sharing analysis stays
+tractable over Vibra's value semantics, and it too refines the ownership model
+rather than replacing it.
+
 ## Network and child processes as values
 
 The first network and process effects need no handles and fit the v1 ABI:
@@ -117,7 +124,7 @@ The first network and process effects need no handles and fit the v1 ABI:
 | --- | --- |
 | `net.http` | request record in, response record or typed error out |
 | `net.dns` | name in, address array or typed error out |
-| `subprocess.run` | program, argument array, stdin bytes, and environment map in; exit status, stdout, and stderr out |
+| `subprocess.run` | program, argument array, stdin bytes, and environment dict in; exit status, stdout, and stderr out |
 
 Each operation is one registry entry with an owning root and an audit event.
 `subprocess.run` accepts no shell string: the program is a path and the arguments

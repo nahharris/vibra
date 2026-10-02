@@ -1,0 +1,14 @@
+id = "V1-TOOL-format-comment-placement"
+rule = "V1-TOOL"
+profile = "tooling-v1"
+operation = "format"
+description = "A comment on the line of a form stays behind that form, and a declaration that holds a comment takes the same canonical attribute order as one that holds none."
+
+[inputs]
+source = "tree/src/app/main.vib"
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

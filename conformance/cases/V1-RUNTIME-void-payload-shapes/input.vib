@@ -1,0 +1,49 @@
+(defn main () (tuple bool bool (result void str) (result void str) (option void) (option void) (option void) str str)
+  (tupleof
+    (is-ok (save))
+    (is-some (direct))
+    (pass (save))
+    (chain)
+    (wrap void)
+    (direct)
+    ((array.of void void) 1u64)
+    (pick (enumof p: void))
+    (pick (enumof q: 3i32))))
+
+(defn save () (result void str) (result.ok))
+
+(defn direct () (option void) (option.some))
+
+; Generic code sees a payload: its patterns still match the nullary value.
+(defn is-ok (value (result t e)) bool
+  where: (t any e any)
+  (match value
+    (result.ok -) true
+    (result.err -) false))
+
+(defn is-some (value (option t)) bool
+  where: (t any)
+  (match value
+    (option.some present) true
+    (option.none) false))
+
+(defn pass (value (result t e)) (result t e)
+  where: (t any e any)
+  (result.ok (try value)))
+
+; `try` over a nullary success yields `void`.
+(defn chain () (result void str)
+  (try (save))
+  (result.ok))
+
+(defn wrap (value t) (option t)
+  where: (t any)
+  (option.some value))
+
+; A binder on a `void` payload binds `void`.
+(defn pick (value (enum p void q i32)) str
+  (match value
+    (enumof p: nothing) (keep nothing)
+    (enumof q: -) "q"))
+
+(defn keep (value void) str "p")

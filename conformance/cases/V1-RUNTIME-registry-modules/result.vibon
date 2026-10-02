@@ -1,0 +1,16 @@
+(record
+  format: @test-run.v1
+  result: @command.ok
+  tests: (array
+    (record name: "@tests.registry::\"char scalars\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.registry::\"a surrogate is no char\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.registry::\"text equality and order\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.registry::\"text slices count scalars\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.registry::\"an out-of-range text slice is none\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.registry::\"text and chars round-trip\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.registry::\"utf-8 encodes scalars\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.registry::\"ill-formed utf-8 is invalid\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.registry::\"bytes concatenate, compare, and slice\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.registry::\"bytes as an array\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)

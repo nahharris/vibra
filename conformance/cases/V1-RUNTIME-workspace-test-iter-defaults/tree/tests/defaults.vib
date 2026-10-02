@@ -1,0 +1,33 @@
+(import assert @std.assert)
+(import iter @std.iter)
+(import main @app.main)
+
+(test "collects an array"
+  (assert.equal (iter.iter.collect (array.of 3i32 1i32 2i32)) (array.of 3i32 1i32 2i32)))
+
+(test "maps to another element type"
+  (assert.equal
+    (iter.iter.collect (iter.iter.map (array.of 1i32 2i32) (lambda (value i32) str (i32.to-str value))))
+    (array.of "1" "2")))
+
+(test "filters, skips, and takes"
+  (assert.equal
+    (iter.iter.collect
+      (iter.iter.take
+        (iter.iter.skip (iter.iter.filter (array.of 1u64 2u64 3u64 4u64 5u64 6u64 8u64) main.even) 1u64)
+        2u64))
+    (array.of 4u64 6u64)))
+
+(test "takes from an infinite user iterator lazily"
+  (assert.equal
+    (iter.iter.collect
+      (iter.iter.take (iter.iter.filter (main.naturals from: 5u64) main.even) 3u64))
+    (array.of 6u64 8u64 10u64)))
+
+(test "walks a str, a dict, and an option"
+  (do
+    (assert.equal (iter.iter.collect (iter.iter.take "héllo" 2u64)) (array.of \h \é))
+    (assert.equal
+      (iter.iter.collect (dict.of "b" 2i32 "a" 1i32))
+      (array.of (tupleof "a" 1i32) (tupleof "b" 2i32)))
+    (assert.equal (iter.iter.collect (option.some 7i32)) (array.of 7i32))))

@@ -3,7 +3,10 @@
 This inventory is derived from the public enum variants in
 `crates/vibra-syntax/src/ast.rs` at the M1 base. The Step 1 conformance test
 requires every `Enum::Variant` token below to remain present in this document;
-adding an AST variant without a disposition fails the test. `supported` means
+adding an AST variant without a disposition fails the test. That test was
+retired when M3 Step 2 changed the AST; the
+[M3 surface inventory](../milestone-3/supported-surface.md) and its test now
+enforce exhaustiveness, and this table records the M2 state only. `supported` means
 the M2 checker/interpreter will implement it by the owning step. `deferred`
 means M1 may parse it, but M2 reports `@tool.unavailable` when semantic support
 is required. `rejected` means the active v1 grammar itself rejects it. This is
@@ -29,7 +32,7 @@ the linked topic chapters in `docs/spec/`.
 | `PatternKind::Array` | deferred | M3 collections |
 | `PatternKind::As` | deferred | M3 union narrowing |
 | `VariadicBinding::Array` | deferred | M3 collection variadics |
-| `VariadicBinding::Map` | deferred | M3 collection variadics |
+| `VariadicBinding::Dict` | deferred | M3 collection variadics |
 | `Declaration::Import` | supported | Steps 3–4 module graph |
 | `Declaration::Def` | supported | Step 6 immutable module values |
 | `Declaration::Defn` | supported | Steps 5–9 functions |
@@ -45,9 +48,9 @@ the linked topic chapters in `docs/spec/`.
 | `TypeExpr::Applied` | deferred | M3 nominal/generic applications |
 | `TypeExpr::Tuple` | deferred | M3 products |
 | `TypeExpr::Array` | deferred | M3 collections |
-| `TypeExpr::Map` | deferred | M3 collections |
+| `TypeExpr::Dict` | deferred | M3 collections |
 | `VariadicType::Array` | deferred | M3 |
-| `VariadicType::Map` | deferred | M3 |
+| `VariadicType::Dict` | deferred | M3 |
 | `DeftypeBody::Type` | deferred | M3 nominal declarations |
 | `DeftypeBody::Record` | deferred | M3 |
 | `DeftypeBody::Enum` | deferred | M3 |

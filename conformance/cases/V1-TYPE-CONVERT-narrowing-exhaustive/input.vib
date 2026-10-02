@@ -1,0 +1,9 @@
+(deftype number (union i32 f32 str))
+
+(defn every (value number) i32
+  (match value (as i32 n) n (as f32 -) 1i32 (as str -) 2i32))
+
+(defn remainder (value number) i32 (match value (as i32 n) n other 0i32))
+
+(defn anonymous (value (union bool u8)) bool
+  (match value (as bool flag) flag (as u8 -) false))

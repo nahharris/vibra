@@ -1,0 +1,1 @@
+(record type: (record type: @tuple arguments: (array @u64 @u64)) value: (record kind: @tuple values: (array 2u64 0u64)))

@@ -693,7 +693,7 @@ mod tests {
             fs::create_dir_all(path.join("src/hello")).expect("create source root");
             fs::write(
                 path.join("project.vibon"),
-                "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/hello\" entry: @app.main.main effects: (array))) dependencies: (map))\n",
+                "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/hello\" entry: @app.main.main effects: (array))) dependencies: (dict))\n",
             )
             .expect("write project marker");
             fs::write(

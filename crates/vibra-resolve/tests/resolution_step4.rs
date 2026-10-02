@@ -81,15 +81,33 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
             )],
         )],
     )
+    .with_builtin_members(builtin_members())
+    .with_role_types(
+        ["bool", "str", "bytes", "option", "result"].map(str::to_owned),
+    )
     .with_verified_overlay(
         "vibra-stdlib",
-        "0.1.0",
-        vec![vibra_resolve::SourceModule::new(
-            "std",
-            ["text"],
-            "stdlib/m2/src/std/text.vib",
-            include_bytes!("../../../stdlib/m2/src/std/text.vib"),
-        )],
+        "0.2.0",
+        vec![
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["text"],
+                "stdlib/src/std/text.vib",
+                include_bytes!("../../../stdlib/src/std/text.vib"),
+            ),
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["core"],
+                "stdlib/src/std/core.vib",
+                include_bytes!("../../../stdlib/src/std/core.vib"),
+            ),
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["char"],
+                "stdlib/src/std/char.vib",
+                include_bytes!("../../../stdlib/src/std/char.vib"),
+            ),
+        ],
     );
     let snapshot = Resolver::resolve(input);
 
@@ -97,10 +115,10 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
     let module = snapshot
         .modules()
         .iter()
-        .find(|module| module.source_id() == "stdlib/m2/src/std/text.vib")
+        .find(|module| module.source_id() == "stdlib/src/std/text.vib")
         .expect("bootstrap module in overlay");
     assert_eq!(module.package().name(), "vibra-stdlib");
-    assert_eq!(module.package().version(), "0.1.0");
+    assert_eq!(module.package().version(), "0.2.0");
     assert_eq!(
         snapshot.imports()[0]
             .module()
@@ -116,7 +134,7 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
         .and_then(|reference| reference.target())
         .expect("resolved bootstrap declaration");
     assert_eq!(target.package().name(), "vibra-stdlib");
-    assert_eq!(target.package().version(), "0.1.0");
+    assert_eq!(target.package().version(), "0.2.0");
 }
 
 #[test]
@@ -146,15 +164,33 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
             ),
         ],
     )
+    .with_builtin_members(builtin_members())
+    .with_role_types(
+        ["bool", "str", "bytes", "option", "result"].map(str::to_owned),
+    )
     .with_verified_overlay(
         "vibra-stdlib",
-        "0.1.0",
-        vec![vibra_resolve::SourceModule::new(
-            "std",
-            ["text"],
-            "stdlib/m2/src/std/text.vib",
-            include_bytes!("../../../stdlib/m2/src/std/text.vib"),
-        )],
+        "0.2.0",
+        vec![
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["text"],
+                "stdlib/src/std/text.vib",
+                include_bytes!("../../../stdlib/src/std/text.vib"),
+            ),
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["core"],
+                "stdlib/src/std/core.vib",
+                include_bytes!("../../../stdlib/src/std/core.vib"),
+            ),
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["char"],
+                "stdlib/src/std/char.vib",
+                include_bytes!("../../../stdlib/src/std/char.vib"),
+            ),
+        ],
     );
     let snapshot = Resolver::resolve(input);
 
@@ -164,7 +200,7 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
     assert_eq!(target.unit(), "std");
     assert_eq!(target.segments(), ["text"]);
     assert!(snapshot.modules().iter().any(|module| {
-        module.source_id() == "stdlib/m2/src/std/text.vib"
+        module.source_id() == "stdlib/src/std/text.vib"
             && module.package().name() == "vibra-stdlib"
     }));
 }
@@ -223,7 +259,8 @@ fn imported_public_function_path_resolves_as_a_function_reference() {
                     "app",
                     ["lib"],
                     "src/lib.vib",
-                    b"(defn greet () void visibility: @public (do))",
+                    b"(defn greet () void visibility: @public (do))
+(deftype box (record value i32) visibility: @public)",
                 ),
             ],
         )],
@@ -480,7 +517,7 @@ fn resolved_artifact_is_structured_vibon_with_stable_text() {
 }
 
 #[test]
-fn importing_a_declaration_reports_wrong_entity_kind_before_unknown_path() {
+fn importing_a_public_declaration_binds_it_and_a_member_path_is_wrong_entity_kind() {
     let input = ResolveInput::new(
         "demo",
         "1.0.0",
@@ -492,34 +529,28 @@ fn importing_a_declaration_reports_wrong_entity_kind_before_unknown_path() {
                     "app",
                     ["main"],
                     "src/main.vib",
-                    b"(import greet @app.lib.greet)\n(defn run () void (do))",
+                    b"(import greet @app.lib.greet)\n(import member @app.lib.box.value)\n(defn run () void (greet))",
                 ),
                 vibra_resolve::SourceModule::new(
                     "app",
                     ["lib"],
                     "src/lib.vib",
-                    b"(defn greet () void visibility: @public (do))",
+                    b"(defn greet () void visibility: @public (do))\n(deftype box (record value i32) visibility: @public)",
                 ),
             ],
         )],
     );
     let snapshot = Resolver::resolve(input);
 
-    assert!(snapshot.diagnostics().iter().any(|diagnostic| {
-        diagnostic.code() == DiagnosticCode::NameWrongEntityKind
-            && diagnostic
-                .related()
-                .iter()
-                .any(|related| related.source_id.as_deref() == Some("src/lib.vib"))
-    }));
-    assert!(
-        !snapshot
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| diagnostic.code() == DiagnosticCode::ModuleUnknownPath)
-    );
-    assert_eq!(snapshot.imports().len(), 1);
-    assert!(snapshot.imports()[0].module().is_none());
+    // The declaration import binds `greet`; a path into a type's members is
+    // still not an import target.
+    let diagnostics = snapshot.diagnostics();
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code(), DiagnosticCode::NameWrongEntityKind);
+    assert_eq!(snapshot.imports().len(), 2);
+    assert_eq!(snapshot.imports()[0].declaration(), Some("greet"));
+    assert!(snapshot.imports()[0].module().is_some());
+    assert!(snapshot.imports()[1].module().is_none());
 }
 
 #[test]
@@ -671,7 +702,7 @@ fn lexical_and_lambda_label_bindings_cannot_shadow_visible_names() {
 }
 
 #[test]
-fn deferred_declaration_forms_and_members_are_explicitly_unavailable() {
+fn deferred_effect_declarations_and_members_are_explicitly_unavailable() {
     let input = ResolveInput::single_module(
         "demo",
         "1.0.0",
@@ -683,14 +714,17 @@ fn deferred_declaration_forms_and_members_are_explicitly_unavailable() {
     );
     let snapshot = Resolver::resolve(input);
 
-    assert!(
-        snapshot
-            .diagnostics()
-            .iter()
-            .filter(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
-            .count()
-            >= 6
-    );
+    // Declared types, their fields, and nested methods resolve from M3 Step 2
+    // and interfaces from Step 11; the effect declaration and its member stay
+    // unavailable.
+    let unavailable: Vec<_> = snapshot
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+        .map(vibra_diagnostics::Diagnostic::primary_span)
+        .collect();
+    assert_eq!(unavailable.len(), 2, "{unavailable:?}");
+    assert!(unavailable.iter().all(|span| span.start() >= 96));
 }
 
 #[test]
@@ -731,4 +765,33 @@ fn import_cycle_related_span_comes_from_the_traversed_cycle_edge() {
                 .iter()
                 .any(|related| related.source_id.as_deref() == Some("src/a.vib"))
     }));
+}
+
+/// The `(type, member)` names `@std.builtin` declares, which the standard
+/// library's own bodies call.
+fn builtin_members() -> Vec<(String, String)> {
+    let source = include_str!("../../../stdlib/src/std/builtin.vib");
+    let document =
+        vibra_syntax::parse_source(std::path::Path::new("builtin.vib"), source)
+            .expect("builtin module");
+    let ast = document.ast().expect("builtin AST");
+    ast.declarations()
+        .iter()
+        .filter_map(|declaration| match declaration {
+            vibra_syntax::Declaration::Deftype(value) => Some(value),
+            _ => None,
+        })
+        .flat_map(|value| {
+            value
+                .members()
+                .iter()
+                .filter_map(move |member| match member {
+                    vibra_syntax::TypeMember::Method(method) => Some((
+                        value.name().value().to_owned(),
+                        method.name().value().to_owned(),
+                    )),
+                    vibra_syntax::TypeMember::Implementation(_) => None,
+                })
+        })
+        .collect()
 }

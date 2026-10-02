@@ -1,0 +1,21 @@
+(defn main () (maybe (boxed i32))
+  (pick (apply keep (maybe.some (boxed.of 5i32))) (maybe.none types: ((boxed i32)))))
+
+(deftype maybe (enum some t none void)
+  where: (t any))
+
+(deftype boxed t
+  where: (t any)
+  (defn of (value t) (boxed t) (boxed value)))
+
+(defn keep (value t) t
+  where: (t any)
+  value)
+
+(defn apply (f (fn ((maybe (boxed i32))) (maybe (boxed i32))) value (maybe (boxed i32)))
+  (maybe (boxed i32))
+  (f value))
+
+(defn pick (left t right t) t
+  where: (t any)
+  left)

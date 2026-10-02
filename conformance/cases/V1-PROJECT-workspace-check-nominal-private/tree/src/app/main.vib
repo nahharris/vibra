@@ -1,0 +1,4 @@
+(import shapes @geo.shapes)
+(defn read (value shapes.secret) i32 0i32)
+(defn make () i32 (let - (shapes.secret value: 1i32) 0i32))
+(defn execute () void void)

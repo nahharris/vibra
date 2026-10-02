@@ -43,7 +43,7 @@ impl Drop for TempDir {
 #[test]
 fn snapshot_binding_normalization_preserves_the_program_result() {
     let root = TempDir::new();
-    let project = r#"(record format: @project.v1 package: (record name: "hello" version: "0.1.0") targets: (array (record name: @hello kind: @bin root: "src/hello" entry: @hello.main.main effects: (array))) dependencies: (map))"#;
+    let project = r#"(record format: @project.v1 package: (record name: "hello" version: "0.1.0") targets: (array (record name: @hello kind: @bin root: "src/hello" entry: @hello.main.main effects: (array))) dependencies: (dict))"#;
     let source = r#"
 (defn main () i32 (choose 3i32 second: 11i32 first: 9i32))
 (defn choose (fallback i32) i32
@@ -63,7 +63,7 @@ fn snapshot_binding_normalization_preserves_the_program_result() {
         vibra_interp::run(original.program().expect("checked original"))
             .expect("run original")
             .value()
-            .clone();
+            .cloned();
 
     let plan = plan_format(root.path(), Path::new("src/hello/main.vib"))
         .expect("plan uses the confined source snapshot");
@@ -80,6 +80,6 @@ fn snapshot_binding_normalization_preserves_the_program_result() {
         vibra_interp::run(reformatted.program().expect("checked formatted source"))
             .expect("run formatted source")
             .value()
-            .clone();
+            .cloned();
     assert_eq!(reformatted_value, original_value);
 }

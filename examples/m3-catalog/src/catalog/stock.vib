@@ -1,0 +1,103 @@
+(import core @std.core)
+
+(import from @std.core.from)
+
+(import iter @std.iter.iter)
+
+(import ordered @std.core.ordered)
+
+; A stock-keeping unit. Stock is listed from the highest number down, so a
+; dict keyed by `sku` follows this order, not the order of the number inside.
+(deftype sku u32
+  visibility: @public
+  (impl ordered
+    (defn compare (left self right self) core.ordering
+      (match
+        (tupleof left right)
+        (tupleof (sku first) (sku second)) (u32.compare second first))))
+  (impl (from u32) (defn convert (value u32) self (sku value))))
+
+; What a line of stock is worth.
+(defint priced
+  visibility: @public
+  (defn cents (value self) u64)
+  ; Whether the value is worth more than `limit` cents.
+  (defn above (value self limit u64) bool
+    (match
+      (u64.compare (priced.cents value) limit)
+      (core.ordering.greater) true
+      - false)))
+
+(deftype part (record name str unit-cents u64 count u64)
+  visibility: @public
+  (impl priced
+    (defn cents (value self) u64 (times (value @unit-cents) (value @count)))))
+
+(deftype service (record name str hours u64)
+  visibility: @public
+  (impl priced (defn cents (value self) u64 (times (value @hours) 9000u64))))
+
+(deftype unknown-sku (record key sku) visibility: @public)
+
+(deftype short-stock (record key sku held u64 wanted u64) visibility: @public)
+
+(deftype stock-error (union unknown-sku short-stock) visibility: @public)
+
+; A last-in, first-out stack. It iterates from its top.
+(deftype stack (record items (array t))
+  where: (t any)
+  visibility: @public
+  (defn push (value self item t) self
+    visibility: @public
+    (stack items: (array.append (value @items) item)))
+  (impl (iter t)
+    (defn next (value self) (option (tuple t self))
+      (match
+        (u64.sub-checked (array.length (value @items)) 1u64)
+        (result.err -) (option.none)
+        (result.ok last) (match
+          (tupleof ((value @items) last) (array.slice (value @items) 0u64 last))
+          (tupleof (option.some top) (option.some rest)) (option.some (tupleof top (stack items: rest)))
+          - (option.none))))))
+
+; A product that saturates at the largest `u64`.
+(defn times (left u64 right u64) u64
+  (match
+    (u64.mul-checked left right)
+    (result.ok product) product
+    (result.err -) 18446744073709551615u64))
+
+; A sum that saturates at the largest `u64`.
+(defn plus (left u64 right u64) u64
+  (match
+    (u64.add-checked left right)
+    (result.ok sum) sum
+    (result.err -) 18446744073709551615u64))
+
+; The worth of every item, in cents.
+(defn total (items (array t)) u64
+  where: (t priced)
+  visibility: @public
+  (array.fold items 0u64 (lambda (sum u64 item t) u64 (plus sum (priced.cents item)))))
+
+; The shelf a number names: the written result type selects the conversion.
+(defn shelf (number u32) sku visibility: @public (from.convert number))
+
+; The count left after taking `wanted` of `key`.
+(defn reserve (stock (dict sku u64) key sku wanted u64) (result u64 stock-error)
+  visibility: @public
+  (match
+    (stock key)
+    (option.none) (result.err (stock-error (unknown-sku key: key)))
+    (option.some held) (match
+      (u64.sub-checked held wanted)
+      (result.ok left) (result.ok left)
+      (result.err -) (result.err (stock-error (short-stock key: key held: held wanted: wanted))))))
+
+; The names of the parts worth more than `limit` cents, from the top down.
+(defn costly-names (parts (stack part) limit u64) (array str)
+  visibility: @public
+  (iter.collect
+    (iter.map
+      (iter.filter parts (lambda (item part) bool (priced.above item limit)))
+      (lambda (item part) str (item @name)))))

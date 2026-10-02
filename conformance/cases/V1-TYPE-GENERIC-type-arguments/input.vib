@@ -1,0 +1,15 @@
+(defn identity (value t) t
+  where: (t any)
+  value)
+
+(defn too-many () i32 (identity types: (i32 str) 1i32))
+
+(defn contradicts () i32 (identity types: (i32) "x"))
+
+(defn wrong-result () str (identity types: (i32) 1i32))
+
+(defn not-generic () i32 (plain types: (i32) 1i32))
+
+(defn plain (value i32) i32 value)
+
+(defn late-and-wrong () i32 (identity "x" types: (i32)))

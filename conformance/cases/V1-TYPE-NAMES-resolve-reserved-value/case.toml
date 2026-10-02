@@ -14,10 +14,10 @@ accepted = false
 code = "@name.reserved-value-spelling"
 level = "@error"
 source = "src/main.vib"
-span = [0, 18]
+span = [0, 19]
 
 [[expect.diagnostics]]
 code = "@name.reserved-value-spelling"
 level = "@error"
 source = "src/main.vib"
-span = [5, 8]
+span = [5, 9]

@@ -1,0 +1,3 @@
+(defn anything (value any) i32 0i32)
+
+(defn pass (value any) i32 (anything value))

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Domain, Level};
-use vibra_ir::{SourceOrigin, Value};
+use vibra_ir::SourceOrigin;
 use vibra_resolve::{DeclarationId, EntityKind, ResolvedSnapshot};
 use vibra_syntax::{Declaration, Literal};
 
@@ -354,7 +354,7 @@ struct TestRef<'a> {
 pub fn run_tests(
     workspace: &WorkspaceSnapshot,
     selector: Option<&TestSelector>,
-    verification: Option<&vibra_types::BootstrapVerification>,
+    verification: Option<&vibra_types::Stdlib>,
 ) -> WorkspaceTestResult {
     let graph = match workspace.source_graph() {
         Ok(graph) => graph,
@@ -373,7 +373,7 @@ pub fn run_tests(
 fn select_tests(
     resolved: &ResolvedSnapshot,
     selector: Option<&TestSelector>,
-    verification: Option<&vibra_types::BootstrapVerification>,
+    verification: Option<&vibra_types::Stdlib>,
 ) -> WorkspaceTestResult {
     let local = resolved.package();
     let modules = resolved
@@ -648,8 +648,8 @@ fn select_tests(
                         status: TestItemStatus::AssertionFailed,
                         failure: Some(TestFailure {
                             assertion: failure.assertion().to_owned(),
-                            expected: canonical_assertion_value(failure.expected()),
-                            actual: canonical_assertion_value(failure.actual()),
+                            expected: failure.expected().to_owned(),
+                            actual: failure.actual().to_owned(),
                             source_id: failure.origin().source_id().to_owned(),
                             primary_span: failure.origin().span(),
                         }),
@@ -732,7 +732,7 @@ fn module_imports_assert(ast: &vibra_syntax::SourceAst) -> bool {
 fn module_has_verified_assertion_import(
     resolved: &ResolvedSnapshot,
     module: &vibra_resolve::ModuleRecord,
-    verification: Option<&vibra_types::BootstrapVerification>,
+    verification: Option<&vibra_types::Stdlib>,
 ) -> bool {
     let Some(verification) = verification else {
         return false;
@@ -931,13 +931,6 @@ fn diagnostic_in_source_closure(
         .is_some_and(|source_id| source_ids.contains(source_id))
 }
 
-fn canonical_assertion_value(value: &Value) -> String {
-    match value {
-        Value::Str(value) => canonical_string_literal(value),
-        _ => value.canonical_vibon(),
-    }
-}
-
 #[cfg(test)]
 mod provenance_tests {
 
@@ -947,8 +940,9 @@ mod provenance_tests {
 
     #[test]
     fn local_assertion_import_cannot_satisfy_verified_assertion_contract() {
-        let test_source = "(import assert @std.assert)\n(test \"spoofed\" (assert.equal-bool false true))\n";
-        let fake_assertions = "(defn equal-bool (expected bool actual bool) void visibility: @public void)\n";
+        let test_source = "(import assert @std.assert)\n(test \"spoofed\" (assert.equal false true))\n";
+        let fake_assertions =
+            "(defn equal (expected bool actual bool) void visibility: @public void)\n";
         let resolved = Resolver::resolve(ResolveInput::new(
             "demo",
             "0.1.0",
@@ -974,7 +968,7 @@ mod provenance_tests {
             ],
         ));
         let verification =
-            vibra_types::verify_bootstrap().expect("signed bootstrap verification");
+            vibra_types::load_stdlib().expect("embedded standard library");
 
         let result = select_tests(&resolved, None, Some(&verification));
 
@@ -1066,19 +1060,28 @@ fn invalid_item(test: &TestRef<'_>, diagnostics: &[Diagnostic]) -> TestItem {
     }
 }
 
-fn trap_item(name: String, _error: vibra_interp::RuntimeError) -> TestItem {
-    let diagnostic = Diagnostic::new(
-        DiagnosticCode::RuntimeInvalidCheckedProgram,
-        ByteSpan::empty_at(0),
-        "checked program violated M2 runtime invariants",
+fn trap_item(name: String, error: vibra_interp::RuntimeError) -> TestItem {
+    let (code, origin) = error.program_trap().map_or(
+        (DiagnosticCode::RuntimeInvalidCheckedProgram, None),
+        |(code, origin)| (code, origin.cloned()),
     );
+    let message = if code == DiagnosticCode::RuntimeInvalidCheckedProgram {
+        "checked program violated M2 runtime invariants".to_owned()
+    } else {
+        error.to_string()
+    };
+    let diagnostic = match &origin {
+        Some(origin) => Diagnostic::new(code, origin.span(), message)
+            .with_source_id(origin.source_id()),
+        None => Diagnostic::new(code, ByteSpan::empty_at(0), message),
+    };
     TestItem {
         name,
         status: TestItemStatus::Trap,
         failure: None,
         trap: Some(TestTrap {
-            trap_code: "@runtime.invalid-checked-program".to_owned(),
-            origin: None,
+            trap_code: code.as_atom().to_owned(),
+            origin,
         }),
         audit_trace: Vec::new(),
         diagnostics: vec![diagnostic],

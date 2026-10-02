@@ -1,0 +1,23 @@
+id = "V1-TYPE-GENERIC-ambiguous"
+rule = "V1-TYPE-GENERIC"
+profile = "static-v1"
+operation = "type-check"
+description = "A generic argument no operand, written result type, or types: list fixes is ambiguous."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-inference"
+level = "@error"
+source = "input.vib"
+span = [206, 218]
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-inference"
+level = "@error"
+source = "input.vib"
+span = [256, 263]

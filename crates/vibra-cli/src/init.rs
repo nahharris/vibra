@@ -117,7 +117,7 @@ pub fn plan_init(
     let package_name = package_name(&workspace_root, &relative_destination)?;
     let source_path = format!("src/{package_name}/main.vib");
     let project_text = format!(
-        "(record format: @project.v1 package: (record name: \"{package_name}\" version: \"0.1.0\") targets: (array (record name: @{package_name} kind: @bin root: \"src/{package_name}\" entry: @{package_name}.main.main effects: (array))) dependencies: (map))"
+        "(record format: @project.v1 package: (record name: \"{package_name}\" version: \"0.1.0\") targets: (array (record name: @{package_name} kind: @bin root: \"src/{package_name}\" entry: @{package_name}.main.main effects: (array))) dependencies: (dict))"
     );
     let project_text = format_source("project.vibon", &project_text)
         .map_err(|error| InitError::OperationalFailure(error.to_string()))?;

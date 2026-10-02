@@ -1,0 +1,17 @@
+id = "V1-TYPE-INTERFACE-key-generic-unbounded"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "A dict keyed by a generic parameter needs an ordered bound on that parameter."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.invalid-dict-key"
+level = "@error"
+source = "input.vib"
+span = [13, 33]

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 use vibra_ir::{
     CheckedFunction, CheckedGlobal, CheckedModuleSet, CheckedProgram, Expr,
-    FunctionSignature, IrError, PrimitiveType, SourceOrigin, TestAssertion, Value,
+    FunctionSignature, IrError, SourceOrigin, TestAssertion, Type, Value,
 };
 use vibra_resolve::{DeclarationId, ResolvedSnapshot};
 use vibra_syntax::{ApplicationBinding, Declaration, SourceAst};
@@ -25,6 +25,109 @@ pub struct ResolvedCheckResult {
     diagnostics: Vec<Diagnostic>,
     bindings: Vec<ApplicationBinding>,
     function_indices: BTreeMap<DeclarationId, usize>,
+    signatures: BTreeMap<DeclarationId, IndexedSignature>,
+    implementations: Vec<IndexedImplementation>,
+    modules: Option<Arc<CheckedModuleSet>>,
+}
+
+/// The checked type of one value, function, or method, for an index record
+/// (`docs/spec/05-tooling.md`, "Index records").
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexedSignature {
+    signature: String,
+    errors: Vec<String>,
+}
+
+impl IndexedSignature {
+    /// The canonical type encoding of the checked type.
+    #[must_use]
+    pub fn signature(&self) -> &str {
+        &self.signature
+    }
+
+    /// The canonical encodings of the error types its result can carry: `e`
+    /// for a result type `(result t e)`.
+    #[must_use]
+    pub fn errors(&self) -> &[String] {
+        &self.errors
+    }
+}
+
+/// One `impl` block, keyed by its receiver and applied interface.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexedImplementation {
+    receiver: String,
+    interface: String,
+    interface_id: String,
+    source_id: String,
+    span: ByteSpan,
+    members: Vec<IndexedMember>,
+}
+
+impl IndexedImplementation {
+    /// The canonical type encoding of the receiver type.
+    #[must_use]
+    pub fn receiver(&self) -> &str {
+        &self.receiver
+    }
+
+    /// The canonical type encoding of the applied interface target.
+    #[must_use]
+    pub fn interface(&self) -> &str {
+        &self.interface
+    }
+
+    /// The canonical declaration identity of the interface.
+    #[must_use]
+    pub fn interface_id(&self) -> &str {
+        &self.interface_id
+    }
+
+    /// The source identity of the block.
+    #[must_use]
+    pub fn source_id(&self) -> &str {
+        &self.source_id
+    }
+
+    /// The span of the block.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+
+    /// The members the block writes, by contract member name.
+    #[must_use]
+    pub fn members(&self) -> &[IndexedMember] {
+        &self.members
+    }
+}
+
+/// One member written in an `impl` block.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexedMember {
+    contract: String,
+    span: ByteSpan,
+    signature: String,
+}
+
+impl IndexedMember {
+    /// The name of the contract member it implements.
+    #[must_use]
+    pub fn contract(&self) -> &str {
+        &self.contract
+    }
+
+    /// The span of the member.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+
+    /// The canonical type encoding of its checked signature.
+    #[must_use]
+    pub fn signature(&self) -> &str {
+        &self.signature
+    }
 }
 
 impl ResolvedCheckResult {
@@ -57,6 +160,27 @@ impl ResolvedCheckResult {
         self.programs.get(declaration)
     }
 
+    /// The checked type of a value, function, or method, when its header
+    /// checked.
+    #[must_use]
+    pub fn signature(&self, declaration: &DeclarationId) -> Option<&IndexedSignature> {
+        self.signatures.get(declaration)
+    }
+
+    /// The validated module set of the selected modules: every checked
+    /// function, global, and type definition. Absent when a module did not
+    /// check or the scope declares no function.
+    #[must_use]
+    pub fn modules(&self) -> Option<&CheckedModuleSet> {
+        self.modules.as_deref()
+    }
+
+    /// Every `impl` block of the selected modules, in registration order.
+    #[must_use]
+    pub fn implementations(&self) -> &[IndexedImplementation] {
+        &self.implementations
+    }
+
     /// The checked function slot for a resolved declaration identity.
     #[must_use]
     pub fn function_index(&self, declaration: &DeclarationId) -> Option<usize> {
@@ -80,7 +204,7 @@ struct Module<'a> {
 pub fn check_resolved(
     snapshot: &ResolvedSnapshot,
     source_ids: &[String],
-    verification: Option<&crate::BootstrapVerification>,
+    verification: Option<&crate::Stdlib>,
 ) -> ResolvedCheckResult {
     let selected = source_ids.iter().cloned().collect::<BTreeSet<_>>();
     let mut seen_source_ids = BTreeSet::new();
@@ -112,6 +236,9 @@ pub fn check_resolved(
                 .collect(),
             bindings: Vec::new(),
             function_indices: BTreeMap::new(),
+            signatures: BTreeMap::new(),
+            implementations: Vec::new(),
+            modules: None,
         };
     }
     let mut modules = snapshot
@@ -144,6 +271,81 @@ pub fn check_resolved(
         .sort_by(|left, right| left.record.source_id().cmp(right.record.source_id()));
 
     let mut diagnostics = Vec::new();
+
+    // Declared types come first: every signature below may name one, in its
+    // own module or through an import alias.
+    let mut types = crate::nominal::TypeNames::default();
+    let mut type_declarations = Vec::new();
+    for module in &modules {
+        for declaration in module.ast.declarations() {
+            if let Declaration::Defint(value) = declaration
+                && let Some(id) = module
+                    .declarations
+                    .get(&(module.record.source_id().to_owned(), value.span()))
+            {
+                let path = std::iter::once(id.unit())
+                    .chain(id.module().iter().map(String::as_str))
+                    .chain(id.path().iter().map(String::as_str))
+                    .collect::<Vec<_>>()
+                    .join(".");
+                types.declare_interface(
+                    module.record.source_id(),
+                    value,
+                    vibra_ir::TypeId::new(id.canonical(), path),
+                );
+                continue;
+            }
+            let Declaration::Deftype(value) = declaration else {
+                continue;
+            };
+            let Some(id) = module
+                .declarations
+                .get(&(module.record.source_id().to_owned(), value.span()))
+            else {
+                continue;
+            };
+            let path = std::iter::once(id.unit())
+                .chain(id.module().iter().map(String::as_str))
+                .chain(id.path().iter().map(String::as_str))
+                .collect::<Vec<_>>()
+                .join(".");
+            let index = types.declare(
+                module.record.source_id(),
+                value,
+                vibra_ir::TypeId::new(id.canonical(), path),
+            );
+            type_declarations.push((index, value));
+        }
+    }
+    for import in snapshot
+        .imports()
+        .iter()
+        .filter(|import| selected.contains(import.source_id()))
+    {
+        let Some(target) = import.module() else {
+            continue;
+        };
+        if let Some(record) = snapshot.modules().iter().find(|record| {
+            record.package() == target.package()
+                && record.unit() == target.unit()
+                && record.segments() == target.segments()
+        }) {
+            match import.declaration() {
+                Some(declaration) => types.import_declaration(
+                    import.source_id(),
+                    import.alias(),
+                    record.source_id(),
+                    declaration,
+                ),
+                None => {
+                    types.import(import.source_id(), import.alias(), record.source_id())
+                }
+            }
+        }
+    }
+    crate::standard::declare_standard_types(&mut types, &mut type_declarations);
+    types.lower_bodies(&type_declarations, &mut diagnostics);
+
     let mut globals = Vec::<GlobalHeader>::new();
     let mut functions = Vec::<FunctionHeader>::new();
     let mut global_indices = BTreeMap::<DeclarationId, usize>::new();
@@ -162,15 +364,13 @@ pub fn check_resolved(
                     else {
                         continue;
                     };
-                    let Some(value_type) =
-                        crate::primitive_type(definition.value_type())
-                    else {
-                        unavailable(
-                            &mut diagnostics,
-                            module.record.source_id(),
-                            definition.span(),
-                            "only monomorphic module values are available in Step 12",
-                        );
+                    let Some(value_type) = types.lower_or_report(
+                        module.record.source_id(),
+                        crate::nominal::Scope::NONE,
+                        definition.value_type(),
+                        definition.span(),
+                        &mut diagnostics,
+                    ) else {
                         continue;
                     };
                     let index = globals.len();
@@ -194,10 +394,22 @@ pub fn check_resolved(
                     else {
                         continue;
                     };
+                    let Some((generics, bounds)) = crate::nominal::function_generics(
+                        &types,
+                        &[],
+                        function,
+                        module.record.source_id(),
+                        &mut diagnostics,
+                    ) else {
+                        continue;
+                    };
                     let Some(signature) = check_signature(
                         module.record.source_id(),
                         function,
                         &mut diagnostics,
+                        &types,
+                        crate::nominal::Scope::new(None, &generics)
+                            .with_bounds(&bounds),
                     ) else {
                         continue;
                     };
@@ -208,21 +420,15 @@ pub fn check_resolved(
                         module_index,
                         source_id: module.record.source_id().to_owned(),
                         name: id.canonical(),
-                        signature,
-                        variadic: function.attributes().items().iter().any(
-                            |attribute| {
-                                matches!(
-                                    attribute,
-                                    vibra_syntax::Attribute::Variadic(_)
-                                )
-                            },
-                        ),
                         external: compiler_intrinsic(
                             module.record.source_id(),
                             function,
                             &mut diagnostics,
                             module.trusted_bootstrap,
+                            &signature,
+                            &crate::standard::role_types(&types),
                         ),
+                        signature,
                         external_declared: function.attributes().items().iter().any(
                             |attribute| {
                                 matches!(
@@ -233,6 +439,12 @@ pub fn check_resolved(
                         ),
                         test: None,
                         test_assertion: None,
+                        member_index: None,
+                        self_type: None,
+                        type_parameters: generics,
+                        bounds,
+                        impl_member: None,
+                        implements: None,
                     });
                 }
                 Declaration::Test(test) => {
@@ -269,17 +481,100 @@ pub fn check_resolved(
                         module_index,
                         source_id: module.record.source_id().to_owned(),
                         name: id.canonical(),
-                        signature: FunctionSignature::new(
-                            Vec::new(),
-                            PrimitiveType::Void,
-                        ),
-                        variadic: false,
+                        signature: FunctionSignature::new(Vec::new(), Type::Void),
                         external: None,
                         external_declared: false,
                         test: Some(test.clone()),
                         test_assertion: None,
+                        member_index: None,
+                        self_type: None,
+                        type_parameters: Vec::new(),
+                        bounds: BTreeMap::new(),
+                        impl_member: None,
+                        implements: None,
                     });
                 }
+                Declaration::Deftype(value) => {
+                    let Some((self_type, owner_generics, owner_bounds)) = types
+                        .declared()
+                        .iter()
+                        .find(|declared| {
+                            declared.span == value.span()
+                                && declared.source_id == module.record.source_id()
+                        })
+                        .map(|declared| {
+                            (
+                                crate::nominal::declared_self_type(
+                                    &declared.id,
+                                    &declared.parameters,
+                                ),
+                                declared.parameters.clone(),
+                                declared.bounds.clone(),
+                            )
+                        })
+                    else {
+                        continue;
+                    };
+                    for (member_index, member) in value.members().iter().enumerate() {
+                        let vibra_syntax::TypeMember::Method(method) = member else {
+                            continue;
+                        };
+                        let Some(id) = module
+                            .declarations
+                            .get(&(module.record.source_id().to_owned(), method.span()))
+                            .cloned()
+                        else {
+                            continue;
+                        };
+                        let Some((generics, bounds)) =
+                            crate::nominal::function_generics(
+                                &types,
+                                &owner_generics,
+                                method,
+                                module.record.source_id(),
+                                &mut diagnostics,
+                            )
+                        else {
+                            continue;
+                        };
+                        let bounds = owner_bounds
+                            .clone()
+                            .into_iter()
+                            .chain(bounds)
+                            .collect::<BTreeMap<_, _>>();
+                        let Some(signature) = check_signature(
+                            module.record.source_id(),
+                            method,
+                            &mut diagnostics,
+                            &types,
+                            crate::nominal::Scope::new(Some(&self_type), &generics)
+                                .with_bounds(&bounds),
+                        ) else {
+                            continue;
+                        };
+                        let index = functions.len();
+                        function_indices.insert(id.clone(), index);
+                        functions.push(FunctionHeader {
+                            declaration_index,
+                            module_index,
+                            source_id: module.record.source_id().to_owned(),
+                            name: id.canonical(),
+                            signature,
+                            external: None,
+                            external_declared: false,
+                            test: None,
+                            test_assertion: None,
+                            member_index: Some(member_index),
+                            self_type: Some(self_type.clone()),
+                            type_parameters: generics,
+                            bounds,
+                            impl_member: None,
+                            implements: None,
+                        });
+                    }
+                }
+                // Declared with the types above; contracts lower below.
+                Declaration::Defint(_) => {}
                 Declaration::Import(_) => {}
                 _ => unavailable(
                     &mut diagnostics,
@@ -288,6 +583,41 @@ pub fn check_resolved(
                     "this declaration family is outside the Step 12 monomorphic profile",
                 ),
             }
+        }
+    }
+
+    {
+        let plan_modules = modules
+            .iter()
+            .map(|module| crate::interfaces::PlanModule {
+                source_id: module.record.source_id(),
+                declarations: module.ast.declarations(),
+            })
+            .collect::<Vec<_>>();
+        crate::interfaces::materialize(
+            &mut types,
+            &plan_modules,
+            &mut functions,
+            &|module_index, span| {
+                let module = modules.get(module_index)?;
+                module
+                    .declarations
+                    .get(&(module.record.source_id().to_owned(), span))
+                    .map(DeclarationId::canonical)
+            },
+            &mut diagnostics,
+        );
+    }
+    for global in &globals {
+        for error in
+            types.unsatisfied_bounds(crate::nominal::Scope::NONE, &global.value_type)
+        {
+            crate::nominal::report_lower_error(
+                &mut diagnostics,
+                &global.source_id,
+                global.span,
+                &error,
+            );
         }
     }
 
@@ -311,11 +641,47 @@ pub fn check_resolved(
             source_id: declaration.source_id().to_owned(),
             name: declaration.id().canonical(),
             signature: assertion.signature(),
-            variadic: false,
             external: None,
             external_declared: true,
             test: None,
             test_assertion: Some(assertion),
+            member_index: None,
+            self_type: None,
+            type_parameters: assertion.type_parameters(),
+            bounds: BTreeMap::new(),
+            impl_member: None,
+            implements: None,
+        });
+    }
+
+    // Builtin static methods such as `array.of` have no module in the graph;
+    // only the members a selected module names join its programs.
+    for member in crate::standard::builtin_members(&types) {
+        let id = vibra_resolve::builtin_member_id(&member.type_name, &member.member);
+        let referenced = snapshot.references().iter().any(|reference| {
+            selected.contains(reference.source_id()) && reference.target() == Some(&id)
+        });
+        if !referenced || function_indices.contains_key(&id) {
+            continue;
+        }
+        let index = functions.len();
+        function_indices.insert(id.clone(), index);
+        functions.push(FunctionHeader {
+            declaration_index: crate::IMPORTED_FUNCTION_DECLARATION,
+            module_index: usize::MAX,
+            source_id: crate::STDLIB_BUILTIN_SOURCE_ID.to_owned(),
+            name: id.canonical(),
+            signature: member.signature,
+            external: Some(member.intrinsic),
+            external_declared: true,
+            test: None,
+            test_assertion: None,
+            member_index: None,
+            self_type: None,
+            type_parameters: member.type_parameters,
+            bounds: BTreeMap::new(),
+            impl_member: None,
+            implements: None,
         });
     }
 
@@ -385,6 +751,7 @@ pub fn check_resolved(
             &empty_names,
             &mut bindings,
             None,
+            &types,
         );
         environment.resolved_targets = Some(&resolved_targets);
         environment.reports_redeclarations = false;
@@ -414,6 +781,22 @@ pub fn check_resolved(
 
     let mut checked_functions = vec![None; functions.len()];
     for (index, header) in functions.iter().cloned().enumerate() {
+        if header.declaration_index == crate::IMPORTED_FUNCTION_DECLARATION
+            && let Some(intrinsic) = header.external
+        {
+            let origin =
+                SourceOrigin::new(header.source_id.as_str(), ByteSpan::empty_at(0));
+            if let Ok(checked) = CheckedFunction::new_external(
+                header.name,
+                header.signature,
+                intrinsic,
+                origin,
+            ) && let Some(slot) = checked_functions.get_mut(index)
+            {
+                *slot = Some(checked);
+            }
+            continue;
+        }
         if let Some(assertion) = header.test_assertion {
             let origin =
                 SourceOrigin::new(header.source_id.as_str(), ByteSpan::empty_at(0));
@@ -443,13 +826,15 @@ pub fn check_resolved(
                 &empty_names,
                 &mut bindings,
                 Some(index),
+                &types,
             );
+            environment.exit = Some((Type::Void, None));
             environment.resolved_targets = Some(&resolved_targets);
             environment.reports_redeclarations = false;
             let Some(body) = crate::check_sequence(
                 &mut environment,
                 test.expressions(),
-                Some(PrimitiveType::Void),
+                Some(Type::Void),
                 test.span(),
                 true,
             ) else {
@@ -480,11 +865,8 @@ pub fn check_resolved(
         let Some(module) = modules.get(header.module_index) else {
             continue;
         };
-        let Some(declaration) = module.ast.declarations().get(header.declaration_index)
+        let Some(function) = crate::header_function(module.ast.declarations(), &header)
         else {
-            continue;
-        };
-        let Declaration::Defn(function) = declaration else {
             continue;
         };
         if !header.external_declared
@@ -533,10 +915,17 @@ pub fn check_resolved(
             &empty_names,
             &mut bindings,
             Some(index),
+            &types,
         );
         environment.resolved_targets = Some(&resolved_targets);
+        environment.self_type = header.self_type.clone();
+        environment.generics = header.type_parameters.clone();
+        environment.bounds = header.bounds.clone();
+        environment.exit =
+            Some((header.signature.result(), Some(function.result_span())));
         environment.reports_redeclarations = false;
         let mut parameters_valid = true;
+        let mut pending = Vec::new();
         for (parameter_index, parameter) in function.parameters().iter().enumerate() {
             match parameter.parsed_pattern().kind() {
                 vibra_syntax::PatternKind::Binding(name) if name.is_discard() => {}
@@ -550,15 +939,14 @@ pub fn check_resolved(
                         parameters_valid = false;
                     }
                 }
-                _ => {
-                    parameters_valid = false;
-                    unavailable(
-                        environment.diagnostics,
-                        environment.source_id,
-                        parameter.span(),
-                        "constructor and destructuring patterns are deferred until M3",
-                    );
-                }
+                _ => match header.signature.parameters().get(parameter_index) {
+                    Some(value_type) => pending.push((
+                        parameter_index,
+                        parameter.parsed_pattern(),
+                        value_type.clone(),
+                    )),
+                    None => parameters_valid = false,
+                },
             }
             environment.next_slot = parameter_index.saturating_add(1);
         }
@@ -582,6 +970,13 @@ pub fn check_resolved(
                 }
             }
         }
+        if !environment.bind_variadic(function.attributes().items(), &header.signature)
+        {
+            parameters_valid = false;
+        }
+        let Some(destructured) = environment.bind_parameter_patterns(&pending) else {
+            continue;
+        };
         if !parameters_valid {
             continue;
         }
@@ -595,13 +990,19 @@ pub fn check_resolved(
             continue;
         };
         let origin = SourceOrigin::new(header.source_id.as_str(), function.span());
+        let body = crate::wrap_destructured(body, destructured, &origin);
+        let implements = header.implements.clone();
         match CheckedFunction::with_slots(
             header.name,
             header.signature,
             body,
             origin,
             environment.next_slot,
-        ) {
+        )
+        .map(|checked| match implements {
+            Some(implements) => checked.with_implements(implements),
+            None => checked,
+        }) {
             Ok(checked) => {
                 if let Some(slot) = checked_functions.get_mut(index) {
                     *slot = Some(checked);
@@ -671,6 +1072,96 @@ pub fn check_resolved(
             }
         }
     }
+    // Index facts: the checked type of every header, and every `impl` block.
+    let result_id = types
+        .role("result")
+        .and_then(|index| types.get(index))
+        .map(|declared| declared.id.clone());
+    let describe = |value: &Type| IndexedSignature {
+        signature: vibra_ir::canonical_type(value),
+        errors: match value {
+            Type::Function(signature) => match signature.result() {
+                Type::Applied(id, arguments) if Some(&id) == result_id.as_ref() => {
+                    arguments
+                        .get(1)
+                        .map(vibra_ir::canonical_type)
+                        .into_iter()
+                        .collect()
+                }
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        },
+    };
+    let mut signatures = BTreeMap::new();
+    for (id, index) in &function_indices {
+        if let Some(header) = functions.get(*index) {
+            signatures.insert(
+                id.clone(),
+                describe(&Type::Function(Box::new(header.signature.clone()))),
+            );
+        }
+    }
+    for (id, index) in &global_indices {
+        if let Some(global) = globals.get(*index) {
+            signatures.insert(id.clone(), describe(&global.value_type));
+        }
+    }
+    // A contract member's signature is written over `self`.
+    for interface in types.interfaces() {
+        let Some(module) = modules
+            .iter()
+            .find(|module| module.record.source_id() == interface.source_id)
+        else {
+            continue;
+        };
+        for member in &interface.members {
+            if let Some(id) = module
+                .declarations
+                .get(&(interface.source_id.clone(), member.span))
+            {
+                signatures.insert(
+                    id.clone(),
+                    describe(&Type::Function(Box::new(member.signature.clone()))),
+                );
+            }
+        }
+    }
+    let implementations = types
+        .implementations()
+        .iter()
+        .filter_map(|implementation| {
+            let interface = types.interface(implementation.interface)?;
+            Some(IndexedImplementation {
+                receiver: vibra_ir::canonical_type(&implementation.receiver),
+                interface: vibra_ir::canonical_type(&Type::Interface(
+                    interface.id.clone(),
+                    implementation.arguments.clone(),
+                )),
+                interface_id: interface.id.id().to_owned(),
+                source_id: implementation.source_id.clone(),
+                span: implementation.span,
+                members: implementation
+                    .members
+                    .iter()
+                    .filter_map(|(name, index)| {
+                        let header = functions.get(*index)?;
+                        header.impl_member?;
+                        let module = modules.get(header.module_index)?;
+                        let function =
+                            crate::header_function(module.ast.declarations(), header)?;
+                        Some(IndexedMember {
+                            contract: name.clone(),
+                            span: function.span(),
+                            signature: vibra_ir::canonical_type(&Type::Function(
+                                Box::new(header.signature.clone()),
+                            )),
+                        })
+                    })
+                    .collect(),
+            })
+        })
+        .collect();
     let globals = checked_globals.into_iter().collect::<Option<Vec<_>>>();
     let functions = checked_functions.into_iter().collect::<Option<Vec<_>>>();
     // One validated module set serves every entry and test program; entries
@@ -685,7 +1176,12 @@ pub fn check_resolved(
             vibra_ir::validate_global_initializer_cycles(&globals, &functions)
                 .map(|()| None)
         } else {
-            CheckedModuleSet::try_new(globals, functions).map(Some)
+            CheckedModuleSet::try_new_with_types(
+                types.definitions(),
+                globals,
+                functions,
+            )
+            .map(Some)
         };
         match validated {
             Ok(set) => module_set = set,
@@ -732,6 +1228,29 @@ pub fn check_resolved(
             let Some(index) = function_indices.get(declaration).copied() else {
                 continue;
             };
+            // An entry's result is observed, and a function value has no
+            // observation, so its type cannot hold one.
+            if !is_test
+                && let Some(function) = set.functions().get(index)
+                && crate::mentions_function(&types, &function.signature().result())
+            {
+                if let Some(resolved) = snapshot
+                    .declarations()
+                    .iter()
+                    .find(|candidate| candidate.id() == declaration)
+                {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            DiagnosticCode::ProjectInvalidEntrySignature,
+                            resolved.span(),
+                            "an entry result cannot hold a function, which has no observable value",
+                        )
+                        .with_source_id(resolved.source_id()),
+                    );
+                }
+                failed_entry = true;
+                continue;
+            }
             match CheckedProgram::for_entry(Arc::clone(set), index) {
                 Ok(program) => {
                     programs.insert(declaration.clone(), program);
@@ -757,10 +1276,11 @@ pub fn check_resolved(
                             format!("{failure}: {error}"),
                         );
                     }
-                    // Stop building programs of this kind after one failure,
-                    // as each failure describes the shared module set.
+                    // A test program fails on its own entry, so the tests after
+                    // it are still built. One failed target entry describes
+                    // the shared module set, so later ones are skipped.
                     if is_test {
-                        break;
+                        continue;
                     }
                     failed_entry = true;
                 }
@@ -781,31 +1301,44 @@ pub fn check_resolved(
         diagnostics,
         bindings,
         function_indices,
+        signatures,
+        implementations,
+        modules: module_set,
     }
 }
 
-fn default_expression(
-    value_type: &PrimitiveType,
-    origin: SourceOrigin,
-) -> Option<Expr> {
+fn default_expression(value_type: &Type, origin: SourceOrigin) -> Option<Expr> {
     let value = match value_type {
-        PrimitiveType::Bool => Some(Value::Bool(false)),
-        PrimitiveType::Void => Some(Value::Void),
-        PrimitiveType::Char => Some(Value::Char('\0')),
-        PrimitiveType::Str => Some(Value::Str(String::new())),
-        PrimitiveType::Bytes => Some(Value::Bytes(Vec::new())),
-        PrimitiveType::Atom => Some(Value::Atom(String::new())),
-        PrimitiveType::I8 => Some(Value::I8(0)),
-        PrimitiveType::I16 => Some(Value::I16(0)),
-        PrimitiveType::I32 => Some(Value::I32(0)),
-        PrimitiveType::I64 => Some(Value::I64(0)),
-        PrimitiveType::U8 => Some(Value::U8(0)),
-        PrimitiveType::U16 => Some(Value::U16(0)),
-        PrimitiveType::U32 => Some(Value::U32(0)),
-        PrimitiveType::U64 => Some(Value::U64(0)),
-        PrimitiveType::F32 => Value::f32(0.0),
-        PrimitiveType::F64 => Value::f64(0.0),
-        PrimitiveType::Function(signature) => {
+        Type::Bool => Some(Value::Bool(false)),
+        Type::Void => Some(Value::Void),
+        Type::Char => Some(Value::Char('\0')),
+        Type::Str => Some(Value::Str(String::new())),
+        Type::Bytes => Some(Value::Bytes(Vec::new())),
+        Type::Atom => Some(Value::Atom(String::new())),
+        Type::I8 => Some(Value::I8(0)),
+        Type::I16 => Some(Value::I16(0)),
+        Type::I32 => Some(Value::I32(0)),
+        Type::I64 => Some(Value::I64(0)),
+        Type::U8 => Some(Value::U8(0)),
+        Type::U16 => Some(Value::U16(0)),
+        Type::U32 => Some(Value::U32(0)),
+        Type::U64 => Some(Value::U64(0)),
+        Type::F32 => Value::f32(0.0),
+        Type::F64 => Value::f64(0.0),
+        // Declared and structural types have no placeholder value.
+        Type::Declared(_)
+        | Type::Record(_)
+        | Type::Enum(_)
+        | Type::Param(_)
+        | Type::Applied(_, _)
+        | Type::Tuple(_)
+        | Type::Union(_)
+        | Type::AtomSingleton(_)
+        | Type::Array(_)
+        | Type::Dict(_, _)
+        | Type::Interface(_, _)
+        | Type::Any => None,
+        Type::Function(signature) => {
             let body = default_expression(&signature.result(), origin.clone())?;
             return Some(Expr::closure(
                 (**signature).clone(),
@@ -823,7 +1356,7 @@ fn default_expression(
 fn is_verified_assertion_declaration(
     snapshot: &ResolvedSnapshot,
     id: &DeclarationId,
-    verification: Option<&crate::BootstrapVerification>,
+    verification: Option<&crate::Stdlib>,
 ) -> bool {
     let Some(verification) = verification else {
         return false;

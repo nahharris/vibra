@@ -1,0 +1,9 @@
+(deftype plain i32)
+
+(defn bounded (value t) i32
+  where: (t plain)
+  0i32)
+
+(defn defaulted () i32
+  labelled: (count i32 @zero)
+  count)

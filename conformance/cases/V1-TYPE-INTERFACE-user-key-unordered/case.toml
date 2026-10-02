@@ -1,0 +1,29 @@
+id = "V1-TYPE-INTERFACE-user-key-unordered"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "A deftype keys a dict only through its own ordered implementation, whether the dict type is written or inferred, and an ordered-bounded parameter rejects it."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.invalid-dict-key"
+level = "@error"
+source = "input.vib"
+span = [89, 113]
+
+[[expect.diagnostics]]
+code = "@type.invalid-dict-key"
+level = "@error"
+source = "input.vib"
+span = [163, 200]
+
+[[expect.diagnostics]]
+code = "@type.unsatisfied-bound"
+level = "@error"
+source = "input.vib"
+span = [284, 315]

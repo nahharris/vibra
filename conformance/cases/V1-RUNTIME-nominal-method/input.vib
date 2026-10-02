@@ -1,0 +1,6 @@
+(defn main () str (apply user.label (user name: "Ada" id: 7u64)))
+
+(deftype user (record name str id u64)
+  (defn label (value self) str (value @name)))
+
+(defn apply (f (fn (user) str) value user) str (f value))

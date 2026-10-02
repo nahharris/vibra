@@ -12,7 +12,7 @@ use vibra_workspace::{WorkspaceSnapshot, source_graph::SourceGraph};
 
 fn project(targets: &str, dependencies: &str) -> String {
     format!(
-        "(record format: @project.v1 package: (record name: \"hello\" version: \"0.1.0\") targets: (array {targets}) dependencies: (map {dependencies}))"
+        "(record format: @project.v1 package: (record name: \"hello\" version: \"0.1.0\") targets: (array {targets}) dependencies: (dict {dependencies}))"
     )
 }
 

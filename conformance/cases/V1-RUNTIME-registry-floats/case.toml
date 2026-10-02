@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-registry-floats"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Float static methods: IEEE 754 arithmetic and negation, NaN inequality, signed zeros under equality and totalOrder, the canonical float text for large, infinite, and NaN values, and parsing of the unsuffixed float grammar."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

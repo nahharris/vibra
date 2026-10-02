@@ -1,0 +1,12 @@
+(deftype boxed t
+  where: (t any))
+
+(deftype plain i32)
+
+(defn unknown (value (box i32)) i32 1i32)
+
+(defn too-many (value (boxed i32 str)) i32 1i32)
+
+(defn too-few (value boxed) i32 1i32)
+
+(defn not-generic (value (plain i32)) i32 1i32)

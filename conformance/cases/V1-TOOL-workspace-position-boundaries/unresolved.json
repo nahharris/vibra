@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "workspaceRevision": "sha256:8e4b8bc6328530239df7b06feddf95936b69f3ffa5a9ec0881c8d4d0708bace6",
+  "workspaceRevision": "sha256:e0db87daae0435d3ec5d68314b51bdc1483bbee9e24bf4e4784d89a4c8c762e1",
   "sourceId": "src/unresolved.vib",
   "offset": 21,
   "nodeId": "src/unresolved.vib#21-28",
@@ -71,6 +71,10 @@
     "value": []
   },
   "application": {
+    "status": "unavailable",
+    "value": null
+  },
+  "pattern": {
     "status": "unavailable",
     "value": null
   }

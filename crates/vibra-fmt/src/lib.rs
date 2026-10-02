@@ -24,6 +24,8 @@
 //! A recovered document is returned byte-for-byte unchanged because applying
 //! canonical whitespace to incomplete or opaque leaf text would be a guess.
 
+mod structural;
+
 use std::collections::{BTreeSet, HashMap};
 use std::fmt;
 use std::path::Path;
@@ -127,9 +129,8 @@ impl<'a> RenderContext<'a> {
             .iter()
             .find(|binding| binding.span() == application.span())
         else {
-            if changed {
-                self.argument_order_diagnostic(application);
-            }
+            // Rendering still moves a late `types:` group, which is never an
+            // operand, but without a complete binding there is no warning.
             return application.arguments().iter().collect();
         };
         match application.ordered_arguments(binding.facts()) {
@@ -260,6 +261,15 @@ fn format_document_inner(
             || document.source().to_owned(),
             |data| format!("{}\n", canonical_data(data)),
         ));
+    }
+
+    if document.accepted()
+        && let Some(reordered) =
+            structural::canonical_structural_order(document.root(), document.source())
+        && let Ok(reordered) = parse_document(document.path(), &reordered)
+        && reordered.accepted()
+    {
+        return format_document_inner(&reordered, context);
     }
 
     if document.accepted()
@@ -545,7 +555,40 @@ fn render_expression(
             render_expression(operand, output, context);
             output.push(')');
         }
+        ExpressionKind::TupleOf(values) => {
+            output.push_str("(tupleof");
+            for value in values {
+                output.push(' ');
+                render_expression(value, output, context);
+            }
+            output.push(')');
+        }
+        ExpressionKind::RecordOf(fields) => {
+            output.push_str("(recordof");
+            for field in fields {
+                output.push(' ');
+                render_labelled_operand(field, output, context);
+            }
+            output.push(')');
+        }
+        ExpressionKind::EnumOf(variant) => {
+            output.push_str("(enumof ");
+            render_labelled_operand(variant, output, context);
+            output.push(')');
+        }
     }
+}
+
+fn render_labelled_operand(
+    operand: &CallArgument,
+    output: &mut String,
+    context: &mut RenderContext<'_>,
+) {
+    if let Some(label) = operand.label() {
+        output.push_str(label.raw());
+        output.push(' ');
+    }
+    render_expression(operand.value(), output, context);
 }
 
 fn render_lambda(
@@ -571,7 +614,9 @@ fn render_pattern(
     context: &mut RenderContext<'_>,
 ) {
     match pattern.kind() {
-        PatternKind::Binding(name) => output.push_str(name.raw()),
+        PatternKind::Binding(name) | PatternKind::Atom(name) => {
+            output.push_str(name.raw())
+        }
         PatternKind::Literal(literal) => output.push_str(&format_leaf(literal.raw())),
         PatternKind::Constructor { head, arguments } => {
             output.push('(');
@@ -583,11 +628,24 @@ fn render_pattern(
             output.push(')');
         }
         PatternKind::Tuple(values) => {
-            output.push_str("(tuple");
+            output.push_str("(tupleof");
             for value in values {
                 output.push(' ');
                 render_pattern(value, output, context);
             }
+            output.push(')');
+        }
+        PatternKind::RecordOf(fields) => {
+            output.push_str("(recordof");
+            for field in fields {
+                output.push(' ');
+                render_pattern_argument(field, output, context);
+            }
+            output.push(')');
+        }
+        PatternKind::EnumOf(variant) => {
+            output.push_str("(enumof ");
+            render_pattern_argument(variant, output, context);
             output.push(')');
         }
         PatternKind::Array(values) => {
@@ -626,19 +684,9 @@ fn render_pattern_argument(
 fn render_deftype_body(body: &DeftypeBody, output: &mut String) {
     match body {
         DeftypeBody::Type(value) => render_type(value, output),
-        DeftypeBody::Record(fields) => render_fields("record", fields, output),
-        DeftypeBody::Enum(fields) => render_fields("enum", fields, output),
-        DeftypeBody::Union(members) => {
-            output.push_str("(union");
-            for member in members {
-                output.push(' ');
-                render_type(member, output);
-            }
-            output.push(')');
-        }
-        DeftypeBody::Newtype(value) => {
-            output.push_str("(newtype ");
-            render_type(value, output);
+        DeftypeBody::Intrinsic(atom) => {
+            output.push_str("(intrinsic-type ");
+            output.push_str(atom.raw());
             output.push(')');
         }
     }
@@ -676,13 +724,23 @@ fn render_type(value: &TypeExpr, output: &mut String) {
             }
             output.push(')');
         }
+        TypeExpr::Record(fields) => render_fields("record", fields, output),
+        TypeExpr::Enum(fields) => render_fields("enum", fields, output),
+        TypeExpr::Union(members) => {
+            output.push_str("(union");
+            for member in members {
+                output.push(' ');
+                render_type(member, output);
+            }
+            output.push(')');
+        }
         TypeExpr::Array(value) => {
             output.push_str("(array ");
             render_type(value, output);
             output.push(')');
         }
-        TypeExpr::Map(key, value) => {
-            output.push_str("(map ");
+        TypeExpr::Dict(key, value) => {
+            output.push_str("(dict ");
             render_type(key, output);
             output.push(' ');
             render_type(value, output);
@@ -737,8 +795,8 @@ fn render_variadic_type(value: &VariadicType, output: &mut String) {
             render_type(value, output);
             output.push(')');
         }
-        VariadicType::Map(key, value) => {
-            output.push_str("(map ");
+        VariadicType::Dict(key, value) => {
+            output.push_str("(dict ");
             render_type(key, output);
             output.push(' ');
             render_type(value, output);
@@ -788,11 +846,15 @@ fn render_attributes(attributes: &[Attribute], output: &mut String) {
                 render_variadic_type(parameter.value_type(), output);
                 output.push(')');
             }
-            Attribute::Visibility(name) | Attribute::External(name) => {
+            Attribute::Visibility(name)
+            | Attribute::External(name)
+            | Attribute::Role(name) => {
                 output.push_str(name.raw());
             }
             Attribute::Effects(row) => render_effect_row(row.references(), output),
-            Attribute::Symbol(value) | Attribute::Doc(value) => {
+            Attribute::Symbol(value)
+            | Attribute::Native(value)
+            | Attribute::Doc(value) => {
                 output.push_str(&format_leaf(value.raw()));
             }
         }
@@ -842,7 +904,9 @@ fn format_source_with_comments(
             if !group.comments.is_empty() {
                 output.push('\n');
             }
-            if is_native_declaration(form) && contains_line_comment(form) {
+            // Every declaration takes the same path, so a comment elsewhere
+            // in the file does not change how an uncommented one is ordered.
+            if is_native_declaration(form) {
                 render_declaration_with_comments(
                     form,
                     document.source(),
@@ -898,86 +962,153 @@ fn render_declaration_with_comments(
     }
     attribute_groups.sort_by_key(|(order, _, _)| *order);
 
-    output.push('(');
-    for item in items.iter().take(header_count) {
-        render_cst_item(
-            item,
-            source,
-            indent.saturating_add(2),
-            layouts,
-            output,
-            false,
-            context,
-        );
-    }
+    // Canonical order: header, sorted attributes, then the body, with a
+    // `deftype` or `defint` listing its methods before its `impl` blocks.
+    let mut ordered: Vec<(&CstItem<'_>, bool)> = items
+        .iter()
+        .take(header_count)
+        .map(|item| (item, false))
+        .collect();
+    // The positions in `ordered` of each attribute's value.
+    let mut value_positions = Vec::new();
     for (_, label, value) in attribute_groups {
-        render_cst_item(
-            label,
-            source,
-            indent.saturating_add(2),
-            layouts,
-            output,
-            false,
-            context,
-        );
-        render_cst_item(
-            value,
-            source,
-            indent.saturating_add(2),
-            layouts,
-            output,
-            false,
-            context,
-        );
+        ordered.push((label, false));
+        value_positions.push(ordered.len());
+        ordered.push((value, false));
     }
     let body = items.iter().skip(cursor);
     if matches!(head, "deftype" | "defint") {
         for member_head in ["defn", "impl"] {
             for item in body.clone() {
                 if meaningful_head(item.node) == Some(member_head) {
-                    render_cst_item(
-                        item,
-                        source,
-                        indent.saturating_add(2),
-                        layouts,
-                        output,
-                        true,
-                        context,
-                    );
+                    ordered.push((item, true));
                 }
             }
         }
         for item in body {
             if !matches!(meaningful_head(item.node), Some("defn" | "impl")) {
-                render_cst_item(
-                    item,
-                    source,
-                    indent.saturating_add(2),
-                    layouts,
-                    output,
-                    is_native_declaration(item.node),
-                    context,
-                );
+                ordered.push((item, is_native_declaration(item.node)));
             }
         }
     } else {
         for item in body {
-            render_cst_item(
-                item,
-                source,
-                indent.saturating_add(2),
-                layouts,
-                output,
-                is_native_declaration(item.node),
-                context,
-            );
+            ordered.push((item, is_native_declaration(item.node)));
         }
     }
-    output.push('\n');
-    output.push_str(&" ".repeat(indent));
+
+    // The head shares the opening delimiter's line, and the closing delimiter
+    // joins the last item unless a line comment ends it: a delimiter stands
+    // alone only when its neighbour is a comment.
+    output.push('(');
+    let inline_width = |item: &CstItem<'_>| {
+        layouts
+            .get(&node_key(item.node))
+            .filter(|layout| layout.inline)
+            .map(|layout| layout.inline_width)
+    };
+    // A declaration with no comment that fits on its line stays on it.
+    let whole_inline = !contains_line_comment(node)
+        && layouts
+            .get(&node_key(node))
+            .is_some_and(|layout| layout.inline);
+    let body_indent = indent.saturating_add(2);
+    // The declaration's last form is followed by its own closing delimiter
+    // and those of every list it ends.
+    let closers = layouts
+        .get(&node_key(node))
+        .map_or(0, |layout| layout.closers)
+        .saturating_add(1);
+    let last_index = ordered.len().saturating_sub(1);
+    // Where the opening line ends while the header still shares it.
+    let mut opening_column = Some(indent.saturating_add(1));
+    let mut ends_in_comment = false;
+    let mut previous: Option<&CstItem<'_>> = None;
+    for (index, (item, recurse_declaration)) in ordered.into_iter().enumerate() {
+        let uninterrupted = item.leading.is_empty()
+            && previous.is_none_or(|previous| previous.trailing.is_empty());
+        let lead = if index == 0 {
+            if let (Some(column), Some(width)) = (opening_column, inline_width(item)) {
+                opening_column = Some(column.saturating_add(width));
+            } else {
+                opening_column = None;
+            }
+            ItemLead::Open
+        } else if whole_inline {
+            ItemLead::Space
+        } else if index < header_count {
+            // A header form shares the opening line while every form before
+            // it does and the line stays within 88 columns.
+            let joined = opening_column
+                .zip(inline_width(item))
+                .map(|(column, width)| column.saturating_add(1).saturating_add(width))
+                .filter(|column| {
+                    let closing = if index == last_index { closers } else { 0 };
+                    uninterrupted && column.saturating_add(closing) <= 88
+                });
+            opening_column = joined;
+            if joined.is_some() {
+                ItemLead::Space
+            } else {
+                ItemLead::Line
+            }
+        } else if value_positions.contains(&index) {
+            // An attribute's value shares its label's line when the pair fits.
+            let fits = previous
+                .and_then(&inline_width)
+                .zip(inline_width(item))
+                .is_some_and(|(label, value)| {
+                    // Room for one closing delimiter, or for all of them
+                    // when the pair ends the declaration.
+                    let room = if index == last_index { closers } else { 1 };
+                    body_indent
+                        .saturating_add(label)
+                        .saturating_add(1)
+                        .saturating_add(value)
+                        .saturating_add(room)
+                        <= 88
+                });
+            if uninterrupted && fits {
+                ItemLead::Space
+            } else {
+                ItemLead::Line
+            }
+        } else {
+            ItemLead::Line
+        };
+        ends_in_comment = render_cst_item(
+            item,
+            source,
+            body_indent,
+            layouts,
+            output,
+            recurse_declaration,
+            context,
+            lead,
+        );
+        previous = Some(item);
+    }
+    if ends_in_comment {
+        output.push('\n');
+        output.push_str(&" ".repeat(indent));
+    }
     output.push(')');
 }
 
+/// How a declaration item starts.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ItemLead {
+    /// Directly after the opening delimiter.
+    Open,
+    /// After one space, on the line of the item before it.
+    Space,
+    /// On its own line.
+    Line,
+}
+
+/// Renders one declaration item as `lead` says; a leading comment always puts
+/// the item on its own line. Returns whether the item ends in a line comment,
+/// after which a closing delimiter must start a new line.
+#[allow(clippy::too_many_arguments)]
 fn render_cst_item(
     item: &CstItem<'_>,
     source: &str,
@@ -986,14 +1117,19 @@ fn render_cst_item(
     output: &mut String,
     recurse_declaration: bool,
     context: &mut RenderContext<'_>,
-) {
+    lead: ItemLead,
+) -> bool {
     for comment in &item.leading {
         output.push('\n');
         output.push_str(&" ".repeat(indent));
         output.push_str(&comment_text(comment));
     }
-    output.push('\n');
-    output.push_str(&" ".repeat(indent));
+    if lead == ItemLead::Line || !item.leading.is_empty() {
+        output.push('\n');
+        output.push_str(&" ".repeat(indent));
+    } else if lead == ItemLead::Space {
+        output.push(' ');
+    }
     if recurse_declaration {
         render_declaration_with_comments(
             item.node, source, indent, layouts, output, context,
@@ -1006,6 +1142,7 @@ fn render_cst_item(
         output.push_str(&" ".repeat(indent));
         output.push_str(&comment_text(comment));
     }
+    !item.trailing.is_empty()
 }
 
 fn cst_items<'source>(node: &'source CstNode, source: &str) -> Vec<CstItem<'source>> {
@@ -1104,27 +1241,33 @@ fn is_attribute_label(node: &CstNode) -> bool {
         matches!(
             text,
             "where:"
+                | "role:"
                 | "labelled:"
                 | "variadic:"
                 | "visibility:"
                 | "effects:"
                 | "external:"
                 | "symbol:"
+                | "native:"
                 | "doc:"
         )
     })
 }
 
+/// The canonical position of an attribute label, the same order as
+/// `Attribute::canonical_order` gives a declaration with no comment.
 fn attribute_order(label: &str) -> usize {
     match label {
         "where:" => 0,
-        "labelled:" => 1,
-        "variadic:" => 2,
-        "visibility:" => 3,
-        "effects:" => 4,
-        "external:" => 5,
-        "symbol:" => 6,
-        "doc:" => 7,
+        "role:" => 1,
+        "labelled:" => 2,
+        "variadic:" => 3,
+        "visibility:" => 4,
+        "effects:" => 5,
+        "external:" => 6,
+        "symbol:" => 7,
+        "native:" => 8,
+        "doc:" => 9,
         _ => usize::MAX,
     }
 }
@@ -1225,6 +1368,9 @@ fn root_groups(root: &CstNode) -> Option<Vec<RootGroup<'_>>> {
 struct NodeLayout {
     inline: bool,
     inline_width: usize,
+    /// The closing delimiters of enclosing lists that follow this list's own
+    /// on the same line, because it is the last form of each.
+    closers: usize,
 }
 
 fn node_key(node: &CstNode) -> *const CstNode {
@@ -1267,11 +1413,78 @@ fn build_layouts(root: &CstNode) -> HashMap<*const CstNode, NodeLayout> {
             _ => NodeLayout {
                 inline: false,
                 inline_width: 0,
+                closers: 0,
             },
         };
         layouts.insert(node_key(node), layout);
     }
+    reflow_last_forms(root, &mut layouts);
     layouts
+}
+
+/// The last form of `node`, unless a line comment follows it.
+fn last_form(node: &CstNode) -> Option<&CstNode> {
+    node.children()
+        .iter()
+        .rev()
+        .find(|child| {
+            matches!(
+                child.kind(),
+                SyntaxKind::Atom | SyntaxKind::List | SyntaxKind::LineComment
+            )
+        })
+        .filter(|child| child.kind() != SyntaxKind::LineComment)
+}
+
+/// Lays a last form out multiline when it is an inline list that leaves no
+/// room for the closing delimiters that follow it, so those delimiters stack
+/// onto its own instead of standing alone on the next line.
+fn reflow_last_forms(
+    root: &CstNode,
+    layouts: &mut HashMap<*const CstNode, NodeLayout>,
+) {
+    // Each entry is a list, its indentation, and the closing delimiters that
+    // follow its own on the same line.
+    let mut tasks = root
+        .children()
+        .iter()
+        .filter(|child| child.kind() == SyntaxKind::List)
+        .map(|child| (child, 0_usize, 0_usize))
+        .collect::<Vec<_>>();
+    while let Some((node, indent, closers)) = tasks.pop() {
+        if layouts
+            .get(&node_key(node))
+            .is_none_or(|layout| layout.inline)
+        {
+            continue;
+        }
+        let child_indent = indent.saturating_add(2);
+        let last = last_form(node);
+        for child in node.children() {
+            if child.kind() != SyntaxKind::List {
+                continue;
+            }
+            let is_last = last.is_some_and(|last| std::ptr::eq(last, child));
+            let child_closers = if is_last {
+                closers.saturating_add(1)
+            } else {
+                0
+            };
+            if let Some(layout) = layouts.get_mut(&node_key(child)) {
+                layout.closers = child_closers;
+                if is_last
+                    && layout.inline
+                    && child_indent
+                        .saturating_add(layout.inline_width)
+                        .saturating_add(child_closers)
+                        > 88
+                {
+                    layout.inline = false;
+                }
+            }
+            tasks.push((child, child_indent, child_closers));
+        }
+    }
 }
 
 fn leaf_layout(text: &str) -> NodeLayout {
@@ -1280,6 +1493,7 @@ fn leaf_layout(text: &str) -> NodeLayout {
     NodeLayout {
         inline: !has_newline,
         inline_width,
+        closers: 0,
     }
 }
 
@@ -1323,6 +1537,7 @@ fn list_layout(
                         .unwrap_or(NodeLayout {
                             inline: false,
                             inline_width: 0,
+                            closers: 0,
                         });
                 if item_count != 0 {
                     inline_width = inline_width.saturating_add(1);
@@ -1337,6 +1552,7 @@ fn list_layout(
     NodeLayout {
         inline: !has_comment && all_inline && indent.saturating_add(inline_width) <= 88,
         inline_width,
+        closers: 0,
     }
 }
 
@@ -1427,13 +1643,14 @@ fn render_node(
                         layouts.get(&node_key(node)).copied().unwrap_or(NodeLayout {
                             inline: false,
                             inline_width: 0,
+                            closers: 0,
                         });
                     if let Some(facts) = context
                         .as_deref_mut()
                         .and_then(|context| context.binding_facts(node.span()))
                     {
                         match bound_application_groups(node, source, &facts) {
-                            Ok((mut groups, changed)) => {
+                            Ok((groups, changed)) => {
                                 if changed && let Some(context) = context.as_deref_mut()
                                 {
                                     context.argument_order_diagnostic_span(node.span());
@@ -1462,48 +1679,9 @@ fn render_node(
                                         }
                                     }
                                 } else {
-                                    let head_group = groups.remove(0);
-                                    let last = groups
-                                        .last()
-                                        .and_then(|group| group.items.last())
-                                        .and_then(|item| match item {
-                                            LineComponent::Node(node) => Some(node),
-                                            LineComponent::Comment(_) => None,
-                                        });
-                                    let last_is_node = last.is_some_and(|last| {
-                                        layouts.get(&node_key(last)).is_some_and(
-                                            |child_layout| {
-                                                if child_layout.inline {
-                                                    indent
-                                                        .saturating_add(2)
-                                                        .saturating_add(
-                                                            child_layout.inline_width,
-                                                        )
-                                                        .saturating_add(1)
-                                                        <= 88
-                                                } else {
-                                                    true
-                                                }
-                                            },
-                                        )
-                                    });
-                                    if last_is_node {
-                                        tasks.push(RenderTask::Raw(")"));
-                                    } else {
-                                        tasks.push(RenderTask::CloseList(indent));
-                                    }
-                                    for group in groups.into_iter().rev() {
-                                        tasks.push(RenderTask::BoundGroup {
-                                            items: group.items,
-                                            indent: indent.saturating_add(2),
-                                            first: false,
-                                        });
-                                    }
-                                    tasks.push(RenderTask::BoundGroup {
-                                        items: head_group.items,
-                                        indent,
-                                        first: true,
-                                    });
+                                    push_multiline_groups(
+                                        &mut tasks, groups, indent, layouts,
+                                    );
                                 }
                                 continue;
                             }
@@ -1535,6 +1713,16 @@ fn render_node(
                             }
                         }
                     } else {
+                        if is_native_declaration(node) && !contains_line_comment(node) {
+                            output.push('(');
+                            push_declaration_lines(&mut tasks, node, indent, layouts);
+                            continue;
+                        }
+                        if let Some(groups) = pair_groups(node, source) {
+                            output.push('(');
+                            push_multiline_groups(&mut tasks, groups, indent, layouts);
+                            continue;
+                        }
                         if let Some(match_layout) = match_layout(node, source) {
                             output.push('(');
                             let last_arm = match_layout.arms.last();
@@ -1777,6 +1965,159 @@ fn render_node(
     }
 }
 
+/// The lines of a multiline declaration with no comment of its own
+/// (`docs/spec/01-source-language.md`, "Canonical format").
+///
+/// The header forms share the opening line for as long as each is inline and
+/// the line stays within 88 columns; a header form past that point takes its
+/// own line. A labelled attribute then shares one line with its value when
+/// the pair fits, and every other form takes its own line.
+fn declaration_lines<'source>(
+    node: &'source CstNode,
+    indent: usize,
+    layouts: &HashMap<*const CstNode, NodeLayout>,
+) -> Vec<Vec<&'source CstNode>> {
+    let items = node
+        .children()
+        .iter()
+        .filter(|child| matches!(child.kind(), SyntaxKind::Atom | SyntaxKind::List))
+        .collect::<Vec<_>>();
+    let inline_width = |item: &CstNode| {
+        layouts
+            .get(&node_key(item))
+            .filter(|layout| layout.inline)
+            .map(|layout| layout.inline_width)
+    };
+    let header_count = items
+        .first()
+        .and_then(|head| head.leaf_text())
+        .map_or(0, declaration_header_count)
+        .min(items.len());
+    let mut lines: Vec<Vec<&CstNode>> = Vec::new();
+    let mut opening = Vec::new();
+    // The declaration's last form is followed by its own closing delimiter
+    // and those of every list it ends.
+    let closers = layouts
+        .get(&node_key(node))
+        .map_or(0, |layout| layout.closers)
+        .saturating_add(1);
+    // The opening delimiter takes one column.
+    let mut column = indent.saturating_add(1);
+    let mut cursor = 0;
+    while let Some(item) = items.get(cursor).filter(|_| cursor < header_count) {
+        let separator = usize::from(cursor != 0);
+        let Some(width) = inline_width(item) else {
+            break;
+        };
+        let next = column.saturating_add(separator).saturating_add(width);
+        let closing = if cursor + 1 == items.len() {
+            closers
+        } else {
+            0
+        };
+        if cursor != 0 && next.saturating_add(closing) > 88 {
+            break;
+        }
+        column = next;
+        opening.push(*item);
+        cursor += 1;
+    }
+    if opening.is_empty()
+        && let Some(head) = items.first()
+    {
+        // A list always starts with its first form, inline or not.
+        opening.push(*head);
+        cursor = 1;
+    }
+    lines.push(opening);
+    while cursor < header_count {
+        if let Some(item) = items.get(cursor) {
+            lines.push(vec![*item]);
+        }
+        cursor += 1;
+    }
+    let body_indent = indent.saturating_add(2);
+    while let Some(item) = items.get(cursor) {
+        let pair = cst_label(item).and_then(|_| {
+            let value = items.get(cursor + 1)?;
+            // Room for one closing delimiter, or for all of them when the
+            // pair ends the declaration.
+            let room = if cursor + 2 == items.len() {
+                closers
+            } else {
+                1
+            };
+            let fits = body_indent
+                .saturating_add(inline_width(item)?)
+                .saturating_add(1)
+                .saturating_add(inline_width(value)?)
+                .saturating_add(room)
+                <= 88;
+            fits.then_some(*value)
+        });
+        match pair {
+            Some(value) => {
+                lines.push(vec![*item, value]);
+                cursor += 2;
+            }
+            None => {
+                lines.push(vec![*item]);
+                cursor += 1;
+            }
+        }
+    }
+    lines
+}
+
+/// Schedules a multiline declaration as its [`declaration_lines`]. The
+/// closing delimiter joins the last line unless that line is inline and
+/// leaves no room for it.
+fn push_declaration_lines<'source>(
+    tasks: &mut Vec<RenderTask<'source>>,
+    node: &'source CstNode,
+    indent: usize,
+    layouts: &HashMap<*const CstNode, NodeLayout>,
+) {
+    let lines = declaration_lines(node, indent, layouts);
+    let body_indent = indent.saturating_add(2);
+    let closes_beside = lines.last().is_some_and(|line| {
+        let start = if lines.len() == 1 {
+            indent.saturating_add(1)
+        } else {
+            body_indent
+        };
+        let mut width = line.len().saturating_sub(1);
+        for item in line {
+            match layouts.get(&node_key(item)) {
+                Some(layout) if layout.inline => {
+                    width = width.saturating_add(layout.inline_width);
+                }
+                // A multiline last form ends on its own closing delimiter,
+                // so this one stacks onto that line.
+                _ => return true,
+            }
+        }
+        start.saturating_add(width).saturating_add(1) <= 88
+    });
+    if closes_beside {
+        tasks.push(RenderTask::Raw(")"));
+    } else {
+        tasks.push(RenderTask::CloseList(indent));
+    }
+    for (line_index, line) in lines.into_iter().enumerate().rev() {
+        for (item_index, item) in line.into_iter().enumerate().rev() {
+            if item_index != 0 {
+                tasks.push(RenderTask::Node(item, body_indent));
+                tasks.push(RenderTask::Raw(" "));
+            } else if line_index == 0 {
+                tasks.push(RenderTask::Node(item, indent));
+            } else {
+                tasks.push(RenderTask::LineNode(item, body_indent));
+            }
+        }
+    }
+}
+
 fn multiline_components(node: &CstNode) -> Vec<LineComponent<'_>> {
     let mut components = Vec::new();
     let mut comments = Vec::new();
@@ -1794,6 +2135,106 @@ fn multiline_components(node: &CstNode) -> Vec<LineComponent<'_>> {
     }
     components.extend(comments.into_iter().map(LineComponent::Comment));
     components
+}
+
+/// Schedules a multiline list rendered as line groups: the head group on the
+/// opening line, then one line per group. The closing delimiter joins the last
+/// form unless that form is a comment or does not fit beside it.
+fn push_multiline_groups<'source>(
+    tasks: &mut Vec<RenderTask<'source>>,
+    mut groups: Vec<BoundGroup<'source>>,
+    indent: usize,
+    layouts: &HashMap<*const CstNode, NodeLayout>,
+) {
+    if groups.is_empty() {
+        tasks.push(RenderTask::Raw(")"));
+        return;
+    }
+    let head_group = groups.remove(0);
+    let last = groups
+        .last()
+        .unwrap_or(&head_group)
+        .items
+        .last()
+        .and_then(|item| match item {
+            LineComponent::Node(node) => Some(node),
+            LineComponent::Comment(_) => None,
+        });
+    let last_is_node = last.is_some_and(|last| {
+        layouts.get(&node_key(last)).is_some_and(|child_layout| {
+            if child_layout.inline {
+                indent
+                    .saturating_add(2)
+                    .saturating_add(child_layout.inline_width)
+                    .saturating_add(1)
+                    <= 88
+            } else {
+                true
+            }
+        })
+    });
+    if last_is_node {
+        tasks.push(RenderTask::Raw(")"));
+    } else {
+        tasks.push(RenderTask::CloseList(indent));
+    }
+    for group in groups.into_iter().rev() {
+        tasks.push(RenderTask::BoundGroup {
+            items: group.items,
+            indent: indent.saturating_add(2),
+            first: false,
+        });
+    }
+    tasks.push(RenderTask::BoundGroup {
+        items: head_group.items,
+        indent,
+        first: true,
+    });
+}
+
+/// Line groups for a multiline `record` or `enum` type: the head, then one
+/// name/type pair per line, each with the comments attached to its forms.
+/// Returns `None` for any other list or for a malformed pair list.
+fn pair_groups<'source>(
+    node: &'source CstNode,
+    source: &str,
+) -> Option<Vec<BoundGroup<'source>>> {
+    if !matches!(meaningful_head(node), Some("record" | "enum")) {
+        return None;
+    }
+    let bound = bound_nodes(node, source);
+    let (head, members) = bound.split_first()?;
+    if members.is_empty() || !members.len().is_multiple_of(2) {
+        return None;
+    }
+    // A source type names its members with bare symbols. A VIBON data record
+    // uses `label: value` entries and keeps the generic data layout.
+    if members.iter().step_by(2).any(|member| {
+        member
+            .node
+            .leaf_text()
+            .is_none_or(|text| text.ends_with(':'))
+    }) {
+        return None;
+    }
+    let group = |forms: &[BoundNode<'source>]| BoundGroup {
+        nodes: forms.iter().map(|bound| bound.node).collect(),
+        items: forms
+            .iter()
+            .flat_map(|bound| {
+                bound
+                    .leading
+                    .iter()
+                    .copied()
+                    .map(LineComponent::Comment)
+                    .chain(std::iter::once(LineComponent::Node(bound.node)))
+                    .chain(bound.trailing.iter().copied().map(LineComponent::Comment))
+            })
+            .collect(),
+    };
+    let mut groups = vec![group(std::slice::from_ref(head))];
+    groups.extend(members.chunks_exact(2).map(group));
+    Some(groups)
 }
 
 fn bound_application_groups<'source>(
@@ -1880,12 +2321,12 @@ fn bound_application_groups<'source>(
     variadic.extend(positional);
     match facts.variadic() {
         Some(vibra_syntax::VariadicBinding::Array) => {}
-        Some(vibra_syntax::VariadicBinding::Map)
+        Some(vibra_syntax::VariadicBinding::Dict)
             if !variadic.len().is_multiple_of(2) =>
         {
-            return Err(BindingError::OddMapVariadic(variadic.len()));
+            return Err(BindingError::OddDictVariadic(variadic.len()));
         }
-        Some(vibra_syntax::VariadicBinding::Map) => {}
+        Some(vibra_syntax::VariadicBinding::Dict) => {}
         None if !variadic.is_empty() => {
             return Err(BindingError::UnexpectedPositional(variadic.len()));
         }
@@ -1985,9 +2426,6 @@ fn bound_nodes<'source>(
             .flatten()
             .next()
             .copied();
-        let Some(target) = next.or(previous) else {
-            continue;
-        };
         let attach_to_previous = previous.is_some_and(|previous| {
             next.is_none()
                 || bound_nodes.get(previous).is_some_and(|bound| {
@@ -1998,6 +2436,15 @@ fn bound_nodes<'source>(
                     )
                 })
         });
+        // A comment on the line of the form before it trails that form; any
+        // other comment leads the form after it.
+        let Some(target) = (if attach_to_previous {
+            previous
+        } else {
+            next.or(previous)
+        }) else {
+            continue;
+        };
         if let Some(bound) = bound_nodes.get_mut(target) {
             if attach_to_previous {
                 bound.trailing.push(comment);

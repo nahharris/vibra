@@ -20,7 +20,7 @@ impl TempProject {
     fn new(label: &str, sources: &[(&str, &str)]) -> Self {
         Self::with_project(
             label,
-            "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (map))\n",
+            "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict))\n",
             sources,
         )
     }
@@ -117,8 +117,7 @@ fn target_may_import_assertion_module_without_referencing_it() {
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let verification =
-        vibra_types::verify_bootstrap().expect("signed bootstrap verification");
+    let verification = vibra_types::load_stdlib().expect("embedded standard library");
 
     let resolved = snapshot
         .resolve_with_bootstrap(&verification)
@@ -163,8 +162,7 @@ fn target_reference_to_assertion_is_unavailable_at_the_reference() {
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let verification =
-        vibra_types::verify_bootstrap().expect("signed bootstrap verification");
+    let verification = vibra_types::load_stdlib().expect("embedded standard library");
 
     let checked = vibra_workspace::semantic::check_all_with_bootstrap(
         &snapshot,
@@ -198,15 +196,14 @@ fn target_reference_to_assertion_is_unavailable_at_the_reference() {
 fn local_std_assert_functions_are_not_promoted_to_trusted_assertions() {
     let project = TempProject::with_project(
         "local-assert-spoof",
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @std kind: @bin root: \"src/std\" entry: @std.assert.execute effects: (array))) dependencies: (map))\n",
+        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @std kind: @bin root: \"src/std\" entry: @std.assert.execute effects: (array))) dependencies: (dict))\n",
         &[(
             "src/std/assert.vib",
-            "(defn equal-i32 (left i32 right i32) void void)\n(defn execute () void (equal-i32 1i32 2i32))\n",
+            "(defn equal (left i32 right i32) void void)\n(defn execute () void (equal 1i32 2i32))\n",
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let verification =
-        vibra_types::verify_bootstrap().expect("signed bootstrap verification");
+    let verification = vibra_types::load_stdlib().expect("embedded standard library");
     let target = snapshot
         .project()
         .project()
@@ -318,7 +315,7 @@ fn test_import_bootstrap_requires_verified_check_and_run_without_becoming_target
         snapshot
             .requires_bootstrap_verification()
             .expect("whole-snapshot bootstrap query"),
-        "test import must request signed bootstrap verification"
+        "test import must request the embedded standard library"
     );
 
     let target = snapshot
@@ -337,8 +334,7 @@ fn test_import_bootstrap_requires_verified_check_and_run_without_becoming_target
     assert_eq!(unverified_run.check().status(), CheckStatus::Unavailable);
     assert!(unverified_run.outcome().is_none());
 
-    let verification =
-        vibra_types::verify_bootstrap().expect("signed bootstrap verification");
+    let verification = vibra_types::load_stdlib().expect("embedded standard library");
     let checked = vibra_workspace::semantic::check_target_with_bootstrap(
         &snapshot,
         target,

@@ -1,0 +1,143 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:a49f233e2bf88e71c963b624771d99fa2506112c3b24e8203ea078d58a368437",
+  "sourceId": "src/main.vib",
+  "offset": 472,
+  "nodeId": "src/main.vib#472-473",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 472,
+    "sourceId": "src/main.vib",
+    "span": {
+      "sourceId": "src/main.vib",
+      "start": 472,
+      "end": 473,
+      "startPosition": {
+        "line": 21,
+        "column": 5
+      },
+      "endPosition": {
+        "line": 21,
+        "column": 6
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "open-paren",
+    "category": "pattern",
+    "status": "exact",
+    "permittedForms": [
+      "tuple",
+      "array",
+      "as"
+    ],
+    "permittedLabels": []
+  },
+  "role": {
+    "status": "exact",
+    "value": "@unknown"
+  },
+  "context": {
+    "status": "exact",
+    "value": "result"
+  },
+  "identity": {
+    "status": "unavailable",
+    "value": null
+  },
+  "expectedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "str",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "observedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "str",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": [
+      {
+        "name": "value",
+        "identity": "binder:src/main.vib:435-440"
+      }
+    ]
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": [
+      {
+        "alias": "from",
+        "module": "@std.core",
+        "sourceId": "src/main.vib",
+        "span": {
+          "sourceId": "src/main.vib",
+          "start": 0,
+          "end": 28,
+          "startPosition": {
+            "line": 1,
+            "column": 1
+          },
+          "endPosition": {
+            "line": 1,
+            "column": 29
+          }
+        }
+      }
+    ]
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": []
+  },
+  "application": {
+    "status": "unavailable",
+    "value": null
+  },
+  "pattern": {
+    "status": "exact",
+    "value": {
+      "kind": "@as",
+      "scrutineeType": {
+        "kind": "declared",
+        "name": "app.main.number",
+        "parameters": [],
+        "result": null,
+        "labelled": []
+      },
+      "narrowed": {
+        "kind": "primitive",
+        "name": "i32",
+        "parameters": [],
+        "result": null,
+        "labelled": []
+      },
+      "unionMembers": [
+        {
+          "kind": "primitive",
+          "name": "i32",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        },
+        {
+          "kind": "primitive",
+          "name": "str",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        }
+      ]
+    }
+  }
+}

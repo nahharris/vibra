@@ -1,0 +1,69 @@
+; Byte sequences. Every operation is Vibra over the bytes a `bytes` value is
+; written over; `native:` names the implementation a toolchain may run instead.
+(import core @std.core)
+(import equatable @std.core.equatable)
+(import ordered @std.core.ordered)
+
+; The standard byte-sequence type, which plays the `@bytes` role. It is written
+; over its bytes, and the toolchain represents it directly.
+(deftype bytes (array u8)
+  role: @bytes
+  visibility: @public
+  (impl equatable
+    (defn equal (left self right self) bool (equal left right)))
+  (impl ordered
+    (defn compare (left self right self) core.ordering (compare left right))))
+
+(defn length (value bytes) u64
+  visibility: @public
+  native: "bytes.length"
+  (let (bytes items) value (array.length items)))
+
+(defn concat (left bytes right bytes) bytes
+  visibility: @public
+  native: "bytes.concat"
+  (let (bytes first) left
+    (let (bytes second) right (bytes (array.concat first second)))))
+
+(defn equal (left bytes right bytes) bool
+  visibility: @public
+  native: "bytes.equal"
+  (match (compare left right) (core.ordering.equal) true - false))
+
+(defn compare (left bytes right bytes) core.ordering
+  visibility: @public
+  native: "bytes.compare"
+  (let (bytes first) left (let (bytes second) right (order first second 0u64))))
+
+(defn slice (value bytes start u64 end u64) (option bytes)
+  visibility: @public
+  native: "bytes.slice"
+  (let (bytes items) value
+    (match (array.slice items start end)
+      (option.some part) (option.some (bytes part))
+      (option.none) (option.none))))
+
+(defn to-array (value bytes) (array u8)
+  visibility: @public
+  native: "bytes.to-array"
+  (let (bytes items) value items))
+
+(defn from-array (values (array u8)) bytes
+  visibility: @public
+  native: "bytes.from-array"
+  (bytes values))
+
+; Lexicographic order from `index`: the first differing byte decides, and a
+; proper prefix is less.
+(defn order (first (array u8) second (array u8) index u64) core.ordering
+  (match (tupleof (first index) (second index))
+    (tupleof (option.none) (option.none)) (core.ordering.equal)
+    (tupleof (option.none) -) (core.ordering.less)
+    (tupleof - (option.none)) (core.ordering.greater)
+    (tupleof (option.some left) (option.some right))
+      (match (u8.compare left right)
+        (core.ordering.equal)
+          (match (u64.add-checked index 1u64)
+            (result.ok next) (order first second next)
+            (result.err -) (core.ordering.equal))
+        decided decided)))

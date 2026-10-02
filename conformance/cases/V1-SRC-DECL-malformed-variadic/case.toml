@@ -1,7 +1,7 @@
 id = "V1-SRC-DECL-malformed-variadic"
 rule = "V1-SRC-DECL"
 profile = "reader-v1"
-description = "Variadic declarations require one binding and one array/map tail type."
+description = "Variadic declarations require one binding and one array/dict tail type."
 
 [inputs]
 source = "input.vib"

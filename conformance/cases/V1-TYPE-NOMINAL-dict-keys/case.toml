@@ -1,0 +1,47 @@
+id = "V1-TYPE-NOMINAL-dict-keys"
+rule = "V1-TYPE-NOMINAL"
+profile = "static-v1"
+operation = "type-check"
+description = "Floats, void, arrays, and declared types are not dict keys, a function key is not equatable, and an inferred key type is checked at its application."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.invalid-dict-key"
+level = "@error"
+source = "input.vib"
+span = [48, 64]
+
+[[expect.diagnostics]]
+code = "@type.invalid-dict-key"
+level = "@error"
+source = "input.vib"
+span = [90, 107]
+
+[[expect.diagnostics]]
+code = "@type.invalid-dict-key"
+level = "@error"
+source = "input.vib"
+span = [134, 158]
+
+[[expect.diagnostics]]
+code = "@type.invalid-dict-key"
+level = "@error"
+source = "input.vib"
+span = [184, 201]
+
+[[expect.diagnostics]]
+code = "@type.function-not-equatable"
+level = "@error"
+source = "input.vib"
+span = [231, 255]
+
+[[expect.diagnostics]]
+code = "@type.invalid-dict-key"
+level = "@error"
+source = "input.vib"
+span = [297, 318]

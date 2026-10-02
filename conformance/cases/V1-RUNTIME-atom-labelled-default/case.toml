@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-atom-labelled-default"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "An atom is a literal, so it is a labelled default at the type atom: the default applies when the label is omitted."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

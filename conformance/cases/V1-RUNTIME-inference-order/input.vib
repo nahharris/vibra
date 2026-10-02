@@ -1,0 +1,21 @@
+(defn main () (tuple i32 i32 (array i32) (array i32) number number)
+  (tupleof
+    (pick 2i32 1)
+    (pick 1 2i32)
+    (array.of 1 2i32)
+    (array.of 1i32 2)
+    (left-first)
+    (right-first)))
+
+(deftype number (union i32 str))
+
+(defn pick (left t right t) t
+  where: (t any)
+  left)
+
+; The written result type fixes `t`, so each operand widens to it.
+(defn left-first () number
+  (pick (as number 2i32) 1i32))
+
+(defn right-first () number
+  (pick 1i32 (as number 2i32)))

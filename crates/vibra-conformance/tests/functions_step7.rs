@@ -20,7 +20,7 @@ fn probe_named_function_value_and_labelled_call() {
     assert_eq!(checked.application_bindings().len(), 1);
     let program = checked.program().expect("program");
     let result = vibra_interp::run(program).expect("execution");
-    assert_eq!(result.value(), &vibra_ir::Value::I32(11));
+    assert_eq!(result.value(), Some(&vibra_ir::Value::I32(11)));
 }
 
 #[test]
@@ -34,7 +34,7 @@ fn nested_callee_expression_is_checked_and_evaluated_once() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let result =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(result.value(), &vibra_ir::Value::I32(3));
+    assert_eq!(result.value(), Some(&vibra_ir::Value::I32(3)));
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn written_function_types_can_store_and_call_a_module_function_value() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let result =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(result.value(), &vibra_ir::Value::I32(8));
+    assert_eq!(result.value(), Some(&vibra_ir::Value::I32(8)));
 }
 
 #[test]
@@ -78,7 +78,7 @@ fn probe_default_and_declaration_order_for_labelled_operands() {
     assert_eq!(binding.facts().labelled(), ["first", "second"]);
     let result =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(result.value(), &vibra_ir::Value::I32(9));
+    assert_eq!(result.value(), Some(&vibra_ir::Value::I32(9)));
 }
 
 #[test]
@@ -93,7 +93,7 @@ fn probe_omitted_label_uses_typed_default_literal() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let result =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(result.value(), &vibra_ir::Value::I32(7));
+    assert_eq!(result.value(), Some(&vibra_ir::Value::I32(7)));
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn formatter_uses_only_checker_binding_facts_for_safe_reordering() {
     assert!(reparsed.accepted(), "{:?}", reparsed.diagnostics());
     let result = vibra_interp::run(reparsed.program().expect("reparsed program"))
         .expect("reparsed execution");
-    assert_eq!(result.value(), &vibra_ir::Value::I32(9));
+    assert_eq!(result.value(), Some(&vibra_ir::Value::I32(9)));
     let reformatted = vibra_fmt::format_source_with_bindings(
         "format-bindings.vib",
         formatted,
@@ -146,7 +146,7 @@ fn probe_lambda_capture_and_return() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let result =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(result.value(), &vibra_ir::Value::I32(41));
+    assert_eq!(result.value(), Some(&vibra_ir::Value::I32(41)));
 }
 
 #[test]
@@ -163,7 +163,7 @@ fn probe_nested_let_capture_survives_the_outer_scope() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let result =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(result.value(), &vibra_ir::Value::I32(40));
+    assert_eq!(result.value(), Some(&vibra_ir::Value::I32(40)));
 }
 
 #[test]
@@ -180,7 +180,7 @@ fn probe_nested_lambda_capture_uses_the_parent_environment() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let result =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(result.value(), &vibra_ir::Value::I32(39));
+    assert_eq!(result.value(), Some(&vibra_ir::Value::I32(39)));
 }
 
 #[test]
@@ -200,7 +200,10 @@ fn nested_lambda_capture_uses_parent_capture_slot_types() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let result =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(result.value(), &vibra_ir::Value::F32(2.5f32.to_bits()));
+    assert_eq!(
+        result.value(),
+        Some(&vibra_ir::Value::F32(2.5f32.to_bits()))
+    );
 }
 
 #[test]
@@ -215,7 +218,7 @@ fn lambda_discard_parameters_keep_their_declared_slots() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let result =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(result.value(), &vibra_ir::Value::I32(2));
+    assert_eq!(result.value(), Some(&vibra_ir::Value::I32(2)));
 }
 
 #[test]
@@ -264,10 +267,12 @@ fn invalid_result_does_not_emit_argument_order_facts_or_warnings() {
 "#;
     let checked = check_source("invalid-result.vib", source);
     assert!(!checked.accepted());
-    assert!(checked
-        .diagnostics()
-        .iter()
-        .any(|diagnostic| diagnostic.code() == DiagnosticCode::TypeArgumentMismatch));
+    assert!(
+        checked
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code() == DiagnosticCode::TypeMismatch)
+    );
     assert!(
         !checked
             .diagnostics()
@@ -382,7 +387,7 @@ fn function_returning_calls_do_not_create_a_false_singleton_hint() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let result =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(result.value(), &vibra_ir::Value::I32(2));
+    assert_eq!(result.value(), Some(&vibra_ir::Value::I32(2)));
 }
 
 #[test]
@@ -399,7 +404,7 @@ fn unused_let_initializer_does_not_contaminate_tail_target() {
 }
 
 #[test]
-fn rejects_unbounded_higher_order_calls_before_lowering() {
+fn unbounded_higher_order_calls_reach_every_escaping_function() {
     let source = r#"
 (defn apply (f (fn () i32)) i32
   (f))
@@ -407,17 +412,10 @@ fn rejects_unbounded_higher_order_calls_before_lowering() {
   (apply answer))
 "#;
     let checked = check_source("higher-order-recursion.vib", source);
-    assert!(
-        !checked.accepted(),
-        "unbounded higher-order calls stay unavailable"
-    );
-    assert!(checked.program().is_none());
-    assert!(
-        checked
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::ToolUnavailable })
-    );
+    // An unknown callee stands for every function named as a value, so the
+    // call through `f` joins `answer` and `apply` in one recursive group.
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    assert!(checked.program().is_some());
 }
 
 #[test]
@@ -433,7 +431,7 @@ fn nonrecursive_higher_order_function_values_remain_admitted() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let result =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(result.value(), &vibra_ir::Value::I32(1));
+    assert_eq!(result.value(), Some(&vibra_ir::Value::I32(1)));
 }
 
 #[test]
@@ -476,7 +474,7 @@ fn omitted_labels_resolve_defaults_from_the_selected_callable() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let result =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(result.value(), &vibra_ir::Value::I32(2));
+    assert_eq!(result.value(), Some(&vibra_ir::Value::I32(2)));
 }
 
 #[test]
@@ -493,5 +491,5 @@ fn omitted_labels_through_a_written_function_type_use_value_defaults() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let result =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(result.value(), &vibra_ir::Value::I32(7));
+    assert_eq!(result.value(), Some(&vibra_ir::Value::I32(7)));
 }

@@ -8,7 +8,7 @@
     (record name: @hello kind: @bin root: "src" entry: @hello.main effects: (array)))
   ; project comment
   dependencies:
-  (map
+  (dict
     @a
     (record kind: @path path: "../a")
     @z

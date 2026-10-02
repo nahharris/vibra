@@ -1,0 +1,9 @@
+(defn attempt () (result void str) (result.ok))
+
+(defn in-do () i32 (do (attempt) 0i32))
+
+(defn in-let () i32 (let value 1i32 (attempt) value))
+
+(defn in-body () i32
+  (attempt)
+  0i32)

@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-variadics"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A variadic call packs zero or several tail operands, and the builtin array operations build new arrays."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

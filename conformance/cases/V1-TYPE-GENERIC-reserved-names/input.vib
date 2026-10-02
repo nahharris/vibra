@@ -1,0 +1,22 @@
+(defn own (value i32) i32
+  where: (self any)
+  value)
+
+(defn top (value i32) i32
+  where: (any any)
+  value)
+
+(defn head (value i32) i32
+  where: (record any)
+  value)
+
+(defn builtin (value i32) i32
+  where: (i32 any)
+  value)
+
+(defint tuple
+  (defn size (value self) i32))
+
+(deftype holder i32
+  (defn dict (value self) i32
+    1i32))

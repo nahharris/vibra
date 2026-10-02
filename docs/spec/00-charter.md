@@ -68,16 +68,25 @@ conformance case or an explicit review-only invariant.
   never inferred from contents.
 - Names use kebab-case and imports produce explicit aliases.
 - Public boundaries carry complete types and effect ceilings.
-- Types, interfaces, their explicit implementations, and effects are nominal.
+- Declared types, interfaces, their explicit implementations, and effects are
+  nominal: every `deftype` introduces a new identity. Anonymous `tuple`,
+  `record`, `enum`, and `union` type expressions are structural and carry no
+  methods or implementations.
 - Every widening relation is declared and every narrowing is written. A value
-  of a member type widens into the `deftype` union that lists it, `match`
-  narrows that union back to one member, `as` ascribes a type at any expression,
-  and the `from` and `try-from` interfaces convert. No conversion is implicit.
+  of a member type widens into a union that lists it, `match` narrows that
+  union back to one member, `as` ascribes a type at any expression, and the
+  `from` and `try-from` interfaces convert. No conversion is implicit.
 - Typed `option` and `result` replace null and exceptions.
 - Effects describe possible operations statically. A binary target's declared
   effect roots are its complete execution consent; v1 has no runtime grants.
 - Project and compiler-owned persistent data use canonical, non-executable
   `.vibon` literal data. JSON is reserved for CLI and MCP interoperability.
+- The language core is minimal. The compiler owns the scalar types, `(array t)`,
+  `fn` types, and the structural type constructors; every other type, including
+  `bool`, `str`, `dict`, `option`, and `result`, and every operation over one, is
+  standard-library Vibra. The compiler knows such a type only by the closed
+  language role it plays, and a toolchain accelerates library code only through
+  native implementations whose meaning stays their Vibra body.
 - Toolchain-owned external declarations use only the closed `@compiler` and
   `@host` providers; ordinary packages cannot add providers or registry symbols.
 - Diagnostic, query, edit-plan, test, and command results have versioned JSON
@@ -100,9 +109,6 @@ The following are not partially implemented in v1:
 - async functions, tasks, channels, threads, and shared mutable state;
 - raw WebAssembly FFI, native FFI, dynamic loading, and a package registry;
 - a SemVer dependency solver; dependencies are local or exact-revision Git;
-- anonymous and structural `record`, `enum`, `union`, and `newtype` types; all
-  four are declaration bodies only, so an identity is always reachable through
-  the `deftype` that introduces it;
 - union subtyping and computed least upper bounds; a union is only ever the one
   an author wrote over a closed, written member set, and it is never inferred;
 - narrowing an interface value to a concrete type, runtime type tests, and

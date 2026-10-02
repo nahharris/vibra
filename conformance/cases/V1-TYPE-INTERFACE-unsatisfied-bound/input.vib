@@ -1,0 +1,13 @@
+(defint shape
+  (defn name (value self) str))
+
+(deftype square (record side i32)
+  (impl shape
+    (defn name (value self) str "square")))
+
+(defn describe (value t) str
+  where: (t shape)
+  (shape.name value))
+
+(defn use () str
+  (describe 3i32))

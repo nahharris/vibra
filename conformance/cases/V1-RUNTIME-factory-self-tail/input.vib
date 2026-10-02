@@ -1,0 +1,14 @@
+(defn main () (tuple u64 u64)
+  (tupleof
+    ((as stack (factory.of (stack depth: 1u64) (stack depth: 2u64))) @depth)
+    ((as stack (factory.of)) @depth)))
+
+(defint factory
+  (defn of () self
+    variadic: (rest (array self))))
+
+(deftype stack (record depth u64)
+  (impl factory
+    (defn of () self
+      variadic: (rest (array self))
+      (stack depth: (array.length rest)))))
