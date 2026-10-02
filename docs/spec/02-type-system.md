@@ -617,7 +617,12 @@ projections, lookups, and enum tags are not `fn` values.
 A contract member named as a value is instantiated from its written expected
 `fn` type, exactly as a generic function is: that type fixes the receiver, and
 calling the value selects the implementation as a call written at that
-receiver would. Without a written `fn` type it is `@type.ambiguous-inference`.
+receiver would. The written type stands for a call's operands and expected
+type: a destination-dispatched member takes its destination from the written
+result, and a member that selects among implementations, as one of a generic
+interface does, is the one implementation with the written type; none is
+`@type.mismatch` and several are `@type.ambiguous-implementation`. Without a
+written `fn` type it is `@type.ambiguous-inference`.
 A bounded generic function or `lambda` named as a value has each bound checked
 at the argument its expected type fixes.
 
@@ -965,8 +970,9 @@ applied-interface-target and receiver-type pair, the checker MUST find every
 **abstract** contract member exactly once, substitute the concrete type for
 `self`, preserve parameter and result types, preserve labelled names and
 defaults and variadic shape, and verify that the method performs no effect
-outside the contract ceiling. A default is preserved when it is written with
-the contract's own spelling; any difference emits `@type.mismatch` at the
+outside the contract ceiling. A default is preserved when it denotes the
+contract's value at the parameter's type, however it is spelled: `1` and
+`1i32` are one default at `i32`. Another value emits `@type.mismatch` at the
 member.
 
 A contract member with a body is a **default method**. An implementation MUST
@@ -1151,7 +1157,9 @@ one uncovered value shape in canonical pattern spelling, chosen as the first
 uncovered shape in declaration order of variants, members, and fields. In that
 shape, a position that only a binder or discard can cover (a value of an
 infinite space such as `str`, `atom`, or a number) is spelled `-`, as is a
-record, tuple, or wrapper whose every component is `-`. A refutable binding
+record, tuple, or wrapper whose every component is `-`. A record shape names
+only the fields that fix it and omits each field spelled `-`, as a record
+pattern may. A refutable binding
 pattern's `@pattern.refutable-binding` carries the same kind of note. An arm
 that no value can reach because earlier arms cover it emits
 `@pattern.unreachable-arm` at that arm's pattern, relating the earliest arm

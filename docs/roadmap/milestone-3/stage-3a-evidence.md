@@ -155,7 +155,7 @@ span:
 | --- | --- | --- |
 | `@type.ambiguous-inference` | `V1-TYPE-GENERIC-ambiguous` | `[206, 218]` |
 | `@type.infinite-size` | `V1-TYPE-NOMINAL-infinite-size` | `[0, 33]` |
-| `@type.invalid-dict-key` | `V1-TYPE-NOMINAL-dict-keys` | `[48, 64]` |
+| `@type.invalid-dict-key` | `V1-TYPE-NOMINAL-dict-keys` | `[56, 59]`, the key type |
 | `@type.invalid-try` | `V1-TYPE-CONTROL-invalid-try` | `[281, 305]` |
 | `@type.unhandled-fallible` | `V1-TYPE-CONTROL-unhandled-fallible` | `[72, 81]` |
 | `@pattern.non-exhaustive` | `V1-TYPE-CONTROL-match-non-exhaustive` | `[83, 135]` |

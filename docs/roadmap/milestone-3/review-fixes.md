@@ -22,11 +22,10 @@ specification itself changes, the step names the ledger row.
 | 28 | Observation (D29.1). A function hidden behind `any`, an interface, or an iterator reached the value encoder in `assert.equal` or in the entry's result and was reported as `@runtime.invalid-checked-program` with no location, the code of a toolchain invariant failure: it is now the trap `@runtime.unobservable-function`, located at the assertion call in a test and reported as `@command.trap` by `run`. Function types were encoded as `(fn …)` instead of the specified `(record type: @fn …)`; the encoding now follows the runtime chapter, which gains the `variadic:` field and the name order of labelled parameters. The corpus manifest admits a runtime trap diagnostic on an accepted case | `V1-RUNTIME-workspace-test-hidden-function`, `process_review_fixes`, re-blessed `V1-TOOL-index-*` and `V1-SRC-CALLS-functions-labelled` | #345, merge `7a44bcf` |
 | 29 | Documentation and evidence. Two examples in the type chapter did not check (`parse-port` converted from `str`, which has no registry conversion; `array.first` is not a member) and are replaced by ones that do. The Step 17 rename had turned the `iter` member `map` into `dict` in two roadmap sentences. Float `from`/`try-from` was listed as reassigned to M4, though the type chapter gives floats no conversion in v1: the row is removed. D22.2 said the contract-member forms were deferred past v1 while the exit evidence said M4: both now say M4. Stale text is corrected (S1 `tuple.of`, D3.1 and the roadmap's `hashable`, the type chapter's status line, one evidence span, one removed case cited as live). Six evidence rows named a case that did not show the stated behavior; the behavior was correct, and each now has its case | `V1-TYPE-GENERIC-bound-overlap`, `V1-RUNTIME-factory-self-tail`, `V1-TYPE-CONVERT-factory-destination`, `V1-RUNTIME-interface-widening-positions`, `V1-TYPE-NOMINAL-intrinsic-type-user`, `V1-TYPE-GENERIC-reserved-names` | #346 |
 
-## Confirmed and not fixed
+## Confirmed and fixed after the merge
 
-The review confirmed these too. After the milestone merged, a follow-up fixed
-the ones that accepted a program the specification rejects, or reported a
-wrong code, and `run` now reports an interpreter trap as `@command.trap`:
+The review confirmed these too, and the milestone merged without them. A
+follow-up fixed them, each with a case that fails without the fix:
 
 | Finding | Fixed by |
 | --- | --- |
@@ -34,17 +33,18 @@ wrong code, and `run` now reports an interpreter trap as `@command.trap`:
 | `(array i32 i32)`, `(dict i32)`, and a bare `array` are `@type.type-argument-mismatch`; `(array)` stays a syntax error, since an applied type has at least one argument | `V1-TYPE-NOMINAL-collection-arity` |
 | A `str` literal arm that an earlier `(str (array …))` arm covers is `@pattern.unreachable-arm` | `V1-TYPE-CONTROL-unreachable-string-arm` |
 | `equatable` on a tuple or structure holding a declared key answers through the key's `compare` | `V1-RUNTIME-workspace-test-structural-key-equal` |
-| An implementation member whose labelled default differs from the contract's is `@type.mismatch` | `V1-TYPE-INTERFACE-labelled-default-mismatch` |
+| An implementation member whose labelled default is another value than the contract's is `@type.mismatch`; two spellings of one value are the same default | `V1-TYPE-INTERFACE-labelled-default-mismatch` |
 | A mismatched component of an anonymous constructor under `as` is `@type.invalid-ascription` | `V1-TYPE-CONVERT-ascription-constructor-components` |
+| `@type.invalid-dict-key` is reported at the key type, and `@type.union-member-overlap` and `@type.union-member-not-concrete` at the union type: those two type expressions now carry their span in the syntax tree | `V1-TYPE-NOMINAL-dict-keys`, `V1-TYPE-NOMINAL-union-member-overlap`, and six other re-pinned cases |
+| `@type.infinite-size` relates the tuple component, union member, or wrapper representation through which the type repeats | `V1-TYPE-NOMINAL-infinite-size-slots` |
+| A record witness omits each field spelled `-`, and is `-` when every field is, including a field of a wrapper type such as `str` | `V1-TYPE-CONTROL-witness-record-fields` |
+| A `lambda` orders its attributes canonically in a file that holds a comment, and a comment moves with its attribute | `comment_layout` |
+| A contract member that selects among implementations is a function value at a written `fn` type: destination-dispatched, of a generic interface, or variadic | `V1-RUNTIME-workspace-test-selected-member-values`, `V1-TYPE-INTERFACE-selected-value-rejections` |
+| `run` reports an interpreter trap as `@command.trap` | `vibra-interp` unit test |
 | `(id (as any 1i32))` with `where: (t any)` is accepted, and the type chapter now says why: `any` constrains nothing | The type chapter |
 
-These remain. None gives a wrong answer at run time: each is a diagnostic
-span, a formatting gap, or a form that reports `@tool.unavailable`.
-
-| Finding | Behavior now | Specification |
-| --- | --- | --- |
-| `@type.invalid-dict-key` and `@type.union-member-overlap` spans | The owning parameter or whole `deftype` | The key type expression and the union type expression. A type expression carries no span of its own in the syntax tree, so this needs a reader change |
-| `@type.infinite-size` through a tuple and an enum in mutual recursion | The related span repeats the primary span | The member through which the type repeats (D3.3); same cause as the row above |
-| The non-exhaustive witness for a record whose other fields only a discard covers | `(recordof a: false)` | The chapter does not say whether a field covered only by `-` is written |
-| A `lambda` with attributes in a noncanonical order, in a file that holds a comment | Left as written | The canonical attribute order; declarations are ordered either way |
-| A contract member named as a function value when it is selected by destination, belongs to a generic interface, or has generic, labelled, or variadic parameters | `@tool.unavailable` | Member paths are first-class; Step 20 implements the plain abstract member, and these shapes share the call path of the forms reassigned to M4 |
+One shape remains, and it is not a separate defect: a contract member with
+its own generic parameters or with labelled parameters is not a function
+value, because calling one is among the forms
+[reassigned to M4](exit-evidence.md#reassigned-to-later-milestones). It
+reports `@tool.unavailable`, as the call does.

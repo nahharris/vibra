@@ -93,3 +93,28 @@ fn a_trailing_comment_stays_behind_its_form() {
         "(deftype point\n  (record\n    x i32\n    ; the x\n    y i32\n    ; the y\n  ))\n"
     );
 }
+
+#[test]
+fn a_lambda_orders_its_attributes_in_a_commented_file() {
+    let formatted = format_twice(
+        "; note\n(defn g () i32\n  ((lambda (x i32) i32 variadic: (r (array i32)) labelled: (k i32 1i32) x) 1i32))\n",
+    );
+    assert_eq!(
+        formatted,
+        "; note\n(defn g () i32\n  ((lambda (x i32) i32 labelled: (k i32 1i32) variadic: (r (array i32)) x) 1i32))\n"
+    );
+}
+
+#[test]
+fn a_comment_moves_with_its_lambda_attribute() {
+    let formatted = format_twice(
+        "(defn g () i32\n  ((lambda (x i32) i32\n    ; the tail\n    variadic: (r (array i32))\n    ; the label\n    labelled: (k i32 1i32)\n    x) 1i32))\n",
+    );
+    let label = formatted.find("; the label").expect("label comment");
+    let tail = formatted.find("; the tail").expect("tail comment");
+    assert!(label < tail, "{formatted}");
+    assert!(
+        formatted.find("labelled:").expect("label") < tail,
+        "{formatted}"
+    );
+}

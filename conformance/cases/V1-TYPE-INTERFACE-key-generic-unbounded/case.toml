@@ -14,4 +14,4 @@ accepted = false
 code = "@type.invalid-dict-key"
 level = "@error"
 source = "input.vib"
-span = [13, 33]
+span = [27, 28]

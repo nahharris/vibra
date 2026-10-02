@@ -32,6 +32,9 @@ pub(crate) enum LowerError {
     Unknown(String),
     /// A name that denotes a type the current module may not see.
     Private(String),
+    /// A failure of one type expression inside the lowered one, reported at
+    /// that expression rather than at the owner.
+    At(ByteSpan, Box<LowerError>),
     /// A name that denotes a visible entity which is not a type: the name
     /// and what it is.
     WrongKind(String, &'static str),
@@ -142,9 +145,10 @@ pub(crate) struct ContractMember {
     pub(crate) bounds: BTreeMap<String, usize>,
     /// Whether the member has a default body.
     pub(crate) default: bool,
-    /// The written default of each labelled parameter, by name: a default is
-    /// not part of the signature, and an implementation must keep it.
-    pub(crate) defaults: BTreeMap<String, String>,
+    /// The default of each labelled parameter, by name, as it is written and
+    /// as the value it denotes at the parameter's type: a default is not part
+    /// of the signature, and an implementation must keep its value.
+    pub(crate) defaults: BTreeMap<String, (String, Option<vibra_ir::Value>)>,
     /// The position of the fixed positional `self` parameter that selects the
     /// implementation, or `None` for a destination-dispatched member.
     pub(crate) receiver: Option<usize>,
@@ -1087,29 +1091,37 @@ impl TypeNames {
             TypeExpr::Array(element) => Ok(Type::Array(Box::new(
                 self.lower(source_id, scope, element)?,
             ))),
-            TypeExpr::Dict(key, value) => {
+            TypeExpr::Dict(key, value, key_span) => {
                 let key = self.lower(source_id, scope, key)?;
                 let value = self.lower(source_id, scope, value)?;
+                // A key that is not admissible is reported at the key type.
+                let at_key = |error: LowerError| {
+                    LowerError::At(key_span.span(), Box::new(error))
+                };
                 match self.key_verdict(scope, &key) {
                     KeyVerdict::Admissible => {}
                     // The embedded standard library declares the generic
                     // `dict` itself; elsewhere a generic name in a key needs
                     // an `ordered` bound.
                     KeyVerdict::Generic if is_stdlib_source(source_id) => {}
-                    KeyVerdict::Generic => return Err(LowerError::InvalidDictKey(key)),
-                    KeyVerdict::Function => {
-                        return Err(LowerError::FunctionDictKey(key));
+                    KeyVerdict::Generic | KeyVerdict::Invalid => {
+                        return Err(at_key(LowerError::InvalidDictKey(key)));
                     }
-                    KeyVerdict::Invalid => return Err(LowerError::InvalidDictKey(key)),
+                    KeyVerdict::Function => {
+                        return Err(at_key(LowerError::FunctionDictKey(key)));
+                    }
                 }
                 Ok(Type::Dict(Box::new(key), Box::new(value)))
             }
-            TypeExpr::Union(members) => {
+            TypeExpr::Union(members, union_span) => {
                 let members = members
                     .iter()
                     .map(|member| self.lower(source_id, scope, member))
                     .collect::<Result<Vec<_>, _>>()?;
-                crate::union::check_members(self, &members)?;
+                // Members that overlap are reported at the union type.
+                crate::union::check_members(self, &members).map_err(|error| {
+                    LowerError::At(union_span.span(), Box::new(error))
+                })?;
                 // An anonymous union's discriminants follow its canonical
                 // member order, which a substitution would change, so its
                 // members name no generic parameter. A declared union keeps
@@ -1137,8 +1149,8 @@ impl TypeNames {
             vibra_syntax::VariadicType::Array(element) => {
                 TypeExpr::Array(element.clone())
             }
-            vibra_syntax::VariadicType::Dict(key, value) => {
-                TypeExpr::Dict(key.clone(), value.clone())
+            vibra_syntax::VariadicType::Dict(key, value, key_span) => {
+                TypeExpr::Dict(key.clone(), value.clone(), *key_span)
             }
         };
         self.lower(source_id, scope, &written)
@@ -1286,7 +1298,7 @@ impl TypeNames {
                     })
                     .collect::<Result<Vec<_>, _>>()
                     .map(TypeBody::Tuple),
-                DeftypeBody::Type(TypeExpr::Union(members)) => members
+                DeftypeBody::Type(TypeExpr::Union(members, _)) => members
                     .iter()
                     .map(|member| {
                         self.lower(
@@ -1372,12 +1384,14 @@ impl TypeNames {
                 .iter()
                 .find_map(|members| crate::union::check_members(self, members).err())
             {
-                report_lower_error(
-                    diagnostics,
-                    &declared.source_id,
-                    declaration.span(),
-                    &error,
-                );
+                // A union body's overlap is reported at the body, which is
+                // the union type; a nested one keeps the declaration.
+                let span = if matches!(body, TypeBody::Union(_)) {
+                    declaration.body_span()
+                } else {
+                    declaration.span()
+                };
+                report_lower_error(diagnostics, &declared.source_id, span, &error);
                 failed.push(*index);
             }
         }
@@ -1499,7 +1513,18 @@ impl TypeNames {
                     ),
                 )
                 .with_source_id(&declared.source_id)
-                .with_related(span, format!("the expansion repeats through `{member}`")),
+                .with_related(
+                    span,
+                    // A field or variant has a name; a tuple component or
+                    // union member has a position, and a wrapper one slot.
+                    if member.is_empty() {
+                        "the expansion repeats through the representation".to_owned()
+                    } else if member.parse::<usize>().is_ok() {
+                        format!("the expansion repeats through operand {member}")
+                    } else {
+                        format!("the expansion repeats through `{member}`")
+                    },
+                ),
             );
             for (index, _) in &cycle {
                 reported.insert(*index);
@@ -1636,7 +1661,14 @@ fn member_span(declaration: &DeftypeDeclaration, member: &str) -> Option<ByteSpa
             .iter()
             .find(|field| field.name().value() == member)
             .map(vibra_syntax::TypeField::span),
-        _ => None,
+        // A tuple component or union member is named by its position.
+        DeftypeBody::Type(TypeExpr::Tuple(_) | TypeExpr::Union(_, _)) => member
+            .parse::<usize>()
+            .ok()
+            .and_then(|index| declaration.slot_spans().get(index).copied()),
+        // A wrapper's one slot is its representation.
+        DeftypeBody::Type(_) => Some(declaration.body_span()),
+        DeftypeBody::Intrinsic(_) => None,
     }
 }
 
@@ -1670,6 +1702,9 @@ pub(crate) fn report_lower_error(
     error: &LowerError,
 ) {
     match error {
+        LowerError::At(inner, error) => {
+            report_lower_error(diagnostics, source_id, *inner, error);
+        }
         LowerError::Unavailable(message) => {
             unavailable(diagnostics, source_id, span, *message);
         }

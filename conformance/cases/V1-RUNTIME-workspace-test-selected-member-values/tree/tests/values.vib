@@ -1,0 +1,56 @@
+(import assert @std.assert)
+
+(import from @std.core.from)
+
+(deftype celsius i64
+  (impl (from i16)
+    (defn convert (value i16) self
+      (celsius 16i64)))
+  (impl (from i8)
+    (defn convert (value i8) self
+      (celsius 8i64))))
+
+(defint factory
+  (defn empty () self)
+  (defn of () self
+    variadic: (rest (array i32))))
+
+(deftype stack (record depth u64)
+  (impl factory
+    (defn empty () self
+      (stack depth: 0u64))
+    (defn of () self
+      variadic: (rest (array i32))
+      (stack depth: (array.length rest)))))
+
+(defint conv
+  where: (source any)
+  (defn show (value self other source) str))
+
+(deftype tag i32
+  (impl (conv i32)
+    (defn show (value self other i32) str
+      "i32"))
+  (impl (conv str)
+    (defn show (value self other str) str
+      "str")))
+
+(defn apply (convert (fn (i16) celsius) value i16) celsius
+  (convert value))
+
+(test "a destination-selected member is a value"
+  (assert.equal (apply from.convert 3i16) (celsius 16i64)))
+
+(test "a builtin conversion is a value"
+  (assert.equal ((as (fn (i32) i64) from.convert) 7i32) 7i64))
+
+(test "a factory member is a value"
+  (assert.equal ((as (fn () stack) factory.empty)) (stack depth: 0u64)))
+
+(test "a member of a generic interface is a value"
+  (assert.equal ((as (fn (tag str) str) conv.show) (tag 1i32) "x") "str"))
+
+(test "a variadic member is a value"
+  (assert.equal
+    ((as (fn () stack variadic: (array i32)) factory.of) 1i32 2i32)
+    (stack depth: 2u64)))

@@ -1,0 +1,7 @@
+(defn partial (value (record flag bool count i32)) i32
+  (match value
+    (recordof flag: true count: -) 1i32))
+
+(defn none (value (record name str count i32)) i32
+  (match value
+    (recordof name: "a" count: 1i32) 1i32))

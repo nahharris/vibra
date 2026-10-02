@@ -684,7 +684,9 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
   Closing delimiters carry no indentation of their own, so the asymmetry
   between the two ends is deliberate. Each end is decided on its own;
 - declaration headers before labelled attributes and bodies, in the same
-  canonical order whether or not the declaration holds a comment;
+  canonical order whether or not the declaration holds a comment. A `lambda`
+  orders its attributes the same way, and a comment moves with the form it
+  is attached to;
 - in a multiline declaration, the header forms on the opening line: the
   declaration head, then each following header form for as long as it is
   inline, no comment separates it from the form before, and the line stays

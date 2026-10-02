@@ -201,7 +201,7 @@ fn type_body_variants_and_function_type_attributes_are_structured() {
     ));
     assert!(matches!(
         &ast.declarations()[1],
-        Declaration::Deftype(value) if matches!(value.body(), DeftypeBody::Type(TypeExpr::Union(members)) if members.len() == 2)
+        Declaration::Deftype(value) if matches!(value.body(), DeftypeBody::Type(TypeExpr::Union(members, _)) if members.len() == 2)
     ));
     assert!(matches!(
         &ast.declarations()[2],

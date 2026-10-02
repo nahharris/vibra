@@ -14,16 +14,16 @@ accepted = false
 code = "@type.union-member-not-concrete"
 level = "@error"
 source = "input.vib"
-span = [34, 69]
+span = [50, 68]
 
 [[expect.diagnostics]]
 code = "@type.union-member-not-concrete"
 level = "@error"
 source = "input.vib"
-span = [71, 119]
+span = [88, 101]
 
 [[expect.diagnostics]]
 code = "@type.union-member-not-concrete"
 level = "@error"
 source = "input.vib"
-span = [135, 169]
+span = [141, 169]

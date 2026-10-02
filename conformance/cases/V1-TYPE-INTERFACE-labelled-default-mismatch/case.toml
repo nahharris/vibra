@@ -2,7 +2,7 @@ id = "V1-TYPE-INTERFACE-labelled-default-mismatch"
 rule = "V1-TYPE-INTERFACE"
 profile = "static-v1"
 operation = "type-check"
-description = "An implementation member keeps the labelled defaults of its contract: a different default is rejected, and the same default is accepted."
+description = "An implementation member keeps the labelled defaults of its contract: a different default value is rejected, and the same value is accepted however it is spelled."
 
 [inputs]
 source = "input.vib"

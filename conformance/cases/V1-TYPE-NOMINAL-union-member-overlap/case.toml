@@ -14,10 +14,10 @@ accepted = false
 code = "@type.union-member-overlap"
 level = "@error"
 source = "input.vib"
-span = [0, 62]
+span = [15, 44]
 
 [[expect.diagnostics]]
 code = "@type.union-member-overlap"
 level = "@error"
 source = "input.vib"
-span = [77, 98]
+span = [83, 98]

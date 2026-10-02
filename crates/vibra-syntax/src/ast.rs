@@ -694,6 +694,8 @@ impl ImportDeclaration {
 pub struct DeftypeDeclaration {
     name: Name,
     body: DeftypeBody,
+    body_span: ByteSpan,
+    slot_spans: Vec<ByteSpan>,
     attributes: TypeAttributes,
     members: Vec<TypeMember>,
     span: ByteSpan,
@@ -704,6 +706,19 @@ impl DeftypeDeclaration {
     #[must_use]
     pub const fn name(&self) -> &Name {
         &self.name
+    }
+
+    /// Where the body is written.
+    #[must_use]
+    pub const fn body_span(&self) -> ByteSpan {
+        self.body_span
+    }
+
+    /// Where each operand of a `tuple` or `union` body is written, in order.
+    /// Empty for every other body.
+    #[must_use]
+    pub fn slot_spans(&self) -> &[ByteSpan] {
+        &self.slot_spans
     }
 
     /// The context-specific nominal body.
@@ -1143,17 +1158,41 @@ pub enum TypeExpr {
     Record(Vec<TypeField>),
     /// A structural enum type with at least one variant.
     Enum(Vec<TypeField>),
-    /// A structural union type with at least two members.
-    Union(Vec<TypeExpr>),
+    /// A structural union type with at least two members, and where the
+    /// union form is written.
+    Union(Vec<TypeExpr>, TypeSpan),
     /// An array constructor.
     Array(Box<TypeExpr>),
-    /// A dict constructor.
-    Dict(Box<TypeExpr>, Box<TypeExpr>),
+    /// A dict constructor: the key type, the value type, and where the key
+    /// type is written.
+    Dict(Box<TypeExpr>, Box<TypeExpr>, TypeSpan),
     /// A function type.
     Function(FunctionType),
     /// The primitive `void` type.
     Void,
 }
+
+/// Where a type expression is written. Two type expressions are the same
+/// type expression wherever they are written, so the span never takes part
+/// in a comparison.
+#[derive(Clone, Copy, Debug)]
+pub struct TypeSpan(ByteSpan);
+
+impl TypeSpan {
+    /// The source span.
+    #[must_use]
+    pub const fn span(self) -> ByteSpan {
+        self.0
+    }
+}
+
+impl PartialEq for TypeSpan {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for TypeSpan {}
 
 /// A function type's complete signature surface.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1224,7 +1263,7 @@ pub enum VariadicType {
     /// An array tail.
     Array(Box<TypeExpr>),
     /// A dict tail.
-    Dict(Box<TypeExpr>, Box<TypeExpr>),
+    Dict(Box<TypeExpr>, Box<TypeExpr>, TypeSpan),
 }
 
 /// A field in a nominal record or enum body.
@@ -1601,6 +1640,16 @@ impl AstParser {
         });
         let name = self.checked_declaration_name(forms[1], intrinsic || claims_role)?;
         let body = self.parse_deftype_body(forms[2])?;
+        let body_span = forms[2].span();
+        let slot_spans = if matches!(head_text(forms[2]), Some("tuple" | "union")) {
+            meaningful_children(forms[2])
+                .iter()
+                .skip(1)
+                .map(|form| form.span())
+                .collect()
+        } else {
+            Vec::new()
+        };
         let parsed = self.parse_attributes(&forms[3..], AttributeContext::Type, &[]);
         let attributes = TypeAttributes {
             items: parsed.items,
@@ -1641,6 +1690,8 @@ impl AstParser {
         Some(Declaration::Deftype(DeftypeDeclaration {
             name,
             body,
+            body_span,
+            slot_spans,
             attributes,
             members,
             span: node.span(),
@@ -2800,7 +2851,9 @@ impl AstParser {
             match head {
                 "record" => self.parse_flat_fields(&forms, true).map(TypeExpr::Record),
                 "enum" => self.parse_flat_fields(&forms, false).map(TypeExpr::Enum),
-                "union" => self.parse_union_members(node, &forms).map(TypeExpr::Union),
+                "union" => self
+                    .parse_union_members(node, &forms)
+                    .map(|members| TypeExpr::Union(members, TypeSpan(node.span()))),
                 "intrinsic-type" => {
                     self.invalid_form(
                         node,
@@ -2824,7 +2877,11 @@ impl AstParser {
                 "dict" if forms.len() == 3 => {
                     let key = self.parse_type_expr(forms[1])?;
                     let value = self.parse_type_expr(forms[2])?;
-                    Some(TypeExpr::Dict(Box::new(key), Box::new(value)))
+                    Some(TypeExpr::Dict(
+                        Box::new(key),
+                        Box::new(value),
+                        TypeSpan(forms[1].span()),
+                    ))
                 }
                 // `array` and `dict` are ordinary generic types: another
                 // nonzero count of arguments is a well-formed applied type
@@ -3028,7 +3085,11 @@ impl AstParser {
             "dict" if forms.len() == 3 => {
                 let key = self.parse_type_expr(forms[1])?;
                 let value = self.parse_type_expr(forms[2])?;
-                Some(VariadicType::Dict(Box::new(key), Box::new(value)))
+                Some(VariadicType::Dict(
+                    Box::new(key),
+                    Box::new(value),
+                    TypeSpan(forms[1].span()),
+                ))
             }
             "array" | "dict" => {
                 self.invalid_form(node, "variadic array/dict type has the wrong arity");
