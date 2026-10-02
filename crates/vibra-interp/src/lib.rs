@@ -696,9 +696,11 @@ impl<'a> Machine<'a> {
                         Value::Bool(variant == "true"),
                     )));
                 }
+                // A `void` payload is no payload: a generic slot instantiated
+                // to `void` builds the same nullary value a written one does.
                 let payload = match payload {
                     Some(payload) => {
-                        Some(Box::new(self.evaluate_value(payload, slots, captures)?))
+                        present_payload(self.evaluate_value(payload, slots, captures)?)
                     }
                     None => None,
                 };
@@ -858,7 +860,7 @@ impl<'a> Machine<'a> {
                 RuntimeValue::Enum {
                     value_type: value_type.clone(),
                     variant: if found.is_some() { "some" } else { "none" }.to_owned(),
-                    payload: found.map(Box::new),
+                    payload: found.and_then(present_payload),
                 }
             }
             _ => return None,
@@ -1033,6 +1035,7 @@ impl<'a> Machine<'a> {
             RuntimeValue::Record { value_type, .. }
             | RuntimeValue::Enum { value_type, .. }
             | RuntimeValue::Wrapper { value_type, .. }
+            | RuntimeValue::Tuple { value_type, .. }
             | RuntimeValue::Union { value_type, .. } => value_type,
             _ => return None,
         };
@@ -1326,7 +1329,11 @@ impl<'a> Machine<'a> {
             return None;
         };
         match variant.as_str() {
-            "some" | "ok" => payload.map(|payload| Evaluation::Value(*payload)),
+            // A nullary success carries the `void` value.
+            "some" | "ok" => Some(Evaluation::Value(
+                payload
+                    .map_or(RuntimeValue::Primitive(Value::Void), |payload| *payload),
+            )),
             "none" | "err" => {
                 self.pending_exit = Some(RuntimeValue::Enum {
                     value_type: exit_type.clone(),
@@ -1801,6 +1808,13 @@ fn items_of(value: &RuntimeValue) -> Option<RuntimeValue> {
 
 /// Whether `value` matches `pattern`. Binders and discards match anything;
 /// omitted record fields are never inspected.
+/// The payload a variant stores for `value`: none for `void`, so a variant
+/// whose payload slot is `void` has one shape however it was built
+/// (`docs/spec/02-type-system.md`, "Nominal declarations").
+pub(crate) fn present_payload(value: RuntimeValue) -> Option<Box<RuntimeValue>> {
+    (value != RuntimeValue::Primitive(Value::Void)).then(|| Box::new(value))
+}
+
 fn pattern_matches(pattern: &Pattern, value: &RuntimeValue) -> bool {
     match (pattern, value) {
         (Pattern::Wildcard | Pattern::Bind { .. }, _) => true,
@@ -1820,7 +1834,10 @@ fn pattern_matches(pattern: &Pattern, value: &RuntimeValue) -> bool {
                 && match (expected_payload, payload) {
                     (Some(pattern), Some(payload)) => pattern_matches(pattern, payload),
                     (None, _) => true,
-                    (Some(_), None) => false,
+                    // A nullary variant holds the `void` value.
+                    (Some(pattern), None) => {
+                        pattern_matches(pattern, &RuntimeValue::Primitive(Value::Void))
+                    }
                 }
         }
         (Pattern::Record(expected), RuntimeValue::Record { fields, .. }) => {
@@ -1876,6 +1893,13 @@ fn bind_pattern(
                 ..
             },
         ) => bind_pattern(pattern, *payload, slots),
+        (
+            Pattern::Variant {
+                payload: Some(pattern),
+                ..
+            },
+            RuntimeValue::Enum { payload: None, .. },
+        ) => bind_pattern(pattern, RuntimeValue::Primitive(Value::Void), slots),
         (Pattern::Variant { payload: None, .. }, RuntimeValue::Enum { .. }) => Some(()),
         (Pattern::Record(expected), RuntimeValue::Record { fields, .. }) => {
             let mut fields = fields;

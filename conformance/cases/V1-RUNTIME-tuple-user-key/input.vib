@@ -1,0 +1,16 @@
+(defn main () (tuple (dict pair str) (option str) (option str) core.ordering core.ordering)
+  (tupleof
+    (dict.of (pair 1i32 5i32) "five" (pair 2i32 9i32) "nine")
+    ((dict.of (pair 1i32 5i32) "five") (pair 7i32 5i32))
+    ((dict.of (pair 1i32 5i32) "five") (pair 1i32 6i32))
+    (ordered.compare (pair 1i32 5i32) (pair 2i32 9i32))
+    (ordered.compare (tupleof (pair 1i32 5i32) "x") (tupleof (pair 2i32 9i32) "x"))))
+
+(import core @std.core)
+(import ordered @std.core.ordered)
+
+; Orders by the second component only, from the highest down.
+(deftype pair (tuple i32 i32)
+  (impl ordered
+    (defn compare (left self right self) core.ordering
+      (i32.compare (right 1) (left 1)))))

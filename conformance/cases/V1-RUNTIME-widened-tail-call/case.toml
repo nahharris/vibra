@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-widened-tail-call"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A call in tail position whose result is widened to a union, an interface value, or atom returns before it is widened, in a function result and in if, match, and let results; a call that already has the result type stays a tail transfer."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

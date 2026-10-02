@@ -192,13 +192,26 @@ pub(crate) fn check_constructor(
                 let operand =
                     single_positional(environment, application, "an enum variant")?;
                 binding = ConstructorBinding::positional(1);
-                Some(Box::new(check_inferred_operand(
+                let checked = check_inferred_operand(
                     environment,
                     &mut instantiation,
                     operand,
                     &payload_type,
                     types_written,
-                )?))
+                )?;
+                // An operand that fixes an open payload to `void` is the same
+                // error as an operand of a written nullary variant.
+                if instantiation.resolved(&payload_type) == Some(Type::Void) {
+                    call_contract_error(
+                        environment,
+                        application.span(),
+                        format!(
+                            "variant `{variant}` has a `void` payload and takes no operand"
+                        ),
+                    );
+                    return None;
+                }
+                Some(Box::new(checked))
             };
             Expr::Variant {
                 value_type: instantiated(

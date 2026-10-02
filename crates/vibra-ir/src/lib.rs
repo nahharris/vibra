@@ -1459,6 +1459,16 @@ impl Expr {
         }
     }
 
+    /// The same expression as an ordinary call: a tail transfer whose result
+    /// the caller still has to use, such as a call it widens, is not one.
+    #[must_use]
+    pub fn without_tail(mut self) -> Self {
+        if let Self::Call { tail, .. } = &mut self {
+            *tail = false;
+        }
+        self
+    }
+
     /// Reports whether this expression is an explicit checked tail transfer.
     #[must_use]
     pub const fn is_tail_call(&self) -> bool {
