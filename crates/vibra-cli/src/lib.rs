@@ -597,7 +597,7 @@ fn execute_run<E: Write>(
             vibra_diagnostics::Diagnostic::new(
                 code,
                 vibra_diagnostics::ByteSpan::empty_at(0),
-                error.to_string(),
+                error.trap_message(),
             ),
         ]));
     }
@@ -617,7 +617,7 @@ fn execute_run<E: Write>(
         ),
         Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(error)) => {
             if error.host_diagnostic().is_none() && error.program_trap().is_none() {
-                let _ = writeln!(stderr, "interpreter invariant failure: {error}");
+                let _ = writeln!(stderr, "interpreter host failure: {error}");
             }
             (None, String::new(), String::new(), Vec::new())
         }

@@ -42,5 +42,4 @@ that the milestone's exit does not claim them.
 | The non-exhaustive witness for a record with a `bool` field | `(recordof a: false b: -)` | The witness spelling of the pattern chapter |
 | A `lambda` with attributes in a noncanonical order, in a file that holds a comment | Left as written | The canonical attribute order |
 | A contract member named as a function value when it is selected by destination, belongs to a generic interface, or has generic, labelled, or variadic parameters | `@tool.unavailable` | Member paths are first-class; Step 20 implements the plain abstract member |
-| An interpreter invariant failure in `run` | `@command.operational-failure` | `@command.trap`; Step 28 moved only the unobservable-function trap |
 | `(id (as any 1i32))` with `where: (t any)` | Accepted | Ambiguous: an interface value type never satisfies a bound, and every type satisfies `any` |

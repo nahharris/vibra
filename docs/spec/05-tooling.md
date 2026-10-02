@@ -221,8 +221,9 @@ For M2 checked-program execution failures, `trapCode` is exactly the string
 `"@runtime.invalid-checked-program"`; their diagnostic uses that code with
 primary span `0..0` and no source ID, and the CLI trap `origin` is `null`.
 The other trap code is `"@runtime.unobservable-function"`, whose origin in a
-test is the assertion call; `run` reports it in its payload's `trap` with a
-`null` origin.
+test is the assertion call. `run` reports either trap as `@command.trap`, with
+the code in its payload's `trap` and a `null` origin. Only a host event, such
+as `@runtime.host-stack-exhausted`, is `@command.operational-failure`.
 
 The process exit mapping is fixed: `0` for `@command.ok`, `1` for
 `@command.diagnostics` or `@command.test-failed`, `2` for

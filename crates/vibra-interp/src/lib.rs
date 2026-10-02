@@ -209,8 +209,8 @@ impl RuntimeError {
         )
     }
 
-    /// The stable trap code and source origin of a trap the program itself
-    /// caused, if this is one.
+    /// The stable trap code and source origin, if this failure is a trap
+    /// rather than a host event.
     #[must_use]
     pub const fn program_trap(
         &self,
@@ -220,7 +220,22 @@ impl RuntimeError {
                 vibra_diagnostics::DiagnosticCode::RuntimeUnobservableFunction,
                 origin.as_ref(),
             )),
-            _ => None,
+            Self::NoEntry | Self::InvalidBody { .. } => Some((
+                vibra_diagnostics::DiagnosticCode::RuntimeInvalidCheckedProgram,
+                None,
+            )),
+            Self::HostStackExhausted { .. } | Self::HostThreadUnavailable(_) => None,
+        }
+    }
+
+    /// The message of this failure's trap diagnostic.
+    #[must_use]
+    pub fn trap_message(&self) -> String {
+        match self {
+            Self::NoEntry | Self::InvalidBody { .. } => {
+                "checked program violated M2 runtime invariants".to_owned()
+            }
+            _ => self.to_string(),
         }
     }
 
@@ -2502,6 +2517,35 @@ mod tests {
     };
 
     use super::run;
+
+    #[test]
+    fn only_a_host_event_is_not_a_trap() {
+        use super::RuntimeError;
+        use vibra_diagnostics::DiagnosticCode;
+
+        let invalid = RuntimeError::InvalidBody {
+            function: "main".to_owned(),
+        };
+        for error in [RuntimeError::NoEntry, invalid] {
+            assert_eq!(
+                error.program_trap(),
+                Some((DiagnosticCode::RuntimeInvalidCheckedProgram, None))
+            );
+            assert!(!error.is_host_event());
+        }
+        let unobservable = RuntimeError::UnobservableFunction { origin: None };
+        assert_eq!(
+            unobservable.program_trap(),
+            Some((DiagnosticCode::RuntimeUnobservableFunction, None))
+        );
+        for error in [
+            RuntimeError::HostStackExhausted { limit: 1 },
+            RuntimeError::HostThreadUnavailable("none".to_owned()),
+        ] {
+            assert_eq!(error.program_trap(), None);
+            assert!(error.is_host_event());
+        }
+    }
 
     #[test]
     fn a_checked_literal_has_no_audit_events() {
