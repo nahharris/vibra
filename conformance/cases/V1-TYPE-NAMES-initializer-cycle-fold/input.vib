@@ -1,0 +1,3 @@
+(def by-fold i32 (array.fold (array.of 1i32) 0i32 (lambda (total i32 item i32) i32 after-fold)))
+
+(def after-fold i32 by-fold)

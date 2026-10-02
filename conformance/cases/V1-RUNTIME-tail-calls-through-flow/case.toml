@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-tail-calls-through-flow"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A tail loop stays in constant stack when it is reached only through a widened call, through an array.fold step, or through a function passed through a generic parameter, and a function returned by array.fold is a tail-call target."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

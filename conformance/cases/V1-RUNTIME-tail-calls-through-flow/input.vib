@@ -1,0 +1,40 @@
+(defn main () (tuple any i32 i32 i32)
+  (tupleof
+    (as any (loop 100000i32 pong))
+    (array.fold (array.of 100000i32) 0i32 (lambda (total i32 count i32) i32 (loop count pong)))
+    (ping 100001i32)
+    (run (array.of step step) 1i32)))
+
+(defn lower (count i32) i32
+  (match (i32.sub-checked count 1i32)
+    (result.ok value) value
+    (result.err -) 0i32))
+
+(defn step (count i32) i32
+  (match (i32.add-checked count 1i32)
+    (result.ok value) value
+    (result.err -) 0i32))
+
+(defn loop (count i32 next (fn (i32) i32)) i32
+  (if (i32.equal count 0i32) 7i32 (next (lower count))))
+
+(defn pong (count i32) i32
+  (loop count pong))
+
+(defn same (value t) t
+  where: (t any)
+  value)
+
+; Mutual tail recursion through a generic identity.
+(defn ping (count i32) i32
+  (if (i32.equal count 0i32) 7i32 ((same back) (lower count))))
+
+(defn back (count i32) i32
+  (if (i32.equal count 0i32) 8i32 ((same ping) (lower count))))
+
+; The callee is whatever function the fold returns.
+(defn pick (steps (array (fn (i32) i32)) fallback (fn (i32) i32)) (fn (i32) i32)
+  (array.fold steps fallback (lambda (kept (fn (i32) i32) candidate (fn (i32) i32)) (fn (i32) i32) candidate)))
+
+(defn run (steps (array (fn (i32) i32)) value i32) i32
+  ((pick steps step) value))

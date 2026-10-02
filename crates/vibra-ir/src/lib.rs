@@ -1569,7 +1569,9 @@ impl Expr {
             Self::Variant { payload, .. } => {
                 payload.iter().map(|payload| &**payload).collect()
             }
-            Self::Wrap { value, .. } | Self::Try { value, .. } => vec![value],
+            Self::Wrap { value, .. }
+            | Self::Try { value, .. }
+            | Self::Widen { value, .. } => vec![value],
             Self::Project { record, .. } => vec![record],
             Self::Tuple { components, .. } => components.iter().collect(),
             Self::TupleProject { tuple, .. } => vec![tuple],
@@ -3350,7 +3352,11 @@ fn validate_program_expr(
         | Expr::Default { .. }
         | Expr::Variable { .. }
         | Expr::Captured { .. } => {}
-        Expr::External { arguments, .. } => {
+        Expr::External {
+            intrinsic,
+            arguments,
+            ..
+        } => {
             for argument in arguments {
                 validate_program_expr(
                     argument,
@@ -3360,6 +3366,42 @@ fn validate_program_expr(
                     calls,
                     dependencies,
                 )?;
+            }
+            // `array.fold` invokes its step operand, so the step's targets
+            // are this owner's dependencies, as for an indirect call.
+            if *intrinsic == external::CompilerIntrinsic::ArrayFold
+                && let [_, _, step] = arguments.as_slice()
+            {
+                let summary = possible_function_targets(
+                    step,
+                    &BTreeMap::new(),
+                    globals,
+                    functions,
+                    &mut BTreeSet::new(),
+                    &mut BTreeSet::new(),
+                );
+                for target in summary.known {
+                    if functions.get(target).is_none() {
+                        return Err(IrError::InvalidExpression(format!(
+                            "function index {target} is outside the program"
+                        )));
+                    }
+                    if let Some(owner) = owner {
+                        let Some(edges) =
+                            dependencies.get_mut(owner.node_index(globals.len()))
+                        else {
+                            return Err(IrError::InvalidExpression(format!(
+                                "dependency owner {owner:?} is outside the program"
+                            )));
+                        };
+                        edges.insert(DependencyNode::Function(target));
+                        if let DependencyNode::Function(owner) = owner
+                            && let Some(edges) = calls.get_mut(owner)
+                        {
+                            edges.insert(target);
+                        }
+                    }
+                }
             }
         }
         Expr::Function {
@@ -3686,6 +3728,12 @@ fn validate_program_expr(
     Ok(())
 }
 
+/// Whether a slot of this type may hold a function value: a function type,
+/// or a generic parameter, which a call may instantiate to one.
+fn holds_function(value_type: &Type) -> bool {
+    matches!(value_type, Type::Function(_) | Type::Param(_))
+}
+
 #[derive(Clone, Debug, Default)]
 struct FunctionTargetSummary {
     known: BTreeSet<usize>,
@@ -3910,7 +3958,7 @@ fn possible_function_targets(
                     .zip(function_signature_types(function.signature()))
                     .enumerate()
                 {
-                    if matches!(value_type, Type::Function(_)) {
+                    if holds_function(&value_type) {
                         target_aliases.insert(slot, argument.clone());
                     }
                 }
@@ -3928,6 +3976,11 @@ fn possible_function_targets(
                 visiting.remove(&target);
             }
             result
+        }
+        // A registry operation that returns a function, such as `array.fold`
+        // over functions, may return any function value.
+        Expr::External { result, .. } if holds_function(result) => {
+            FunctionTargetSummary::unknown()
         }
         Expr::Literal { .. } | Expr::External { .. } | Expr::Default { .. } => {
             FunctionTargetSummary::default()
@@ -4138,7 +4191,7 @@ fn analyze_call_flow_with_entry(
         for (slot, value_type) in
             function_signature_types(function.signature()).enumerate()
         {
-            if matches!(value_type, Type::Function(_))
+            if holds_function(&value_type)
                 && let Some(summary) = flow
                     .parameter_targets
                     .get_mut(entry)
@@ -4283,7 +4336,7 @@ fn parameter_aliases(
     };
     for (slot, value_type) in function_signature_types(checked.signature()).enumerate()
     {
-        if !matches!(value_type, Type::Function(_)) {
+        if !holds_function(&value_type) {
             continue;
         }
         let summary = if parameter_sources
@@ -4318,7 +4371,7 @@ where
     T: Clone,
 {
     let slot = slot?;
-    matches!(value.result_type(), Type::Function(_)).then(|| {
+    holds_function(&value.result_type()).then(|| {
         let mut nested = environment.clone();
         nested.insert(slot, summary);
         nested
@@ -4348,7 +4401,7 @@ fn function_argument_environment(
         .zip(function_signature_types(signature))
         .enumerate()
         .filter_map(|(slot, (argument, value_type))| {
-            matches!(value_type, Type::Function(_)).then(|| (slot, argument.clone()))
+            holds_function(&value_type).then(|| (slot, argument.clone()))
         })
         .collect()
 }
@@ -4365,7 +4418,7 @@ impl<'a> CallFlow<'a> {
         for (slot, value_type) in
             function_signature_types(checked.signature()).enumerate()
         {
-            if matches!(value_type, Type::Function(_)) {
+            if holds_function(&value_type) {
                 let summary = if self
                     .parameter_sources
                     .get(function)
@@ -4461,7 +4514,7 @@ impl<'a> CallFlow<'a> {
             Expr::Variable {
                 slot, value_type, ..
             } => {
-                if !matches!(value_type, Type::Function(_)) {
+                if !holds_function(value_type) {
                     return FlowTargetSummary::default();
                 }
                 environment
@@ -4472,7 +4525,7 @@ impl<'a> CallFlow<'a> {
             Expr::Captured {
                 slot, value_type, ..
             } => {
-                if !matches!(value_type, Type::Function(_)) {
+                if !holds_function(value_type) {
                     return FlowTargetSummary::default();
                 }
                 captures
@@ -4483,7 +4536,7 @@ impl<'a> CallFlow<'a> {
             Expr::Global {
                 index, value_type, ..
             } => {
-                if !matches!(value_type, Type::Function(_)) {
+                if !holds_function(value_type) {
                     return FlowTargetSummary::default();
                 }
                 self.reads
@@ -4563,7 +4616,7 @@ impl<'a> CallFlow<'a> {
                 result,
                 ..
             } => {
-                if !matches!(result, Type::Function(_)) {
+                if !holds_function(result) {
                     return FlowTargetSummary::default();
                 }
                 let mut targets = match target {
@@ -4648,7 +4701,7 @@ impl<'a> CallFlow<'a> {
                         .zip(function_signature_types(function.signature()))
                         .enumerate()
                     {
-                        if matches!(value_type, Type::Function(_)) {
+                        if holds_function(&value_type) {
                             target_environment.insert(slot, argument.clone());
                         }
                     }
@@ -4662,6 +4715,9 @@ impl<'a> CallFlow<'a> {
                     visiting.remove(&function_id);
                 }
                 summary
+            }
+            Expr::External { result, .. } if holds_function(result) => {
+                FlowTargetSummary::unknown_function()
             }
             Expr::Literal { .. } | Expr::External { .. } | Expr::Default { .. } => {
                 FlowTargetSummary::default()
@@ -4699,9 +4755,33 @@ impl<'a> CallFlow<'a> {
                     dependencies.insert(DependencyNode::Global(*index));
                 }
             }
-            Expr::External { arguments, .. } => {
+            Expr::External {
+                intrinsic,
+                arguments,
+                result,
+                origin,
+            } => {
                 for argument in arguments {
                     self.collect_expr(argument, owner, environment, captures)?;
+                }
+                // `array.fold` invokes its step operand. The accumulator and
+                // the element are not followed, so the step's own function
+                // parameters are unknown: the call is collected with no
+                // operand summaries.
+                if *intrinsic == external::CompilerIntrinsic::ArrayFold
+                    && let [_, _, step] = arguments.as_slice()
+                {
+                    let invocation = Expr::Call {
+                        target: CallTarget::Indirect {
+                            callee: Box::new(step.clone()),
+                            hint: None,
+                        },
+                        arguments: Vec::new(),
+                        result: result.clone(),
+                        tail: false,
+                        origin: origin.clone(),
+                    };
+                    self.collect_expr(&invocation, owner, environment, captures)?;
                 }
             }
             Expr::Record { .. }
@@ -4904,7 +4984,7 @@ impl<'a> CallFlow<'a> {
                         .zip(function_signature_types(callee.signature()))
                         .enumerate()
                     {
-                        if !matches!(value_type, Type::Function(_)) {
+                        if !holds_function(&value_type) {
                             continue;
                         }
                         let Some(target_parameters) =

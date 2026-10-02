@@ -1,0 +1,7 @@
+(defn same (value t) t
+  where: (t any)
+  value)
+
+(defn read-generic (value i32) i32 by-generic)
+
+(def by-generic i32 ((same read-generic) 1i32))

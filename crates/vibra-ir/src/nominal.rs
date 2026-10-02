@@ -465,6 +465,11 @@ pub(crate) fn children(expression: &Expr) -> Vec<&Expr> {
             children
         }
         Expr::Let { value, body, .. } => vec![value, body],
+        Expr::Match {
+            scrutinee, arms, ..
+        } => std::iter::once(&**scrutinee)
+            .chain(arms.iter().map(|arm| &arm.body))
+            .collect(),
         Expr::If {
             condition,
             then_branch,

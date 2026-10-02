@@ -1253,10 +1253,11 @@ pub fn check_resolved(
                             format!("{failure}: {error}"),
                         );
                     }
-                    // Stop building programs of this kind after one failure,
-                    // as each failure describes the shared module set.
+                    // A test program fails on its own entry, so the tests after
+                    // it are still built. One failed target entry describes
+                    // the shared module set, so later ones are skipped.
                     if is_test {
-                        break;
+                        continue;
                     }
                     failed_entry = true;
                 }
