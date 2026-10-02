@@ -67,7 +67,7 @@ fn option(result: &Type, value: Option<RuntimeValue>) -> RuntimeValue {
     RuntimeValue::Enum {
         value_type: result.clone(),
         variant: if value.is_some() { "some" } else { "none" }.to_owned(),
-        payload: value.map(Box::new),
+        payload: value.and_then(crate::present_payload),
     }
 }
 
@@ -76,7 +76,7 @@ fn ok(result: &Type, value: RuntimeValue) -> RuntimeValue {
     RuntimeValue::Enum {
         value_type: result.clone(),
         variant: "ok".to_owned(),
-        payload: Some(Box::new(value)),
+        payload: crate::present_payload(value),
     }
 }
 

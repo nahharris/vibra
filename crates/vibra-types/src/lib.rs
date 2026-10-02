@@ -3593,8 +3593,10 @@ fn widen_to(
         return None;
     };
     let origin = checked.origin().clone();
+    // The widening happens after the call returns, so the call is not a
+    // tail transfer even in tail position.
     Some(Expr::Widen {
-        value: Box::new(checked),
+        value: Box::new(checked.without_tail()),
         value_type: target.clone(),
         member,
         origin,

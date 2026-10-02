@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-tuple-user-key"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A tuple-bodied deftype keys a dict through its own ordered implementation, directly, nested in a structural key, and in a lookup, exactly as a record-bodied one does."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

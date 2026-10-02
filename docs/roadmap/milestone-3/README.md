@@ -1,6 +1,6 @@
 # Milestone 3 step plan
 
-Status: every step landed; exit evidenced in [exit-evidence.md](exit-evidence.md)
+Status: Steps 1–18 landed; [review fixes](review-fixes.md) in progress
 Milestone: [Milestone 3 — complete nominal static core](../v1.md#milestone-3--complete-nominal-static-core)
 Execution model: [execution.md](../execution.md)
 Integration branch: `m3`
@@ -137,7 +137,8 @@ Stage 3B — interfaces, generics, conversion, and iteration.
 | 15b | [Type-aware query metadata for the Stage 3A and 3B forms at a source position](15b-query-metadata.md) | 15a | landed | PR #332, merge `442114f` |
 | 16 | [M3 demo and exit gate, including the M2 deferral sweep — evidence step](16-exit.md) | 15b | landed | PR #333, merge `00f0a02`; [exit evidence](exit-evidence.md) |
 | 17 | [The associative type is `dict`: the type, its members, role, VIBON form, encodings, and diagnostic code are renamed from `map` — mechanical step](17-dict-rename.md) | 16 | landed | PR #334, merge `36edfef` |
-| 18 | [Declaration layout in the canonical format: the header on the opening line, attributes beside their values, and no orphaned closing delimiter after a list](18-declaration-layout.md) | 17 | landed | Step 18 PR (conditional on merge) |
+| 18 | [Declaration layout in the canonical format: the header on the opening line, attributes beside their values, and no orphaned closing delimiter after a list](18-declaration-layout.md) | 17 | landed | PR #335, merge `79c18fc` |
+| 19+ | [Review fixes: defects found by the adversarial review of the milestone, each with a reproducing case](review-fixes.md) | 18 | in progress | see [review-fixes.md](review-fixes.md) |
 
 Steps 1, 4a, and 10 are specification prerequisites, Steps 9 and 16 are
 evidence steps, and Step 17 is a mechanical rename; they claim no language

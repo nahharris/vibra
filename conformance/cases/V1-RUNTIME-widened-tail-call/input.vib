@@ -1,0 +1,51 @@
+(defn main () (tuple number atom number number number number str)
+  (tupleof
+    (read "7")
+    (name "x")
+    (by-if true)
+    (by-match false)
+    (by-let "9")
+    (down 100000i32)
+    (describe "7")))
+
+(deftype number (union i32 f32))
+
+(defint shape
+  (defn label (value self) str)
+  (impl i32
+    (defn label (value self) str "integer")))
+
+(defn parse (text str) i32 7i32)
+
+(defn same (value t) t
+  where: (t any)
+  value)
+
+(defn read (text str) number
+  (parse text))
+
+(defn name (text str) atom
+  (same @ready))
+
+(defn by-if (flag bool) number
+  (if flag (parse "1") 2i32))
+
+(defn by-match (flag bool) number
+  (match flag
+    true 1i32
+    false (parse "2")))
+
+(defn by-let (text str) number
+  (let copy text (parse copy)))
+
+; The recursive call already has the result type, so it stays a tail transfer.
+(defn down (count i32) number
+  (if (i32.equal count 0i32)
+    0i32
+    (down (match (i32.sub-checked count 1i32) (result.ok lower) lower (result.err -) 0i32))))
+
+(defn widen (text str) shape
+  (parse text))
+
+(defn describe (text str) str
+  (shape.label (widen text)))

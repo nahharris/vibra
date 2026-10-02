@@ -141,9 +141,13 @@ pub(crate) fn check_pattern(
                 return None;
             };
             let payload = check_pattern(environment, variant.pattern(), payload_type)?;
+            // A `void` payload has no value to inspect, but a binder written
+            // for it still binds `void`.
+            let binds = !matches!(payload, Pattern::Wildcard);
             Some(Pattern::Variant {
                 variant: name.clone(),
-                payload: (*payload_type != Type::Void).then(|| Box::new(payload)),
+                payload: (*payload_type != Type::Void || binds)
+                    .then(|| Box::new(payload)),
             })
         }
         PatternKind::Array(items) => {
