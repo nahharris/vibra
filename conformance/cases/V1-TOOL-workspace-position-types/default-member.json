@@ -116,8 +116,8 @@
         "name": "fn",
         "parameters": [
           {
-            "kind": "param",
-            "name": "self",
+            "kind": "declared",
+            "name": "app.main.point",
             "parameters": [],
             "result": null,
             "labelled": []

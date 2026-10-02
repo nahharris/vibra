@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-generic-dispatch"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Dispatch uses instantiated types. One receiver implementing a generic interface twice answers at the interface arguments of the call, directly, through an interface value, and from a default member; a value built inside a generic function dispatches by the type it was instantiated at; and a member selected by its destination is selected from a bounded parameter and from the self of a default member."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

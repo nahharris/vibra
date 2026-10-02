@@ -1,0 +1,107 @@
+(defn main () (tuple str str str str (array i32) (array str) str str str str stack str str)
+  (tupleof
+    (tagged.label (as (tagged str) (both n: 7i32 s: "x")))
+    (tagged.twice (as (tagged str) (both n: 7i32 s: "x")))
+    (tagged.twice (as (tagged i32) (both n: 7i32 s: "x")))
+    (through (both n: 7i32 s: "x"))
+    (ints (dual n: 1i32))
+    (strs (dual n: 1i32))
+    (show (mk 1i32))
+    (show (mk "a"))
+    (via (mk 1i32))
+    (via (first (array.of "a")))
+    (as stack (make))
+    (make-label (queue depth: 1u64))
+    (factory.fresh-label (queue depth: 1u64))))
+
+(import iter @std.iter.iter)
+
+; One receiver implements a generic interface at two argument lists.
+(defint tagged
+  where: (item any)
+  (defn label (value self) str)
+  ; The default dispatches at the interface arguments of its own call.
+  (defn twice (value self) str
+    (tagged.label value)))
+
+(deftype both (record n i32 s str)
+  (impl (tagged i32)
+    (defn label (value self) str "as-int"))
+  (impl (tagged str)
+    (defn label (value self) str "as-str")))
+
+(defn through (value (tagged str)) str
+  (tagged.label value))
+
+(deftype dual (record n i32)
+  (impl (iter str)
+    (defn next (value self) (option (tuple str self))
+      (if (i32.equal (value @n) 0i32)
+        (option.none)
+        (option.some (tupleof "s" (dual n: 0i32))))))
+  (impl (iter i32)
+    (defn next (value self) (option (tuple i32 self))
+      (if (i32.equal (value @n) 0i32)
+        (option.none)
+        (option.some (tupleof 7i32 (dual n: 0i32)))))))
+
+(defn ints (values (iter i32)) (array i32)
+  (iter.collect values))
+
+(defn strs (values (iter str)) (array str)
+  (iter.collect values))
+
+; Two implementations on one generic head.
+(defint shape
+  (defn name (value self) str)
+  (impl (array str)
+    (defn name (value self) str "strs"))
+  (impl (array i32)
+    (defn name (value self) str "ints"))
+  (impl (option i32)
+    (defn name (value self) str "some-int"))
+  (impl (option str)
+    (defn name (value self) str "some-str")))
+
+; The array is built where `t` is still a parameter.
+(defn mk (value t) (array t)
+  where: (t any)
+  (array.of value))
+
+(defn first (values (iter item)) (option item)
+  where: (item any)
+  (match (iter.next values)
+    (option.some (tupleof head -)) (option.some head)
+    (option.none) (option.none)))
+
+(defn show (value t) str
+  where: (t shape)
+  (shape.name value))
+
+(defn via (value shape) str
+  (shape.name value))
+
+; A member selected by its destination, from a parameter and from `self`.
+(defint factory
+  (defn empty () self)
+  (defn label (value self) str)
+  (defn fresh-label (value self) str
+    (factory.label (as self (factory.empty)))))
+
+(deftype stack (record depth u64)
+  (impl factory
+    (defn empty () self (stack depth: 0u64))
+    (defn label (value self) str "stack")))
+
+(deftype queue (record depth u64)
+  (impl factory
+    (defn empty () self (queue depth: 0u64))
+    (defn label (value self) str "queue")))
+
+(defn make () t
+  where: (t factory)
+  (factory.empty))
+
+(defn make-label (witness t) str
+  where: (t factory)
+  (factory.label (as t (factory.empty))))

@@ -1167,6 +1167,14 @@ pub enum CallTarget {
         member: String,
         /// The operand that selects the implementation.
         receiver: usize,
+        /// The interface's type arguments at this call, for a generic
+        /// interface: one receiver may implement it at several.
+        arguments: Vec<Type>,
+        /// For a member selected by its destination, the type that selects
+        /// the implementation in place of the operand at `receiver`: a
+        /// generic parameter bounded by the interface, instantiated at run
+        /// time.
+        destination: Option<Type>,
         /// The member's signature at this call.
         signature: Box<FunctionSignature>,
         /// The toolchain conformance the call falls back to when no
@@ -2595,6 +2603,10 @@ pub struct Implements {
     pub member: String,
     /// The receiver type; its generic parameters match any argument.
     pub receiver: Type,
+    /// The interface's type arguments this implementation is for, over the
+    /// same generic parameters as `receiver`. A default member names the
+    /// interface's own parameters.
+    pub arguments: Vec<Type>,
 }
 
 impl CheckedFunction {

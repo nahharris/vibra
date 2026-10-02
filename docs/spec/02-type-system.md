@@ -925,6 +925,11 @@ The rule is general and is not limited to conversion. A contract member such as
 `(defn empty () self)` is a factory of the same shape and is selected the same
 way, from the expected type at its call site.
 
+The expected type may be a generic parameter bounded by the interface, such as
+`t` under `where: (t factory)` or the `self` of a default member. The
+implementation is then the one for the type the parameter is instantiated to,
+as the runtime chapter defines.
+
 The two rules partition every contract member, because each member either has a
 fixed positional `self` parameter or does not. A member with no such parameter
 and no `self` in its result is selectable by neither rule and emits
