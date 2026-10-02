@@ -55,13 +55,18 @@
   visibility: @public
   (impl (iter item)
     (defn next (value self) (option (tuple item self))
-      (match (iter.next (value @source))
-        (option.some (tupleof first rest))
-          (if ((value @keep) first)
-            (option.some
-              (tupleof first (filtered-iter source: rest keep: (value @keep))))
-            (iter.next (filtered-iter source: rest keep: (value @keep))))
-        (option.none) (option.none)))))
+      (filter-step (value @source) (value @keep)))))
+
+; The first item of `source` that `keep` accepts, with the filter over what
+; remains. Rejected items are passed at constant depth.
+(defn filter-step (source (iter item) keep (fn (item) bool)) (option (tuple item (filtered-iter item)))
+  where: (item any)
+  (match (iter.next source)
+    (option.some (tupleof first rest))
+      (if (keep first)
+        (option.some (tupleof first (filtered-iter source: rest keep: keep)))
+        (filter-step rest keep))
+    (option.none) (option.none)))
 
 ; `skip`: the items of `source` after its first `count`.
 (deftype skipped-iter (record source (iter item) count u64)
@@ -69,13 +74,18 @@
   visibility: @public
   (impl (iter item)
     (defn next (value self) (option (tuple item self))
-      (match (iter.next (value @source))
-        (option.some (tupleof first rest))
-          (if (u64.equal (value @count) 0u64)
-            (option.some (tupleof first (skipped-iter source: rest count: 0u64)))
-            (iter.next
-              (skipped-iter source: rest count: (decrement (value @count)))))
-        (option.none) (option.none)))))
+      (skip-step (value @source) (value @count)))))
+
+; The item of `source` after its first `count`, with what remains. Skipped
+; items are passed at constant depth.
+(defn skip-step (source (iter item) count u64) (option (tuple item (skipped-iter item)))
+  where: (item any)
+  (match (iter.next source)
+    (option.some (tupleof first rest))
+      (if (u64.equal count 0u64)
+        (option.some (tupleof first (skipped-iter source: rest count: 0u64)))
+        (skip-step rest (decrement count)))
+    (option.none) (option.none)))
 
 ; `take`: at most the first `count` items of `source`.
 (deftype taken-iter (record source (iter item) count u64)

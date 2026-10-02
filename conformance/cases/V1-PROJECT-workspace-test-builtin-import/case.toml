@@ -1,0 +1,19 @@
+id = "V1-PROJECT-workspace-test-builtin-import"
+rule = "V1-PROJECT"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "A test module cannot import @std.builtin, as no module can: the builtin types and their members need no import."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+interpreter = { result = "result.vibon" }
+
+[[expect.diagnostics]]
+code = "@module.unknown-path"
+level = "@error"
+source = "tests/builtin.vib"
+span = [29, 58]

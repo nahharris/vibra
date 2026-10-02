@@ -1747,12 +1747,22 @@ impl Resolution {
                 let target_span = import.target().span_or(import.span());
                 let test_unit_import_forbidden =
                     unit == "tests" && module_key.unit != "tests";
-                if test_unit_import_forbidden {
+                // The builtin types and their members are reached with no
+                // import, from every module, tests included.
+                let builtin_import = unit == "std"
+                    && target_path
+                        .first()
+                        .is_some_and(|segment| segment == "builtin");
+                if test_unit_import_forbidden || builtin_import {
                     self.diagnostics.push(
                         Diagnostic::new(
                             DiagnosticCode::ModuleUnknownPath,
                             target_span,
-                            "the reserved `@tests` unit is importable only from test modules",
+                            if builtin_import {
+                                "`@std.builtin` is never imported; its types and members need no import"
+                            } else {
+                                "the reserved `@tests` unit is importable only from test modules"
+                            },
                         )
                         .with_source_id(parsed.module.source_id.clone()),
                     );

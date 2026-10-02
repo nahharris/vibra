@@ -1,0 +1,6 @@
+(deftype failure (record retry (fn (i32) i32)))
+
+(defn same (value i32) i32 value)
+
+(defn execute () (result void failure)
+  (result.err (failure retry: same)))

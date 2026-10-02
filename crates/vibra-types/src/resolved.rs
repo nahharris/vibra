@@ -1228,6 +1228,29 @@ pub fn check_resolved(
             let Some(index) = function_indices.get(declaration).copied() else {
                 continue;
             };
+            // An entry's result is observed, and a function value has no
+            // observation, so its type cannot hold one.
+            if !is_test
+                && let Some(function) = set.functions().get(index)
+                && crate::mentions_function(&types, &function.signature().result())
+            {
+                if let Some(resolved) = snapshot
+                    .declarations()
+                    .iter()
+                    .find(|candidate| candidate.id() == declaration)
+                {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            DiagnosticCode::ProjectInvalidEntrySignature,
+                            resolved.span(),
+                            "an entry result cannot hold a function, which has no observable value",
+                        )
+                        .with_source_id(resolved.source_id()),
+                    );
+                }
+                failed_entry = true;
+                continue;
+            }
             match CheckedProgram::for_entry(Arc::clone(set), index) {
                 Ok(program) => {
                     programs.insert(declaration.clone(), program);

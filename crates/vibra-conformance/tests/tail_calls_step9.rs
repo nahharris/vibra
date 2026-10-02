@@ -61,7 +61,7 @@ fn direct_and_mutual_tail_transfers_reuse_one_activation() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let program = checked.program().expect("program");
     let execution = vibra_interp::run(program).expect("execution");
-    assert_eq!(execution.value(), &vibra_ir::Value::I32(2));
+    assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(2)));
     assert_eq!(execution.tail_transfer_count(), 2);
     assert_eq!(execution.max_activation_depth(), 1);
     assert!(execution.audit_trace().is_empty());
@@ -82,7 +82,7 @@ fn mixed_named_and_closure_tail_calls_reuse_only_the_selected_named_target() {
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
         let execution =
             vibra_interp::run(checked.program().expect("program")).expect("execution");
-        assert_eq!(execution.value(), &vibra_ir::Value::I32(expected));
+        assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(expected)));
         assert_eq!(execution.tail_transfer_count(), transfers);
         assert_eq!(execution.max_activation_depth(), depth);
     }
@@ -99,7 +99,7 @@ fn returned_function_targets_reuse_the_current_activation() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let execution =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(execution.value(), &vibra_ir::Value::I32(1));
+    assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(1)));
     assert_eq!(execution.tail_transfer_count(), 1);
     assert_eq!(execution.max_activation_depth(), 2);
 }
@@ -115,7 +115,7 @@ fn parameter_targets_reuse_the_current_activation() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let execution =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(execution.value(), &vibra_ir::Value::I32(1));
+    assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(1)));
     assert_eq!(execution.tail_transfer_count(), 2);
     assert_eq!(execution.max_activation_depth(), 1);
 }
@@ -131,7 +131,7 @@ fn identity_returned_targets_remain_bounded_through_direct_and_local_calls() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let execution =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(execution.value(), &vibra_ir::Value::I32(1));
+    assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(1)));
     assert_eq!(execution.tail_transfer_count(), 1);
 
     let local = r#"
@@ -144,7 +144,7 @@ fn identity_returned_targets_remain_bounded_through_direct_and_local_calls() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let execution =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(execution.value(), &vibra_ir::Value::I32(1));
+    assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(1)));
     assert_eq!(execution.tail_transfer_count(), 1);
 
     let nested = r#"
@@ -156,7 +156,7 @@ fn identity_returned_targets_remain_bounded_through_direct_and_local_calls() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let execution =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(execution.value(), &vibra_ir::Value::I32(1));
+    assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(1)));
     assert_eq!(execution.tail_transfer_count(), 1);
 }
 
@@ -182,7 +182,7 @@ fn mixed_source_and_external_tail_candidates_reuse_only_source_targets() {
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
         let execution =
             vibra_interp::run(checked.program().expect("program")).expect("execution");
-        assert_eq!(execution.value(), &vibra_ir::Value::U64(expected));
+        assert_eq!(execution.value(), Some(&vibra_ir::Value::U64(expected)));
         assert_eq!(execution.tail_transfer_count(), transfers);
         assert_eq!(execution.max_activation_depth(), depth);
     }
@@ -200,7 +200,7 @@ fn lambda_activations_keep_unknown_calls_as_ordinary_invocations() {
     let program = checked.program().expect("program");
     assert!(!program.canonical_vibon().contains("tail: true"));
     let execution = vibra_interp::run(program).expect("execution");
-    assert_eq!(execution.value(), &vibra_ir::Value::I32(1));
+    assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(1)));
     assert_eq!(execution.tail_transfer_count(), 0);
 }
 
@@ -220,7 +220,7 @@ fn returned_external_callables_fall_back_to_ordinary_invocation() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let execution =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(execution.value(), &vibra_ir::Value::U64(1));
+    assert_eq!(execution.value(), Some(&vibra_ir::Value::U64(1)));
     assert_eq!(execution.tail_transfer_count(), 0);
 }
 
@@ -245,7 +245,7 @@ fn unknown_callable_branches_keep_known_recursive_and_external_fallbacks() {
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
         let execution =
             vibra_interp::run(checked.program().expect("program")).expect("execution");
-        assert_eq!(execution.value(), &vibra_ir::Value::U64(expected));
+        assert_eq!(execution.value(), Some(&vibra_ir::Value::U64(expected)));
         assert_eq!(execution.tail_transfer_count(), transfers);
     }
 }
@@ -262,7 +262,7 @@ fn non_tail_call_keeps_a_live_caller_activation() {
     let program = checked.program().expect("program");
     assert!(!program.canonical_vibon().contains("tail: true"));
     let execution = vibra_interp::run(program).expect("execution");
-    assert_eq!(execution.value(), &vibra_ir::Value::I32(7));
+    assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(7)));
     assert_eq!(execution.tail_transfer_count(), 0);
     assert_eq!(execution.max_activation_depth(), 2);
 }
@@ -276,7 +276,7 @@ fn source_tail_counter_keeps_bounded_depth_at_two_workload_sizes() {
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
         let program = checked.program().expect("program");
         let execution = vibra_interp::run(program).expect("execution");
-        assert_eq!(execution.value(), &vibra_ir::Value::I32(0));
+        assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(0)));
         assert_eq!(execution.tail_transfer_count(), 1 << bit_count);
         assert_eq!(execution.max_activation_depth(), 1);
         assert!(execution.audit_trace().is_empty());
@@ -342,7 +342,7 @@ fn captured_callable_values_survive_repeated_tail_transfers() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let execution =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(execution.value(), &vibra_ir::Value::I32(41));
+    assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(41)));
     assert_eq!(execution.tail_transfer_count(), 3);
     assert_eq!(execution.max_activation_depth(), 2);
 }
@@ -359,7 +359,7 @@ fn callable_return_and_unused_initializer_boundaries_remain_valid() {
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let execution =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
-    assert_eq!(execution.value(), &vibra_ir::Value::I32(2));
+    assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(2)));
 
     let unused = r#"
 (defn answer (flag bool) i32

@@ -1,0 +1,1 @@
+(record type: (record type: @tuple arguments: (array (record type: @dict arguments: (array @point @str)) (record type: @dict arguments: (array @str @i32)))) value: (record kind: @tuple values: (array (record kind: @dict entries: (array (tuple (record kind: @record type: @point fields: (record x: 3i32 y: 5i32)) "second"))) (record kind: @dict entries: (array (tuple "a" 2i32))))))

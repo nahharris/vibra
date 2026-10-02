@@ -74,7 +74,7 @@ fn global_initializer_keeps_its_local_slots_at_runtime() {
     let execution = vibra_interp::run(program).expect("global initializer");
     assert_eq!(
         execution.value(),
-        &vibra_ir::Value::I32(1),
+        Some(&vibra_ir::Value::I32(1)),
         "global local binding must evaluate through the checked IR"
     );
 }

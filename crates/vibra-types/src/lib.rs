@@ -2710,7 +2710,7 @@ fn pack_tail(
 
 /// Whether a value of `value_type` is or contains a function, looking through
 /// declared bodies. A declaration is visited once.
-fn mentions_function(types: &nominal::TypeNames, value_type: &Type) -> bool {
+pub(crate) fn mentions_function(types: &nominal::TypeNames, value_type: &Type) -> bool {
     let mut visited = BTreeSet::new();
     let mut pending = vec![value_type.clone()];
     while let Some(value_type) = pending.pop() {

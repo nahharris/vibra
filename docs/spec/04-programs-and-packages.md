@@ -270,6 +270,9 @@ signature emits `@project.invalid-entry-signature`.
 An entry signature has no parameters and a result of either `void` or
 `result void e` for a nominal error type `e`. Returning an error produces a
 structured nonzero program result; traps remain distinct.
+The error type MUST NOT hold a function type, directly or through a declared
+type, because the result is observed and a function has no observable value;
+such a signature also emits `@project.invalid-entry-signature`.
 
 The entry declaration need not be public and need not be named `main`. The
 project document is a privileged referrer: naming a declaration in `entry`
