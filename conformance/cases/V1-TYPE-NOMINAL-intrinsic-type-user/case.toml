@@ -1,0 +1,23 @@
+id = "V1-TYPE-NOMINAL-intrinsic-type-user"
+rule = "V1-TYPE-NOMINAL"
+profile = "static-v1"
+operation = "type-check"
+description = "An intrinsic-type body is admissible only in the toolchain-embedded package: a user declaration is rejected whether or not its atom names a builtin type."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [0, 36]
+
+[[expect.diagnostics]]
+code = "@tool.unavailable"
+level = "@error"
+source = "input.vib"
+span = [38, 73]

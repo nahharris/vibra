@@ -72,8 +72,9 @@ passes.
   type, an anonymous pattern over a mismatched shape, and a literal of another
   type are `@type.mismatch`. Arity and label errors reuse the constructor
   diagnostics (`@type.argument-mismatch`, `@type.unknown-record-field`).
-- `as` patterns report `@tool.unavailable` until Step 6
-  (`V1-TYPE-CONTROL-availability-patterns`).
+- `as` patterns reported `@tool.unavailable` until Step 6; the case that
+  pinned it, `V1-TYPE-CONTROL-availability-patterns`, was removed when Step 6
+  landed them.
 - Subject-once evaluation is structural in the interpreter (the subject is
   evaluated before any arm is tried) but not observable in the pure
   `interpreter-v1` profile; M4 effects make it observable.

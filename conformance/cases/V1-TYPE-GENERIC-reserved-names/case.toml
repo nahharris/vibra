@@ -1,0 +1,41 @@
+id = "V1-TYPE-GENERIC-reserved-names"
+rule = "V1-TYPE-GENERIC"
+profile = "static-v1"
+operation = "type-check"
+description = "A where: generic name spelled self, any, a reserved type head, or a builtin type name is rejected with @name.reserved-declaration, as is a defint named with a reserved head; a nested method named dict on another owner is accepted, since the reservation does not reach members."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [36, 40]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [92, 95]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [148, 154]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [210, 213]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [237, 242]

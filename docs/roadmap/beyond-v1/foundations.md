@@ -52,7 +52,7 @@ used inside effect rows:
 
 **Compatibility:** every v1 program has only closed rows, which stay valid.
 The `iter` defaults may later gain effect-polymorphic variants under new names.
-Changing `dict` itself would alter accepted signatures.
+Changing `map` itself would alter accepted signatures.
 
 **Rejected alternative:** algebraic effect handlers. They answer a different
 question (how an effect is implemented) and add resumable control flow that

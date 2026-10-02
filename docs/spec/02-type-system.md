@@ -1,9 +1,10 @@
 # Vibra v1 type system
 
 Status: normative target
-Implementation status: M2 resolves and checks the documented primitive,
-binding, fixed and labelled call, and monomorphic empty-effect function subset.
-Nominal/generic types and exhaustive matching remain deferred.
+Implementation status: M3 checks and runs this chapter for pure programs:
+nominal and generic types, unions, patterns and exhaustive matching,
+interfaces, conversion, and iteration. Effects, `@host` externals, and the
+forms the M3 exit evidence reassigns remain deferred.
 
 ## Model
 
@@ -681,7 +682,7 @@ that constrains nothing.
 (defn first (items (array t)) (option t)
   where: (t any)
   visibility: @public
-  (array.first items))
+  (items 0u64))
 ```
 
 Generic arguments are invariant. Function and constructor applications infer
@@ -1329,9 +1330,9 @@ A written result type supplies the destination just as well, which is the usual
 spelling for `try-from`:
 
 ```vibra
-(defn parse-port (text str) (result u32 conversion-error)
+(defn narrow-port (value i64) (result u16 conversion-error)
   visibility: @public
-  (try-from.convert text))
+  (try-from.convert value))
 ```
 
 Placing the implementation on the destination is what makes the orphan rule

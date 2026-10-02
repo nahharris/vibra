@@ -155,7 +155,7 @@ span:
 | --- | --- | --- |
 | `@type.ambiguous-inference` | `V1-TYPE-GENERIC-ambiguous` | `[206, 218]` |
 | `@type.infinite-size` | `V1-TYPE-NOMINAL-infinite-size` | `[0, 33]` |
-| `@type.invalid-dict-key` | `V1-TYPE-NOMINAL-dict-keys` | `[48, 63]` |
+| `@type.invalid-dict-key` | `V1-TYPE-NOMINAL-dict-keys` | `[48, 64]` |
 | `@type.invalid-try` | `V1-TYPE-CONTROL-invalid-try` | `[281, 305]` |
 | `@type.unhandled-fallible` | `V1-TYPE-CONTROL-unhandled-fallible` | `[72, 81]` |
 | `@pattern.non-exhaustive` | `V1-TYPE-CONTROL-match-non-exhaustive` | `[83, 135]` |
@@ -176,8 +176,8 @@ The Stage 3A clauses of `docs/spec/07-diagnostics-and-conformance.md`:
 | Nominal coverage: direct self-containment rejected; containment through an array accepted | `V1-TYPE-NOMINAL-infinite-size`, `V1-TYPE-NOMINAL-recursive-through-array` |
 | Union coverage: declarations, one-member body, non-concrete members, overlap under instantiation, no lifting, union dict key | `V1-TYPE-NOMINAL-union-declarations`, `V1-SRC-DECL-union-arity`, `V1-TYPE-NOMINAL-union-member-not-concrete`, `V1-TYPE-NOMINAL-union-member-overlap`, `V1-TYPE-NOMINAL-union-no-lifting` |
 | Structural-type coverage: anonymous types in every position, wrapper and tuple distinctness, order-insensitive identity and formatting, reserved heads | `V1-SRC-DECL-structural-types`, `V1-TYPE-NOMINAL-distinct-identity`, `V1-TYPE-NOMINAL-wrapper-representation`, `V1-TYPE-CONVERT-widening-boundaries`, `V1-SRC-FMT-structural-order` |
-| Builtin-type coverage: `intrinsic-type` only in the embedded package | `V1-SRC-DECL-intrinsic-type`, `V1-SRC-DECL-builtin-name-reservation` |
-| Reserved heads and names | `V1-SRC-DECL-builtin-name-reservation`, `V1-TYPE-NAMES-resolve-reserved-value`, `V1-TYPE-GENERIC-redeclaration` |
+| Builtin-type coverage: `intrinsic-type` only in the embedded package | `V1-SRC-DECL-intrinsic-type` (the reader form), `V1-TYPE-NOMINAL-intrinsic-type-user` (rejected in a user package); an unknown intrinsic atom can only be written in the embedded package, so `@external.unknown-symbol` is shown by the host test `vibra-workspace/tests/semantic_step12` |
+| Reserved heads and names | `V1-SRC-DECL-builtin-name-reservation`, `V1-TYPE-NAMES-resolve-reserved-value`, `V1-TYPE-NAMES-reserved-role-names` (`any` and the role type names), `V1-TYPE-GENERIC-reserved-names` |
 | Unification: overlap with a bound | `V1-TYPE-NOMINAL-union-member-overlap` |
 | Widening: every written boundary, member-to-union and singleton-to-`atom`; none without an expected type; `if` branches; invariance; atom arrays | `V1-TYPE-CONVERT-widening-boundaries`, `V1-TYPE-CONVERT-widening-rejections`, `V1-RUNTIME-union-values` |
 | Ascription: no-op, empty collection, generic result; `(as i64 3i32)` and `(as i32 some-number)`; erasure | `V1-TYPE-CONVERT-ascription-erased`, `V1-TYPE-CONVERT-invalid-ascription` |

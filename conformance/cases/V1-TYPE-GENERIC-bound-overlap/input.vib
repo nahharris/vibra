@@ -1,0 +1,18 @@
+(defint printable
+  (defn render (value self) str))
+
+(deftype lists (union (array t) (array i32))
+  where: (t printable))
+
+(defint conv
+  where: (source any)
+  (defn convert (value source) self))
+
+(deftype cell (record value t)
+  where: (t printable)
+  (impl (conv t)
+    (defn convert (value t) self
+      (cell value: value)))
+  (impl (conv i32)
+    (defn convert (value i32) self
+      (cell value: value))))

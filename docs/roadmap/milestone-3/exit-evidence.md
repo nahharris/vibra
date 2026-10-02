@@ -100,16 +100,19 @@ the actual binary on every CI run.
 
 ## Corpus gate
 
-The full corpus reports 319 passed, 0 failed, and 0 unavailable, by profile:
+The full corpus reports 358 passed, 0 failed, and 0 unavailable, by profile:
 
 | Profile | Passed | Failed | Unavailable |
 | --- | --- | --- | --- |
-| reader-v1 | 76 | 0 | 0 |
-| static-v1 | 170 | 0 | 0 |
-| interpreter-v1 | 65 | 0 | 0 |
-| tooling-v1 | 8 | 0 | 0 |
+| reader-v1 | 77 | 0 | 0 |
+| static-v1 | 188 | 0 | 0 |
+| interpreter-v1 | 80 | 0 | 0 |
+| tooling-v1 | 13 | 0 | 0 |
 
-The workspace suite reports 636 passed and 0 failed.
+The workspace suite reports 649 passed and 0 failed.
+
+These counts include the cases added by the [review fixes](review-fixes.md),
+Steps 19 to 29, which followed an adversarial review of the milestone.
 
 ### Stage 3B inventory rows
 
@@ -145,16 +148,19 @@ The remaining reports are M4's, a single-source limit, or a trust boundary:
 
 The exit gate lets an M3 form be reassigned to a named later milestone
 instead of implemented. These are reassigned. Each still reports
-`@tool.unavailable` at its form, never a wrong answer.
+`@tool.unavailable` where the form is used, never a wrong answer.
 
 | Form | Reassigned to | Why not M3 |
 | --- | --- | --- |
 | An abstract contract member with its own generic parameters | M4 | A default member with its own generics is checked as one function (Step 14b, `iter.map`). An abstract one needs each implementation instantiated per call, which the typed IR does not yet express; M4 lowers the same IR to Wasm and must settle that shape once for both backends. |
 | Labelled operands and written `types:` arguments on a contract member call | M4 | Same call path as the row above. |
 | A dict variadic tail on a contract member | M4 | Same call path; an array tail is supported (`V1-RUNTIME-conversion`, `factory.of`). |
-| `from` and `try-from` between float types and between floats and integers | M4 | The conversion registry covers the 56 integer pairs (D21.1). Float conversions need a rounding and range contract in the runtime chapter that both backends must share. |
 | The public `query` command | M6 | It is M6's `query <subject>` deliverable. M3 delivers the records and the position envelope as library projections with corpus operations (D23.1, D23.2). |
 | G21: the command result for an entry that returns `err` | M4 | It needs a tooling-chapter decision on a result atom and exit code. M4 introduces host failures at the entry and must make the same decision for them. |
+
+Float conversions are not reassigned either: the type chapter gives the
+floating-point types no registry conversion in v1, so `from` and `try-from`
+over a float report an ordinary missing implementation.
 
 `hashable` is not reassigned: v1 has no `hashable`, because dict keys need only
 `ordered` (D18.2), so the roadmap's law clause covers `equatable`, `ordered`,
@@ -181,15 +187,15 @@ The Stage 3B clauses of `docs/spec/07-diagnostics-and-conformance.md`:
 | Interface coverage: pure `iter` default methods with `effects: ()` callbacks only | `V1-TYPE-INTERFACE-iter-default-rejections` |
 | Interface coverage: effectful walks as tail-recursive functions over `iter.next` | The pure walk is `V1-RUNTIME-iter-next`; an effectful one needs M4's effect rows |
 | Dict coverage over user and generic keys | `V1-RUNTIME-user-dict-keys`, `V1-RUNTIME-library-dict`, `V1-RUNTIME-key-contracts`, `V1-TYPE-INTERFACE-user-key-unordered`, `V1-TYPE-INTERFACE-key-generic-unbounded`, `V1-TYPE-INTERFACE-key-closed-registry` |
-| Unification: a bound does not make two members or two targets disjoint | `V1-TYPE-NOMINAL-union-member-overlap`, `V1-TYPE-INTERFACE-overlapping` |
-| Widening: concrete-to-interface at every written boundary | `V1-RUNTIME-interface-values`: a parameter, a result, an `as` ascription, a record field, and a `def` annotation |
+| Unification: a bound does not make two members or two targets disjoint | `V1-TYPE-GENERIC-bound-overlap` (the bound is an interface `i32` does not implement); `V1-TYPE-NOMINAL-union-member-overlap` and `V1-TYPE-INTERFACE-overlapping` cover the unbounded overlaps |
+| Widening: concrete-to-interface at every written boundary | `V1-RUNTIME-interface-values`: a parameter, a result, an `as` ascription, a record field, and a `def` annotation. `V1-RUNTIME-interface-widening-positions`: a tuple component, an enum payload, a wrapper, an array and a dict variadic tail, an `enumof` payload, and a written type argument |
 | No chaining: a union member where only its union implements the interface; an atom singleton where `any` is expected | `V1-TYPE-CONVERT-interface-widening-rejections` |
 | Conversion: `from` on a destination `deftype`; `try-from` returning `conversion-error`; selection through a parameter type, a result type, and `as` | `V1-RUNTIME-conversion` |
 | Conversion: a bare call rejected with `@type.ambiguous-destination`; an unsuffixed literal rejected with `@type.ambiguous-implementation` | `V1-TYPE-CONVERT-destination-rejections` |
 | Conversion: one receiver implementing `(from i16)` and `(from i8)`; two block identities and two member identities in index output; completeness per block | `V1-RUNTIME-conversion`, `V1-TOOL-index-records`, `V1-TYPE-INTERFACE-generic-targets`, `V1-TYPE-INTERFACE-missing-abstract` |
 | Conversion: a `from`/`try-from` pair on one source, and `(from t)` with `(try-from i32)`, rejected with `@type.redundant-conversion`; `(from t)` and `(from i32)` rejected with `@type.overlapping-implementation` | `V1-TYPE-CONVERT-redundant-conversion`, `V1-TYPE-INTERFACE-overlapping` |
-| Contract members rejected with `@type.undispatchable-contract-member`; a member naming `self` in its result and a variadic tail accepted | `V1-TYPE-INTERFACE-undispatchable`, `V1-RUNTIME-conversion` (`factory.of`) |
-| Destination dispatch beyond conversion: a `(defn empty () self)` factory | `V1-RUNTIME-conversion`, `V1-TYPE-CONVERT-destination-rejections` |
+| Contract members rejected with `@type.undispatchable-contract-member`; a member naming `self` in its result and a variadic tail accepted | `V1-TYPE-INTERFACE-undispatchable`, `V1-RUNTIME-factory-self-tail` |
+| Destination dispatch beyond conversion: a `(defn empty () self)` factory | `V1-RUNTIME-conversion` (selected), `V1-TYPE-CONVERT-factory-destination` (rejected where no type is written) |
 | Index records and position metadata | `V1-TOOL-index-records`, `V1-TOOL-index-unavailable`, `V1-TOOL-workspace-position-query`, `V1-TOOL-workspace-position-boundaries`, `V1-TOOL-workspace-position-types` |
 
 ## Roadmap exit clauses
