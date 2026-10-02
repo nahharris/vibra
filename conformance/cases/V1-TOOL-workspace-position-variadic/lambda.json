@@ -29,8 +29,10 @@
       "lambda",
       "do",
       "let",
+      "let-else",
       "if",
       "match",
+      "return",
       "as",
       "try"
     ],

@@ -16,10 +16,10 @@ use vibra_syntax::{Declaration, ExpressionKind, PatternKind, TypeExpr, parse_sou
 fn nested_expressions_and_patterns_have_step9_structure() {
     let source = r#"
 (defn run (value (tuple i32 i32)) i32
-  (let (tupleof left right) value
-    (match left
-      (as i32 n) (if true n right)
-      (option.none) (try right))))
+  (let (tupleof left right) value)
+  (match left
+    (as i32 n) (if true n right)
+    (option.none) (try right)))
 "#;
     let document =
         parse_source(Path::new("expressions.vib"), source).expect("source loader");
@@ -28,22 +28,19 @@ fn nested_expressions_and_patterns_have_step9_structure() {
     let Declaration::Defn(function) = &ast.declarations()[0] else {
         panic!("expected defn")
     };
-    let [expression] = function.expressions() else {
-        panic!("expected one function expression")
+    let [binding, match_expression] = function.expressions() else {
+        panic!("expected a let and a match element")
     };
-    let ExpressionKind::Let {
-        pattern,
-        value,
-        body,
-    } = expression.kind()
-    else {
+    let ExpressionKind::Let { bindings } = binding.kind() else {
         panic!("expected let expression")
     };
-    assert!(matches!(pattern.kind(), PatternKind::Tuple(values) if values.len() == 2));
-    assert!(matches!(value.kind(), ExpressionKind::Name(_)));
-    let [match_expression] = body.as_slice() else {
-        panic!("expected one let body expression")
+    let [pair] = bindings.as_slice() else {
+        panic!("expected one let pair")
     };
+    assert!(
+        matches!(pair.pattern().kind(), PatternKind::Tuple(values) if values.len() == 2)
+    );
+    assert!(matches!(pair.value().kind(), ExpressionKind::Name(_)));
     let ExpressionKind::Match { scrutinee, arms } = match_expression.kind() else {
         panic!("expected match expression")
     };
@@ -139,9 +136,10 @@ fn lambda_attributes_and_nested_discard_patterns_are_structured() {
     effects: ()
     0i32))
 (defn ignore (value i32) i32
-  (let - value
-    (let @- value
-      (let -: value value))))
+  (let - value)
+  (let @- value)
+  (let -: value)
+  value)
 "#;
     let document =
         parse_source(Path::new("patterns.vib"), source).expect("source loader");
@@ -162,27 +160,20 @@ fn lambda_attributes_and_nested_discard_patterns_are_structured() {
     let Declaration::Defn(ignore) = &ast.declarations()[1] else {
         panic!("expected ignore")
     };
-    let [outer] = ignore.expressions() else {
-        panic!("expected outer let")
+    let [outer, middle, inner, _value] = ignore.expressions() else {
+        panic!("expected three lets and a value")
     };
-    let ExpressionKind::Let { pattern, body, .. } = outer.kind() else {
-        panic!("expected let")
-    };
-    assert!(matches!(pattern.kind(), PatternKind::Binding(name) if name.is_discard()));
-    let [middle] = body.as_slice() else {
-        panic!("expected middle let")
-    };
-    let ExpressionKind::Let { pattern, body, .. } = middle.kind() else {
-        panic!("expected middle let")
-    };
-    assert!(matches!(pattern.kind(), PatternKind::Binding(name) if name.is_discard()));
-    let [inner] = body.as_slice() else {
-        panic!("expected inner let")
-    };
-    let ExpressionKind::Let { pattern, .. } = inner.kind() else {
-        panic!("expected inner let")
-    };
-    assert!(matches!(pattern.kind(), PatternKind::Binding(name) if name.is_discard()));
+    for element in [outer, middle, inner] {
+        let ExpressionKind::Let { bindings } = element.kind() else {
+            panic!("expected let")
+        };
+        let [pair] = bindings.as_slice() else {
+            panic!("expected one let pair")
+        };
+        assert!(
+            matches!(pair.pattern().kind(), PatternKind::Binding(name) if name.is_discard())
+        );
+    }
 }
 
 #[test]
@@ -194,7 +185,7 @@ fn malformed_step9_forms_report_existing_syntax_diagnostics() {
             DiagnosticCode::SyntaxInvalidForm,
         ),
         (
-            "(defn bad (value i32) i32 (let (as i32) value value))",
+            "(defn bad (value i32) i32 (let (as i32) value) value)",
             DiagnosticCode::SyntaxInvalidForm,
         ),
         (
@@ -211,7 +202,7 @@ fn malformed_step9_forms_report_existing_syntax_diagnostics() {
         ),
         ("(defn bad () i32 -)", DiagnosticCode::SyntaxInvalidForm),
         (
-            "(defn bad (value i32) i32 (let (bind x) value value))",
+            "(defn bad (value i32) i32 (let (bind x) value) value)",
             DiagnosticCode::SyntaxRetiredForm,
         ),
         (
@@ -273,9 +264,7 @@ fn trailing_lambda_and_test_attributes_use_the_attribute_diagnostic() {
 
 #[test]
 fn retired_expression_forms_have_explicit_diagnostics() {
-    for head in [
-        "while", "for", "break", "continue", "return", "bind", "case",
-    ] {
+    for head in ["while", "for", "break", "continue", "bind", "case"] {
         let source = format!("(defn bad () void ({head} true))");
         let document =
             parse_source(Path::new("retired.vib"), &source).expect("source loader");

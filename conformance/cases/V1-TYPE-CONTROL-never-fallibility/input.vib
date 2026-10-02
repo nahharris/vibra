@@ -1,0 +1,13 @@
+(defn attempt-never () (result void never) (result.ok))
+
+(defn attempt-str () (result void str) (result.ok))
+
+(defn attempt-never-ok () (result never str) (result.err "x"))
+
+(defn ignored-never-error () i32 (attempt-never) 1i32)
+
+(defn ignored-str () i32 (attempt-str) 1i32)
+
+(defn ignored-never-ok () i32 (attempt-never-ok) 1i32)
+
+(defn try-same () (result void never) (try (attempt-never)) (result.ok))

@@ -128,7 +128,9 @@ fn every_m3_row_names_an_owning_step() {
                     "{variant} is owned outside its stage"
                 );
             }
-            "M2" | "M4" => assert_eq!(owner, "—", "{variant} is not M3 work"),
+            "M2" | "M4" | "Pre-M4" => {
+                assert_eq!(owner, "—", "{variant} is not M3 work");
+            }
             other => panic!("{variant} has unknown disposition {other}"),
         }
     }

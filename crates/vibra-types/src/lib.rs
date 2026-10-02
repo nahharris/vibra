@@ -1702,6 +1702,14 @@ impl<'a> CheckEnvironment<'a> {
         }
     }
 
+    /// Whether a `return` here exits a function or `lambda` body; a test body
+    /// has an exit for `try` but no function to leave.
+    fn leaves_function(&self) -> bool {
+        self.exit
+            .as_ref()
+            .is_some_and(|(_, written)| written.is_some())
+    }
+
     /// Takes back the slots and captures a nested scope used.
     fn absorb(&mut self, scope: ScopeExit) {
         self.next_slot = self.next_slot.max(scope.next_slot);
@@ -1860,8 +1868,10 @@ impl<'a> CheckEnvironment<'a> {
     }
 }
 
-fn types_match(left: &Type, right: &Type) -> bool {
-    left.same_shape(right)
+/// Whether a value of type `actual` fits where `expected` is required. An
+/// expression of type `never` is admitted at any expected type.
+fn types_match(expected: &Type, actual: &Type) -> bool {
+    *actual == Type::Never || expected.same_shape(actual)
 }
 
 /// Visits `expression` and every nested expression in pre-order.
@@ -1889,10 +1899,13 @@ pub fn walk_expressions<'e>(
                 );
             }
             ExpressionKind::Do(expressions) => pending.extend(expressions),
-            ExpressionKind::Let { value, body, .. } => {
-                pending.push(value);
-                pending.extend(body);
+            ExpressionKind::Let { bindings } => {
+                pending.extend(bindings.iter().map(|binding| binding.value()));
             }
+            ExpressionKind::LetElse {
+                value, fallback, ..
+            } => pending.extend([&**value, &**fallback]),
+            ExpressionKind::Return(operand) => pending.push(operand),
             ExpressionKind::If {
                 condition,
                 then_branch,
@@ -1958,6 +1971,7 @@ fn function_targets_from_expr(
         | Expr::Array { .. }
         | Expr::Dict { .. }
         | Expr::Lookup { .. } => FunctionTargetSet::default(),
+        Expr::Return { .. } => FunctionTargetSet::default(),
         Expr::Project { value_type, .. }
         | Expr::TupleProject { value_type, .. }
         | Expr::Try { value_type, .. } => {
@@ -2131,56 +2145,13 @@ fn syntax_function_targets(
                     .map(|global| global.function_targets.clone())
             })
             .unwrap_or_default(),
-        ExpressionKind::Do(expressions) => {
-            expressions
-                .last()
-                .map_or_else(FunctionTargetSet::default, |expression| {
-                    syntax_function_targets(
-                        expression,
-                        global_indices,
-                        function_indices,
-                        globals,
-                        aliases,
-                    )
-                })
-        }
-        ExpressionKind::Let {
-            pattern,
-            value,
-            body,
-        } => {
-            let mut scoped = aliases.clone();
-            if let PatternKind::Binding(name) = pattern.kind()
-                && !name.is_discard()
-            {
-                let targets = syntax_function_targets(
-                    value,
-                    global_indices,
-                    function_indices,
-                    globals,
-                    aliases,
-                );
-                if !targets.known.is_empty() || targets.unknown || targets.has_closure {
-                    scoped.insert(name.value().to_owned(), targets);
-                }
-            }
-            // Destructured binders are not tracked: a callable one is unknown.
-            if !matches!(pattern.kind(), PatternKind::Binding(_)) {
-                for name in pattern::binder_names(pattern) {
-                    scoped.insert(name, FunctionTargetSet::unknown());
-                }
-            }
-            body.last()
-                .map_or_else(FunctionTargetSet::default, |expression| {
-                    syntax_function_targets(
-                        expression,
-                        global_indices,
-                        function_indices,
-                        globals,
-                        &scoped,
-                    )
-                })
-        }
+        ExpressionKind::Do(expressions) => syntax_sequence_targets(
+            expressions,
+            global_indices,
+            function_indices,
+            globals,
+            aliases,
+        ),
         ExpressionKind::If {
             then_branch,
             else_branch,
@@ -2223,6 +2194,70 @@ fn syntax_function_targets(
         ExpressionKind::Application(_) => FunctionTargetSet::unknown(),
         _ => FunctionTargetSet::default(),
     }
+}
+
+/// The function targets a body sequence can produce: its final element's,
+/// seen through the aliases that earlier `let` and `let-else` elements bind.
+fn syntax_sequence_targets(
+    expressions: &[Expression],
+    global_indices: &BTreeMap<String, usize>,
+    function_indices: &BTreeMap<String, usize>,
+    globals: &[GlobalHeader],
+    aliases: &BTreeMap<String, FunctionTargetSet>,
+) -> FunctionTargetSet {
+    let mut scoped = aliases.clone();
+    let mut targets = FunctionTargetSet::default();
+    for (index, element) in expressions.iter().enumerate() {
+        match element.kind() {
+            ExpressionKind::Let { bindings } => {
+                for binding in bindings {
+                    match binding.pattern().kind() {
+                        PatternKind::Binding(name) if name.is_discard() => {}
+                        PatternKind::Binding(name) => {
+                            let value_targets = syntax_function_targets(
+                                binding.value(),
+                                global_indices,
+                                function_indices,
+                                globals,
+                                &scoped,
+                            );
+                            if !value_targets.known.is_empty()
+                                || value_targets.unknown
+                                || value_targets.has_closure
+                            {
+                                scoped.insert(name.value().to_owned(), value_targets);
+                            }
+                        }
+                        // Destructured binders are not tracked: a callable one
+                        // is unknown.
+                        _ => {
+                            for name in pattern::binder_names(binding.pattern()) {
+                                scoped.insert(name, FunctionTargetSet::unknown());
+                            }
+                        }
+                    }
+                }
+                targets = FunctionTargetSet::default();
+            }
+            ExpressionKind::LetElse { pattern, .. } => {
+                for name in pattern::binder_names(pattern) {
+                    scoped.insert(name, FunctionTargetSet::unknown());
+                }
+                targets = FunctionTargetSet::default();
+            }
+            _ if index + 1 == expressions.len() => {
+                targets = syntax_function_targets(
+                    element,
+                    global_indices,
+                    function_indices,
+                    globals,
+                    &scoped,
+                );
+            }
+            _ => {}
+        }
+    }
+    targets
 }
 
 fn ensure_expected(
@@ -2651,7 +2686,11 @@ pub(crate) fn check_inferred_operand(
         }
         return checked;
     }
-    let checked = check_operand(environment, operand, None)?;
+    let checked = check_operand_open(environment, operand)?;
+    // An operand of type `never` fixes no generic argument.
+    if checked.result_type() == Type::Never {
+        return Some(checked);
+    }
     // A parameter typed as a generic interface's value takes its arguments
     // from the one way the operand conforms, and the operand widens to it.
     let actual = checked.result_type();
@@ -3443,6 +3482,9 @@ fn has_deferred_attributes(attributes: &[Attribute]) -> bool {
     })
 }
 
+/// Checks one body sequence. A `let` or `let-else` element binds for every
+/// later element, so the rest of the sequence is checked inside the scope it
+/// opens, and the names end with the sequence.
 fn check_sequence(
     environment: &mut CheckEnvironment<'_>,
     expressions: &[Expression],
@@ -3473,22 +3515,54 @@ fn check_sequence(
 
     let mut checked = Vec::with_capacity(expressions.len());
     let mut valid = true;
+    // The first element of type `never`, after which every element is
+    // unreachable; only the first such element is reported.
+    let mut diverging: Option<ByteSpan> = None;
+    let mut reported = false;
     for (index, expression) in expressions.iter().enumerate() {
-        let expression_expected = (index + 1 == expressions.len())
-            .then_some(expected.clone())
-            .flatten();
+        if let Some(diverged) = diverging
+            && !reported
+        {
+            reported = true;
+            valid = false;
+            environment.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::TypeUnreachableCode,
+                    expression.span(),
+                    "this element follows an element of type `never`, so it never runs",
+                )
+                .with_source_id(environment.source_id)
+                .with_related(diverged, "this element never completes"),
+            );
+        }
+        if matches!(
+            expression.kind(),
+            ExpressionKind::Let { .. } | ExpressionKind::LetElse { .. }
+        ) {
+            match check_binding_element(
+                environment,
+                expression,
+                expressions.get(index + 1..).unwrap_or_default(),
+                expected.clone(),
+                tail_position,
+            ) {
+                Some(value) => checked.push(value),
+                None => valid = false,
+            }
+            break;
+        }
+        let is_last = index + 1 == expressions.len();
+        let expression_expected = is_last.then_some(expected.clone()).flatten();
         match check_expression_in_position(
             environment,
             expression,
             expression_expected,
-            tail_position && index + 1 == expressions.len(),
+            tail_position && is_last,
         ) {
             Some(value) => {
                 // A non-final element's value is ignored; a `result` there is
                 // a failure nobody handles.
-                if index + 1 != expressions.len()
-                    && is_fallible(environment.types, &value.result_type())
-                {
+                if !is_last && is_fallible(environment.types, &value.result_type()) {
                     environment.diagnostics.push(
                         Diagnostic::new(
                             DiagnosticCode::TypeUnhandledFallible,
@@ -3498,6 +3572,9 @@ fn check_sequence(
                         .with_source_id(environment.source_id),
                     );
                     valid = false;
+                }
+                if value.result_type() == Type::Never && diverging.is_none() {
+                    diverging = Some(expression.span());
                 }
                 checked.push(value);
             }
@@ -3517,24 +3594,306 @@ fn check_sequence(
     Some(Expr::sequence(checked, origin))
 }
 
+/// Checks a `let` or `let-else` element together with the rest of its body
+/// sequence, which it scopes.
+fn check_binding_element(
+    environment: &mut CheckEnvironment<'_>,
+    element: &Expression,
+    rest: &[Expression],
+    expected: Option<Type>,
+    tail_position: bool,
+) -> Option<Expr> {
+    match element.kind() {
+        ExpressionKind::Let { bindings } => check_let_pairs(
+            environment,
+            element,
+            bindings,
+            rest,
+            expected,
+            tail_position,
+        ),
+        ExpressionKind::LetElse {
+            pattern,
+            value,
+            fallback,
+        } => check_let_else(
+            environment,
+            element,
+            pattern,
+            value,
+            fallback,
+            rest,
+            expected,
+            tail_position,
+        ),
+        _ => None,
+    }
+}
+
+/// Checks the pairs of a `let` in order, each in the scope of the earlier
+/// ones, and then the rest of the sequence in the scope of all of them.
+fn check_let_pairs(
+    environment: &mut CheckEnvironment<'_>,
+    form: &Expression,
+    bindings: &[vibra_syntax::LetBinding],
+    rest: &[Expression],
+    expected: Option<Type>,
+    tail_position: bool,
+) -> Option<Expr> {
+    let Some((binding, remaining)) = bindings.split_first() else {
+        // The form itself is `void`, so a sequence that ends here is `void`.
+        return check_sequence(environment, rest, expected, form.span(), tail_position);
+    };
+    let (pattern, value) = (binding.pattern(), binding.value());
+    environment.keeps_generic = matches!(value.kind(), ExpressionKind::Lambda(_));
+    let generics = quantified_lambda_generics(value);
+    let value = check_expression(environment, value, None)?;
+    let function_targets = matches!(value.result_type(), Type::Function(_))
+        .then(|| function_targets_from_expr(&value, environment, &BTreeMap::new()));
+    let mut nested = environment.scoped();
+    let mut destructured = None;
+    let slot = match pattern.kind() {
+        PatternKind::Binding(name) if name.is_discard() => None,
+        PatternKind::Binding(name) => {
+            if !nested.add_binding_type_with_targets(
+                name.value(),
+                value.result_type(),
+                pattern.span(),
+                function_targets,
+            ) {
+                return None;
+            }
+            if let Some(binding) = nested.locals.get_mut(name.value()) {
+                binding.generics = generics;
+            }
+            Some(nested.next_slot.saturating_sub(1))
+        }
+        // A destructuring `let` is a single-arm `match`.
+        _ => {
+            destructured =
+                Some(nested.check_binding_pattern(pattern, &value.result_type())?);
+            None
+        }
+    };
+    let result =
+        check_let_pairs(&mut nested, form, remaining, rest, expected, tail_position);
+    let exit = nested.exit();
+    drop(nested);
+    environment.absorb(exit);
+    let origin = SourceOrigin::new(environment.source_id, form.span());
+    result.map(|body| match destructured {
+        Some(pattern) => Expr::Match {
+            value_type: body.result_type(),
+            scrutinee: Box::new(value),
+            arms: vec![vibra_ir::MatchArm { pattern, body }],
+            origin,
+        },
+        None => Expr::let_binding(slot, value, body, origin),
+    })
+}
+
+/// Checks `let-else`: a refutable pattern against the value, the fallback
+/// outside the pattern's scope with the expected type `never`, and the rest of
+/// the sequence in the pattern's scope. It lowers to a two-arm `match`.
+#[allow(clippy::too_many_arguments)]
+fn check_let_else(
+    environment: &mut CheckEnvironment<'_>,
+    form: &Expression,
+    pattern: &vibra_syntax::Pattern,
+    value: &Expression,
+    fallback: &Expression,
+    rest: &[Expression],
+    expected: Option<Type>,
+    tail_position: bool,
+) -> Option<Expr> {
+    let value = check_expression(environment, value, None)?;
+    let value_type = value.result_type();
+    // The fallback does not see the pattern's names, and a fallback is not in
+    // tail position.
+    let before = environment.diagnostics.len();
+    let fallback_checked =
+        check_expression_in_position(environment, fallback, Some(Type::Never), false);
+    if let Some(checked) = &fallback_checked
+        && checked.result_type() != Type::Never
+        && environment.diagnostics.len() == before
+    {
+        mismatch(
+            environment.diagnostics,
+            environment.source_id,
+            fallback.span(),
+            Type::Never,
+            checked.result_type(),
+            "a `let-else` fallback must leave the sequence",
+        );
+        return None;
+    }
+    let fallback_checked = fallback_checked?;
+    let mut nested = environment.scoped();
+    let checked_pattern = pattern::check_pattern(&mut nested, pattern, &value_type)?;
+    if pattern::uncovered(
+        nested.types,
+        std::slice::from_ref(&checked_pattern),
+        &value_type,
+    )
+    .is_none()
+    {
+        nested.diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::PatternIrrefutableLetElse,
+                pattern.span(),
+                "this pattern matches every value, so the fallback can never run",
+            )
+            .with_source_id(nested.source_id)
+            .with_note("write `let` for a binding that cannot fail"),
+        );
+        return None;
+    }
+    let result =
+        check_sequence(&mut nested, rest, expected, form.span(), tail_position);
+    let exit = nested.exit();
+    drop(nested);
+    environment.absorb(exit);
+    let body = result?;
+    let origin = SourceOrigin::new(environment.source_id, form.span());
+    Some(Expr::Match {
+        value_type: body.result_type(),
+        scrutinee: Box::new(value),
+        arms: vec![
+            vibra_ir::MatchArm {
+                pattern: checked_pattern,
+                body,
+            },
+            vibra_ir::MatchArm {
+                pattern: vibra_ir::Pattern::Wildcard,
+                body: fallback_checked,
+            },
+        ],
+        origin,
+    })
+}
+
+/// Checks `return`: the operand at the enclosing function's written result
+/// type, with the form having type `never`.
+fn check_return(
+    environment: &mut CheckEnvironment<'_>,
+    expression: &Expression,
+    operand: &Expression,
+) -> Option<Expr> {
+    // A test body has a `void` exit for `try` but no function to leave.
+    let Some((result_type, _)) = environment
+        .exit
+        .clone()
+        .filter(|_| environment.leaves_function())
+    else {
+        environment.diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeInvalidReturn,
+                expression.span(),
+                "`return` needs an enclosing function or `lambda` body to exit",
+            )
+            .with_source_id(environment.source_id),
+        );
+        return None;
+    };
+    let value = check_value_in_position(environment, operand, Some(result_type), true)?;
+    Some(Expr::Return {
+        value: Box::new(value),
+        origin: SourceOrigin::new(environment.source_id, expression.span()),
+    })
+}
+
 /// Whether a value of `value_type` is fallible: a `result`, the type playing
 /// the `@result` role. `option` is not fallible.
 fn is_fallible(types: &nominal::TypeNames, value_type: &Type) -> bool {
-    let Type::Applied(id, _) = value_type else {
+    let Type::Applied(id, arguments) = value_type else {
         return false;
     };
+    // A `result` whose error type is uninhabited has nothing to handle.
     types
         .role("result")
         .and_then(|index| types.get(index))
         .is_some_and(|declared| declared.id == *id)
+        && !arguments
+            .get(1)
+            .is_some_and(|error| pattern::uninhabited(types, error))
 }
 
+/// Checks an operand of a generic application whose parameter is not yet
+/// fixed. An operand of type `never` is reported as unreachable code but still
+/// returned, so that the application goes on to report the generic argument
+/// the operand could not fix.
+fn check_operand_open(
+    environment: &mut CheckEnvironment<'_>,
+    operand: &Expression,
+) -> Option<Expr> {
+    let checked = check_operand_raw(environment, operand)?;
+    if checked.result_type() == Type::Never {
+        let _ = forbid_never(environment, checked.clone(), operand.span());
+    }
+    Some(checked)
+}
+
+fn check_operand_raw(
+    environment: &mut CheckEnvironment<'_>,
+    operand: &Expression,
+) -> Option<Expr> {
+    let before = environment.diagnostics.len();
+    let checked = check_position_raw(environment, operand, None, false);
+    for diagnostic in environment.diagnostics.iter_mut().skip(before) {
+        if diagnostic.code() == DiagnosticCode::TypeMismatch
+            && diagnostic.primary_span() == operand.span()
+        {
+            *diagnostic = diagnostic
+                .clone()
+                .with_code(DiagnosticCode::TypeArgumentMismatch);
+        }
+    }
+    checked
+}
+
+/// Checks an expression in a position that needs a value: an operand, a
+/// condition, a subject, or a binding value. An expression of type `never`
+/// there is unreachable code.
 fn check_expression(
     environment: &mut CheckEnvironment<'_>,
     expression: &Expression,
     expected: Option<Type>,
 ) -> Option<Expr> {
-    check_expression_in_position(environment, expression, expected, false)
+    check_value_in_position(environment, expression, expected, false)
+}
+
+/// [`check_expression`] with an explicit tail position.
+fn check_value_in_position(
+    environment: &mut CheckEnvironment<'_>,
+    expression: &Expression,
+    expected: Option<Type>,
+    tail_position: bool,
+) -> Option<Expr> {
+    let checked = check_position_raw(environment, expression, expected, tail_position)?;
+    forbid_never(environment, checked, expression.span())
+}
+
+/// Rejects a `never` expression where the position needs a value.
+fn forbid_never(
+    environment: &mut CheckEnvironment<'_>,
+    checked: Expr,
+    span: ByteSpan,
+) -> Option<Expr> {
+    if checked.result_type() != Type::Never {
+        return Some(checked);
+    }
+    environment.diagnostics.push(
+        Diagnostic::new(
+            DiagnosticCode::TypeUnreachableCode,
+            span,
+            "an expression of type `never` never produces the value this position needs",
+        )
+        .with_source_id(environment.source_id)
+        .with_note(
+            "`never` is admitted as a body element, an `if` branch, a `match` arm result, a `let-else` fallback, or a final expression",
+        ),
+    );
+    None
 }
 
 /// Checks an operand bound to a parameter or constructor slot. A type
@@ -3559,7 +3918,36 @@ fn check_operand(
     checked
 }
 
+/// Checks an expression in a position that admits `never`: a body element, an
+/// `if` branch, a `match` arm result, or a `let-else` fallback. A `return` in
+/// tail position there is redundant.
 fn check_expression_in_position(
+    environment: &mut CheckEnvironment<'_>,
+    expression: &Expression,
+    expected: Option<Type>,
+    tail_position: bool,
+) -> Option<Expr> {
+    let checked = check_position_raw(environment, expression, expected, tail_position);
+    // A `return` that leaves its function is redundant in tail position even
+    // when its operand is rejected; one with no function to leave is not.
+    if tail_position
+        && matches!(expression.kind(), ExpressionKind::Return(_))
+        && environment.leaves_function()
+    {
+        environment.diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeRedundantReturn,
+                expression.span(),
+                "this `return` is in tail position, where the expression is already the result",
+            )
+            .with_source_id(environment.source_id),
+        );
+        return None;
+    }
+    checked
+}
+
+fn check_position_raw(
     environment: &mut CheckEnvironment<'_>,
     expression: &Expression,
     expected: Option<Type>,
@@ -4236,65 +4624,11 @@ fn check_form(
             expression.span(),
             tail_position,
         ),
-        ExpressionKind::Let {
-            pattern,
-            value,
-            body,
-        } => {
-            environment.keeps_generic =
-                matches!(value.kind(), ExpressionKind::Lambda(_));
-            let generics = quantified_lambda_generics(value);
-            let value = check_expression(environment, value, None)?;
-            let function_targets = matches!(value.result_type(), Type::Function(_))
-                .then(|| {
-                    function_targets_from_expr(&value, environment, &BTreeMap::new())
-                });
-            let mut nested = environment.scoped();
-            let mut destructured = None;
-            let slot = match pattern.kind() {
-                PatternKind::Binding(name) if name.is_discard() => None,
-                PatternKind::Binding(name) => {
-                    if !nested.add_binding_type_with_targets(
-                        name.value(),
-                        value.result_type(),
-                        pattern.span(),
-                        function_targets,
-                    ) {
-                        return None;
-                    }
-                    if let Some(binding) = nested.locals.get_mut(name.value()) {
-                        binding.generics = generics;
-                    }
-                    Some(nested.next_slot.saturating_sub(1))
-                }
-                // A destructuring `let` is a single-arm `match`.
-                _ => {
-                    destructured = Some(
-                        nested.check_binding_pattern(pattern, &value.result_type())?,
-                    );
-                    None
-                }
-            };
-            let result = check_sequence(
-                &mut nested,
-                body,
-                expected,
-                expression.span(),
-                tail_position,
-            );
-            let exit = nested.exit();
-            drop(nested);
-            environment.absorb(exit);
-            let origin = SourceOrigin::new(environment.source_id, expression.span());
-            result.map(|body| match destructured {
-                Some(pattern) => Expr::Match {
-                    value_type: body.result_type(),
-                    scrutinee: Box::new(value),
-                    arms: vec![vibra_ir::MatchArm { pattern, body }],
-                    origin,
-                },
-                None => Expr::let_binding(slot, value, body, origin),
-            })
+        // The reader keeps a binding form only as a body-sequence element, and
+        // `check_sequence` handles it there.
+        ExpressionKind::Let { .. } | ExpressionKind::LetElse { .. } => None,
+        ExpressionKind::Return(operand) => {
+            check_return(environment, expression, operand)
         }
         ExpressionKind::Match { scrutinee, arms } => check_match(
             environment,
@@ -4310,19 +4644,27 @@ fn check_form(
             else_branch,
         } => {
             let condition = check_expression(environment, condition, Some(Type::Bool))?;
+            // Both branches are checked, so each reports its own errors.
             let then_branch = check_expression_in_position(
                 environment,
                 then_branch,
                 expected.clone(),
                 tail_position,
-            )?;
+            );
             let else_branch = check_expression_in_position(
                 environment,
                 else_branch,
                 expected.clone(),
                 tail_position,
-            )?;
-            if !types_match(&then_branch.result_type(), &else_branch.result_type()) {
+            );
+            let (then_branch, else_branch) = (then_branch?, else_branch?);
+            // A branch of type `never` is skipped when the branches are compared.
+            let (then_type, else_type) =
+                (then_branch.result_type(), else_branch.result_type());
+            if then_type != Type::Never
+                && else_type != Type::Never
+                && !types_match(&then_type, &else_type)
+            {
                 mismatch(
                     environment.diagnostics,
                     environment.source_id,
@@ -4623,7 +4965,7 @@ fn check_try(
         ) if id == exit_id => match (arguments.as_slice(), exit_arguments.as_slice()) {
             ([success], [_]) if option_id.as_ref() == Some(id) => Some(success.clone()),
             ([success, error], [_, exit_error])
-                if result_id.as_ref() == Some(id) && types_match(error, exit_error) =>
+                if result_id.as_ref() == Some(id) && error.same_shape(exit_error) =>
             {
                 Some(success.clone())
             }
@@ -4687,7 +5029,7 @@ fn check_ascription(
         environment.diagnostics,
     )?;
     let before = environment.diagnostics.len();
-    let checked = check_expression_in_position(
+    let checked = check_value_in_position(
         environment,
         operand,
         Some(target.clone()),
@@ -4792,6 +5134,8 @@ fn check_match(
         match (pattern, body) {
             (Some(pattern), Some(body)) => {
                 match &result_type {
+                    // An arm of type `never` is skipped in the comparison.
+                    _ if body.result_type() == Type::Never => {}
                     None => result_type = Some(body.result_type()),
                     Some(first) if !types_match(first, &body.result_type()) => {
                         mismatch(
@@ -4827,22 +5171,36 @@ fn check_match(
             continue;
         }
         valid = false;
+        // An arm that no value of the subject type could reach, because it
+        // needs one of an uninhabited type, relates no earlier arm.
+        let alone = pattern::reachable(
+            environment.types,
+            &[],
+            &checked_arm.pattern,
+            &subject_type,
+        );
         let mut diagnostic = Diagnostic::new(
             DiagnosticCode::PatternUnreachableArm,
             arm.pattern().span(),
-            "no value reaches this arm: earlier arms cover it",
+            if alone {
+                "no value reaches this arm: earlier arms cover it"
+            } else {
+                "no value reaches this arm: it needs a value of an uninhabited type"
+            },
         )
         .with_source_id(environment.source_id);
-        if let Some((covering, _)) = checked.get(..index).and_then(|earlier| {
-            earlier.iter().find(|(_, earlier)| {
-                !pattern::reachable(
-                    environment.types,
-                    std::slice::from_ref(&earlier.pattern),
-                    &checked_arm.pattern,
-                    &subject_type,
-                )
+        if alone
+            && let Some((covering, _)) = checked.get(..index).and_then(|earlier| {
+                earlier.iter().find(|(_, earlier)| {
+                    !pattern::reachable(
+                        environment.types,
+                        std::slice::from_ref(&earlier.pattern),
+                        &checked_arm.pattern,
+                        &subject_type,
+                    )
+                })
             })
-        }) {
+        {
             diagnostic = diagnostic
                 .with_related(covering.pattern().span(), "covered by this arm");
         }
@@ -4871,7 +5229,7 @@ fn check_match(
     Some(Expr::Match {
         scrutinee: Box::new(scrutinee),
         arms: checked.into_iter().map(|(_, arm)| arm).collect(),
-        value_type: result_type?,
+        value_type: result_type.unwrap_or(Type::Never),
         origin: SourceOrigin::new(environment.source_id, expression.span()),
     })
 }
@@ -5441,7 +5799,7 @@ mod tests {
     fn checks_bindings_conditionals_and_fixed_calls() {
         let result = check_source(
             "bindings.vib",
-            "(def base i32 40)\n(defn answer () i32 (add base))\n(defn add (value i32) i32 (let next (do 1i8 2i8) (if true (do value 2i32) 0i32)))",
+            "(def base i32 40)\n(defn answer () i32 (add base))\n(defn add (value i32) i32 (let next (do 1i8 2i8)) (if true (do value 2i32) 0i32))",
         );
         assert!(result.accepted(), "{:?}", result.diagnostics());
         let program = result.program().expect("program");
@@ -5469,7 +5827,7 @@ mod tests {
     fn rejects_shadowing_and_non_boolean_condition() {
         let result = check_source(
             "scope.vib",
-            "(def value i32 1)\n(defn answer (value i32) i32 (let value value (if value 1i32 2i32)))",
+            "(def value i32 1)\n(defn answer (value i32) i32 (let value value) (if value 1i32 2i32))",
         );
         assert!(!result.accepted());
         assert!(result.program().is_none());
@@ -5490,7 +5848,7 @@ mod tests {
     #[test]
     fn local_shadowing_reports_binder_spans() {
         let source =
-            "(defn answer (value i32) i32 (let first value (let first 1i32 first)))";
+            "(defn answer (value i32) i32 (let first value) (let first 1i32) first)";
         let result = check_source("scope.vib", source);
         let diagnostic = result
             .diagnostics()
@@ -5499,7 +5857,7 @@ mod tests {
             .expect("local redeclaration");
         assert_eq!(
             diagnostic.primary_span(),
-            vibra_diagnostics::ByteSpan::new(51, 56)
+            vibra_diagnostics::ByteSpan::new(52, 57)
         );
         assert_eq!(diagnostic.related().len(), 1);
         assert_eq!(
@@ -5633,7 +5991,7 @@ mod tests {
         let local = check_bootstrap_text_import(
             &verification,
             "app/main.vib",
-            "(import text @std.text)\n(defn answer () u64 (let text 1u64 text))",
+            "(import text @std.text)\n(defn answer () u64 (let text 1u64) text)",
         );
         assert!(!local.accepted());
         let diagnostic = local
@@ -5739,7 +6097,7 @@ mod tests {
 
     #[test]
     fn variadic_targets_survive_lambda_alias_captures() {
-        let source = "(defn use-alias () i32\n  (let alias collect-array (alias 1i32)))\n(defn collect-array (first i32) i32\n  variadic: (rest (array i32))\n  first)\n(defn use-direct () (fn () i32)\n  (let alias collect-array\n    (lambda () i32 (alias 1i32))))\n(defn use-nested () (fn () (fn () i32))\n  (let alias collect-array\n    (lambda () (fn () i32)\n      (lambda () i32 (alias 1i32)))))";
+        let source = "(defn use-alias () i32\n  (let alias collect-array)\n  (alias 1i32))\n(defn collect-array (first i32) i32\n  variadic: (rest (array i32))\n  first)\n(defn use-direct () (fn () i32)\n  (let alias collect-array)\n  (lambda () i32 (alias 1i32)))\n(defn use-nested () (fn () (fn () i32))\n  (let alias collect-array)\n  (lambda () (fn () i32)\n    (lambda () i32 (alias 1i32))))";
         let result = check_source("captured-variadic.vib", source);
         assert!(result.accepted(), "{:?}", result.diagnostics());
         let program = result.program().expect("program");

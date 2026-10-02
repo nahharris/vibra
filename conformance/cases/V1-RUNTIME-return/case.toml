@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-return"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "return skips the rest of the activation, a return in a lambda leaves only the lambda, and the operand widens at the written result type."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

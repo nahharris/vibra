@@ -1,0 +1,28 @@
+(defn between-pairs () i32
+  (let
+    ; first
+    a 1i32
+    ; second
+    b 2i32)
+  a)
+
+(defn trailing-comment () i32
+  (let c 1i32 ; trailing
+    d 2i32)
+  c)
+
+(defn between-pattern-and-value () i32
+  (let a ; between
+    1i32)
+  a)
+
+(defn before-fallback (o (option i32)) i32
+  (let-else (option.some v) o ; why
+    (return 0i32))
+  v)
+
+(defn long-do () i32
+  (do (call-one 1 2) (call-two 3 4) (call-three 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27))
+  1i32)
+
+(defn do-in-arm (v (option i32)) i32 (match v (option.some n) (do (let m n) (let k m) k) (option.none) 0i32))

@@ -465,7 +465,7 @@ fn duplicate_top_level_names_and_lexical_bindings_have_distinct_contracts() {
         "1.0.0",
         "app",
         "main",
-        b"(def value i32 0i32)\n(defn value () void (do))\n(defn f (x i32) void (let x 0i32 (do)))",
+        b"(def value i32 0i32)\n(defn value () void (do))\n(defn f (x i32) void (let x 0i32) (do))",
     );
     let snapshot = Resolver::resolve(input);
 

@@ -1,0 +1,11 @@
+(defn use (value i32) void (do))
+
+(defn own-value () i32 (let a a) a)
+
+(defn earlier () i32 (use a) (let a 1i32) a)
+
+(defn after-do () i32 (do (let b 1i32)) b)
+
+(defn earlier-lambda () i32 (let f (lambda () i32 g)) (let g 1i32) g)
+
+(defn later-lambda () i32 (let g 1i32) (let f (lambda () i32 g)) (f))

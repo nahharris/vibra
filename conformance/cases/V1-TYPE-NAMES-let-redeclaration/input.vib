@@ -1,0 +1,7 @@
+(defn consecutive () i32 (let a 1i32) (let a 2i32) a)
+
+(defn in-one-let () i32 (let a 1i32 a 2i32) a)
+
+(defn siblings () i32 (do (let c 1i32) c) (do (let c 2i32) c))
+
+(defn nested () i32 (let d 1i32) (do (let d 2i32) d))

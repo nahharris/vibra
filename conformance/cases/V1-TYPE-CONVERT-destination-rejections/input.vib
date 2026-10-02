@@ -9,7 +9,8 @@
       (celsius degrees: (as i32 (from.convert value))))))
 
 (defn bare () i32
-  (let value (from.convert 1u8) 0i32))
+  (let value (from.convert 1u8))
+  0i32)
 
 (defn literal () celsius
   (from.convert 5))

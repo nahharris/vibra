@@ -28,9 +28,9 @@
     "permittedForms": [
       "lambda",
       "do",
-      "let",
       "if",
       "match",
+      "return",
       "as",
       "try"
     ],

@@ -530,6 +530,13 @@ fn resolve_block(
                 );
                 return None;
             }
+            if receiver == Type::Never {
+                wrong_kind(
+                    diagnostics,
+                    "`never` has no values, so no implementation can be written for it",
+                );
+                return None;
+            }
             if let Type::Declared(id) | Type::Applied(id, _) = &receiver
                 && types
                     .index_of(id)

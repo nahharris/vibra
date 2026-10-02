@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:21ce7d7881bf4edf948d5afab57c81c941eb1743e1b99b5026cd7b441de7f1e2",
+  "sourceId": "src/main.vib",
+  "offset": 126,
+  "nodeId": "src/main.vib#126-127",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 126,
+    "sourceId": "src/main.vib",
+    "span": {
+      "sourceId": "src/main.vib",
+      "start": 126,
+      "end": 127,
+      "startPosition": {
+        "line": 5,
+        "column": 39
+      },
+      "endPosition": {
+        "line": 5,
+        "column": 40
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "open-paren",
+    "category": "expression",
+    "status": "exact",
+    "permittedForms": [
+      "lambda",
+      "do",
+      "if",
+      "match",
+      "return",
+      "as",
+      "try"
+    ],
+    "permittedLabels": [
+      "types"
+    ]
+  },
+  "role": {
+    "status": "exact",
+    "value": "@unknown"
+  },
+  "context": {
+    "status": "exact",
+    "value": "let-else-fallback"
+  },
+  "identity": {
+    "status": "unavailable",
+    "value": null
+  },
+  "expectedType": {
+    "status": "unavailable",
+    "value": null
+  },
+  "observedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "never",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": [
+      {
+        "name": "flag",
+        "identity": "binder:src/main.vib:14-18"
+      },
+      {
+        "name": "value",
+        "identity": "binder:src/main.vib:24-29"
+      },
+      {
+        "name": "first",
+        "identity": "binder:src/main.vib:59-64"
+      },
+      {
+        "name": "second",
+        "identity": "binder:src/main.vib:74-80"
+      }
+    ]
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": []
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": []
+  },
+  "application": {
+    "status": "unavailable",
+    "value": null
+  },
+  "pattern": {
+    "status": "unavailable",
+    "value": null
+  }
+}

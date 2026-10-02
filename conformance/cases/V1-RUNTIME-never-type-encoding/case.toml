@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-never-type-encoding"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "The type encoding of never appears inside the encoding of another type; no value has the type."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

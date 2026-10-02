@@ -1,0 +1,5 @@
+(defn spin () never (spin))
+
+(defn wrong-final () never 1i32)
+
+(defn empty-body () never)

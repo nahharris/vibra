@@ -1,0 +1,13 @@
+(defint tag (defn name (value self) i32))
+(defint named
+  (defn label (value self) i32)
+  (impl never (defn label (value never) i32 1i32)))
+
+(deftype any-box (record item t) where: (t any))
+(deftype tag-box (record item t) where: (t tag))
+
+(defn ok-any (b (any-box never)) i32 1i32)
+
+(defn bad-tag (b (tag-box never)) i32 1i32)
+
+(def bad-key (dict never i32) (dict.of))

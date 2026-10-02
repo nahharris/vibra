@@ -1,0 +1,22 @@
+(deftype lookup-error (enum missing str)
+  visibility: @public)
+
+(defn fail (message str) never
+  (fail message))
+
+(defn first-char (value str) (result char lookup-error)
+  (let-else
+    (option.some found) (value 0u64)
+    (return (result.err (lookup-error.missing value))))
+  (result.ok found))
+
+(defn require-first (text str) char
+  (let-else (option.some first) (text 0u64) (fail text))
+  first)
+
+(defn unwrap-infallible (value (result char never)) char
+  (let (result.ok found) value)
+  found)
+
+(defn describe (flag bool) str
+  (if flag "yes" (fail "no")))

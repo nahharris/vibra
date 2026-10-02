@@ -1,5 +1,5 @@
 (deftype point (record x i32))
 (defn unknown (value missing) i32 0i32)
-(defn as-value () i32 (let f point 0i32))
-(defn enum-type () i32 (let s (shape 1u32) 0i32))
+(defn as-value () i32 (let f point) 0i32)
+(defn enum-type () i32 (let s (shape 1u32)) 0i32)
 (deftype shape (enum circle u32))

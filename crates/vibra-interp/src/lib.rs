@@ -626,6 +626,9 @@ struct Machine<'a> {
     /// The value a failing `try` returns from the innermost function or
     /// `lambda`: evaluation unwinds to that boundary, which takes it.
     pending_exit: Option<RuntimeValue>,
+    /// A tail transfer that a `return` operand produced, which the innermost
+    /// activation performs as its result.
+    pending_transfer: Option<Evaluation>,
     /// The type arguments of each live activation, innermost last.
     types: Vec<Arc<TypeMap>>,
 }
@@ -644,6 +647,7 @@ impl<'a> Machine<'a> {
             assertion_failure: None,
             unobservable: None,
             pending_exit: None,
+            pending_transfer: None,
             types: Vec::new(),
         }
     }
@@ -778,6 +782,9 @@ impl<'a> Machine<'a> {
                 }
                 Code::Lambda(body) => self.evaluate(body, &mut slots, &captures),
             };
+            // A `return` operand that is a tail transfer leaves it for the
+            // activation to perform.
+            let evaluation = evaluation.or_else(|| self.pending_transfer.take());
             match evaluation {
                 Some(Evaluation::Value(value)) => break Some(value),
                 Some(Evaluation::TestAssertionFailed) => break None,
@@ -1029,6 +1036,21 @@ impl<'a> Machine<'a> {
             } => {
                 let exit_type = self.concrete(exit_type);
                 self.evaluate_try(value, &exit_type, slots, captures)
+            }
+            Expr::Return { value, .. } => {
+                match self.evaluate(value, slots, captures)? {
+                    Evaluation::Value(value) => {
+                        self.pending_exit = Some(value);
+                        None
+                    }
+                    Evaluation::TestAssertionFailed => {
+                        Some(Evaluation::TestAssertionFailed)
+                    }
+                    transfer @ Evaluation::TailTransfer { .. } => {
+                        self.pending_transfer = Some(transfer);
+                        None
+                    }
+                }
             }
             Expr::Project { record, field, .. } => {
                 let RuntimeValue::Record { fields, .. } =
@@ -2714,7 +2736,7 @@ mod tests {
         assert_eq!(result, repeated);
     }
 
-    /// `(defn f () i32 (let v (f) v))`: every activation stays live.
+    /// `(defn f () i32 (let v (f)) v)`: every activation stays live.
     fn non_tail_self_recursion() -> vibra_ir::CheckedProgram {
         let origin = SourceOrigin::new("deep.vib", ByteSpan::new(0, 1));
         let body = Expr::let_binding(

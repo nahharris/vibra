@@ -1,0 +1,41 @@
+id = "V1-TYPE-NAMES-let-redeclaration"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "A let binding outlasts its form, so a consecutive let, a repeat inside one let, and a nested do that repeats a visible name are redeclarations, while sibling do forms may reuse a name."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "input.vib"
+span = [43, 44]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [30, 31]
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "input.vib"
+span = [91, 92]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [84, 85]
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "input.vib"
+span = [209, 210]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [192, 193]

@@ -1,0 +1,11 @@
+id = "V1-TYPE-CONTROL-never-join"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "Branches and arm results of type never are skipped when compared, a form of only such branches has type never, and the join is not a least upper bound."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

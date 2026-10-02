@@ -34,10 +34,10 @@ pub use ast::{
     DeffectDeclaration, DefintDeclaration, DeftypeBody, DeftypeDeclaration, EffectRow,
     Expression, ExpressionKind, FunctionAttributes, FunctionDeclaration, FunctionType,
     GenericBinding, ImplDeclaration, ImportDeclaration, LabelledDefault,
-    LabelledParameter, LambdaExpression, MatchArm, Parameter, Pattern, PatternArgument,
-    PatternKind, RawNode, SourceAst, SourceDecode, TestDeclaration, TypeAttributes,
-    TypeExpr, TypeField, TypeMember, TypeSlot, VariadicBinding, VariadicParameter,
-    VariadicType, contains_declaration_head, decode_source_root,
+    LabelledParameter, LambdaExpression, LetBinding, MatchArm, Parameter, Pattern,
+    PatternArgument, PatternKind, RawNode, SourceAst, SourceDecode, TestDeclaration,
+    TypeAttributes, TypeExpr, TypeField, TypeMember, TypeSlot, VariadicBinding,
+    VariadicParameter, VariadicType, contains_declaration_head, decode_source_root,
     is_reserved_value_spelling,
 };
 pub use data::{

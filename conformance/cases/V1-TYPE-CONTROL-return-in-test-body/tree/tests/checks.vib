@@ -1,0 +1,4 @@
+(import assert @std.assert)
+
+(test "returns directly"
+  (return void))

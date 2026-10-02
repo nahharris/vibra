@@ -1,0 +1,17 @@
+(deftype shape (enum empty void circle u32))
+
+(defn attempt () (result void str) (result.ok))
+
+(defn void-let () void (let a 1i32))
+
+(defn void-empty () void (do))
+
+(defn final-let-mismatch () i32 (let a 1i32))
+
+(defn refutable-let (v shape) u32 (let (shape.circle r) v) r)
+
+(defn ambiguous () i32 (let a 1) a)
+
+(defn bound-fallible () void (let r (attempt)) (let - (attempt)))
+
+(defn ignored-fallible () void (attempt) (let - 1i32))

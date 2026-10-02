@@ -1,0 +1,11 @@
+id = "V1-SRC-EXPR-misplaced-binding-do"
+rule = "V1-SRC-EXPR"
+profile = "static-v1"
+operation = "type-check"
+description = "An if branch or match arm that needs a binding wraps it in a do."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

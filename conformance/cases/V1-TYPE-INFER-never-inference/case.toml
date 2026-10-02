@@ -1,0 +1,29 @@
+id = "V1-TYPE-INFER-never-inference"
+rule = "V1-TYPE-INFER"
+profile = "static-v1"
+operation = "type-check"
+description = "never is never inferred: a generic argument only a diverging operand could fix stays ambiguous, there is no fallback type, and writing never explicitly fixes it."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [163, 169]
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-inference"
+level = "@error"
+source = "input.vib"
+span = [157, 170]
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-inference"
+level = "@error"
+source = "input.vib"
+span = [203, 212]

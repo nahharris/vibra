@@ -1,0 +1,11 @@
+id = "V1-TYPE-CONTROL-try-and-return"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "try stays the propagation form and return the early exit with a value; they coexist in one body."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

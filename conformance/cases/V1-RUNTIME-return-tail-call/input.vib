@@ -1,0 +1,6 @@
+(defn answer () i32 (walk (array.of 1i32 2i32 3i32 4i32 5i32 6i32 7i32 8i32)))
+
+(defn walk (items (array i32)) i32
+  (let-else (option.some rest) (array.slice items 1u64 (array.length items)) (return 7i32))
+  (let-else (option.none) (items 0u64) (return (walk rest)))
+  7i32)

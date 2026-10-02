@@ -1,0 +1,6 @@
+(defn choose (flag bool value (option i32)) i32
+  (let
+    first 1i32
+    second first)
+  (let-else (option.some found) value (return second))
+  found)

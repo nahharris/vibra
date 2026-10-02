@@ -1,0 +1,35 @@
+id = "V1-TYPE-NAMES-let-scope"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "A let binding is visible to later pairs and later elements only: not to its own value, an earlier element, a lambda written before it, or past the end of a do."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "input.vib"
+span = [64, 65]
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "input.vib"
+span = [97, 98]
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "input.vib"
+span = [157, 158]
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "input.vib"
+span = [211, 212]

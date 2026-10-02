@@ -85,7 +85,7 @@ fn builtin_methods_infer_from_their_tails_and_need_an_expected_empty_type() {
     );
     assert_eq!(codes("(defn main () (array i32) (array.of))"), Vec::new());
     assert_eq!(
-        codes("(defn main () i32 (let items (array.of) 0i32))"),
+        codes("(defn main () i32 (let items (array.of)) 0i32)"),
         vec![DiagnosticCode::TypeAmbiguousInference]
     );
     assert_eq!(

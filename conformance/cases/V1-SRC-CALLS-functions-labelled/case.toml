@@ -15,4 +15,4 @@ types = "types.vibon"
 code = "@style.argument-order"
 level = "@warning"
 source = "input.vib"
-span = [40, 74]
+span = [39, 73]

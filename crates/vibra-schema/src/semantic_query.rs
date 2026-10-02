@@ -308,8 +308,8 @@ const IDENTITY_KINDS: &[&str] = &[
 ];
 
 const PRIMITIVE_NAMES: &[&str] = &[
-    "bool", "void", "char", "str", "bytes", "atom", "i8", "i16", "i32", "i64", "u8",
-    "u16", "u32", "u64", "f32", "f64",
+    "bool", "void", "never", "char", "str", "bytes", "atom", "i8", "i16", "i32", "i64",
+    "u8", "u16", "u32", "u64", "f32", "f64",
 ];
 
 const APPLICATION_KINDS: &[&str] = &["@function", "@constructor", "@contract"];
@@ -347,7 +347,8 @@ const CONTEXT_NAMES: &[&str] = &[
     "parameter",
     "lambda",
     "let-value",
-    "let-body",
+    "let-else-fallback",
+    "return-operand",
     "branch",
     "argument",
     "result",

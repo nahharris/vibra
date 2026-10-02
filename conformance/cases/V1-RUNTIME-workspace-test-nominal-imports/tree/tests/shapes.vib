@@ -11,4 +11,5 @@
   (assert.equal ((shapes.origin) @x) 0i32))
 
 (test "builds a variant"
-  (let - (shapes.size.large 3u64) (assert.true true)))
+  (let - (shapes.size.large 3u64))
+  (assert.true true))

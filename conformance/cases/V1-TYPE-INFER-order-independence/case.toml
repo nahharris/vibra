@@ -20,58 +20,58 @@ span = [228, 232]
 code = "@type.mismatch"
 level = "@error"
 source = "input.vib"
-span = [317, 325]
+span = [319, 327]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
 source = "input.vib"
-span = [398, 402]
+span = [402, 406]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
 source = "input.vib"
-span = [464, 480]
+span = [470, 486]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
 source = "input.vib"
-span = [551, 555]
+span = [559, 563]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
 source = "input.vib"
-span = [618, 631]
+span = [628, 641]
 
 [[expect.diagnostics]]
 code = "@type.ambiguous-destination"
 level = "@error"
 source = "input.vib"
-span = [720, 738]
+span = [732, 750]
 
 [[expect.diagnostics]]
 code = "@type.ambiguous-destination"
 level = "@error"
 source = "input.vib"
-span = [803, 821]
+span = [817, 835]
 
 [[expect.diagnostics]]
 code = "@type.ambiguous-destination"
 level = "@error"
 source = "input.vib"
-span = [882, 900]
+span = [898, 916]
 
 [[expect.diagnostics]]
 code = "@type.ambiguous-implementation"
 level = "@error"
 source = "input.vib"
-span = [950, 966]
+span = [968, 984]
 
 [[expect.diagnostics]]
 code = "@type.ambiguous-implementation"
 level = "@error"
 source = "input.vib"
-span = [1001, 1018]
+span = [1019, 1036]

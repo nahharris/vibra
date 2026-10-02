@@ -1,0 +1,15 @@
+(defn single () i32
+  (let a 1i32)
+  a)
+
+(defn pairs () i32
+  (let
+    a 1i32
+    b a)
+  b)
+
+(defn destructure (pair (tuple str i32)) i32
+  (let
+    (tupleof - id) pair
+    - id)
+  id)

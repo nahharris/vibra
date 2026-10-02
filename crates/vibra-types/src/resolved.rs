@@ -1335,6 +1335,7 @@ fn default_expression(value_type: &Type, origin: SourceOrigin) -> Option<Expr> {
         | Type::Array(_)
         | Type::Dict(_, _)
         | Type::Interface(_, _)
+        | Type::Never
         | Type::Any => None,
         Type::Function(signature) => {
             let body = default_expression(&signature.result(), origin.clone())?;

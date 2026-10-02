@@ -2,7 +2,7 @@
 
 (defn mixed () (array i32) (array.of 1i32 "x"))
 
-(defn empty () i32 (let items (array.of) 0i32))
+(defn empty () i32 (let items (array.of)) 0i32)
 
 (defn outside () i32 ((tupleof 1i32 "x") 2))
 

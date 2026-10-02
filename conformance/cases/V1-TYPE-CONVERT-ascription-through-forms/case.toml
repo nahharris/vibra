@@ -20,10 +20,10 @@ span = [35, 63]
 code = "@type.invalid-ascription"
 level = "@error"
 source = "input.vib"
-span = [93, 124]
+span = [93, 129]
 
 [[expect.diagnostics]]
 code = "@type.invalid-ascription"
 level = "@error"
 source = "input.vib"
-span = [153, 171]
+span = [158, 176]

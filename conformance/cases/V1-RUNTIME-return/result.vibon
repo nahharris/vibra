@@ -1,0 +1,1 @@
+(record type: (record type: @tuple arguments: (array @i32 @i32 @i32 @i32 @i32 @number @number)) value: (record kind: @tuple values: (array 1i32 2i32 10i32 20i32 7i32 (record kind: @union type: @number member: @i32 value: 1i32) (record kind: @union type: @number member: @i32 value: 2i32))))

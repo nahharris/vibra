@@ -1,0 +1,79 @@
+id = "V1-TYPE-CONTROL-never-positions"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "A never expression is admitted as a body element, an if branch, a match arm result, a let-else fallback, and a final expression, and is unreachable code anywhere else or after another never element."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [616, 622]
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [343, 349]
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [388, 394]
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [430, 436]
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [478, 484]
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [538, 544]
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [584, 590]
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [657, 661]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [650, 656]
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [702, 706]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [695, 701]
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [757, 770]

@@ -97,7 +97,7 @@ fn link_directory(link: &Path, target: &Path) -> io::Result<()> {
 
 #[test]
 fn plan_uses_snapshot_binding_facts_and_apply_writes_the_canonical_result() {
-    let source = "(defn answer () i32 (let f choose (f 3i32 second: 11i32 first: 9i32)))\n(defn choose (fallback i32) i32 labelled: (first i32 7i32 second i32 8i32) first)\n";
+    let source = "(defn answer () i32 (let f choose) (f 3i32 second: 11i32 first: 9i32))\n(defn choose (fallback i32) i32 labelled: (first i32 7i32 second i32 8i32) first)\n";
     let root = TempDir::project("binding", source);
 
     let plan = plan_format(root.path(), Path::new("src/hello/main.vib"))
@@ -125,7 +125,7 @@ fn plan_uses_snapshot_binding_facts_and_apply_writes_the_canonical_result() {
 fn untracked_source_keeps_label_order_without_snapshot_binding_facts() {
     let root = TempDir::project("untracked-binding", "(defn main () void (do))\n");
     let untracked = root.path().join("untracked.vib");
-    let source = "(defn answer () i32 (let f choose (f 3i32 second: 11i32 first: 9i32)))\n(defn choose (fallback i32) i32 labelled: (first i32 7i32 second i32 8i32) first)\n";
+    let source = "(defn answer () i32 (let f choose) (f 3i32 second: 11i32 first: 9i32))\n(defn choose (fallback i32) i32 labelled: (first i32 7i32 second i32 8i32) first)\n";
     fs::write(&untracked, source).expect("write accepted untracked source");
 
     let plan = plan_format(root.path(), Path::new("untracked.vib"))

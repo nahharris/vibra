@@ -30,7 +30,7 @@ request that has not merged is conditional on that merge.
 
 | # | Change | Status |
 | --- | --- | --- |
-| 1 | Bindings, early exit, and `never`: `let` becomes a parent-scope binding form `(let pattern value pattern value ...)` valid only as an element of a body sequence; a new `(let-else pattern value fallback)` refutable binding whose fallback must diverge; a new `(return expr)` early-exit form; and a predeclared uninhabited type `never` | `in progress` (separate PR) |
+| 1 | Bindings, early exit, and `never`: `let` becomes a parent-scope binding form `(let pattern value pattern value ...)` valid only as an element of a body sequence; a new `(let-else pattern value fallback)` refutable binding whose fallback must diverge; a new `(return expr)` early-exit form; and a predeclared uninhabited type `never`; checklist: [`01-bindings-return-never.md`](01-bindings-return-never.md) | `landed`, conditional on [PR #352](https://github.com/nahharris/vibra/pull/352) merging |
 | 2 | Tail-call guarantee: every call in tail position reuses the current activation, whatever the callee, replacing the narrower rule for a recursive group within one module | `landed`, conditional on [PR #351](https://github.com/nahharris/vibra/pull/351) merging; see [`02-tail-calls.md`](02-tail-calls.md) |
 | 3 | Roadmap coverage: this document, the M4 deliverable for deep non-tail recursion, and the beyond-v1 notes | `landed`, conditional on this PR merging |
 

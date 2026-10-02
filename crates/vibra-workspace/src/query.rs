@@ -928,6 +928,9 @@ struct SemanticCollector<'a> {
     expressions: Vec<ExpressionSite>,
     binders: Vec<BinderSite>,
     scopes: Vec<ScopeSite>,
+    /// The written result type of each enclosing function body, innermost
+    /// last, which the operand of a `return` is checked at.
+    returns: Vec<Option<SemanticType>>,
     patterns: Vec<PatternSite>,
     ir_sites: Vec<IrSite>,
     ir_expected_sites: Vec<IrExpectedSite>,
@@ -957,6 +960,7 @@ impl<'a> SemanticCollector<'a> {
             expressions: Vec::new(),
             binders: Vec::new(),
             scopes: Vec::new(),
+            returns: Vec::new(),
             patterns: Vec::new(),
             ir_sites: Vec::new(),
             ir_expected_sites: Vec::new(),
@@ -981,18 +985,14 @@ impl<'a> SemanticCollector<'a> {
                 }
                 Declaration::Defn(function) => self.collect_function(function),
                 Declaration::Test(test) => {
-                    for (index, expression) in test.expressions().iter().enumerate() {
-                        self.collect_expression(
-                            expression,
-                            &[],
-                            if index + 1 == test.expressions().len() {
-                                "result"
-                            } else {
-                                "function"
-                            },
-                            None,
-                        );
-                    }
+                    self.returns.push(None);
+                    self.collect_sequence(
+                        test.expressions(),
+                        &[],
+                        &|last| if last { "result" } else { "function" }.to_owned(),
+                        None,
+                    );
+                    self.returns.pop();
                 }
                 // A type and an interface own functions: their methods, an
                 // interface default, and the members of each `impl` block.
@@ -1123,21 +1123,105 @@ impl<'a> SemanticCollector<'a> {
             span: function.span(),
             locals: locals.clone(),
         });
-        for (index, expression) in function.expressions().iter().enumerate() {
-            self.collect_expression(
-                expression,
-                &locals,
-                if index + 1 == function.expressions().len() {
-                    "result"
-                } else {
-                    "function"
-                },
-                if index + 1 == function.expressions().len() {
-                    semantic_type_expr(function.result())
-                } else {
-                    None
-                },
-            );
+        self.returns.push(semantic_type_expr(function.result()));
+        self.collect_sequence(
+            function.expressions(),
+            &locals,
+            &|last| if last { "result" } else { "function" }.to_owned(),
+            semantic_type_expr(function.result()),
+        );
+        self.returns.pop();
+    }
+
+    /// Collects one body sequence. A `let` or `let-else` element extends the
+    /// locals every later element sees, and opens no context of its own.
+    fn collect_sequence(
+        &mut self,
+        elements: &[Expression],
+        locals: &[LocalBinding],
+        context: &dyn Fn(bool) -> String,
+        expected_type: Option<SemanticType>,
+    ) {
+        let mut scope = locals.to_vec();
+        for (index, element) in elements.iter().enumerate() {
+            let last = index + 1 == elements.len();
+            let element_context = context(last);
+            let element_context = element_context.as_str();
+            let element_expected = if last { expected_type.clone() } else { None };
+            match element.kind() {
+                ExpressionKind::Let { bindings } => {
+                    self.push_form_site(element, element_context);
+                    for (position, binding) in bindings.iter().enumerate() {
+                        if position != 0 {
+                            self.scopes.push(ScopeSite {
+                                span: binding.value().span(),
+                                locals: scope.clone(),
+                            });
+                        }
+                        self.collect_expression(
+                            binding.value(),
+                            &scope,
+                            "let-value",
+                            None,
+                        );
+                        self.collect_pattern_binding(
+                            binding.pattern(),
+                            &mut scope,
+                            "let-value",
+                        );
+                    }
+                    self.push_rest_scope(elements, index, &scope);
+                }
+                ExpressionKind::LetElse {
+                    pattern,
+                    value,
+                    fallback,
+                } => {
+                    self.push_form_site(element, element_context);
+                    self.collect_expression(value, &scope, "let-value", None);
+                    self.collect_expression(
+                        fallback,
+                        &scope,
+                        "let-else-fallback",
+                        None,
+                    );
+                    self.collect_pattern_binding(pattern, &mut scope, "let-value");
+                    self.push_rest_scope(elements, index, &scope);
+                }
+                _ => self.collect_expression(
+                    element,
+                    &scope,
+                    element_context,
+                    element_expected,
+                ),
+            }
+        }
+    }
+
+    fn push_form_site(&mut self, element: &Expression, context: &str) {
+        self.expressions.push(ExpressionSite {
+            span: element.span(),
+            role: "@unknown".to_owned(),
+            context: context.to_owned(),
+            identity: None,
+            expected_type: None,
+            observed_type: None,
+            application: None,
+        });
+    }
+
+    /// The locals the elements after a binding form see.
+    fn push_rest_scope(
+        &mut self,
+        elements: &[Expression],
+        index: usize,
+        scope: &[LocalBinding],
+    ) {
+        if let (Some(first), Some(last)) = (elements.get(index + 1), elements.last()) {
+            self.scopes.push(ScopeSite {
+                span: first.span().join(last.span()),
+                locals: scope.to_vec(),
+            });
         }
     }
 
@@ -1155,6 +1239,15 @@ impl<'a> SemanticCollector<'a> {
                     span: binding_span,
                     binding: binding.clone(),
                 });
+                // A binder of a `let` or `let-else` has the `let-value` context,
+                // as a discard there does.
+                if context == "let-value" {
+                    self.patterns.push(PatternSite {
+                        span: binding_span,
+                        role: "@local-binding".to_owned(),
+                        context: context.to_owned(),
+                    });
+                }
                 locals.push(binding);
             }
             PatternKind::Binding(name) => {
@@ -1262,45 +1355,19 @@ impl<'a> SemanticCollector<'a> {
                 }
             }
             ExpressionKind::Do(expressions) => {
-                for (index, expression) in expressions.iter().enumerate() {
-                    self.collect_expression(
-                        expression,
-                        locals,
-                        context,
-                        if index + 1 == expressions.len() {
-                            expected_type.clone()
-                        } else {
-                            None
-                        },
-                    );
-                }
+                self.collect_sequence(
+                    expressions,
+                    locals,
+                    &|_| context.to_owned(),
+                    expected_type.clone(),
+                );
             }
-            ExpressionKind::Let {
-                pattern,
-                value,
-                body,
-            } => {
-                self.collect_expression(value, locals, "let-value", None);
-                let mut nested = locals.to_vec();
-                self.collect_pattern_binding(pattern, &mut nested, "let-value");
-                if let (Some(first), Some(last)) = (body.first(), body.last()) {
-                    self.scopes.push(ScopeSite {
-                        span: first.span().join(last.span()),
-                        locals: nested.clone(),
-                    });
-                }
-                for (index, expression) in body.iter().enumerate() {
-                    self.collect_expression(
-                        expression,
-                        &nested,
-                        "let-body",
-                        if index + 1 == body.len() {
-                            expected_type.clone()
-                        } else {
-                            None
-                        },
-                    );
-                }
+            // A binding form is only ever a body-sequence element, which
+            // `collect_sequence` handles.
+            ExpressionKind::Let { .. } | ExpressionKind::LetElse { .. } => {}
+            ExpressionKind::Return(operand) => {
+                let expected = self.returns.last().cloned().flatten();
+                self.collect_expression(operand, locals, "return-operand", expected);
             }
             ExpressionKind::If {
                 condition,
@@ -1367,18 +1434,14 @@ impl<'a> SemanticCollector<'a> {
                     span: lambda.span(),
                     locals: nested.clone(),
                 });
-                for (index, body) in lambda.body().iter().enumerate() {
-                    self.collect_expression(
-                        body,
-                        &nested,
-                        "lambda",
-                        if index + 1 == lambda.body().len() {
-                            semantic_type_expr(lambda.result())
-                        } else {
-                            None
-                        },
-                    );
-                }
+                self.returns.push(semantic_type_expr(lambda.result()));
+                self.collect_sequence(
+                    lambda.body(),
+                    &nested,
+                    &|_| "lambda".to_owned(),
+                    semantic_type_expr(lambda.result()),
+                );
+                self.returns.pop();
             }
             ExpressionKind::As {
                 value_type,
@@ -1470,6 +1533,8 @@ impl<'a> SemanticCollector<'a> {
             }
             ExpressionKind::Do(_)
             | ExpressionKind::Let { .. }
+            | ExpressionKind::LetElse { .. }
+            | ExpressionKind::Return(_)
             | ExpressionKind::If { .. }
             | ExpressionKind::Lambda(_)
             | ExpressionKind::Match { .. }
@@ -1620,6 +1685,7 @@ impl<'a> SemanticCollector<'a> {
             | Expr::Wrap { .. }
             | Expr::Widen { .. }
             | Expr::Try { .. }
+            | Expr::Return { .. }
             | Expr::Project { .. }
             | Expr::Tuple { .. }
             | Expr::TupleProject { .. }
@@ -2194,6 +2260,7 @@ fn semantic_type_expr(value: &TypeExpr) -> Option<SemanticType> {
 fn primitive_name(value: &str) -> Option<&'static str> {
     Some(match value {
         "bool" => "bool",
+        "never" => "never",
         "char" => "char",
         "str" => "str",
         "bytes" => "bytes",

@@ -1,0 +1,15 @@
+(defn none () i32 (let) 0i32)
+
+(defn one () i32 (let a) 0i32)
+
+(defn odd () i32 (let a 1i32 b) 0i32)
+
+(defn else-two () i32 (let-else p v) 0i32)
+
+(defn else-four () i32 (let-else p v f g) 0i32)
+
+(defn return-none () i32 (return))
+
+(defn return-two () i32 (return a b))
+
+(defn valid-after () i32 (let a 1i32) a)

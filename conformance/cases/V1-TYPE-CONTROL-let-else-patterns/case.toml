@@ -1,0 +1,41 @@
+id = "V1-TYPE-CONTROL-let-else-patterns"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "A let-else pattern must be refutable; an irrefutable one is reported at the pattern and names let."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@pattern.irrefutable-let-else"
+level = "@error"
+source = "input.vib"
+span = [217, 218]
+
+[[expect.diagnostics]]
+code = "@pattern.irrefutable-let-else"
+level = "@error"
+source = "input.vib"
+span = [288, 289]
+
+[[expect.diagnostics]]
+code = "@pattern.irrefutable-let-else"
+level = "@error"
+source = "input.vib"
+span = [368, 381]
+
+[[expect.diagnostics]]
+code = "@pattern.irrefutable-let-else"
+level = "@error"
+source = "input.vib"
+span = [449, 464]
+
+[[expect.diagnostics]]
+code = "@pattern.irrefutable-let-else"
+level = "@error"
+source = "input.vib"
+span = [531, 539]

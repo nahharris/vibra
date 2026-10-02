@@ -1,0 +1,11 @@
+id = "V1-TYPE-CONTROL-never-spec-example"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "The never example of the type chapter is accepted as written."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

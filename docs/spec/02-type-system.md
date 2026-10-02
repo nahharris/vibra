@@ -4,7 +4,10 @@ Status: normative target
 Implementation status: M3 checks and runs this chapter for pure programs:
 nominal and generic types, unions, patterns and exhaustive matching,
 interfaces, conversion, and iteration. Effects, `@host` externals, and the
-forms the M3 exit evidence reassigns remain deferred.
+forms the M3 exit evidence reassigns remain deferred. The pre-M4 revision of
+binding sequences, `let-else`, `return`, and `never`, specified below, is
+implemented by the checklist in
+[`../roadmap/pre-m4/01-bindings-return-never.md`](../roadmap/pre-m4/01-bindings-return-never.md).
 
 ## Model
 
@@ -16,7 +19,7 @@ a call.
 The primitive types are:
 
 ```text
-bool void char str bytes atom
+bool void never char str bytes atom
 i8 i16 i32 i64
 u8 u16 u32 u64
 f32 f64
@@ -28,7 +31,8 @@ Vibra is library-first. The compiler owns only what the language cannot build
 for itself:
 
 - the scalar types `void`, `atom`, `char`, `i8` through `i64`, `u8` through
-  `u64`, `f32`, and `f64`;
+  `u64`, `f32`, and `f64`, and the uninhabited type `never`, which has no
+  values;
 - the one generic immutable sequence `(array t)`, whose indexed storage no
   combination of records and enums can express in constant time;
 - `fn` types and the structural `tuple`, `record`, `enum`, and `union` type
@@ -97,6 +101,14 @@ Unicode scalar values. `atom` contains interned atom values such as `@ok`;
 every written atom also has a singleton type that can widen to `atom`. There is
 no null value, truthiness conversion, implicit numeric widening, or implicit
 string conversion.
+
+`never` has no value. It is the type of an expression that never produces one,
+because control leaves instead: a `return`, or a call of a function whose written
+result type is `never`. Its name is reserved in type position exactly as `void`
+and `any` are, and the "Control flow and failure" section defines where an
+expression of that type may appear, how it is admitted at an expected type, and
+how it behaves under exhaustiveness. `never` is writable wherever a type is,
+including a function result and a generic argument such as `(result t never)`.
 
 The M2 executable subset is deliberately smaller than this complete type
 surface. Its checker admits primitive names, `void`, monomorphic `fn` types,
@@ -317,8 +329,8 @@ atom types have no declaration to carry one, and the rule for anonymous types
 is the language's own structural rule; both conform through the registry
 alone. The list is closed so that no other package can add to it.
 
-`void`, `f32`, `f64`, `fn` types, arrays, dicts, and options are not admissible
-keys. A `deftype` is admissible only through its own written `ordered`
+`void`, `never`, `f32`, `f64`, `fn` types, arrays, dicts, and options are not
+admissible keys. A `deftype` is admissible only through its own written `ordered`
 implementation. An inadmissible key type in any written or inferred
 `(dict k v)` emits `@type.invalid-dict-key` at the key type expression, or at the
 constructor application when the dict type is inferred; an `fn` key keeps the
@@ -370,8 +382,9 @@ expression forms are recognized before application.
 The reservation reaches exactly the declarations that must be usable as a bare
 `type-name` head: a `deftype`, a `defint`, and a generic name in a `where:`
 clause. One of those spelled with a reserved type head, or with the name of a
-builtin type outside an `intrinsic-type` declaration, emits
-`@name.reserved-declaration`. It reaches no other namespace and no member,
+builtin type, `never` included, outside an `intrinsic-type` declaration, emits
+`@name.reserved-declaration`. A declaration named `never` is therefore this
+existing error and has no code of its own. It reaches no other namespace and no member,
 because a member is only ever reached through a qualified path and is never a
 bare type head. A nested method named `dict` therefore stays legal exactly as
 the source-language chapter states. The separate value-namespace rule on
@@ -588,21 +601,33 @@ Name shadowing is forbidden. A repeated top-level declaration, import alias,
 or lexical binding emits `@name.redeclaration` at the later introduction and
 relates the earlier introduction. Each later introduction emits exactly one
 such diagnostic. A lexical binding's primary span is its binder name, not the
-enclosing parameter, labelled entry, or `let` form. The related span is the
+enclosing parameter, labelled entry, or `let` or `let-else` form. The related span is the
 nearest earlier visible introduction's binder: the innermost enclosing lexical
 binder, including one a lambda captures, else the module-level declaration.
 The shadowing binder still binds for the rest of its scope, so a further
 repetition relates it instead. Members of one owner's flat namespace use
 `@name.member-collision` instead. Every name introduced anywhere inside a
-positional-parameter, `let`, or `match` pattern MUST NOT reuse any visible
-lexical name. Labelled and variadic parameter names follow the same rule. A
-pattern cannot introduce the same name twice. `-`, `@-`, and `-:` are
+positional-parameter, `let`, `let-else`, or `match` pattern MUST NOT reuse any
+visible lexical name. Labelled and variadic parameter names follow the same
+rule. A pattern cannot introduce the same name twice. `-`, `@-`, and `-:` are
 equivalent discards, create no binding, and may repeat in the same or nested
 scopes. Sibling scopes may reuse a named symbol when neither declaration is
 visible from the other.
 
+A `let` or `let-else` binding is visible from the end of its own pair to the end
+of its directly enclosing body sequence, so it is visible to the later pairs of
+its own form, to every later element of the sequence, and to everything nested
+in those. Two `let` forms that are consecutive elements of one sequence are
+therefore not sibling scopes: a name the first binds is redeclared by the
+second, and `@name.redeclaration` relates the first binder. A `do` is a body
+sequence of its own, so its bindings end with it, and a name bound inside one
+`do` may be bound again after it or inside another `do` that does not see it.
+The pattern of a `let-else` binds for the elements after it, never for its own
+value or its fallback, so a binder inside the fallback is a redeclaration only
+of a name that is visible there.
+
 A module-level `def`, `defn`, or import alias MUST NOT be spelled as a builtin
-type name: a primitive type, `array`, `dict`, or `tuple`. Builtin types own
+type name: a primitive type (`never` included), `array`, `dict`, or `tuple`. Builtin types own
 static methods reached by dotted path, so such an alias or value would make
 `i32.add-checked` or `array.of` ambiguous. A top-level use of one of those
 spellings as a value or alias emits `@name.reserved-value-spelling`.
@@ -664,6 +689,16 @@ When no unique type follows for an unsuffixed numeric literal, an empty
 application, with one note per candidate or missing constraint. A
 destination-dispatched call with no written expected type keeps the more
 specific `@type.ambiguous-destination`.
+
+`never` is never inferred. A generic argument is fixed by written types and by
+the types of operands that produce values; an operand whose own type is `never`
+fixes nothing, and the checker chooses no fallback type, so a parameter that
+only diverging operands could constrain stays `@type.ambiguous-inference`. An
+argument is `never` only when an author wrote it: in a `types:` list such as
+`types: (never)`, in a written type expression such as `(result i32 never)`, or
+in a written expected type that contains it. A `never` that is part of an
+operand's written type, as in an operand of type `(result i32 never)`, fixes its
+argument like any other component of that type.
 
 An operand that does not fit the parameter or constructor slot it binds to, a
 wrong arity, an unknown, duplicate, or missing label or record field, an odd
@@ -732,9 +767,8 @@ as a generic function named as a value is, and emits
 Function types themselves are never generic.
 
 ```vibra
-(let pick (lambda (left t right t) t
-            where: (t any)
-            left)
+(defn pick-twice () str
+  (let pick (lambda (left t right t) t where: (t any) left))
   (pick "x" (pick types: (str) "y" "z")))
 ```
 
@@ -812,6 +846,16 @@ that matching names and shapes are insufficient is untouched. No other interface
 acquires an implementation implicitly, and the exception is fixed to this one
 predeclared name rather than extended to any empty interface a package might
 declare.
+
+`never` satisfies the bound `any` and no other interface in v1. This is an
+explicit exclusion, not an omission: it has no value to dispatch on, so no
+implementation can be written for it, none is supplied by a closed registry,
+and a destination-dispatched member such as `from.convert`, selected from an
+expected type of `never`, would have to produce a value that does not exist. An
+`impl` block whose target is `never` emits `@name.wrong-entity-kind` at the
+block, as an anonymous structural type does. A type argument of `never` for a
+parameter whose bound is any other interface is `@type.unsatisfied-bound`, and
+`never` is not an admissible dict key.
 
 The second exception is closed toolchain `iter` conformance for the builtin
 constructor types `(array t)`, `(dict k v)`, `str`, and `(option t)` named in
@@ -1137,18 +1181,25 @@ remain post-v1.
 
 ## Control flow and failure
 
-`if` requires `bool` and both branches must have one common type. `match` is
-checked for exhaustiveness over booleans, atoms when statically closed, enums,
-unions, and finite structural patterns. Unreachable arms are errors. One common
-type means one written or already-identical type; the checker MUST NOT search
-for a union or interface that covers two differing branch types.
+`if` requires `bool`. Its two branches, and the results of the arms of a
+`match`, must have one common type once every branch of type `never` is
+skipped: the checker compares only the branches that can produce a value, that
+common type is the type of the form, and a form all of whose branches have type
+`never` has type `never`. A form with exactly one branch left to compare is
+checked as that branch would be, against the same expected type. This is the
+only join the checker computes, and it is not a general least upper bound. One
+common type means one written or already-identical type; the checker MUST NOT
+search for a union or interface that covers two differing branch types.
+`match` is checked for exhaustiveness over booleans, atoms when statically
+closed, enums, unions, and finite structural patterns. Unreachable arms are
+errors.
 
 A scrutinee of type `atom` is never statically closed: its atom-literal arms
 are refutable and a binder or discard must cover the remainder. A scrutinee of
 an atom singleton type is closed by the one arm for that atom. Literal patterns
-are admitted for every primitive except `f32`, `f64`, and `void`, and an arm
-set of literals covers its type only for `bool`; any other literal arm set
-needs a covering binder or discard. The arm set of `str`, `bytes`, and every
+are admitted for every primitive except `f32`, `f64`, `void`, and `never`, and
+an arm set of literals covers its type only for `bool`; any other literal arm
+set needs a covering binder or discard. The arm set of `str`, `bytes`, and every
 numeric type is therefore never closed by literals alone.
 
 A `match` whose arms do not cover the scrutinee type emits
@@ -1159,13 +1210,16 @@ shape, a position that only a binder or discard can cover (a value of an
 infinite space such as `str`, `atom`, or a number) is spelled `-`, as is a
 record, tuple, or wrapper whose every component is `-`. A record shape names
 only the fields that fix it and omits each field spelled `-`, as a record
-pattern may. A refutable binding
+pattern may. A variant, member, or position whose type is uninhabited has no
+value to cover, so it is never the uncovered shape. A refutable binding
 pattern's `@pattern.refutable-binding` carries the same kind of note. An arm
 that no value can reach because earlier arms cover it emits
 `@pattern.unreachable-arm` at that arm's pattern, relating the earliest arm
-that alone covers it when one exists. Arms are examined in source order, so
-only the later of two identical arms is unreachable. A `str` or `bytes`
-literal is the wrapper over its scalars or bytes, so an earlier
+that alone covers it when one exists. An arm whose pattern requires a value of
+an uninhabited type, such as `(result.err error)` against `(result t never)`,
+is unreachable in the same way and relates no arm. Arms are examined in source
+order, so only the later of two identical arms is unreachable. A `str` or
+`bytes` literal is the wrapper over its scalars or bytes, so an earlier
 `(str (array …))` arm of its length makes a literal arm unreachable.
 
 `try` applies to an operand of type `(option t)` or `(result t e)` inside a
@@ -1178,14 +1232,18 @@ or test body with that `none` or that error wrapped in the enclosing result
 type. A `try` in any other context, over any other type, or against a
 different container or error type emits `@type.invalid-try` at the `try` form,
 relating the enclosing written result type when there is one. A test body has
-result type `void`, so `try` is always invalid there.
+result type `void`, so `try` is always invalid there. `try` is unchanged by
+`return` and `never`: it stays the propagation form, and its operand is a value,
+never a diverging expression.
 
-A value whose static type is `(result t e)` is fallible. A fallible value is
-ignored when it is evaluated in a non-final element of a function, `lambda`,
-test, `do`, or `let` body; such an expression emits
+A value whose static type is `(result t e)` is fallible, unless `e` is
+uninhabited: a `result` that cannot hold an error has nothing to handle. A
+fallible value is ignored when it is evaluated in a non-final element of a body
+sequence (a function, `lambda`, test, or `do` body); such an expression emits
 `@type.unhandled-fallible` at the expression unless it is written as
 `(let - expression)` or with another discard spelling. `option` is not
-fallible: absence is a value, and ignoring one needs no discard.
+fallible: absence is a value, and ignoring one needs no discard. A value bound
+by `let`, matched by `let-else`, or passed on is not ignored.
 
 An `(as type-expr pattern)` pattern narrows a union. Its scrutinee MUST have a
 union type, and a scrutinee of any other type emits `@type.narrowing-non-union`.
@@ -1195,21 +1253,24 @@ binds the payload at the member type, not at the union type. A union `match` is
 exhaustive when every member has an arm or when a binder or discard covers the
 remainder.
 
-Because a union has at least two members, an `as` pattern can never cover every
-value of its expected type and is therefore always refutable. It is valid in
-`match` and invalid in `let`, in a fixed positional function parameter, and in a
-lambda parameter, where it emits the existing `@pattern.refutable-binding`.
+Because a union has at least two members, an `as` pattern covers every value of
+its expected type only when every other member of the union is uninhabited, so
+it is refutable in every other case. It is valid in `match` and in `let-else`,
+and invalid in `let`, in a fixed positional function parameter, and in a lambda
+parameter whenever it is refutable, where it emits the existing
+`@pattern.refutable-binding`.
 
 The same exhaustiveness engine determines whether a binding pattern is
 irrefutable: the single pattern MUST cover every value of its expected type.
 `let` and fixed positional function or lambda parameters require an irrefutable
-pattern; `match` permits refutable patterns and checks all arms together.
+pattern; `let-else` requires a refutable one; `match` permits refutable patterns
+and checks all arms together.
 Tuple patterns, anonymous or declared, have exact arity and are irrefutable
 when every component is. Record patterns may omit fields and are irrefutable
 when every written field pattern is. A fixed-length array pattern is refutable for the
 variable-length array type. A wrapper constructor pattern is irrefutable when
 its payload pattern is. An enum constructor pattern is refutable unless its
-expected enum has exactly that one variant and its payload pattern is
+expected enum has exactly that one inhabited variant and its payload pattern is
 irrefutable. A bare unqualified name always binds; it never pins or compares a
 visible value.
 
@@ -1223,6 +1284,153 @@ Arithmetic is checked. Overflow, division by zero, invalid shifts, and failed
 numeric conversions return typed results from their standard operations; they
 do not wrap or trap implicitly. Floating-point behavior follows IEEE 754 with
 canonical serialization rules defined by the runtime chapter.
+
+### Body sequences and bindings
+
+A body sequence, which the source-language chapter defines, has the type of its
+final element. It has type `void` when it is empty or ends in a `let` or
+`let-else`, because a binding form has type `void`. A function body is checked
+with its final element at the function's written result type; the other
+elements are evaluated and their values discarded, under the fallible-value rule
+above.
+
+A `let` checks the value of each pair and then its pattern against that value's
+type, left to right, so a later value sees the names an earlier pair bound. Each
+pattern MUST be irrefutable for its value's type. A value is checked with no
+written expected type, so a `let` never widens its value, and an unsuffixed
+numeric literal or an empty collection there needs the type it would need
+anywhere else that no expected type is written. A `let` performs the effects of
+its values. A `let` is not an expression with a value: its position rule keeps it
+out of every position that needs one.
+
+A `let-else` checks its value and then its pattern against that value's type.
+The pattern MUST be refutable, as the same engine decides. An irrefutable
+pattern emits `@pattern.irrefutable-let-else` at the pattern, with a note that
+names `let` as the form for an irrefutable binding. The fallback is checked with
+the expected type `never`, and a fallback of any other type emits
+`@type.mismatch` at the fallback, which is the existing code for an expression
+whose type differs from the type its position requires. The pattern's names are
+bound for the later elements of the sequence, and not for the value or the
+fallback.
+
+### `return`
+
+`(return expr)` exits the innermost enclosing `defn`, nested method, or
+`lambda`, and that function supplies its written result type. The operand is
+checked at that type as a written expected type, exactly as the function's
+final expression is, so every widening the type chapter allows at a written
+result type applies to it. The form has type `never`, and its operand is in
+tail position.
+
+A `return` with no enclosing function body, which is a `return` in a `def`
+initializer or in a `test` body that is not inside a `lambda`, emits
+`@type.invalid-return` at the `return` form, and such a form has no type, so
+neither a position rule nor a tail rule applies to it afterwards. A `return`
+inside a `lambda` exits that lambda, which a `defn` around it does not see.
+
+A `return` that is in tail position of the function it exits emits
+`@type.redundant-return` at the `return` form. Tail position is the runtime
+chapter's, so a `return` that is a branch of a final `if` or an arm result of a
+final `match`, or the last element of a final `do`, is redundant, and the
+operand is the final expression instead. A `return` that already emits
+`@type.unreachable-code` for its position does not also emit
+`@type.redundant-return`. A `return` whose operand has type `never` emits
+`@type.unreachable-code` at that operand, because an operand position admits no
+diverging expression.
+
+### The `never` type
+
+`never` is uninhabited: no value has type `never`, so an expression of that type
+never completes. It is predeclared and reserved in type position like `void` and
+`any`, and it is writable wherever a type is.
+
+**Sources.** An expression has type `never` when it is a `return`, when it is
+an application of a function whose written result type is `never`, when it is a
+`do` whose final element has type `never`, or when every branch of an `if` or
+every arm of a `match` has type `never`. A function declared with result `never`
+MUST have a body whose final expression has type `never`; the ordinary
+final-expression check against the written result type enforces it, and any
+other final expression, and an empty body, is `@type.mismatch`.
+
+**Acceptance.** An expression of type `never` is admitted at any expected type,
+written or not. Acceptance is not widening: it attaches no discriminant, it is
+not one of the three widening relations, and the no-chaining rule does not
+apply to it.
+
+**Branch join.** `if` branches and `match` arm results of type `never` are
+skipped when they are compared, and a form with only such branches has type
+`never`. This is the join defined at the start of this section, the only one the
+checker computes.
+
+**Where it may appear.** An expression of type `never` MAY appear only as an
+element of a body sequence, as a branch of an `if`, as the result of a `match`
+arm, as the fallback of a `let-else`, or as the final expression of a function
+body, which is an element of its body sequence. In any other position (an
+application operand, a `let` value, an `if` condition, a `match` subject, a
+`try`, `as`, `return`, or anonymous-value operand) it emits
+`@type.unreachable-code` at the expression, because the value the position needs
+never exists. An element of a body sequence that follows an element of type
+`never` is also unreachable and emits `@type.unreachable-code` at that following
+element, relating the diverging element; only the first such element is
+reported, and every element is still checked.
+
+**Inference.** `never` is never inferred, as the inference section states.
+
+**Inhabitedness.** A type is **uninhabited** when it is `never`; when it is a
+tuple or a record, anonymous or declared, with an uninhabited component or
+field; when it is a wrapper whose representation is uninhabited; or when it is
+an enum or a union, anonymous or declared, all of whose variant payloads or
+members are uninhabited. A variant whose payload slot is `void` is inhabited,
+so an enum with a payloadless variant is inhabited. Every other type is
+inhabited, including arrays, dicts, `fn` types, interface values, and a generic
+name, because an array can be empty and the checker does not know a name's
+instantiation. The check is structural and exhaustive over the type's written
+form after substituting the arguments of an applied declared type. A nominal
+type met again while it is being examined is assumed inhabited; there is no
+fixed-point search.
+
+**Exhaustiveness.** The exhaustiveness and irrefutability engine treats an
+uninhabited type as having no values to cover. A constructor pattern whose
+payload is uninhabited needs no arm, so a `match` on `(result t never)` needs
+only the `ok` arm, and `(let (result.ok value) x)` is irrefutable against it.
+An arm that requires an uninhabited payload is unreachable, as the match
+paragraphs above state.
+
+**Fallibility and interfaces.** A `result` whose error type is uninhabited is
+not fallible, as above. `never` satisfies the bound `any` and no other interface,
+as the interfaces section states.
+
+```vibra
+(deftype lookup-error (enum missing str)
+  visibility: @public)
+
+(defn fail (message str) never
+  (fail message))
+
+(defn first-char (value str) (result char lookup-error)
+  (let-else
+    (option.some found) (value 0u64)
+    (return (result.err (lookup-error.missing value))))
+  (result.ok found))
+
+(defn require-first (text str) char
+  (let-else (option.some first) (text 0u64) (fail text))
+  first)
+
+(defn unwrap-infallible (value (result char never)) char
+  (let (result.ok found) value)
+  found)
+
+(defn describe (flag bool) str
+  (if flag "yes" (fail "no")))
+```
+
+`fail` has result `never` and recurses forever, which the final-expression rule
+accepts. `require-first` and `describe` use a never-typed call as a `let-else`
+fallback and as a branch. `unwrap-infallible` is irrefutable because the error
+variant of its parameter cannot occur. The `let-else` in `first-char` is the
+shape that `return` serves; its `return` is not redundant, because a fallback
+is not in tail position.
 
 ## Type ascription and widening
 
@@ -1249,7 +1457,8 @@ Widening fires only against a **written expected type**. The complete set of
 written expected types is:
 
 - a fixed positional, labelled, or variadic parameter type;
-- a written result type;
+- a written result type, which is also the expected type of the operand of a
+  `return` in that function;
 - a `def` type annotation;
 - a declared record or tuple field type, a declared enum payload type, or a
   wrapper representation type at its constructor, and the payload type of an
@@ -1259,9 +1468,10 @@ written expected types is:
 
 Where no expected type is written, no widening occurs. The checker MUST NOT
 compute a least upper bound: two `if` or `match` branches typed `i32` and `f32`
-are an error unless an enclosing boundary writes a union containing both. This
-preserves the rule that inference invents nothing, because a union is only ever
-the type an author wrote.
+are an error unless an enclosing boundary writes a union containing both. The
+one join the checker does compute skips a branch of type `never` and is not a
+least upper bound. This preserves the rule that inference invents nothing,
+because a union is only ever the type an author wrote.
 
 A type that inference fixed is not a written expected type. A generic parameter
 fixed only by another operand of the same application, and the type of one

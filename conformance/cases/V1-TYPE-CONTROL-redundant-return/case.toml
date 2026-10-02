@@ -1,0 +1,65 @@
+id = "V1-TYPE-CONTROL-redundant-return"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "A return in tail position is redundant, and a let-else fallback is not in tail position."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.redundant-return"
+level = "@error"
+source = "input.vib"
+span = [60, 73]
+
+[[expect.diagnostics]]
+code = "@type.redundant-return"
+level = "@error"
+source = "input.vib"
+span = [110, 123]
+
+[[expect.diagnostics]]
+code = "@type.redundant-return"
+level = "@error"
+source = "input.vib"
+span = [171, 184]
+
+[[expect.diagnostics]]
+code = "@type.redundant-return"
+level = "@error"
+source = "input.vib"
+span = [185, 198]
+
+[[expect.diagnostics]]
+code = "@type.redundant-return"
+level = "@error"
+source = "input.vib"
+span = [247, 260]
+
+[[expect.diagnostics]]
+code = "@type.redundant-return"
+level = "@error"
+source = "input.vib"
+span = [312, 325]
+
+[[expect.diagnostics]]
+code = "@type.redundant-return"
+level = "@error"
+source = "input.vib"
+span = [378, 391]
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [423, 436]
+
+[[expect.diagnostics]]
+code = "@type.redundant-return"
+level = "@error"
+source = "input.vib"
+span = [415, 437]

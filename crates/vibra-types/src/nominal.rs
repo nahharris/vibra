@@ -1679,6 +1679,7 @@ pub(crate) fn primitive_type(name: &str) -> Option<Type> {
         "char" => Type::Char,
         "str" => Type::Str,
         "bytes" => Type::Bytes,
+        "never" => Type::Never,
         "atom" => Type::Atom,
         "i8" => Type::I8,
         "i16" => Type::I16,

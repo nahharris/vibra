@@ -1,0 +1,19 @@
+id = "V1-TYPE-CONTROL-return-in-test-body"
+rule = "V1-TYPE-CONTROL"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "A return directly in a test body has no function to exit."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+interpreter = { result = "result.vibon" }
+
+[[expect.diagnostics]]
+code = "@type.invalid-return"
+level = "@error"
+source = "tests/checks.vib"
+span = [56, 69]

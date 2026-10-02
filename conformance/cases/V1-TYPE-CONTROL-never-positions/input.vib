@@ -1,0 +1,33 @@
+(defn spin () never (spin))
+(defn use (value i32) void (do))
+
+(defn admitted-final () i32 (spin))
+
+(defn admitted-branch (c bool) i32 (if c 1i32 (spin)))
+
+(defn admitted-arm (v bool) i32
+  (match v
+    true 1i32
+    false (spin)))
+
+(defn admitted-fallback (o (option i32)) i32 (let-else (option.some v) o (spin)) v)
+
+(defn operand () i32 (use (spin)) 1i32)
+
+(defn let-value () i32 (let a (spin)) 1i32)
+
+(defn condition () i32 (if (spin) 1i32 2i32))
+
+(defn subject () i32 (match (spin) - 1i32))
+
+(defn try-operand () (result i32 str) (try (spin)))
+
+(defn tuple-operand () i32 (tupleof (spin)) 1i32)
+
+(def initial i32 (spin))
+
+(defn after-never () i32 (spin) 1i32)
+
+(defn after-never-twice () i32 (spin) 1i32 (use 2i32) 3i32)
+
+(defn return-in-try () i32 (try (return 1i32)))

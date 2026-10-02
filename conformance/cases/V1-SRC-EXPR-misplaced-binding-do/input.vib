@@ -1,0 +1,7 @@
+(defn branch (flag bool) i32
+  (if flag (do (let a 1i32) a) 2i32))
+
+(defn arm (value (option i32)) i32
+  (match value
+    (option.some n) (do (let m n) m)
+    (option.none) 0i32))

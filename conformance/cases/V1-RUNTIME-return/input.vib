@@ -1,0 +1,17 @@
+(deftype number (union i32 f32))
+
+(defn answer () (tuple i32 i32 i32 i32 i32 number number)
+  (tupleof (early true) (early false) (lambda-leaves true) (lambda-leaves false) (continues) (widened true) (widened false)))
+
+(defn early (c bool) i32 (if c (return 1i32) void) 2i32)
+
+(defn lambda-leaves (c bool) i32
+  (let f (lambda () i32 (if c (return 10i32) void) 20i32))
+  (f))
+
+(defn continues () i32
+  (let f (lambda () i32 (if true (return 10i32) void) 20i32))
+  (let - (f))
+  7i32)
+
+(defn widened (c bool) number (if c (return 1i32) void) 2i32)

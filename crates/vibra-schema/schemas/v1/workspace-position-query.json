@@ -88,7 +88,7 @@
     },
     "factStatus": { "enum": ["exact", "recovered", "unavailable"] },
     "roleName": { "enum": ["@atom-value", "@entity-reference", "@code-reference", "@literal", "@local-binding", "@discard", "@declaration", "@application", "@unknown"] },
-    "contextName": { "enum": ["module", "initializer", "function", "parameter", "lambda", "let-value", "let-body", "branch", "argument", "result", "trivia", "recovery"] },
+    "contextName": { "enum": ["module", "initializer", "function", "parameter", "lambda", "let-value", "let-else-fallback", "return-operand", "branch", "argument", "result", "trivia", "recovery"] },
     "stringFact": {
       "type": "object",
       "unevaluatedProperties": false,
@@ -123,7 +123,7 @@
       ]
     },
     "identityOrNull": { "anyOf": [{ "$ref": "#/$defs/identity" }, { "type": "null" }] },
-    "primitiveName": { "enum": ["bool", "void", "char", "str", "bytes", "atom", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64"] },
+    "primitiveName": { "enum": ["bool", "void", "never", "char", "str", "bytes", "atom", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64"] },
     "type": {
       "oneOf": [
         {

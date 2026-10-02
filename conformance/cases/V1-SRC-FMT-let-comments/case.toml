@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-let-comments"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "Line comments in a let or let-else keep their own lines at the pair indentation, a comment written on a pair line moves after it, a comment between pattern and value splits the pair, and a multiline do puts each element on its own line."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

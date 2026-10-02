@@ -40,7 +40,16 @@ Evaluation is strict and deterministic:
 - a dict variadic tail builds one dict from alternating key/value forms and an
   odd tail is rejected before execution;
 - function bodies and `do` forms evaluate from first to last; the value of a
-  `do` is its last expression, or `void` if empty;
+  body sequence is that of its final element, or `void` if it is empty or ends
+  in a `let` or `let-else`;
+- `let` evaluates its pairs in order, matching each pattern against its value
+  and binding its names before the next value is evaluated, and the bindings
+  last until the enclosing body sequence ends;
+- `let-else` evaluates its value once and matches its pattern; on a match its
+  names are bound for the rest of the body sequence, and otherwise it evaluates
+  its fallback, which never completes;
+- `return` evaluates its operand and then leaves the innermost enclosing
+  function activation with that value, skipping the rest of that activation;
 - `if` evaluates only the selected branch;
 - `match` evaluates its subject once and selects the first matching arm, and an
   `as` arm tests only the union discriminant;
@@ -162,8 +171,11 @@ itself is in tail position:
 
 - in `(do e1 … en)`, only `en` may be in tail position, and only when the `do`
   is in tail position;
-- in `(let p v e1 … en)`, only `en` may be in tail position, and only when the
-  `let` is in tail position;
+- `let` and `let-else` have no body, so the values and patterns of a `let`, the
+  value and pattern of a `let-else`, and the fallback of a `let-else` are all
+  non-tail;
+- the operand of `return` is in tail position, whether or not the `return` is,
+  because it hands its value directly to the caller of the activation it exits;
 - in `(if c t e)`, `t` and `e` may be in tail position only when the `if` is
   in tail position;
 - in `(match s …)`, each arm's result expression may be in tail position only
@@ -173,7 +185,8 @@ itself is in tail position:
 
 Every other position is non-tail, including operands of applications (even when
 they are the final expression inside a `do` that is itself an operand),
-`let`/`match` bindings and subjects, `if` conditions, and `try` operands.
+`let` and `let-else` values and patterns, `match` subjects, `if` conditions, and
+`try` operands.
 
 Every call in tail position MUST reuse the current activation, whatever its
 callee is: a module-level `defn` of any module, a method of a declared type, a
@@ -385,6 +398,12 @@ MAY, without any observable difference and without any promise to do so:
 These are implementation strategies, not guarantees; v1 makes no
 optimization promise.
 
+`never` has no value and therefore no representation. No checked program
+allocates, stores, passes, or encodes one: an expression of that type ends its
+activation with `return`, or never completes, and no later evaluation consumes
+a value from it. A representation that lays out a type, such as an enum payload
+or a function result slot, may omit a slot or a variant of type `never`.
+
 ## Canonical value encoding
 
 Execution results, assertion failure `expected` and `actual` strings, and the
@@ -408,7 +427,9 @@ Declared record fields appear in declaration order and anonymous record fields
 in canonical order.
 
 `P` is the declaration's canonical atom path, and `T` is the canonical type
-encoding: a primitive's atom such as `@i32`; a declared type's canonical atom
+encoding: a primitive's atom such as `@i32` or `@never`, where `@never` appears
+only inside the encoding of another type, such as `(result t never)`, because no
+value has type `never` and none is encoded; a declared type's canonical atom
 path; `(record type: P arguments: (array T...))` for an applied generic type,
 including `@array` and `@dict`; `(record type: @tuple arguments: (array T...))`
 for an anonymous tuple; `(record type: @record fields: (record name: T...))`,

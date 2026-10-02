@@ -19,13 +19,15 @@
 (defn concat (left str right str) str
   visibility: @public
   native: "text.concat"
-  (let (str first) left
-    (let (str second) right (str (array.concat first second)))))
+  (let (str first) left)
+  (let (str second) right)
+  (str (array.concat first second)))
 
 (defn length (value str) u64
   visibility: @public
   native: "text.length"
-  (let (str scalars) value (array.length scalars)))
+  (let (str scalars) value)
+  (array.length scalars))
 
 (defn equal (left str right str) bool
   visibility: @public
@@ -35,20 +37,23 @@
 (defn compare (left str right str) core.ordering
   visibility: @public
   native: "text.compare"
-  (let (str first) left (let (str second) right (order first second 0u64))))
+  (let (str first) left)
+  (let (str second) right)
+  (order first second 0u64))
 
 (defn slice (value str start u64 end u64) (option str)
   visibility: @public
   native: "text.slice"
-  (let (str scalars) value
-    (match (array.slice scalars start end)
-      (option.some piece) (option.some (str piece))
-      (option.none) (option.none))))
+  (let (str scalars) value)
+  (match (array.slice scalars start end)
+    (option.some piece) (option.some (str piece))
+    (option.none) (option.none)))
 
 (defn to-chars (value str) (array char)
   visibility: @public
   native: "text.to-chars"
-  (let (str scalars) value scalars))
+  (let (str scalars) value)
+  scalars)
 
 (defn from-chars (scalars (array char)) str
   visibility: @public
@@ -58,12 +63,14 @@
 (defn to-utf8 (value str) bytes
   visibility: @public
   native: "text.to-utf8"
-  (let (str scalars) value (bytes (encode scalars 0u64 (array.of)))))
+  (let (str scalars) value)
+  (bytes (encode scalars 0u64 (array.of))))
 
 (defn from-utf8 (encoded bytes) (result str core.conversion-error)
   visibility: @public
   native: "text.from-utf8"
-  (let (bytes items) encoded (decode items 0u64 (array.of))))
+  (let (bytes items) encoded)
+  (decode items 0u64 (array.of)))
 
 ; The text operations below are reviewed Vibra over the operations above.
 
@@ -98,18 +105,18 @@
 
 (defn trim-start (value str) str
   visibility: @public
-  (let scalars (to-chars value)
-    (part value (first-content scalars 0u64) (length value))))
+  (let scalars (to-chars value))
+  (part value (first-content scalars 0u64) (length value)))
 
 (defn trim-end (value str) str
   visibility: @public
-  (let scalars (to-chars value)
-    (part value 0u64 (last-content scalars (length value)))))
+  (let scalars (to-chars value))
+  (part value 0u64 (last-content scalars (length value))))
 
 (defn trim (value str) str
   visibility: @public
-  (let scalars (to-chars value)
-    (part value (first-content scalars 0u64) (last-content scalars (length value)))))
+  (let scalars (to-chars value))
+  (part value (first-content scalars 0u64) (last-content scalars (length value))))
 
 (defn plus (left u64 right u64) u64
   (match (u64.add-checked left right)

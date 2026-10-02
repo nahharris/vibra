@@ -1,0 +1,5 @@
+(import assert @std.assert)
+
+(test "returns from a lambda"
+  (let f (lambda () i32 (if true (return 1i32) void) 2i32))
+  (assert.equal (f) 1i32))

@@ -13,8 +13,8 @@ fn a_tail_recursive_loop_exits_through_try_at_constant_depth() {
             "\
 (defn answer () (option i32) (drain (array.of {items})))
 (defn drain (items (array i32)) (option i32)
-  (let - (try (items 0u64))
-    (drain (try (array.slice items 1u64 (array.length items))))))
+  (let - (try (items 0u64)))
+  (drain (try (array.slice items 1u64 (array.length items)))))
 "
         );
         let checked = check_source("try-loop.vib", &source);

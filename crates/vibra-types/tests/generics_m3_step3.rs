@@ -104,7 +104,7 @@ fn a_generic_function_value_is_instantiated_from_its_expected_type() {
         Vec::new()
     );
     assert_eq!(
-        codes("(defn main () i32 (let f identity (f 1i32)))"),
+        codes("(defn main () i32 (let f identity) (f 1i32))"),
         vec![DiagnosticCode::TypeAmbiguousInference]
     );
 }
@@ -144,15 +144,15 @@ fn a_generic_body_treats_its_parameters_as_rigid() {
 fn a_let_bound_generic_lambda_is_instantiated_at_each_call() {
     assert_eq!(
         codes(
-            "(defn main () str\n  (let pick (lambda (a t b t) t\n    where: (t any)\n    a)\n    \
-             (do (pick 1i32 2i32) (pick \"x\" \"y\"))))"
+            "(defn main () str\n  (let pick (lambda (a t b t) t\n    where: (t any)\n    a))\n  \
+             (do (pick 1i32 2i32) (pick \"x\" \"y\")))"
         ),
         Vec::new()
     );
     assert_eq!(
         codes(
-            "(defn main () i32\n  (let keep (lambda (a t) t\n    where: (t any)\n    a)\n    \
-             (keep types: (i32) \"x\")))"
+            "(defn main () i32\n  (let keep (lambda (a t) t\n    where: (t any)\n    a))\n  \
+             (keep types: (i32) \"x\"))"
         ),
         vec![DiagnosticCode::TypeTypeArgumentMismatch]
     );
@@ -175,14 +175,14 @@ fn a_lambda_sees_and_must_not_redeclare_enclosing_generic_names() {
     assert_eq!(
         codes(
             "(defn outer (v t) t\n  where: (t any)\n  \
-             (let f (lambda (a u) t\n    where: (u any)\n    v)\n    (f 1i32)))"
+             (let f (lambda (a u) t\n    where: (u any)\n    v))\n  (f 1i32))"
         ),
         Vec::new()
     );
     assert_eq!(
         codes(
             "(defn outer (v t) t\n  where: (t any)\n  \
-             (let f (lambda (a t) t\n    where: (t any)\n    a)\n    (f v)))"
+             (let f (lambda (a t) t\n    where: (t any)\n    a))\n  (f v))"
         ),
         vec![DiagnosticCode::NameGenericRedeclaration]
     );
@@ -223,7 +223,7 @@ fn a_parameter_no_operand_mentions_is_ambiguous_unless_supplied() {
 fn a_generic_lambda_takes_its_complete_where_list() {
     let body = |call: &str| {
         format!(
-            "(defn main () i32\n  (let g (lambda (x b) b\n    where: (a any b any)\n    x)\n    {call}))"
+            "(defn main () i32\n  (let g (lambda (x b) b\n    where: (a any b any)\n    x))\n  {call})"
         )
     };
     assert_eq!(codes(&body("(g types: (str i32) 1i32)")), Vec::new());
@@ -358,7 +358,7 @@ fn a_function_type_mismatch_spells_both_signatures() {
 fn ambiguity_notes_each_unfixed_parameter() {
     let source = format!(
         "{PRELUDE}(defn pair-of () (pair a b)\n  where: (a any b any)\n  (pair-of))\n\
-         (defn main () i32 (let p (pair-of) 0i32))"
+         (defn main () i32 (let p (pair-of)) 0i32)"
     );
     let checked = check_source("case.vib", &source);
     let ambiguous = checked

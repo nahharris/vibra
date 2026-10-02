@@ -127,7 +127,10 @@ record independently supplies the project's execution consent ceiling.
 ## Performed rows are transitively closed
 
 The performed row of a body is the union of the complete rows of everything it
-reaches through the function-call graph. An effect operation is an ordinary
+reaches through the function-call graph. A `let` value, a `let-else` value and
+fallback, and a `return` operand are evaluated by the body that holds them, so
+their rows join that body's row, and a `return` adds no call edge of its own.
+An effect operation is an ordinary
 node in that graph and contributes its complete row, so an additive root
 declared on an operation appears in the performed row of every transitive
 caller and MUST appear in each of their written ceilings.

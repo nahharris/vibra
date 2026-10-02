@@ -77,6 +77,12 @@ conformance case or an explicit review-only invariant.
   union back to one member, `as` ascribes a type at any expression, and the
   `from` and `try-from` interfaces convert. No conversion is implicit.
 - Typed `option` and `result` replace null and exceptions.
+- Bindings are `let` and `let-else` elements of a body sequence, and they last
+  to its end. Early exit is `try`, which propagates a failure, or `return`,
+  which leaves the innermost function with a value; `let-else` states a
+  refutable binding whose mismatch must leave. The predeclared uninhabited type
+  `never` types an expression that does not complete, and it is admitted at
+  any expected type without becoming a subtype or a computed join.
 - Effects describe possible operations statically. A binary target's declared
   effect roots are its complete execution consent; v1 has no runtime grants.
 - Project and compiler-owned persistent data use canonical, non-executable
@@ -105,12 +111,15 @@ The following are not partially implemented in v1:
 - algebraic effect handlers, effect polymorphism, sealed effect roots, declared
   effect dominance or sub-effect relations, runtime grants, permission prompts,
   path-scoped capabilities, and user-defined host providers;
-- assignment, `while`, `for`, `break`, `continue`, and `return` forms;
+- assignment, `while`, `for`, `break`, and `continue` forms;
 - async functions, tasks, channels, threads, and shared mutable state;
 - raw WebAssembly FFI, native FFI, dynamic loading, and a package registry;
 - a SemVer dependency solver; dependencies are local or exact-revision Git;
 - union subtyping and computed least upper bounds; a union is only ever the one
   an author wrote over a closed, written member set, and it is never inferred;
+  `never` is no exception: it is admitted at an expected type and skipped when
+  branches are compared, it is never inferred for a generic parameter, and it
+  satisfies the bound `any` and no other interface;
 - narrowing an interface value to a concrete type, runtime type tests, and
   interface-typed `match` arms;
 - associated types on an interface contract, and therefore per-implementation

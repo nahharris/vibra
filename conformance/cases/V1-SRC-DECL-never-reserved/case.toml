@@ -1,0 +1,38 @@
+id = "V1-SRC-DECL-never-reserved"
+rule = "V1-SRC-DECL"
+profile = "reader-v1"
+description = "never is reserved as a declaration name, a generic name, and a module value spelling."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+[expect.diagnostics.span]
+start = 9
+end = 14
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+[expect.diagnostics.span]
+start = 29
+end = 34
+
+[[expect.diagnostics]]
+code = "@name.reserved-value-spelling"
+level = "@error"
+[expect.diagnostics.span]
+start = 42
+end = 47
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+[expect.diagnostics.span]
+start = 99
+end = 104

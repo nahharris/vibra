@@ -66,7 +66,7 @@ fn checked_binding_observation_is_valid_vibon() {
 fn global_initializer_keeps_its_local_slots_at_runtime() {
     let checked = vibra_types::check_source(
         "global-let.vib",
-        "(def value i32 (let local 1i32 local))\n(defn answer () i32 value)",
+        "(def value i32 (do (let local 1i32) local))\n(defn answer () i32 value)",
     );
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let program = checked.program().expect("checked program");

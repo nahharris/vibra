@@ -1,0 +1,14 @@
+(defn spin () never (spin))
+(defn use (value i32) void (do))
+
+(defn return-fallback (o (option i32)) i32 (let-else (option.some v) o (return 0i32)) v)
+
+(defn call-fallback (o (option i32)) i32 (let-else (option.some v) o (spin)) v)
+
+(defn if-fallback (o (option i32) c bool) i32 (let-else (option.some v) o (if c (spin) (spin))) v)
+
+(defn do-fallback (o (option i32)) i32 (let-else (option.some v) o (do (use 1i32) (return 0i32))) v)
+
+(defn literal-fallback (o (option i32)) i32 (let-else (option.some v) o 0i32) v)
+
+(defn final-let-else (o (option i32)) void (let-else (option.some v) o (return void)))

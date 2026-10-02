@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-let-let-else"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "let and let-else lay out as the source-language chapter states: a one-pair let that fits stays on one line, a let of two or more pairs is multiline with one pair per line, a pair that does not fit splits its pattern and value, and a let-else fallback takes its own line."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

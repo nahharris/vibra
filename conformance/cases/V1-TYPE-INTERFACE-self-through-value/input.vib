@@ -18,7 +18,9 @@
   (shape.copy value))
 
 (defn no-written-type (value shape) i32
-  (let read shape.merge 0i32))
+  (let read shape.merge)
+  0i32)
 
 (defn by-destination () i32
-  (let make factory.empty 0i32))
+  (let make factory.empty)
+  0i32)

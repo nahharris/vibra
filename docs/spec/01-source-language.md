@@ -109,7 +109,8 @@ the standalone `-` remains the discard symbol.
 `void` is both the primitive type name in type position and its single value in
 expression or data position. It is the result of a function or form that
 completes successfully but has no meaningful value to return. Empty `do` and
-an empty function body evaluate to `void`. There is no `unit` literal.
+an empty function body evaluate to `void`, and so does a `let` or `let-else`
+form. There is no `unit` literal.
 
 Every named symbol consists of one or more dot-separated segments, and every
 segment independently satisfies `kebab-name`. Its first character MUST be a
@@ -140,11 +141,13 @@ do not participate in redeclaration or shadowing checks. Despite being derived
 through the ordinary name grammar, a discard never denotes a value, label,
 atom, or reference and is rejected in every non-discard position.
 
-Keywords, booleans, `void`, primitive type names, `any`, and atom names cannot
-be rebound. Boolean, `void`, and reserved-form recognition takes precedence when
-their spelling also satisfies the symbol production. `any` and the primitive
-type names are ordinary symbols to the reader and are reserved by resolution,
-not by lexing.
+Keywords, booleans, `void`, primitive type names, `any`, `never`, and atom names
+cannot be rebound. Boolean, `void`, and reserved-form recognition takes
+precedence when their spelling also satisfies the symbol production. `any`,
+`never`, and the primitive type names are ordinary symbols to the reader and are
+reserved by resolution, not by lexing. The reserved expression heads include
+`do`, `let`, `let-else`, `if`, `match`, `return`, `as`, `try`, `lambda`,
+`tupleof`, `recordof`, and `enumof`.
 
 An atom is an ordinary value by default. Only a source grammar or `.vibon`
 schema position that explicitly expects an entity reference resolves an atom
@@ -238,19 +241,21 @@ deffect  = "(", "deffect", symbol,
 def      = "(", "def", symbol, type-expr, expr,
            { declaration-attribute }, ")" ;
 defn     = "(", "defn", symbol, parameters, type-expr,
-           { function-attribute }, { expr }, ")" ;
-test     = "(", "test", string, [ "effects:", effect-row ], expr+, ")" ;
+           { function-attribute }, body, ")" ;
+test     = "(", "test", string, [ "effects:", effect-row ],
+           body-element, { body-element }, ")" ;
 
 nested-method = "(", "defn", local-name, parameters, type-expr,
-                { function-attribute }, { expr }, ")" ;
+                { function-attribute }, body, ")" ;
 interface-member = "(", "defn", local-name, parameters, type-expr,
-                   { function-attribute }, [ expr, { expr } ], ")" ;
+                   { function-attribute },
+                   [ body-element, { body-element } ], ")" ;
 interface-implementation = "(", "impl", type-expr,
                            implementation-member+, ")" ;
 implementation-member = "(", "defn", local-name, parameters, type-expr,
-                        { function-attribute }, { expr }, ")" ;
+                        { function-attribute }, body, ")" ;
 effect-member = "(", "defn", local-name, parameters, type-expr,
-                { function-attribute }, { expr }, ")" ;
+                { function-attribute }, body, ")" ;
 
 discard              = "-" | "@-" | "-:" ;
 local-name           = kebab-name ;
@@ -497,7 +502,7 @@ A nested method named `dict` on some other owner is allowed; the associative
 ## Functions and expressions
 
 A named function declares a name, a flat parameter list, and a result type.
-Function bodies are direct expression sequences; their final expression is the
+A function body is a body sequence, defined below; its final element is the
 result. `lambda` declares an anonymous function with the same parameter,
 result, generic, labelled, variadic, and effect syntax, but no name or visibility.
 `fn` is reserved for function types and is never an anonymous declaration.
@@ -508,11 +513,15 @@ result, generic, labelled, variadic, and effect syntax, but no name or visibilit
 ```
 
 ```ebnf
+body          = { body-element } ;
+body-element  = expr | let-form | let-else-form ;
+let-form      = "(", "let", pattern, expr, { pattern, expr }, ")" ;
+let-else-form = "(", "let-else", pattern, expr, expr, ")" ;
 expr = atom | application | lambda
-     | "(", "do", { expr }, ")"
-     | "(", "let", pattern, expr, { expr }, ")"
+     | "(", "do", body, ")"
      | "(", "if", expr, expr, expr, ")"
      | "(", "match", expr, pattern, expr, { pattern, expr }, ")"
+     | "(", "return", expr, ")"
      | "(", "as", type-expr, expr, ")"
      | "(", "try", expr, ")"
      | "(", "tupleof", { expr }, ")"
@@ -520,7 +529,7 @@ expr = atom | application | lambda
      | "(", "enumof", label, expr, ")" ;
 application = "(", expr, { expr }, ")" ;
 lambda = "(", "lambda", parameters, type-expr,
-         { lambda-attribute }, { expr }, ")" ;
+         { lambda-attribute }, body, ")" ;
 pattern = binding-name | literal
         | "(", symbol, { pattern | label, pattern }, ")"
         | "(", "tupleof", { pattern }, ")"
@@ -530,36 +539,115 @@ pattern = binding-name | literal
         | "(", "as", type-expr, pattern, ")" ;
 ```
 
-V1 has no `while`, `for`, `break`, `continue`, `return`, or assignment form.
-The last expression in a function body, `lambda`, `let`, or `do` is the result.
-`try` is the only early-exit form.
+V1 has no `while`, `for`, `break`, `continue`, or assignment form; the four
+loop and jump forms are retired and emit `@syntax.retired-form`. Early exit is
+written with `return`, defined below, or with `try`, which the type chapter
+defines as the propagation form.
 
 Reserved forms are recognized before the general application production. A
-list headed by `let`, for example, cannot be reinterpreted as application of a
-value named `let`.
+list headed by `let`, `let-else`, or `return`, for example, cannot be
+reinterpreted as application of a value named `let`, `let-else`, or `return`,
+and none of these spellings can be bound as a name.
 
-`let` introduces immutable bindings for the remainder of its form. There is no
-assignment or shared mutable state in v1. `let` and positional function or
-lambda parameters accept patterns, but each such binding pattern MUST be
-irrefutable for its expected type. `match` accepts refutable patterns.
+### Body sequences
+
+A **body sequence** is the `body` of a `defn` (module-level, nested method,
+`impl` member, interface default member, or effect operation), the `body` of a
+`lambda`, the `body` of a `do`, and the `body-element` list of a `test`. Its
+elements are evaluated in order and its value is that of its final element. An
+empty sequence and a sequence whose final element is a `let` or `let-else` have
+type and value `void`, because a `let` or `let-else` form has type `void`.
+
+`let` and `let-else` are **binding forms**, and a binding form is valid only as
+a direct element of a body sequence. Anywhere else (an application operand, an
+`if` condition or branch, a `match` subject or arm result, a `def` initializer,
+a `let` or `let-else` value, a `return`, `try`, `as`, or anonymous-value
+operand, and so on) it emits `@syntax.misplaced-binding` over the complete
+form. An `if` branch or `match` arm that needs a binding wraps its elements in
+`do`, whose bindings end with that `do`. A misplaced binding form introduces
+no binding, its value operands are still read so that their own syntax errors
+are reported, and the declaration that holds it is checked no further, as for
+any other form-level syntax error.
+
+### `let`
+
+`(let pattern expr { pattern expr })` has one or more pattern/value pairs,
+evaluated in order. The pairs are written flat, with no wrapper list. An odd
+number of operands after `let`, or none, is malformed and emits
+`@syntax.invalid-form` over the complete form.
+
+The names a pair's pattern introduces are visible to the values of every later
+pair of the same form and to every later element of the directly enclosing body
+sequence. They are never visible to the pair's own value, to an earlier pair or
+element, or after the sequence ends. There is no assignment or shared mutable
+state in v1. `let` and positional function or lambda parameters accept
+patterns, but each such binding pattern MUST be irrefutable for its expected
+type. `match` accepts refutable patterns.
 
 A bare unqualified local name in a pattern always introduces a binding; it
 never compares against an existing value. A dotted symbol in a pattern names a
 constructor or other resolved entity and never introduces a local. Every named
 binder MUST NOT shadow a visible name, and the same pattern MUST NOT bind one
-name more than once. A discard never binds and may be used as
+name more than once. Because a `let` binding stays visible to the end of its
+body sequence, a later binder in that sequence, or in a form nested in it, that
+repeats the name is a redeclaration even when the two `let` forms are written
+one after another. A discard never binds and may be used as
 `(let - expression)`, `(let @- expression)`, or `(let -: expression)` to state
 that a result is intentionally ignored. Repeating a discard is always valid
 because it creates no declaration to redeclare or shadow. There is no `bind`
 pattern form and no compatibility spelling for it.
 
+### `let-else`
+
+`(let-else pattern expr fallback)` has exactly three operands and follows the
+same position and scope rules as `let`; any other operand count emits
+`@syntax.invalid-form` over the complete form. The pattern MUST be refutable
+for the value's type. An irrefutable pattern is an error that directs the author
+to `let`, because a `let-else` whose fallback can never run would be a second
+spelling of `let`.
+
+The value is evaluated once and matched against the pattern. On a match, the
+pattern's bindings are visible to the later elements of the enclosing body
+sequence, exactly as a `let` binding is. Otherwise the fallback is evaluated,
+and the fallback MUST have type `never`, so control leaves the sequence and a
+later element runs only for a matched value. The fallback does not see the
+pattern's bindings. The type chapter defines `never`.
+
+### `return`
+
+`(return expr)` has exactly one operand; a function whose result type is `void`
+writes `(return void)`. It exits the innermost enclosing `defn`, nested method,
+or `lambda` with the operand's value, which is checked at that function's
+written result type. A `return` inside a `lambda` therefore leaves the lambda
+and never the function that contains it. Outside any such body, in a `def`
+initializer or in a `test` body that is not inside a `lambda`, it is an error.
+`return` has type `never`.
+
+A `return` that is in tail position of its function is redundant, because the
+final expression is already the result. It is an error, so that one result has
+one spelling. The runtime chapter defines tail position, and the rule includes
+a `return` that is a branch of a final `if` or `match`.
+
 ```vibra
-(let (tupleof name id) pair
-  (text.concat name (i32.to-str id)))
+(defn describe-pair (pair (tuple str i32)) str
+  (let
+    (tupleof name id) pair
+    full (text.concat name (i32.to-str id)))
+  full)
+
+(defn first-or-zero (items (array i32)) i32
+  (let-else (option.some head) (items 0u64) (return 0i32))
+  head)
 
 (lambda ((tupleof left right) (tuple i32 i32)) (result i32 core.arithmetic-error)
   (i32.add-checked left right))
 ```
+
+The second function is the shape `let-else` exists for: the `return` leaves
+early on a mismatch and the rest of the body is the matched path. Its `return`
+is not redundant because the fallback is not in tail position.
+
+### Collections, `match`, and `try`
 
 Collections have immutable value semantics. Pure iteration uses the standard
 `iter` interface; the type chapter defines `iter.next` and its default methods.
@@ -701,9 +789,57 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
   and the value each take a line. Every other form of the declaration takes
   its own line;
 - fixed, labelled, then variadic function or constructor operands;
+- a multiline `do` with its head alone on the opening line and each element on
+  its own line, two spaces in from the head;
+- a `let` of one pair that holds no comment and fits within 88 columns on one
+  line is written on one line. A `let` of two or more pairs is always
+  multiline, and so is a one-pair `let` that holds a comment or does not fit.
+  A multiline `let` has its head alone on the opening line and each pair on its
+  own line, two spaces in from the head, with the pattern and value sharing that
+  line when both are inline, no comment separates them, and the pair leaves room
+  within 88 columns for the closing delimiter that follows it, or for the one
+  that ends the form when it is the last pair. Any other pair gives the pattern
+  one line and the value the next, at the same indentation, and a comment before
+  a pair or after its value keeps its own line at that indentation;
+- a `let-else` that holds no comment and fits within 88 columns on one line is
+  written on one line. Otherwise its head stands alone on the opening line,
+  its pattern and value share the next line when both are inline and fit
+  within 88 columns, and its fallback takes the line after. When the pattern
+  and value do not fit together, the pattern, the value, and the fallback each
+  take a line. All are two spaces in from the head;
 - one pattern/result arm per line in a multiline `match`; and
 - preserved comments, attached to the form whose line they were written on
   and otherwise to the following form when possible.
+
+```vibra
+(defn resolve-entry (items (array entry) key str) (result entry lookup-error)
+  (let lower 1u64)
+  (let
+    upper 2u64
+    width (width-of upper))
+  (let
+    (tupleof found rest) (split-first items key)
+    (option.some entry) (find-entry found key (collect-matching-entries rest))
+    count (entry-count entry))
+  (let
+    summary
+    (describe-entry-with-all-of-its-attributes entry count (default-describe-options)))
+  (let-else (option.some second) (items 1u64) (return (result.ok entry)))
+  (let-else
+    (option.some picked) (pick-entry-by-key-and-priority entry key (priority-of entry))
+    (return (result.err (lookup-error.missing key))))
+  (let-else
+    (option.some chosen)
+    (choose-entry-by-key-and-priority entry key (priority-of-entry entry))
+    (return (result.err (lookup-error.missing key))))
+  (result.ok summary))
+```
+
+The example shows, in order, a one-line single-pair `let`, a two-pair `let`
+(always multiline), a three-pair `let`, a single-pair `let` whose pair does not
+fit, a one-line `let-else`, a `let-else` whose
+pattern and value share a line, and one whose three operands each take a line.
+The names and calls are illustrative.
 
 Formatting MUST be idempotent and semantics-preserving. The formatter MAY
 normalize recoverable presentation but MUST NOT guess through a syntax,

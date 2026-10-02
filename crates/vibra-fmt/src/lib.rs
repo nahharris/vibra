@@ -501,19 +501,32 @@ fn render_expression(
             }
             output.push(')');
         }
-        ExpressionKind::Let {
+        ExpressionKind::Let { bindings } => {
+            output.push_str("(let");
+            for binding in bindings {
+                output.push(' ');
+                render_pattern(binding.pattern(), output, context);
+                output.push(' ');
+                render_expression(binding.value(), output, context);
+            }
+            output.push(')');
+        }
+        ExpressionKind::LetElse {
             pattern,
             value,
-            body,
+            fallback,
         } => {
-            output.push_str("(let ");
+            output.push_str("(let-else ");
             render_pattern(pattern, output, context);
             output.push(' ');
             render_expression(value, output, context);
-            for expression in body {
-                output.push(' ');
-                render_expression(expression, output, context);
-            }
+            output.push(' ');
+            render_expression(fallback, output, context);
+            output.push(')');
+        }
+        ExpressionKind::Return(operand) => {
+            output.push_str("(return ");
+            render_expression(operand, output, context);
             output.push(')');
         }
         ExpressionKind::If {
@@ -1549,8 +1562,13 @@ fn list_layout(
             SyntaxKind::Root | SyntaxKind::Error => {}
         }
     }
+    // A `let` of two or more pairs is always multiline.
+    let several_pairs = item_count >= 5 && meaningful_head(node) == Some("let");
     NodeLayout {
-        inline: !has_comment && all_inline && indent.saturating_add(inline_width) <= 88,
+        inline: !has_comment
+            && all_inline
+            && !several_pairs
+            && indent.saturating_add(inline_width) <= 88,
         inline_width,
         closers: 0,
     }
@@ -1725,6 +1743,13 @@ fn render_node(
                         if is_native_declaration(node) && !contains_line_comment(node) {
                             output.push('(');
                             push_declaration_lines(&mut tasks, node, indent, layouts);
+                            continue;
+                        }
+                        if let Some(groups) =
+                            binding_groups(node, source, indent, layouts)
+                        {
+                            output.push('(');
+                            push_multiline_groups(&mut tasks, groups, indent, layouts);
                             continue;
                         }
                         if let Some(groups) = pair_groups(node, source) {
@@ -2258,6 +2283,95 @@ fn push_multiline_groups<'source>(
         indent,
         first: true,
     });
+}
+
+/// Line groups for a multiline `let` or `let-else`: the head alone, then one
+/// pattern/value pair per line when both are inline and the pair leaves room
+/// within 88 columns, and otherwise the pattern and the value on a line each.
+/// A `let-else` fallback always takes a line of its own. Returns `None` for
+/// any other list and for a malformed operand list.
+fn binding_groups<'source>(
+    node: &'source CstNode,
+    source: &str,
+    indent: usize,
+    layouts: &HashMap<*const CstNode, NodeLayout>,
+) -> Option<Vec<BoundGroup<'source>>> {
+    let head = meaningful_head(node)?;
+    let bound = bound_nodes(node, source);
+    let (head_node, operands) = bound.split_first()?;
+    let (pairs, fallback): (Vec<&[BoundNode<'source>]>, Option<&BoundNode<'source>>) =
+        match head {
+            "let" if !operands.is_empty() && operands.len().is_multiple_of(2) => {
+                (operands.chunks_exact(2).collect(), None)
+            }
+            "let-else" if operands.len() == 3 => {
+                (vec![operands.get(..2)?], operands.get(2))
+            }
+            _ => return None,
+        };
+    let closers = layouts
+        .get(&node_key(node))
+        .map_or(0, |layout| layout.closers);
+    let group = |forms: &[&BoundNode<'source>]| BoundGroup {
+        nodes: forms.iter().map(|bound| bound.node).collect(),
+        items: forms
+            .iter()
+            .flat_map(|bound| {
+                bound
+                    .leading
+                    .iter()
+                    .copied()
+                    .map(LineComponent::Comment)
+                    .chain(std::iter::once(LineComponent::Node(bound.node)))
+                    .chain(bound.trailing.iter().copied().map(LineComponent::Comment))
+            })
+            .collect(),
+    };
+    let inline_width = |bound: &BoundNode<'source>| {
+        layouts
+            .get(&node_key(bound.node))
+            .filter(|layout| layout.inline)
+            .map(|layout| layout.inline_width)
+    };
+    let mut groups = vec![group(&[head_node])];
+    let last_index = pairs.len().saturating_sub(1);
+    for (index, pair) in pairs.iter().enumerate() {
+        let [pattern, value] = pair else {
+            return None;
+        };
+        // A comment between the pattern and its value keeps them on separate
+        // lines; one before the pattern or after the value does not.
+        let commented = !pattern.trailing.is_empty() || !value.leading.is_empty();
+        // Room for one closing delimiter, or for every one that follows when
+        // the pair ends the form.
+        let room = if index == last_index && fallback.is_none() {
+            closers.saturating_add(1)
+        } else {
+            1
+        };
+        let shares = !commented
+            && inline_width(pattern).zip(inline_width(value)).is_some_and(
+                |(pattern_width, value_width)| {
+                    indent
+                        .saturating_add(2)
+                        .saturating_add(pattern_width)
+                        .saturating_add(1)
+                        .saturating_add(value_width)
+                        .saturating_add(room)
+                        <= 88
+                },
+            );
+        if shares {
+            groups.push(group(&[pattern, value]));
+        } else {
+            groups.push(group(&[pattern]));
+            groups.push(group(&[value]));
+        }
+    }
+    if let Some(fallback) = fallback {
+        groups.push(group(&[fallback]));
+    }
+    Some(groups)
 }
 
 /// Line groups for a multiline `record` or `enum` type: the head, then one

@@ -1,3 +1,4 @@
 (defn answer () i32
-  (let value (leaf) value))
+  (let value (leaf))
+  value)
 (defn leaf () i32 7i32)

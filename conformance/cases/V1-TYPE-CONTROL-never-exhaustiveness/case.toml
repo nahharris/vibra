@@ -1,0 +1,29 @@
+id = "V1-TYPE-CONTROL-never-exhaustiveness"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "The exhaustiveness engine treats an uninhabited type as having no values: an arm for an uninhabited variant is unreachable, the uncovered shape skips such variants, and a let over the only inhabited variant is irrefutable."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@pattern.unreachable-arm"
+level = "@error"
+source = "input.vib"
+span = [189, 203]
+
+[[expect.diagnostics]]
+code = "@pattern.non-exhaustive"
+level = "@error"
+source = "input.vib"
+span = [246, 269]
+
+[[expect.diagnostics]]
+code = "@pattern.unreachable-arm"
+level = "@error"
+source = "input.vib"
+span = [409, 410]

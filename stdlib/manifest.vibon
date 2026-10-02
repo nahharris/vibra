@@ -13,11 +13,11 @@
       role: @source)
     @std.char (record
       path: "std/char.vib"
-      sha256: "sha256:1c46c4b586e689ca93b30291f2e2d14889cf4e609cccd064177310846d9aeffd"
+      sha256: "sha256:7ce6e6072993fe04ebc17b5860b11d6af4ab37112d7c5bd44fe0a1a96ccbec08"
       role: @source)
     @std.text (record
       path: "std/text.vib"
-      sha256: "sha256:cdcc988f2d167e0d520f2771d11d126430bf022daff4781e71515888a87ff530"
+      sha256: "sha256:7abe43fb9a86b31fe861dc7c6e37831cf25f33311a0df67b1b2ccc0aa3be8bcd"
       role: @source)
     @std.option (record
       path: "std/option.vib"
@@ -29,7 +29,7 @@
       role: @source)
     @std.bytes (record
       path: "std/bytes.vib"
-      sha256: "sha256:7068e2727b0e8ca14df999c35d8de6fa5423e85ecd5752cac65e481106f4fe19"
+      sha256: "sha256:0247ed091e8e2a63aabb0dd55213ca9eb06cf4d5d37957bd3e754537a85a1d76"
       role: @source)
     @std.iter (record
       path: "std/iter.vib"

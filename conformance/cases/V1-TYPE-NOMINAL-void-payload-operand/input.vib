@@ -1,5 +1,6 @@
 (defn inferred () i32
-  (let value (option.some void) 0i32))
+  (let value (option.some void))
+  0i32)
 
 (defn written () (option void)
   (option.some void))

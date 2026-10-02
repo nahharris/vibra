@@ -1,6 +1,6 @@
 (deftype shape (enum empty void circle u32))
 
-(defn from-let (value shape) u32 (let (shape.circle radius) value radius))
+(defn from-let (value shape) u32 (let (shape.circle radius) value) radius)
 
 (defn from-parameter ((tupleof true flag) (tuple bool bool)) bool flag)
 

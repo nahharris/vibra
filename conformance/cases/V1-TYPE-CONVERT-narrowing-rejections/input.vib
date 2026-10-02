@@ -4,7 +4,7 @@
 
 (defn non-member (value number) i32 (match value (as str -) 0i32 - 1i32))
 
-(defn in-let (value number) i32 (let (as i32 n) value n))
+(defn in-let (value number) i32 (let (as i32 n) value) n)
 
 (defn in-parameter ((as i32 n) number) i32 n)
 

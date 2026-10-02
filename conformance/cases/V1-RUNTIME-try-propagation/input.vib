@@ -22,16 +22,19 @@
       (array.of 1i32 2i32))))
 
 (defn describe (items (array i32)) (option str)
-  (let - (try (items 0u64)) (option.some "has a first element")))
+  (let - (try (items 0u64)))
+  (option.some "has a first element"))
 
 (defn parse (flag bool) (result i32 str)
   (if flag (result.ok 1i32) (result.err "bad flag")))
 
 (defn checked (flag bool) (result i32 str)
-  (let value (try (parse flag)) (result.ok value)))
+  (let value (try (parse flag)))
+  (result.ok value))
 
 (defn flatten (nested (option (option i32))) (option i32)
   (option.some (try (try nested))))
 
 (defn guarded (outcome (result bool core.arithmetic-error)) (result u8 core.arithmetic-error)
-  (let - (try outcome) (result.ok 1u8)))
+  (let - (try outcome))
+  (result.ok 1u8))

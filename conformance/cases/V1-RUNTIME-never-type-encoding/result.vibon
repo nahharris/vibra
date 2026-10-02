@@ -1,0 +1,1 @@
+(record type: (record type: @std.result.result arguments: (array @i32 @never)) value: (record kind: @enum type: @std.result.result variant: @ok payload: 4i32))

@@ -1,0 +1,17 @@
+(defn spin () never (spin))
+
+(defn none-of () (option t) where: (t any) (option.none))
+
+(defn parameter (x never) i32 1i32)
+
+(defn result-type () (result i32 never) (result.ok 1i32))
+
+(defn array-type () (array never) (array.of))
+
+(defn option-type () (option never) (option.none))
+
+(defn function-type () (fn () never) (lambda () never (spin)))
+
+(defn ascribed () (option never) (as (option never) (option.none)))
+
+(defn explicit-types () (option never) (none-of types: (never)))

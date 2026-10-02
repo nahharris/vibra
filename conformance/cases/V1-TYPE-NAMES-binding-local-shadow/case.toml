@@ -14,7 +14,7 @@ accepted = false
 code = "@name.redeclaration"
 level = "@error"
 source = "input.vib"
-span = [51, 56]
+span = [52, 57]
 
   [[expect.diagnostics.related]]
   source = "input.vib"

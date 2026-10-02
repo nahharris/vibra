@@ -9,8 +9,8 @@ use vibra_types::check_source;
 fn probe_named_function_value_and_labelled_call() {
     let source = r#"
 (defn answer () i32
-  (let f choose
-    (f 3i32 preferred: 11i32)))
+  (let f choose)
+  (f 3i32 preferred: 11i32))
 (defn choose (fallback i32) i32
   labelled: (preferred i32 7i32)
   preferred)
@@ -27,7 +27,7 @@ fn probe_named_function_value_and_labelled_call() {
 fn nested_callee_expression_is_checked_and_evaluated_once() {
     let source = r#"
 (defn answer () i32
-  ((let f choose f) 3i32))
+  ((do (let f choose) f) 3i32))
 (defn choose (value i32) i32 value)
 "#;
     let checked = check_source("nested-callee.vib", source);
@@ -139,8 +139,8 @@ fn probe_lambda_capture_and_return() {
 (defn answer () i32
   ((make)))
 (defn make () (fn () i32)
-  (let value 41i32
-    (lambda () i32 value)))
+  (let value 41i32)
+  (lambda () i32 value))
 "#;
     let checked = check_source("closures.vib", source);
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
@@ -155,9 +155,9 @@ fn probe_nested_let_capture_survives_the_outer_scope() {
 (defn answer () i32
   ((make)))
 (defn make () (fn () i32)
-  (let outer 40i32
-    (let middle 1i32
-      (lambda () i32 outer))))
+  (let outer 40i32)
+  (let middle 1i32)
+  (lambda () i32 outer))
 "#;
     let checked = check_source("nested-closures.vib", source);
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
@@ -172,9 +172,9 @@ fn probe_nested_lambda_capture_uses_the_parent_environment() {
 (defn answer () i32
   (((make))))
 (defn make () (fn () (fn () i32))
-  (let value 39i32
-    (lambda () (fn () i32)
-      (lambda () i32 value))))
+  (let value 39i32)
+  (lambda () (fn () i32)
+    (lambda () i32 value)))
 "#;
     let checked = check_source("nested-lambdas.vib", source);
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
@@ -189,12 +189,12 @@ fn nested_lambda_capture_uses_parent_capture_slot_types() {
 (defn answer () f32
   (((make))))
 (defn make () (fn () (fn () f32))
-  (let first 1i32
-    (let second 2.5f32
-      (lambda () (fn () f32)
-        (do
-          (lambda () i32 first)
-          (lambda () f32 second))))))
+  (let first 1i32)
+  (let second 2.5f32)
+  (lambda () (fn () f32)
+      (do
+        (lambda () i32 first)
+        (lambda () f32 second))))
 "#;
     let checked = check_source("nested-capture-types.vib", source);
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
@@ -301,11 +301,11 @@ fn rejects_nonempty_effects_in_function_values() {
 fn indirect_function_aliases_are_admitted_for_tail_analysis() {
     let source = r#"
 (defn first () i32
-  (let next second
-    (next)))
+  (let next second)
+  (next))
 (defn second () i32
-  (let next first
-    (next)))
+  (let next first)
+  (next))
 "#;
     let checked = check_source("indirect-recursion.vib", source);
     assert!(
@@ -395,7 +395,7 @@ fn unused_let_initializer_does_not_contaminate_tail_target() {
     let source = r#"
 (defn leaf () i32 1i32)
 (defn answer (flag bool) i32
-  ((let unused flag leaf)))
+  ((do (let unused flag) leaf)))
 "#;
     let checked = check_source("unused-let-tail.vib", source);
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
