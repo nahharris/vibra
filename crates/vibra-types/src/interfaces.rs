@@ -119,6 +119,12 @@ pub(crate) fn lower_contract(
         };
         let mut generics = parameters.clone();
         generics.extend(crate::nominal::generic_names(method.attributes().items()));
+        // A member's own `where:` bounds hold in its body and at each call.
+        let Some(bounds) =
+            generic_bounds(types, source_id, method.attributes().items(), diagnostics)
+        else {
+            continue;
+        };
         let Some(signature) = crate::check_signature(
             source_id,
             method,
@@ -148,11 +154,54 @@ pub(crate) fn lower_contract(
             span: method.span(),
             signature,
             generics: crate::nominal::generic_names(method.attributes().items()),
+            bounds,
             default: !method.expressions().is_empty(),
             receiver: position,
         });
     }
     types.set_contract(index, members);
+}
+
+/// Whether `value` uses `self` where an interface value cannot stand for it:
+/// as an operand of a function type, which another receiver's value could
+/// then be passed to, or inside a dict key, which must be a concrete type.
+fn self_escapes(value: &Type) -> bool {
+    match value {
+        Type::Function(signature) => {
+            signature.parameters().iter().any(mentions_self)
+                || signature
+                    .labelled()
+                    .iter()
+                    .any(|slot| mentions_self(&slot.value_type()))
+                || signature.variadic().is_some_and(mentions_self)
+                || self_escapes(&signature.result())
+        }
+        Type::Dict(key, value) => mentions_self(key) || self_escapes(value),
+        _ => value.components().iter().any(self_escapes),
+    }
+}
+
+/// Rejects a member call through an interface value when the member's result
+/// would let two receivers be mixed (`docs/spec/02-type-system.md`,
+/// "Interfaces and methods").
+fn reject_escaping_self(
+    environment: &mut CheckEnvironment<'_>,
+    span: ByteSpan,
+    contract: &ContractMember,
+    receiver: &Type,
+) -> bool {
+    if !self_escapes(&contract.signature.result()) {
+        return false;
+    }
+    mismatch(
+        environment.diagnostics,
+        environment.source_id,
+        span,
+        self_type(),
+        receiver.clone(),
+        "a member whose result takes `self` as a function operand or a dict key cannot be called through an interface value, which erases that type",
+    );
+    true
 }
 
 fn mentions_self(value: &Type) -> bool {
@@ -761,6 +810,9 @@ pub(crate) fn check_contract_call(
                 );
                 return None;
             }
+            if reject_escaping_self(environment, span, &contract, &receiver) {
+                return None;
+            }
             None
         }
         _ => {
@@ -963,7 +1015,9 @@ pub(crate) fn materialize(
                     member_index: Some(member_index),
                     self_type: Some(self_type()),
                     type_parameters,
-                    bounds: BTreeMap::from([(SELF.to_owned(), index)]),
+                    bounds: std::iter::once((SELF.to_owned(), index))
+                        .chain(member.bounds.clone())
+                        .collect(),
                     impl_member: None,
                     implements: Some(Implements {
                         interface: interface.id.clone(),
@@ -1338,6 +1392,9 @@ fn check_selected_call(
                             receiver.clone(),
                             "a member with another `self` operand cannot be called through an interface value, which erases the type they must share",
                         );
+                        return None;
+                    }
+                    if reject_escaping_self(environment, span, contract, &receiver) {
                         return None;
                     }
                     Some(arguments.clone())
@@ -1859,6 +1916,28 @@ fn check_default_call(
             .map(|parameter| Type::Param(parameter.clone()))
             .collect::<Vec<_>>()
     };
+    // An interface value erases its concrete type, so no other operand can be
+    // required to share it, exactly as for an abstract member.
+    if matches!(&receiver, Type::Interface(id, _) if *id == declared.id) {
+        let shared =
+            contract.signature.parameters().iter().enumerate().find(
+                |(index, parameter)| *index != position && mentions_self(parameter),
+            );
+        if let Some((index, _)) = shared {
+            mismatch(
+                environment.diagnostics,
+                environment.source_id,
+                operands.get(index)?.value().span(),
+                self_type(),
+                receiver.clone(),
+                "a member with another `self` operand cannot be called through an interface value, which erases the type they must share",
+            );
+            return None;
+        }
+        if reject_escaping_self(environment, span, contract, &receiver) {
+            return None;
+        }
+    }
     let arguments = match &receiver {
         Type::Interface(id, arguments) if *id == declared.id => Some(arguments.clone()),
         Type::Interface(_, _) | Type::Any => None,
@@ -1942,6 +2021,20 @@ fn check_default_call(
         crate::ambiguous_generic(environment, span, &unbound);
         return None;
     };
+    // The member's own bounded parameters, at the arguments this call fixed.
+    if !contract.bounds.is_empty() {
+        let fixed = contract
+            .generics
+            .iter()
+            .filter_map(|name| {
+                let variable = instantiation.open(&Type::Param(name.clone()));
+                Some((name.clone(), instantiation.resolved(&variable)?))
+            })
+            .collect::<BTreeMap<_, _>>();
+        if !check_bounds(environment, span, &contract.bounds, &fixed) {
+            return None;
+        }
+    }
     let result = instantiated.result();
     crate::ensure_expected(environment, span, expected.clone(), result.clone());
     if expected
@@ -1956,4 +2049,136 @@ fn check_default_call(
         result,
         SourceOrigin::new(environment.source_id, span),
     ))
+}
+
+/// An abstract contract member named as a function value
+/// (`docs/spec/02-type-system.md`, "Interfaces and methods").
+///
+/// The written expected `fn` type fixes the receiver. The value is a closure
+/// that performs the contract call, so it selects the implementation exactly
+/// as a call written at that receiver would. `None` means the name is not
+/// such a member and the caller resolves it as an ordinary function.
+pub(crate) fn check_contract_value(
+    environment: &mut CheckEnvironment<'_>,
+    span: ByteSpan,
+    interface: usize,
+    member: usize,
+    expected: Option<&Type>,
+) -> Option<Option<Expr>> {
+    let declared = environment.types.interface(interface)?.clone();
+    let contract = declared.members.get(member)?.clone();
+    // A default member with a receiver is one function for every receiver.
+    if contract.default && contract.receiver.is_some() {
+        return None;
+    }
+    let position = contract.receiver.filter(|_| {
+        declared.parameters.is_empty()
+            && contract.generics.is_empty()
+            && contract.signature.labelled().is_empty()
+            && contract.signature.variadic().is_none()
+    });
+    let Some(position) = position else {
+        crate::unavailable(
+            environment.diagnostics,
+            environment.source_id,
+            span,
+            "a contract member selected by its destination, of a generic interface, or with generic, labelled, or variadic parameters is not a function value in the M3 profile; call it in a `lambda`",
+        );
+        return Some(None);
+    };
+    let Some(Type::Function(written)) = expected else {
+        environment.diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeAmbiguousInference,
+                span,
+                format!(
+                    "`{}.{}` as a value needs a written expected `fn` type to fix its receiver",
+                    declared.name, contract.name
+                ),
+            )
+            .with_source_id(environment.source_id),
+        );
+        return Some(None);
+    };
+    let Some(receiver) = written.parameters().get(position).cloned() else {
+        crate::ensure_expected(
+            environment,
+            span,
+            expected.cloned(),
+            Type::Function(Box::new(contract.signature.clone())),
+        );
+        return Some(None);
+    };
+    let signature = contract
+        .signature
+        .substitute(&BTreeMap::from([(SELF.to_owned(), receiver.clone())]));
+    let actual = Type::Function(Box::new(signature.clone()));
+    crate::ensure_expected(environment, span, expected.cloned(), actual.clone());
+    if !expected.is_some_and(|expected| crate::types_match(expected, &actual)) {
+        return Some(None);
+    }
+    let holds = match &receiver {
+        Type::Interface(id, _) if *id == declared.id => {
+            let shared = contract.signature.parameters().iter().enumerate().any(
+                |(index, parameter)| index != position && mentions_self(parameter),
+            );
+            if shared {
+                mismatch(
+                    environment.diagnostics,
+                    environment.source_id,
+                    span,
+                    self_type(),
+                    receiver.clone(),
+                    "a member with another `self` operand cannot be called through an interface value, which erases the type they must share",
+                );
+                return Some(None);
+            }
+            if reject_escaping_self(environment, span, &contract, &receiver) {
+                return Some(None);
+            }
+            true
+        }
+        Type::Interface(_, _) | Type::Any => false,
+        _ => {
+            let scope =
+                Scope::new(environment.self_type.as_ref(), &environment.generics)
+                    .with_bounds(&environment.bounds);
+            environment.types.satisfies(scope, interface, &receiver)
+        }
+    };
+    if !holds {
+        unsatisfied(environment, span, &receiver, &declared.name);
+        return Some(None);
+    }
+    let origin = SourceOrigin::new(environment.source_id, span);
+    let parameters = signature.parameters().to_vec();
+    let arguments = parameters
+        .iter()
+        .enumerate()
+        .map(|(slot, value_type)| {
+            Expr::variable(slot, value_type.clone(), origin.clone())
+        })
+        .collect::<Vec<_>>();
+    let body = Expr::Call {
+        target: CallTarget::Contract {
+            interface: declared.id.clone(),
+            member: contract.name.clone(),
+            receiver: position,
+            signature: Box::new(signature.clone()),
+            closed: closed_contract(environment.types, interface, &contract.name),
+        },
+        arguments,
+        result: signature.result(),
+        tail: false,
+        origin: origin.clone(),
+    };
+    let slot_count = parameters.len();
+    Some(Some(Expr::closure(
+        signature,
+        parameters,
+        Vec::new(),
+        body,
+        slot_count,
+        origin,
+    )))
 }
