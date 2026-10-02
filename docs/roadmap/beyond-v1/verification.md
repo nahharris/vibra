@@ -111,6 +111,17 @@ takes one flat binder/expression pair that names the result:
   on every call. Contracts and properties therefore strengthen each other
   before any solver exists.
 
+**Recursion classification** is a solver-free fact recorded per function:
+no recursion, tail-only recursion, or non-tail recursion. It is computed from
+the call graph and exposed through queries. A lambda's calls count as its
+enclosing function's, so a recursive call made inside a lambda classifies the
+function that wrote it. The fact is informational and rejects nothing: a
+static ban on non-tail recursion was studied and rejected, with the reasons
+recorded in the
+[pre-M4 decisions](../pre-m4/README.md#a-static-ban-on-non-tail-recursion-is-rejected).
+Stage V1's termination check and an agent reviewing stack behavior can both start from
+it.
+
 V0 is valuable on its own. It is also the adoption path: an agent that writes
 contracts for tests has already written V1's specifications.
 
@@ -250,6 +261,21 @@ claims, so an agent can see that a library's `parse` is verified and its
   of process protocols are the next step once distributed systems ship.
 - **Verified compilation.** Translation validation between typed IR and
   emitted Wasm, building on the differential harness.
+
+## Techniques considered and not adopted
+
+- **Sized types and dependent sizes.** The charter excludes dependent and
+  refinement types. Contracts, `decreases:` measures, and invariant newtypes
+  cover the same need in ordinary Vibra expressions.
+- **`rec fn` and `partial fn` keyword tiers.** Termination is already a
+  recorded, queryable property that is required only where verification needs
+  it, so a keyword would duplicate it and add a second spelling.
+- **Abstract interpretation and symbolic execution as standalone analyses.**
+  Low priority. Checked arithmetic and lookups already return `result` and
+  `option`, so there is little trap surface left to prove away, and the SMT
+  counterexamples of stage V1 cover the bug-finding role.
+- **Capabilities as values.** The charter excludes path-scoped capabilities and
+  runtime grants. Static nominal effect rows are the consent mechanism.
 
 ## Trusted computing base
 

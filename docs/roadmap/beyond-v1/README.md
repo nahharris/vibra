@@ -2,7 +2,7 @@
 
 Status: long-term direction; not normative
 Applies after: the 1.0 release gate in [`../v1.md`](../v1.md)
-Last updated: 2026-09-25
+Last updated: 2026-10-02
 
 This directory records where Vibra goes after v1 and why, so the v1 design can
 avoid closing doors that later lines need. It ranks below the specification
@@ -218,6 +218,11 @@ These tracks are unscheduled. Each needs evidence before it gets a line:
 
 - a GPU shader and compute subset of pure Vibra;
 - a native AOT backend from the same typed IR;
+- tail recursion modulo constructor as a backend guarantee: constant stack for
+  a recursive call whose only remaining work is completing a data constructor.
+  It is additive because it only makes more programs stack-safe. It matters
+  less for Vibra than for cons-list languages, because collections are arrays
+  walked through `iter`;
 - hot code upgrade for long-running services;
 - a Lean bridge for obligations that the SMT solver cannot discharge;
 - automatic parallel evaluation of pure code in the style of interaction-net

@@ -28,6 +28,7 @@ illustrative.
 - [Milestone execution model](roadmap/execution.md)
 - [Milestone 1 step plan](roadmap/milestone-1/README.md)
 - [Milestone 2 step plan](roadmap/milestone-2/README.md)
+- [Pre-M4 specification changes](roadmap/pre-m4/README.md)
 - [Beyond v1: long-term release lines and design tracks](roadmap/beyond-v1/README.md)
   (non-normative direction)
 
