@@ -60,9 +60,9 @@ conformance case or an explicit review-only invariant.
 - Pure collection transforms use the standard `iter` interface. Effectful walks
   are recursive functions over `iter.next` with an explicit written effect
   ceiling. There is no separate loop or foreach form.
-- Tail-position recursive calls MUST NOT consume additional language-level
-  stack; the interpreter and WebAssembly backend MUST implement this
-  obligation.
+- Every call in tail position MUST reuse the current activation and so MUST NOT
+  consume additional language-level stack, whatever its callee is; the
+  interpreter and WebAssembly backend MUST implement this obligation.
 - Source files use `.vib`; compiler-owned persistent data uses `.vibon`. Both
   are UTF-8 S-expression document grammars over one lexical reader and are
   never inferred from contents.

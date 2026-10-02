@@ -220,7 +220,9 @@ interpreter executes transfers through a trampoline, reusing the current activat
 for group members while invoking closures and outside-group callable alternatives
 through the ordinary boundary. Captured callable values, returned and parameter
 targets, mixed source/external branches, and unknown callable branches retain their
-runtime evaluation order and fallback behavior.
+runtime evaluation order and fallback behavior. The recursive-group rule
+recorded here was later replaced by reuse for every call in tail position; see
+[pre-M4 tail calls](../pre-m4/02-tail-calls.md).
 
 The checked-in runtime tail cases include direct and mutual recursion, negative
 non-tail positions, returned/parameter/captured callables, external fallback, and a

@@ -47,8 +47,8 @@ Evaluation is strict and deterministic:
 - `tupleof`, `recordof`, and `enumof` operands evaluate from left to right,
   and `array.of` and `dict.of` follow the ordinary variadic order;
 - `try` performs only its specified early-exit propagation; and
-- a tail-position call to a function in the same recursive group reuses the
-  current activation instead of growing language-level stack.
+- a call in tail position reuses the current activation instead of growing
+  language-level stack, whatever its callee is.
 
 ### M2 module-value initialization
 
@@ -175,18 +175,23 @@ Every other position is non-tail, including operands of applications (even when
 they are the final expression inside a `do` that is itself an operand),
 `let`/`match` bindings and subjects, `if` conditions, and `try` operands.
 
-The **recursive group** of a module-level `defn` is the set of module-level
-`defn`s in that module reachable from it through static function-call edges,
-including mutual recursion. An application whose callee value is not statically
-one function has an edge to every function it may denote; a callee whose value
-flows through data or a parameter that the analysis does not follow, such as a
-function stored in a record or an array, may denote every `defn` named as a
-value anywhere in the program and every `lambda`. Calls in tail position whose callee resolves to a
-member of the current function's recursive group MUST reuse the current
-activation. The interpreter and WebAssembly backend MAY implement this with
-explicit tail-call instructions or an internal trampoline; the strategy is not
+Every call in tail position MUST reuse the current activation, whatever its
+callee is: a module-level `defn` of any module, a method of a declared type, a
+`lambda` or closure, a function value held in a parameter, a binding, a record
+field, or a collection, and a contract member, whether it is selected
+statically or through an interface value. The callee replaces the caller in
+that activation, with its own captures and type arguments, and the call's
+result is the result of the activation. A program does not grow language-level
+stack through calls in tail position, however many it makes and wherever they
+lead. An application that creates no language activation, such as a
+constructor, a projection, a lookup, a `@compiler` external, or a native
+implementation, is not a call for this rule. This rule does not change which
+positions are tail positions.
+
+The interpreter and WebAssembly backend MAY implement this with explicit
+tail-call instructions or an internal trampoline; the strategy is not
 observable except that conforming programs do not overflow language-level stack
-on such tail recursion.
+through calls in tail position.
 
 V1 defines no portable stack-depth limit. Non-tail recursion and non-tail calls
 that exhaust an embedding host's stack are host events, not portable semantic

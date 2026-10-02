@@ -60,9 +60,10 @@ revalidate entry, unique names, and body/result invariants. `vibra-types`
 consumes an explicit source ID and the shared syntax AST; it does not read the
 filesystem or call the interpreter. The checker lowers direct
 parameter/`let` slots, `do` sequences, boolean `if`, and fixed positional calls
-to checked IR; initializer dependencies, initializer cycles, and Step 9's
-same-module recursive groups are computed once, over that IR, by `vibra-ir`, so
-`check_source` and `check_resolved` share one analysis. (The original Step 6
+to checked IR; initializer dependencies and initializer cycles are computed
+once, over that IR, by `vibra-ir`, so `check_source` and `check_resolved` share
+one analysis. (Step 9 also computed same-module recursive groups there; the
+[pre-M4 tail-call change](../pre-m4/02-tail-calls.md) removed them.) (The original Step 6
 and Step 9 checkers also ran syntax-level dependency walkers; the M2 review
 removed them, and `check_paths_agree` compares both check paths over the static
 corpus.)
@@ -83,11 +84,14 @@ the formatter consumes those facts only when it can prove a canonical order.
 
 Step 9 marks only activation-relative tail positions: the final expression of a
 body/sequence/`let` and both branches of a tail `if`; conditions, initializers,
-callee expressions, arguments, and nested closure activations stay ordinary. The
-interpreter replaces a module activation only when the selected named callable is
-in the current function's recursive group. Indirect candidates may include
-closures or outside-group named functions, which are invoked normally after their
-values are evaluated. The host-only execution result exposes maximum activation
+callee expressions, and arguments stay ordinary. The interpreter reuses the
+current activation for every call in tail position, whatever the callee, after
+its values are evaluated. (M2 reused it only when the selected named callable
+was in the current function's recursive group and invoked closures and
+outside-group functions normally; the
+[pre-M4 tail-call change](../pre-m4/02-tail-calls.md) replaced that rule, and a
+`lambda` body is now its own activation with its own tail position.) The
+host-only execution result exposes maximum activation
 depth and transfer count for evidence, while pure traces remain empty canonical
 `@audit-trace.v1` VIBON records.
 

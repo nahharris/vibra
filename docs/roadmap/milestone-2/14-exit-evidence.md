@@ -177,8 +177,10 @@ evidence above:
   `@type.initializer-cycle`
   (`V1-TYPE-INFER-initializer-cycle-closure-global`,
   `V1-PROJECT-workspace-check-closure-global-initializer-cycle`). Checked IR is
-  the single initializer-cycle and recursive-group authority, and call-flow
-  analysis fails closed if it does not converge.
+  the single initializer-cycle authority (and, until the
+  [pre-M4 tail-call change](../pre-m4/02-tail-calls.md) removed them, the
+  recursive-group authority), and call-flow analysis fails closed if it does
+  not converge.
 - Human `vibra test` reports each non-passing item and a summary. `vibra help`
   prints the closed grammar.
 - Non-tail recursion stops at the interpreter's host budget with
