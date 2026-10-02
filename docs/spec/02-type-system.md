@@ -634,10 +634,10 @@ the same module by name. Same-module mutual recursion among module-level
 `defn`s is valid, and forward reference within a module is permitted. A
 `lambda` has no self-name and MUST NOT refer to itself; it MAY appear in mutual
 recursion only as the callee of a named module-level `defn`. A call in tail
-position to a function in the same module's recursive group MUST NOT consume
-additional language-level stack; the runtime chapter defines tail position and
-the recursive group. Exhaustion of a host stack limit on non-tail recursion is
-not a portable Vibra semantic result.
+position MUST reuse the current activation and so MUST NOT consume additional
+language-level stack, whatever its callee is; the runtime chapter defines tail
+position and that guarantee. Exhaustion of a host stack limit on non-tail
+recursion is not a portable Vibra semantic result.
 
 ## Inference and checking
 

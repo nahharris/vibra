@@ -49,7 +49,7 @@ User-declared dict types whose key is a generic parameter stay
 6. Close gap G12: extend the checked-IR call-flow analysis so an unbounded
    indirect call target stands for every escaping function and every closure,
    instead of rejecting the module. Functions stored in records, arrays, dicts,
-   and options then remain callable, with recursive groups and initializer
+   and options then remain callable, with initializer
    cycles computed over that sound over-approximation.
 
 ## Test matrix
@@ -95,7 +95,7 @@ validation passes.
 - G12 is closed in the call-flow analysis: an unknown call target stands for
   every function named as a value and every closure in the program, whose
   captured callables are unknown in turn. Calls through record fields,
-  collections, and callback parameters are admitted, and recursive groups are
+  collections, and callback parameters are admitted, and initializer cycles are
   computed over that over-approximation.
 - Collection cases use the `V1-TYPE-NOMINAL` rule, which owns dict keys and
   constructors.

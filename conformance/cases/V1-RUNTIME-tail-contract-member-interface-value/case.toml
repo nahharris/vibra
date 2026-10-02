@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-tail-contract-member-interface-value"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A contract member called through an interface value in tail position reuses the activation after dispatch, so an implementation that calls itself through a fresh interface value runs a hundred thousand times."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

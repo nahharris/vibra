@@ -1,0 +1,5 @@
+(import assert @std.assert)
+(import main @app.main)
+
+(test "calls between two modules loop in one activation"
+  (assert.equal (main.run 100000u64) 7u64))

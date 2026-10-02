@@ -506,7 +506,12 @@ conformance for `(array t)`, `(dict k v)`, `str`, and `(option t)`, explicit
 `taken-iter`, pure `iter` default methods with `effects: ()` callbacks only,
 and effectful walks written as tail-recursive module-level functions over
 `iter.next`.
-Tail-call cases belong to `V1-RUNTIME`. `@name.reserved-value-spelling` and
+Tail-call cases belong to `V1-RUNTIME`. Each runs its loop for more iterations
+than the reference interpreter's activation bound and checks the result, and
+together they cover a callee in another module, a function-value parameter, a
+closure, a contract member called through an interface value, and an unrelated
+module-level function; deep non-tail recursion still stops with
+`@runtime.host-stack-exhausted`. `@name.reserved-value-spelling` and
 `@type.function-not-equatable` have fixed level `@error`.
 
 Union coverage includes a two-member declaration, rejection of a one-member

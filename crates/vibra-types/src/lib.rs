@@ -1091,7 +1091,6 @@ impl<'a> Checker<'a> {
                 &self.function_indices,
                 &self.module_names,
                 &mut self.bindings,
-                None,
                 &self.types,
             );
             let Some(expression) = check_expression(
@@ -1213,7 +1212,6 @@ impl<'a> Checker<'a> {
                     &self.module_names
                 },
                 &mut self.bindings,
-                Some(index),
                 &self.types,
             );
             environment.self_type = header.self_type.clone();
@@ -1465,7 +1463,6 @@ struct CheckEnvironment<'a> {
     capture_sources: Vec<Expr>,
     outer: Option<VisibleBindings>,
     next_slot: usize,
-    current_function: Option<usize>,
     resolved_targets:
         Option<&'a BTreeMap<(String, usize, usize), ResolvedReferenceTarget>>,
     /// The written result type of the innermost function, `lambda`, or test
@@ -1528,7 +1525,6 @@ impl<'a> CheckEnvironment<'a> {
         function_indices: &'a BTreeMap<String, usize>,
         module_names: &'a BTreeMap<String, ByteSpan>,
         bindings: &'a mut Vec<ApplicationBinding>,
-        current_function: Option<usize>,
         types: &'a nominal::TypeNames,
     ) -> Self {
         Self {
@@ -1551,7 +1547,6 @@ impl<'a> CheckEnvironment<'a> {
             capture_sources: Vec::new(),
             outer: None,
             next_slot: 0,
-            current_function,
             resolved_targets: None,
             reports_redeclarations: true,
             exit: None,
@@ -1701,7 +1696,6 @@ impl<'a> CheckEnvironment<'a> {
             capture_sources: self.capture_sources.clone(),
             outer: self.outer.clone(),
             next_slot: self.next_slot,
-            current_function: self.current_function,
             resolved_targets: self.resolved_targets,
             reports_redeclarations: self.reports_redeclarations,
             exit: self.exit.clone(),
@@ -1873,7 +1867,7 @@ fn types_match(left: &Type, right: &Type) -> bool {
 /// Visits `expression` and every nested expression in pre-order.
 ///
 /// This is the one syntax traversal the checker needs before lowering;
-/// dependency, cycle, and recursive-group analysis happen once, over checked
+/// dependency and cycle analysis happen once, over checked
 /// IR, in `vibra-ir`.
 pub fn walk_expressions<'e>(
     expression: &'e Expression,
@@ -3865,6 +3859,7 @@ fn check_form(
                     interface,
                     member,
                     expected,
+                    tail_position,
                 );
             }
             if let ExpressionKind::Name(name) = application.callee().kind()
@@ -3952,11 +3947,9 @@ fn check_form(
                 function_targets_from_expr(&callee, environment, &BTreeMap::new());
             let known_function = direct_function
                 .or_else(|| function_index_from_expr(&callee, environment));
-            // A call's own targets are reachable from the caller, so they are
-            // in its recursive group unless they are compiler-intrinsic
-            // wrappers. Checked IR computes the groups and decides whether a
-            // marked transfer reuses the activation; the checker only marks
-            // tail-position calls that can reach source code.
+            // Every call in tail position reuses its activation, whatever the
+            // callee; only a call that can reach no source code, such as a
+            // compiler-intrinsic wrapper, creates no activation to reuse.
             let has_source_target = function_targets.known.iter().any(|index| {
                 environment
                     .functions
@@ -3964,8 +3957,9 @@ fn check_form(
                     .is_some_and(|function| function.external.is_none())
             });
             let tail_transfer = tail_position
-                && environment.current_function.is_some()
-                && (has_source_target || function_targets.unknown);
+                && (has_source_target
+                    || function_targets.unknown
+                    || function_targets.has_closure);
             let facts = BindingFacts::new(
                 signature.parameters().len(),
                 signature
@@ -4387,7 +4381,6 @@ fn check_form(
                 environment.function_indices,
                 environment.module_names,
                 &mut *environment.bindings,
-                None,
                 environment.types,
             );
             nested.self_type = environment.self_type.clone();
@@ -4575,6 +4568,28 @@ fn check_form(
             unknown_name(environment, expression, "<invalid name>");
             None
         }
+    }
+}
+
+/// A call to a module function. In tail position it is a tail transfer that
+/// reuses the activation, unless the function is a compiler-intrinsic wrapper,
+/// which creates no activation to reuse.
+pub(crate) fn direct_call(
+    environment: &CheckEnvironment<'_>,
+    function: usize,
+    arguments: Vec<Expr>,
+    result: Type,
+    origin: SourceOrigin,
+    tail_position: bool,
+) -> Expr {
+    let runs_source = environment
+        .functions
+        .get(function)
+        .is_some_and(|header| header.external.is_none());
+    if tail_position && runs_source {
+        Expr::tail_call(function, arguments, result, origin)
+    } else {
+        Expr::call(function, arguments, result, origin)
     }
 }
 
@@ -5526,11 +5541,8 @@ mod tests {
         );
         assert!(result.accepted(), "{:?}", result.diagnostics());
         let program = result.program().expect("recursive program");
-        assert_eq!(
-            program.recursive_groups(),
-            [vec![0, 1], vec![0, 1], vec![0, 1, 2]]
-        );
-        assert!(program.canonical_vibon().contains("tail: true"));
+        // Each of the three bodies is one call in tail position.
+        assert_eq!(program.canonical_vibon().matches("tail: true").count(), 3);
     }
 
     #[test]

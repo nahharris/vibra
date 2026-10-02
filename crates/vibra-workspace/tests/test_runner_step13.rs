@@ -342,3 +342,31 @@ fn warnings_are_reported_without_blocking_test_execution() {
             && diagnostic.level() == vibra_diagnostics::Level::Warning
     }));
 }
+
+#[test]
+fn a_test_body_ending_in_a_source_call_reuses_its_activation() {
+    let project = TempProject::new(
+        "tail-test-body",
+        &[
+            ("src/app/main.vib", "(defn execute () void void)\n"),
+            (
+                "tests/tail/loop.vib",
+                "(import assert @std.assert)
+(defn finish () void (do))\n(defn spin (count u64) void\n  (if (u64.equal count 0u64) (finish) (spin (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n(test \"one call\" (finish))\n(test \"a loop past the activation bound\" (spin 100000u64))\n",
+            ),
+        ],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let verification = verified_bootstrap();
+
+    let result = run_tests(&snapshot, None, Some(&verification));
+
+    assert_eq!(
+        result.status(),
+        TestSuiteStatus::Ok,
+        "{:?}",
+        result.diagnostics()
+    );
+    assert_eq!(result.selected(), 2);
+    assert_eq!(result.passed(), 2);
+}

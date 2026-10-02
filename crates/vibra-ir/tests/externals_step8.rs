@@ -7,7 +7,8 @@ use vibra_ir::external::{
     CompilerIntrinsic, REGISTRY_VERSION, RoleTypes, SemanticIdentity,
 };
 use vibra_ir::{
-    CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Type, Value,
+    CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature, IrError,
+    SourceOrigin, Type, Value,
 };
 
 #[test]
@@ -82,25 +83,26 @@ fn registry_entries_expose_the_versioned_semantic_identity() {
 }
 
 #[test]
-fn external_operands_remain_in_recursive_call_analysis() {
-    let origin = SourceOrigin::new("recursive-external.vib", ByteSpan::new(0, 1));
-    let recursive = Expr::call(0, Vec::new(), Type::Str, origin.clone());
-    let body = Expr::external(
+fn external_operands_remain_in_initializer_cycle_analysis() {
+    let origin = SourceOrigin::new("cycle-external.vib", ByteSpan::new(0, 1));
+    let initializer = Expr::external(
         CompilerIntrinsic::TextConcat,
         vec![
-            recursive,
+            Expr::call(0, Vec::new(), Type::Str, origin.clone()),
             Expr::literal(Value::Str(String::new()), origin.clone()),
         ],
         origin.clone(),
     );
+    let global = CheckedGlobal::new("value", Type::Str, initializer, origin.clone())
+        .expect("valid shape");
     let function = CheckedFunction::new(
-        "loop",
+        "read",
         FunctionSignature::new(Vec::new(), Type::Str),
-        body,
+        Expr::global(0, Type::Str, origin.clone()),
         origin,
     )
     .expect("valid shape");
-    let program = CheckedProgram::try_new(vec![function], 0)
-        .expect("external operand must remain visible to recursive-group analysis");
-    assert_eq!(program.recursive_groups(), [vec![0]]);
+    let error = CheckedProgram::try_new_with_globals(vec![global], vec![function], 0)
+        .expect_err("the call inside an external operand is a dependency");
+    assert_eq!(error, IrError::GlobalInitializerCycle(0));
 }

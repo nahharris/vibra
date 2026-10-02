@@ -1,0 +1,11 @@
+(defn main () u64 (apply 100000u64 countdown))
+
+(defn apply (count u64 next (fn (u64) u64)) u64 (next count))
+
+(defn countdown (count u64) u64
+  (if (u64.equal count 0u64) 11u64 (apply (lower count) countdown)))
+
+(defn lower (count u64) u64
+  (match (u64.sub-checked count 1u64)
+    (result.ok value) value
+    (result.err -) 0u64))

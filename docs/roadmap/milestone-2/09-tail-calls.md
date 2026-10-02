@@ -2,8 +2,10 @@
 
 Requires Step 8. Read runtime **Tail calls**, **Evaluation**, and types
 **Functions as values** in [runtime](../../spec/06-runtime.md) and
-[types](../../spec/02-type-system.md). Copy the normative recursive-group
-definition accurately; do not substitute an optimization heuristic for it.
+[types](../../spec/02-type-system.md). This guide records the M2 delivery,
+which guaranteed activation reuse only inside a recursive group. That
+definition was removed, and every call in tail position now reuses the
+activation; see [pre-M4 tail calls](../pre-m4/02-tail-calls.md).
 
 ## Implementation sequence
 

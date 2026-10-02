@@ -813,6 +813,7 @@ pub(crate) fn check_contract_call(
     interface: usize,
     member: usize,
     expected: Option<Type>,
+    tail_position: bool,
 ) -> Option<Expr> {
     let declared = environment.types.interface(interface)?.clone();
     let contract = declared.members.get(member)?.clone();
@@ -846,6 +847,7 @@ pub(crate) fn check_contract_call(
             &contract,
             position,
             expected,
+            tail_position,
         );
     }
     if !contract.generics.is_empty() {
@@ -867,6 +869,7 @@ pub(crate) fn check_contract_call(
             &declared,
             &contract,
             expected,
+            tail_position,
         );
     };
     let operands = application.arguments();
@@ -987,7 +990,14 @@ pub(crate) fn check_contract_call(
     }
     let origin = SourceOrigin::new(environment.source_id, span);
     Some(match dispatch {
-        Some(function) => Expr::call(function, arguments, result, origin),
+        Some(function) => crate::direct_call(
+            environment,
+            function,
+            arguments,
+            result,
+            origin,
+            tail_position,
+        ),
         None => Expr::Call {
             target: CallTarget::Contract {
                 interface: declared.id.clone(),
@@ -1000,7 +1010,7 @@ pub(crate) fn check_contract_call(
             },
             arguments,
             result,
-            tail: false,
+            tail: tail_position,
             origin,
         },
     })
@@ -1453,6 +1463,7 @@ fn check_selected_call(
     declared: &DeclaredInterface,
     contract: &ContractMember,
     expected: Option<Type>,
+    tail_position: bool,
 ) -> Option<Expr> {
     let span = application.span();
     let operands = application.arguments();
@@ -1689,9 +1700,14 @@ fn check_selected_call(
         return None;
     }
     Some(match chosen.target {
-        CandidateTarget::Function(function) => {
-            Expr::call(function, arguments, result, origin)
-        }
+        CandidateTarget::Function(function) => crate::direct_call(
+            environment,
+            function,
+            arguments,
+            result,
+            origin,
+            tail_position,
+        ),
         CandidateTarget::Primitive(intrinsic) => {
             Expr::external_with_result(intrinsic, arguments, result, origin)
         }
@@ -1707,7 +1723,7 @@ fn check_selected_call(
             },
             arguments,
             result,
-            tail: false,
+            tail: tail_position,
             origin,
         },
     })
@@ -1885,9 +1901,15 @@ fn check_selected_value(
         .collect::<Vec<_>>();
     let result = signature.result();
     let body = match chosen.target {
-        CandidateTarget::Function(function) => {
-            Expr::call(function, arguments, result, origin.clone())
-        }
+        // The closure body's call is in the tail position of its activation.
+        CandidateTarget::Function(function) => crate::direct_call(
+            environment,
+            function,
+            arguments,
+            result,
+            origin.clone(),
+            true,
+        ),
         CandidateTarget::Primitive(intrinsic) => {
             Expr::external_with_result(intrinsic, arguments, result, origin.clone())
         }
@@ -1903,7 +1925,7 @@ fn check_selected_value(
             },
             arguments,
             result,
-            tail: false,
+            tail: true,
             origin: origin.clone(),
         },
     };
@@ -2240,6 +2262,7 @@ fn conversion_contract(types: &TypeNames, interface: usize) -> Option<bool> {
 /// with `self` as the receiver's type, the interface's parameters as the
 /// arguments at which the receiver conforms, and the member's own generic
 /// parameters inferred from the operands and the written expected type.
+#[allow(clippy::too_many_arguments)]
 fn check_default_call(
     environment: &mut CheckEnvironment<'_>,
     application: &Application,
@@ -2248,6 +2271,7 @@ fn check_default_call(
     contract: &ContractMember,
     position: usize,
     expected: Option<Type>,
+    tail_position: bool,
 ) -> Option<Expr> {
     let span = application.span();
     let operands = application.arguments();
@@ -2428,7 +2452,7 @@ fn check_default_call(
         },
         arguments: checked,
         result,
-        tail: false,
+        tail: tail_position,
         origin: SourceOrigin::new(environment.source_id, span),
     })
 }
@@ -2561,7 +2585,7 @@ pub(crate) fn check_contract_value(
         },
         arguments,
         result: signature.result(),
-        tail: false,
+        tail: true,
         origin: origin.clone(),
     };
     let slot_count = parameters.len();
