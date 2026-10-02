@@ -5939,30 +5939,32 @@ fn canonical_function_signature(signature: &FunctionSignature) -> String {
         .iter()
         .map(canonical_type)
         .collect::<Vec<_>>();
-    let mut output = format!(
-        "(fn {} {}",
+    // Labelled parameters bind by name, so their order is not part of the
+    // type: the encoding lists them by name.
+    let mut labelled = signature
+        .labelled()
+        .iter()
+        .map(|parameter| {
+            (
+                parameter.name().to_owned(),
+                canonical_type(&parameter.value_type()),
+            )
+        })
+        .collect::<Vec<_>>();
+    labelled.sort();
+    let labelled = labelled
+        .iter()
+        .map(|(name, value_type)| format!(" {name}: {value_type}"))
+        .collect::<String>();
+    let variadic = signature
+        .variadic()
+        .map(|tail| format!(" variadic: {}", canonical_type(tail)))
+        .unwrap_or_default();
+    format!(
+        "(record type: @fn parameters: {} labelled: (record{labelled}){variadic} result: {})",
         canonical_array(&parameters),
         canonical_type(&signature.result())
-    );
-    if !signature.labelled().is_empty() {
-        let labelled = signature
-            .labelled()
-            .iter()
-            .map(|parameter| {
-                format!(
-                    "(record name: @{} type: {}",
-                    parameter.name(),
-                    canonical_type(&parameter.value_type())
-                ) + ")"
-            })
-            .collect::<Vec<_>>();
-        output.push_str(&format!(" labelled: {}", canonical_array(&labelled)));
-    }
-    if let Some(tail) = signature.variadic() {
-        output.push_str(&format!(" variadic: {}", canonical_type(tail)));
-    }
-    output.push(')');
-    output
+    )
 }
 
 fn canonical_labelled_field(signature: &FunctionSignature) -> String {

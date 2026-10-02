@@ -1060,19 +1060,28 @@ fn invalid_item(test: &TestRef<'_>, diagnostics: &[Diagnostic]) -> TestItem {
     }
 }
 
-fn trap_item(name: String, _error: vibra_interp::RuntimeError) -> TestItem {
-    let diagnostic = Diagnostic::new(
-        DiagnosticCode::RuntimeInvalidCheckedProgram,
-        ByteSpan::empty_at(0),
-        "checked program violated M2 runtime invariants",
+fn trap_item(name: String, error: vibra_interp::RuntimeError) -> TestItem {
+    let (code, origin) = error.program_trap().map_or(
+        (DiagnosticCode::RuntimeInvalidCheckedProgram, None),
+        |(code, origin)| (code, origin.cloned()),
     );
+    let message = if code == DiagnosticCode::RuntimeInvalidCheckedProgram {
+        "checked program violated M2 runtime invariants".to_owned()
+    } else {
+        error.to_string()
+    };
+    let diagnostic = match &origin {
+        Some(origin) => Diagnostic::new(code, origin.span(), message)
+            .with_source_id(origin.source_id()),
+        None => Diagnostic::new(code, ByteSpan::empty_at(0), message),
+    };
     TestItem {
         name,
         status: TestItemStatus::Trap,
         failure: None,
         trap: Some(TestTrap {
-            trap_code: "@runtime.invalid-checked-program".to_owned(),
-            origin: None,
+            trap_code: code.as_atom().to_owned(),
+            origin,
         }),
         audit_trace: Vec::new(),
         diagnostics: vec![diagnostic],

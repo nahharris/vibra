@@ -573,17 +573,34 @@ fn execute_run<E: Write>(
         vibra_workspace::semantic::CheckStatus::Unavailable => {
             CommandResult::Unavailable
         }
-        vibra_workspace::semantic::CheckStatus::Accepted => match outcome.outcome() {
-            Some(vibra_workspace::semantic::RunOutcome::Program(_)) => {
-                CommandResult::Ok
+        vibra_workspace::semantic::CheckStatus::Accepted => {
+            match outcome.outcome() {
+                Some(vibra_workspace::semantic::RunOutcome::Program(_)) => {
+                    CommandResult::Ok
+                }
+                Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(
+                    error,
+                )) if error.program_trap().is_some() => CommandResult::Trap,
+                Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(_)) => {
+                    CommandResult::OperationalFailure
+                }
+                None => CommandResult::OperationalFailure,
             }
-            Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(_)) => {
-                CommandResult::OperationalFailure
-            }
-            None => CommandResult::OperationalFailure,
-        },
+        }
     };
     let mut diagnostics = diagnostics;
+    if let Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(error)) =
+        outcome.outcome()
+        && let Some((code, _)) = error.program_trap()
+    {
+        diagnostics.extend(render_unlocated_diagnostics(&[
+            vibra_diagnostics::Diagnostic::new(
+                code,
+                vibra_diagnostics::ByteSpan::empty_at(0),
+                error.to_string(),
+            ),
+        ]));
+    }
     if let Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(error)) =
         outcome.outcome()
         && let Some(diagnostic) = error.host_diagnostic()
@@ -599,7 +616,7 @@ fn execute_run<E: Write>(
             execution.audit_trace().to_vec(),
         ),
         Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(error)) => {
-            if error.host_diagnostic().is_none() {
+            if error.host_diagnostic().is_none() && error.program_trap().is_none() {
                 let _ = writeln!(stderr, "interpreter invariant failure: {error}");
             }
             (None, String::new(), String::new(), Vec::new())
@@ -614,6 +631,14 @@ fn execute_run<E: Write>(
             (None, String::new(), String::new(), Vec::new())
         }
     };
+    // The entry's result is observed after the program ends, so the trap
+    // has no source origin.
+    let trap = match outcome.outcome() {
+        Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(error)) => error
+            .program_trap()
+            .map(|(code, _)| serde_json::json!({ "trapCode": code.as_atom(), "origin": null })),
+        _ => None,
+    };
     CommandEnvelope {
         schema_version: SCHEMA_VERSION,
         command: invocation.command.clone(),
@@ -625,7 +650,7 @@ fn execute_run<E: Write>(
             stdout,
             stderr: program_stderr,
             audit_trace,
-            trap: None,
+            trap,
         }),
     }
 }

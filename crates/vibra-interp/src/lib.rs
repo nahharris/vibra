@@ -163,6 +163,13 @@ pub enum RuntimeError {
         /// The activation bound that was reached.
         limit: usize,
     },
+    /// A value holding a function reached an observation: a test assertion's
+    /// operand or the entry's result. The checker rejects a type that names a
+    /// function there; this is one hidden behind `any` or an interface.
+    UnobservableFunction {
+        /// The observing call, when it is in source.
+        origin: Option<SourceOrigin>,
+    },
     /// The host could not start the interpreter thread.
     HostThreadUnavailable(String),
 }
@@ -179,6 +186,9 @@ impl fmt::Display for RuntimeError {
             Self::HostStackExhausted { limit } => write!(
                 formatter,
                 "non-tail activations exhausted the interpreter host budget of {limit}"
+            ),
+            Self::UnobservableFunction { .. } => formatter.write_str(
+                "a value that holds a function has no canonical encoding to observe",
             ),
             Self::HostThreadUnavailable(error) => {
                 write!(formatter, "cannot start the interpreter thread: {error}")
@@ -197,6 +207,21 @@ impl RuntimeError {
             self,
             Self::HostStackExhausted { .. } | Self::HostThreadUnavailable(_)
         )
+    }
+
+    /// The stable trap code and source origin of a trap the program itself
+    /// caused, if this is one.
+    #[must_use]
+    pub const fn program_trap(
+        &self,
+    ) -> Option<(vibra_diagnostics::DiagnosticCode, Option<&SourceOrigin>)> {
+        match self {
+            Self::UnobservableFunction { origin } => Some((
+                vibra_diagnostics::DiagnosticCode::RuntimeUnobservableFunction,
+                origin.as_ref(),
+            )),
+            _ => None,
+        }
     }
 
     /// The registered unlocated diagnostic for a host-budget stop, if this is
@@ -267,7 +292,7 @@ impl Interpreter {
             return Err(invalid());
         }
         let Some(value) = observe(value) else {
-            return Err(invalid());
+            return Err(RuntimeError::UnobservableFunction { origin: None });
         };
         let canonical = value.canonical_observation(&value_type);
         let value = match value {
@@ -309,6 +334,11 @@ impl Interpreter {
             Arc::default(),
         );
         machine.check_host_budget()?;
+        if let Some(origin) = machine.unobservable.take() {
+            return Err(RuntimeError::UnobservableFunction {
+                origin: Some(origin),
+            });
+        }
         if machine.assertion_failure.is_none()
             && value != Some(RuntimeValue::Primitive(Value::Void))
         {
@@ -571,6 +601,8 @@ struct Machine<'a> {
     /// down on every supported host, so the distance from it is stack use.
     stack_base: usize,
     assertion_failure: Option<TestAssertionFailure>,
+    /// The assertion whose operand held a function, which stops the test.
+    unobservable: Option<SourceOrigin>,
     /// The value a failing `try` returns from the innermost function or
     /// `lambda`: evaluation unwinds to that boundary, which takes it.
     pending_exit: Option<RuntimeValue>,
@@ -590,6 +622,7 @@ impl<'a> Machine<'a> {
             host_budget_exhausted: false,
             stack_base: stack_address(),
             assertion_failure: None,
+            unobservable: None,
             pending_exit: None,
             types: Vec::new(),
         }
@@ -1787,12 +1820,17 @@ impl<'a> Machine<'a> {
         values: Vec<RuntimeValue>,
         origin: SourceOrigin,
     ) -> Option<RuntimeValue> {
-        // Every operand is compared and reported by its canonical encoding;
-        // the checker rejects a function operand.
-        let encodings = values
+        // Every operand is compared and reported by its canonical encoding.
+        // The checker rejects an operand whose type names a function; one
+        // hidden behind `any` or an interface stops the test here.
+        let Some(encodings) = values
             .into_iter()
             .map(|value| observe(value).map(|value| value.canonical_vibon()))
-            .collect::<Option<Vec<_>>>()?;
+            .collect::<Option<Vec<_>>>()
+        else {
+            self.unobservable = Some(origin);
+            return None;
+        };
         let (passed, expected, actual) = match (assertion, encodings.as_slice()) {
             (TestAssertion::True | TestAssertion::False, [actual]) => {
                 let expected =

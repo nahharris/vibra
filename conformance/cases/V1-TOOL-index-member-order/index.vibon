@@ -33,7 +33,7 @@
       owner: @app.main.c
       visibility: @private
       source: (record source-id: "src/app/main.vib" start: 110u64 end: 139u64)
-      signature: (fn (array @app.main.c) @str)
+      signature: (record type: @fn parameters: (array @app.main.c) labelled: (record) result: @str)
       effects: (array)
       errors: (array)
       applications: (array)
@@ -45,7 +45,7 @@
       owner: void
       visibility: @private
       source: (record source-id: "src/app/main.vib" start: 142u64 end: 169u64)
-      signature: (fn (array) @void)
+      signature: (record type: @fn parameters: (array) labelled: (record) result: @void)
       effects: (array)
       errors: (array)
       applications: (array)
@@ -69,7 +69,7 @@
       owner: @app.main.shape
       visibility: @private
       source: (record source-id: "src/app/main.vib" start: 14u64 end: 42u64)
-      signature: (fn (array (record type: @param name: @self)) @str)
+      signature: (record type: @fn parameters: (array (record type: @param name: @self)) labelled: (record) result: @str)
       effects: (array)
       errors: (array)
       applications: (array)
@@ -84,6 +84,6 @@
         (record
           contract: @app.main.shape.name
           source: (record source-id: "src/app/main.vib" start: 74u64 end: 106u64)
-          signature: (fn (array @app.main.c) @str)
+          signature: (record type: @fn parameters: (array @app.main.c) labelled: (record) result: @str)
           text: "(defn name (value self) str \"c\")"))))
   references: (array))

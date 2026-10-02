@@ -1,0 +1,10 @@
+(record
+  format: @test-run.v1
+  result: @command.trap
+  tests: (array
+    (record name: "@tests.observe::\"any holding a function\"" result: @test.trap trap: (record trap-code: "@runtime.unobservable-function" origin: (record source-id: "tests/observe.vib" start: 221u64 end: 261u64)) audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.observe::\"any holding a number\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.observe::\"interface holding a function\"" result: @test.trap trap: (record trap-code: "@runtime.unobservable-function" origin: (record source-id: "tests/observe.vib" start: 377u64 end: 421u64)) audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.observe::\"iterator holding a function\"" result: @test.trap trap: (record trap-code: "@runtime.unobservable-function" origin: (record source-id: "tests/observe.vib" start: 462u64 end: 584u64)) audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)

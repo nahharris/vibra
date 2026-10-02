@@ -411,9 +411,13 @@ for an anonymous tuple; `(record type: @record fields: (record name: T...))`,
 `(record type: @union members: (array T...))` for the other anonymous types,
 in canonical order; `(record type: @atom-singleton atom: @name)` for the
 singleton type of a written atom; and `(record type: @fn parameters: (array T...) labelled:
-(record name: T...) result: T)` for a function type. A result observation is
-`(record type: T value: v)`. Function values have no value encoding and are
-never an observable result.
+(record name: T...) result: T)` for a function type, with labelled parameters
+in name order and `variadic: T` before `result` when the function has a
+variadic tail. A result observation is `(record type: T value: v)`. Function
+values have no value encoding and are never an observable result: the checker
+rejects a type that names a function where a value is observed, and a
+function hidden behind `any` or an interface that reaches a test assertion or
+the entry's result is the trap `@runtime.unobservable-function`.
 
 ## External providers
 
@@ -453,8 +457,18 @@ at the checked-program execution boundary (no executable entry or a body that
 violates checked-IR invariants) use `@runtime.invalid-checked-program`. These
 failures have no source origin and use an unlocated diagnostic primary at
 `0..0` with no source ID. The CLI `trapCode` is the exact diagnostic-code
-spelling as a string, and its `origin` is `null`. Traps are not catchable by
-user code.
+spelling as a string, and its `origin` is `null`.
+
+`@runtime.unobservable-function` is the trap of a value that holds a function
+reaching an observation. A test assertion compares canonical value encodings
+and `run` reports the entry's result as one, and a function has none. The
+checker rejects an observed type that is or contains a `fn` type, so the trap
+is left to a function hidden behind `any` or an interface, or held by a
+library type such as `iter`. In a test its origin is the assertion call and
+the item is `@test.trap`; for the entry's result it has no origin and `run`
+ends with `@command.trap`.
+
+Traps are not catchable by user code.
 
 ## WebAssembly boundary
 
