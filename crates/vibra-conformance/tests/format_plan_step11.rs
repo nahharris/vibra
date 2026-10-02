@@ -63,7 +63,7 @@ fn snapshot_binding_normalization_preserves_the_program_result() {
         vibra_interp::run(original.program().expect("checked original"))
             .expect("run original")
             .value()
-            .clone();
+            .cloned();
 
     let plan = plan_format(root.path(), Path::new("src/hello/main.vib"))
         .expect("plan uses the confined source snapshot");
@@ -80,6 +80,6 @@ fn snapshot_binding_normalization_preserves_the_program_result() {
         vibra_interp::run(reformatted.program().expect("checked formatted source"))
             .expect("run formatted source")
             .value()
-            .clone();
+            .cloned();
     assert_eq!(reformatted_value, original_value);
 }

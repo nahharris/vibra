@@ -1114,10 +1114,11 @@ Heterogeneous tuples do not implement `iter` in v1. Users cannot add methods or
 method named `dict`.
 
 User `deftype`s MAY implement `(iter item)` with a nested `(impl (iter item) …)`
-block supplying only `next`. The owner MUST declare `item` in its `where:`
-clause, and the `impl` target MUST spell the full application `(iter item)`;
-bare `iter` is invalid. The `next` member MUST name that same `item` in its
-result type. Generic `impl` targets such as `(array t)` inside a `defint`
+block supplying only `next`. The `impl` target MUST spell the full application
+`(iter item)`; bare `iter` is invalid. The item is a concrete type, as in
+`(impl (iter u64) …)`, or a generic parameter the owner declares in its
+`where:` clause. The `next` member MUST name that same item in its result
+type. Generic `impl` targets such as `(array t)` inside a `defint`
 remain post-v1.
 
 ## Control flow and failure

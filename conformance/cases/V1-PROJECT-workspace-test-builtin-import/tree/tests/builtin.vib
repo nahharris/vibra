@@ -1,0 +1,5 @@
+(import assert @std.assert)
+
+(import builtin @std.builtin)
+
+(test "one is one" (assert.equal 1i32 1i32))

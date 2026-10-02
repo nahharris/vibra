@@ -29,18 +29,25 @@ use vibra_ir::{
 /// One successful reference-interpreter run.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Execution {
-    value: ObservedValue,
-    value_type: Type,
+    /// The entry's value when it is a primitive. A compound value stays on
+    /// the interpreter thread, where it is encoded and released: both walk
+    /// its whole depth.
+    value: Option<Value>,
+    /// The canonical observation, encoded on the interpreter thread: the
+    /// encoder recurses through the value, which may be deeper than a
+    /// caller's stack allows.
+    canonical: String,
     audit_trace: Vec<String>,
     max_activation_depth: usize,
     tail_transfer_count: usize,
 }
 
 impl Execution {
-    /// The value returned by the selected entry function.
+    /// The value returned by the selected entry function, when it is a
+    /// primitive; [`Self::canonical_result`] observes every value.
     #[must_use]
-    pub const fn value(&self) -> &ObservedValue {
-        &self.value
+    pub const fn value(&self) -> Option<&Value> {
+        self.value.as_ref()
     }
 
     /// Ordered audit events.  Pure M2 literals always return an empty trace.
@@ -66,7 +73,7 @@ impl Execution {
     /// Canonical typed value observation.
     #[must_use]
     pub fn canonical_result(&self) -> String {
-        self.value.canonical_observation(&self.value_type)
+        self.canonical.clone()
     }
 }
 
@@ -262,9 +269,14 @@ impl Interpreter {
         let Some(value) = observe(value) else {
             return Err(invalid());
         };
+        let canonical = value.canonical_observation(&value_type);
+        let value = match value {
+            ObservedValue::Primitive(value) => Some(value),
+            _ => None,
+        };
         Ok(Execution {
             value,
-            value_type,
+            canonical,
             audit_trace: Vec::new(),
             max_activation_depth: machine.max_depth,
             tail_transfer_count: machine.tail_transfers,
@@ -1254,9 +1266,10 @@ impl<'a> Machine<'a> {
         key_order: Option<&TypeId>,
     ) -> Option<()> {
         match self.search_entries(entries, &key, key_order)? {
+            // The later pair replaces the earlier one: its key and its value.
             Ok(position) => {
                 if let Some(entry) = entries.get_mut(position) {
-                    entry.1 = value;
+                    *entry = (key, value);
                 }
             }
             Err(position) => entries.insert(position, (key, value)),
@@ -2463,7 +2476,7 @@ mod tests {
         let program = vibra_ir::CheckedProgram::try_new(vec![function], 0)
             .expect("valid checked program");
         let result = run(&program).expect("execution");
-        assert_eq!(result.value(), &vibra_ir::Value::I32(42));
+        assert_eq!(result.value(), Some(&vibra_ir::Value::I32(42)));
         assert!(result.audit_trace().is_empty());
     }
 
@@ -2490,7 +2503,7 @@ mod tests {
 
         let result = run(&program).expect("execution");
 
-        assert_eq!(result.value(), &vibra_ir::Value::I32(2));
+        assert_eq!(result.value(), Some(&vibra_ir::Value::I32(2)));
     }
 
     #[test]
@@ -2564,7 +2577,7 @@ mod tests {
             .expect("valid intrinsic program");
         let result = run(&program).expect("execution");
         let repeated = run(&program).expect("repeated execution");
-        assert_eq!(result.value(), &Value::U64(3));
+        assert_eq!(result.value(), Some(&Value::U64(3)));
         assert!(result.audit_trace().is_empty());
         assert_eq!(result, repeated);
     }
