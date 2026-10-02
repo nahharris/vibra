@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-let-else"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A let-else binds for the rest of the body on a match and runs its fallback, which leaves with a value, on a mismatch."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

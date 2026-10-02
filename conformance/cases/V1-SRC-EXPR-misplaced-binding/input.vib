@@ -1,0 +1,31 @@
+(defn operand () i32 (g (let a1 1i32)))
+
+(defn if-condition () i32 (if (let a2 true) 1i32 2i32))
+
+(defn if-then () i32 (if true (let a3 1i32) 2i32))
+
+(defn if-else () i32 (if true 1i32 (let a4 2i32)))
+
+(defn match-subject () i32 (match (let a5 1i32) - 0i32))
+
+(defn match-result () i32 (match 1i32 - (let a6 1i32)))
+
+(def initializer i32 (let a7 1i32))
+
+(defn let-value () i32 (let b (let a8 1i32)) b)
+
+(defn let-else-value () i32 (let-else x (let a9 1i32) (return 0i32)) 0i32)
+
+(defn let-else-fallback () i32 (let-else x y (let a10 1i32)) 0i32)
+
+(defn return-operand () i32 (do (return (let a11 1i32)) 0i32))
+
+(defn try-operand () i32 (try (let a12 1i32)))
+
+(defn as-operand () i32 (as i32 (let a13 1i32)))
+
+(defn tuple-operand () i32 (tupleof (let a14 1i32)))
+
+(defn let-else-operand () i32 (g (let-else x y (return 0i32))))
+
+(defn valid-after () i32 (let a15 1i32) a15)

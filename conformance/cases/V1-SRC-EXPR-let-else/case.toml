@@ -1,0 +1,11 @@
+id = "V1-SRC-EXPR-let-else"
+rule = "V1-SRC-EXPR"
+profile = "static-v1"
+operation = "type-check"
+description = "A let-else is an element of a body sequence and binds for the later elements."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

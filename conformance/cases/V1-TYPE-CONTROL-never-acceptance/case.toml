@@ -1,0 +1,11 @@
+id = "V1-TYPE-CONTROL-never-acceptance"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "An expression of type never is admitted at any expected type."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

@@ -1,0 +1,24 @@
+(defint named
+  (defn label (value self) i32)
+  (defn doubled (value self) i32
+    (let n (named.label value))
+    n))
+
+(deftype item (record n i32)
+  (defn plain (value self) i32
+    (let n (value @n))
+    n)
+  (impl named
+    (defn label (value self) i32
+      (let n (value @n))
+      n)))
+
+(defn lambda-body () (fn (i32) i32)
+  (lambda (v i32) i32
+    (let w v)
+    w))
+
+(defn do-body () i32
+  (do
+    (let a 1i32)
+    a))

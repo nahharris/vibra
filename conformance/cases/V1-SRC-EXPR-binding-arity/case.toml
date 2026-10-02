@@ -1,0 +1,59 @@
+id = "V1-SRC-EXPR-binding-arity"
+rule = "V1-SRC-EXPR"
+profile = "reader-v1"
+description = "A let needs one or more complete pairs, a let-else exactly three operands, and a return exactly one; later declarations still read."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 18
+end = 23
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 48
+end = 55
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 80
+end = 94
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 124
+end = 138
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 169
+end = 187
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 220
+end = 228
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 255
+end = 267

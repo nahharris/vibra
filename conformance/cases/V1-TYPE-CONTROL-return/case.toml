@@ -1,0 +1,23 @@
+id = "V1-TYPE-CONTROL-return"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "return exits the innermost defn, nested method, or lambda at the written result type; its operand may not be a diverging expression."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [593, 596]
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [658, 664]

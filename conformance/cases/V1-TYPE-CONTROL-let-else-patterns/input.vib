@@ -1,0 +1,19 @@
+(deftype single (enum only u32))
+(deftype wrap u32)
+(deftype number (union i32 f32))
+
+(defn refutable (o (option i32)) i32 (let-else (option.some v) o (return 0i32)) v)
+
+(defn bare-name (o (option i32)) i32 (let-else x o (return 0i32)) 0i32)
+
+(defn discard (o (option i32)) i32 (let-else - o (return 0i32)) 0i32)
+
+(defn tuple-binders (p (tuple i32 i32)) i32 (let-else (tupleof a b) p (return 0i32)) a)
+
+(defn single-variant (s single) u32 (let-else (single.only n) s (return 0u32)) n)
+
+(defn wrapper-pattern (w wrap) u32 (let-else (wrap n) w (return 0u32)) n)
+
+(defn as-pattern (n number) i32 (let-else (as i32 v) n (return 0i32)) v)
+
+(defn uninhabited-payload (o (option never)) i32 (let-else (option.some v) o (return 0i32)) 1i32)

@@ -1,0 +1,1 @@
+(defn answer () (result i32 never) (result.ok 4i32))

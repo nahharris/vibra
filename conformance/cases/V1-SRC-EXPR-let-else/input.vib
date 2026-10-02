@@ -1,0 +1,3 @@
+(defn first-or-zero (items (array i32)) i32
+  (let-else (option.some head) (items 0u64) (return 0i32))
+  head)

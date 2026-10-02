@@ -1,0 +1,19 @@
+(defn use (value i32) void (do))
+
+(defn final-return () i32 (return 1i32))
+
+(defn final-if (c bool) i32 (if c (return 1i32) 2i32))
+
+(defn both-branches (c bool) i32 (if c (return 1i32) (return 2i32)))
+
+(defn final-match (v bool) i32 (match v true (return 1i32) false 2i32))
+
+(defn final-do () i32 (do (use 1i32) (return 2i32)))
+
+(defn final-lambda () (fn () i32) (lambda () i32 (return 1i32)))
+
+(defn nested () i32 (return (return 1i32)))
+
+(defn fallback-ok (o (option i32)) i32 (let-else (option.some v) o (return 0i32)) v)
+
+(defn fallback-final (o (option i32)) void (let-else (option.some v) o (return void)))

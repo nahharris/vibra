@@ -1,0 +1,29 @@
+id = "V1-TYPE-INTERFACE-never-bounds"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "never satisfies the bound any and no other interface, takes no implementation, and is not a dict key."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.invalid-dict-key"
+level = "@error"
+source = "input.vib"
+span = [348, 353]
+
+[[expect.diagnostics]]
+code = "@name.wrong-entity-kind"
+level = "@error"
+source = "input.vib"
+span = [90, 138]
+
+[[expect.diagnostics]]
+code = "@type.unsatisfied-bound"
+level = "@error"
+source = "input.vib"
+span = [299, 316]

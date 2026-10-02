@@ -1,0 +1,3 @@
+(deftype number (union i32 f32))
+
+(defn early (c bool) number (if c (return 1i32) void) 2i32)

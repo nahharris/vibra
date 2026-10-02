@@ -1,0 +1,3 @@
+(defn answer () i32 (if false (spin) 3i32))
+
+(defn spin () never (spin))

@@ -1,0 +1,15 @@
+(defn pattern-in-value (o (option i32)) i32
+  (let-else (option.some x) x (return 0i32))
+  0i32)
+
+(defn pattern-in-fallback (o (option i32)) i32
+  (let-else (option.some y) o (return y))
+  y)
+
+(defn fallback-sibling (o (option i32)) i32
+  (let-else (option.some z) o (do (let z 1i32) (return z)))
+  z)
+
+(defn visible-after (o (option i32)) i32
+  (let-else (option.some w) o (return 0i32))
+  w)

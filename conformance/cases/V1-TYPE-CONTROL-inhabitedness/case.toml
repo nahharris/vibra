@@ -1,0 +1,35 @@
+id = "V1-TYPE-CONTROL-inhabitedness"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "A type is uninhabited when it is never, a tuple, record, or wrapper with an uninhabited component, or an enum or union of only such members; arrays, options, function types, and enums with a payloadless variant are inhabited."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@pattern.unreachable-arm"
+level = "@error"
+source = "input.vib"
+span = [236, 237]
+
+[[expect.diagnostics]]
+code = "@pattern.unreachable-arm"
+level = "@error"
+source = "input.vib"
+span = [290, 291]
+
+[[expect.diagnostics]]
+code = "@pattern.unreachable-arm"
+level = "@error"
+source = "input.vib"
+span = [341, 342]
+
+[[expect.diagnostics]]
+code = "@pattern.unreachable-arm"
+level = "@error"
+source = "input.vib"
+span = [393, 394]

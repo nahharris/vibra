@@ -1,0 +1,17 @@
+id = "V1-TYPE-CONTROL-return-outside-function"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "A return in a def initializer has no function body to exit."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.invalid-return"
+level = "@error"
+source = "input.vib"
+span = [21, 34]

@@ -1,0 +1,23 @@
+(defn spin () never (spin))
+
+(defn in-defn (c bool) i32 (if c (return 1i32) void) 2i32)
+
+(deftype holder (record n i32)
+  (defn method (value self c bool) i32 (if c (return 1i32) void) 2i32))
+
+(defint named
+  (defn label (value self c bool) i32 (if c (return 1i32) void) 2i32))
+
+(defn lambda-return (c bool) str
+  (let f (lambda () i32 (if c (return 1i32) void) 2i32))
+  "text")
+
+(defn void-return (c bool) void (if c (return void) void) void)
+
+(defn in-match (v (option i32)) i32
+  (match v (option.some n) (return n) (option.none) void)
+  0i32)
+
+(defn bad-operand (c bool) i32 (if c (return "x") void) 1i32)
+
+(defn never-operand (c bool) i32 (if c (return (spin)) void) 1i32)

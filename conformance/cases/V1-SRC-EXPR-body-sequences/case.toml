@@ -1,0 +1,11 @@
+id = "V1-SRC-EXPR-body-sequences"
+rule = "V1-SRC-EXPR"
+profile = "static-v1"
+operation = "type-check"
+description = "A let is an element of every defn-shaped body, a lambda body, and a do."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

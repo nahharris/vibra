@@ -1,0 +1,8 @@
+(defn answer () (tuple i32 i32)
+  (let hit (pick (option.some 5i32)))
+  (let miss (pick (option.none)))
+  (tupleof hit miss))
+
+(defn pick (o (option i32)) i32
+  (let-else (option.some v) o (return 100i32))
+  v)

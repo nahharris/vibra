@@ -1,0 +1,13 @@
+(defn spin () never (spin))
+
+(defn pick (a t) t where: (t any) a)
+
+(defn none-of () (option t) where: (t any) (option.none))
+
+(defn diverging-operand () i32 (pick (spin)) 1i32)
+
+(defn no-fallback () i32 (none-of) 1i32)
+
+(defn written-types () i32 (none-of types: (never)) 1i32)
+
+(defn ascribed () i32 (as (option never) (none-of)) 1i32)

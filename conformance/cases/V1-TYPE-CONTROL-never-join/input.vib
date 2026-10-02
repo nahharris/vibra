@@ -1,0 +1,19 @@
+(deftype number (union i32 f32))
+
+(defn spin () never (spin))
+
+(defn one-never (c bool) i32 (if c 1i32 (spin)))
+
+(defn all-never (c bool) never (if c (spin) (spin)))
+
+(defn match-never (v (option i32)) i32
+  (match v
+    (option.some n) n
+    (option.none) (spin)))
+
+(defn all-arms-never (v bool) never
+  (match v
+    true (spin)
+    false (spin)))
+
+(defn widened (c bool) number (if c 1i32 (spin)))

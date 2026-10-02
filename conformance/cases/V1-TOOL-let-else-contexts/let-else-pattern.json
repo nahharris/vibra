@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:21ce7d7881bf4edf948d5afab57c81c941eb1743e1b99b5026cd7b441de7f1e2",
+  "sourceId": "src/main.vib",
+  "offset": 113,
+  "nodeId": "src/main.vib#113-118",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 113,
+    "sourceId": "src/main.vib",
+    "span": {
+      "sourceId": "src/main.vib",
+      "start": 113,
+      "end": 118,
+      "startPosition": {
+        "line": 5,
+        "column": 26
+      },
+      "endPosition": {
+        "line": 5,
+        "column": 31
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "atom",
+    "category": "pattern",
+    "status": "exact",
+    "permittedForms": [
+      "tuple",
+      "array",
+      "as"
+    ],
+    "permittedLabels": []
+  },
+  "role": {
+    "status": "exact",
+    "value": "@local-binding"
+  },
+  "context": {
+    "status": "exact",
+    "value": "let-value"
+  },
+  "identity": {
+    "status": "exact",
+    "value": {
+      "kind": "binder",
+      "canonical": "binder:src/main.vib:113-118"
+    }
+  },
+  "expectedType": {
+    "status": "unavailable",
+    "value": null
+  },
+  "observedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "i32",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": [
+      {
+        "name": "flag",
+        "identity": "binder:src/main.vib:14-18"
+      },
+      {
+        "name": "value",
+        "identity": "binder:src/main.vib:24-29"
+      },
+      {
+        "name": "first",
+        "identity": "binder:src/main.vib:59-64"
+      },
+      {
+        "name": "second",
+        "identity": "binder:src/main.vib:74-80"
+      }
+    ]
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": []
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": []
+  },
+  "application": {
+    "status": "unavailable",
+    "value": null
+  },
+  "pattern": {
+    "status": "unavailable",
+    "value": null
+  }
+}

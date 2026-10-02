@@ -1,0 +1,23 @@
+id = "V1-TYPE-NAMES-let-else-scope"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "A let-else pattern binds for the later elements, never for its own value or its fallback, and a fallback may bind a name the pattern binds."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "input.vib"
+span = [72, 73]
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "input.vib"
+span = [183, 184]

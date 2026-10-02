@@ -1,0 +1,115 @@
+id = "V1-SRC-EXPR-misplaced-binding"
+rule = "V1-SRC-EXPR"
+profile = "reader-v1"
+description = "A let or let-else that is not a direct element of a body sequence is reported over the complete form, and later declarations still read."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.misplaced-binding"
+level = "@error"
+[expect.diagnostics.span]
+start = 24
+end = 37
+
+[[expect.diagnostics]]
+code = "@syntax.misplaced-binding"
+level = "@error"
+[expect.diagnostics.span]
+start = 71
+end = 84
+
+[[expect.diagnostics]]
+code = "@syntax.misplaced-binding"
+level = "@error"
+[expect.diagnostics.span]
+start = 128
+end = 141
+
+[[expect.diagnostics]]
+code = "@syntax.misplaced-binding"
+level = "@error"
+[expect.diagnostics.span]
+start = 185
+end = 198
+
+[[expect.diagnostics]]
+code = "@syntax.misplaced-binding"
+level = "@error"
+[expect.diagnostics.span]
+start = 236
+end = 249
+
+[[expect.diagnostics]]
+code = "@syntax.misplaced-binding"
+level = "@error"
+[expect.diagnostics.span]
+start = 300
+end = 313
+
+[[expect.diagnostics]]
+code = "@syntax.misplaced-binding"
+level = "@error"
+[expect.diagnostics.span]
+start = 338
+end = 351
+
+[[expect.diagnostics]]
+code = "@syntax.misplaced-binding"
+level = "@error"
+[expect.diagnostics.span]
+start = 384
+end = 397
+
+[[expect.diagnostics]]
+code = "@syntax.misplaced-binding"
+level = "@error"
+[expect.diagnostics.span]
+start = 443
+end = 456
+
+[[expect.diagnostics]]
+code = "@syntax.misplaced-binding"
+level = "@error"
+[expect.diagnostics.span]
+start = 524
+end = 538
+
+[[expect.diagnostics]]
+code = "@syntax.misplaced-binding"
+level = "@error"
+[expect.diagnostics.span]
+start = 587
+end = 601
+
+[[expect.diagnostics]]
+code = "@syntax.misplaced-binding"
+level = "@error"
+[expect.diagnostics.span]
+start = 641
+end = 655
+
+[[expect.diagnostics]]
+code = "@syntax.misplaced-binding"
+level = "@error"
+[expect.diagnostics.span]
+start = 691
+end = 705
+
+[[expect.diagnostics]]
+code = "@syntax.misplaced-binding"
+level = "@error"
+[expect.diagnostics.span]
+start = 745
+end = 759
+
+[[expect.diagnostics]]
+code = "@syntax.misplaced-binding"
+level = "@error"
+[expect.diagnostics.span]
+start = 796
+end = 824

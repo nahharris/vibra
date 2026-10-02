@@ -1,0 +1,9 @@
+(defn spin () never (spin))
+
+(defn at-i32 () i32 (spin))
+
+(defn at-str () str (spin))
+
+(defn at-option () (option i32) (spin))
+
+(defn at-void () void (spin))

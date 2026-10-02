@@ -1,0 +1,11 @@
+id = "V1-TYPE-CONVERT-return-widening"
+rule = "V1-TYPE-CONVERT"
+profile = "static-v1"
+operation = "type-check"
+description = "The operand of return is checked at the written result type, so the widening to a union fires as it does for a final expression."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

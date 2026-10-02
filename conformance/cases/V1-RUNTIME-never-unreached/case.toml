@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-never-unreached"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A diverging call on a branch that is not taken is never made."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

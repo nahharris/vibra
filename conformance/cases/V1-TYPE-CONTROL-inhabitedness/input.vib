@@ -1,0 +1,21 @@
+(deftype dead never)
+(deftype dead-record (record n i32 gone never))
+(deftype dead-enum (enum a never b never))
+(deftype dead-union (union dead never))
+(deftype live-enum (enum a never b void))
+
+(defn dead-wrapper (v dead) i32 (match v - 0i32))
+
+(defn dead-rec (v dead-record) i32 (match v - 0i32))
+
+(defn dead-en (v dead-enum) i32 (match v - 0i32))
+
+(defn dead-un (v dead-union) i32 (match v - 0i32))
+
+(defn live-en (v live-enum) i32 (match v - 0i32))
+
+(defn array-of-never (v (array never)) i32 (match v - 0i32))
+
+(defn option-of-never (v (option never)) i32 (match v - 0i32))
+
+(defn function-to-never (v (fn () never)) i32 (match v - 0i32))

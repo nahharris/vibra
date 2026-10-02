@@ -1,0 +1,23 @@
+id = "V1-TYPE-CONTROL-never-functions"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "A function declared never needs a final expression of type never; any other final expression, and an empty body, is a mismatch."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [56, 60]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [63, 89]

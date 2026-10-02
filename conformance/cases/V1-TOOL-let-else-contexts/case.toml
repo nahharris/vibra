@@ -1,0 +1,47 @@
+id = "V1-TOOL-let-else-contexts"
+rule = "V1-TOOL-workspace-position-query"
+profile = "tooling-v1"
+operation = "query"
+description = "A let and let-else pattern and value are let-value, a let-else fallback is let-else-fallback, a return operand is return-operand, and an element after a binding keeps its sequence's context with the bindings visible."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 59
+snapshot = "let-pattern.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 65
+snapshot = "let-value.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 81
+snapshot = "second-pair-value.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 126
+snapshot = "fallback.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 134
+snapshot = "return-operand.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 113
+snapshot = "let-else-pattern.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 145
+snapshot = "after-binding.json"

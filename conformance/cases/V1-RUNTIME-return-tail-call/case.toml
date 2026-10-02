@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-return-tail-call"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "The operand of a return is in tail position, so a recursion through it reuses one activation."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

@@ -1,0 +1,17 @@
+id = "V1-SRC-EXPR-old-let-shape"
+rule = "V1-SRC-EXPR"
+profile = "static-v1"
+operation = "type-check"
+description = "The old let shape with a body has no compatibility spelling: its trailing form is read as an unpaired operand."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-form"
+level = "@error"
+source = "input.vib"
+span = [22, 44]
