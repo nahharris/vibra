@@ -1,0 +1,29 @@
+id = "V1-TYPE-CONVERT-ascription-through-forms"
+rule = "V1-TYPE-CONVERT"
+profile = "static-v1"
+operation = "type-check"
+description = "An ascription that fails through an if, a let, or a do reports one invalid ascription at the form, as a direct operand does."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.invalid-ascription"
+level = "@error"
+source = "input.vib"
+span = [35, 63]
+
+[[expect.diagnostics]]
+code = "@type.invalid-ascription"
+level = "@error"
+source = "input.vib"
+span = [93, 124]
+
+[[expect.diagnostics]]
+code = "@type.invalid-ascription"
+level = "@error"
+source = "input.vib"
+span = [153, 171]
