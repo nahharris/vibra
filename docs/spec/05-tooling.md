@@ -170,7 +170,10 @@ If the single-source checker reports `@tool.unavailable`, `fmt` discards that
 incomplete check result and continues with syntax-only formatting. It uses no
 binding facts and must preserve labelled argument order; the unavailable
 semantic check does not make formatting unavailable. Parser and formatter
-diagnostics still apply to preview and write.
+diagnostics still apply to preview and write. The layouts that `fmt` writes for
+`do`, `let`, and `let-else` are the ones the source-language chapter's
+"Canonical format" section states; they need no binding facts, so they apply
+under syntax-only formatting too.
 
 JSON mode emits exactly one versioned envelope to stdout and sends diagnostics
 and operational logs to stderr. The envelope always has these fields:
@@ -424,9 +427,22 @@ self-contained module beside a broken one keeps its facts.
 `role` is a closed M2 vocabulary: `@atom-value`, `@entity-reference`,
 `@code-reference`, `@literal`, `@local-binding`, `@discard`, `@declaration`,
 `@application`, and `@unknown`. `context` is one of `module`, `initializer`,
-`function`, `parameter`, `lambda`, `let-value`, `let-body`, `branch`,
-`argument`, `result`, `trivia`, or `recovery`. The structural category remains
-authoritative for grammar facts; these fields describe semantic position.
+`function`, `parameter`, `lambda`, `let-value`, `let-else-fallback`,
+`return-operand`, `branch`, `argument`, `result`, `trivia`, or `recovery`. The
+structural category remains authoritative for grammar facts; these fields
+describe semantic position.
+
+`let-value` is the context of every pattern and value of a `let` and of the
+pattern and value of a `let-else`. `let-else-fallback` is the context of the
+fallback of a `let-else`, and `return-operand` is the context of the operand of a
+`return`. An element of a body sequence, including one that follows a `let` or
+`let-else`, has the context of the sequence that holds it (`function`, `lambda`,
+or the context of the enclosing `do`); a `let` form opens no context of its own,
+because it has no body. The vocabulary has no `let-body`: no form carries one.
+The `visibleLocals` of a position in a body sequence include the bindings of
+every earlier `let` and `let-else` element of that sequence and, inside a `let`,
+those of its earlier pairs. They exclude the bindings of the pair or form that
+contains the position.
 
 Identity values are `{ "kind": ..., "canonical": ... }`. Declaration
 identities use the resolver's canonical spelling. Lexical binders use the
@@ -442,7 +458,7 @@ Types are closed objects with `kind`, `name`, `parameters`, `result`, and
 
 | `kind` | `name` | `parameters` | `labelled` |
 |---|---|---|---|
-| `primitive` | the builtin's name, such as `str` or `i32` | empty | empty |
+| `primitive` | the builtin's name, such as `str`, `i32`, or `never` | empty | empty |
 | `function` | `fn` | parameter types, in order | labelled slots |
 | `declared` | the declared type's path | type arguments, in order | empty |
 | `interface` | the interface's path, or `any` | interface arguments | empty |

@@ -268,7 +268,8 @@ found. A path that resolves to such a `defn` whose signature is not an entry
 signature emits `@project.invalid-entry-signature`.
 
 An entry signature has no parameters and a result of either `void` or
-`result void e` for a nominal error type `e`. Returning an error produces a
+`result void e` for a nominal error type `e`; `never` is neither, so an entry
+result of `never` or an error type of `never` is not an entry signature. Returning an error produces a
 structured nonzero program result; traps remain distinct.
 The error type MUST NOT hold a function type, directly or through a declared
 type, because the result is observed and a function has no observable value;
@@ -560,8 +561,11 @@ target unavailable.
 The table is closed: another assertion name, generic assertion, implicit
 conversion, collection assertion, or deferred operand type is
 `@tool.unavailable` in M2. Assertion operands are checked and evaluated
-left-to-right. A test body has result type `void`, and its static effects row
-MUST be empty; assertion calls do not add an effect.
+left-to-right. A test body is a body sequence with result type `void`, and its
+static effects row MUST be empty; assertion calls do not add an effect. A
+`return` directly in a test body has no function to exit and emits
+`@type.invalid-return`, while one inside a `lambda` in the test exits that
+`lambda`.
 
 A passing assertion returns `void`. A false assertion records one structured
 test failure with the assertion's canonical name, the canonical literal forms

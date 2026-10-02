@@ -26,6 +26,7 @@ table governs.
 | `@syntax.invalid-name` | `@error` |
 | `@syntax.retired-form` | `@error` |
 | `@syntax.invalid-form` | `@error` |
+| `@syntax.misplaced-binding` | `@error` |
 | `@syntax.duplicate-attribute` | `@error` |
 | `@syntax.unknown-attribute` | `@error` |
 | `@syntax.invalid-attribute` | `@error` |
@@ -75,7 +76,11 @@ table governs.
 | `@type.invalid-dict-key` | `@error` |
 | `@type.invalid-try` | `@error` |
 | `@type.unhandled-fallible` | `@error` |
+| `@type.invalid-return` | `@error` |
+| `@type.redundant-return` | `@error` |
+| `@type.unreachable-code` | `@error` |
 | `@pattern.refutable-binding` | `@error` |
+| `@pattern.irrefutable-let-else` | `@error` |
 | `@pattern.non-exhaustive` | `@error` |
 | `@pattern.unreachable-arm` | `@error` |
 | `@effect.outside-ceiling` | `@error` |
@@ -228,6 +233,36 @@ overlay is present. A repeated source ID emits `@module.source-id-collision`
 at the empty span `0..0` of that source ID. The affected graph is not type
 checked or executed because diagnostics and source text would otherwise be
 ambiguous across packages.
+
+### Binding, `return`, and `never` diagnostics
+
+The binding-sequence, `return`, and `never` rules add the codes
+`@syntax.misplaced-binding`, `@type.invalid-return`, `@type.redundant-return`,
+`@type.unreachable-code`, and `@pattern.irrefutable-let-else`. All have fixed
+level `@error` and fix capability `@none`. The rules otherwise reuse existing
+codes, and each primary span below is a complete half-open UTF-8 range with the
+owning source identity:
+
+| Condition | Code | Primary span | Related span and notes |
+| --- | --- | --- | --- |
+| `let` or `let-else` that is not a direct element of a body sequence | `@syntax.misplaced-binding` | the complete form | none; a note names the admitted positions |
+| `let` with an odd number of operands after its head, or none; `let-else` without exactly three operands; `return` without exactly one | `@syntax.invalid-form` | the complete form | none |
+| `let-else` pattern that is irrefutable | `@pattern.irrefutable-let-else` | the pattern | none; a note names `let` |
+| `let-else` fallback whose type is not `never` | `@type.mismatch` | the fallback | none; there is no written type to relate |
+| `return` in a `def` initializer, or in a `test` body outside a `lambda` | `@type.invalid-return` | the complete `return` form | none |
+| `return` in tail position of its function | `@type.redundant-return` | the complete `return` form | none |
+| expression of type `never` in a position that does not admit one | `@type.unreachable-code` | the expression | none |
+| element following an element of type `never` in one body sequence | `@type.unreachable-code` | the first following element | the diverging element |
+| binder repeating a name a `let` or `let-else` left visible | `@name.redeclaration` | the later binder | the earlier binder |
+| declaration named `never` | `@name.reserved-declaration` | the name | none |
+| generic argument that only diverging operands could fix | `@type.ambiguous-inference` | the application | one note per missing constraint |
+| `never` as a type argument for a bound other than `any` | `@type.unsatisfied-bound` | the type argument | the bound |
+| `impl` block whose target is `never` | `@name.wrong-entity-kind` | the target | none |
+| arm requiring an uninhabited payload | `@pattern.unreachable-arm` | the arm's pattern | none |
+
+One form never receives both `@type.unreachable-code` and
+`@type.redundant-return`; the position error wins. A form emits at most one
+`@type.unreachable-code`.
 
 ## Recovery
 
@@ -465,9 +500,13 @@ an invalid application never produces formatter binding facts.
 Pattern coverage includes direct bare-name binders, nested destructuring in
 `let`, positional parameters, lambdas, and `match`, duplicate-name and
 no-shadowing rejection, all three repeating discards, and irrefutability
-checking against the expected type. The removed `(bind name)` spelling MUST be
-rejected with no compatibility bridge. Retired loop and return forms MUST be
-rejected with `@syntax.retired-form`. `@type.not-applicable`,
+checking against the expected type, with `let` written in the pair form inside
+a body sequence. The removed `(bind name)` spelling MUST be rejected with no
+compatibility bridge. Retired `while`, `for`, `break`, and `continue` forms MUST
+be rejected with `@syntax.retired-form`; `return` is no longer retired, and the
+old `(let pattern value body...)` shape has no compatibility spelling: whatever
+follows its first pair is read under the pair grammar, as further pairs, so the
+old shape is rejected, or means something else, by the rules below alone. `@type.not-applicable`,
 `@type.invalid-tuple-index`, `@type.unknown-record-field`, and
 `@pattern.refutable-binding` all have fixed level `@error`.
 
@@ -494,6 +533,67 @@ contains itself through an array. `@type.mismatch`,
 `@type.ambiguous-inference`, `@type.infinite-size`, `@type.invalid-dict-key`,
 `@type.invalid-try`, `@type.unhandled-fallible`, `@pattern.non-exhaustive`,
 and `@pattern.unreachable-arm` all have fixed level `@error`.
+
+Binding coverage, in `V1-SRC-EXPR` and `V1-TYPE-NAMES`, proves a one-pair and a
+multi-pair `let`; a later pair seeing an earlier one; bindings visible to every
+later element of the sequence and to nothing before, inside, or after it, so a
+binding in a `do` ends with that `do`; a `let` as the final element, whose
+sequence is `void`; destructuring and discard pairs; and the redeclaration of a
+name by a consecutive `let`, rejected with `@name.redeclaration`, beside the
+same name reused in two sibling `do` forms, which is accepted. Each admitted
+position and each rejected one is covered: a `let` or `let-else` as an
+application operand, an `if` condition and branch, a `match` subject and arm
+result, a `def` initializer, a `let` and `let-else` value, and a `return`, `try`,
+`as`, and anonymous-value operand, each rejected with
+`@syntax.misplaced-binding` and each accepted once wrapped in `do`. Malformed
+forms are rejected with `@syntax.invalid-form`: `(let)`, `(let a)`,
+`(let a 1 b)`, `(let-else p e)`, `(let-else p e f g)`, `(return)`, and
+`(return a b)`. Every such case is followed by a valid form that still checks,
+which proves recovery, and the old `(let pattern value body...)` shape is
+rejected with no bridge.
+
+`let-else` and `return` coverage, in `V1-TYPE-CONTROL`, accepts a refutable
+pattern whose bindings are visible after the form and not in its value or
+fallback, and a `let-else` that is the final element; it rejects an irrefutable
+pattern with `@pattern.irrefutable-let-else` and a fallback that is not `never`
+with `@type.mismatch`. A fallback is covered as a `return`, as a call of a
+function whose result is `never`, and as an `if` whose branches are all `never`.
+`return` is covered in a `defn`, a nested method, an `impl` member, and a
+`lambda`, where it exits only the lambda; at a written result type with a
+widening; as `(return void)`; rejected in a `def` initializer and in a test body
+with `@type.invalid-return`, and accepted inside a `lambda` in a test; and
+rejected as redundant with `@type.redundant-return` as a final expression, a
+branch of a final `if`, an arm of a final `match`, and the last element of a
+final `do`, while the same `return` in a `let-else` fallback is accepted. The
+interpreter cases prove the exit value, that a later element does not run, and,
+with the tail-call corpus, that the operand of a `return` is a tail call.
+
+`never` coverage proves that a function declared `never` accepts a final
+expression of type `never` and rejects any other, empty bodies included with
+`@type.mismatch`; that `never` is admitted at several expected types; the branch
+join for `if` and `match` with one, some, and all branches `never`; every
+admitted position and every rejected one with `@type.unreachable-code`,
+including an element after a `never` element; inference, where an uninferable
+argument that only a diverging operand could fix is rejected with
+`@type.ambiguous-inference` and the same argument written as `types: (never)` or
+inside `(result t never)` is accepted; `never` as a type argument bounded by
+`any`, and its rejection against another bound with `@type.unsatisfied-bound`
+and as a dict key with `@type.invalid-dict-key`; a declaration named `never`,
+rejected with `@name.reserved-declaration`, and a module value named `never`,
+rejected with `@name.reserved-value-spelling`; inhabitedness for `never`, a
+tuple, a record, a wrapper, an enum with and without a payloadless variant, a
+union, an array of `never`, and a recursive nominal type; exhaustiveness, where a
+`match` on `(result t never)` is exhaustive with only the `ok` arm, an `err` arm
+is rejected with `@pattern.unreachable-arm`, and `(let (result.ok value) x)` is
+irrefutable; and fallibility, where an ignored `(result t never)` is accepted and
+an ignored `(result t e)` is still rejected with `@type.unhandled-fallible`.
+`@syntax.misplaced-binding`, `@type.invalid-return`, `@type.redundant-return`,
+`@type.unreachable-code`, and `@pattern.irrefutable-let-else` all have fixed
+level `@error`. Layout coverage, in `V1-SRC-FMT`, formats the single-pair
+`let`, multi-pair `let`, and `let-else` of the source-language chapter in every
+layout it states, idempotently, and workspace-position coverage, in `V1-TOOL`,
+reports the contexts `let-value`, `let-else-fallback`, and `return-operand`, no
+`let-body`, and the `visibleLocals` of a position after a `let`.
 
 An `interpret` result snapshot is the canonical result observation
 `(record type: T value: v)` of the runtime chapter's canonical value encoding.
