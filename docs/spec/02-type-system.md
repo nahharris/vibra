@@ -783,8 +783,10 @@ whole list:
   (defn empty () (ring t)
     visibility: @public
     (ring items: (array.of) head: 0u64)))
+```
 
-(def empty-ring (ring str) (ring.empty types: (str)))
+```vibra
+(ring.empty types: (str))
 ```
 
 `types:` is a reserved call-site label. A declaration MUST NOT introduce a
@@ -851,7 +853,7 @@ implementation can be written for it, none is supplied by a closed registry,
 and a destination-dispatched member such as `from.convert`, selected from an
 expected type of `never`, would have to produce a value that does not exist. An
 `impl` block whose target is `never` emits `@name.wrong-entity-kind` at the
-target, as an anonymous structural type does. A type argument of `never` for a
+block, as an anonymous structural type does. A type argument of `never` for a
 parameter whose bound is any other interface is `@type.unsatisfied-bound`, and
 `never` is not an admissible dict key.
 

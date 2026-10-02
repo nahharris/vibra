@@ -111,8 +111,7 @@ The following are not partially implemented in v1:
 - algebraic effect handlers, effect polymorphism, sealed effect roots, declared
   effect dominance or sub-effect relations, runtime grants, permission prompts,
   path-scoped capabilities, and user-defined host providers;
-- assignment, `while`, `for`, `break`, and `continue` forms; `return` is
-  specified, and exits only the innermost function body;
+- assignment, `while`, `for`, `break`, and `continue` forms;
 - async functions, tasks, channels, threads, and shared mutable state;
 - raw WebAssembly FFI, native FFI, dynamic loading, and a package registry;
 - a SemVer dependency solver; dependencies are local or exact-revision Git;

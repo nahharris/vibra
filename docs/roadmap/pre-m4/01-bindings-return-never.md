@@ -1,6 +1,6 @@
 # Pre-M4 step 1: bindings, `return`, and `never`
 
-Status: Stage A specification landed; Stage B not started
+Status: implemented in the pre-M4 bindings PR
 Applies to: the pre-M4 language revision in [`../v1.md`](../v1.md)
 
 This is the behavior checklist that [`../execution.md`](../execution.md) step 4
@@ -67,7 +67,7 @@ calls"), and [`07-diagnostics-and-conformance.md`](../../spec/07-diagnostics-and
 | A02 | `let` multi pair, later value sees earlier pair | `(defn f () i32 (let a 1i32 b a) b)` | accepted | none | unchanged | `syn::let_multi_pair` | `V1-SRC-EXPR-let-pairs` |
 | A03 | `let` with a discard pair and a destructuring pair | `(let - (attempt) (tupleof x y) pair)` | accepted | none | unchanged | `syn::let_discard_and_destructure` | `V1-SRC-EXPR-let-pairs` |
 | A04 | Body sequences that admit a binding | `let` as a direct element of a `defn`, nested method, `impl` member, interface default member, `lambda`, `do`, and `test` body | each accepted | none | unchanged | `syn::let_in_every_body_sequence` | `V1-SRC-EXPR-body-sequences` |
-| A05 | `let-else` is a body element | `(defn f ((o (option i32))) i32 (let-else (option.some v) o (return 0i32)) v)` | accepted | none | unchanged | `syn::let_else_element` | `V1-SRC-EXPR-let-else` |
+| A05 | `let-else` is a body element | `(defn f (o (option i32)) i32 (let-else (option.some v) o (return 0i32)) v)` | accepted | none | unchanged | `syn::let_else_element` | `V1-SRC-EXPR-let-else` |
 | A06 | `let` misplaced as an application operand | `(defn f () i32 (g (let a 1i32)))` | rejected | `@syntax.misplaced-binding`, `@error`, the `let` form | n/a (rejected) | `syn::misplaced_application_operand` | `V1-SRC-EXPR-misplaced-binding` |
 | A07 | Misplaced as an `if` condition, `then` branch, and `else` branch | `(if (let a true) 1i32 2i32)`, `(if c (let a 1i32) 2i32)`, `(if c 1i32 (let a 2i32))` | three diagnostics, in source order | `@syntax.misplaced-binding`, `@error`, each `let` form | n/a (rejected) | `syn::misplaced_if_positions` | `V1-SRC-EXPR-misplaced-binding` |
 | A08 | Misplaced as a `match` subject and an arm result | `(match (let a 1i32) - 0i32)`, `(match x - (let a 1i32))` | two diagnostics | `@syntax.misplaced-binding`, `@error`, each `let` form | n/a (rejected) | `syn::misplaced_match_positions` | `V1-SRC-EXPR-misplaced-binding` |
@@ -84,7 +84,7 @@ calls"), and [`07-diagnostics-and-conformance.md`](../../spec/07-diagnostics-and
 | A19 | The old `let` shape has no bridge | `(let x 1i32 (f x))` and `(let x 1i32 (f x) (g x))` | read under the pair grammar: the first has an odd operand count; the second has a second pair whose pattern `(f x)` is a constructor pattern that does not resolve | first: `@syntax.invalid-form`, `@error`, the form; second: `@name.unknown-symbol`, `@error`, the symbol `f`, and `@name.redeclaration` over the inner `x` (pin the exact set from the resolver's existing pattern behaviour) | n/a (rejected) | `syn::old_let_shape_has_no_bridge` | `V1-SRC-EXPR-old-let-shape` |
 | A20 | Recovery after a misplaced form | a misplaced `let` in one defn, followed by a valid defn using `let` | the first rejected, the second still checks and is accepted | one `@syntax.misplaced-binding` | n/a (rejected) | `syn::recovery_after_misplaced` | `V1-SRC-EXPR-misplaced-binding` |
 | A21 | Recovery after a malformed form | `(let a 1i32 b)` followed by a valid defn | the second checks | one `@syntax.invalid-form` | n/a (rejected) | `syn::recovery_after_malformed` | `V1-SRC-EXPR-binding-arity` |
-| A22 | A misplaced form's operands are still checked | `(g (let a (h undefined)))` | both the misplacement and the unknown symbol are reported, in span order; `a` is bound nowhere | `@syntax.misplaced-binding` over the `let`; `@name.unknown-symbol` over `undefined` | n/a (rejected) | `syn::misplaced_operands_checked` | `V1-SRC-EXPR-misplaced-binding` |
+| A22 | A misplaced form's value operands are still read | `(g (let a (h (let b 1i32))))` | both misplacements are reported; the declaration is checked no further, so no `@name.unknown-symbol` follows | `@syntax.misplaced-binding` over each `let` | n/a (rejected) | `syn::misplaced_operands_checked` | `V1-SRC-EXPR-misplaced-binding` |
 | A23 | `return` is no longer retired; the other four are | `(defn f () void (return void))` accepted; `(while true)`, `(for x)`, `(break)`, `(continue)` in a case | `return` accepted; the others rejected | `@syntax.retired-form`, `@error`, the head atom, for each of the four | n/a | `syn::retired_forms_exclude_return` | `V1-SRC-EXPR-retired-form` (existing, migrated) |
 | A24 | `let-else` and `return` are reserved heads, not applications | a value named `return` called as `(return 1i32)` in a position the grammar reads as the form | the list is the form, never an application of a value | none beyond the form's own rules | unchanged | `syn::reserved_heads_win_over_application` | `V1-SRC-EXPR-reserved-heads` |
 | A25 | Old retired-pattern case keeps rejecting `(bind x)` | `(defn bad (value i32) i32 (let (bind x) value) value)` | `bind` rejected as before | `@syntax.retired-form`, `@error`, the `bind` head | n/a (rejected) | `syn::bind_still_retired` | `V1-SRC-EXPR-pattern-retired-form` (existing, migrated) |
@@ -129,7 +129,7 @@ calls"), and [`07-diagnostics-and-conformance.md`](../../spec/07-diagnostics-and
 | C11 | Fallback is a call of a `never` function | `(let-else p v (spin))` | accepted | none | unchanged | `typ::fallback_never_call` | `V1-TYPE-CONTROL-let-else-fallbacks` |
 | C12 | Fallback is an `if` or `match` whose branches are all `never`, or a `do` ending in `return` | `(let-else p v (if c (spin) (spin)))`, `(let-else p v (do (use 1i32) (return 0i32)))` | accepted | none | unchanged | `typ::fallback_compound_never` | `V1-TYPE-CONTROL-let-else-fallbacks` |
 | C13 | Fallback of another type | `(let-else p v 0i32)`, `(let-else p v (try (attempt)))` | rejected | `@type.mismatch`, `@error`, the fallback; no related span | n/a (rejected) | `typ::fallback_not_never` | `V1-TYPE-CONTROL-let-else-fallbacks` |
-| C14 | `let-else` as the final element | `(defn f ((o (option i32))) void (let-else (option.some v) o (return void)))` | accepted; sequence `void` | none | unchanged | `typ::final_let_else_is_void` | `V1-TYPE-CONTROL-let-else-fallbacks` |
+| C14 | `let-else` as the final element | `(defn f (o (option i32)) void (let-else (option.some v) o (return void)))` | accepted; sequence `void` | none | unchanged | `typ::final_let_else_is_void` | `V1-TYPE-CONTROL-let-else-fallbacks` |
 | C15 | `let-else` with a value of `(option never)` | `(let-else (option.some v) (no-values) (return 0i32))` where the `some` variant is uninhabited | accepted: the pattern is refutable (it matches no value), so the fallback is the only path | none | unchanged | `typ::let_else_over_uninhabited_payload` | `V1-TYPE-CONTROL-let-else-patterns` |
 | C16 | Effect rows of a `let` value and a `let-else` fallback count toward the ceiling | a value performing an effect outside its ceiling | deferred to the M4 effect step; no case before M4 | none now | n/a | none | none (deferred, listed under Deferred) |
 
@@ -235,8 +235,8 @@ Widths are 88 columns.
 | ID | Rule | Input | Expected | Format | Host test | Corpus |
 | --- | --- | --- | --- | --- | --- | --- |
 | H01 | A `let` that fits is one line | `(let   a   1i32)` in a body | `(let a 1i32)` | `(let a 1i32)` | `fmt::let_fits_on_one_line` | `V1-SRC-FMT-let-let-else` |
-| H02 | A multi-pair `let` that fits is one line | `(let a 1i32   b 2i32)` | one line | `(let a 1i32 b 2i32)` | `fmt::multi_pair_let_fits_on_one_line` | `V1-SRC-FMT-let-let-else` |
-| H03 | A multi-pair `let` that does not fit: head alone, one pair per line | three long pairs | head on its line, each pair on its own line at two spaces | the spec's `(let` / pair / pair / `count (entry-count entry))` example | `fmt::multi_pair_let_one_pair_per_line` | `V1-SRC-FMT-let-let-else` |
+| H02 | A two-pair `let` is always multiline, even when it would fit | `(let a 1i32   b 2i32)` | head alone, one pair per line | `(let` / `  a 1i32` / `  b 2i32)` | `fmt::two_pair_let_is_multiline` | `V1-SRC-FMT-let-let-else` |
+| H03 | A three-pair `let`: head alone, one pair per line | three long pairs | head on its line, each pair on its own line at two spaces | the spec's `(let` / pair / pair / `count (entry-count entry))` example | `fmt::multi_pair_let_one_pair_per_line` | `V1-SRC-FMT-let-let-else` |
 | H04 | A single pair whose pair does not fit: pattern line, value line | the spec's `summary` example | `(let` / `summary` / the value and the closing delimiter | as the spec example | `fmt::single_pair_let_splits_pattern_and_value` | `V1-SRC-FMT-let-let-else` |
 | H05 | A `let-else` that fits is one line | `(let-else   (option.some second) (items 1u64) (return (result.ok entry)))` | one line | one line | `fmt::let_else_fits_on_one_line` | `V1-SRC-FMT-let-let-else` |
 | H06 | A `let-else` whose pattern and value fit together | the spec's `picked` example | head alone; pattern and value on one line; fallback on the next | as the spec example | `fmt::let_else_pattern_and_value_share_a_line` | `V1-SRC-FMT-let-let-else` |
@@ -248,6 +248,71 @@ Widths are 88 columns.
 | H12 | A `let` nested in a `do` in a `match` arm | an arm result `(do (let a 1i32) a)` too long for the line | the `do` breaks as H08 and the arm stays one arm per line | as written, normalized | `fmt::let_inside_do_inside_match_arm` | `V1-SRC-FMT-let-let-else` |
 | H13 | Every spec example round-trips | each `vibra` fence of the source and type chapters that holds the new forms | the formatter leaves the canonical ones unchanged | unchanged | `fmt::spec_examples_are_canonical` | `V1-SRC-FMT-spec-examples` |
 | H14 | A `return` is an ordinary list | `(return   (some-call   a   b))` | `(return (some-call a b))`; breaks like any one-operand list when long | one line, or head alone and the operand below | `fmt::return_is_a_plain_list` | `V1-SRC-FMT-let-let-else` |
+
+## Evidence
+
+Every row of sections A through H maps to a passing host test, a passing corpus
+case, or an entry below under "Rows not done". Host tests live in the files named
+under Conventions; corpus cases are under `conformance/cases/`. Diagnostics are
+listed in emission order, which is the order the checker produces them: the
+single-source path does not sort, so a position error found while an operand is
+checked precedes the application error that follows it.
+
+| Rows | Host tests | Corpus cases |
+| --- | --- | --- |
+| A01-A05 | `syn::let_forms_are_body_elements_with_one_or_more_pairs`, `syn::a_let_has_pairs_in_the_ast` | `V1-SRC-EXPR-let-pairs`, `V1-SRC-EXPR-body-sequences`, `V1-SRC-EXPR-let-else` |
+| A06-A12 | `syn::a_binding_form_anywhere_else_is_misplaced`, `syn::a_misplaced_form_is_accepted_once_wrapped_in_do` | `V1-SRC-EXPR-misplaced-binding`, `V1-SRC-EXPR-misplaced-binding-do` |
+| A13-A18, A21 | `syn::binding_and_return_arity_is_checked`, `syn::a_rejected_form_leaves_the_next_declaration_readable` | `V1-SRC-EXPR-binding-arity` |
+| A19-A20 | `syn::the_old_let_shape_has_no_bridge`, `syn::a_rejected_form_leaves_the_next_declaration_readable` | `V1-SRC-EXPR-old-let-shape`, `V1-SRC-EXPR-misplaced-binding` |
+| A23, A25 | `syn::return_is_no_longer_retired_but_the_loop_forms_are` | `V1-SRC-EXPR-retired-form`, `V1-SRC-EXPR-pattern-retired-form` (existing, migrated) |
+| B01-B04, B13 | `res::a_binding_reaches_later_pairs_and_later_elements_only` | `V1-TYPE-NAMES-let-scope` |
+| B05-B08 | `res::a_binding_that_outlasts_its_form_makes_a_later_repeat_a_redeclaration` | `V1-TYPE-NAMES-let-redeclaration` |
+| B09-B12 | `res::a_let_else_pattern_binds_after_the_form_and_not_in_its_value_or_fallback` | `V1-TYPE-NAMES-let-else-scope` |
+| B14-B15 | `res::discard_pairs_repeat_freely` | `V1-TYPE-NAMES-binding-discards`, `V1-PROJECT-workspace-check-binding-shadow` (existing, migrated) |
+| B16-B17 | `syn::never_is_reserved_as_a_declaration_and_a_value_spelling` | `V1-SRC-DECL-never-reserved` |
+| C01-C06 | `typ::a_final_let_is_void`, `typ::let_patterns_must_be_irrefutable_and_values_have_no_expected_type`, `typ::a_bound_or_discarded_result_is_handled` | `V1-TYPE-CONTROL-binding-forms` |
+| C07-C15 | `typ::let_else_needs_a_refutable_pattern_and_a_never_fallback` | `V1-TYPE-CONTROL-let-else-patterns`, `V1-TYPE-CONTROL-let-else-fallbacks` |
+| D01-D06, D16 | `typ::return_exits_the_innermost_function_at_its_written_result_type` | `V1-TYPE-CONTROL-return`, `V1-TYPE-CONVERT-return-widening` |
+| D07-D09 | `typ::return_outside_a_function_is_invalid` | `V1-TYPE-CONTROL-return-outside-function`, `V1-TYPE-CONTROL-return-in-test-body`, `V1-TYPE-CONTROL-return-in-test-lambda` |
+| D10-D15, D17-D18 | `typ::a_return_in_tail_position_is_redundant`, `typ::a_return_nested_in_a_return_reports_the_position_error_once`, `typ::a_never_function_needs_a_never_final_expression` | `V1-TYPE-CONTROL-redundant-return` |
+| D19-D20 | `typ::never_is_unreachable_code_outside_its_admitted_positions` | `V1-TYPE-CONTROL-try-and-return`, `V1-TYPE-CONTROL-never-positions` |
+| E01-E04 | `typ::a_never_function_needs_a_never_final_expression`, `typ::never_is_admitted_at_expected_types_and_skipped_in_joins` | `V1-TYPE-CONTROL-never-functions`, `V1-TYPE-CONTROL-never-acceptance` |
+| E05-E12 | `typ::never_is_unreachable_code_outside_its_admitted_positions`, `typ::never_is_admitted_at_expected_types_and_skipped_in_joins` | `V1-TYPE-CONTROL-never-join`, `V1-TYPE-CONTROL-never-positions` |
+| E13-E16 | `typ::never_is_written_wherever_a_type_is_and_is_never_inferred` | `V1-TYPE-NOMINAL-never-type-positions`, `V1-TYPE-INFER-never-inference` |
+| E17-E20 | `typ::never_satisfies_any_and_nothing_else` | `V1-TYPE-INTERFACE-never-bounds` |
+| E21-E28 | `typ::inhabitedness_is_structural`, `typ::inhabitedness_terminates_on_recursive_types`, `typ::uninhabited_types_need_no_arm` | `V1-TYPE-CONTROL-inhabitedness`, `V1-TYPE-CONTROL-never-exhaustiveness`, `V1-TYPE-CONTROL-never-spec-example` |
+| E29-E31 | `typ::a_result_that_cannot_fail_is_not_fallible` | `V1-TYPE-CONTROL-never-fallibility` |
+| E32 | `schema::never_is_a_primitive_type_name` | `V1-RUNTIME-never-type-encoding` |
+| E33 | none beyond the case | `V1-PROJECT-entry-never` |
+| F01-F07, F10 | `int::let_binds_in_order_for_the_rest_of_the_sequence`, `int::let_else_takes_the_match_path_or_the_fallback`, `int::return_skips_the_rest_and_a_lambda_return_leaves_only_the_lambda`, `int::the_operand_of_return_widens_at_the_written_result_type`, `int::the_operand_of_return_is_a_tail_call`, `int::a_diverging_call_on_an_untaken_branch_is_never_made` | `V1-RUNTIME-let-else`, `V1-RUNTIME-return`, `V1-RUNTIME-return-tail-call`, `V1-RUNTIME-never-unreached` |
+| F08-F09 | existing tail-call host tests | `V1-RUNTIME-tail-negative`, `V1-RUNTIME-widened-tail-call` (existing, migrated) |
+| G01-G05, G07 | none beyond the case | `V1-TOOL-let-else-contexts` |
+| G06 | `schema::the_context_vocabulary_has_the_new_contexts_and_no_let_body` | `V1-TOOL-let-else-contexts` |
+| G08 | `crates/vibra-conformance/tests/diagnostic_registry.rs` (existing, unedited) and the registry unit test | `V1-DIAG` registry coverage (existing) |
+| H01-H14 | `fmt::*` in `crates/vibra-fmt/tests/pre_m4_bindings.rs` | `V1-SRC-FMT-let-let-else`, `V1-SRC-FMT-let-comments` |
+
+Crate prefixes `syn`, `res`, `typ`, `fmt`, `int`, and `schema` are the test files
+`crates/vibra-syntax/tests/pre_m4_bindings.rs`,
+`crates/vibra-resolve/tests/pre_m4_bindings.rs`,
+`crates/vibra-types/tests/pre_m4_bindings.rs`,
+`crates/vibra-fmt/tests/pre_m4_bindings.rs`,
+`crates/vibra-conformance/tests/pre_m4_runtime.rs`, and
+`crates/vibra-schema/tests/pre_m4_vocabulary.rs`.
+
+### Rows not done
+
+- **A22** changed: the declaration that holds a misplaced form is checked no
+  further, so a misplaced operand does not also yield a name error (the spec
+  states this).
+- **A24** has no dedicated case; the reserved heads are exercised by the arity
+  and misplacement cases.
+- **B18** is a known gap, pinned by no case (below).
+- **C16** is deferred to the M4 effect step.
+- **G09** is not applicable: the CLI has no `query` command until M6.
+- **G10** has no dedicated test: the query snapshots are produced by the real
+  handler and the schema enum change is checked by `schema::*`.
+- **E20** reports at the `impl` block rather than the target, as an anonymous
+  target does today.
 
 ## Stage B tasks, in order
 
@@ -393,3 +458,15 @@ the ones the Stage B rows depend on:
   decision (question 8).
 - Wasm lowering of `return`, `let-else`, and sequences is M4 work; the
   interpreter is the oracle until then.
+
+## Known gaps
+
+- The spec says keywords and primitive type names cannot be rebound, but the
+  implementation accepts a local binder named `if` or `i32`, and so also one
+  named `let-else`, `return`, or `never`. This revision pins that behaviour
+  (row B18) and does not fix it.
+- `vibra fmt` reports `@project.io-error: formatted document did not reparse
+  cleanly` for a document that carries an AST-level error. This revision does
+  not change that contract.
+- `never` has no terminating source in v1; a host `exit` or pure intrinsic is
+  left to M4.

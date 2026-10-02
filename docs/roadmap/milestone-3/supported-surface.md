@@ -16,6 +16,8 @@ defined by the linked chapters in `docs/spec/`, not by this table.
 | `ExpressionKind::Lambda` | M2 | — | Destructuring parameters: Step 5 (`V1-RUNTIME-match-patterns`, `V1-TYPE-CONTROL-pattern-refutable-binding`) |
 | `ExpressionKind::Do` | M2 | — | Unhandled-fallible positions: Step 7 (`V1-TYPE-CONTROL-unhandled-fallible`, `V1-TYPE-CONTROL-fallible-discards`) |
 | `ExpressionKind::Let` | M2 | — | Destructuring patterns: Step 5 (`V1-RUNTIME-match-patterns`, `V1-RUNTIME-workspace-test-patterns`) |
+| `ExpressionKind::LetElse` | Pre-M4 | — | Added by [the pre-M4 bindings revision](../pre-m4/01-bindings-return-never.md) |
+| `ExpressionKind::Return` | Pre-M4 | — | Added by [the pre-M4 bindings revision](../pre-m4/01-bindings-return-never.md) |
 | `ExpressionKind::If` | M2 | — | — |
 | `ExpressionKind::Match` | Stage 3A | Step 5 | Cases `V1-RUNTIME-match-patterns`, `V1-TYPE-CONTROL-match-exhaustive`, `V1-TYPE-CONTROL-match-non-exhaustive`, `V1-TYPE-CONTROL-match-unreachable-arm`; union arms: Step 6 (`V1-TYPE-CONVERT-narrowing-exhaustive`, `V1-TYPE-CONVERT-narrowing-rejections`) |
 | `ExpressionKind::As` | Stage 3A | Step 6 | Cases `V1-TYPE-CONVERT-ascription-erased`, `V1-TYPE-CONVERT-invalid-ascription`, `V1-RUNTIME-union-values`; interface targets: Step 12 (`V1-RUNTIME-interface-values`, `V1-TYPE-CONVERT-interface-widening-rejections`) |

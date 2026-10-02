@@ -256,8 +256,8 @@ owning source identity:
 | binder repeating a name a `let` or `let-else` left visible | `@name.redeclaration` | the later binder | the earlier binder |
 | declaration named `never` | `@name.reserved-declaration` | the name | none |
 | generic argument that only diverging operands could fix | `@type.ambiguous-inference` | the application | one note per missing constraint |
-| `never` as a type argument for a bound other than `any` | `@type.unsatisfied-bound` | the type argument | the bound |
-| `impl` block whose target is `never` | `@name.wrong-entity-kind` | the target | none |
+| `never` as a type argument for a bound other than `any` | `@type.unsatisfied-bound` | the type argument, as that code reports an argument that does not satisfy a bound elsewhere | the bound |
+| `impl` block whose target is `never` | `@name.wrong-entity-kind` | the `impl` block, as for an anonymous target | none |
 | arm requiring an uninhabited payload | `@pattern.unreachable-arm` | the arm's pattern | none |
 
 One form never receives both `@type.unreachable-code` and

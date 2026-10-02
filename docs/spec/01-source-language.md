@@ -339,7 +339,6 @@ Visibility is part of the declaration, not a wrapper form.
 
 ```vibra
 (import io @std.io)
-(import log @std.log)
 
 (deftype user-id u64
   visibility: @public)
@@ -354,6 +353,14 @@ Visibility is part of the declaration, not a wrapper form.
   (enum some t none void)
   where: (t any)
   visibility: @public)
+```
+
+The following declaration has labelled defaults, an array variadic tail, and
+an imported effect reference:
+
+```vibra
+(import io @std.io)
+(import log @std.log)
 
 (defn write-log (message str) void
   labelled: (level atom @info)
@@ -362,9 +369,6 @@ Visibility is part of the declaration, not a wrapper form.
   effects: (io.stdout)
   (log.write message level fields))
 ```
-
-The last declaration, `write-log`, has labelled defaults, an array variadic tail,
-and an imported effect reference.
 
 Omitted `effects:` always means `effects: ()`. This default is identical for
 every `defn`, `lambda`, function type, and test; omission never requests effect
@@ -561,7 +565,9 @@ a `let` or `let-else` value, a `return`, `try`, `as`, or anonymous-value
 operand, and so on) it emits `@syntax.misplaced-binding` over the complete
 form. An `if` branch or `match` arm that needs a binding wraps its elements in
 `do`, whose bindings end with that `do`. A misplaced binding form introduces
-no binding, and its operands are still read and checked for their own errors.
+no binding, its value operands are still read so that their own syntax errors
+are reported, and the declaration that holds it is checked no further, as for
+any other form-level syntax error.
 
 ### `let`
 
@@ -624,7 +630,9 @@ a `return` that is a branch of a final `if` or `match`.
 
 ```vibra
 (defn describe-pair (pair (tuple str i32)) str
-  (let (tupleof name id) pair full (text.concat name (i32.to-str id)))
+  (let
+    (tupleof name id) pair
+    full (text.concat name (i32.to-str id)))
   full)
 
 (defn first-or-zero (items (array i32)) i32
@@ -783,14 +791,16 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
 - fixed, labelled, then variadic function or constructor operands;
 - a multiline `do` with its head alone on the opening line and each element on
   its own line, two spaces in from the head;
-- a `let` that holds no comment and fits within 88 columns on one line is
-  written on one line. Otherwise its head stands alone on the opening line and
-  each pair takes its own line, two spaces in from the head, with the pattern
-  and value sharing that line when both are inline and the pair leaves room
+- a `let` of one pair that holds no comment and fits within 88 columns on one
+  line is written on one line. A `let` of two or more pairs is always
+  multiline, and so is a one-pair `let` that holds a comment or does not fit.
+  A multiline `let` has its head alone on the opening line and each pair on its
+  own line, two spaces in from the head, with the pattern and value sharing that
+  line when both are inline, no comment separates them, and the pair leaves room
   within 88 columns for the closing delimiter that follows it, or for the one
-  that ends the form when it is the last pair. A pair that does not fit gives
-  the pattern one line and the value the next, at the same indentation. A
-  single-pair `let` follows the same rule, and so does a multi-pair one;
+  that ends the form when it is the last pair. Any other pair gives the pattern
+  one line and the value the next, at the same indentation, and a comment before
+  a pair or after its value keeps its own line at that indentation;
 - a `let-else` that holds no comment and fits within 88 columns on one line is
   written on one line. Otherwise its head stands alone on the opening line,
   its pattern and value share the next line when both are inline and fit
@@ -803,7 +813,10 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
 
 ```vibra
 (defn resolve-entry (items (array entry) key str) (result entry lookup-error)
-  (let lower 1u64 upper 2u64)
+  (let lower 1u64)
+  (let
+    upper 2u64
+    width (width-of upper))
   (let
     (tupleof found rest) (split-first items key)
     (option.some entry) (find-entry found key (collect-matching-entries rest))
@@ -822,8 +835,9 @@ type, and a pattern `as` narrows from one. Neither performs a conversion, and
   (result.ok summary))
 ```
 
-The example shows, in order, a one-line `let`, a multi-pair `let`, a single-pair
-`let` whose pair does not fit, a one-line `let-else`, a `let-else` whose
+The example shows, in order, a one-line single-pair `let`, a two-pair `let`
+(always multiline), a three-pair `let`, a single-pair `let` whose pair does not
+fit, a one-line `let-else`, a `let-else` whose
 pattern and value share a line, and one whose three operands each take a line.
 The names and calls are illustrative.
 

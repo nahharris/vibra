@@ -436,9 +436,10 @@ describe semantic position.
 pattern and value of a `let-else`. `let-else-fallback` is the context of the
 fallback of a `let-else`, and `return-operand` is the context of the operand of a
 `return`. An element of a body sequence, including one that follows a `let` or
-`let-else`, has the context of the sequence that holds it (`function`, `lambda`,
-or the context of the enclosing `do`); a `let` form opens no context of its own,
-because it has no body. The vocabulary has no `let-body`: no form carries one.
+`let-else`, has the context it would have without the binding form: `function`
+or `result` in a `defn` or `test` body, `lambda` in a `lambda` body, and the
+context of the enclosing `do` in a `do`; a `let` form opens no context of its
+own, because it has no body. The vocabulary has no `let-body`: no form carries one.
 The `visibleLocals` of a position in a body sequence include the bindings of
 every earlier `let` and `let-else` element of that sequence and, inside a `let`,
 those of its earlier pairs. They exclude the bindings of the pair or form that
