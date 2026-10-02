@@ -147,7 +147,10 @@ The remaining reports are M4's, a single-source limit, or a trust boundary:
 ## Reassigned to later milestones
 
 The exit gate lets an M3 form be reassigned to a named later milestone
-instead of implemented. These are reassigned. Each still reports
+instead of implemented. These are reassigned, and the maintainer accepted
+the reassignments when the milestone merged
+([PR #304](https://github.com/nahharris/vibra/pull/304), 2026-10-02), so they
+are M4's and M6's scope and no longer open questions of M3. Each still reports
 `@tool.unavailable` where the form is used, never a wrong answer.
 
 | Form | Reassigned to | Why not M3 |
