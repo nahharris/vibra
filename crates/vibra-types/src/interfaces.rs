@@ -204,6 +204,33 @@ fn reject_escaping_self(
     true
 }
 
+/// Whether `expression` calls a contract member that is selected by its
+/// destination, having no `self` operand.
+pub(crate) fn selected_by_destination(
+    environment: &CheckEnvironment<'_>,
+    expression: &vibra_syntax::Expression,
+) -> bool {
+    let vibra_syntax::ExpressionKind::Application(application) = expression.kind()
+    else {
+        return false;
+    };
+    let vibra_syntax::ExpressionKind::Name(name) = application.callee().kind() else {
+        return false;
+    };
+    environment
+        .types
+        .contract_member(environment.source_id, name)
+        .and_then(|(interface, member)| {
+            environment
+                .types
+                .interface(interface)?
+                .members
+                .get(member)
+                .map(|contract| contract.receiver.is_none())
+        })
+        .unwrap_or(false)
+}
+
 fn mentions_self(value: &Type) -> bool {
     matches!(value, Type::Param(name) if name == SELF)
         || value.components().iter().any(mentions_self)
@@ -1457,6 +1484,30 @@ fn check_selected_call(
         return None;
     }
     let position = receiver_value.as_ref().map(|(position, _)| *position);
+    // An unsuffixed literal has no type of its own, so it cannot choose
+    // among conversion sources: which one fits would depend on its value.
+    if candidates.len() > 1
+        && conversion_contract(environment.types, interface).is_some()
+        && operands
+            .iter()
+            .any(|operand| crate::unsuffixed_literal(operand.value()))
+    {
+        let mut diagnostic = Diagnostic::new(
+            DiagnosticCode::TypeAmbiguousImplementation,
+            span,
+            format!(
+                "an unsuffixed literal fits more than one source of `{}` for {receiver}; write its suffix",
+                declared.name
+            ),
+        )
+        .with_source_id(environment.source_id);
+        for candidate in &candidates {
+            diagnostic = diagnostic
+                .with_note(format!("`{}` is a candidate", candidate.spelling));
+        }
+        environment.diagnostics.push(diagnostic);
+        return None;
+    }
     let fitting = candidates
         .iter()
         .filter(|candidate| {

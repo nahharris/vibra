@@ -26,6 +26,10 @@ pub(crate) struct Instantiation {
     /// Original parameter names, in `where:` order, with their variables.
     variables: Vec<(String, String)>,
     bindings: BTreeMap<String, Type>,
+    /// The bindings fixed by the call's written types, a `types:` list and
+    /// the expected type, before any operand was checked. `None` until
+    /// [`Self::mark_written`], which treats every binding as written.
+    written: Option<BTreeMap<String, Type>>,
 }
 
 impl Instantiation {
@@ -38,7 +42,24 @@ impl Instantiation {
                 .map(|(index, name)| (name.clone(), format!("?{index}:{name}")))
                 .collect(),
             bindings: BTreeMap::new(),
+            written: None,
         }
+    }
+
+    /// Records that every binding so far comes from a written type. A
+    /// binding made after this comes from an operand.
+    pub(crate) fn mark_written(&mut self) {
+        self.written = Some(self.bindings.clone());
+    }
+
+    /// Whether written types alone fix `value`. A parameter type fixed only
+    /// by a sibling operand is inferred, not written, so it admits no
+    /// widening (`docs/spec/02-type-system.md`, "Type ascription and
+    /// widening").
+    pub(crate) fn fixed_by_written_types(&self, value: &Type) -> bool {
+        self.written
+            .as_ref()
+            .is_none_or(|written| !has_variables(&resolve(value, written)))
     }
 
     /// Whether the instantiated entity is generic at all.

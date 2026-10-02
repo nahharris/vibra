@@ -1,0 +1,77 @@
+id = "V1-TYPE-INFER-order-independence"
+rule = "V1-TYPE-INFER"
+profile = "static-v1"
+operation = "type-check"
+description = "No sibling fixes a widening or a destination: match arms are checked like if branches, a parameter type fixed by another operand is inferred and not written, and an unsuffixed literal cannot choose among conversion sources. Each rejection holds in either order."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [228, 232]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [317, 325]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [398, 402]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [464, 480]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [551, 555]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [618, 631]
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-destination"
+level = "@error"
+source = "input.vib"
+span = [720, 738]
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-destination"
+level = "@error"
+source = "input.vib"
+span = [803, 821]
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-destination"
+level = "@error"
+source = "input.vib"
+span = [882, 900]
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-implementation"
+level = "@error"
+source = "input.vib"
+span = [950, 966]
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-implementation"
+level = "@error"
+source = "input.vib"
+span = [1001, 1018]

@@ -2569,7 +2569,22 @@ pub(crate) fn start_instantiation(
             return None;
         }
     }
+    instantiation.mark_written();
     Some(instantiation)
+}
+
+/// Whether `expression` is a numeric literal with no suffix, whose type only
+/// an expected type can fix.
+pub(crate) fn unsuffixed_literal(expression: &Expression) -> bool {
+    match expression.kind() {
+        ExpressionKind::Literal(vibra_syntax::Literal::Integer(literal)) => {
+            literal.suffix().is_none()
+        }
+        ExpressionKind::Literal(vibra_syntax::Literal::Float(literal)) => {
+            literal.suffix().is_none()
+        }
+        _ => false,
+    }
 }
 
 /// Checks one operand against its opened parameter type `pattern`.
@@ -2587,6 +2602,36 @@ pub(crate) fn check_inferred_operand(
 ) -> Option<Expr> {
     if let Some(fixed) = instantiation.resolved(pattern) {
         let before = environment.diagnostics.len();
+        // A parameter type that only a sibling operand fixed is inferred,
+        // not written, so the operand must already have it: no widening
+        // fires, whichever operand comes first.
+        if !instantiation.fixed_by_written_types(pattern)
+            && widening_target(environment.types, &fixed)
+        {
+            let checked = check_operand(environment, operand, None)?;
+            let actual = checked.result_type();
+            if !types_match(&fixed, &actual) {
+                environment.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::TypeArgumentMismatch,
+                        operand.span(),
+                        format!(
+                            "operand has type {actual}, but another operand fixed this parameter to {fixed}; write the type with `as` or `types:`"
+                        ),
+                    )
+                    .with_source_id(environment.source_id),
+                );
+                return None;
+            }
+            return Some(checked);
+        }
+        // Likewise it is no destination: a member selected by its
+        // destination needs a written expected type.
+        if !instantiation.fixed_by_written_types(pattern)
+            && interfaces::selected_by_destination(environment, operand)
+        {
+            return check_operand(environment, operand, None);
+        }
         let checked = check_operand(environment, operand, Some(fixed));
         // Only an operand whose whole parameter type is a generic parameter
         // fixed by `types:` contradicts that list; a mismatch in a concrete
@@ -2872,9 +2917,13 @@ fn check_generic_operands(
             pending.push((OperandSlot::Tail(index), pattern, *argument));
         }
     }
+    // A `lambda` and an unsuffixed numeric literal take their type from the
+    // parameter, so they are checked after the operands that fix it,
+    // whatever the written order.
     let (lambdas, others): (Vec<_>, Vec<_>) =
         pending.into_iter().partition(|(_, _, argument)| {
             matches!(argument.value().kind(), ExpressionKind::Lambda(_))
+                || unsuffixed_literal(argument.value())
         });
 
     let mut positional = BTreeMap::new();
@@ -4631,9 +4680,17 @@ fn check_ascription(
     let Some(checked) = checked else {
         let mut reported = false;
         let mut index = before;
+        // `if`, `match`, `let`, and `do` pass the target to their results, so
+        // the mismatch is reported inside the operand: it is the same
+        // failed ascription when it is a mismatch against the target.
+        let against_target = format!("expected {target}, found");
         while let Some(diagnostic) = environment.diagnostics.get(index) {
+            let span = diagnostic.primary_span();
+            let inside = span.start() >= operand.span().start()
+                && span.end() <= operand.span().end();
             if diagnostic.code() == DiagnosticCode::TypeMismatch
-                && diagnostic.primary_span() == operand.span()
+                && (span == operand.span()
+                    || (inside && diagnostic.message().contains(&against_target)))
             {
                 environment.diagnostics.remove(index);
                 reported = true;
@@ -4681,7 +4738,11 @@ fn check_match(
 ) -> Option<Expr> {
     let scrutinee = check_expression(environment, scrutinee, None)?;
     let subject_type = scrutinee.result_type();
-    let mut result_type = expected;
+    // Every arm is checked against the written expected type only, exactly as
+    // the branches of `if` are: one arm's type is never the expected type of
+    // another, so the order of the arms cannot decide a widening, a literal's
+    // type, or a destination.
+    let mut result_type: Option<Type> = None;
     let mut checked = Vec::with_capacity(arms.len());
     let mut valid = true;
     for arm in arms {
@@ -4691,7 +4752,7 @@ fn check_match(
             check_expression_in_position(
                 &mut nested,
                 arm.result(),
-                result_type.clone(),
+                expected.clone(),
                 tail_position,
             )
         });
@@ -4700,8 +4761,20 @@ fn check_match(
         environment.absorb(exit);
         match (pattern, body) {
             (Some(pattern), Some(body)) => {
-                if result_type.is_none() {
-                    result_type = Some(body.result_type());
+                match &result_type {
+                    None => result_type = Some(body.result_type()),
+                    Some(first) if !types_match(first, &body.result_type()) => {
+                        mismatch(
+                            environment.diagnostics,
+                            environment.source_id,
+                            arm.result().span(),
+                            first.clone(),
+                            body.result_type(),
+                            "match arms must have identical types",
+                        );
+                        valid = false;
+                    }
+                    Some(_) => {}
                 }
                 checked.push((arm, vibra_ir::MatchArm { pattern, body }));
             }

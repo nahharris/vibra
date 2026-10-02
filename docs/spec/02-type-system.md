@@ -1245,6 +1245,15 @@ are an error unless an enclosing boundary writes a union containing both. This
 preserves the rule that inference invents nothing, because a union is only ever
 the type an author wrote.
 
+A type that inference fixed is not a written expected type. A generic parameter
+fixed only by another operand of the same application, and the type of one
+`if` branch or `match` arm seen from another, admit no widening and are no
+destination for a member selected by its destination. Such a type still types
+an unsuffixed numeric literal and fixes an otherwise ambiguous generic
+argument. A `types:` list or a written result type that fixes the parameter is
+written, so every operand widens to it. None of this depends on the order of
+the operands, branches, or arms.
+
 Widening applies at most once at a boundary and does not chain. Reaching an
 interface from a union member requires the union itself to implement that
 interface. Widening is pure: it contributes no effect and no function-call edge,
@@ -1355,9 +1364,9 @@ types, the destination implements `(from source)` exactly when it holds every
 value of the source, and `(try-from source)` otherwise, with `out-of-range` for
 a value it cannot hold. The registry is the `to-U` family of the runtime
 chapter, and a call selects its operation directly. An unsuffixed integer
-literal fits more than one source and is therefore
-`@type.ambiguous-implementation`. The floating-point types have no registry
-conversion in v1.
+literal has no type of its own, so where more than one source converts to the
+destination the call is `@type.ambiguous-implementation`, whatever the
+literal's value. The floating-point types have no registry conversion in v1.
 
 Across `from` and `try-from` together, a receiver's source targets MUST be
 pairwise non-unifiable, as the overlap section defines. The same written source
