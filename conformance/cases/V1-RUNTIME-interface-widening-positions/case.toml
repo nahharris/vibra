@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-interface-widening-positions"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A concrete value widens to an interface value at each remaining written expected type: a tuple component, an enum payload, a wrapper's representation, an array and a dict variadic tail, an enumof payload, and a written type argument."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

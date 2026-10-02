@@ -1,0 +1,27 @@
+id = "V1-TYPE-GENERIC-bound-overlap"
+rule = "V1-TYPE-GENERIC"
+profile = "static-v1"
+operation = "type-check"
+description = "A bound does not make two union members or two implementation targets disjoint: with `t` bound by an interface that i32 does not implement, (array t) still overlaps (array i32) and (conv t) still overlaps (conv i32)."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.union-member-overlap"
+level = "@error"
+source = "input.vib"
+span = [53, 121]
+
+[[expect.diagnostics]]
+code = "@type.overlapping-implementation"
+level = "@error"
+source = "input.vib"
+span = [331, 410]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [253, 328]

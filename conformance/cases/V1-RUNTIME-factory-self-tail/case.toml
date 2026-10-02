@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-factory-self-tail"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A contract member naming self in both its result and its variadic tail is destination-dispatched: the written expected type selects the implementation whether the tail arrives with operands or empty."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

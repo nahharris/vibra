@@ -1,0 +1,11 @@
+(defint factory
+  (defn empty () self))
+
+(deftype stack (record depth u64)
+  (impl factory
+    (defn empty () self
+      (stack depth: 0u64))))
+
+(defn bare () i32
+  (let made (factory.empty)
+    1i32))

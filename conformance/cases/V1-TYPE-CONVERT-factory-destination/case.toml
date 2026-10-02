@@ -1,0 +1,17 @@
+id = "V1-TYPE-CONVERT-factory-destination"
+rule = "V1-TYPE-CONVERT"
+profile = "static-v1"
+operation = "type-check"
+description = "A destination-dispatched member that is not a conversion, a `(defn empty () self)` factory, is rejected with @type.ambiguous-destination where no expected type is written."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-destination"
+level = "@error"
+source = "input.vib"
+span = [175, 190]
