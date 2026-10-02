@@ -2,7 +2,7 @@
   (as i64 (if flag 1i32 2i32)))
 
 (defn through-let () i64
-  (as i64 (let value 1i32 value)))
+  (as i64 (do (let value 1i32) value)))
 
 (defn through-do () i64
   (as i64 (do 3i32)))

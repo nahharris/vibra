@@ -344,7 +344,7 @@ fn signed_stdlib_imports_cannot_be_rebound_by_a_local_std_target() {
         &[
             (
                 "src/app/main.vib",
-                "(import text @std.text)\n(defn execute () void (let - (text.length \"local\") (do)))\n",
+                "(import text @std.text)\n(defn execute () void (let - (text.length \"local\")) (do))\n",
             ),
             (
                 "src/std/text.vib",

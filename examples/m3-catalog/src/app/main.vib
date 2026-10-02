@@ -2,7 +2,6 @@
 
 ; Reserves three units from a fixed shelf; an `err` result names the failure.
 (defn execute () (result void stock.stock-error)
-  (let
-    held
-    (dict.of (stock.shelf 7u32) 4u64 (stock.shelf 12u32) 9u64)
-    (let - (try (stock.reserve held (stock.shelf 7u32) 3u64)) (result.ok))))
+  (let held (dict.of (stock.shelf 7u32) 4u64 (stock.shelf 12u32) 9u64))
+  (let - (try (stock.reserve held (stock.shelf 7u32) 3u64)))
+  (result.ok))

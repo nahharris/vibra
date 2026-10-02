@@ -20,7 +20,7 @@ span = [72, 81]
 code = "@type.unhandled-fallible"
 level = "@error"
 source = "input.vib"
-span = [126, 135]
+span = [127, 136]
 
 [[expect.diagnostics]]
 code = "@type.unhandled-fallible"

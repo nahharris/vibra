@@ -20,4 +20,4 @@ span = [35, 53]
 code = "@type.argument-mismatch"
 level = "@error"
 source = "input.vib"
-span = [95, 113]
+span = [97, 115]

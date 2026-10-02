@@ -26,19 +26,16 @@
   (match
     (lines index)
     (option.none) (result.ok entries)
-    (option.some raw) (let
-      line
-      (text.trim raw)
-      (let
-        number
-        (after index)
-        (if
-          (skipped line)
-          (parse-lines lines number entries)
-          (parse-lines
-            lines
-            number
-            (array.append entries (try (parse-entry line number)))))))))
+    (option.some raw) (do
+      (let line (text.trim raw))
+      (let number (after index))
+      (if
+        (skipped line)
+        (parse-lines lines number entries)
+        (parse-lines
+          lines
+          number
+          (array.append entries (try (parse-entry line number))))))))
 
 (defn skipped (line str) bool
   (if (text.equal line "") true (text.starts-with line "#")))
@@ -47,16 +44,13 @@
   (match
     (text.index-of line "=")
     (option.none) (result.err (parse-error (missing-separator line: number)))
-    (option.some at) (let
-      key
-      (text.trim (part line 0u64 at))
-      (let
-        raw
-        (text.trim (part line (after at) (text.length line)))
-        (if
-          (text.equal key "")
-          (result.err (parse-error (empty-key line: number)))
-          (result.ok (entry key: key value: (try (parse-value raw number)))))))))
+    (option.some at) (do
+      (let key (text.trim (part line 0u64 at)))
+      (let raw (text.trim (part line (after at) (text.length line))))
+      (if
+        (text.equal key "")
+        (result.err (parse-error (empty-key line: number)))
+        (result.ok (entry key: key value: (try (parse-value raw number))))))))
 
 (defn parse-value (raw str number u64) (result value parse-error)
   (match

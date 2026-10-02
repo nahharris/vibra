@@ -36,7 +36,8 @@
     false (parse "2")))
 
 (defn by-let (text str) number
-  (let copy text (parse copy)))
+  (let copy text)
+  (parse copy))
 
 ; The recursive call already has the result type, so it stays a tail transfer.
 (defn down (count i32) number

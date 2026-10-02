@@ -32,7 +32,7 @@ fn a_commented_declaration_has_no_hanging_or_orphaned_delimiter() {
 fn a_commented_declaration_matches_the_comment_free_layout() {
     let commented = format_twice("(defn f (value i32) i32\n  ; body\n  value)\n");
     let plain = format_twice(
-        "(defn f (value i32) i32 (let long-binding-name value (let another-binding-name long-binding-name another-binding-name)))\n",
+        "(defn f (value i32) i32 (let long-binding-name value) (let another-binding-name long-binding-name) another-binding-name)\n",
     );
     assert!(commented.starts_with("(defn f (value i32) i32\n"));
     assert!(plain.starts_with("(defn f (value i32) i32\n"));

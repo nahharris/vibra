@@ -523,6 +523,65 @@ pub(crate) fn instantiated_body(
 // Usefulness
 // ---------------------------------------------------------------------------
 
+/// Whether no value has `value_type`: it is `never`, a tuple, record, or
+/// wrapper with an uninhabited component, or an enum or union whose every
+/// variant or member is uninhabited. The check is structural; a nominal type
+/// met again while it is being examined is assumed inhabited.
+pub(crate) fn uninhabited(types: &TypeNames, value_type: &Type) -> bool {
+    uninhabited_in(types, value_type, &mut Vec::new())
+}
+
+fn uninhabited_in(
+    types: &TypeNames,
+    value_type: &Type,
+    visiting: &mut Vec<vibra_ir::TypeId>,
+) -> bool {
+    match value_type {
+        Type::Never => true,
+        Type::Tuple(components) => components
+            .iter()
+            .any(|component| uninhabited_in(types, component, visiting)),
+        Type::Record(members) => members
+            .iter()
+            .any(|(_, member)| uninhabited_in(types, member, visiting)),
+        Type::Enum(variants) => variants
+            .iter()
+            .all(|(_, payload)| uninhabited_in(types, payload, visiting)),
+        Type::Union(members) => members
+            .iter()
+            .all(|member| uninhabited_in(types, member, visiting)),
+        Type::Declared(id) | Type::Applied(id, _) => {
+            if visiting.contains(id) {
+                return false;
+            }
+            let Some(body) = instantiated_body(types, value_type) else {
+                return false;
+            };
+            visiting.push(id.clone());
+            let result = match body {
+                TypeBody::Record(members) => members
+                    .iter()
+                    .any(|(_, member)| uninhabited_in(types, member, visiting)),
+                TypeBody::Tuple(components) => components
+                    .iter()
+                    .any(|component| uninhabited_in(types, component, visiting)),
+                TypeBody::Wrapper(representation) => {
+                    uninhabited_in(types, &representation, visiting)
+                }
+                TypeBody::Enum(variants) => variants
+                    .iter()
+                    .all(|(_, payload)| uninhabited_in(types, payload, visiting)),
+                TypeBody::Union(members) => members
+                    .iter()
+                    .all(|member| uninhabited_in(types, member, visiting)),
+            };
+            visiting.pop();
+            result
+        }
+        _ => false,
+    }
+}
+
 /// One constructor of a type's value space.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Constructor {
@@ -774,6 +833,10 @@ fn useful(
     let Some((column, rest_columns)) = columns.split_first() else {
         return matrix.is_empty().then(Vec::new);
     };
+    // An uninhabited column has no value to cover, so nothing is useful.
+    if uninhabited(types, column) {
+        return None;
+    }
     let space = space(types, column);
     let head = query.first()?;
     let specialize_by = |constructor: &Constructor| {

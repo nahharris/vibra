@@ -6,4 +6,4 @@
 
 (defn nominal ((seconds count) meters) u32 count)
 
-(defn components (value i32) i32 (let (tupleof left right) value left))
+(defn components (value i32) i32 (let (tupleof left right) value) left)

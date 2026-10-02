@@ -1,26 +1,26 @@
 (defn main ()
   (tuple u32 u32 u32 u32 str u32 atom atom atom i32 i32 i32 i32 bool str)
-  (let (single.only only) (single.only 9i32)
-    (let (tupleof picked -)
+  (let (single.only only) (single.only 9i32))
+  (let (tupleof picked -)
         ((lambda ((recordof a: a) (record a i32 b str)) (tuple i32 bool)
            (tupleof a true))
-          (recordof a: 5i32 b: "z"))
-      (tupleof
-        (describe (shape.empty))
-        (describe (shape.circle 0u32))
-        (describe (shape.circle 4u32))
-        (describe (shape.rect (dims w: 6u32 h: 7u32)))
-        (second (pair 1i32 "label"))
-        (unwrap (meters 12u32))
-        (pick (tupleof false true))
-        (size (array.of 1i32 2i32))
-        (size (array.of))
-        (color-code @green)
-        only
-        picked
-        (match (option.some 3i32) (option.some n) n (option.none) 0i32)
-        (match (maybe.some) (maybe.some) true (maybe.none) false)
-        (label-of (enumof b: "enumof"))))))
+          (recordof a: 5i32 b: "z")))
+  (tupleof
+      (describe (shape.empty))
+      (describe (shape.circle 0u32))
+      (describe (shape.circle 4u32))
+      (describe (shape.rect (dims w: 6u32 h: 7u32)))
+      (second (pair 1i32 "label"))
+      (unwrap (meters 12u32))
+      (pick (tupleof false true))
+      (size (array.of 1i32 2i32))
+      (size (array.of))
+      (color-code @green)
+      only
+      picked
+      (match (option.some 3i32) (option.some n) n (option.none) 0i32)
+      (match (maybe.some) (maybe.some) true (maybe.none) false)
+      (label-of (enumof b: "enumof"))))
 
 (deftype shape (enum empty void circle u32 rect dims))
 

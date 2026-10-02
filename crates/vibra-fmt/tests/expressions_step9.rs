@@ -20,10 +20,10 @@ use vibra_syntax::{
 fn formatter_renders_nested_step9_forms_and_is_idempotent() {
     let source = r#"
 (defn run (value (tuple i32 i32)) i32
-  (let (tupleof left right) value
-    (match left
-      (as i32 n) (if true n right)
-      (option.none) (try right))))
+  (let (tupleof left right) value)
+  (match left
+    (as i32 n) (if true n right)
+    (option.none) (try right)))
 "#;
     let formatted =
         format_source(Path::new("expressions.vib"), source).expect("source mode");

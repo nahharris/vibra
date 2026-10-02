@@ -63,7 +63,7 @@ fn resolves_imported_calls_and_constants_before_running_a_private_non_main_entry
         &[
             (
                 "src/app/main.vib",
-                "(import util @app.util)\n(defn execute () void (let - util.base (util.perform)))\n",
+                "(import util @app.util)\n(defn execute () void (let - util.base) (util.perform))\n",
             ),
             (
                 "src/app/util.vib",
@@ -164,7 +164,7 @@ fn an_uninvoked_higher_order_closure_does_not_block_the_entry() {
         "uninvoked-higher-order-closure",
         &[(
             "src/app/main.vib",
-            "(defn execute () void (let unused (lambda (f (fn () void)) void (f)) (do)))\n",
+            "(defn execute () void (let unused (lambda (f (fn () void)) void (f))) (do))\n",
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
@@ -192,7 +192,7 @@ fn an_invoked_higher_order_closure_uses_its_known_callback_argument() {
         "invoked-higher-order-closure",
         &[(
             "src/app/main.vib",
-            "(defn execute () void (let invoke (lambda (callback (fn () void)) void (callback)) (invoke (lambda () void (do)))))\n",
+            "(defn execute () void (let invoke (lambda (callback (fn () void)) void (callback))) (invoke (lambda () void (do))))\n",
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
@@ -281,7 +281,7 @@ fn global_initializer_may_call_a_terminating_recursive_helper() {
         "recursive-helper-global-initializer",
         &[(
             "src/app/main.vib",
-            "(def value i32 (helper false))\n(defn helper (again bool) i32 (if again (helper false) 1i32))\n(defn execute () void (let - value (do)))\n",
+            "(def value i32 (helper false))\n(defn helper (again bool) i32 (if again (helper false) 1i32))\n(defn execute () void (let - value) (do))\n",
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
@@ -337,7 +337,7 @@ fn library_initializer_does_not_execute_an_uninvoked_closure_body() {
         "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n",
         &[(
             "src/util/main.vib",
-            "(def value i32 (let unused (lambda () i32 (read)) 0i32))\n(defn read () i32 value)\n",
+            "(def value i32 (do (let unused (lambda () i32 (read))) 0i32))\n(defn read () i32 value)\n",
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
@@ -419,7 +419,7 @@ fn checks_recursion_and_closures_in_every_module_without_running_check() {
         "recursion-closure",
         &[(
             "src/app/main.vib",
-            "(defn first () i32 (second))\n(defn second () i32 (first))\n(defn execute () void (let captured 9i32 (let callback (lambda () i32 captured) (let - (callback) (do)))))\n",
+            "(defn first () i32 (second))\n(defn second () i32 (first))\n(defn execute () void (let captured 9i32) (let callback (lambda () i32 captured)) (let - (callback)) (do))\n",
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
@@ -528,7 +528,7 @@ fn verified_bootstrap_imports_keep_package_identity_and_execute_through_checked_
         "verified-stdlib",
         &[(
             "src/app/main.vib",
-            "(import text @std.text)\n(defn execute () void (let - (text.length (text.concat \"a\" \"b\")) (do)))\n",
+            "(import text @std.text)\n(defn execute () void (let - (text.length (text.concat \"a\" \"b\"))) (do))\n",
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
@@ -579,7 +579,7 @@ fn bootstrap_overlay_rejects_a_duplicate_project_source_identity() {
         &[
             (
                 "src/app/main.vib",
-                "(import text @std.text)\n(defn execute () void (let - (text.length \"x\") (do)))\n",
+                "(import text @std.text)\n(defn execute () void (let - (text.length \"x\")) (do))\n",
             ),
             (
                 "stdlib/src/std/text.vib",
@@ -614,7 +614,7 @@ fn bootstrap_spelling_without_verification_is_unavailable_and_never_runs() {
         "unverified-stdlib",
         &[(
             "src/app/main.vib",
-            "(import text @std.text)\n(defn execute () void (let - (text.length \"spoof\") (do)))\n",
+            "(import text @std.text)\n(defn execute () void (let - (text.length \"spoof\")) (do))\n",
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
@@ -672,7 +672,7 @@ fn imported_std_modules_keep_the_verified_package_and_local_std_units_resolve_lo
         &[
             (
                 "src/app/main.vib",
-                "(import text @std.text)\n(import assertions @std.assert)\n(import extra @std.extra)\n(defn execute () void (let - (text.length (extra.suffix \"a\")) (do)))\n",
+                "(import text @std.text)\n(import assertions @std.assert)\n(import extra @std.extra)\n(defn execute () void (let - (text.length (extra.suffix \"a\"))) (do))\n",
             ),
             (
                 "src/std/extra.vib",
@@ -729,7 +729,7 @@ fn an_exact_local_std_text_target_cannot_satisfy_the_reserved_bootstrap_import()
         &[
             (
                 "src/app/main.vib",
-                "(import text @std.text)\n(defn execute () void (let - (text.length \"local\") (do)))\n",
+                "(import text @std.text)\n(defn execute () void (let - (text.length \"local\")) (do))\n",
             ),
             (
                 "src/std/text.vib",
@@ -848,7 +848,7 @@ fn ordinary_dependency_diagnostics_apply_even_to_an_explicit_target() {
 fn retired_syntax_and_unsupported_valid_declarations_keep_distinct_diagnostics() {
     let retired = TempProject::new(
         "retired-form",
-        &[("src/app/main.vib", "(defn execute () void (return))\n")],
+        &[("src/app/main.vib", "(defn execute () void (while true))\n")],
     );
     let retired_snapshot =
         WorkspaceSnapshot::load(retired.path()).expect("retired snapshot");

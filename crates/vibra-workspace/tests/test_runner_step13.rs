@@ -186,7 +186,7 @@ fn unsupported_test_form_is_unavailable_at_its_reference() {
             ("src/app/main.vib", "(defn execute () void void)\n"),
             (
                 "tests/math.vib",
-                "(import assert @std.assert)\n(test \"generic\" (let - (lambda () void effects: (audit) void) (assert.true true)))\n",
+                "(import assert @std.assert)\n(test \"generic\" (let - (lambda () void effects: (audit) void)) (assert.true true))\n",
             ),
         ],
     );

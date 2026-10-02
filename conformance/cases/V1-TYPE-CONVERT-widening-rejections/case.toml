@@ -20,16 +20,16 @@ span = [78, 99]
 code = "@type.mismatch"
 level = "@error"
 source = "input.vib"
-span = [160, 166]
+span = [162, 168]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
 source = "input.vib"
-span = [214, 218]
+span = [216, 220]
 
 [[expect.diagnostics]]
 code = "@type.mismatch"
 level = "@error"
 source = "input.vib"
-span = [262, 265]
+span = [264, 267]

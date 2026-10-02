@@ -36,14 +36,14 @@
       - false)))
 
 (test "bytes concatenate, compare, and slice"
-  (let joined (bytes-of.concat (text.to-utf8 "ab") (text.to-utf8 "c"))
-    (assert.true
-      (match (bytes-of.slice joined 1u64 3u64)
-        (option.some part)
-          (match (bytes-of.compare part (text.to-utf8 "bc"))
-            (core.ordering.equal) (bytes-of.equal part (text.to-utf8 "bc"))
-            - false)
-        - false))))
+  (let joined (bytes-of.concat (text.to-utf8 "ab") (text.to-utf8 "c")))
+  (assert.true
+    (match (bytes-of.slice joined 1u64 3u64)
+      (option.some part)
+        (match (bytes-of.compare part (text.to-utf8 "bc"))
+          (core.ordering.equal) (bytes-of.equal part (text.to-utf8 "bc"))
+          - false)
+      - false)))
 
 (test "bytes as an array"
   (assert.equal (array.length (bytes-of.to-array (text.to-utf8 "hey"))) 3u64))

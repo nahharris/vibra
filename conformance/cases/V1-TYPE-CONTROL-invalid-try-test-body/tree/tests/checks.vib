@@ -1,4 +1,5 @@
 (import assert @std.assert)
 
 (test "propagates"
-  (let value (try (option.some 1i32)) (assert.equal value 1i32)))
+  (let value (try (option.some 1i32)))
+  (assert.equal value 1i32))

@@ -182,7 +182,7 @@ fn unavailable_test_form_stays_distinct_from_failure() {
         "unavailable-assertion",
         &[(
             "tests/math.vib",
-            "(import assert @std.assert)\n(test \"generic\" (let - (lambda () void effects: (audit) void) (assert.true true)))\n",
+            "(import assert @std.assert)\n(test \"generic\" (let - (lambda () void effects: (audit) void)) (assert.true true))\n",
         )],
     );
 
@@ -375,7 +375,7 @@ fn unavailability_takes_precedence_over_assertion_failure() {
         "unavailable-precedence",
         &[(
             "tests/math.vib",
-            "(import assert @std.assert)\n(test \"fails\" (assert.false true))\n(test \"unavailable\" (let - (lambda () void effects: (audit) void) (assert.true true)))\n",
+            "(import assert @std.assert)\n(test \"fails\" (assert.false true))\n(test \"unavailable\" (let - (lambda () void effects: (audit) void)) (assert.true true))\n",
         )],
     );
 

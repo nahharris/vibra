@@ -2,5 +2,5 @@
   where: (t any)
   (let keep (lambda (other t) t
               where: (t any)
-              other)
-    (keep value)))
+              other))
+  (keep value))

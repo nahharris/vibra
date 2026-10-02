@@ -33,4 +33,5 @@
 (defn atoms (value atom) i32 (match value @on 1i32 @off 0i32 @- 2i32))
 
 (defn discards ((tupleof - @- -:) (tuple i32 i32 i32)) i32
-  (let (tupleof - -) (tupleof 1i32 2i32) 0i32))
+  (let (tupleof - -) (tupleof 1i32 2i32))
+  0i32)

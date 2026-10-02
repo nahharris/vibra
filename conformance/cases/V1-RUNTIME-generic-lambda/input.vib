@@ -1,8 +1,8 @@
 (defn main () str
   (let pick (lambda (left t right t) t
               where: (t any)
-              left)
-    (let
+              left))
+  (let
       describe (lambda (value i32) str
-                 (pick types: (str) "x" "y"))
-      (pick (describe (pick 1i32 2i32)) "z"))))
+                 (pick types: (str) "x" "y")))
+  (pick (describe (pick 1i32 2i32)) "z"))

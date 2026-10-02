@@ -1,5 +1,5 @@
 (defn main () (tuple i32 str)
-  (let pair (point 1i32 "x")
-    (tupleof (pair 0) ((tupleof true "y") 1))))
+  (let pair (point 1i32 "x"))
+  (tupleof (pair 0) ((tupleof true "y") 1)))
 
 (deftype point (tuple i32 str))

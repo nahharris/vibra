@@ -120,7 +120,7 @@ fn a_relocated_binary_verifies_its_embedded_bootstrap() {
     fs::copy(env!("CARGO_BIN_EXE_vibra"), &binary).expect("copy the built binary");
     let project = demo_project(
         "relocated",
-        "(import text @std.text)\n(defn main () void (let - (text.length \"A😀\") (do)))\n",
+        "(import text @std.text)\n(defn main () void (let - (text.length \"A😀\")) (do))\n",
     );
     project.write(
         "tests/math.vib",
@@ -162,7 +162,7 @@ fn human_test_reports_unavailable_items_and_their_diagnostics() {
     let project = demo_project("human-unavailable", "(defn main () void (do))\n");
     project.write(
         "tests/t.vib",
-        "(import assert @std.assert)\n(test \"generic\" (let - (lambda () void effects: (audit) void) (assert.true true)))\n",
+        "(import assert @std.assert)\n(test \"generic\" (let - (lambda () void effects: (audit) void)) (assert.true true))\n",
     );
 
     let output = vibra(project.path(), &["test"]);
@@ -193,7 +193,7 @@ fn human_test_success_keeps_its_single_line() {
 }
 
 const DEEP_RECURSION: &str =
-    "(defn f () i32 (let v (f) v))\n(defn main () void (let - (f) (do)))\n";
+    "(defn f () i32 (let v (f)) v)\n(defn main () void (let - (f)) (do))\n";
 
 #[test]
 fn deep_non_tail_recursion_is_an_operational_failure_not_an_abort() {
@@ -228,7 +228,7 @@ fn deep_non_tail_recursion_in_a_test_stops_the_suite() {
     let project = demo_project("deep-recursion-test", "(defn main () void (do))\n");
     project.write(
         "tests/t.vib",
-        "(import assert @std.assert)\n(defn f () i32 (let v (f) v))\n(test \"deep\" (assert.equal (f) 0i32))\n",
+        "(import assert @std.assert)\n(defn f () i32 (let v (f)) v)\n(test \"deep\" (assert.equal (f) 0i32))\n",
     );
 
     let output = vibra(project.path(), &["--format", "json", "test"]);
@@ -272,7 +272,7 @@ fn help_prints_the_closed_grammar() {
 fn an_initializer_cycle_through_a_closure_global_is_rejected_before_running() {
     let project = demo_project(
         "closure-cycle",
-        "(def h (fn () i32) (lambda () i32 x))\n(def x i32 (h))\n(defn main () void (let - x (do)))\n",
+        "(def h (fn () i32) (lambda () i32 x))\n(def x i32 (h))\n(defn main () void (let - x) (do))\n",
     );
 
     for command in [&["check"][..], &["run", "src/demo"]] {

@@ -7,5 +7,5 @@
       (stack depth: 0u64))))
 
 (defn bare () i32
-  (let made (factory.empty)
-    1i32))
+  (let made (factory.empty))
+  1i32)

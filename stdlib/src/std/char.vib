@@ -11,10 +11,10 @@
   (u32.compare (char.to-u32 left) (char.to-u32 right)))
 
 (defn in-range (value char low u32 high u32) bool
-  (let scalar (char.to-u32 value)
-    (match (u32.compare scalar low)
-      (core.ordering.less) false
-      - (match (u32.compare scalar high) (core.ordering.greater) false - true))))
+  (let scalar (char.to-u32 value))
+  (match (u32.compare scalar low)
+    (core.ordering.less) false
+    - (match (u32.compare scalar high) (core.ordering.greater) false - true)))
 
 (defn is-ascii-digit (value char) bool
   visibility: @public

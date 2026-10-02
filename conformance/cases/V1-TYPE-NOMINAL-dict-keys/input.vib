@@ -10,4 +10,4 @@
 
 (defn functions (m (dict (fn () i32) i32)) i32 0i32)
 
-(defn inferred () i32 (let m (dict.of 1.0f64 2i32) 0i32))
+(defn inferred () i32 (let m (dict.of 1.0f64 2i32)) 0i32)

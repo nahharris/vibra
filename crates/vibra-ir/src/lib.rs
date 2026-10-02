@@ -35,6 +35,8 @@ pub enum Type {
     Bool,
     /// The single successful-completion value.
     Void,
+    /// The uninhabited type of an expression that never completes.
+    Never,
     /// Unicode scalar values.
     Char,
     /// Immutable Unicode scalar strings.
@@ -111,6 +113,7 @@ impl Type {
             Self::Dict(_, _) => "dict",
             Self::Bool => "bool",
             Self::Void => "void",
+            Self::Never => "never",
             Self::Char => "char",
             Self::Str => "str",
             Self::Bytes => "bytes",
@@ -228,7 +231,7 @@ impl Type {
     #[must_use]
     pub fn admits(&self, actual: &Self) -> bool {
         match (self, actual) {
-            (Self::Param(_), _) | (_, Self::Param(_)) => true,
+            (Self::Param(_), _) | (_, Self::Param(_)) | (_, Self::Never) => true,
             (Self::Interface(_, _) | Self::Any, _) => true,
             (
                 Self::Applied(left, left_arguments),
@@ -1008,6 +1011,14 @@ pub enum Expr {
         /// The source origin of the `try` form.
         origin: SourceOrigin,
     },
+    /// `return`: leaves the innermost enclosing function activation with the
+    /// operand's value. It has type `never`.
+    Return {
+        /// The returned value, in tail position of the activation it exits.
+        value: Box<Self>,
+        /// The source origin of the `return` form.
+        origin: SourceOrigin,
+    },
     /// A boolean conditional with two already checked branches.
     If {
         /// The boolean condition.
@@ -1523,6 +1534,7 @@ impl Expr {
             | Self::Wrap { origin, .. }
             | Self::Widen { origin, .. }
             | Self::Try { origin, .. }
+            | Self::Return { origin, .. }
             | Self::Project { origin, .. }
             | Self::Tuple { origin, .. }
             | Self::TupleProject { origin, .. }
@@ -1551,7 +1563,15 @@ impl Expr {
             Self::Captured { value_type, .. } => value_type.clone(),
             Self::Let { body, .. } => body.result_type(),
             Self::Match { value_type, .. } => value_type.clone(),
-            Self::If { then_branch, .. } => then_branch.result_type(),
+            Self::If {
+                then_branch,
+                else_branch,
+                ..
+            } => match then_branch.result_type() {
+                Type::Never => else_branch.result_type(),
+                value_type => value_type,
+            },
+            Self::Return { .. } => Type::Never,
             Self::Call { result, .. } => result.clone(),
             Self::Record { value_type, .. }
             | Self::Variant { value_type, .. }
@@ -1580,6 +1600,7 @@ impl Expr {
             }
             Self::Wrap { value, .. }
             | Self::Try { value, .. }
+            | Self::Return { value, .. }
             | Self::Widen { value, .. } => vec![value],
             Self::Project { record, .. } => vec![record],
             Self::Tuple { components, .. } => components.iter().collect(),
@@ -1617,6 +1638,7 @@ impl Expr {
             | Self::Wrap { .. }
             | Self::Widen { .. }
             | Self::Try { .. }
+            | Self::Return { .. }
             | Self::Project { .. }
             | Self::Tuple { .. }
             | Self::TupleProject { .. }
@@ -1649,6 +1671,7 @@ impl Expr {
             | Self::Wrap { .. }
             | Self::Widen { .. }
             | Self::Try { .. }
+            | Self::Return { .. }
             | Self::Project { .. }
             | Self::Tuple { .. }
             | Self::TupleProject { .. }
@@ -1717,6 +1740,7 @@ impl Expr {
             }
             Self::Wrap { value, .. }
             | Self::Widen { value, .. }
+            | Self::Return { value, .. }
             | Self::Try { value, .. } => value.slot_count(),
             Self::Project { record, .. } => record.slot_count(),
             Self::Tuple { .. }
@@ -1971,7 +1995,10 @@ impl Expr {
                     .validate_shape_with_captures(&mut then_slots, capture_types)?;
                 let else_type = else_branch
                     .validate_shape_with_captures(&mut else_slots, capture_types)?;
-                if !then_type.same_shape(&else_type) {
+                if then_type == Type::Never {
+                    return Ok(else_type);
+                }
+                if else_type != Type::Never && !then_type.same_shape(&else_type) {
                     return Err(IrError::InvalidExpression(format!(
                         "if branches have types {then_type} and {else_type}"
                     )));
@@ -2120,6 +2147,10 @@ impl Expr {
                     )));
                 }
                 Ok(value_type.clone())
+            }
+            Self::Return { value, .. } => {
+                value.validate_shape_with_captures(slots, capture_types)?;
+                Ok(Type::Never)
             }
             Self::Widen {
                 value_type,
@@ -2736,7 +2767,8 @@ impl CheckedFunction {
             }
         }
         let actual = body.validate_shape(&mut slots)?;
-        if !actual.same_shape(&signature.result()) {
+        // A body of type `never` is admitted at any written result type.
+        if actual != Type::Never && !actual.same_shape(&signature.result()) {
             return Err(IrError::ResultTypeMismatch {
                 expected: Box::new(signature.result()),
                 actual: Box::new(actual),
@@ -2927,7 +2959,8 @@ impl CheckedModuleSet {
                 }
             }
             let actual = function.body.validate_shape(&mut slots)?;
-            if !actual.same_shape(&function.signature.result()) {
+            if actual != Type::Never && !actual.same_shape(&function.signature.result())
+            {
                 return Err(IrError::ResultTypeMismatch {
                     expected: Box::new(function.signature.result()),
                     actual: Box::new(actual),
@@ -3254,6 +3287,7 @@ fn validate_program_expr(
         | Expr::Wrap { .. }
         | Expr::Widen { .. }
         | Expr::Try { .. }
+        | Expr::Return { .. }
         | Expr::Project { .. }
         | Expr::Tuple { .. }
         | Expr::TupleProject { .. }
@@ -3618,6 +3652,27 @@ fn holds_function(value_type: &Type) -> bool {
     matches!(value_type, Type::Function(_) | Type::Param(_))
 }
 
+/// Whether a body leaves its activation through a `return` of a value that
+/// holds a function. Such a value reaches the caller by a path the result
+/// summaries do not follow, so the body's result is unknown. A closure body
+/// has its own activation, which a `return` inside it does not leave.
+fn returns_function_value(expression: &Expr) -> bool {
+    let mut pending = vec![expression];
+    while let Some(expression) = pending.pop() {
+        match expression {
+            Expr::Return { value, .. } => {
+                if holds_function(&value.result_type()) {
+                    return true;
+                }
+                pending.push(value);
+            }
+            Expr::Closure { captures, .. } => pending.extend(captures),
+            _ => pending.extend(nominal::children(expression)),
+        }
+    }
+    false
+}
+
 #[derive(Clone, Debug, Default)]
 struct FunctionTargetSummary {
     known: BTreeSet<usize>,
@@ -3676,9 +3731,10 @@ fn possible_function_targets(
         | Expr::Array { .. }
         | Expr::Dict { .. }
         | Expr::Lookup { .. } => FunctionTargetSummary::default(),
-        Expr::Project { .. } | Expr::TupleProject { .. } | Expr::Try { .. } => {
-            FunctionTargetSummary::unknown()
-        }
+        Expr::Project { .. }
+        | Expr::TupleProject { .. }
+        | Expr::Try { .. }
+        | Expr::Return { .. } => FunctionTargetSummary::unknown(),
         Expr::Function { function, .. } => FunctionTargetSummary::known(*function),
         // A closure is a distinct runtime callable, even when its body
         // returns a module function.  It therefore cannot be summarized as
@@ -3846,7 +3902,7 @@ fn possible_function_targets(
                         target_aliases.insert(slot, argument.clone());
                     }
                 }
-                let returned = possible_function_targets(
+                let mut returned = possible_function_targets(
                     function.body(),
                     &target_aliases,
                     globals,
@@ -3854,6 +3910,9 @@ fn possible_function_targets(
                     visiting,
                     visiting_globals,
                 );
+                if returns_function_value(function.body()) {
+                    returned.unknown = true;
+                }
                 result.known.extend(returned.known);
                 result.unknown |= returned.unknown;
                 result.has_closure |= returned.has_closure;
@@ -4126,7 +4185,10 @@ fn analyze_call_flow_with_entry(
         };
 
         flow.reads.borrow_mut().clear();
-        let returned = flow.summary_expr(body, &environment, &[]);
+        let mut returned = flow.summary_expr(body, &environment, &[]);
+        if returns_function_value(body) {
+            returned.union(&FlowTargetSummary::unknown_function());
+        }
         let slot = match owner {
             DependencyNode::Global(index) => flow.global_returns.get_mut(index),
             DependencyNode::Function(index) => flow.function_returns.get_mut(index),
@@ -4299,9 +4361,10 @@ impl<'a> CallFlow<'a> {
             | Expr::Array { .. }
             | Expr::Dict { .. }
             | Expr::Lookup { .. } => FlowTargetSummary::default(),
-            Expr::Project { .. } | Expr::TupleProject { .. } | Expr::Try { .. } => {
-                FlowTargetSummary::unknown_function()
-            }
+            Expr::Project { .. }
+            | Expr::TupleProject { .. }
+            | Expr::Try { .. }
+            | Expr::Return { .. } => FlowTargetSummary::unknown_function(),
             Expr::Function { function, .. } => {
                 FlowTargetSummary::known_function(*function)
             }
@@ -4497,12 +4560,15 @@ impl<'a> CallFlow<'a> {
                         summary.unknown = true;
                         continue;
                     }
-                    let returned = self.summary_expr_with_stack(
+                    let mut returned = self.summary_expr_with_stack(
                         &closure.body,
                         &closure_environment,
                         &closure.captures,
                         visiting,
                     );
+                    if returns_function_value(&closure.body) {
+                        returned.union(&FlowTargetSummary::unknown_function());
+                    }
                     summary.union(&returned);
                     visiting.remove(&closure_id);
                 }
@@ -4534,12 +4600,15 @@ impl<'a> CallFlow<'a> {
                             target_environment.insert(slot, argument.clone());
                         }
                     }
-                    let returned = self.summary_expr_with_stack(
+                    let mut returned = self.summary_expr_with_stack(
                         function.body(),
                         &target_environment,
                         &[],
                         visiting,
                     );
+                    if returns_function_value(function.body()) {
+                        returned.union(&FlowTargetSummary::unknown_function());
+                    }
                     summary.union(&returned);
                     visiting.remove(&function_id);
                 }
@@ -4618,6 +4687,7 @@ impl<'a> CallFlow<'a> {
             | Expr::Wrap { .. }
             | Expr::Widen { .. }
             | Expr::Try { .. }
+            | Expr::Return { .. }
             | Expr::Project { .. }
             | Expr::Tuple { .. }
             | Expr::TupleProject { .. }
@@ -4922,6 +4992,9 @@ fn validate_tail_calls(expression: &Expr, tail_position: bool) -> Result<(), IrE
                 validate_tail_calls(operand, false)?;
             }
         }
+        // The operand of `return` hands its value to the caller of the
+        // activation it exits, so it is in tail position there.
+        Expr::Return { value, .. } => validate_tail_calls(value, true)?,
         Expr::External { arguments, .. } => {
             for argument in arguments {
                 validate_tail_calls(argument, false)?;
@@ -5068,6 +5141,9 @@ fn canonical_expr(expression: &Expr) -> String {
             canonical_type(exit_type),
             canonical_expr(value)
         ),
+        Expr::Return { value, .. } => {
+            format!("(record kind: @return value: {})", canonical_expr(value))
+        }
         Expr::Widen {
             value_type,
             value,

@@ -19,7 +19,7 @@ const RESERVED_TYPE_HEADS: &[&str] =
 /// Builtin type names; only an `intrinsic-type` declaration may use one.
 const BUILTIN_TYPE_NAMES: &[&str] = &[
     "bool", "void", "char", "str", "bytes", "atom", "i8", "i16", "i32", "i64", "u8",
-    "u16", "u32", "u64", "f32", "f64", "array", "dict",
+    "u16", "u32", "u64", "f32", "f64", "never", "array", "dict",
 ];
 /// The names of the types that play a language role and are named without an
 /// import; only the declaration that claims the role may use one.
@@ -35,9 +35,8 @@ const RESERVED_EXPRESSION_TYPE_HEADS: &[&str] = &[
     "intrinsic-type",
     "fn",
 ];
-const RETIRED_EXPRESSION_HEADS: &[&str] = &[
-    "while", "for", "break", "continue", "return", "bind", "case",
-];
+const RETIRED_EXPRESSION_HEADS: &[&str] =
+    &["while", "for", "break", "continue", "bind", "case"];
 const MAX_CONTEXTUAL_DEPTH: usize = 256;
 
 /// A lossless CST slice retained alongside a contextual grammar view.
@@ -81,15 +80,24 @@ pub enum ExpressionKind {
     Lambda(LambdaExpression),
     /// A direct expression sequence.
     Do(Vec<Expression>),
-    /// An immutable binding form.
+    /// An immutable binding form with one or more pattern/value pairs. It
+    /// is only valid as an element of a body sequence and binds for the rest
+    /// of that sequence.
     Let {
-        /// The binding pattern.
-        pattern: Pattern,
-        /// The expression producing the bound value.
-        value: Box<Expression>,
-        /// Expressions evaluated after the binding.
-        body: Vec<Expression>,
+        /// The pattern/value pairs in written order.
+        bindings: Vec<LetBinding>,
     },
+    /// A refutable binding whose fallback must leave the sequence.
+    LetElse {
+        /// The refutable binding pattern.
+        pattern: Pattern,
+        /// The expression producing the matched value.
+        value: Box<Expression>,
+        /// The expression evaluated on a mismatch; it must have type `never`.
+        fallback: Box<Expression>,
+    },
+    /// An early exit from the innermost enclosing function body.
+    Return(Box<Expression>),
     /// A three-operand conditional.
     If {
         /// The condition.
@@ -121,6 +129,34 @@ pub enum ExpressionKind {
     RecordOf(Vec<CallArgument>),
     /// An anonymous enum value, `(enumof a: e)`; the operand is labelled.
     EnumOf(Box<CallArgument>),
+}
+
+/// One pattern/value pair of a `let`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LetBinding {
+    pattern: Pattern,
+    value: Expression,
+    span: ByteSpan,
+}
+
+impl LetBinding {
+    /// The binding pattern.
+    #[must_use]
+    pub const fn pattern(&self) -> &Pattern {
+        &self.pattern
+    }
+
+    /// The expression producing the bound value.
+    #[must_use]
+    pub const fn value(&self) -> &Expression {
+        &self.value
+    }
+
+    /// The span from the pattern through the value.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
 }
 
 /// A nonempty application and its written operand groups.
@@ -1871,7 +1907,7 @@ impl AstParser {
                 if is_declaration_attribute_label(form) {
                     None
                 } else {
-                    self.parse_expression(form)
+                    self.parse_body_element(form)
                 }
             })
             .collect::<Option<Vec<_>>>()?;
@@ -1942,7 +1978,7 @@ impl AstParser {
                 if is_declaration_attribute_label(form) {
                     None
                 } else {
-                    self.parse_expression(form)
+                    self.parse_body_element(form)
                 }
             })
             .collect::<Option<Vec<_>>>();
@@ -2140,7 +2176,8 @@ impl AstParser {
         match head_node.leaf_text() {
             Some("lambda") => self.parse_lambda(node, &forms),
             Some("do") => self.parse_do(node, &forms),
-            Some("let") => self.parse_let(node, &forms),
+            Some("let" | "let-else") => self.parse_misplaced_binding(node, &forms),
+            Some("return") => self.parse_return(node, &forms),
             Some("if") => self.parse_if(node, &forms),
             Some("match") => self.parse_match(node, &forms),
             Some("as") => self.parse_expression_as(node, &forms),
@@ -2283,7 +2320,7 @@ impl AstParser {
                 if is_lambda_attribute_label(form) {
                     None
                 } else {
-                    self.parse_expression(form)
+                    self.parse_body_element(form)
                 }
             })
             .collect::<Option<Vec<_>>>();
@@ -2309,30 +2346,126 @@ impl AstParser {
             kind: ExpressionKind::Do(
                 forms[1..]
                     .iter()
-                    .map(|form| self.parse_expression(form))
+                    .map(|form| self.parse_body_element(form))
                     .collect::<Option<Vec<_>>>()?,
             ),
             span: node.span(),
         })
     }
 
+    /// One element of a body sequence: an expression or a binding form.
+    fn parse_body_element(&mut self, node: &CstNode) -> Option<Expression> {
+        if node.kind() == SyntaxKind::List {
+            let forms = meaningful_children(node);
+            match forms.first().and_then(|head| head.leaf_text()) {
+                Some("let") => {
+                    return self.guarded(node, |parser| parser.parse_let(node, &forms));
+                }
+                Some("let-else") => {
+                    return self
+                        .guarded(node, |parser| parser.parse_let_else(node, &forms));
+                }
+                _ => {}
+            }
+        }
+        self.parse_expression(node)
+    }
+
+    fn guarded(
+        &mut self,
+        node: &CstNode,
+        parse: impl FnOnce(&mut Self) -> Option<Expression>,
+    ) -> Option<Expression> {
+        if !self.enter_context(node) {
+            return None;
+        }
+        let result = parse(self);
+        self.leave_context();
+        result
+    }
+
     fn parse_let(&mut self, node: &CstNode, forms: &[&CstNode]) -> Option<Expression> {
-        if forms.len() < 3 {
-            self.invalid_form(node, "let requires a pattern, value, and body");
+        if forms.len() < 3 || !(forms.len() - 1).is_multiple_of(2) {
+            self.invalid_form(node, "let requires one or more pattern/value pairs");
+            return None;
+        }
+        let mut bindings = Vec::with_capacity((forms.len() - 1) / 2);
+        for pair in forms[1..].chunks_exact(2) {
+            let pattern = self.parse_pattern(pair[0])?;
+            let value = self.parse_expression(pair[1])?;
+            bindings.push(LetBinding {
+                pattern,
+                value,
+                span: ByteSpan::new(pair[0].span().start(), pair[1].span().end()),
+            });
+        }
+        Some(Expression {
+            kind: ExpressionKind::Let { bindings },
+            span: node.span(),
+        })
+    }
+
+    fn parse_let_else(
+        &mut self,
+        node: &CstNode,
+        forms: &[&CstNode],
+    ) -> Option<Expression> {
+        if forms.len() != 4 {
+            self.invalid_form(
+                node,
+                "let-else requires a pattern, a value, and a fallback",
+            );
             return None;
         }
         let pattern = self.parse_pattern(forms[1])?;
         let value = self.parse_expression(forms[2])?;
-        let body = forms[3..]
-            .iter()
-            .map(|form| self.parse_expression(form))
-            .collect::<Option<Vec<_>>>()?;
+        let fallback = self.parse_expression(forms[3])?;
         Some(Expression {
-            kind: ExpressionKind::Let {
+            kind: ExpressionKind::LetElse {
                 pattern,
                 value: Box::new(value),
-                body,
+                fallback: Box::new(fallback),
             },
+            span: node.span(),
+        })
+    }
+
+    /// A `let` or `let-else` read where an expression is required. The form
+    /// is reported at its complete span; its value operands are still read so
+    /// their own syntax errors surface, and the form yields no expression.
+    fn parse_misplaced_binding(
+        &mut self,
+        node: &CstNode,
+        forms: &[&CstNode],
+    ) -> Option<Expression> {
+        self.error(
+            DiagnosticCode::SyntaxMisplacedBinding,
+            node.span(),
+            "a let or let-else must be a direct element of a body sequence",
+        );
+        let is_let = forms.first().and_then(|head| head.leaf_text()) == Some("let");
+        let values = if is_let {
+            forms.iter().skip(2).step_by(2).copied().collect::<Vec<_>>()
+        } else {
+            forms.iter().skip(2).take(2).copied().collect::<Vec<_>>()
+        };
+        for value in values {
+            self.parse_expression(value);
+        }
+        None
+    }
+
+    fn parse_return(
+        &mut self,
+        node: &CstNode,
+        forms: &[&CstNode],
+    ) -> Option<Expression> {
+        if forms.len() != 2 {
+            self.invalid_form(node, "return requires exactly one expression");
+            return None;
+        }
+        Some(Expression {
+            kind: ExpressionKind::Return(Box::new(self.parse_expression(forms[1])?)),
             span: node.span(),
         })
     }

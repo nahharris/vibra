@@ -1,12 +1,12 @@
 (import option @std.option)
 
 (defn main () (tuple (array i32) (array i32) u64 (option.option (array i32)))
-  (let joined (array.concat (array.append (collect 1i32) 2i32) (collect 0i32 3i32 4i32))
-    (tupleof
-      (collect 1i32)
-      joined
-      (array.length joined)
-      (array.slice joined 1u64 3u64))))
+  (let joined (array.concat (array.append (collect 1i32) 2i32) (collect 0i32 3i32 4i32)))
+  (tupleof
+    (collect 1i32)
+    joined
+    (array.length joined)
+    (array.slice joined 1u64 3u64)))
 
 (defn collect (first i32) (array i32)
   variadic: (rest (array i32))

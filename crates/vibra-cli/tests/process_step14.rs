@@ -233,7 +233,7 @@ fn actual_binary_positive_demo_repeats_in_two_fresh_hello_workspaces() {
         );
         workspace.write(
             "src/hello/main.vib",
-            "(import helper @hello.helper)\n(defn main () void (let - (helper.answer) (do)))\n",
+            "(import helper @hello.helper)\n(defn main () void (let - (helper.answer)) (do))\n",
         );
 
         let preview = run(&workspace.root, &["fmt", "src/hello/main.vib"]);
@@ -252,7 +252,7 @@ fn actual_binary_positive_demo_repeats_in_two_fresh_hello_workspaces() {
             .as_str()
             .expect("preview returns formatted source text");
         let main_path = workspace.root.join("src/hello/main.vib");
-        let unformatted = "(import helper @hello.helper)\n(defn main () void (let - (helper.answer) (do)))\n";
+        let unformatted = "(import helper @hello.helper)\n(defn main () void (let - (helper.answer)) (do))\n";
         assert_eq!(
             fs::read(&main_path).expect("read unmodified input"),
             unformatted.as_bytes()
@@ -326,7 +326,7 @@ fn actual_binary_run_preflight_failures_never_produce_a_program_result() {
     mismatch.write("project.vibon", &binary_project("(dict)"));
     mismatch.write(
         "src/hello/main.vib",
-        "(defn spin () void (spin))\n(defn value (number i32) i32 number)\n(defn main () void (let - (spin) (let - (value true) (do))))\n",
+        "(defn spin () void (spin))\n(defn value (number i32) i32 number)\n(defn main () void (let - (spin)) (let - (value true)) (do))\n",
     );
     let mismatch_output = run_with_timeout(
         &mismatch.root,
@@ -344,7 +344,7 @@ fn actual_binary_run_preflight_failures_never_produce_a_program_result() {
     private.write("project.vibon", &binary_project("(dict)"));
     private.write(
         "src/hello/main.vib",
-        "(import secret @hello.secret)\n(defn main () void (let - (secret.answer) (do)))\n",
+        "(import secret @hello.secret)\n(defn main () void (let - (secret.answer)) (do))\n",
     );
     private.write("src/hello/secret.vib", "(defn answer () i32 42i32)\n");
     assert_nonexecuting_run(

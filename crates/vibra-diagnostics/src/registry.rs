@@ -224,9 +224,11 @@ diagnostic_registry! {
     SyntaxInvalidName => "@syntax.invalid-name", Syntax, Error, None,
         "a nonliteral leaf is not a valid symbol, label, atom, or discard spelling";
     SyntaxRetiredForm => "@syntax.retired-form", Syntax, Error, None,
-        "a form retired from v1, such as `while` or `return`, was written";
+        "a form retired from v1, such as `while` or `break`, was written";
     SyntaxInvalidForm => "@syntax.invalid-form", Syntax, Error, None,
         "a source form has an invalid head, arity, or grammar position";
+    SyntaxMisplacedBinding => "@syntax.misplaced-binding", Syntax, Error, None,
+        "a `let` or `let-else` is not a direct element of a body sequence";
     SyntaxDuplicateAttribute => "@syntax.duplicate-attribute", Syntax, Error, None,
         "a declaration repeats one attribute";
     SyntaxUnknownAttribute => "@syntax.unknown-attribute", Syntax, Error, None,
@@ -325,8 +327,16 @@ diagnostic_registry! {
         "`try` is outside a matching `option` or `result` context";
     TypeUnhandledFallible => "@type.unhandled-fallible", Type, Error, None,
         "a `result` value is ignored without an explicit discard";
+    TypeInvalidReturn => "@type.invalid-return", Type, Error, None,
+        "`return` has no enclosing function body to exit";
+    TypeRedundantReturn => "@type.redundant-return", Type, Error, None,
+        "`return` is in tail position, where the final expression is already the result";
+    TypeUnreachableCode => "@type.unreachable-code", Type, Error, None,
+        "a `never` expression is in a position that admits none, or follows one";
     PatternRefutableBinding => "@pattern.refutable-binding", Pattern, Error, None,
         "a binding pattern is refutable for its expected type";
+    PatternIrrefutableLetElse => "@pattern.irrefutable-let-else", Pattern, Error, None,
+        "a `let-else` pattern covers every value, so `let` is the form to write";
     PatternNonExhaustive => "@pattern.non-exhaustive", Pattern, Error, None,
         "the arms of a `match` do not cover every value of the scrutinee type";
     PatternUnreachableArm => "@pattern.unreachable-arm", Pattern, Error, None,
@@ -395,7 +405,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 85;
+    const REGISTERED_CODES: usize = 90;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

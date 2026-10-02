@@ -6,10 +6,12 @@
 (defn in-signature (value (holder f64)) i32 0i32)
 
 (defn in-constructor () i32
-  (let value (holder item: 1.5f64) 0i32))
+  (let value (holder item: 1.5f64))
+  0i32)
 
 (defn in-body () i32
-  (let use (lambda (value (holder f64)) i32 0i32) 0i32))
+  (let use (lambda (value (holder f64)) i32 0i32))
+  0i32)
 
 (def in-global (array (holder f64)) (array.of))
 
@@ -17,5 +19,5 @@
   (let pick
     (lambda (value k) k
       where: (k ordered)
-      value)
-    (pick 1.5f64)))
+      value))
+  (pick 1.5f64))

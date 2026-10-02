@@ -14,7 +14,12 @@ use crate::reader::{CstNode, Document, DocumentMode, SyntaxKind};
 const TOP_LEVEL_FORMS: &[&str] = &[
     "import", "deftype", "defint", "deffect", "def", "defn", "test",
 ];
-const EXPRESSION_FORMS: &[&str] = &["lambda", "do", "let", "if", "match", "as", "try"];
+const EXPRESSION_FORMS: &[&str] =
+    &["lambda", "do", "if", "match", "return", "as", "try"];
+/// The forms of a body-sequence element, which also admits the binding forms.
+const BODY_FORMS: &[&str] = &[
+    "lambda", "do", "let", "let-else", "if", "match", "return", "as", "try",
+];
 const TYPE_FORMS: &[&str] = &["tuple", "array", "dict", "fn"];
 const PATTERN_FORMS: &[&str] = &["tuple", "array", "as"];
 const DATA_FORMS: &[&str] = &["record", "array", "tuple", "dict"];
@@ -438,6 +443,8 @@ enum Context {
     Type,
     Pattern,
     Expression,
+    /// An element of a body sequence, where `let` and `let-else` are valid.
+    Body,
     DeclarationAttribute,
     EffectRow,
     DataField,
@@ -455,7 +462,7 @@ impl Context {
             Self::Declaration => GrammarCategory::Declaration,
             Self::Type => GrammarCategory::Type,
             Self::Pattern | Self::ParameterList => GrammarCategory::Pattern,
-            Self::Expression => GrammarCategory::Expression,
+            Self::Expression | Self::Body => GrammarCategory::Expression,
             Self::DeclarationAttribute | Self::LabelledList | Self::WhereList => {
                 GrammarCategory::DeclarationAttribute
             }
@@ -564,7 +571,9 @@ fn child_context(
         Context::Declaration => declaration_child_context(parent, head, child, index),
         Context::Type => type_child_context(parent, head, child, index),
         Context::Pattern => pattern_child_context(parent, head, child, index),
-        Context::Expression => expression_child_context(parent, head, child, index),
+        Context::Expression | Context::Body => {
+            expression_child_context(parent, head, child, index)
+        }
         Context::DeclarationAttribute => {
             attribute_child_context(parent, head, child, index)
         }
@@ -664,7 +673,7 @@ fn declaration_child_context(
             {
                 Context::DeclarationAttribute
             } else {
-                Context::Expression
+                Context::Body
             }
         }
         "impl" => {
@@ -701,7 +710,7 @@ fn declaration_tail_context(
         return Context::Declaration;
     }
     if index > 0 && !members_are_declarations {
-        return Context::Expression;
+        return Context::Body;
     }
     Context::DeclarationAttribute
 }
@@ -773,9 +782,12 @@ fn expression_child_context(
             2 => Context::Type,
             _ => lambda_tail_context(parent, child, index),
         },
-        "let" if index == 1 => Context::Pattern,
+        "let" if index % 2 == 1 => Context::Pattern,
         "let" => Context::Expression,
-        "if" | "do" | "try" => Context::Expression,
+        "let-else" if index == 1 => Context::Pattern,
+        "let-else" => Context::Expression,
+        "do" => Context::Body,
+        "if" | "try" | "return" => Context::Expression,
         "match" if index == 1 => Context::Expression,
         "match" if index.is_multiple_of(2) => Context::Pattern,
         "match" => Context::Expression,
@@ -816,7 +828,7 @@ fn lambda_tail_context(parent: &CstNode, child: &CstNode, index: usize) -> Conte
     } else if let Some(label) = previous_label(parent, index) {
         attribute_value_context(label)
     } else {
-        Context::Expression
+        Context::Body
     }
 }
 
@@ -843,6 +855,7 @@ fn permitted_for(
             Some(to_owned(EXPRESSION_FORMS)),
             Some(vec!["types".to_owned()]),
         ),
+        Context::Body => (Some(to_owned(BODY_FORMS)), Some(vec!["types".to_owned()])),
         Context::DeclarationAttribute => {
             (Some(Vec::new()), Some(attribute_labels(path)))
         }

@@ -20,16 +20,16 @@ span = [321, 339]
 code = "@type.ambiguous-implementation"
 level = "@error"
 source = "input.vib"
-span = [375, 391]
+span = [377, 393]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "input.vib"
-span = [418, 439]
+span = [420, 441]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "input.vib"
-span = [471, 489]
+span = [473, 491]

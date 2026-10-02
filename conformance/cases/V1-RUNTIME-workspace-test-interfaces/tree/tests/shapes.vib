@@ -16,5 +16,5 @@
   (assert.equal (shapes.name-of (shapes.circle radius: 2i32)) "circle"))
 
 (test "names an imported interface in type position"
-  (let held (as shapes.shape (shapes.square side: 1i32))
-    (assert.equal (shapes.shape.name held) "square")))
+  (let held (as shapes.shape (shapes.square side: 1i32)))
+  (assert.equal (shapes.shape.name held) "square"))

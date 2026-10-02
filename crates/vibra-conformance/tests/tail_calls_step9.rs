@@ -136,7 +136,8 @@ fn identity_returned_targets_remain_bounded_through_direct_and_local_calls() {
 
     let local = r#"
 (defn answer () i32
-  (let selected (identity leaf) (selected)))
+  (let selected (identity leaf))
+  (selected))
 (defn identity (f (fn () i32)) (fn () i32) f)
 (defn leaf () i32 1i32)
 "#;
@@ -192,7 +193,8 @@ fn mixed_source_and_external_tail_candidates_reuse_only_source_targets() {
 fn lambda_activations_reuse_for_calls_through_captured_values() {
     let source = r#"
 (defn answer () i32
-  (let f leaf ((lambda () i32 (f)))))
+  (let f leaf)
+  ((lambda () i32 (f))))
 (defn leaf () i32 1i32)
 "#;
     let checked = check_source("tail-lambda-activation.vib", source);
@@ -257,7 +259,8 @@ fn unknown_callable_branches_keep_known_recursive_and_external_fallbacks() {
 fn non_tail_call_keeps_a_live_caller_activation() {
     let source = r#"
 (defn answer () i32
-  (let value (leaf) value))
+  (let value (leaf))
+  value)
 (defn leaf () i32 7i32)
 "#;
     let checked = check_source("tail-negative.vib", source);
@@ -331,9 +334,9 @@ fn real_interpreter_handler_executes_the_tail_stress_workload() {
 fn captured_callable_values_survive_repeated_tail_transfers() {
     let source = r#"
 (defn answer () i32
-  (let value 41i32
-    (let captured (lambda () i32 value)
-      (loop true true captured))))
+  (let value 41i32)
+  (let captured (lambda () i32 value))
+  (loop true true captured))
 (defn loop (first bool second bool f (fn () i32)) i32
   (if first
     (loop false true f)
@@ -367,7 +370,7 @@ fn callable_return_and_unused_initializer_boundaries_remain_valid() {
 
     let unused = r#"
 (defn answer (flag bool) i32
-  ((let unused flag leaf)))
+  ((do (let unused flag) leaf)))
 (defn leaf () i32 1i32)
 "#;
     let checked = check_source("tail-unused-initializer.vib", unused);

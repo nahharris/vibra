@@ -108,11 +108,11 @@ fn semantic_query_joins_structural_type_scope_and_application_facts() {
 fn semantic_query_keeps_discards_unidentified_and_binds_labelled_slots() {
     let root = temporary_directory("labels");
     let source = r#"(defn answer () str
-  (let - "ignored"
-    "done"))
+  (let - "ignored")
+  "done")
 (defn use-local () str
-  (let f choose
-    (f "head" second: 11i32 first: "tail")))
+  (let f choose)
+  (f "head" second: 11i32 first: "tail"))
 (defn choose (fallback str) str
   labelled: (first str "first" second i32 8i32)
   first)
@@ -198,7 +198,7 @@ fn semantic_query_keeps_discards_unidentified_and_binds_labelled_slots() {
 fn semantic_query_retains_literal_type_next_to_recovered_syntax() {
     let root = temporary_directory("recovery");
     let source =
-        "(defn broken () i32 (let (bind x) 1i32 1i32))\n(defn good () i32 2i32)";
+        "(defn broken () i32 (let (bind x) 1i32) 1i32)\n(defn good () i32 2i32)";
     write_workspace(&root, source);
     let workspace = WorkspaceSnapshot::load(&root).expect("workspace snapshot");
     let offset = source.rfind("2i32").expect("valid neighboring literal");
@@ -258,7 +258,7 @@ fn semantic_query_does_not_promote_expected_to_observed_for_unresolved_applicati
 #[test]
 fn semantic_query_does_not_bind_qualified_name_to_unqualified_local() {
     let root = temporary_directory("qualified-local");
-    let source = "(defn answer () i32 (let x 1i32 x.bad))";
+    let source = "(defn answer () i32 (let x 1i32) x.bad)";
     write_workspace(&root, source);
     let workspace = WorkspaceSnapshot::load(&root).expect("workspace snapshot");
     let query = workspace
@@ -278,7 +278,7 @@ fn semantic_query_does_not_bind_qualified_name_to_unqualified_local() {
 #[test]
 fn semantic_query_keeps_trivia_facts_unavailable() {
     let root = temporary_directory("trivia");
-    let source = "(defn answer () i32 (let x 1i32 x))";
+    let source = "(defn answer () i32 (let x 1i32) x)";
     write_workspace(&root, source);
     let workspace = WorkspaceSnapshot::load(&root).expect("workspace snapshot");
     let offset = source.find("1i32").expect("literal") - 1;

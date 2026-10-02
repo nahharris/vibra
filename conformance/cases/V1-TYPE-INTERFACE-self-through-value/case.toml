@@ -32,4 +32,4 @@ span = [535, 546]
 code = "@type.ambiguous-inference"
 level = "@error"
 source = "input.vib"
-span = [595, 608]
+span = [597, 610]

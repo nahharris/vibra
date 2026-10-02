@@ -3,9 +3,9 @@
     (bool.true)
     (match false (bool.false) true (bool.true) false)
     (str (array.of \h \i))
-    (let (str scalars) "héllo" scalars)
+    (do (let (str scalars) "héllo") scalars)
     (bytes (array.of 104u8 105u8))
-    (let (bytes items) (bytes (array.of 1u8 2u8 3u8)) (array.length items))
+    (do (let (bytes items) (bytes (array.of 1u8 2u8 3u8))) (array.length items))
     (array.fold
       (array.of 1i32 2i32 3i32)
       10i32

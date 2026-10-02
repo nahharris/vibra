@@ -2206,22 +2206,22 @@ impl Resolution {
                 BodyWork::Function(function) => {
                     let mut scope = Vec::new();
                     self.bind_parameters(&module, &function, &mut scope, &source_id);
-                    for expression in function.expressions() {
-                        self.resolve_expression(
-                            &module, &from, expression, &scope, &source_id,
-                        );
-                    }
+                    self.resolve_sequence(
+                        &module,
+                        &from,
+                        function.expressions(),
+                        &scope,
+                        &source_id,
+                    );
                 }
                 BodyWork::Test(test) => {
-                    for expression in test.expressions() {
-                        self.resolve_expression(
-                            &module,
-                            &from,
-                            expression,
-                            &[],
-                            &source_id,
-                        );
-                    }
+                    self.resolve_sequence(
+                        &module,
+                        &from,
+                        test.expressions(),
+                        &[],
+                        &source_id,
+                    );
                 }
             }
         }
@@ -2346,6 +2346,49 @@ impl Resolution {
         }
     }
 
+    /// Resolves one body sequence. A `let` or `let-else` binds for every later
+    /// element, and the names it binds end with the sequence.
+    fn resolve_sequence(
+        &mut self,
+        module: &ModuleKey,
+        from: &DeclarationId,
+        elements: &[Expression],
+        scope: &[(String, ByteSpan)],
+        source_id: &str,
+    ) {
+        let mut local = scope.to_vec();
+        for element in elements {
+            match element.kind() {
+                ExpressionKind::Let { bindings } => {
+                    for binding in bindings {
+                        self.resolve_expression(
+                            module,
+                            from,
+                            binding.value(),
+                            &local,
+                            source_id,
+                        );
+                        let mut names = Vec::new();
+                        collect_pattern_names(binding.pattern(), &mut names);
+                        self.bind_names(module, &mut local, names, source_id);
+                    }
+                }
+                ExpressionKind::LetElse {
+                    pattern,
+                    value,
+                    fallback,
+                } => {
+                    self.resolve_expression(module, from, value, &local, source_id);
+                    self.resolve_expression(module, from, fallback, &local, source_id);
+                    let mut names = Vec::new();
+                    collect_pattern_names(pattern, &mut names);
+                    self.bind_names(module, &mut local, names, source_id);
+                }
+                _ => self.resolve_expression(module, from, element, &local, source_id),
+            }
+        }
+    }
+
     fn resolve_expression(
         &mut self,
         module: &ModuleKey,
@@ -2403,40 +2446,22 @@ impl Resolution {
                     &mut nested_scope,
                     source_id,
                 );
-                for expression in lambda.body() {
-                    self.resolve_expression(
-                        module,
-                        from,
-                        expression,
-                        &nested_scope,
-                        source_id,
-                    );
-                }
+                self.resolve_sequence(
+                    module,
+                    from,
+                    lambda.body(),
+                    &nested_scope,
+                    source_id,
+                );
             }
             ExpressionKind::Do(expressions) => {
-                for expression in expressions {
-                    self.resolve_expression(module, from, expression, scope, source_id);
-                }
+                self.resolve_sequence(module, from, expressions, scope, source_id);
             }
-            ExpressionKind::Let {
-                pattern,
-                value,
-                body,
-            } => {
-                self.resolve_expression(module, from, value, scope, source_id);
-                let mut nested_scope = scope.to_vec();
-                let mut names = Vec::new();
-                collect_pattern_names(pattern, &mut names);
-                self.bind_names(module, &mut nested_scope, names, source_id);
-                for expression in body {
-                    self.resolve_expression(
-                        module,
-                        from,
-                        expression,
-                        &nested_scope,
-                        source_id,
-                    );
-                }
+            // A binding form outside a body sequence is never kept by the
+            // reader, and one inside is handled by `resolve_sequence`.
+            ExpressionKind::Let { .. } | ExpressionKind::LetElse { .. } => {}
+            ExpressionKind::Return(operand) => {
+                self.resolve_expression(module, from, operand, scope, source_id);
             }
             ExpressionKind::If {
                 condition,

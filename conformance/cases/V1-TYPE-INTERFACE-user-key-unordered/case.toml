@@ -26,4 +26,4 @@ span = [163, 200]
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "input.vib"
-span = [284, 315]
+span = [286, 317]
