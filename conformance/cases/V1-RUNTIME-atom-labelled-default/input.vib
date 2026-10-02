@@ -1,0 +1,8 @@
+(defn main () (tuple atom atom)
+  (tupleof
+    (level "started")
+    (level "failed" severity: @error)))
+
+(defn level (message str) atom
+  labelled: (severity atom @info)
+  severity)

@@ -33,11 +33,12 @@ pub use ast::{
     CallArgument, Declaration, DeclarationAttributes, DefDeclaration,
     DeffectDeclaration, DefintDeclaration, DeftypeBody, DeftypeDeclaration, EffectRow,
     Expression, ExpressionKind, FunctionAttributes, FunctionDeclaration, FunctionType,
-    GenericBinding, ImplDeclaration, ImportDeclaration, LabelledParameter,
-    LambdaExpression, MatchArm, Parameter, Pattern, PatternArgument, PatternKind,
-    RawNode, SourceAst, SourceDecode, TestDeclaration, TypeAttributes, TypeExpr,
-    TypeField, TypeMember, TypeSlot, VariadicBinding, VariadicParameter, VariadicType,
-    contains_declaration_head, decode_source_root, is_reserved_value_spelling,
+    GenericBinding, ImplDeclaration, ImportDeclaration, LabelledDefault,
+    LabelledParameter, LambdaExpression, MatchArm, Parameter, Pattern, PatternArgument,
+    PatternKind, RawNode, SourceAst, SourceDecode, TestDeclaration, TypeAttributes,
+    TypeExpr, TypeField, TypeMember, TypeSlot, VariadicBinding, VariadicParameter,
+    VariadicType, contains_declaration_head, decode_source_root,
+    is_reserved_value_spelling,
 };
 pub use data::{
     AtomRole, DataDecode, DataField, DataNode, DataValue, TypedDataSchema,

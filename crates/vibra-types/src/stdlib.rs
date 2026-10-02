@@ -812,7 +812,11 @@ mod tests {
         inputs.manifest = manifest.as_bytes();
         rejects(&inputs, "`@option` is claimed by more than one declaration");
 
-        let unclaimed = option.replace("  role: @option\n", "");
+        // Only the declaration that claims a role may take the role's name,
+        // so the unclaimed type is also renamed.
+        let unclaimed = option
+            .replace("  role: @option\n", "")
+            .replace("(deftype option ", "(deftype maybe ");
         let manifest = with_option(&unclaimed);
         let mut inputs = StdlibInputs::embedded()
             .with_module("std/option.vib", unclaimed.as_bytes());

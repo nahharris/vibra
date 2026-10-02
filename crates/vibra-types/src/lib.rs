@@ -3110,11 +3110,11 @@ fn check_signature(
                         valid = false;
                         continue;
                     };
-                    let Some(default) = check_literal(
+                    let Some(default) = check_default(
                         source_id,
                         entry.span(),
                         entry.default(),
-                        Some(value_type.clone()),
+                        &value_type,
                         diagnostics,
                     ) else {
                         valid = false;
@@ -3382,11 +3382,11 @@ fn check_lambda_signature(
                         valid = false;
                         continue;
                     };
-                    let Some(default) = check_literal(
+                    let Some(default) = check_default(
                         source_id,
                         entry.span(),
                         entry.default(),
-                        Some(value_type.clone()),
+                        &value_type,
                         diagnostics,
                     ) else {
                         valid = false;
@@ -4901,6 +4901,41 @@ fn check_resolved_reference(
         }
         ResolvedReferenceTarget::Function(index) => {
             function_value(environment, expression, index, expected, callee_position)
+        }
+    }
+}
+
+/// The value of a labelled parameter's default at its written type. An atom
+/// default has the type `atom` or its own singleton.
+fn check_default(
+    source_id: &str,
+    span: ByteSpan,
+    default: &vibra_syntax::LabelledDefault,
+    value_type: &Type,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<Value> {
+    match default {
+        vibra_syntax::LabelledDefault::Literal(literal) => check_literal(
+            source_id,
+            span,
+            literal,
+            Some(value_type.clone()),
+            diagnostics,
+        ),
+        vibra_syntax::LabelledDefault::Atom(name) => {
+            let singleton = Type::AtomSingleton(name.value().to_owned());
+            if *value_type != Type::Atom && *value_type != singleton {
+                mismatch(
+                    diagnostics,
+                    source_id,
+                    span,
+                    value_type.clone(),
+                    singleton,
+                    "an atom default does not match the parameter type",
+                );
+                return None;
+            }
+            Some(Value::Atom(name.value().to_owned()))
         }
     }
 }

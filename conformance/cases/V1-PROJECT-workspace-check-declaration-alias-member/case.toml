@@ -1,0 +1,22 @@
+id = "V1-PROJECT-workspace-check-declaration-alias-member"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "A member reached through a single-declaration import alias is checked for visibility like one reached through a module alias: a private method is private access, a public one is accepted."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.private-access"
+level = "@error"
+source = "src/app/main.vib"
+span = [80, 90]
+
+  [[expect.diagnostics.related]]
+  source = "src/lib/shapes.vib"
+  span = [67, 112]

@@ -21,6 +21,9 @@ const BUILTIN_TYPE_NAMES: &[&str] = &[
     "bool", "void", "char", "str", "bytes", "atom", "i8", "i16", "i32", "i64", "u8",
     "u16", "u32", "u64", "f32", "f64", "array", "dict",
 ];
+/// The names of the types that play a language role and are named without an
+/// import; only the declaration that claims the role may use one.
+const ROLE_TYPE_NAMES: &[&str] = &["option", "result", "iter"];
 /// Heads that are reserved forms in expression position.
 const RESERVED_EXPRESSION_TYPE_HEADS: &[&str] = &[
     "tuple",
@@ -1031,12 +1034,33 @@ impl Parameter {
     }
 }
 
-/// A labelled parameter and its literal default.
+/// The default of a labelled parameter: any literal of the source grammar,
+/// which counts an atom name among them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LabelledDefault {
+    /// A string, character, boolean, numeric, or `void` literal.
+    Literal(Literal),
+    /// An atom literal, `@name`.
+    Atom(Name),
+}
+
+impl LabelledDefault {
+    /// The default's exact source spelling.
+    #[must_use]
+    pub fn raw(&self) -> &str {
+        match self {
+            Self::Literal(literal) => literal.raw(),
+            Self::Atom(name) => name.raw(),
+        }
+    }
+}
+
+/// A labelled parameter with its required default.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LabelledParameter {
     name: Name,
     value_type: TypeExpr,
-    default: Literal,
+    default: LabelledDefault,
     name_span: ByteSpan,
     span: ByteSpan,
 }
@@ -1056,7 +1080,7 @@ impl LabelledParameter {
 
     /// The default literal.
     #[must_use]
-    pub const fn default(&self) -> &Literal {
+    pub const fn default(&self) -> &LabelledDefault {
         &self.default
     }
 
@@ -1629,7 +1653,17 @@ impl AstParser {
             self.invalid_form(node, "defint requires a name");
             return None;
         }
-        let name = self.declaration_name(forms[1])?;
+        // The interface that plays a role, such as `iter`, takes its name.
+        let claims_role = forms.get(2..).is_some_and(|attributes| {
+            attributes.iter().any(|form| {
+                matches!(
+                    form.name(),
+                    Some(NameClassification::Name(name))
+                        if name.kind() == NameKind::Label && name.value() == "role"
+                )
+            })
+        });
+        let name = self.checked_declaration_name(forms[1], claims_role)?;
         let parsed = self.parse_attributes(&forms[2..], AttributeContext::Type, &[]);
         let attributes = TypeAttributes {
             items: parsed.items,
@@ -3224,8 +3258,17 @@ impl AstParser {
                 return None;
             }
             let value_type = self.parse_type_expr(triple[1])?;
-            let default =
-                self.literal(triple[2], "labelled defaults must be literals")?;
+            // An atom name is a literal of the source grammar.
+            let default = match triple[2].name() {
+                Some(NameClassification::Name(atom))
+                    if atom.kind() == NameKind::Atom =>
+                {
+                    LabelledDefault::Atom(atom)
+                }
+                _ => LabelledDefault::Literal(
+                    self.literal(triple[2], "labelled defaults must be literals")?,
+                ),
+            };
             parameters.push(LabelledParameter {
                 name,
                 value_type,
@@ -3306,8 +3349,12 @@ impl AstParser {
     ) -> Option<Name> {
         let name =
             self.local_name(node, "declaration names must be unqualified symbols")?;
-        if RESERVED_TYPE_HEADS.contains(&name.value())
-            || (!allow_builtin && BUILTIN_TYPE_NAMES.contains(&name.value()))
+        // `any` is the predeclared empty interface; no declaration takes it.
+        if name.value() == "any"
+            || RESERVED_TYPE_HEADS.contains(&name.value())
+            || (!allow_builtin
+                && (BUILTIN_TYPE_NAMES.contains(&name.value())
+                    || ROLE_TYPE_NAMES.contains(&name.value())))
         {
             self.error(
                 DiagnosticCode::NameReservedDeclaration,
