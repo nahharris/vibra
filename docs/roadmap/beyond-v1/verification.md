@@ -119,7 +119,7 @@ function that wrote it. The fact is informational and rejects nothing: a
 static ban on non-tail recursion was studied and rejected, with the reasons
 recorded in the
 [pre-M4 decisions](../pre-m4/README.md#a-static-ban-on-non-tail-recursion-is-rejected).
-V1's termination check and an agent reviewing stack behavior can both start from
+Stage V1's termination check and an agent reviewing stack behavior can both start from
 it.
 
 V0 is valuable on its own. It is also the adoption path: an agent that writes

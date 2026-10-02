@@ -152,8 +152,10 @@ application, as BEAM does. The same counter delivers budgets:
   budget exhaustion is a portable, deterministic result rather than a host
   event.
 
-The v1 statement that stack exhaustion from non-tail recursion is a host event
-stays true for the root process of a single-process program.
+For the root process of a single-process program, the outcome of deep
+non-tail recursion is whatever rule
+[Milestone 4](../v1.md#milestone-4--webassembly-spine-static-effects-and-host-operations)
+writes into the runtime chapter.
 
 ## Packages and publishing
 
