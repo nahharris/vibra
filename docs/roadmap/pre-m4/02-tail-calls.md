@@ -123,7 +123,7 @@ Commands run in the worktree on this change, all passing:
 cargo fetch --locked
 cargo fmt --all --check
 RUSTFLAGS="-D warnings" cargo clippy --locked --offline --workspace --all-targets --all-features -- -D warnings
-RUSTFLAGS="-D warnings" cargo test --locked --offline --workspace --all-targets --all-features   # 653 passed, 0 failed
+RUSTFLAGS="-D warnings" cargo test --locked --offline --workspace --all-targets --all-features   # 656 passed, 0 failed
 RUSTDOCFLAGS="-D warnings" cargo doc --locked --offline --workspace --no-deps --all-features
 cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases   # 373 passed
 cargo test --locked --offline -p vibra-conformance --test evidence_step11

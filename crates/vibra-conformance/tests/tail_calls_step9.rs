@@ -486,6 +486,55 @@ fn tail_calls_between_modules_reuse_one_activation() {
     assert_eq!(execution.max_activation_depth(), 3);
 }
 
+/// A `def` initializer is not an activation's final expression, so a call at
+/// its top level is never a tail transfer; only a `lambda` body inside it has
+/// a tail position.
+#[test]
+fn def_initializer_calls_are_never_tail_transfers() {
+    let sources = [
+        // A direct call to a source function.
+        (
+            "(def value i32 (leaf))\n(defn leaf () i32 7i32)\n(defn answer () i32 value)\n",
+            7,
+        ),
+        // A call to a closure.
+        (
+            "(def value i32 ((lambda () i32 8i32)))\n(defn answer () i32 value)\n",
+            8,
+        ),
+        // A contract member called through an interface value.
+        (
+            "(defint shape (defn name (item self) i32))\n(deftype point (record x i32)\n  (impl shape (defn name (item self) i32 9i32)))\n(def value i32 (shape.name (as shape (point x: 1i32))))\n(defn answer () i32 value)\n",
+            9,
+        ),
+    ];
+    for (source, expected) in sources {
+        let checked = check_source("tail-def-initializer.vib", source);
+        assert!(checked.accepted(), "{:?}", checked.diagnostics());
+        let program = checked.program().expect("program");
+        assert!(
+            !program.canonical_vibon().contains("tail: true"),
+            "{source}"
+        );
+        let execution = vibra_interp::run(program).expect("execution");
+        assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(expected)));
+        assert_eq!(execution.tail_transfer_count(), 0);
+    }
+}
+
+#[test]
+fn a_lambda_in_a_def_initializer_tail_calls_in_one_activation() {
+    let source = "(def drive (fn (u64) u64) (lambda (count u64) u64 (spin count)))\n(defn answer () u64 (drive 100000u64))\n(defn spin (count u64) u64\n  (if (u64.equal count 0u64) 3u64 (spin (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
+    let checked = check_source("tail-def-lambda.vib", source);
+    assert!(checked.accepted(), "{:?}", checked.diagnostics());
+    let execution =
+        vibra_interp::run(checked.program().expect("program")).expect("execution");
+    assert_eq!(execution.value(), Some(&vibra_ir::Value::U64(3)));
+    // `answer` into the closure, the closure into `spin`, and 100000 self calls.
+    assert_eq!(execution.tail_transfer_count(), 100_002);
+    assert_eq!(execution.max_activation_depth(), 3);
+}
+
 /// Deep recursion whose every call is an operand keeps its activations live,
 /// whatever the callee is, and the interpreter stops it at its bound.
 #[test]
