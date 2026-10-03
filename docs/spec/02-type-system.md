@@ -666,8 +666,8 @@ the same module by name. Same-module mutual recursion among module-level
 recursion only as the callee of a named module-level `defn`. A call in tail
 position MUST reuse the current activation and so MUST NOT consume additional
 language-level stack, whatever its callee is; the runtime chapter defines tail
-position and that guarantee. Exhaustion of a host stack limit on non-tail
-recursion is not a portable Vibra semantic result.
+position and that guarantee. Non-tail recursion has no depth limit of its own;
+exhausting the memory of the instance is a host event, not a program result.
 
 ## Inference and checking
 

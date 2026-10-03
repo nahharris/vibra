@@ -1,9 +1,10 @@
 # Milestone 4 step plan
 
 Status: in progress. Step 1, the Stage 4A contract freeze, has landed
-(PR #354). Step 2, the contract-member forms and the binder fix, is proposed
-as `landed` by its pull request and is conditional on that PR merging; no
-other implementation step has landed
+(PR #354), and so has Step 2, the contract-member forms and the binder fix
+(PR #355). Step 3, deep non-tail recursion in the reference interpreter, is
+proposed as `landed` by its pull request and is conditional on that PR
+merging; no other implementation step has landed
 Decision ledger: [decision-ledger.md](decision-ledger.md)
 Surface inventory: [supported-surface.md](supported-surface.md)
 Validation: [validation.md](validation.md)
@@ -242,8 +243,8 @@ tail-recursive walk that grows neither stack nor arena.
 | Step | One-PR slice | Requires | Status | PR / merge evidence |
 | --- | --- | --- | --- | --- |
 | 1 | [Freeze Stage 4A contracts](01-contracts.md) — specification/infrastructure prerequisite | M3 on `main`; this bootstrap | landed | PR #354, merge e7d2e08 |
-| 2 | [Contract-member forms reassigned from M3, and the binder defect](02-contract-members.md): an abstract contract member with its own generic parameters, labelled operands and written `types:` arguments on a contract member call, a dict variadic tail on a contract member, and such a member as a function value, in typed IR and the interpreter (per G8), plus the reserved-binder fix (per G11) | 1 | landed, conditional on its PR merging | Branch `claude/m4-step-02-contract-members`; merge commit to be recorded when the PR merges |
-| 3 | [The specified outcome of deep non-tail recursion](03-activations.md) in the reference interpreter, replacing the host-event rule: heap activations, a memory budget, and `@runtime.memory-exhausted` as the host event, with `expect.host_event` (per G1) | 2 | not started | — |
+| 2 | [Contract-member forms reassigned from M3, and the binder defect](02-contract-members.md): an abstract contract member with its own generic parameters, labelled operands and written `types:` arguments on a contract member call, a dict variadic tail on a contract member, and such a member as a function value, in typed IR and the interpreter (per G8), plus the reserved-binder fix (per G11) | 1 | landed | PR #355, merge 3289ee75c68f4d68419597e0e7dfecd28c64c742 |
+| 3 | [The specified outcome of deep non-tail recursion](03-activations.md) in the reference interpreter, replacing the host-event rule: heap activations, a memory budget, and `@runtime.memory-exhausted` as the host event, with `expect.host_event` (per G1) | 2 | landed, conditional on its PR merging | Branch `claude/m4-step-03-activations`; merge commit to be recorded when the PR merges |
 | 4 | [Wasm backend skeleton and differential harness](04-skeleton.md): the emitter crate, the engine and native-code crate behind the runner (latest Wasmtime and a raised toolchain), the corpus contract of G4, the parity inventory and its test, deterministic emission, and a CI job — infrastructure step | 3 | not started | — |
 | 5a | [The value arena and its runtime](05a-arena.md): linear-memory arena, reference counting, the handle table, the exported accessors, memory exhaustion, scalars and literals, and the canonical result observation | 4 | not started | — |
 | 5b | [Data and core lowering](05b-core-lowering.md): declared and anonymous records, enums, tuples, wrappers, and unions with discriminants in written order, projection, module values, `let`, body sequences, `if`, `return`, and direct calls | 5a | not started | — |
