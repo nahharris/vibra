@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Domain, Level};
+use vibra_interp::MemoryBudget;
 use vibra_ir::SourceOrigin;
 use vibra_resolve::{DeclarationId, EntityKind, ResolvedSnapshot};
 use vibra_syntax::{Declaration, Literal};
@@ -356,6 +357,18 @@ pub fn run_tests(
     selector: Option<&TestSelector>,
     verification: Option<&vibra_types::Stdlib>,
 ) -> WorkspaceTestResult {
+    run_tests_with_budget(workspace, selector, verification, MemoryBudget::DEFAULT)
+}
+
+/// Like [`run_tests`], with the memory budget the runner supplies for each
+/// test's instance: exhausting it ends the run with the host event
+/// `@runtime.memory-exhausted` and no test counts.
+pub fn run_tests_with_budget(
+    workspace: &WorkspaceSnapshot,
+    selector: Option<&TestSelector>,
+    verification: Option<&vibra_types::Stdlib>,
+    budget: MemoryBudget,
+) -> WorkspaceTestResult {
     let graph = match workspace.source_graph() {
         Ok(graph) => graph,
         Err(error) => return diagnostics_result(error.diagnostics().to_vec()),
@@ -367,13 +380,14 @@ pub fn run_tests(
         Ok(resolved) => resolved,
         Err(error) => return diagnostics_result(error.diagnostics().to_vec()),
     };
-    select_tests(&resolved, selector, verification)
+    select_tests(&resolved, selector, verification, budget)
 }
 
 fn select_tests(
     resolved: &ResolvedSnapshot,
     selector: Option<&TestSelector>,
     verification: Option<&vibra_types::Stdlib>,
+    budget: MemoryBudget,
 ) -> WorkspaceTestResult {
     let local = resolved.package();
     let modules = resolved
@@ -640,7 +654,7 @@ fn select_tests(
             items.push(item);
             continue;
         };
-        match vibra_interp::Interpreter::run_test(program) {
+        match vibra_interp::Interpreter::run_test_with_budget(program, budget) {
             Ok(execution) => {
                 if let Some(failure) = execution.assertion_failure() {
                     items.push(TestItem {
@@ -970,7 +984,12 @@ mod provenance_tests {
         let verification =
             vibra_types::load_stdlib().expect("embedded standard library");
 
-        let result = select_tests(&resolved, None, Some(&verification));
+        let result = select_tests(
+            &resolved,
+            None,
+            Some(&verification),
+            vibra_interp::MemoryBudget::DEFAULT,
+        );
 
         assert_eq!(
             result.status(),
