@@ -18,8 +18,15 @@ fn diagnostics(source: &str) -> Vec<(DiagnosticCode, ByteSpan)> {
 /// `source` reports exactly one diagnostic, `@name.reserved-declaration` at
 /// `binder` inside the first `anchor`, and nothing else cascades from it.
 fn rejected(source: &str, anchor: &str, binder: &str) {
-    let start =
-        source.find(anchor).expect("anchor") + anchor.find(binder).expect("binder");
+    // The binder is the first spelling that is not a qualified path's head.
+    fn binder_offset(anchor: &str, binder: &str) -> usize {
+        anchor
+            .match_indices(binder)
+            .map(|(index, _)| index)
+            .find(|index| !anchor[index + binder.len()..].starts_with('.'))
+            .expect("binder")
+    }
+    let start = source.find(anchor).expect("anchor") + binder_offset(anchor, binder);
     assert_eq!(
         diagnostics(source),
         vec![(
@@ -30,11 +37,15 @@ fn rejected(source: &str, anchor: &str, binder: &str) {
     );
 }
 
-/// Symbol spellings the rule names. Booleans and `void` read as literals.
+/// Symbol spellings the rule names that every binder site admits as a pure name:
+/// keywords, `any`, and the closed vocabulary's types. The vocabulary's values,
+/// `true` and `false`, are constant patterns at a pattern site and reserved
+/// pure names elsewhere, so they have their own test below.
 const SPELLINGS: &[&str] = &[
     "do", "let", "let-else", "if", "match", "return", "as", "try", "lambda", "tupleof",
-    "recordof", "enumof", "any", "never", "bool", "char", "str", "bytes", "atom", "i8",
-    "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64",
+    "recordof", "enumof", "any", "never", "bool", "char", "str", "bytes", "atom",
+    "option", "result", "iter", "array", "dict", "i8", "i16", "i32", "i64", "u8",
+    "u16", "u32", "u64", "f32", "f64",
 ];
 
 #[test]
@@ -99,6 +110,6 @@ fn a_nested_pattern_binder_is_rejected_at_its_own_name() {
 
 #[test]
 fn ordinary_binders_and_discards_are_accepted() {
-    let source = "(defn f (value i32 - i32) i32 (let result 1i32 - 2i32) (let option 3i32) value)";
+    let source = "(defn f (value i32 - i32) i32 (let first 1i32 - 2i32) (let second 3i32) value)";
     assert_eq!(diagnostics(source), vec![], "{source}");
 }

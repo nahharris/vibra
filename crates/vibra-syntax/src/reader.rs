@@ -577,6 +577,36 @@ impl CstNode {
         }
     }
 
+    /// Classifies an atom leaf as a literal under the `.vib` source grammar.
+    ///
+    /// The source grammar has no boolean literal: `true` and `false` are
+    /// ordinary symbols there, names of `@std.bool` values. Every other leaf
+    /// classifies as [`Self::literal`] does, and `.vibon` data keeps both
+    /// spellings as boolean literals.
+    #[must_use]
+    pub fn source_literal(&self) -> Option<LiteralClassification> {
+        if self.is_boolean_spelling() {
+            return Some(LiteralClassification::Opaque);
+        }
+        self.literal()
+    }
+
+    /// Classifies a complete atom leaf as a name under the `.vib` source
+    /// grammar.
+    #[must_use]
+    pub fn source_name(&self) -> Option<NameClassification> {
+        if self.is_boolean_spelling() {
+            return Some(classify_name(&self.text));
+        }
+        self.name()
+    }
+
+    fn is_boolean_spelling(&self) -> bool {
+        self.kind == SyntaxKind::Atom
+            && !self.unterminated_quote
+            && matches!(self.text.as_str(), "true" | "false")
+    }
+
     /// Child nodes in source order. Trivia and delimiters are retained.
     #[must_use]
     pub fn children(&self) -> &[CstNode] {
