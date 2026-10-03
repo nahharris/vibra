@@ -250,7 +250,7 @@ diagnostic_registry! {
     NameReservedLabel => "@name.reserved-label", Name, Error, None,
         "a label uses a spelling the grammar reserves";
     NameReservedDeclaration => "@name.reserved-declaration", Name, Error, None,
-        "a declaration or generic name uses a reserved type head";
+        "a declaration, generic name, or lexical binder uses a reserved spelling";
     NameReservedValueSpelling => "@name.reserved-value-spelling", Name, Error, None,
         "a module-level value or import alias is spelled as a builtin type name";
     ModuleFileDirectoryCollision => "@module.file-directory-collision", Module, Error, None,
@@ -380,11 +380,11 @@ diagnostic_registry! {
     RuntimeInvalidHostValue => "@runtime.invalid-host-value", Runtime, Error, None,
         "a host operation received or returned a value its ABI does not admit";
     RuntimeInvalidCheckedProgram => "@runtime.invalid-checked-program", Runtime, Error, None,
-        "checked program execution violated an M2 runtime invariant";
+        "checked program execution violated a runtime invariant";
     RuntimeUnobservableFunction => "@runtime.unobservable-function", Runtime, Error, None,
         "a value that holds a function reached an observation, which has no encoding for one";
-    RuntimeHostStackExhausted => "@runtime.host-stack-exhausted", Runtime, Error, None,
-        "non-tail activations exhausted the reference interpreter's host stack budget";
+    RuntimeMemoryExhausted => "@runtime.memory-exhausted", Runtime, Error, None,
+        "execution exhausted the memory or the value-ID space of the instance, a host event rather than a trap";
     StyleArgumentOrder => "@style.argument-order", Style, Warning, Safe,
         "operands are in a noncanonical but unambiguous order";
     ContractUnusedEffect => "@contract.unused-effect", Contract, Warning, None,

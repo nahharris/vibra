@@ -245,7 +245,7 @@ impl RuntimeError {
     pub fn host_diagnostic(&self) -> Option<vibra_diagnostics::Diagnostic> {
         matches!(self, Self::HostStackExhausted { .. }).then(|| {
             vibra_diagnostics::Diagnostic::new(
-                vibra_diagnostics::DiagnosticCode::RuntimeHostStackExhausted,
+                vibra_diagnostics::DiagnosticCode::RuntimeMemoryExhausted,
                 vibra_diagnostics::ByteSpan::empty_at(0),
                 self.to_string(),
             )
@@ -255,10 +255,12 @@ impl RuntimeError {
 
 /// Live language activations the reference interpreter admits at once.
 ///
-/// V1 has no portable stack-depth limit (06-runtime); this is the reference
-/// interpreter's host budget. Reaching it stops execution with
-/// [`RuntimeError::HostStackExhausted`] instead of overflowing the host
-/// stack. Calls in tail position reuse their activation and never approach it.
+/// V1 has no portable stack-depth limit (06-runtime, "Activation depth"); this
+/// is an interim host budget that Milestone 4 Step 3 retires by holding
+/// activations in the heap. Until then, reaching it stops execution with
+/// [`RuntimeError::HostStackExhausted`] and the host event
+/// `@runtime.memory-exhausted` instead of overflowing the host stack. Calls in
+/// tail position reuse their activation and never approach it.
 pub const MAX_ACTIVATION_DEPTH: usize = 4096;
 
 /// Host stack reserved for the interpreter thread, independent of the
@@ -1734,6 +1736,7 @@ impl<'a> Machine<'a> {
             member,
             receiver,
             arguments: interface_arguments,
+            member_types,
             destination,
             closed,
             ..
@@ -1820,8 +1823,22 @@ impl<'a> Machine<'a> {
                 )));
             };
             let mut callable = self.named_callable(index)?;
+            let mut bound = bound;
+            // The member's own type arguments at this call, which the
+            // selected function names by its own generic parameters, at this
+            // activation's type arguments.
+            if let Some(implements) = self.program.functions().get(index)?.implements()
+            {
+                for (name, written) in
+                    implements.member_generics.iter().zip(member_types)
+                {
+                    if let Some(name) = name {
+                        bound.insert(name.clone(), self.concrete(written));
+                    }
+                }
+            }
             *callable.types_mut() = Arc::new(bound);
-            // The member's own generic parameters, from this call.
+            // Anything the operands and the result still fix.
             self.bind_call(&mut callable, arguments, &values, result);
             return self.finish_call(callable, values, result, tail);
         }

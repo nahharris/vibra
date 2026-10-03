@@ -1,0 +1,11 @@
+(defint tagged
+  where: (t any)
+  (defn tag-with (value self other t) (tuple t t)
+    where: (t any)))
+
+(defint distinct
+  where: (t any)
+  (defn tag-with (value self other u) (tuple t u)
+    where: (u any)))
+
+(defn after () i32 1i32)

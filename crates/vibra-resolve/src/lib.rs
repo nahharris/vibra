@@ -2274,7 +2274,10 @@ impl Resolution {
                         self.bind_names(
                             module,
                             scope,
-                            [(parameter.name().value().to_owned(), parameter.span())],
+                            [(
+                                parameter.name().value().to_owned(),
+                                parameter.name_span(),
+                            )],
                             source_id,
                         );
                     }
@@ -2303,6 +2306,18 @@ impl Resolution {
         for (name, span) in names {
             if name == "-" || name == "@-" || name == "-:" {
                 continue;
+            }
+            // A reserved spelling is rejected at the binder and still binds,
+            // so the rest of its scope resolves without a cascade.
+            if vibra_syntax::is_reserved_binder_spelling(&name) {
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::NameReservedDeclaration,
+                        span,
+                        "a lexical binder uses a keyword, boolean, `void`, `any`, `never`, or primitive type name",
+                    )
+                    .with_source_id(source_id),
+                );
             }
             // One diagnostic per introduction, relating the nearest earlier
             // one: the innermost lexical binding, else the module binding.

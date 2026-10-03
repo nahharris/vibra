@@ -1,0 +1,53 @@
+id = "V1-TYPE-NAMES-reserved-binders"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "A lexical binder spelled as a keyword, `any`, `never`, or a primitive type name is @name.reserved-declaration at the binder name, at a parameter, a let, a let-else pattern, a match arm, a lambda parameter, a labelled parameter, and a variadic parameter. Each still binds, so the rest of its scope checks without a cascade, and a function with ordinary binders after them is accepted."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [22, 24]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [79, 82]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [185, 190]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [313, 319]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [398, 405]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [511, 515]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [575, 578]

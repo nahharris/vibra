@@ -203,7 +203,7 @@ fn deep_non_tail_recursion_is_an_operational_failure_not_an_abort() {
     assert_eq!(human.status.code(), Some(3), "{human:?}");
     assert!(human.stdout.is_empty(), "{human:?}");
     assert!(
-        text(&human.stderr).contains("@runtime.host-stack-exhausted"),
+        text(&human.stderr).contains("@runtime.memory-exhausted"),
         "{human:?}"
     );
 
@@ -213,7 +213,7 @@ fn deep_non_tail_recursion_is_an_operational_failure_not_an_abort() {
     assert_eq!(envelope["payload"]["trap"], Value::Null);
     assert_eq!(
         envelope["diagnostics"][0]["code"],
-        "@runtime.host-stack-exhausted"
+        "@runtime.memory-exhausted"
     );
     assert_eq!(envelope["diagnostics"][0]["primarySpan"]["start"], 0);
     assert_eq!(envelope["diagnostics"][0]["primarySpan"]["end"], 0);
@@ -238,7 +238,7 @@ fn deep_non_tail_recursion_in_a_test_stops_the_suite() {
     assert_eq!(envelope["payload"]["tests"], serde_json::json!([]));
     assert_eq!(
         envelope["diagnostics"][0]["code"],
-        "@runtime.host-stack-exhausted"
+        "@runtime.memory-exhausted"
     );
 }
 

@@ -3,11 +3,16 @@
 Status: normative target
 Implementation status: M3 checks and runs this chapter for pure programs:
 nominal and generic types, unions, patterns and exhaustive matching,
-interfaces, conversion, and iteration. Effects, `@host` externals, and the
-forms the M3 exit evidence reassigns remain deferred. The pre-M4 revision of
-binding sequences, `let-else`, `return`, and `never`, specified below, is
-implemented by the checklist in
+interfaces, conversion, and iteration, and the pre-M4 revision of binding
+sequences, `let-else`, `return`, and `never` is implemented by
 [`../roadmap/pre-m4/01-bindings-return-never.md`](../roadmap/pre-m4/01-bindings-return-never.md).
+The forms the M3 exit evidence reassigned to Milestone 4, an abstract contract
+member with its own generic parameters, labelled operands and written `types:`
+arguments on a contract member call, a dict variadic tail on a contract member,
+and such a member used as a function value, are implemented by Milestone 4
+Step 2 in the type checker, the typed IR, and the reference interpreter, and
+Step 9 lowers them. Effects and `@host` externals remain deferred to Stage 4B.
+The WebAssembly backend executes none of this chapter yet.
 
 ## Model
 
@@ -796,11 +801,11 @@ declaration emits `@name.reserved-label`.
 
 `types:` is always defined by the entity the call site addresses, never by the
 entity dispatch selects. A call through an interface contract member therefore
-supplies the contract's parameters, and the receiver's own generic names stay
-lexical: they scope an implementation body and are fixed by unification with the
-receiver, never written at a call site. Implementations of one contract may
-belong to owners of different generic arity, so an implementation member has no
-`types:` contract of its own.
+supplies the contract's parameters and then the member's own, and the
+receiver's own generic names stay lexical: they scope an implementation body and
+are fixed by unification with the receiver, never written at a call site.
+Implementations of one contract may belong to owners of different generic arity,
+so an implementation member has no `types:` contract of its own.
 
 `types:` is written among an application's labelled operands but is not one: it
 is neither an operand of the callee nor visible to its body, and it has no
