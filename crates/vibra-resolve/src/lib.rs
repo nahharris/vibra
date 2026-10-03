@@ -3060,9 +3060,8 @@ fn parse_module(
     memoize: bool,
 ) -> (Vec<Diagnostic>, Option<vibra_syntax::SourceAst>) {
     type Parsed = (Vec<Diagnostic>, Option<vibra_syntax::SourceAst>);
-    static MEMO: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<(String, Vec<u8>), Parsed>>,
-    > = std::sync::OnceLock::new();
+    type Memo = std::sync::Mutex<std::collections::HashMap<(String, Vec<u8>), Parsed>>;
+    static MEMO: std::sync::OnceLock<Memo> = std::sync::OnceLock::new();
     let key = (module.source_id.clone(), module.bytes.clone());
     if memoize
         && let Ok(memo) = MEMO.get_or_init(Default::default).lock()

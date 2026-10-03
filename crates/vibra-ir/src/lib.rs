@@ -6221,7 +6221,7 @@ mod tests {
             vec![super::LabelledParameter::new(
                 "value",
                 Type::I32,
-                Some(Value::I32(7)),
+                Some(crate::Constant::Primitive(Value::I32(7))),
             )],
             Type::I32,
         );
@@ -6347,7 +6347,7 @@ mod tests {
             vec![super::LabelledParameter::new(
                 "value",
                 Type::I32,
-                Some(Value::Str("wrong".to_owned())),
+                Some(crate::Constant::Primitive(Value::Str("wrong".to_owned()))),
             )],
             Type::I32,
         );
