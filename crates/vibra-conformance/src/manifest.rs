@@ -146,6 +146,17 @@ impl ConformanceOperation {
             Self::WorkspaceTest => "workspace-test",
         }
     }
+
+    /// Whether a case of this operation is an **executable case** of
+    /// `docs/spec/07-diagnostics-and-conformance.md`, "Differential
+    /// execution": one that both backends run against its one expectation.
+    #[must_use]
+    pub const fn is_executable(self) -> bool {
+        matches!(
+            self,
+            Self::Interpret | Self::WorkspaceRun | Self::WorkspaceTest
+        )
+    }
 }
 
 impl fmt::Display for ConformanceOperation {
@@ -245,8 +256,6 @@ pub struct CaseExpectations {
     /// replaces the result and audit-trace snapshots because such a run has
     /// neither.
     pub host_event: Option<String>,
-    /// Expected Wasm output.
-    pub wasm: Option<ExpectedExecution>,
     /// Expected deterministic artifact hashes, when the case covers an
     /// artifact-producing backend.
     pub artifact_hashes: Option<Vec<String>>,
@@ -814,7 +823,6 @@ fn decode_expectations(
         ));
     }
     let interpreter = raw.interpreter.map(decode_execution).transpose()?;
-    let wasm = raw.wasm.map(decode_execution).transpose()?;
     let host_event = raw.host_event;
     if let Some(event) = &host_event {
         if !HOST_EVENTS.contains(&event.as_str()) {
@@ -822,7 +830,7 @@ fn decode_expectations(
                 "host_event `{event}` is not a registered host event; expected one of {HOST_EVENTS:?}"
             )));
         }
-        if interpreter.is_some() || wasm.is_some() {
+        if interpreter.is_some() {
             return Err(ManifestError::Invalid(
                 "host_event replaces the result and audit-trace snapshots; a case cannot declare both"
                     .to_owned(),
@@ -857,7 +865,6 @@ fn decode_expectations(
             .collect(),
         interpreter,
         host_event,
-        wasm,
         artifact_hashes,
     })
 }
@@ -1017,8 +1024,6 @@ pub(crate) struct RawExpectations {
     pub(crate) interpreter: Option<RawExecution>,
     #[serde(default)]
     pub(crate) host_event: Option<String>,
-    #[serde(default)]
-    pub(crate) wasm: Option<RawExecution>,
     #[serde(default)]
     pub(crate) artifact: Option<RawArtifact>,
 }

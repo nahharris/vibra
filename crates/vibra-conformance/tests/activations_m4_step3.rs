@@ -332,7 +332,6 @@ fn host_event_is_exclusive_with_result_and_trace_snapshots() {
         "interpreter = { result = \"result.vibon\" }",
         "interpreter = { result = \"result.vibon\", audit_trace = \"audit.vibon\" }",
         "interpreter = { audit_trace = \"audit.vibon\" }",
-        "wasm = { result = \"result.vibon\", audit_trace = \"audit.vibon\" }",
     ] {
         let error = CaseManifest::from_str(&manifest(
             "interpret",

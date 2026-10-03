@@ -1,4 +1,4 @@
-//! Internal reader-v1 conformance entrypoint.
+//! Internal conformance entrypoint.
 //!
 //! This binary is intentionally owned by `vibra-conformance`; it is a CI
 //! adapter and is not the user-facing `vibra` command promised for milestone 2.
@@ -8,11 +8,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use vibra_conformance::{
-    ConformanceProfile, ConformanceRunner, Corpus, InterpreterV1Handler,
-    InterpreterV1WorkspaceRunHandler, InterpreterV1WorkspaceTestHandler,
-    ProfileDispatcher, ReaderV1Handler, StaticV1ProjectHandler, StaticV1ResolveHandler,
-    StaticV1SourceGraphHandler, StaticV1TypeHandler, StaticV1WorkspaceCheckHandler,
-    ToolingV1FormatHandler, ToolingV1IndexHandler, ToolingV1QueryHandler,
+    ConformanceProfile, ConformanceRunner, Corpus, standard_dispatcher,
 };
 
 fn main() -> ExitCode {
@@ -39,33 +35,7 @@ fn run() -> Result<(), String> {
     if reader_cases == 0 {
         return Err("corpus contains no reader-v1 cases".to_owned());
     }
-    let dispatcher = ProfileDispatcher::new()
-        .with_handler(ConformanceProfile::ReaderV1, ReaderV1Handler)
-        .with_handler(ConformanceProfile::StaticV1, StaticV1ProjectHandler)
-        .with_additional_handler(
-            ConformanceProfile::StaticV1,
-            StaticV1SourceGraphHandler,
-        )
-        .with_additional_handler(ConformanceProfile::StaticV1, StaticV1ResolveHandler)
-        .with_additional_handler(ConformanceProfile::StaticV1, StaticV1TypeHandler)
-        .with_additional_handler(
-            ConformanceProfile::StaticV1,
-            StaticV1WorkspaceCheckHandler,
-        )
-        .with_handler(ConformanceProfile::InterpreterV1, InterpreterV1Handler);
-    let dispatcher = dispatcher.with_additional_handler(
-        ConformanceProfile::InterpreterV1,
-        InterpreterV1WorkspaceRunHandler,
-    );
-    let dispatcher = dispatcher.with_additional_handler(
-        ConformanceProfile::InterpreterV1,
-        InterpreterV1WorkspaceTestHandler,
-    );
-    let dispatcher = dispatcher
-        .with_handler(ConformanceProfile::ToolingV1, ToolingV1QueryHandler)
-        .with_additional_handler(ConformanceProfile::ToolingV1, ToolingV1FormatHandler)
-        .with_additional_handler(ConformanceProfile::ToolingV1, ToolingV1IndexHandler);
-    let report = ConformanceRunner::new(dispatcher).run(&corpus);
+    let report = ConformanceRunner::new(standard_dispatcher()).run(&corpus);
 
     for case in report.cases() {
         match &case.status {
@@ -96,6 +66,18 @@ fn run() -> Result<(), String> {
             );
         }
     }
+    // One line per backend over the executable cases
+    // (`docs/spec/07-diagnostics-and-conformance.md`, "Differential execution").
+    let interpreter = report.interpreter_counts();
+    println!(
+        "interpreter backend: {} passed, {} failed, {} unavailable",
+        interpreter.passed, interpreter.failed, interpreter.unavailable
+    );
+    let wasm = report.wasm_counts();
+    println!(
+        "wasm backend: {} matched, {} failed, {} not lowered",
+        wasm.matched, wasm.failed, wasm.not_lowered
+    );
     println!(
         "conformance total: {} passed, {} failed, {} unavailable",
         report.passed(),
