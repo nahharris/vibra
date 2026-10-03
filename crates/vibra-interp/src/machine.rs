@@ -30,6 +30,8 @@ use std::mem::size_of;
 use std::rc::Rc;
 use std::sync::Arc;
 
+mod compare;
+
 use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::{
     CallTarget, CheckedProgram, ClosedContract, Expr, FunctionSignature, MatchArm,
@@ -39,9 +41,9 @@ use vibra_ir::{
 use crate::value::{Callable, Elements, Inner, LambdaId, RuntimeValue, TypeMap};
 use crate::{
     TestAssertionFailure, activation_slots, admits_value, bind_pattern, bind_type,
-    closed_contract, closed_next, key_order_canonical, lookup, mentions_param, observe,
-    pattern_matches, present_payload, registry, representation_of, runtime_type,
-    slots_match_signature, values_match_slots,
+    closed_next, lookup, mentions_param, observe, pattern_matches, present_payload,
+    registry, representation_of, runtime_type, slots_match_signature,
+    values_match_slots,
 };
 
 /// Why the machine stopped before the entry returned.
@@ -127,6 +129,8 @@ enum Kont<'a> {
     Match { arms: &'a [MatchArm] },
     /// One step of `array.fold` returned.
     Fold(Box<FoldState>),
+    /// A key comparison that called a user's `compare` returned.
+    Compare(Box<compare::CompareKont>),
 }
 
 /// `array.fold` calls its step once for each element in order, and each call
@@ -150,12 +154,6 @@ const SLOT_BYTES: usize = size_of::<Option<RuntimeValue>>();
 /// The least allocation between two measurements of the live values.
 const MIN_WALK_BYTES: usize = 64 * 1024;
 
-/// How many callbacks into Vibra from Rust code may be open at once. The
-/// ordering of a dict key runs a user's `compare` and waits for it; each open
-/// wait is a Rust call, so the nesting is bounded rather than the host stack
-/// trusted. The activations inside a callback are on the heap as usual.
-const NESTED_CALLBACK_LIMIT: usize = 16;
-
 pub(crate) struct Machine<'a> {
     program: &'a CheckedProgram,
     pub(crate) globals: Vec<GlobalState>,
@@ -175,10 +173,6 @@ pub(crate) struct Machine<'a> {
     pub(crate) max_depth: usize,
     pub(crate) tail_transfers: usize,
     test_mode: bool,
-    /// Open waits for a Vibra callback made from Rust code.
-    nesting: usize,
-    /// The halt a failed callback left for its Rust caller to report.
-    pending_halt: Option<Halt>,
     limit: usize,
     /// Bytes of frames and continuations now live, counted exactly.
     stack_bytes: usize,
@@ -214,8 +208,6 @@ impl<'a> Machine<'a> {
             max_depth: 0,
             tail_transfers: 0,
             test_mode,
-            nesting: 0,
-            pending_halt: None,
             limit: budget_bytes,
             stack_bytes: 0,
             live_bytes: 0,
@@ -275,41 +267,6 @@ impl<'a> Machine<'a> {
             };
         }
     }
-
-    /// Calls `callable` from Rust code and waits for its value, for the
-    /// places the language runs Vibra code on behalf of an operation, such as
-    /// ordering dict keys by a user's `compare`. The wait is a Rust call, so
-    /// the number open at once is bounded.
-    fn call_sync(
-        &mut self,
-        callable: Callable,
-        values: Vec<RuntimeValue>,
-        result: &Type,
-    ) -> Option<RuntimeValue> {
-        if self.nesting >= NESTED_CALLBACK_LIMIT {
-            self.pending_halt = Some(Halt::Memory);
-            return None;
-        }
-        self.nesting += 1;
-        let base = self.konts.len();
-        let outcome = self
-            .invoke(callable, values, result)
-            .and_then(|step| self.execute(step, base));
-        self.nesting -= 1;
-        match outcome {
-            Ok(value) => Some(value),
-            Err(halt) => {
-                self.pending_halt = Some(halt);
-                None
-            }
-        }
-    }
-
-    /// The halt behind a `None` from a helper that may have called back.
-    fn fail(&mut self) -> Halt {
-        self.pending_halt.take().unwrap_or(Halt::Invalid)
-    }
-
     // -----------------------------------------------------------------
     // Frames, continuations, and the memory budget.
     // -----------------------------------------------------------------
@@ -463,6 +420,7 @@ impl<'a> Machine<'a> {
                         capture.live_bytes(&mut seen, &mut live);
                     }
                 }
+                Kont::Compare(state) => state.live_bytes(&mut seen, &mut live),
                 _ => {}
             }
         }
@@ -701,6 +659,7 @@ impl<'a> Machine<'a> {
                 Err(Halt::Invalid)
             }
             Kont::Fold(state) => self.fold_next(state, value),
+            Kont::Compare(state) => self.resume_compare(state, value),
         }
     }
 
@@ -1096,21 +1055,13 @@ impl<'a> Machine<'a> {
         else {
             return Err(Halt::Invalid);
         };
-        let mut ordered = Vec::with_capacity(values.len() / 2);
+        let mut pairs = Vec::with_capacity(values.len() / 2);
         let mut operands = values.into_iter();
         while let (Some(key), Some(value)) = (operands.next(), operands.next()) {
-            if self
-                .insert_entry(&mut ordered, key, value, key_order.as_ref())
-                .is_none()
-            {
-                return Err(self.fail());
-            }
+            pairs.push((key, value));
         }
-        let dict = RuntimeValue::Dict {
-            value_type: self.concrete(value_type),
-            entries: ordered.into(),
-        };
-        self.fresh(dict)
+        let value_type = self.concrete(value_type);
+        self.start_build(pairs, key_order.clone(), value_type)
     }
 
     /// A lookup, which never traps and answers with the standard `option`.
@@ -1133,128 +1084,22 @@ impl<'a> Machine<'a> {
         else {
             return Err(Halt::Invalid);
         };
-        let found = if let RuntimeValue::Dict { entries, .. } = &collection {
-            match self.search_entries(entries, &key, key_order.as_ref()) {
-                Some(Ok(position)) => {
-                    entries.get(position).map(|(_, value)| value.clone())
-                }
-                Some(Err(_)) => None,
-                None => return Err(self.fail()),
-            }
-        } else {
-            lookup(&collection, &key)
-        };
+        if let RuntimeValue::Dict { entries, .. } = &collection {
+            let value_type = self.concrete(value_type);
+            return self.start_lookup(
+                entries.clone(),
+                key,
+                key_order.clone(),
+                value_type,
+            );
+        }
+        let found = lookup(&collection, &key);
         let entry = RuntimeValue::Enum {
             value_type: self.concrete(value_type),
             variant: if found.is_some() { "some" } else { "none" }.to_owned(),
             payload: found.and_then(present_payload),
         };
         self.fresh(entry)
-    }
-
-    /// Orders two keys of one dict (`docs/spec/02-type-system.md`, "Nominal
-    /// declarations"). A value of a declared type is ordered by its own
-    /// `compare` of `key_order`, the `ordered` interface; everything else
-    /// takes canonical key order, component-wise through structures.
-    fn compare_keys(
-        &mut self,
-        left: &RuntimeValue,
-        right: &RuntimeValue,
-        key_order: Option<&TypeId>,
-    ) -> Option<std::cmp::Ordering> {
-        use std::cmp::Ordering;
-        let Some(interface) = key_order else {
-            return Some(key_order_canonical(left, right));
-        };
-        if let Some(function) = self.key_compare_function(interface, left) {
-            let result = self.program.functions().get(function)?.signature().result();
-            let callable = self.implementation_callable(function, left)?;
-            let answer =
-                self.call_sync(callable, vec![left.clone(), right.clone()], &result)?;
-            let RuntimeValue::Enum { variant, .. } = &answer else {
-                return None;
-            };
-            return match variant.as_str() {
-                "less" => Some(Ordering::Less),
-                "equal" => Some(Ordering::Equal),
-                "greater" => Some(Ordering::Greater),
-                _ => None,
-            };
-        }
-        match (left, right) {
-            (
-                RuntimeValue::Tuple { values: left, .. },
-                RuntimeValue::Tuple { values: right, .. },
-            ) => self.compare_sequences(left.iter(), right.iter(), key_order),
-            (
-                RuntimeValue::Record { fields: left, .. },
-                RuntimeValue::Record { fields: right, .. },
-            ) => self.compare_sequences(
-                left.iter().map(|(_, value)| value),
-                right.iter().map(|(_, value)| value),
-                key_order,
-            ),
-            (
-                RuntimeValue::Enum {
-                    variant: left_variant,
-                    payload: left_payload,
-                    ..
-                },
-                RuntimeValue::Enum {
-                    variant: right_variant,
-                    payload: right_payload,
-                    ..
-                },
-            ) => match left_variant.as_bytes().cmp(right_variant.as_bytes()) {
-                Ordering::Equal => match (left_payload, right_payload) {
-                    (Some(left), Some(right)) => {
-                        self.compare_keys(left, right, key_order)
-                    }
-                    _ => Some(Ordering::Equal),
-                },
-                order => Some(order),
-            },
-            (
-                RuntimeValue::Union {
-                    member: left_member,
-                    value: left,
-                    ..
-                },
-                RuntimeValue::Union {
-                    member: right_member,
-                    value: right,
-                    ..
-                },
-            ) => match left_member.cmp(right_member) {
-                Ordering::Equal => self.compare_keys(left, right, key_order),
-                order => Some(order),
-            },
-            _ => Some(key_order_canonical(left, right)),
-        }
-    }
-
-    fn compare_sequences<'v>(
-        &mut self,
-        left: impl Iterator<Item = &'v RuntimeValue>,
-        right: impl Iterator<Item = &'v RuntimeValue>,
-        key_order: Option<&TypeId>,
-    ) -> Option<std::cmp::Ordering> {
-        use std::cmp::Ordering;
-        let mut right = right;
-        for left in left {
-            let Some(right) = right.next() else {
-                return Some(Ordering::Greater);
-            };
-            let order = self.compare_keys(left, right, key_order)?;
-            if order.is_ne() {
-                return Some(order);
-            }
-        }
-        Some(if right.next().is_some() {
-            Ordering::Less
-        } else {
-            Ordering::Equal
-        })
     }
 
     /// The `ordered` interface of `@std.core`, when the program holds an
@@ -1297,48 +1142,6 @@ impl<'a> Machine<'a> {
                     && admits_value(&implements.receiver, value)
             })
         })
-    }
-
-    /// Inserts one entry into a dict's sorted entries; a repeated key keeps
-    /// its first position and takes the later value.
-    fn insert_entry(
-        &mut self,
-        entries: &mut Vec<(RuntimeValue, RuntimeValue)>,
-        key: RuntimeValue,
-        value: RuntimeValue,
-        key_order: Option<&TypeId>,
-    ) -> Option<()> {
-        match self.search_entries(entries, &key, key_order)? {
-            // The later pair replaces the earlier one: its key and its value.
-            Ok(position) => {
-                if let Some(entry) = entries.get_mut(position) {
-                    *entry = (key, value);
-                }
-            }
-            Err(position) => entries.insert(position, (key, value)),
-        }
-        Some(())
-    }
-
-    /// Binary search over sorted dict entries, with a comparison that may run
-    /// Vibra code.
-    fn search_entries(
-        &mut self,
-        entries: &[(RuntimeValue, RuntimeValue)],
-        key: &RuntimeValue,
-        key_order: Option<&TypeId>,
-    ) -> Option<Result<usize, usize>> {
-        let (mut low, mut high) = (0, entries.len());
-        while low < high {
-            let middle = low + (high - low) / 2;
-            let (existing, _) = entries.get(middle)?;
-            match self.compare_keys(existing, key, key_order)? {
-                std::cmp::Ordering::Less => low = middle + 1,
-                std::cmp::Ordering::Greater => high = middle,
-                std::cmp::Ordering::Equal => return Some(Ok(middle)),
-            }
-        }
-        Some(Err(low))
     }
 
     /// The callable of module function `function`, whose signature is shared
@@ -1740,11 +1543,14 @@ impl<'a> Machine<'a> {
                 ClosedContract::KeyCompare => Some(interface.clone()),
                 _ => self.ordered_interface(),
             };
-            let Some(order) = self.compare_keys(left, right, key_order.as_ref()) else {
-                return Err(self.fail());
-            };
-            let answer = closed_contract(closed, order, &self.concrete(result));
-            return self.fresh(answer);
+            let result = self.concrete(result);
+            return self.start_closed(
+                left.clone(),
+                right.clone(),
+                key_order,
+                closed,
+                result,
+            );
         };
         let mut callable = self.named_callable(index).ok_or(Halt::Invalid)?;
         let mut bound = bound;

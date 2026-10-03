@@ -379,6 +379,47 @@ fn a_case_that_ends_in_a_host_event_is_accepted_by_the_checker() {
     assert!(error.to_string().contains("host_event"), "{error}");
 }
 
+// ---------------------------------------------------------------------------
+// A user's `compare` nested inside dict operations that it performs itself.
+// ---------------------------------------------------------------------------
+
+/// The corpus source with the nesting depth replaced.
+fn compare_nesting_source(depth: u64) -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/cases/V1-RUNTIME-dict-compare-nesting/input.vib");
+    std::fs::read_to_string(path)
+        .expect("corpus source")
+        .replace("300u64", &format!("{depth}u64"))
+        .replace("301u64", &format!("{}u64", depth + 1))
+}
+
+#[test]
+fn key_comparison_nests_far_deeper_than_any_cap_on_a_small_stack() {
+    // The comparison is a continuation, so no Rust frame stays open across a
+    // call of the user's `compare`: this runs on a stack far too small for
+    // thousands of nested waits.
+    for depth in [300u64, 3_000] {
+        let source = compare_nesting_source(depth);
+        let checked = checked(&source);
+        let program = checked.program().expect("program");
+        let observation = std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(256 * 1024)
+                .spawn_scoped(scope, || {
+                    Interpreter::run(program)
+                        .expect("execution")
+                        .canonical_result()
+                })
+                .expect("thread")
+                .join()
+                .expect("no stack overflow")
+        });
+        let equal = observation.find("variant: @equal").expect("equal first");
+        let less = observation.find("variant: @less").expect("then less");
+        assert!(equal < less, "depth {depth}: {observation}");
+    }
+}
+
 struct FixedHandler(CaseObservation);
 
 impl ProfileHandler for FixedHandler {
