@@ -1182,45 +1182,11 @@ impl Resolution {
             }
             let index = self.modules.len();
             self.module_indexes.insert(key, index);
-            let ast = match std::str::from_utf8(&module.bytes) {
-                Ok(source) => {
-                    match parse_source(Path::new(&module.source_id), source) {
-                        Ok(document) => {
-                            self.diagnostics.extend(
-                                document.diagnostics().iter().cloned().map(
-                                    |diagnostic| {
-                                        diagnostic
-                                            .with_source_id(module.source_id.clone())
-                                    },
-                                ),
-                            );
-                            document.ast().cloned()
-                        }
-                        Err(error) => {
-                            self.diagnostics.push(
-                                Diagnostic::new(
-                                    DiagnosticCode::ModuleIoError,
-                                    ByteSpan::empty_at(0),
-                                    error.to_string(),
-                                )
-                                .with_source_id(module.source_id.clone()),
-                            );
-                            None
-                        }
-                    }
-                }
-                Err(error) => {
-                    self.diagnostics.push(
-                        Diagnostic::new(
-                            DiagnosticCode::ModuleIoError,
-                            ByteSpan::empty_at(0),
-                            format!("source module is not UTF-8: {error}"),
-                        )
-                        .with_source_id(module.source_id.clone()),
-                    );
-                    None
-                }
-            };
+            // A verified overlay module parses to the same tree every time, so
+            // it is parsed once per process; a local module always parses.
+            let (parse_diagnostics, ast) =
+                parse_module(&module, package != self.input.package);
+            self.diagnostics.extend(parse_diagnostics);
             self.modules.push(ParsedModule {
                 package,
                 module,
@@ -3083,6 +3049,66 @@ impl SpanOr for Name {
         let _ = self;
         fallback
     }
+}
+
+/// Parses one source module into its diagnostics and tree. With `memoize`, the
+/// result is kept for the life of the process, keyed by identity and bytes.
+fn parse_module(
+    module: &SourceModule,
+    memoize: bool,
+) -> (Vec<Diagnostic>, Option<vibra_syntax::SourceAst>) {
+    type Parsed = (Vec<Diagnostic>, Option<vibra_syntax::SourceAst>);
+    static MEMO: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<(String, Vec<u8>), Parsed>>,
+    > = std::sync::OnceLock::new();
+    let key = (module.source_id.clone(), module.bytes.clone());
+    if memoize
+        && let Ok(memo) = MEMO.get_or_init(Default::default).lock()
+        && let Some(parsed) = memo.get(&key)
+    {
+        return parsed.clone();
+    }
+    let parsed: Parsed = match std::str::from_utf8(&module.bytes) {
+        Ok(source) => match parse_source(Path::new(&module.source_id), source) {
+            Ok(document) => (
+                document
+                    .diagnostics()
+                    .iter()
+                    .cloned()
+                    .map(|diagnostic| {
+                        diagnostic.with_source_id(module.source_id.clone())
+                    })
+                    .collect(),
+                document.ast().cloned(),
+            ),
+            Err(error) => (
+                vec![
+                    Diagnostic::new(
+                        DiagnosticCode::ModuleIoError,
+                        ByteSpan::empty_at(0),
+                        error.to_string(),
+                    )
+                    .with_source_id(module.source_id.clone()),
+                ],
+                None,
+            ),
+        },
+        Err(error) => (
+            vec![
+                Diagnostic::new(
+                    DiagnosticCode::ModuleIoError,
+                    ByteSpan::empty_at(0),
+                    format!("source module is not UTF-8: {error}"),
+                )
+                .with_source_id(module.source_id.clone()),
+            ],
+            None,
+        ),
+    };
+    if memoize && let Ok(mut memo) = MEMO.get_or_init(Default::default).lock() {
+        memo.insert(key, parsed.clone());
+    }
+    parsed
 }
 
 /// The identity of a builtin type's static method, declared by the embedded
