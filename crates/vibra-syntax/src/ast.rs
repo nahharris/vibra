@@ -1152,6 +1152,7 @@ impl LabelledParameter {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VariadicParameter {
     name: Name,
+    name_span: ByteSpan,
     value_type: VariadicType,
     span: ByteSpan,
 }
@@ -1161,6 +1162,12 @@ impl VariadicParameter {
     #[must_use]
     pub const fn name(&self) -> &Name {
         &self.name
+    }
+
+    /// The source span of the binding name alone.
+    #[must_use]
+    pub const fn name_span(&self) -> ByteSpan {
+        self.name_span
     }
 
     /// The variadic tail type.
@@ -3492,6 +3499,7 @@ impl AstParser {
         let value_type = self.parse_variadic_type(forms[1])?;
         Some(VariadicParameter {
             name,
+            name_span: forms[0].span(),
             value_type,
             span: node.span(),
         })
@@ -3743,6 +3751,28 @@ fn deftype_member_names(body: &DeftypeBody) -> BTreeSet<String> {
             .collect(),
         DeftypeBody::Type(_) | DeftypeBody::Intrinsic(_) => BTreeSet::new(),
     }
+}
+
+/// Heads that are reserved expression forms, which no lexical binder may take.
+const BINDER_KEYWORDS: &[&str] = &[
+    "do", "let", "let-else", "if", "match", "return", "as", "try", "lambda", "tupleof",
+    "recordof", "enumof",
+];
+/// The primitive type names of the type chapter.
+const PRIMITIVE_TYPE_NAMES: &[&str] = &[
+    "bool", "void", "never", "char", "str", "bytes", "atom", "i8", "i16", "i32", "i64",
+    "u8", "u16", "u32", "u64", "f32", "f64",
+];
+
+/// Whether a lexical binder may not be spelled `spelling`: a keyword, a
+/// boolean, `void`, `any`, `never`, or a primitive type name
+/// (`docs/spec/01-source-language.md`, "Reader"). Such a binder is
+/// `@name.reserved-declaration` at its name and still binds.
+#[must_use]
+pub fn is_reserved_binder_spelling(spelling: &str) -> bool {
+    matches!(spelling, "true" | "false" | "any")
+        || BINDER_KEYWORDS.contains(&spelling)
+        || PRIMITIVE_TYPE_NAMES.contains(&spelling)
 }
 
 /// Whether a module-level value or import alias spelling names a builtin

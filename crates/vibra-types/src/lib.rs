@@ -1618,6 +1618,21 @@ impl<'a> CheckEnvironment<'a> {
         {
             redeclaration(self.diagnostics, self.source_id, name, name, span, earlier);
         }
+        // A reserved spelling is rejected at the binder, which still binds so
+        // the rest of its scope checks without a cascade. A workspace's
+        // resolver reports it instead, as it does a redeclaration.
+        if self.reports_redeclarations
+            && vibra_syntax::is_reserved_binder_spelling(name)
+        {
+            self.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::NameReservedDeclaration,
+                    span,
+                    "a lexical binder uses a keyword, boolean, `void`, `any`, `never`, or primitive type name",
+                )
+                .with_source_id(self.source_id),
+            );
+        }
         let slot = self.next_slot;
         self.locals.insert(
             name.to_owned(),
@@ -1653,7 +1668,11 @@ impl<'a> CheckEnvironment<'a> {
             self.next_slot = self.next_slot.saturating_add(1);
             return true;
         }
-        self.add_binding_type(parameter.name().value(), tail.clone(), parameter.span())
+        self.add_binding_type(
+            parameter.name().value(),
+            tail.clone(),
+            parameter.name_span(),
+        )
     }
 
     fn earlier_introduction(&self, name: &str) -> Option<ByteSpan> {
