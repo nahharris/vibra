@@ -11,7 +11,9 @@ member with its own generic parameters, labelled operands and written `types:`
 arguments on a contract member call, a dict variadic tail on a contract member,
 and such a member used as a function value, are implemented by Milestone 4
 Step 2 in the type checker, the typed IR, and the reference interpreter, and
-Step 9 lowers them. Effects and `@host` externals remain deferred to Stage 4B.
+Step 9 lowers them. Milestone 4 Step 2b implements the prelude values `true` and
+`false` and constant patterns in the same components. Effects and `@host`
+externals remain deferred to Stage 4B.
 The WebAssembly backend executes none of this chapter yet.
 
 ## Model
@@ -58,7 +60,7 @@ fills with a library type:
 
 | Role | Played by | What depends on it |
 | --- | --- | --- |
-| `@bool` | `bool` | `true` and `false`, `if` conditions |
+| `@bool` | `bool` | `if` conditions; the prelude values `true` and `false` have this type |
 | `@str` | `str` | string literals |
 | `@bytes` | `bytes` | `bytes` lookups |
 | `@option` | `option` | collection lookups, `try` on an optional value |
@@ -82,7 +84,10 @@ patterns are the declared ones, so `(bool.true)`, `(str scalars)`, and
 `(bytes items)` build and destructure values, while a toolchain represents the
 values directly under the representation latitude of the runtime chapter. An
 enum body admits `true` and `false` as variant names, which is how `bool` spells
-its variants.
+its variants. `@std.bool` also declares the two values of the type as ordinary
+public module values, `(def true bool (bool.true) visibility: @public)` and
+`(def false bool (bool.false) visibility: @public)`. They are the only way
+source writes a boolean, because source has no boolean literal.
 
 `@std.builtin` declares `(deftype dict (array (tuple k v)) where: (k ordered v
 any) role: @dict)`: a dict is its entries sorted by the `ordered.compare` of
@@ -91,11 +96,23 @@ declaration has no written constructor or pattern. A dict is built by `dict.of`
 or a dict variadic tail, which sort and merge their entries, and read by lookup
 and by `dict.entries`.
 
-The compiler-owned types and the types that play a role are the only types a
+The compiler-owned types, the types that play a role, and the two values
+`true` and `false` that `@std.bool` declares are the only declarations a
 program names without an import, and their names are reserved spellings;
 every other standard-library declaration is reached through an explicit
-import. This closed vocabulary is not a prelude: it cannot grow without a
-specification change, and no name in it can be shadowed. Until each migration lands, the toolchain
+import. This closed set is the **prelude**. It is fixed by this specification:
+it is not user-extensible, no package can add to it, and it cannot grow
+without a specification change. Every module sees it, because the modules that
+declare it are in every checked graph, and a prelude name resolves to its real
+declaration in every module, a type or a value alike. No name in it can be
+shadowed: a lexical binder, and a module value, function, or import alias,
+that is spelled as a prelude name is rejected (`@name.reserved-declaration`
+and `@name.reserved-value-spelling`, as the source chapter and the namespaces
+section state). Only the embedded standard library declares a prelude name,
+which is the rule that already lets it declare `bool` under its role. Reading
+`true` or `false` is an ordinary read of the module value, with no special
+evaluation: a toolchain that folds module values that are constants may fold
+them, and the choice is unobservable. Until each migration lands, the toolchain
 may still implement a library type directly; the roadmap names the step that
 moves it into the standard library, and no program can observe the
 difference.
@@ -553,8 +570,9 @@ and spelling alone are not identities. Source imports bind
 one explicit module alias from an atom entity reference. An atom is resolved
 only in a position whose grammar or data schema expects an entity reference;
 it remains an ordinary `atom` value in expression
-position. Wildcard imports, re-exports, open namespaces, implicit prelude
-names, and filesystem-dependent fallback resolution are forbidden.
+position. Wildcard imports, re-exports, open namespaces, a prelude that is
+open to additions, and filesystem-dependent fallback resolution are forbidden;
+the one prelude is the closed set of the type vocabulary above.
 
 Token spelling never heuristically selects entity resolution. In source,
 symbols name lexical code entities and the surrounding grammar selects the
@@ -613,8 +631,12 @@ The shadowing binder still binds for the rest of its scope, so a further
 repetition relates it instead. Members of one owner's flat namespace use
 `@name.member-collision` instead. Every name introduced anywhere inside a
 positional-parameter, `let`, `let-else`, or `match` pattern MUST NOT reuse any
-visible lexical name. Labelled and variadic parameter names follow the same
-rule. A pattern cannot introduce the same name twice. `-`, `@-`, and `-:` are
+visible lexical name, except that a name resolving to a module value is a
+constant pattern (see "Constant patterns") and introduces nothing; a name that
+resolves to a module value that is not a constant, or to a function, stays the
+shadowing introduction this paragraph rejects, and for the module value the
+diagnostic relates that value and notes that it is not a compile-time constant.
+Labelled and variadic parameter names follow the same rule. A pattern cannot introduce the same name twice. `-`, `@-`, and `-:` are
 equivalent discards, create no binding, and may repeat in the same or nested
 scopes. Sibling scopes may reuse a named symbol when neither declaration is
 visible from the other.
@@ -635,7 +657,13 @@ A module-level `def`, `defn`, or import alias MUST NOT be spelled as a builtin
 type name: a primitive type (`never` included), `array`, `dict`, or `tuple`. Builtin types own
 static methods reached by dotted path, so such an alias or value would make
 `i32.add-checked` or `array.of` ambiguous. A top-level use of one of those
-spellings as a value or alias emits `@name.reserved-value-spelling`.
+spellings as a value or alias emits `@name.reserved-value-spelling`. A module
+value, function, or import alias spelled `true` or `false` emits the same
+code, because those are prelude values; only the embedded standard library
+declares one. Every prelude name is likewise a reserved spelling at a lexical
+binder: a binder spelled as a prelude type or value name emits
+`@name.reserved-declaration`, exactly as one spelled `bool` does, and a binder
+spelled `true` or `false` is only possible where the name is not a pattern.
 
 ## Functions as values
 
@@ -674,8 +702,8 @@ recursion is not a portable Vibra semantic result.
 Inference is local:
 
 - unsuffixed numeric literal types may be constrained by their expression
-  context, while character, boolean, string, atom, `void`, and suffixed numeric
-  literals have fixed types;
+  context, while character, string, atom, `void`, and suffixed numeric
+  literals have fixed types, as do the prelude values `true` and `false`, which have type `bool`;
 - generic arguments may be inferred from written operand and result types;
 - effects performed by a function body are computed to check its written or
   default-empty ceiling; and
@@ -1203,9 +1231,12 @@ A scrutinee of type `atom` is never statically closed: its atom-literal arms
 are refutable and a binder or discard must cover the remainder. A scrutinee of
 an atom singleton type is closed by the one arm for that atom. Literal patterns
 are admitted for every primitive except `f32`, `f64`, `void`, and `never`, and
-an arm set of literals covers its type only for `bool`; any other literal arm
-set needs a covering binder or discard. The arm set of `str`, `bytes`, and every
-numeric type is therefore never closed by literals alone.
+no arm set of literals covers its type; it needs a covering binder or discard.
+The arm set of `str`, `bytes`, and every numeric type is therefore never closed
+by literals alone. `bool` has no literal, because source has none: its two
+values are the prelude values `true` and `false`, constant patterns that cover
+`bool` exactly as the constructor patterns `(bool.true)` and `(bool.false)`
+do.
 
 A `match` whose arms do not cover the scrutinee type emits
 `@pattern.non-exhaustive` at the complete `match` form, with one note naming
@@ -1289,6 +1320,37 @@ Arithmetic is checked. Overflow, division by zero, invalid shifts, and failed
 numeric conversions return typed results from their standard operations; they
 do not wrap or trap implicitly. Floating-point behavior follows IEEE 754 with
 canonical serialization rules defined by the runtime chapter.
+
+### Constant patterns
+
+A name in pattern position, bare (`limit`) or dotted through an import
+(`limits.max`), that resolves to a visible module-level `def` whose initializer
+is a constant expression is a **constant pattern**. It is not a binder: it
+means exactly the pattern of that constant's value, as if the literal or
+constructor form of the value were written at that position, and it
+introduces no name. Name shadowing is forbidden, so such a name could never
+have been a binder. The consequence is deliberate: adding a module-level `def x`
+turns an existing arm, parameter, or `let` pattern written `x` into a value
+match on that constant, and a program that relied on `x` as a catch-all
+binder is then checked as the value match it now is. `true` and `false` are
+constant patterns for this reason alone, because they are `@std.bool` values of
+the prelude.
+
+A **constant expression** is a literal, an atom, or `void`; a constructor
+application, or a `tupleof`, `recordof`, or `enumof`, whose operands are all
+constant expressions; or a name of another constant `def`. A function call is
+never constant, even of a pure function, so whether a `def` is constant is a
+property of its initializer's checked form, decidable without evaluation, and
+initializer cycles are already rejected. The initializer is checked as the
+module that declares it checks it, and the pattern reads nothing when it
+matches beyond what the expanded literal or constructor pattern would.
+
+A constant pattern has no restriction of its own: whatever the expanded literal
+or constructor pattern admits or rejects at the expected type decides the
+outcome, and exhaustiveness and reachability treat it as that expanded
+pattern. A name that resolves to a module value that is not a constant, to a
+function, or to a parameter or local binder stays the shadowing introduction
+that "Namespaces and resolution" rejects.
 
 ### Body sequences and bindings
 

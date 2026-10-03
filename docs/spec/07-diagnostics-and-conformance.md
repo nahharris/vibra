@@ -265,7 +265,9 @@ owning source identity:
 | expression of type `never` in a position that does not admit one | `@type.unreachable-code` | the expression | none |
 | element following an element of type `never` in one body sequence | `@type.unreachable-code` | the first following element | the diverging element |
 | binder repeating a name a `let` or `let-else` left visible | `@name.redeclaration` | the later binder | the earlier binder |
-| lexical binder of any form (parameter, `let`, `let-else`, `match` arm, or `lambda` parameter) spelled as a keyword, boolean, `void`, `any`, `never`, or primitive type name | `@name.reserved-declaration` | the binder name | none |
+| lexical binder of any form (parameter, `let`, `let-else`, `match` arm, or `lambda` parameter) spelled as a keyword, `any`, or a name of the prelude (a primitive type name, `option`, `result`, `iter`, `array`, `dict`, `true`, or `false`) | `@name.reserved-declaration` | the binder name | none; `true` and `false` reach this only as a plain name, because they are constant patterns at a pattern site |
+| module value, function, or import alias spelled `true` or `false` outside the embedded standard library | `@name.reserved-value-spelling` | the declaration | none |
+| pattern name that resolves to a module value that is not a compile-time constant | `@name.redeclaration` | the name | the module value, with a note that it is not a compile-time constant |
 | declaration named `never` | `@name.reserved-declaration` | the name | none |
 | generic argument that only diverging operands could fix | `@type.ambiguous-inference` | the application | one note per missing constraint |
 | `never` as a type argument for a bound other than `any` | `@type.unsatisfied-bound` | the type argument, as that code reports an argument that does not satisfy a bound elsewhere | the bound |
@@ -670,6 +672,25 @@ other than the associative `dict` type is accepted, proving the reservation
 does not reach members; the
 `@name.reserved-value-spelling` cases cover module-level values and aliases
 spelled `i32`, `array`, and `dict`.
+
+Prelude and constant-pattern coverage proves, in `V1-TYPE`, `V1-RUNTIME`, and
+`V1-PROJECT`, that `true` and `false` are named in every module without an
+import and read as ordinary module values; that a constant pattern of an
+integer, a declared enum value, a tuple, a constant defined by another
+constant, and `true` and `false` (bare, nested in a tuple, and in a
+`let-else`) matches exactly that value and covers `bool` as `(bool.true)` and
+`(bool.false)` do; that a dotted name through a module alias and a bare name
+through a declaration alias to another module's public constant are constant
+patterns; that adding a `def` of a name turns an existing arm into a value
+match; and, as rejections, that a pattern name that resolves to a module value
+whose initializer is a call, to a function, or to a parameter stays
+`@name.redeclaration`, that a constant whose expanded pattern is a float
+literal is `@type.mismatch` as the literal is, that a binder spelled as any
+prelude name at a plain-name site (a labelled or variadic parameter, or a
+`let-else` binder spelled `option`) is `@name.reserved-declaration`, that a
+`let` pattern spelled `true` is `@pattern.refutable-binding`, and that a module
+value or function spelled `true` or `false` is
+`@name.reserved-value-spelling` in a single source and in a workspace.
 
 Unification coverage fixes the bound-agnostic reading: a union whose members are
 `(array t)` and `(array i32)` where `t` is bound by an interface `i32` does not
