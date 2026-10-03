@@ -172,6 +172,12 @@ evidences every exit-gate clause.
   Vibra runtime would instead use a self-contained form that runs the bodies; M7
   decides the shipped form, and M4 emits the native-import form only. See the
   [D10 options](decision-ledger.md#d10-the-single-source-for-natives-and-primitives).
+- **The prelude is declared, not folded (D16).** The checker declares the
+  values of the closed import-free vocabulary from the embedded `@std.bool`
+  module, which is in every checked graph, so typed IR reads `true` and `false`
+  as ordinary module-value reads. Folding module values that are constants is
+  an M7 optimization applied to every constant or to none. A constant pattern is
+  expanded by checking the constant's initializer as its own module checks it.
 - **The NaN defence is on (D11).** The engine runs with NaN canonicalization
   enabled because it is unobservable, while the specification canonicalizes at the
   observation points.
@@ -244,6 +250,7 @@ tail-recursive walk that grows neither stack nor arena.
 | --- | --- | --- | --- | --- |
 | 1 | [Freeze Stage 4A contracts](01-contracts.md) — specification/infrastructure prerequisite | M3 on `main`; this bootstrap | landed | PR #354, merge e7d2e08 |
 | 2 | [Contract-member forms reassigned from M3, and the binder defect](02-contract-members.md): an abstract contract member with its own generic parameters, labelled operands and written `types:` arguments on a contract member call, a dict variadic tail on a contract member, and such a member as a function value, in typed IR and the interpreter (per G8), plus the reserved-binder fix (per G11) | 1 | landed | PR #355, merge 3289ee75c68f4d68419597e0e7dfecd28c64c742 |
+| 2b | [Boolean constants and constant patterns](02b-boolean-constants.md): `true` and `false` become `@std.bool` values of the prelude with no source boolean literal, a pattern name that resolves to a constant module `def` is a value pattern, and every prelude name is reserved at a binder (per ledger D14.1 and D16) | 2 | landed, conditional on its PR merging | Branch `claude/m4-step-02b-boolean-constants`; merge commit to be recorded when the PR merges |
 | 3 | [The specified outcome of deep non-tail recursion](03-activations.md) in the reference interpreter, replacing the host-event rule: heap activations, a memory budget, and `@runtime.memory-exhausted` as the host event, with `expect.host_event` (per G1) | 2 | landed, conditional on its PR merging | Branch `claude/m4-step-03-activations`; merge commit to be recorded when the PR merges |
 | 4 | [Wasm backend skeleton and differential harness](04-skeleton.md): the emitter crate, the engine and native-code crate behind the runner (latest Wasmtime and a raised toolchain), the corpus contract of G4, the parity inventory and its test, deterministic emission, and a CI job — infrastructure step | 3 | not started | — |
 | 5a | [The value arena and its runtime](05a-arena.md): linear-memory arena, reference counting, the handle table, the exported accessors, memory exhaustion, scalars and literals, and the canonical result observation | 4 | not started | — |
