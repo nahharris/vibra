@@ -122,3 +122,15 @@ The three availability messages are gone from `interfaces.rs`; the host tests
 and corpus cases above pass; the inventory rows I3–I6 name this step as
 implemented; the binder cases pass; the PR lists every case whose expectation
 changed and why.
+
+## Outcome
+
+The IR names above were proposals, and [ledger D9.3](decision-ledger.md)
+records what the step chose instead: no `ContractFunction` expression, because
+a member named as a value stays the closure M3 already made of it, with a body
+that is a tail contract call carrying `member_types`; and `Implements` gains
+`member_generics`, so an implementation function's complete list is its owner's
+parameters then the member's own, not the receiver's, the interface's, and the
+member's. A call of a generic member is always a contract call. The step also
+corrected the tail-call summary of a module value that names a contract member
+([D9.4](decision-ledger.md)), which the invariant above required.
