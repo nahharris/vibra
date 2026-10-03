@@ -1,0 +1,18 @@
+id = "V1-RUNTIME-contract-member-labelled"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Labelled operands on a contract member call bind by name in declaration order whatever order they are written in, and a labelled operand left out takes the contract's default, whether the receiver is a known type, a bounded generic parameter, or an interface value. Writing them out of declaration order is accepted with a style warning."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }
+
+[[expect.diagnostics]]
+code = "@style.argument-order"
+level = "@warning"
+source = "input.vib"
+span = [155, 210]
