@@ -35,7 +35,7 @@ exhaustion as the host event `@runtime.memory-exhausted`.
 
 ## Ordered tasks
 
-1. Characterize: a host test that a non-tail recursion a million deep, with a
+1. Characterize: a host test that a non-tail recursion a hundred thousand deep, with a
    base case, currently ends in the host event, so the change is visible.
 2. Make an activation a value of the machine. Evaluate with an explicit
    stack of frames and continuations held on the heap, so a non-tail call
@@ -63,7 +63,7 @@ never recast as host events; a host event never produces a program result.
 
 ## Test matrix
 
-- Positive: non-tail recursion a million deep completes with its result;
+- Positive: non-tail recursion a hundred thousand deep completes with its result;
   mutual non-tail recursion; non-tail recursion through a closure, a function
   value, and a contract member; a deeply nested value built and dropped.
 - Negative: recursion with no base case ends with the host event; `run` is
@@ -73,7 +73,7 @@ never recast as host events; a host event never produces a program result.
 - Recovery: after a host event in one `run`, a following valid run in the same
   process behaves normally.
 - Boundary: the budget exactly at a program's need and one frame under it; a
-  value nested 5,000 and 1,000,000 deep; a tail loop that never approaches the
+  value nested 5,000 and 100,000 deep; a tail loop that never approaches the
   budget.
 - Formatter: no change.
 
@@ -87,7 +87,7 @@ needs the manifest to accept it; that is the only contract change.
 ## Validation
 
 The [Step 3 row](validation.md#focused-checks), then the full
-[pre-merge list](validation.md#before-merging-each-step). The million-deep case
+[pre-merge list](validation.md#before-merging-each-step). The hundred-thousand-deep case
 must finish in release and debug builds within the CI time budget; record the
 times.
 

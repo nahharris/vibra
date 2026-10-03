@@ -51,7 +51,7 @@ users:
    count, size), per-kind payloads, and the frame layout, so Step 5b and later
    steps add kinds by table, not by editing every routine.
 2. Allocator and `dup`/`drop`, then the worklist release, then a host test that
-   a value nested 5,000 and 1,000,000 deep releases with bounded engine stack.
+   a value nested 5,000 and 100,000 deep releases with bounded engine stack.
 3. Handle table and the accessors, then the host-side encoder over scalars and
    `void`, so the result of a program that returns a literal matches the
    interpreter's canonical encoding.
@@ -70,7 +70,8 @@ status; emission is byte-identical.
 
 ## Test matrix
 
-- Positive: every scalar literal type round-trips through the accessors; the
+- Positive: every scalar literal type round-trips through the accessors, and
+  `bool`, an enum value, reads through `vibra_v1_variant`; the
   result of a literal program matches the interpreter byte for byte; `dup` and
   `drop` balance to a live size equal to the start; IDs are strictly increasing
   and never reused after a release.

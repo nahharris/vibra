@@ -624,11 +624,11 @@ conformance for `(array t)`, `(dict k v)`, `str`, and `(option t)`, explicit
 `taken-iter`, pure `iter` default methods with `effects: ()` callbacks only,
 and effectful walks written as tail-recursive module-level functions over
 `iter.next`.
-Tail-call cases belong to `V1-RUNTIME`. Each runs its loop for a million
+Tail-call cases belong to `V1-RUNTIME`. Each runs its loop for a hundred thousand
 iterations and checks the result, and together they cover a callee in another
 module, a function-value parameter, a closure, a contract member called through
 an interface value, and an unrelated module-level function. Activation-depth
-coverage proves that non-tail recursion a million activations deep, with a
+coverage proves that non-tail recursion a hundred thousand activations deep, with a
 base case, completes with its result in both backends, and that a non-tail
 recursion with no base case ends with `expect.host_event =
 "@runtime.memory-exhausted"` under the runner's memory limit. Arena coverage

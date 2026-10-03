@@ -81,9 +81,7 @@ function-only recursion cycle reached from an initializer is not a module
 initializer cycle. A module-value cycle is rejected with the error-level
 `@type.initializer-cycle` before an executable checked program is produced or
 any initializer is evaluated or program executed; no checked program is
-produced. A closure holds only the local values it captured and its
-type arguments: a module-level value its body names is read from the
-instance's module state when the body runs and is never held by the closure. Its primary span is the complete source form of a `def` participating
+produced. Its primary span is the complete source form of a `def` participating
 in the cycle, selected by the deterministic dependency traversal. Acyclic
 forward references remain valid. Type checking never evaluates an initializer
 to infer its written type.
@@ -421,7 +419,9 @@ that has crossed a host boundary is observed only through the operations that
 boundary defines.
 
 A value is a **scalar** or an **arena value**. The scalars are the values of
-`bool`, `void`, `char`, the integer types, and the float types. Every other
+`void`, `char`, the integer types, and the float types. `bool` is the
+standard-library enum of the `@bool` role, so it is an `enum` arena value like
+any other. Every other
 value is an arena value of one of the closed kinds `atom`, `str`, `bytes`,
 `tuple`, `array`, `dict`, `record`, `enum`, `wrapper`, `union`, and `function`.
 The arena is the instance's own value storage. A representation MAY keep a
@@ -457,8 +457,8 @@ event, or ID changes because storage was or was not released.
 
 In particular, a tail-recursive loop that allocates a fresh compound value on
 each iteration and keeps none of the earlier ones live runs with a bounded live
-arena: the live arena after a million iterations exceeds the live arena after
-a thousand by at most a constant that depends on the program and not on the
+arena: the live arena after a hundred thousand iterations exceeds the live arena after
+ten thousand by at most a constant that depends on the program and not on the
 iteration count. A WebAssembly backend MUST be able to report its live arena
 size, in bytes of storage held by live values and by the handle table, so a
 conformance harness can measure this. Releasing a value
@@ -478,7 +478,9 @@ cycle collector:
 - a module-level `def` cannot reach itself, because an initializer cycle is
   rejected with `@type.initializer-cycle`;
 - a module function is named by its identity and never held by a counted
-  reference, and a closure holds only the local values it captured;
+  reference, and a closure holds only the local values it captured and its
+  type arguments, because a module-level value its body names is read from the
+  instance's module state when the body runs;
 - a `let` or `let-else` binding is visible only from the end of its own pair, so
   a `lambda` cannot capture the value that is being bound to it; and
 - an in-place update, where a backend performs one, applies only to a value

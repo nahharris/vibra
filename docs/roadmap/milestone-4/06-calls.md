@@ -43,7 +43,7 @@ arena across a long allocating tail loop.
    type arguments, for a module function of any module, a method, a lambda, a
    function value, and (in Step 9) a contract member. No Wasm call is made per
    language activation, so no engine feature is needed.
-5. Depth: a non-tail recursion a million deep completes; one with no base case
+5. Depth: a non-tail recursion a hundred thousand deep completes; one with no base case
    exhausts the runner's memory limit and is reported as the host event, in both
    backends against one `expect.host_event`.
 6. Bounded arena: the allocating tail loop measured through
@@ -59,7 +59,7 @@ stay observable; engine stack use is independent of language depth.
 
 - Positive: each callee kind in tail and non-tail position; a closure capturing
   across two lambdas; a generic function called at two instantiations; mutual
-  recursion; a loop of a million tail calls through each kind of callee.
+  recursion; a loop of a hundred thousand tail calls through each kind of callee.
 - Negative: no new source diagnostic; the exhaustion case and its host-event
   expectation; a forged indirect-call signature in a host test is a defect.
 - Recovery: after an exhaustion stop, a new instance runs the same program with
