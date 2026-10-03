@@ -90,7 +90,7 @@ fn err(result: &Type, error: &str) -> RuntimeValue {
     RuntimeValue::Enum {
         value_type: result.clone(),
         variant: "err".to_owned(),
-        payload: Some(Box::new(RuntimeValue::Enum {
+        payload: Some(crate::value::Inner::new(RuntimeValue::Enum {
             value_type: error_type,
             variant: error.to_owned(),
             payload: None,
@@ -485,7 +485,7 @@ fn sequences(
 ) -> Option<RuntimeValue> {
     let array = |values: Vec<RuntimeValue>| RuntimeValue::Array {
         value_type: result.clone(),
-        values,
+        values: values.into(),
     };
     Some(match (intrinsic, operands) {
         (

@@ -66,7 +66,7 @@ the anchors of headings it renames.
 | --- | --- |
 | 1 | `cargo test --locked --offline -p vibra-diagnostics -p vibra-schema`<br>`cargo test --locked --offline -p vibra-conformance --test m4_contract_inventory --test diagnostic_registry` |
 | 2 | `cargo test --locked --offline -p vibra-resolve -p vibra-types -p vibra-ir -p vibra-interp -p vibra-fmt`<br>`cargo test --locked --offline -p vibra-workspace -p vibra-conformance` |
-| 3 | `cargo test --locked --offline -p vibra-interp -p vibra-cli`<br>`cargo test --locked --offline -p vibra-conformance --test tail_calls_step9` |
+| 3 | `cargo test --locked --offline -p vibra-interp -p vibra-ir -p vibra-cli -p vibra-workspace`<br>`cargo test --locked --offline -p vibra-conformance --test activations_m4_step3 --test tail_calls_step9` |
 | 4–12 | the emitter crate and the runner crate the Step 4 PR adds, with `cargo test --locked --offline -p vibra-conformance` for the parity inventory and the native harness (`natives_m3_step4b`) |
 | 8a–8c | `cargo test --locked --offline -p vibra-types` for the standard-library input and registry, and the registry vectors the step adds |
 | 11 | `cargo test --locked --offline -p vibra-cli` for `run` and `test` output |

@@ -6,8 +6,8 @@
 )]
 
 //! Actual-binary regressions for the M2 review of PR 295: a relocated
-//! toolchain, human-mode test reports, host activation exhaustion, `help`, and
-//! an initializer cycle through a closure-valued global.
+//! toolchain, human-mode test reports, memory exhaustion by deep recursion,
+//! `help`, and an initializer cycle through a closure-valued global.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -240,6 +240,39 @@ fn deep_non_tail_recursion_in_a_test_stops_the_suite() {
         envelope["diagnostics"][0]["code"],
         "@runtime.memory-exhausted"
     );
+}
+
+/// Non-tail recursion a hundred thousand activations deep, with a base case:
+/// `n + 1` activations are live at the bottom.
+const DEEP_WITH_BASE_CASE: &str = "(defn depth (remaining u64) u64\n  (if (u64.equal remaining 0u64)\n    0u64\n    (match (u64.add-checked (depth (lower remaining)) 1u64)\n      (result.ok total) total\n      (result.err -) 0u64)))\n\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
+
+#[test]
+fn deep_non_tail_recursion_with_a_base_case_completes_in_run_and_in_test() {
+    let project = demo_project(
+        "deep-recursion-completes",
+        &format!(
+            "{DEEP_WITH_BASE_CASE}\n(defn main () void (let - (depth 100000u64)) (do))\n"
+        ),
+    );
+
+    let output = vibra(project.path(), &["--format", "json", "run", "src/demo"]);
+    let envelope = json(&output, 0, "run", "@command.ok");
+    assert_eq!(
+        envelope["payload"]["programResult"],
+        "(record type: @void value: void)\n"
+    );
+    assert_eq!(envelope["payload"]["trap"], Value::Null);
+
+    project.write(
+        "tests/t.vib",
+        &format!(
+            "(import assert @std.assert)\n{DEEP_WITH_BASE_CASE}\n(test \"deep\" (assert.equal (depth 100000u64) 100000u64))\n"
+        ),
+    );
+    let output = vibra(project.path(), &["--format", "json", "test"]);
+    let envelope = json(&output, 0, "test", "@command.ok");
+    assert_eq!(envelope["payload"]["selected"], 1);
+    assert_eq!(envelope["payload"]["passed"], 1);
 }
 
 #[test]

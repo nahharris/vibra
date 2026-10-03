@@ -13,6 +13,14 @@ use vibra_types::{
 
 const BOOTSTRAP_PROVENANCE_FAILURE: &str = "bootstrap provenance verification failed";
 
+/// The atom of the host event an interpreter failure is, such as
+/// `@runtime.memory-exhausted`.
+pub(crate) fn host_event_atom(error: &vibra_interp::RuntimeError) -> Option<String> {
+    error
+        .host_diagnostic()
+        .map(|diagnostic| diagnostic.code().as_atom().to_owned())
+}
+
 fn check_case_source(
     source_id: &str,
     source: &str,
@@ -151,8 +159,23 @@ impl ProfileHandler for InterpreterV1Handler {
                 ..CaseObservation::default()
             });
         };
-        let execution = vibra_interp::run(program)
-            .map_err(|error| HandlerError::new(error.to_string()))?;
+        let execution = match vibra_interp::Interpreter::run_with_budget(
+            program,
+            crate::INSTANCE_MEMORY_BUDGET,
+        ) {
+            Ok(execution) => execution,
+            // A host event ends the run with no result and no trace, so the
+            // case records the event instead of snapshots.
+            Err(error) if error.is_host_event() => {
+                return Ok(CaseObservation {
+                    accepted: checked.accepted(),
+                    diagnostics: checked.diagnostics().to_vec(),
+                    host_event: host_event_atom(&error),
+                    ..CaseObservation::default()
+                });
+            }
+            Err(error) => return Err(HandlerError::new(error.to_string())),
+        };
         Ok(CaseObservation {
             accepted: checked.accepted(),
             diagnostics: checked.diagnostics().to_vec(),

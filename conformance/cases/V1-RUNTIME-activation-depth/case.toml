@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-activation-depth"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Non-tail recursion a hundred thousand activations deep, with a base case, completes with its result: the depth of live activations is bounded only by memory, not by a fixed limit."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }
