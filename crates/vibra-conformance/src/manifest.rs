@@ -241,6 +241,10 @@ pub struct CaseExpectations {
     pub queries: Vec<ExpectedQuery>,
     /// Expected reference-interpreter output.
     pub interpreter: Option<ExpectedExecution>,
+    /// The host event an `interpret` or `workspace-run` case ends in, which
+    /// replaces the result and audit-trace snapshots because such a run has
+    /// neither.
+    pub host_event: Option<String>,
     /// Expected Wasm output.
     pub wasm: Option<ExpectedExecution>,
     /// Expected deterministic artifact hashes, when the case covers an
@@ -353,6 +357,16 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
         let operation = decode_operation(raw.operation.as_deref(), profile, &inputs)?;
 
         let expectations = decode_expectations(raw.expect)?;
+        if expectations.host_event.is_some()
+            && !matches!(
+                operation,
+                ConformanceOperation::Interpret | ConformanceOperation::WorkspaceRun
+            )
+        {
+            return Err(ManifestError::Invalid(format!(
+                "host_event is valid only on interpret and workspace-run cases, not {operation}"
+            )));
+        }
         if operation == ConformanceOperation::Index && expectations.index.is_none() {
             return Err(ManifestError::Invalid(
                 "index cases must declare the expected index document".to_owned(),
@@ -369,7 +383,9 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
                 "format cases must declare a formatted snapshot".to_owned(),
             ));
         }
-        if operation == ConformanceOperation::WorkspaceRun {
+        if operation == ConformanceOperation::WorkspaceRun
+            && expectations.host_event.is_none()
+        {
             if expectations.accepted
                 && expectations.interpreter.as_ref().is_none_or(|execution| {
                     execution.result.is_none() || execution.audit_trace.is_none()
@@ -748,6 +764,11 @@ pub(crate) fn section_for(value: &str) -> Option<&str> {
         .max_by_key(|section| section.len())
 }
 
+/// The closed host events a case may end in. A host event is an unlocated
+/// error diagnostic that is never a trap (`docs/spec/06-runtime.md`,
+/// "Activations and memory"); memory exhaustion is the only one.
+const HOST_EVENTS: [&str; 1] = ["@runtime.memory-exhausted"];
+
 fn decode_expectations(
     raw: RawExpectations,
 ) -> Result<CaseExpectations, ManifestError> {
@@ -794,6 +815,26 @@ fn decode_expectations(
     }
     let interpreter = raw.interpreter.map(decode_execution).transpose()?;
     let wasm = raw.wasm.map(decode_execution).transpose()?;
+    let host_event = raw.host_event;
+    if let Some(event) = &host_event {
+        if !HOST_EVENTS.contains(&event.as_str()) {
+            return Err(ManifestError::Invalid(format!(
+                "host_event `{event}` is not a registered host event; expected one of {HOST_EVENTS:?}"
+            )));
+        }
+        if interpreter.is_some() || wasm.is_some() {
+            return Err(ManifestError::Invalid(
+                "host_event replaces the result and audit-trace snapshots; a case cannot declare both"
+                    .to_owned(),
+            ));
+        }
+        if !accepted {
+            return Err(ManifestError::Invalid(
+                "host_event requires an accepted case: a program the checker rejects never runs"
+                    .to_owned(),
+            ));
+        }
+    }
     let artifact_hashes = raw.artifact.map(|artifact| artifact.hashes);
 
     Ok(CaseExpectations {
@@ -815,6 +856,7 @@ fn decode_expectations(
             })
             .collect(),
         interpreter,
+        host_event,
         wasm,
         artifact_hashes,
     })
@@ -973,6 +1015,8 @@ pub(crate) struct RawExpectations {
     pub(crate) queries: Vec<RawQuery>,
     #[serde(default)]
     pub(crate) interpreter: Option<RawExecution>,
+    #[serde(default)]
+    pub(crate) host_event: Option<String>,
     #[serde(default)]
     pub(crate) wasm: Option<RawExecution>,
     #[serde(default)]

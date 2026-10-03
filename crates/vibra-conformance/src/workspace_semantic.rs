@@ -71,16 +71,15 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
         };
         let target = unique_binary_target(&snapshot)?;
         let verification = verified_bootstrap_if_used(&snapshot)?;
-        let result = match verification.as_ref() {
-            Some(verification) => vibra_workspace::semantic::run_target_with_bootstrap(
-                &snapshot,
-                target,
-                Some(verification),
-            ),
-            None => vibra_workspace::semantic::run_target(&snapshot, target),
-        };
+        let result = vibra_workspace::semantic::run_target_with_budget(
+            &snapshot,
+            target,
+            verification.as_ref(),
+            crate::INSTANCE_MEMORY_BUDGET,
+        );
         let accepted =
             result.check().status() == vibra_workspace::semantic::CheckStatus::Accepted;
+        let mut host_event = None;
         let interpreter = if accepted {
             match result.outcome() {
                 Some(vibra_workspace::semantic::RunOutcome::Program(execution)) => {
@@ -88,6 +87,13 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
                         result: Some(execution.canonical_result()),
                         audit_trace: execution.audit_trace().to_vec(),
                     })
+                }
+                // A host event ends the run with no result and no trace.
+                Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(
+                    error,
+                )) if error.is_host_event() => {
+                    host_event = crate::types::host_event_atom(error);
+                    None
                 }
                 Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(
                     error,
@@ -109,6 +115,7 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             accepted,
             diagnostics: result.check().diagnostics().to_vec(),
             interpreter,
+            host_event,
             ..CaseObservation::default()
         })
     }

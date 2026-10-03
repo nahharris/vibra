@@ -3,11 +3,11 @@
 Status: normative target
 Implementation status: the reference interpreter executes successfully checked
 IR for the complete pure language through M3 and the pre-M4 binding revision,
-including tail calls and isolated tests, with an interim activation bound that
-Stage 4A replaces. The Stage 4A contracts of this chapter (activations and
-memory, the value arena, reclamation, the module contract, traps, and native
-sources) are specified and unimplemented. The WebAssembly backend, host
-operations, and effect checking remain unimplemented.
+including tail calls and isolated tests, and holds activations on the heap, so
+depth is bounded only by the memory budget its runner supplies. The other
+Stage 4A contracts of this chapter (the value arena, reclamation, the module
+contract, traps, and native sources) and the WebAssembly backend, host
+operations, and effect checking remain specified and unimplemented.
 
 ## Semantic reference
 

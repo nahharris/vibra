@@ -1,0 +1,15 @@
+; Each call of `depth` is an operand of the checked addition, so it is not in
+; tail position and its activation stays live until the call returns.
+(defn main () u64 (depth 100000u64))
+
+(defn depth (remaining u64) u64
+  (if (u64.equal remaining 0u64)
+    0u64
+    (match (u64.add-checked (depth (lower remaining)) 1u64)
+      (result.ok total) total
+      (result.err -) 0u64)))
+
+(defn lower (count u64) u64
+  (match (u64.sub-checked count 1u64)
+    (result.ok value) value
+    (result.err -) 0u64))

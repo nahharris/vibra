@@ -13,9 +13,22 @@ use vibra_schema::{DiagnosticDocument, SCHEMA_VERSION};
 use vibra_workspace::format_plan::{
     FormatPlan, FormatPlanError, apply_format, plan_format,
 };
-use vibra_workspace::semantic::{TestSelector, TestSuiteStatus};
+use vibra_workspace::semantic::{MemoryBudget, TestSelector, TestSuiteStatus};
 
 pub use init::{InitError, InitPlan, apply_init, plan_init};
+
+/// The memory every instance `run` and `test` execute may hold, in the
+/// interpreter's accounting of live activations and values.
+///
+/// The runtime chapter defines no portable limit: the limit that ends a
+/// program with `@runtime.memory-exhausted` belongs to the host, and this is
+/// the CLI's choice. 256 MiB admits non-tail recursion several hundred
+/// thousand activations deep (a small function holds about 400 bytes per
+/// activation in the interpreter's accounting, so about 670,000) and any
+/// program whose live data fits a few hundred megabytes, and it stops a
+/// program that recurses without a base case within seconds, instead of after
+/// it has exhausted the machine. There is deliberately no option to change it.
+pub const MEMORY_BUDGET: MemoryBudget = MemoryBudget::new(256 * 1024 * 1024);
 
 /// The global output mode accepted before a command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -548,14 +561,12 @@ fn execute_run<E: Write>(
             return operational_run_envelope(invocation, &target_root, message, stderr);
         }
     };
-    let outcome = match verification.as_ref() {
-        Some(verification) => vibra_workspace::semantic::run_target_with_bootstrap(
-            &snapshot,
-            target,
-            Some(verification),
-        ),
-        None => vibra_workspace::semantic::run_target(&snapshot, target),
-    };
+    let outcome = vibra_workspace::semantic::run_target_with_budget(
+        &snapshot,
+        target,
+        verification.as_ref(),
+        MEMORY_BUDGET,
+    );
     let diagnostics = match render_workspace_diagnostics(
         &snapshot,
         verification.as_ref(),
@@ -679,10 +690,11 @@ fn execute_test<W: Write, E: Write>(
         Ok(false) => None,
         Err(message) => return operational_test_envelope(invocation, message, stderr),
     };
-    let result = vibra_workspace::semantic::run_tests(
+    let result = vibra_workspace::semantic::run_tests_with_budget(
         &snapshot,
         selector,
         verification.as_ref(),
+        MEMORY_BUDGET,
     );
     let diagnostics = match render_workspace_diagnostics(
         &snapshot,

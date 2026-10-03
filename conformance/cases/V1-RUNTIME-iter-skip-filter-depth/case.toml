@@ -2,7 +2,7 @@ id = "V1-RUNTIME-iter-skip-filter-depth"
 rule = "V1-RUNTIME"
 profile = "interpreter-v1"
 operation = "interpret"
-description = "iter.skip and iter.filter pass over ten thousand items at constant depth, so skipping or filtering a long run does not exhaust the activation bound."
+description = "iter.skip and iter.filter pass over ten thousand items at constant depth, so skipping or filtering a long run holds no more activations than a short one."
 
 [inputs]
 source = "input.vib"

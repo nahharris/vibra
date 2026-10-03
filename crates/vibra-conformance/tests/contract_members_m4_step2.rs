@@ -385,8 +385,8 @@ const STEPPER: &str = "\
 
 #[test]
 fn a_tail_call_through_each_form_reuses_the_activation() {
-    // Far more calls than the interpreter's activation bound; each ends the
-    // run only because every call in tail position reuses its activation.
+    // Thousands of calls: the depth assertion below holds only because every
+    // call in tail position reuses its activation.
     const CALLS: u64 = 6000;
     for (call, expected) in [
         (
