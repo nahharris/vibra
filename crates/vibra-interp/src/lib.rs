@@ -1736,6 +1736,7 @@ impl<'a> Machine<'a> {
             member,
             receiver,
             arguments: interface_arguments,
+            member_types,
             destination,
             closed,
             ..
@@ -1822,8 +1823,22 @@ impl<'a> Machine<'a> {
                 )));
             };
             let mut callable = self.named_callable(index)?;
+            let mut bound = bound;
+            // The member's own type arguments at this call, which the
+            // selected function names by its own generic parameters, at this
+            // activation's type arguments.
+            if let Some(implements) = self.program.functions().get(index)?.implements()
+            {
+                for (name, written) in
+                    implements.member_generics.iter().zip(member_types)
+                {
+                    if let Some(name) = name {
+                        bound.insert(name.clone(), self.concrete(written));
+                    }
+                }
+            }
             *callable.types_mut() = Arc::new(bound);
-            // The member's own generic parameters, from this call.
+            // Anything the operands and the result still fix.
             self.bind_call(&mut callable, arguments, &values, result);
             return self.finish_call(callable, values, result, tail);
         }

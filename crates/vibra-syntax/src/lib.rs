@@ -38,7 +38,7 @@ pub use ast::{
     PatternArgument, PatternKind, RawNode, SourceAst, SourceDecode, TestDeclaration,
     TypeAttributes, TypeExpr, TypeField, TypeMember, TypeSlot, VariadicBinding,
     VariadicParameter, VariadicType, contains_declaration_head, decode_source_root,
-    is_reserved_value_spelling,
+    is_reserved_binder_spelling, is_reserved_value_spelling,
 };
 pub use data::{
     AtomRole, DataDecode, DataField, DataNode, DataValue, TypedDataSchema,

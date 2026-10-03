@@ -1,8 +1,9 @@
 # Milestone 4 step plan
 
-Status: in progress. Step 1, the Stage 4A contract freeze, is proposed as
-`landed` by its pull request and is conditional on that PR merging; no
-implementation step has landed
+Status: in progress. Step 1, the Stage 4A contract freeze, has landed
+(PR #354). Step 2, the contract-member forms and the binder fix, is proposed
+as `landed` by its pull request and is conditional on that PR merging; no
+other implementation step has landed
 Decision ledger: [decision-ledger.md](decision-ledger.md)
 Surface inventory: [supported-surface.md](supported-surface.md)
 Validation: [validation.md](validation.md)
@@ -140,13 +141,16 @@ evidences every exit-gate clause.
 - **Type arguments pass at run time (D9).** The Wasm backend passes type
   arguments as the interpreter does and emits one function per source function.
   Monomorphization is an M7 optimization. Typed IR carries what both backends
-  need: a contract call holds the interface arguments and, new in Step 2, the
-  member's own type arguments in `where:` order; operands are already in resolved
-  parameter order, so labelled operands and a dict tail add checking and no IR
-  field; and a contract member used as a function value is its own expression
-  holding the member, the interface arguments, and its own type arguments, which
-  selects its implementation from the operand at each application. The Step 2
-  guide fixes the names.
+  need: a contract call holds the interface arguments and, from Step 2, the
+  member's own type arguments in `where:` order (`member_types`), and each
+  implementation or default function names the generic parameter it declares
+  for each of them (`member_generics`); operands are in resolved parameter
+  order, with a labelled operand left out already replaced by the contract's
+  default and a dict tail already packed, so labelled operands and a dict tail
+  add checking and no IR field; and a contract member used as a function value
+  stays the closure M3 already made of it, whose body is a tail contract call
+  carrying the same fields, so it adds no expression and no call target. See
+  [ledger D9.1 and D9.3](decision-ledger.md).
 - **Natives are written once, in Rust, and called by both backends (D10,
   "Bun style").** The Vibra runtime embeds Wasmtime, and where performance
   matters the toolchain runs native Rust and escapes from Wasmtime into the host
@@ -237,8 +241,8 @@ tail-recursive walk that grows neither stack nor arena.
 
 | Step | One-PR slice | Requires | Status | PR / merge evidence |
 | --- | --- | --- | --- | --- |
-| 1 | [Freeze Stage 4A contracts](01-contracts.md) — specification/infrastructure prerequisite | M3 on `main`; this bootstrap | landed, conditional on its PR merging | Branch `claude/m4-step-01-contracts`; merge commit to be recorded when the PR merges |
-| 2 | [Contract-member forms reassigned from M3, and the binder defect](02-contract-members.md): an abstract contract member with its own generic parameters, labelled operands and written `types:` arguments on a contract member call, a dict variadic tail on a contract member, and such a member as a function value, in typed IR and the interpreter (per G8), plus the reserved-binder fix (per G11) | 1 | not started | — |
+| 1 | [Freeze Stage 4A contracts](01-contracts.md) — specification/infrastructure prerequisite | M3 on `main`; this bootstrap | landed | PR #354, merge e7d2e08 |
+| 2 | [Contract-member forms reassigned from M3, and the binder defect](02-contract-members.md): an abstract contract member with its own generic parameters, labelled operands and written `types:` arguments on a contract member call, a dict variadic tail on a contract member, and such a member as a function value, in typed IR and the interpreter (per G8), plus the reserved-binder fix (per G11) | 1 | landed, conditional on its PR merging | Branch `claude/m4-step-02-contract-members`; merge commit to be recorded when the PR merges |
 | 3 | [The specified outcome of deep non-tail recursion](03-activations.md) in the reference interpreter, replacing the host-event rule: heap activations, a memory budget, and `@runtime.memory-exhausted` as the host event, with `expect.host_event` (per G1) | 2 | not started | — |
 | 4 | [Wasm backend skeleton and differential harness](04-skeleton.md): the emitter crate, the engine and native-code crate behind the runner (latest Wasmtime and a raised toolchain), the corpus contract of G4, the parity inventory and its test, deterministic emission, and a CI job — infrastructure step | 3 | not started | — |
 | 5a | [The value arena and its runtime](05a-arena.md): linear-memory arena, reference counting, the handle table, the exported accessors, memory exhaustion, scalars and literals, and the canonical result observation | 4 | not started | — |

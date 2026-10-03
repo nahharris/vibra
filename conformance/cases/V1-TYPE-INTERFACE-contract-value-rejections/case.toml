@@ -1,0 +1,65 @@
+id = "V1-TYPE-INTERFACE-contract-value-rejections"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "A contract member with its own generic parameter or with labelled parameters, named as a value, needs a written fn type: without one it is @type.ambiguous-inference, as is a written type that leaves a generic the signature never mentions open. A receiver that implements nothing is @type.unsatisfied-bound, a written type that is not the member's at that receiver, including its labelled slots, is @type.mismatch, and when two implementations have the written type the value is @type.ambiguous-implementation. The valid values around them still check."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-inference"
+level = "@error"
+source = "input.vib"
+span = [43, 56]
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-inference"
+level = "@error"
+source = "input.vib"
+span = [119, 131]
+
+[[expect.diagnostics]]
+code = "@type.unsatisfied-bound"
+level = "@error"
+source = "input.vib"
+span = [212, 225]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [289, 302]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [395, 407]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [484, 496]
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-inference"
+level = "@error"
+source = "input.vib"
+span = [546, 559]
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-implementation"
+level = "@error"
+source = "input.vib"
+span = [603, 613]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [658, 668]

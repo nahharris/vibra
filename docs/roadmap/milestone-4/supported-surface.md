@@ -83,16 +83,19 @@ Availability shrinks monotonically in M4: each step moves forms from
 
 The M4 [deferral inventory](README.md#m3-deferral-inventory) lists nine rows
 that earlier milestones left to M4. Each has one owner here, and the test
-requires all nine.
+requires all nine. Rows I3–I6 are implemented by Step 2 in the type checker,
+the typed IR, and the reference interpreter, conditional on its pull request
+merging, and report `@tool.unavailable` no longer. Their Wasm lowering stays
+Step 9's.
 
 | ID | Inherited row | Owner |
 | --- | --- | --- |
 | I1 | `Declaration::Deffect`; nonempty `Attribute::Effects`, including on a function type and an `iter` default callback | Step 14 |
 | I2 | `Attribute::External` with `@host` | Step 16 |
-| I3 | An abstract contract member with its own generic parameters | Step 2; Wasm in Step 9 |
-| I4 | Labelled operands and written `types:` arguments on a contract member call | Step 2; Wasm in Step 9 |
-| I5 | A dict variadic tail on a contract member | Step 2; Wasm in Step 9 |
-| I6 | A contract member with its own generics or labelled parameters as a function value | Step 2; Wasm in Step 9 |
+| I3 | An abstract contract member with its own generic parameters | Step 2; implemented in Step 2, Wasm in Step 9 |
+| I4 | Labelled operands and written `types:` arguments on a contract member call | Step 2; implemented in Step 2, Wasm in Step 9 |
+| I5 | A dict variadic tail on a contract member | Step 2; implemented in Step 2, Wasm in Step 9 |
+| I6 | A contract member with its own generics or labelled parameters as a function value | Step 2; implemented in Step 2, Wasm in Step 9 |
 | I7 | M3's G21 (G16 here): the command result for an entry that returns `err` | Step 19 |
 | I8 | Pre-M4 C16: effect rows of a `let` value, a `let-else` fallback, and a `return` operand | Step 14 |
 | I9 | The conformance chapter's effectful walk over `iter.next` | Step 16 |
