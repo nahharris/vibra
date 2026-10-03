@@ -468,7 +468,7 @@ fn execute_check<W: Write, E: Write>(
         },
         None => None,
     };
-    let verification = match verify_workspace_bootstrap(&snapshot) {
+    let verification = match verify_toolchain_bootstrap().map(Some) {
         Ok(verification) => verification,
         Err(message) => {
             return operational_check_envelope(invocation, target_path, message);
@@ -555,7 +555,7 @@ fn execute_run<E: Write>(
         return invalid_envelope(invocation, Some(target_path.to_path_buf()));
     }
     let target_root = canonical_target_root(&snapshot, target);
-    let verification = match verify_workspace_bootstrap(&snapshot) {
+    let verification = match verify_toolchain_bootstrap().map(Some) {
         Ok(verification) => verification,
         Err(message) => {
             return operational_run_envelope(invocation, &target_root, message, stderr);
@@ -677,17 +677,9 @@ fn execute_test<W: Write, E: Write>(
         Ok(snapshot) => snapshot,
         Err(error) => return workspace_load_error_envelope(invocation, error, stderr),
     };
-    let verification = match snapshot
-        .requires_test_bootstrap_verification(selector)
-        .map_err(|error| error.to_string())
-    {
-        Ok(true) => match verify_toolchain_bootstrap() {
-            Ok(verification) => Some(verification),
-            Err(message) => {
-                return operational_test_envelope(invocation, message, stderr);
-            }
-        },
-        Ok(false) => None,
+    // The standard library's vocabulary module is in every checked graph.
+    let verification = match verify_toolchain_bootstrap() {
+        Ok(verification) => Some(verification),
         Err(message) => return operational_test_envelope(invocation, message, stderr),
     };
     let result = vibra_workspace::semantic::run_tests_with_budget(
@@ -887,19 +879,6 @@ fn canonical_target_root(
 
 fn verify_toolchain_bootstrap() -> Result<vibra_types::Stdlib, String> {
     vibra_types::load_stdlib().map_err(|error| error.to_string())
-}
-
-fn verify_workspace_bootstrap(
-    snapshot: &vibra_workspace::WorkspaceSnapshot,
-) -> Result<Option<vibra_types::Stdlib>, String> {
-    let requires_verification = snapshot
-        .requires_bootstrap_verification()
-        .map_err(|error| error.to_string())?;
-    if requires_verification {
-        verify_toolchain_bootstrap().map(Some)
-    } else {
-        Ok(None)
-    }
 }
 
 fn render_workspace_diagnostics(

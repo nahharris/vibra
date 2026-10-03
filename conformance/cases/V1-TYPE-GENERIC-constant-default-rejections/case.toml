@@ -1,0 +1,45 @@
+id = "V1-TYPE-GENERIC-constant-default-rejections"
+rule = "V1-TYPE-GENERIC"
+profile = "static-v1"
+operation = "type-check"
+description = "A labelled default must be a constant expression. A module value whose initializer is a call, a function, and a call written inline are each @type.not-constant at the expression, relating the module value when the expression names one. A constant of another type is @type.mismatch, and an implementation member whose default is a different value than its contract's is @type.mismatch."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [300, 304]
+
+[[expect.diagnostics]]
+code = "@type.not-constant"
+level = "@error"
+source = "input.vib"
+span = [114, 122]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [23, 47]
+
+[[expect.diagnostics]]
+code = "@type.not-constant"
+level = "@error"
+source = "input.vib"
+span = [179, 182]
+
+[[expect.diagnostics]]
+code = "@type.not-constant"
+level = "@error"
+source = "input.vib"
+span = [242, 247]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [444, 522]

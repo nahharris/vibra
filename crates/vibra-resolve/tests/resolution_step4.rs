@@ -107,6 +107,12 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
                 "stdlib/src/std/char.vib",
                 include_bytes!("../../../stdlib/src/std/char.vib"),
             ),
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["bool"],
+                "stdlib/src/std/bool.vib",
+                include_bytes!("../../../stdlib/src/std/bool.vib"),
+            ),
         ],
     );
     let snapshot = Resolver::resolve(input);
@@ -189,6 +195,12 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
                 ["char"],
                 "stdlib/src/std/char.vib",
                 include_bytes!("../../../stdlib/src/std/char.vib"),
+            ),
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["bool"],
+                "stdlib/src/std/bool.vib",
+                include_bytes!("../../../stdlib/src/std/bool.vib"),
             ),
         ],
     );

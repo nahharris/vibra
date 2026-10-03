@@ -749,13 +749,14 @@ impl<'a> Machine<'a> {
                     .ok_or(Halt::Invalid)?,
             )
             .ok_or(Halt::Invalid)?;
-        let default = parameter.default().ok_or(Halt::Invalid)?.clone();
+        let default = parameter.default().ok_or(Halt::Invalid)?;
         let atom_default =
-            matches!(default, Value::Atom(_)) && argument.result_type() == Type::Atom;
-        if !atom_default && !default.ty().same_shape(&argument.result_type()) {
+            matches!(default, vibra_ir::Constant::Primitive(Value::Atom(_)))
+                && argument.result_type() == Type::Atom;
+        if !atom_default && !default.value_type().same_shape(&argument.result_type()) {
             return Err(Halt::Invalid);
         }
-        Ok(RuntimeValue::Primitive(default))
+        crate::constant_value(self.program, default).ok_or(Halt::Invalid)
     }
 
     /// Builds the value of `node` once its operands are evaluated.

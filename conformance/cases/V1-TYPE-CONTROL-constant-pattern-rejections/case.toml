@@ -1,0 +1,47 @@
+id = "V1-TYPE-CONTROL-constant-pattern-rejections"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "A pattern name that resolves to a module value that is not a compile-time constant (an initializer that is a call), or to a function, or to a parameter, is the shadowing binder it would otherwise be, @name.redeclaration relating the earlier introduction. A constant whose expanded pattern is a float literal is rejected as that literal pattern is, @type.mismatch."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "input.vib"
+span = [111, 119]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [23, 47]
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "input.vib"
+span = [187, 190]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [0, 22]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [240, 245]
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "input.vib"
+span = [345, 350]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [286, 291]

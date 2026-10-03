@@ -315,8 +315,16 @@ impl fmt::Display for StdlibError {
 impl std::error::Error for StdlibError {}
 
 /// Loads the standard library embedded into this toolchain.
+///
+/// The embedded bytes are fixed for the life of the process, so they are
+/// verified once, and every later call returns the verified result: no check
+/// is skipped, it is not repeated.
 pub fn load_stdlib() -> Result<Stdlib, StdlibError> {
-    load_stdlib_bytes(&StdlibInputs::embedded())
+    static VERIFIED: std::sync::OnceLock<Result<Stdlib, StdlibError>> =
+        std::sync::OnceLock::new();
+    VERIFIED
+        .get_or_init(|| load_stdlib_bytes(&StdlibInputs::embedded()))
+        .clone()
 }
 
 /// Loads one set of standard-library bytes without touching the filesystem.

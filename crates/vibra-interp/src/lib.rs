@@ -405,7 +405,7 @@ fn entry_frame(program: &CheckedProgram) -> Vec<Option<RuntimeValue>> {
         if let Some(default) = parameter.default()
             && let Some(slot) = slots.get_mut(signature.parameters().len() + offset)
         {
-            *slot = Some(RuntimeValue::Primitive(default.clone()));
+            *slot = constant_value(program, default);
         }
     }
     slots
@@ -801,6 +801,85 @@ fn items_of(value: &RuntimeValue) -> Option<RuntimeValue> {
     Some(RuntimeValue::Array {
         value_type: Type::Array(Box::new(element)),
         values: values.into(),
+    })
+}
+
+/// The runtime value of a labelled default, which is a constant of any type.
+/// It is built as the construction it came from builds it: a record in the
+/// order of its type, a `void` payload as no payload.
+pub(crate) fn constant_value(
+    program: &CheckedProgram,
+    constant: &vibra_ir::Constant,
+) -> Option<RuntimeValue> {
+    use vibra_ir::Constant;
+    Some(match constant {
+        Constant::Primitive(value) => RuntimeValue::Primitive(value.clone()),
+        Constant::Tuple {
+            value_type,
+            components,
+        } => RuntimeValue::Tuple {
+            value_type: value_type.clone(),
+            values: components
+                .iter()
+                .map(|component| constant_value(program, component))
+                .collect::<Option<Vec<_>>>()?
+                .into(),
+        },
+        Constant::Record { value_type, fields } => {
+            let mut named = fields
+                .iter()
+                .map(|(name, field)| {
+                    Some((name.clone(), constant_value(program, field)?))
+                })
+                .collect::<Option<Vec<_>>>()?;
+            let order: Vec<&str> = match value_type {
+                Type::Record(members) => {
+                    members.iter().map(|(name, _)| name.as_str()).collect()
+                }
+                Type::Declared(id) | Type::Applied(id, _) => program
+                    .types()
+                    .iter()
+                    .find(|definition| definition.id() == id)
+                    .and_then(|definition| definition.record_fields())?
+                    .iter()
+                    .map(|(name, _)| name.as_str())
+                    .collect(),
+                _ => return None,
+            };
+            named.sort_by_key(|(name, _)| {
+                order.iter().position(|member| member == name)
+            });
+            RuntimeValue::Record {
+                value_type: value_type.clone(),
+                fields: named.into(),
+            }
+        }
+        Constant::Variant {
+            value_type,
+            variant,
+            payload,
+        } => RuntimeValue::Enum {
+            value_type: value_type.clone(),
+            variant: variant.clone(),
+            payload: match payload {
+                Some(payload) => present_payload(constant_value(program, payload)?),
+                None => None,
+            },
+        },
+        Constant::Wrap { value_type, value } => RuntimeValue::Wrapper {
+            value_type: value_type.clone(),
+            value: constant_value(program, value)?.into(),
+        },
+        Constant::Member {
+            value_type,
+            index,
+            value,
+        } => RuntimeValue::Union {
+            value_type: value_type.clone(),
+            member: *index,
+            member_type: std::rc::Rc::new(value.value_type()),
+            value: constant_value(program, value)?.into(),
+        },
     })
 }
 

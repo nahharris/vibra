@@ -1,0 +1,18 @@
+id = "V1-PROJECT-workspace-check-vocabulary-declaration"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "Only the embedded standard library declares a name of the closed import-free vocabulary: a module value spelled true in a workspace is @name.reserved-value-spelling, as the single-source checker reports it."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.reserved-value-spelling"
+level = "@error"
+source = "src/app/main.vib"
+span = [0, 27]

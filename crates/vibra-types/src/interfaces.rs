@@ -165,8 +165,12 @@ pub(crate) fn lower_contract(
             );
             continue;
         }
-        let defaults =
-            labelled_defaults(source_id, method.attributes().items(), &signature);
+        let defaults = labelled_defaults(
+            types,
+            source_id,
+            method.attributes().items(),
+            &signature,
+        );
         members.push(ContractMember {
             name: method.name().value().to_owned(),
             span: method.span(),
@@ -681,10 +685,11 @@ pub(crate) fn contract_substitution(
 /// A default that does not check has no value; the function's own check
 /// reports it.
 fn labelled_defaults(
+    types: &TypeNames,
     source_id: &str,
     attributes: &[Attribute],
     signature: &FunctionSignature,
-) -> BTreeMap<String, (String, Option<vibra_ir::Value>)> {
+) -> BTreeMap<String, (String, Option<vibra_ir::Constant>)> {
     attributes
         .iter()
         .filter_map(|attribute| match attribute {
@@ -701,8 +706,8 @@ fn labelled_defaults(
                 .and_then(|labelled| {
                     crate::check_default(
                         source_id,
-                        parameter.span(),
-                        parameter.default(),
+                        types,
+                        parameter,
                         &labelled.value_type(),
                         &mut Vec::new(),
                     )
@@ -741,7 +746,7 @@ pub(crate) fn check_member_signature(
     if expected.same_shape(written) {
         // Two spellings of one value, such as `1` and `1i32` at `i32`, are
         // the same default.
-        let defaults = labelled_defaults(&plan.source_id, attributes, written);
+        let defaults = labelled_defaults(types, &plan.source_id, attributes, written);
         let Some((label, (default, _))) =
             contract.defaults.iter().find(|(label, (_, value))| {
                 defaults
@@ -1021,7 +1026,7 @@ fn check_member_operands(
         } else if let Some(default) = parameter.default() {
             // An implementation keeps its contract's defaults, so the
             // contract's value is the operand whichever one is selected.
-            arguments.push(Expr::literal(default.clone(), origin.clone()));
+            arguments.push(default.to_expr(&origin));
         } else {
             call_contract_error(
                 environment,

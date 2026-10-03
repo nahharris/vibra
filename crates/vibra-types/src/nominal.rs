@@ -148,7 +148,7 @@ pub(crate) struct ContractMember {
     /// The default of each labelled parameter, by name, as it is written and
     /// as the value it denotes at the parameter's type: a default is not part
     /// of the signature, and an implementation must keep its value.
-    pub(crate) defaults: BTreeMap<String, (String, Option<vibra_ir::Value>)>,
+    pub(crate) defaults: BTreeMap<String, (String, Option<vibra_ir::Constant>)>,
     /// The position of the fixed positional `self` parameter that selects the
     /// implementation, or `None` for a destination-dispatched member.
     pub(crate) receiver: Option<usize>,
@@ -214,6 +214,21 @@ pub(crate) struct TypeNames {
     /// site, so it is unique within a source; the lambda arm records it and
     /// every application reads it back.
     lambda_bounds: std::cell::RefCell<BTreeMap<(String, String), usize>>,
+    /// What each labelled default written as a name denotes, keyed by source
+    /// identity and the span of the default.
+    default_constants: BTreeMap<(String, usize, usize), DefaultConstant>,
+}
+
+/// What a labelled default written as a name denotes.
+#[derive(Clone, Debug)]
+pub(crate) enum DefaultConstant {
+    /// The constant the expression denotes.
+    Value(vibra_ir::Constant),
+    /// The expression is not a constant expression. When it is a name of a
+    /// module value, that value's source identity and span.
+    NotConstant(Option<(String, ByteSpan)>),
+    /// The expression did not check, and the diagnostics said why.
+    Failed,
 }
 
 /// A value path that names a type constructor or an enum variant.
@@ -226,6 +241,24 @@ pub(crate) enum ConstructorTarget {
 }
 
 impl TypeNames {
+    /// Records what the labelled defaults written as names denote.
+    pub(crate) fn add_default_constants(
+        &mut self,
+        constants: BTreeMap<(String, usize, usize), DefaultConstant>,
+    ) {
+        self.default_constants.extend(constants);
+    }
+
+    /// What the labelled default written as a name at `span` denotes.
+    pub(crate) fn default_constant(
+        &self,
+        source_id: &str,
+        span: ByteSpan,
+    ) -> Option<&DefaultConstant> {
+        self.default_constants
+            .get(&(source_id.to_owned(), span.start(), span.end()))
+    }
+
     /// Registers a declared type owned by `source_id`, returning its index.
     pub(crate) fn declare(
         &mut self,

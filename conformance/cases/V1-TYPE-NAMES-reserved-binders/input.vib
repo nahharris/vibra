@@ -26,6 +26,6 @@
   variadic: (any (array i32))
   (array.length any))
 
-(defn valid-site (result i32 option i32) i32
-  (let value result)
-  option)
+(defn valid-site (first i32 second i32) i32
+  (let value first)
+  second)
