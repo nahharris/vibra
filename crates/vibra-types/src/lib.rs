@@ -600,6 +600,21 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// A module-level value spelled as a vocabulary value is rejected: only
+    /// the embedded standard library declares one.
+    fn reserve_vocabulary_spelling(&mut self, name: &str, span: ByteSpan) {
+        if vibra_syntax::is_prelude_value_spelling(name) && !self.trusted_bootstrap {
+            self.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::NameReservedValueSpelling,
+                    span,
+                    "a module-level value uses a reserved value spelling",
+                )
+                .with_source_id(self.source_id),
+            );
+        }
+    }
+
     fn collect_headers(&mut self) {
         // Standard-library type modules first, so declared types may name
         // their types: `(import option @std.option)` sees the embedded module
@@ -776,6 +791,7 @@ impl<'a> Checker<'a> {
                         continue;
                     };
                     let name = definition.name().value().to_owned();
+                    self.reserve_vocabulary_spelling(&name, definition.span());
                     if let Some(earlier) = self.module_names.get(&name).copied() {
                         redeclaration(
                             self.diagnostics,
@@ -821,6 +837,7 @@ impl<'a> Checker<'a> {
                         continue;
                     };
                     let name = function.name().value().to_owned();
+                    self.reserve_vocabulary_spelling(&name, function.span());
                     if let Some(earlier) = self.module_names.get(&name).copied() {
                         redeclaration(
                             self.diagnostics,
@@ -1044,6 +1061,37 @@ impl<'a> Checker<'a> {
                 implements: None,
             });
         }
+        // The closed import-free vocabulary: the values `@std.bool` declares are
+        // visible to every module. A run that does not hold that module
+        // declares them from the embedded one, as it does the vocabulary's
+        // types, and a name the run declared itself is already reported.
+        for definition in standard::prelude_definitions() {
+            let name = definition.name().value();
+            if self.global_indices.contains_key(name) {
+                continue;
+            }
+            let Some(value_type) = self.types.lower_or_report(
+                STDLIB_BOOL_SOURCE_ID,
+                nominal::Scope::NONE,
+                definition.value_type(),
+                definition.span(),
+                self.diagnostics,
+            ) else {
+                continue;
+            };
+            let index = self.globals.len();
+            self.global_indices.insert(name.to_owned(), index);
+            self.globals.push(GlobalHeader {
+                name: name.to_owned(),
+                value_type,
+                expression: definition.expression().clone(),
+                span: definition.span(),
+                source_id: STDLIB_BOOL_SOURCE_ID.to_owned(),
+                module_index: 0,
+                function_index: None,
+                function_targets: FunctionTargetSet::default(),
+            });
+        }
         for _ in 0..=self.globals.len() {
             let global_function_targets = self
                 .globals
@@ -1078,19 +1126,26 @@ impl<'a> Checker<'a> {
     }
 
     fn check_globals(&mut self) {
+        // The facts of a value the embedded library declares are not the
+        // checked source's.
+        let mut declared_elsewhere = Vec::new();
         for index in 0..self.globals.len() {
             let Some(header) = self.globals.get(index).cloned() else {
                 continue;
             };
             let mut environment = CheckEnvironment::new(
-                self.source_id,
+                &header.source_id,
                 self.diagnostics,
                 &self.global_indices,
                 &self.globals,
                 &self.functions,
                 &self.function_indices,
                 &self.module_names,
-                &mut self.bindings,
+                if header.source_id == self.source_id {
+                    &mut self.bindings
+                } else {
+                    &mut declared_elsewhere
+                },
                 &self.types,
             );
             let Some(expression) = check_expression(
@@ -1100,7 +1155,7 @@ impl<'a> Checker<'a> {
             ) else {
                 continue;
             };
-            let origin = SourceOrigin::new(self.source_id, header.span);
+            let origin = SourceOrigin::new(header.source_id.as_str(), header.span);
             match CheckedGlobal::new(
                 header.name,
                 header.value_type.clone(),
@@ -1225,7 +1280,14 @@ impl<'a> Checker<'a> {
             {
                 match parameter.parsed_pattern().kind() {
                     PatternKind::Binding(name) if name.is_discard() => {}
-                    PatternKind::Binding(name) => {
+                    PatternKind::Binding(name)
+                        if pattern::pattern_value_global(
+                            &environment,
+                            name,
+                            parameter.parsed_pattern().span(),
+                        )
+                        .is_none() =>
+                    {
                         if !environment.add_binding(
                             name.value(),
                             parameter.value_type(),
@@ -3706,7 +3768,10 @@ fn check_let_pairs(
     let mut destructured = None;
     let slot = match pattern.kind() {
         PatternKind::Binding(name) if name.is_discard() => None,
-        PatternKind::Binding(name) => {
+        PatternKind::Binding(name)
+            if pattern::pattern_value_global(&nested, name, pattern.span())
+                .is_none() =>
+        {
             if !nested.add_binding_type_with_targets(
                 name.value(),
                 value.result_type(),
@@ -4814,7 +4879,14 @@ fn check_form(
                 parameter_types.push(value_type.clone());
                 match parameter.parsed_pattern().kind() {
                     PatternKind::Binding(name) if name.is_discard() => {}
-                    PatternKind::Binding(name) => {
+                    PatternKind::Binding(name)
+                        if pattern::pattern_value_global(
+                            &nested,
+                            name,
+                            parameter.parsed_pattern().span(),
+                        )
+                        .is_none() =>
+                    {
                         if !nested.add_binding_type(
                             name.value(),
                             value_type,
@@ -5846,7 +5918,16 @@ mod tests {
         let result =
             check_source("deferred.vib", "(def value i32 1)\n(defn answer () i32 2)");
         assert!(result.accepted(), "{:?}", result.diagnostics());
-        assert_eq!(result.program().expect("program").globals().len(), 1);
+        // The source's own value, then the closed vocabulary's two values that
+        // `@std.bool` declares and every module sees.
+        let names = result
+            .program()
+            .expect("program")
+            .globals()
+            .iter()
+            .map(|global| global.name().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["value", "true", "false"]);
     }
 
     #[test]
@@ -5881,7 +5962,7 @@ mod tests {
     fn rejects_shadowing_and_non_boolean_condition() {
         let result = check_source(
             "scope.vib",
-            "(def value i32 1)\n(defn answer (value i32) i32 (let value value) (if value 1i32 2i32))",
+            "(defn one () i32 1i32)\n(def value i32 (one))\n(defn answer (value i32) i32 (let value value) (if value 1i32 2i32))",
         );
         assert!(!result.accepted());
         assert!(result.program().is_none());

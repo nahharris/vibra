@@ -206,7 +206,20 @@ pub fn check_resolved(
     source_ids: &[String],
     verification: Option<&crate::Stdlib>,
 ) -> ResolvedCheckResult {
-    let selected = source_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let mut selected = source_ids.iter().cloned().collect::<BTreeSet<_>>();
+    // The module that declares the closed import-free vocabulary's values is
+    // in every checked graph, so every module sees them without an import.
+    selected.extend(
+        snapshot
+            .modules()
+            .iter()
+            .filter(|module| {
+                module.package().name() == "vibra-stdlib"
+                    && module.unit() == "std"
+                    && module.segments() == ["bool"]
+            })
+            .map(|module| module.source_id().to_owned()),
+    );
     let mut seen_source_ids = BTreeSet::new();
     let mut duplicate_source_ids = BTreeSet::new();
     for module in snapshot
@@ -937,7 +950,14 @@ pub fn check_resolved(
         for (parameter_index, parameter) in function.parameters().iter().enumerate() {
             match parameter.parsed_pattern().kind() {
                 vibra_syntax::PatternKind::Binding(name) if name.is_discard() => {}
-                vibra_syntax::PatternKind::Binding(name) => {
+                vibra_syntax::PatternKind::Binding(name)
+                    if crate::pattern::pattern_value_global(
+                        &environment,
+                        name,
+                        parameter.parsed_pattern().span(),
+                    )
+                    .is_none() =>
+                {
                     if !environment.add_binding(
                         name.value(),
                         parameter.value_type(),

@@ -126,13 +126,10 @@ fn workspace_verdict(id: &str, source: &str) -> Verdict {
     fs::write(root.join("src/app/main.vib"), source).expect("write module");
     let snapshot = vibra_workspace::WorkspaceSnapshot::load(&root)
         .expect("load workspace snapshot");
-    let verification = snapshot
-        .requires_bootstrap_verification()
-        .expect("bootstrap requirement")
-        .then(|| load_stdlib().expect("embedded bootstrap"));
+    let verification = load_stdlib().expect("embedded bootstrap");
     let checked = vibra_workspace::semantic::check_all_with_bootstrap(
         &snapshot,
-        verification.as_ref(),
+        Some(&verification),
     );
     let _ = fs::remove_dir_all(&root);
     let (_, codes) = verdict(checked.diagnostics());

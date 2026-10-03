@@ -1675,7 +1675,7 @@ impl AstParser {
         let claims_role = forms.get(3..).is_some_and(|attributes| {
             attributes.iter().any(|form| {
                 matches!(
-                    form.name(),
+                    form.source_name(),
                     Some(NameClassification::Name(name))
                         if name.kind() == NameKind::Label && name.value() == "role"
                 )
@@ -1751,7 +1751,7 @@ impl AstParser {
         let claims_role = forms.get(2..).is_some_and(|attributes| {
             attributes.iter().any(|form| {
                 matches!(
-                    form.name(),
+                    form.source_name(),
                     Some(NameClassification::Name(name))
                         if name.kind() == NameKind::Label && name.value() == "role"
                 )
@@ -2142,7 +2142,7 @@ impl AstParser {
 
     fn parse_expression_inner(&mut self, node: &CstNode) -> Option<Expression> {
         if node.kind() != SyntaxKind::List {
-            if let Some(classification) = node.literal() {
+            if let Some(classification) = node.source_literal() {
                 match classification {
                     LiteralClassification::Literal(literal) => {
                         return Some(Expression {
@@ -2154,7 +2154,7 @@ impl AstParser {
                     LiteralClassification::Opaque => {}
                 }
             }
-            return match node.name() {
+            return match node.source_name() {
                 Some(NameClassification::Name(name))
                     if matches!(name.kind(), NameKind::Symbol | NameKind::Atom) =>
                 {
@@ -2656,7 +2656,7 @@ impl AstParser {
 
     fn parse_pattern_inner(&mut self, node: &CstNode) -> Option<Pattern> {
         if node.kind() != SyntaxKind::List {
-            if let Some(classification) = node.literal() {
+            if let Some(classification) = node.source_literal() {
                 match classification {
                     LiteralClassification::Literal(literal) => {
                         return Some(Pattern {
@@ -2668,7 +2668,7 @@ impl AstParser {
                     LiteralClassification::Opaque => {}
                 }
             }
-            return match node.name() {
+            return match node.source_name() {
                 Some(NameClassification::Name(name)) => match name.kind() {
                     NameKind::Symbol if name.segments().len() == 1 => Some(Pattern {
                         kind: PatternKind::Binding(name.clone()),
@@ -2863,7 +2863,7 @@ impl AstParser {
     }
 
     fn label_name(&self, node: &CstNode) -> Option<Name> {
-        match node.name() {
+        match node.source_name() {
             Some(NameClassification::Name(name)) if name.kind() == NameKind::Label => {
                 Some(name.clone())
             }
@@ -2876,7 +2876,7 @@ impl AstParser {
             Some("intrinsic-type") => {
                 let forms = meaningful_children(node);
                 let atom = match forms.as_slice() {
-                    [_, value] => match value.name() {
+                    [_, value] => match value.source_name() {
                         Some(NameClassification::Name(name))
                             if name.kind() == NameKind::Atom =>
                         {
@@ -2939,17 +2939,8 @@ impl AstParser {
         let mut fields = Vec::with_capacity((forms.len() - 1) / 2);
         let mut seen = BTreeSet::new();
         for pair in forms[1..].chunks_exact(2) {
-            // An enum may name variants `true` and `false`, as `bool` does.
-            let name = match pair[0].literal() {
-                Some(LiteralClassification::Literal(Literal::Boolean(value)))
-                    if !record =>
-                {
-                    Name::symbol(if value.value() { "true" } else { "false" })
-                }
-                _ => {
-                    self.local_name(pair[0], "type body members must be local names")?
-                }
-            };
+            let name =
+                self.local_name(pair[0], "type body members must be local names")?;
             if !seen.insert(name.value().to_owned()) {
                 self.error(
                     DiagnosticCode::NameMemberCollision,
@@ -3073,9 +3064,9 @@ impl AstParser {
                 }
             }
         } else {
-            let Some(classification) = node.name() else {
+            let Some(classification) = node.source_name() else {
                 if matches!(
-                    node.literal(),
+                    node.source_literal(),
                     Some(LiteralClassification::Literal(Literal::Void(_)))
                 ) {
                     return Some(TypeExpr::Void);
@@ -3130,7 +3121,7 @@ impl AstParser {
         while index < forms.len() {
             let label = forms[index];
             let Some(label_name) = label
-                .name()
+                .source_name()
                 .and_then(|classification| classification.as_name().cloned())
             else {
                 self.invalid_form(label, "function type attributes must be labels");
@@ -3271,7 +3262,7 @@ impl AstParser {
         let mut index = 0;
         while index < forms.len() {
             let Some(label_name) = forms[index]
-                .name()
+                .source_name()
                 .and_then(|classification| classification.as_name().cloned())
             else {
                 break;
@@ -3387,6 +3378,7 @@ impl AstParser {
                 self.local_name(pair[0], "generic names must be unqualified symbols")?;
             if RESERVED_TYPE_HEADS.contains(&name.value())
                 || BUILTIN_TYPE_NAMES.contains(&name.value())
+                || is_prelude_value_spelling(name.value())
                 || matches!(name.value(), "any" | "self")
             {
                 self.error(
@@ -3462,7 +3454,7 @@ impl AstParser {
             }
             let value_type = self.parse_type_expr(triple[1])?;
             // An atom name is a literal of the source grammar.
-            let default = match triple[2].name() {
+            let default = match triple[2].source_name() {
                 Some(NameClassification::Name(atom))
                     if atom.kind() == NameKind::Atom =>
                 {
@@ -3512,7 +3504,7 @@ impl AstParser {
         };
         let mut references = Vec::with_capacity(forms.len());
         for form in forms {
-            match form.name() {
+            match form.source_name() {
                 Some(NameClassification::Name(name))
                     if name.kind() == NameKind::Symbol =>
                 {
@@ -3555,6 +3547,7 @@ impl AstParser {
             self.local_name(node, "declaration names must be unqualified symbols")?;
         // `any` is the predeclared empty interface; no declaration takes it.
         if name.value() == "any"
+            || is_prelude_value_spelling(name.value())
             || RESERVED_TYPE_HEADS.contains(&name.value())
             || (!allow_builtin
                 && (BUILTIN_TYPE_NAMES.contains(&name.value())
@@ -3582,7 +3575,7 @@ impl AstParser {
     }
 
     fn type_name(&mut self, node: &CstNode) -> Option<Name> {
-        match node.name() {
+        match node.source_name() {
             Some(NameClassification::Name(name)) if name.kind() == NameKind::Symbol => {
                 Some(name)
             }
@@ -3599,7 +3592,7 @@ impl AstParser {
     }
 
     fn local_name(&mut self, node: &CstNode, message: &'static str) -> Option<Name> {
-        match node.name() {
+        match node.source_name() {
             Some(NameClassification::Name(name))
                 if name.kind() == NameKind::Symbol && name.segments().len() == 1 =>
             {
@@ -3618,7 +3611,7 @@ impl AstParser {
     }
 
     fn binding_name(&mut self, node: &CstNode) -> Option<Name> {
-        match node.name() {
+        match node.source_name() {
             Some(NameClassification::Name(name))
                 if (name.kind() == NameKind::Symbol && name.segments().len() == 1)
                     || name.kind() == NameKind::Discard =>
@@ -3638,7 +3631,7 @@ impl AstParser {
     }
 
     fn atom_name(&mut self, node: &CstNode, message: &'static str) -> Option<Name> {
-        match node.name() {
+        match node.source_name() {
             Some(NameClassification::Name(name)) if name.kind() == NameKind::Atom => {
                 Some(name)
             }
@@ -3651,7 +3644,7 @@ impl AstParser {
     }
 
     fn literal(&mut self, node: &CstNode, message: &'static str) -> Option<Literal> {
-        match node.literal() {
+        match node.source_literal() {
             Some(LiteralClassification::Literal(literal)) => Some(literal),
             Some(LiteralClassification::Invalid(_)) | None => {
                 self.invalid_form(node, message);
@@ -3700,7 +3693,7 @@ fn head_text(node: &CstNode) -> Option<&str> {
 }
 
 fn is_label(node: &CstNode, expected: &str) -> bool {
-    node.name()
+    node.source_name()
         .and_then(|classification| classification.as_name().cloned())
         .is_some_and(|name| name.kind() == NameKind::Label && name.value() == expected)
 }
@@ -3764,15 +3757,36 @@ const PRIMITIVE_TYPE_NAMES: &[&str] = &[
     "u8", "u16", "u32", "u64", "f32", "f64",
 ];
 
-/// Whether a lexical binder may not be spelled `spelling`: a keyword, a
-/// boolean, `void`, `any`, `never`, or a primitive type name
+/// The values of the closed import-free vocabulary that `@std.bool` declares.
+/// Every module sees them without an import, and nothing can shadow them
+/// (`docs/spec/02-type-system.md`, "Language core and standard library").
+pub const PRELUDE_VALUES: &[&str] = &["true", "false"];
+
+/// Whether `spelling` is a value of the closed import-free vocabulary.
+#[must_use]
+pub fn is_prelude_value_spelling(spelling: &str) -> bool {
+    PRELUDE_VALUES.contains(&spelling)
+}
+
+/// Whether `spelling` is a name of the closed import-free vocabulary, a type
+/// or a value. Every such name is a reserved spelling.
+#[must_use]
+pub fn is_vocabulary_name(spelling: &str) -> bool {
+    is_prelude_value_spelling(spelling)
+        || ROLE_TYPE_NAMES.contains(&spelling)
+        || BUILTIN_TYPE_NAMES.contains(&spelling)
+}
+
+/// Whether a lexical binder may not be spelled `spelling`: a keyword, `any`,
+/// or a name of the closed import-free vocabulary
 /// (`docs/spec/01-source-language.md`, "Reader"). Such a binder is
 /// `@name.reserved-declaration` at its name and still binds.
 #[must_use]
 pub fn is_reserved_binder_spelling(spelling: &str) -> bool {
-    matches!(spelling, "true" | "false" | "any")
+    spelling == "any"
         || BINDER_KEYWORDS.contains(&spelling)
         || PRIMITIVE_TYPE_NAMES.contains(&spelling)
+        || is_vocabulary_name(spelling)
 }
 
 /// Whether a module-level value or import alias spelling names a builtin

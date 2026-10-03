@@ -32,7 +32,7 @@ impl ProfileHandler for StaticV1WorkspaceCheckHandler {
                 });
             }
         };
-        let verification = verified_bootstrap_if_used(&snapshot)?;
+        let verification = verified_bootstrap()?;
         let checked = match verification.as_ref() {
             Some(verification) => vibra_workspace::semantic::check_all_with_bootstrap(
                 &snapshot,
@@ -70,7 +70,7 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             }
         };
         let target = unique_binary_target(&snapshot)?;
-        let verification = verified_bootstrap_if_used(&snapshot)?;
+        let verification = verified_bootstrap()?;
         let result = vibra_workspace::semantic::run_target_with_budget(
             &snapshot,
             target,
@@ -145,7 +145,7 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
                 });
             }
         };
-        let verification = verified_bootstrap_if_used(&snapshot)?;
+        let verification = verified_bootstrap()?;
         let result = vibra_workspace::semantic::run_tests(
             &snapshot,
             None,
@@ -273,15 +273,9 @@ fn load_workspace(case: &Case) -> Result<WorkspaceLoad, HandlerError> {
     }
 }
 
-fn verified_bootstrap_if_used(
-    snapshot: &WorkspaceSnapshot,
-) -> Result<Option<Stdlib>, HandlerError> {
-    let requires_verification = snapshot
-        .requires_bootstrap_verification()
-        .map_err(|error| HandlerError::new(error.to_string()))?;
-    if !requires_verification {
-        return Ok(None);
-    }
+/// The standard library every workspace is checked against: its vocabulary
+/// module is in every checked graph.
+fn verified_bootstrap() -> Result<Option<Stdlib>, HandlerError> {
     load_stdlib().map(Some).map_err(|error| {
         HandlerError::new(format!("{BOOTSTRAP_PROVENANCE_FAILURE}: {error}"))
     })

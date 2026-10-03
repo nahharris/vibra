@@ -1,5 +1,9 @@
 (record
   format: @types.v1
+  globals: (array
+    (record name: @true type: @bool body: (record kind: @variant type: @bool variant: @true))
+    (record name: @false type: @bool body: (record kind: @variant type: @bool variant: @false))
+  )
   functions: (array
     (record name: @answer params: (array) result: (record type: @array arguments: (array @str)) body: (record kind: @sequence type: (record type: @array arguments: (array @str)) values: (array (record kind: @call contract: @mapper member: @map-to receiver: 0u64 types: (array @str) tail: true result: (record type: @array arguments: (array @str)) arguments: (array (record kind: @record type: @box fields: (record n: (record kind: @literal type: @i32 value: 1i32))) (record kind: @closure type: (record type: @fn parameters: (array @box) labelled: (record) result: @str) captures: (array) body: (record kind: @sequence type: @str values: (array (record kind: @literal type: @str value: "x")))))))))
     (record name: @box.impl-0.map-to params: (array @box (record type: @fn parameters: (array @box) labelled: (record) result: (record type: @param name: @u))) result: (record type: @array arguments: (array (record type: @param name: @u))) body: (record kind: @sequence type: (record type: @array arguments: (array (record type: @param name: @u))) values: (array (record kind: @call function: 2u64 result: (record type: @array arguments: (array (record type: @param name: @u))) arguments: (array (record kind: @array type: (record type: @array arguments: (array (record type: @param name: @u))) elements: (array (record kind: @call callee: (record kind: @variable slot: 1u64 type: (record type: @fn parameters: (array @box) labelled: (record) result: (record type: @param name: @u))) result: (record type: @param name: @u) arguments: (array (record kind: @variable slot: 0u64 type: @box))))))))))
