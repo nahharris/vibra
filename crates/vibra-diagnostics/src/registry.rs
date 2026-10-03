@@ -407,7 +407,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 90;
+    const REGISTERED_CODES: usize = 91;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {
