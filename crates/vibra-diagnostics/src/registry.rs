@@ -289,6 +289,8 @@ diagnostic_registry! {
         "an atom selector names no field of this record";
     TypeNumericOutOfRange => "@type.numeric-out-of-range", Type, Error, None,
         "a literal lies outside the range of its suffixed type";
+    TypeNotConstant => "@type.not-constant", Type, Error, None,
+        "a constant expression is required and the expression is not one";
     TypeInitializerCycle => "@type.initializer-cycle", Type, Error, None,
         "module value initializers form a cycle";
     TypeUndispatchableContractMember => "@type.undispatchable-contract-member", Type, Error, None,

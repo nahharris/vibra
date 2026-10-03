@@ -60,6 +60,7 @@ table governs.
 | `@type.invalid-tuple-index` | `@error` |
 | `@type.unknown-record-field` | `@error` |
 | `@type.numeric-out-of-range` | `@error` |
+| `@type.not-constant` | `@error` |
 | `@type.initializer-cycle` | `@error` |
 | `@type.undispatchable-contract-member` | `@error` |
 | `@type.union-too-few-members` | `@error` |
