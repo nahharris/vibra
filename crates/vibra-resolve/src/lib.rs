@@ -2473,7 +2473,7 @@ impl Resolution {
                     Diagnostic::new(
                         DiagnosticCode::NameReservedDeclaration,
                         span,
-                        "a lexical binder uses a keyword, boolean, `void`, `any`, `never`, or primitive type name",
+                        "a lexical binder uses a keyword, `any`, or a name of the closed import-free vocabulary",
                     )
                     .with_source_id(source_id),
                 );

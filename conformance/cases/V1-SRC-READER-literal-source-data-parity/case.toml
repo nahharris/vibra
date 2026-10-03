@@ -1,7 +1,7 @@
 id = "V1-SRC-READER-literal-source-data-parity"
 rule = "V1-SRC-READER"
 profile = "reader-v1"
-description = "The shared literal lexer gives source and VIBON loaders the same Step 5 surface."
+description = "The shared lexer gives source and VIBON loaders the same Step 5 surface. `true` and `false` are literals only in VIBON; in source they are names of the closed import-free vocabulary, and the formatter keeps their spelling."
 
 [inputs]
 source = "input.vib"
