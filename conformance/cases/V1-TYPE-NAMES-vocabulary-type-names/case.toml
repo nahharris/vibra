@@ -1,0 +1,29 @@
+id = "V1-TYPE-NAMES-vocabulary-type-names"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "A module value or function spelled as a type of the prelude that plays a role (option, result, iter) is @name.reserved-value-spelling at its name, as one spelled bool is. An import alias is not rejected: (import option @std.option) is the specification's spelling of a declaration import."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.reserved-value-spelling"
+level = "@error"
+source = "input.vib"
+span = [5, 11]
+
+[[expect.diagnostics]]
+code = "@name.reserved-value-spelling"
+level = "@error"
+source = "input.vib"
+span = [28, 34]
+
+[[expect.diagnostics]]
+code = "@name.reserved-value-spelling"
+level = "@error"
+source = "input.vib"
+span = [54, 58]

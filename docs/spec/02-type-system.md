@@ -657,13 +657,17 @@ A module-level `def`, `defn`, or import alias MUST NOT be spelled as a builtin
 type name: a primitive type (`never` included), `array`, `dict`, or `tuple`. Builtin types own
 static methods reached by dotted path, so such an alias or value would make
 `i32.add-checked` or `array.of` ambiguous. A top-level use of one of those
-spellings as a value or alias emits `@name.reserved-value-spelling`. A module
-value, function, or import alias spelled `true` or `false` emits the same
-code, because those are prelude values; only the embedded standard library
-declares one. Every prelude name is likewise a reserved spelling at a lexical
-binder: a binder spelled as a prelude type or value name emits
-`@name.reserved-declaration`, exactly as one spelled `bool` does, and a binder
-spelled `true` or `false` is only possible where the name is not a pattern.
+spellings as a value or alias emits `@name.reserved-value-spelling`. Every
+name of the prelude is a reserved spelling, and this is the one rule for all of
+them, types and values: a module value or function spelled as a prelude name
+emits `@name.reserved-value-spelling`, as does an import alias spelled as a
+builtin type name or as `true` or `false`, and a lexical binder spelled as a
+prelude name emits `@name.reserved-declaration`, exactly as one spelled `bool`
+does. Only the embedded standard library declares a prelude name. An import
+alias spelled as a role type (`(import option @std.option)`,
+`(import iter @std.iter.iter)`) is the one spelling not rejected, because it
+is how a declaration import names its declaration; a binder spelled `true` or
+`false` is only possible where the name is not a pattern.
 
 ## Functions as values
 
@@ -990,7 +994,7 @@ contract member supplies by naming `self` as the type of a **fixed positional**
 parameter. A variadic parameter does not qualify: an `(array self)` or
 `(dict k self)` tail may receive no operands at all, leaving a call with no
 receiver value to select from. A labelled parameter does not qualify either,
-since every labelled parameter requires a literal default.
+since every labelled parameter requires a constant default.
 
 A contract member with no fixed positional `self` parameter but with `self`
 somewhere in its result type has no receiver value and is instead
@@ -1344,6 +1348,12 @@ property of its initializer's checked form, decidable without evaluation, and
 initializer cycles are already rejected. The initializer is checked as the
 module that declares it checks it, and the pattern reads nothing when it
 matches beyond what the expanded literal or constructor pattern would.
+
+The same definition decides a **labelled default**, which is a constant
+expression written as a literal, an atom, or a name of a constant module value.
+Two defaults are the same when they denote the same value, so a contract that
+writes `true` and an implementation that writes a constant of that value keep
+one default.
 
 A constant pattern has no restriction of its own: whatever the expanded literal
 or constructor pattern admits or rejects at the expected type decides the

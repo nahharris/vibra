@@ -17,6 +17,7 @@ her goal is the fewest keywords possible.
   module `def` with a constant initializer is a value pattern. `true` and
   `false` are such names, with no special treatment. A non-constant `def`, a
   function, a parameter, or a local stays `@name.redeclaration`.
+- **Constant defaults.** A labelled default is a constant expression: a literal, an atom, or a name of a constant module value, decided by the same helper as constant patterns, before any signature is checked. Module values are therefore declared before signatures in both checking paths.
 - **Reserved names.** Every prelude name is a reserved spelling at a binder
   site (`@name.reserved-declaration`) and at a module value, function, or alias
   (`@name.reserved-value-spelling`, for `true` and `false`).
@@ -42,7 +43,8 @@ Cases: `V1-TYPE-CONTROL-constant-patterns`,
 Existing special rules in the areas touched: the exclusion of float and `void`
 literal patterns; the lowering of a `bool` variant to a literal pattern; the
 hard-coded `assert.*` declarations in the resolver; the `tuple` case of
-`is_reserved_value_spelling`; the `@literal` query kind for `(bool.true)`; a
-module value or alias named after a role type is still accepted; and a
-labelled parameter default must be a literal or an atom, so `true` cannot be
-one.
+`is_reserved_value_spelling`; the `@literal` query kind for `(bool.true)`; an
+import alias spelled as a role type is still accepted, because it is the
+specification's spelling of a declaration import; and a default that names a
+compound constant is rejected, because a default is stored as a primitive
+value.

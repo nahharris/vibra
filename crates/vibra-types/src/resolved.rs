@@ -365,51 +365,95 @@ pub fn check_resolved(
     let mut global_indices = BTreeMap::<DeclarationId, usize>::new();
     let mut function_indices = BTreeMap::<DeclarationId, usize>::new();
 
+    // Module values are declared before any signature is checked, because a
+    // labelled default may name one.
+    for (module_index, module) in modules.iter().enumerate() {
+        for declaration in module.ast.declarations() {
+            let Declaration::Def(definition) = declaration else {
+                continue;
+            };
+            let Some(id) = module
+                .declarations
+                .get(&(module.record.source_id().to_owned(), definition.span()))
+                .cloned()
+            else {
+                continue;
+            };
+            let Some(value_type) = types.lower_or_report(
+                module.record.source_id(),
+                crate::nominal::Scope::NONE,
+                definition.value_type(),
+                definition.span(),
+                &mut diagnostics,
+            ) else {
+                continue;
+            };
+            let index = globals.len();
+            global_indices.insert(id.clone(), index);
+            // A module value of function type may hold any function or
+            // closure, including a contract member named as a value, so
+            // its target is unknown and a call through it in tail
+            // position still reuses the activation.
+            let function_targets = if matches!(value_type, vibra_ir::Type::Function(_))
+            {
+                FunctionTargetSet::unknown()
+            } else {
+                FunctionTargetSet::default()
+            };
+            globals.push(GlobalHeader {
+                name: id.canonical(),
+                value_type,
+                expression: definition.expression().clone(),
+                span: definition.span(),
+                source_id: module.record.source_id().to_owned(),
+                module_index,
+                function_index: None,
+                function_targets,
+            });
+        }
+    }
+    {
+        let mut default_targets = BTreeMap::new();
+        for reference in snapshot
+            .references()
+            .iter()
+            .filter(|reference| selected.contains(reference.source_id()))
+        {
+            if let Some(index) = reference
+                .target()
+                .and_then(|target| global_indices.get(target))
+            {
+                default_targets.insert(
+                    (
+                        reference.source_id().to_owned(),
+                        reference.span().start(),
+                        reference.span().end(),
+                    ),
+                    ResolvedReferenceTarget::Global(*index),
+                );
+            }
+        }
+        let sources = modules
+            .iter()
+            .map(|module| (module.record.source_id(), module.ast))
+            .collect::<Vec<_>>();
+        let constants = crate::defaults::decide(
+            &types,
+            &sources,
+            &globals,
+            &crate::defaults::DefaultNames::Resolved(&default_targets),
+            &BTreeMap::new(),
+            &mut diagnostics,
+        );
+        types.add_default_constants(constants);
+    }
+
     for (module_index, module) in modules.iter().enumerate() {
         for (declaration_index, declaration) in
             module.ast.declarations().iter().enumerate()
         {
             match declaration {
-                Declaration::Def(definition) => {
-                    let Some(id) = module
-                        .declarations
-                        .get(&(module.record.source_id().to_owned(), definition.span()))
-                        .cloned()
-                    else {
-                        continue;
-                    };
-                    let Some(value_type) = types.lower_or_report(
-                        module.record.source_id(),
-                        crate::nominal::Scope::NONE,
-                        definition.value_type(),
-                        definition.span(),
-                        &mut diagnostics,
-                    ) else {
-                        continue;
-                    };
-                    let index = globals.len();
-                    global_indices.insert(id.clone(), index);
-                    // A module value of function type may hold any function or
-                    // closure, including a contract member named as a value, so
-                    // its target is unknown and a call through it in tail
-                    // position still reuses the activation.
-                    let function_targets =
-                        if matches!(value_type, vibra_ir::Type::Function(_)) {
-                            FunctionTargetSet::unknown()
-                        } else {
-                            FunctionTargetSet::default()
-                        };
-                    globals.push(GlobalHeader {
-                        name: id.canonical(),
-                        value_type,
-                        expression: definition.expression().clone(),
-                        span: definition.span(),
-                        source_id: module.record.source_id().to_owned(),
-                        module_index,
-                        function_index: None,
-                        function_targets,
-                    });
-                }
+                Declaration::Def(_) => {}
                 Declaration::Defn(function) => {
                     let Some(id) = module
                         .declarations

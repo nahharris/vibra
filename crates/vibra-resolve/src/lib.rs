@@ -22,8 +22,8 @@ use std::path::Path;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 use vibra_syntax::{
     Attribute, Declaration, DeftypeBody, Expression, ExpressionKind,
-    FunctionDeclaration, Literal, Name, Pattern, PatternKind, TypeExpr, TypeMember,
-    parse_source,
+    FunctionDeclaration, LabelledDefault, Literal, Name, Pattern, PatternKind,
+    TypeExpr, TypeMember, parse_source,
 };
 
 /// Package provenance carried by every declaration identity.
@@ -2400,6 +2400,7 @@ impl Resolution {
         }
         self.bind_function_attributes(
             module,
+            from,
             function.attributes().items(),
             scope,
             source_id,
@@ -2409,6 +2410,7 @@ impl Resolution {
     fn bind_function_attributes(
         &mut self,
         module: &ModuleKey,
+        from: &DeclarationId,
         attributes: &[Attribute],
         scope: &mut Vec<(String, ByteSpan)>,
         source_id: &str,
@@ -2417,6 +2419,17 @@ impl Resolution {
             match attribute {
                 Attribute::Labelled(parameters) => {
                     for parameter in parameters {
+                        // A default written as a name denotes a module value:
+                        // no parameter is in scope there.
+                        if let LabelledDefault::Constant(name) = parameter.default() {
+                            self.resolve_reference(
+                                module,
+                                from,
+                                name,
+                                parameter.default_span(),
+                                source_id,
+                            );
+                        }
                         self.bind_names(
                             module,
                             scope,
@@ -2632,6 +2645,7 @@ impl Resolution {
                 }
                 self.bind_function_attributes(
                     module,
+                    from,
                     lambda.attributes().items(),
                     &mut nested_scope,
                     source_id,

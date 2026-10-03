@@ -1085,14 +1085,17 @@ impl Parameter {
     }
 }
 
-/// The default of a labelled parameter: any literal of the source grammar,
-/// which counts an atom name among them.
+/// The default of a labelled parameter: a constant expression, written as any
+/// literal of the source grammar, which counts an atom name among them, or as
+/// the name of a constant module value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LabelledDefault {
-    /// A string, character, boolean, numeric, or `void` literal.
+    /// A string, character, numeric, or `void` literal.
     Literal(Literal),
     /// An atom literal, `@name`.
     Atom(Name),
+    /// A name that resolves to a constant module value, such as `true`.
+    Constant(Name),
 }
 
 impl LabelledDefault {
@@ -1101,7 +1104,7 @@ impl LabelledDefault {
     pub fn raw(&self) -> &str {
         match self {
             Self::Literal(literal) => literal.raw(),
-            Self::Atom(name) => name.raw(),
+            Self::Atom(name) | Self::Constant(name) => name.raw(),
         }
     }
 }
@@ -1112,11 +1115,18 @@ pub struct LabelledParameter {
     name: Name,
     value_type: TypeExpr,
     default: LabelledDefault,
+    default_span: ByteSpan,
     name_span: ByteSpan,
     span: ByteSpan,
 }
 
 impl LabelledParameter {
+    /// The source span of the default alone.
+    #[must_use]
+    pub const fn default_span(&self) -> ByteSpan {
+        self.default_span
+    }
+
     /// The unqualified parameter name.
     #[must_use]
     pub const fn name(&self) -> &Name {
@@ -1948,7 +1958,8 @@ impl AstParser {
         let name =
             self.local_name(forms[1], "defn names must be unqualified symbols")?;
         if matches!(owner, FunctionOwner::Module)
-            && is_reserved_value_spelling(name.value())
+            && (is_reserved_value_spelling(name.value())
+                || is_prelude_type_spelling(name.value()))
         {
             self.error(
                 DiagnosticCode::NameReservedValueSpelling,
@@ -3453,21 +3464,30 @@ impl AstParser {
                 return None;
             }
             let value_type = self.parse_type_expr(triple[1])?;
-            // An atom name is a literal of the source grammar.
+            // An atom name is a literal of the source grammar, and a symbol
+            // names a constant module value.
             let default = match triple[2].source_name() {
                 Some(NameClassification::Name(atom))
                     if atom.kind() == NameKind::Atom =>
                 {
                     LabelledDefault::Atom(atom)
                 }
-                _ => LabelledDefault::Literal(
-                    self.literal(triple[2], "labelled defaults must be literals")?,
-                ),
+                Some(NameClassification::Name(constant))
+                    if constant.kind() == NameKind::Symbol
+                        && !constant.is_discard() =>
+                {
+                    LabelledDefault::Constant(constant)
+                }
+                _ => LabelledDefault::Literal(self.literal(
+                    triple[2],
+                    "labelled defaults must be literals or names of constants",
+                )?),
             };
             parameters.push(LabelledParameter {
                 name,
                 value_type,
                 default,
+                default_span: triple[2].span(),
                 name_span: triple[0].span(),
                 span: ByteSpan::new(triple[0].span().start(), triple[2].span().end()),
             });
@@ -3564,7 +3584,9 @@ impl AstParser {
 
     fn value_declaration_name(&mut self, node: &CstNode) -> Option<Name> {
         let name = self.local_name(node, "value names must be unqualified symbols")?;
-        if is_reserved_value_spelling(name.value()) {
+        if is_reserved_value_spelling(name.value())
+            || is_prelude_type_spelling(name.value())
+        {
             self.error(
                 DiagnosticCode::NameReservedValueSpelling,
                 node.span(),
@@ -3794,4 +3816,13 @@ pub fn is_reserved_binder_spelling(spelling: &str) -> bool {
 #[must_use]
 pub fn is_reserved_value_spelling(spelling: &str) -> bool {
     spelling == "tuple" || BUILTIN_TYPE_NAMES.contains(&spelling)
+}
+
+/// Whether `spelling` names a type that plays a language role, a name of the
+/// prelude. A module-level value or function may not take it. An import alias
+/// may: `(import option @std.option)` and `(import iter @std.iter.iter)` are
+/// the specification's own spelling of a declaration import.
+#[must_use]
+pub fn is_prelude_type_spelling(spelling: &str) -> bool {
+    ROLE_TYPE_NAMES.contains(&spelling)
 }

@@ -38,8 +38,8 @@ pub use ast::{
     Parameter, Pattern, PatternArgument, PatternKind, RawNode, SourceAst, SourceDecode,
     TestDeclaration, TypeAttributes, TypeExpr, TypeField, TypeMember, TypeSlot,
     VariadicBinding, VariadicParameter, VariadicType, contains_declaration_head,
-    decode_source_root, is_prelude_value_spelling, is_reserved_binder_spelling,
-    is_reserved_value_spelling, is_vocabulary_name,
+    decode_source_root, is_prelude_type_spelling, is_prelude_value_spelling,
+    is_reserved_binder_spelling, is_reserved_value_spelling, is_vocabulary_name,
 };
 pub use data::{
     AtomRole, DataDecode, DataField, DataNode, DataValue, TypedDataSchema,

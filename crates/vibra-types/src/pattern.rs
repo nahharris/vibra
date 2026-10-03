@@ -258,26 +258,44 @@ pub(crate) fn check_pattern(
     }
 }
 
+/// The one place that excludes literal patterns: no literal of type `f32`,
+/// `f64`, or `void` is a pattern, whether it is written or is part of a
+/// constant's expansion. Reports and returns `true` when `actual` is one.
+fn reject_excluded_literal(
+    environment: &mut CheckEnvironment<'_>,
+    span: ByteSpan,
+    expected: &Type,
+    actual: Type,
+) -> bool {
+    if !matches!(actual, Type::F32 | Type::F64 | Type::Void) {
+        return false;
+    }
+    mismatch(
+        environment.diagnostics,
+        environment.source_id,
+        span,
+        expected.clone(),
+        actual,
+        "float and `void` literals are not patterns",
+    );
+    true
+}
+
 fn check_literal_pattern(
     environment: &mut CheckEnvironment<'_>,
     span: ByteSpan,
     literal: &Literal,
     expected: &Type,
 ) -> Option<Pattern> {
-    if matches!(literal, Literal::Float(_) | Literal::Void(_)) {
-        let actual = match literal {
-            Literal::Float(_) if *expected == Type::F32 => Type::F32,
-            Literal::Float(_) => Type::F64,
-            _ => Type::Void,
-        };
-        mismatch(
-            environment.diagnostics,
-            environment.source_id,
-            span,
-            expected.clone(),
-            actual,
-            "float and `void` literals are not patterns",
-        );
+    let literal_type = match literal {
+        Literal::Float(_) if *expected == Type::F32 => Some(Type::F32),
+        Literal::Float(_) => Some(Type::F64),
+        Literal::Void(_) => Some(Type::Void),
+        _ => None,
+    };
+    if let Some(actual) = literal_type
+        && reject_excluded_literal(environment, span, expected, actual)
+    {
         return None;
     }
     check_literal(
@@ -335,7 +353,7 @@ pub(crate) fn pattern_value_global(
 /// constant; or a read of another constant. A call never is one, so the
 /// property is syntactic. The initializer is checked as its own module checks
 /// it, so the pattern reads nothing at run time.
-fn constant_pattern(
+pub(crate) fn constant_pattern(
     environment: &CheckEnvironment<'_>,
     index: usize,
     depth: usize,
@@ -451,40 +469,38 @@ fn admit_constant_pattern(
         );
         return None;
     }
-    if let Some(rejected) = inadmissible_literal(&constant) {
-        mismatch(
-            environment.diagnostics,
-            environment.source_id,
-            span,
-            expected.clone(),
-            rejected,
-            "float and `void` literals are not patterns",
-        );
-        return None;
+    let mut literals = Vec::new();
+    literal_types(&constant, &mut literals);
+    for literal in literals {
+        if reject_excluded_literal(environment, span, expected, literal) {
+            return None;
+        }
     }
     Some(constant)
 }
 
-/// The type of the first float or `void` literal in `pattern`, which no
-/// literal pattern admits.
-fn inadmissible_literal(pattern: &Pattern) -> Option<Type> {
+/// The type of every literal in `pattern`, which the one literal-pattern rule
+/// then admits or rejects.
+fn literal_types(pattern: &Pattern, types: &mut Vec<Type>) {
     match pattern {
-        Pattern::Literal(value @ (Value::F32(_) | Value::F64(_) | Value::Void)) => {
-            Some(value.ty())
-        }
+        Pattern::Literal(value) => types.push(value.ty()),
         Pattern::Variant {
             payload: Some(payload),
             ..
-        } => inadmissible_literal(payload),
-        Pattern::Record(fields) => fields
-            .iter()
-            .find_map(|(_, field)| inadmissible_literal(field)),
-        Pattern::Tuple(items) | Pattern::Array(items) => {
-            items.iter().find_map(inadmissible_literal)
+        } => literal_types(payload, types),
+        Pattern::Record(fields) => {
+            for (_, field) in fields {
+                literal_types(field, types);
+            }
         }
-        Pattern::Wrap(inner) => inadmissible_literal(inner),
-        Pattern::Member { pattern, .. } => inadmissible_literal(pattern),
-        _ => None,
+        Pattern::Tuple(items) | Pattern::Array(items) => {
+            for item in items {
+                literal_types(item, types);
+            }
+        }
+        Pattern::Wrap(inner) => literal_types(inner, types),
+        Pattern::Member { pattern, .. } => literal_types(pattern, types),
+        _ => {}
     }
 }
 

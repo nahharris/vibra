@@ -32,6 +32,7 @@ use vibra_syntax::{
 };
 
 mod construct;
+mod defaults;
 mod infer;
 mod interfaces;
 mod nominal;
@@ -615,6 +616,117 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Declares the module's values, then the closed import-free vocabulary's,
+    /// and decides what every labelled default written as a name denotes, all
+    /// before any signature is checked.
+    fn declare_module_values(&mut self) {
+        // The bootstrap `text` alias is introduced first, so a module value of
+        // the same name is the later introduction.
+        for declaration in self.ast.declarations() {
+            if let Declaration::Import(import) = declaration
+                && self.text_import_authorized
+                && import.alias().kind() == NameKind::Symbol
+                && import.alias().value() == "text"
+                && import.target().kind() == NameKind::Atom
+                && import.target().value() == "std.text"
+            {
+                if let Some(earlier) = self.module_names.get("text").copied() {
+                    redeclaration(
+                        self.diagnostics,
+                        self.source_id,
+                        "text",
+                        "text",
+                        import.span(),
+                        earlier,
+                    );
+                } else {
+                    self.module_names.insert("text".to_owned(), import.span());
+                }
+                self.text_import_span = Some(import.span());
+            }
+        }
+        for declaration in self.ast.declarations() {
+            let Declaration::Def(definition) = declaration else {
+                continue;
+            };
+            let Some(value_type) = self.types.lower_or_report(
+                self.source_id,
+                nominal::Scope::NONE,
+                definition.value_type(),
+                definition.span(),
+                self.diagnostics,
+            ) else {
+                continue;
+            };
+            let name = definition.name().value().to_owned();
+            self.reserve_vocabulary_spelling(&name, definition.span());
+            if let Some(earlier) = self.module_names.get(&name).copied() {
+                redeclaration(
+                    self.diagnostics,
+                    self.source_id,
+                    definition.name().value(),
+                    definition.name().value(),
+                    definition.span(),
+                    earlier,
+                );
+                continue;
+            }
+            self.module_names.insert(name.clone(), definition.span());
+            let index = self.globals.len();
+            self.global_indices.insert(name.clone(), index);
+            self.globals.push(GlobalHeader {
+                name,
+                value_type,
+                expression: definition.expression().clone(),
+                span: definition.span(),
+                source_id: self.source_id.to_owned(),
+                module_index: 0,
+                function_index: None,
+                function_targets: FunctionTargetSet::default(),
+            });
+        }
+        // The closed import-free vocabulary: the values `@std.bool` declares are
+        // visible to every module. A run that does not hold that module
+        // declares them from the embedded one, as it does the vocabulary's
+        // types, and a name the run declared itself is already reported.
+        for definition in standard::prelude_definitions() {
+            let name = definition.name().value();
+            if self.global_indices.contains_key(name) {
+                continue;
+            }
+            let Some(value_type) = self.types.lower_or_report(
+                STDLIB_BOOL_SOURCE_ID,
+                nominal::Scope::NONE,
+                definition.value_type(),
+                definition.span(),
+                self.diagnostics,
+            ) else {
+                continue;
+            };
+            let index = self.globals.len();
+            self.global_indices.insert(name.to_owned(), index);
+            self.globals.push(GlobalHeader {
+                name: name.to_owned(),
+                value_type,
+                expression: definition.expression().clone(),
+                span: definition.span(),
+                source_id: STDLIB_BOOL_SOURCE_ID.to_owned(),
+                module_index: 0,
+                function_index: None,
+                function_targets: FunctionTargetSet::default(),
+            });
+        }
+        let constants = defaults::decide(
+            &self.types,
+            &[(self.source_id, self.ast)],
+            &self.globals,
+            &defaults::DefaultNames::Source(&self.global_indices),
+            &self.module_names,
+            self.diagnostics,
+        );
+        self.types.add_default_constants(constants);
+    }
+
     fn collect_headers(&mut self) {
         // Standard-library type modules first, so declared types may name
         // their types: `(import option @std.option)` sees the embedded module
@@ -699,6 +811,7 @@ impl<'a> Checker<'a> {
         standard::declare_standard_types(&mut self.types, &mut type_declarations);
         self.types
             .lower_bodies(&type_declarations, self.diagnostics);
+        self.declare_module_values();
         for (declaration_index, declaration) in
             self.ast.declarations().iter().enumerate()
         {
@@ -780,43 +893,9 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                Declaration::Def(definition) => {
-                    let Some(value_type) = self.types.lower_or_report(
-                        self.source_id,
-                        nominal::Scope::NONE,
-                        definition.value_type(),
-                        definition.span(),
-                        self.diagnostics,
-                    ) else {
-                        continue;
-                    };
-                    let name = definition.name().value().to_owned();
-                    self.reserve_vocabulary_spelling(&name, definition.span());
-                    if let Some(earlier) = self.module_names.get(&name).copied() {
-                        redeclaration(
-                            self.diagnostics,
-                            self.source_id,
-                            definition.name().value(),
-                            definition.name().value(),
-                            definition.span(),
-                            earlier,
-                        );
-                        continue;
-                    }
-                    self.module_names.insert(name.clone(), definition.span());
-                    let index = self.globals.len();
-                    self.global_indices.insert(name.clone(), index);
-                    self.globals.push(GlobalHeader {
-                        name,
-                        value_type,
-                        expression: definition.expression().clone(),
-                        span: definition.span(),
-                        source_id: self.source_id.to_owned(),
-                        module_index: 0,
-                        function_index: None,
-                        function_targets: FunctionTargetSet::default(),
-                    });
-                }
+                // Module values are declared before any signature is checked,
+                // because a labelled default may name one.
+                Declaration::Def(_) => {}
                 Declaration::Defn(function) => {
                     let Some((generics, bounds)) = nominal::function_generics(
                         &self.types,
@@ -886,19 +965,7 @@ impl<'a> Checker<'a> {
                         && import.target().kind() == NameKind::Atom
                         && import.target().value() == "std.text" =>
                 {
-                    if let Some(earlier) = self.module_names.get("text").copied() {
-                        redeclaration(
-                            self.diagnostics,
-                            self.source_id,
-                            "text",
-                            "text",
-                            import.span(),
-                            earlier,
-                        );
-                    } else {
-                        self.module_names.insert("text".to_owned(), import.span());
-                    }
-                    self.text_import_span = Some(import.span());
+                    // Introduced with the module values, before them.
                 }
                 // Declared with the types above; contracts lower below.
                 Declaration::Defint(_) => {}
@@ -1059,37 +1126,6 @@ impl<'a> Checker<'a> {
                 bounds: BTreeMap::new(),
                 impl_member: None,
                 implements: None,
-            });
-        }
-        // The closed import-free vocabulary: the values `@std.bool` declares are
-        // visible to every module. A run that does not hold that module
-        // declares them from the embedded one, as it does the vocabulary's
-        // types, and a name the run declared itself is already reported.
-        for definition in standard::prelude_definitions() {
-            let name = definition.name().value();
-            if self.global_indices.contains_key(name) {
-                continue;
-            }
-            let Some(value_type) = self.types.lower_or_report(
-                STDLIB_BOOL_SOURCE_ID,
-                nominal::Scope::NONE,
-                definition.value_type(),
-                definition.span(),
-                self.diagnostics,
-            ) else {
-                continue;
-            };
-            let index = self.globals.len();
-            self.global_indices.insert(name.to_owned(), index);
-            self.globals.push(GlobalHeader {
-                name: name.to_owned(),
-                value_type,
-                expression: definition.expression().clone(),
-                span: definition.span(),
-                source_id: STDLIB_BOOL_SOURCE_ID.to_owned(),
-                module_index: 0,
-                function_index: None,
-                function_targets: FunctionTargetSet::default(),
             });
         }
         for _ in 0..=self.globals.len() {
@@ -3260,8 +3296,8 @@ fn check_signature(
                     };
                     let Some(default) = check_default(
                         source_id,
-                        entry.span(),
-                        entry.default(),
+                        types,
+                        entry,
                         &value_type,
                         diagnostics,
                     ) else {
@@ -3532,8 +3568,8 @@ fn check_lambda_signature(
                     };
                     let Some(default) = check_default(
                         source_id,
-                        entry.span(),
-                        entry.default(),
+                        types,
+                        entry,
                         &value_type,
                         diagnostics,
                     ) else {
@@ -5423,12 +5459,46 @@ fn check_resolved_reference(
 /// default has the type `atom` or its own singleton.
 fn check_default(
     source_id: &str,
-    span: ByteSpan,
-    default: &vibra_syntax::LabelledDefault,
+    types: &nominal::TypeNames,
+    entry: &vibra_syntax::LabelledParameter,
     value_type: &Type,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> Option<Value> {
-    match default {
+    let span = entry.span();
+    match entry.default() {
+        vibra_syntax::LabelledDefault::Constant(_) => {
+            // The constant a name denotes was decided before any signature: a
+            // default is a constant expression, as a constant pattern is.
+            let Some(nominal::DefaultConstant::Value(value)) =
+                types.default_constant(source_id, entry.default_span())
+            else {
+                diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::SyntaxInvalidForm,
+                        entry.default_span(),
+                        "a labelled default must be a literal or a name of a constant of a primitive type",
+                    )
+                    .with_source_id(source_id),
+                );
+                return None;
+            };
+            let actual = match (value_type, value) {
+                (Type::AtomSingleton(_), Value::Atom(_)) => value_type.clone(),
+                _ => value.ty(),
+            };
+            if *value_type != actual {
+                mismatch(
+                    diagnostics,
+                    source_id,
+                    span,
+                    value_type.clone(),
+                    actual,
+                    "a constant default does not match the parameter type",
+                );
+                return None;
+            }
+            Some(value.clone())
+        }
         vibra_syntax::LabelledDefault::Literal(literal) => check_literal(
             source_id,
             span,

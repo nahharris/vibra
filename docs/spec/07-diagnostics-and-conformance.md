@@ -266,7 +266,7 @@ owning source identity:
 | element following an element of type `never` in one body sequence | `@type.unreachable-code` | the first following element | the diverging element |
 | binder repeating a name a `let` or `let-else` left visible | `@name.redeclaration` | the later binder | the earlier binder |
 | lexical binder of any form (parameter, `let`, `let-else`, `match` arm, or `lambda` parameter) spelled as a keyword, `any`, or a name of the prelude (a primitive type name, `option`, `result`, `iter`, `array`, `dict`, `true`, or `false`) | `@name.reserved-declaration` | the binder name | none; `true` and `false` reach this only as a plain name, because they are constant patterns at a pattern site |
-| module value, function, or import alias spelled `true` or `false` outside the embedded standard library | `@name.reserved-value-spelling` | the declaration | none |
+| module value or function spelled as a prelude name (`true`, `false`, `option`, `result`, `iter`, or a builtin type name), or an import alias spelled as a builtin type name, `true`, or `false`, outside the embedded standard library | `@name.reserved-value-spelling` | the declaration or the name | none |
 | pattern name that resolves to a module value that is not a compile-time constant | `@name.redeclaration` | the name | the module value, with a note that it is not a compile-time constant |
 | declaration named `never` | `@name.reserved-declaration` | the name | none |
 | generic argument that only diverging operands could fix | `@type.ambiguous-inference` | the application | one note per missing constraint |
