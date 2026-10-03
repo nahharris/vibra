@@ -930,10 +930,7 @@ impl<'source> Parser<'source> {
         let mut children = Vec::new();
         let mut open_lists = Vec::new();
 
-        loop {
-            let Some(token) = self.current().cloned() else {
-                break;
-            };
+        while let Some(token) = self.current().cloned() {
             match token.kind() {
                 TokenKind::Eof => {
                     let eof = token.span().start();
