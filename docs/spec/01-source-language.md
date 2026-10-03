@@ -3,7 +3,9 @@
 Status: normative target
 Implementation status: M1 supplies the lossless source structure and position
 metadata; M2 and M3 resolve and check every source form of the pure language,
-including binding sequences, `let-else`, `return`, and `never`. The effect
+including binding sequences, `let-else`, `return`, and `never`, and Milestone 4
+Step 2b removes the source boolean literal for the prelude values `true` and
+`false`. The effect
 forms, `deffect`, nonempty effect rows, and `@host` externals remain
 `@tool.unavailable` until Milestone 4 Stage 4B, as its surface inventory
 records.
@@ -20,12 +22,11 @@ module         = trivia, { top-form, trivia }, EOF ;
 form           = atom | list ;
 list           = "(", trivia,
                  [ form, { required-trivia, form } ], trivia, ")" ;
-atom           = string | character | boolean | integer | float | void
+atom           = string | character | integer | float | void
                | atom-name
                | label | symbol ;
-literal        = string | character | boolean | integer | float | void
+literal        = string | character | integer | float | void
                | atom-name ;
-boolean        = "true" | "false" ;
 void           = "void" ;
 character      = backslash,
                  ( character-name | unicode-character | character-scalar ) ;
@@ -68,9 +69,10 @@ remains lossless and carries an explicit error marker rather than being
 assigned an ambiguous typed node. When a double-quoted leaf reaches end of
 file without a closing quote, the reader emits
 `@syntax.unmatched-delimiter`, marks the subtree recovered, and preserves the
-original bytes. Terminated strings, characters, booleans, `void`, and decimal
-numeric spellings are classified by step 5; nonliteral leaves are classified
-as names by step 6. The formatter canonicalizes valid character spellings
+original bytes. Terminated strings, characters, `void`, and decimal
+numeric spellings are classified by step 5, and so are `true` and `false` in a
+`.vibon` document, where they are the boolean literals; nonliteral leaves,
+which in source include `true` and `false`, are classified as names by step 6. The formatter canonicalizes valid character spellings
 while preserving raw string, numeric, and name spellings.
 Opaque leaves and literal leaves retain interior CR and CRLF bytes. LF
 normalization applies to trivia, not to quoted leaf contents.
@@ -144,16 +146,29 @@ do not participate in redeclaration or shadowing checks. Despite being derived
 through the ordinary name grammar, a discard never denotes a value, label,
 atom, or reference and is rejected in every non-discard position.
 
-Keywords, booleans, `void`, primitive type names, `any`, `never`, and atom names
-cannot be rebound. Boolean, `void`, and reserved-form recognition takes
-precedence when their spelling also satisfies the symbol production. `any`,
-`never`, and the primitive type names are ordinary symbols to the reader and are
-reserved by resolution, not by lexing. The reserved expression heads include
+There is no boolean literal in source. `true` and `false` are ordinary symbols
+to the reader: they name the two public values `@std.bool` declares, and
+those values belong to the prelude, the closed set of declarations that every
+module sees without an import, which the type chapter defines. A `.vibon`
+document keeps `true` and `false` as its boolean literals, because data has no
+imports or definitions, and the canonical value encoding writes them so.
+
+Keywords, `void`, primitive type names, `any`, `never`, the names of the
+prelude, and atom names cannot be rebound. `void` and reserved-form recognition
+takes precedence when their spelling also satisfies the symbol production.
+`any`, `never`, the primitive type names, and the names of the prelude are
+ordinary symbols to the reader and are reserved by resolution, not by lexing.
+The reserved expression heads include
 `do`, `let`, `let-else`, `if`, `match`, `return`, `as`, `try`, `lambda`,
 `tupleof`, `recordof`, and `enumof`. A lexical binder, whatever form
-introduces it, that is spelled as a keyword, a boolean, `void`, `any`, `never`,
-or a primitive type name is `@name.reserved-declaration` at the binder name,
-and it still binds for the rest of its scope so that the error does not cascade.
+introduces it, that is spelled as a keyword, `any`, or a name of the prelude (a
+primitive type name, `option`, `result`, `iter`, `array`, `dict`, `true`, or
+`false`) is `@name.reserved-declaration` at the binder name, and it still binds
+for the rest of its scope so that the error does not cascade. At a pattern site
+(a positional parameter, `let`, `let-else`, or `match` arm pattern) resolution
+decides first whether a name denotes a module value; if it does, the name is a
+constant pattern, which the type chapter defines, and not a binder. `true` and
+`false` there are such names, so they are value patterns and never binders.
 
 An atom is an ordinary value by default. Only a source grammar or `.vibon`
 schema position that explicitly expects an entity reference resolves an atom

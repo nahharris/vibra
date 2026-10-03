@@ -354,9 +354,11 @@ declaration in every namespace the declaration occupies, so `ordering` then
 names the type and `ordering.less` its variant; members of a declared type are
 reached through the alias exactly as through the type name. Because the layout
 rule makes a module a leaf, a path never denotes both a module and a
-declaration. Apart from the closed core and role vocabulary the type chapter
-lists, the standard library is imported explicitly like any other package; it
-is not an ambient prelude.
+declaration. Apart from the prelude, the closed set of declarations the type
+chapter lists (the core and role types and the values `true` and `false`),
+the standard library is imported explicitly like any other package. The
+prelude is fixed by the specification, cannot be extended by a package, and the
+module that declares it, `@std.bool`, is in every checked graph.
 
 ## Dependencies and lock
 
@@ -441,7 +443,10 @@ directory, a vendor tree, a cache, or the network.
 
 The admitted modules enter the resolver as the `vibra-stdlib@0.2.0` package
 with unit `@std`, keep that provenance in every declaration identity, and are
-imported explicitly; there is no ambient prelude. A declaration outside this
+imported explicitly, except for the prelude of the type chapter, whose
+declarations every module sees and whose declaring module `@std.bool` is in
+every checked graph, so `check`, `run`, and `test` always load the embedded
+library. A declaration outside this
 embedded package that writes `external:` acquires no provider authority and is
 rejected before execution. The M3 module set is `@std.core`, `@std.option`,
 `@std.result`, `@std.bool`, `@std.char`, `@std.text`, `@std.bytes`,
@@ -572,7 +577,8 @@ A passing assertion returns `void`. A false assertion records one structured
 test failure with the assertion's canonical name, the canonical literal forms
 of its expected and actual values, and the assertion call's primary source
 span, then stops that test's body. For `assert.true` and `assert.false`,
-`expected` is the required boolean literal and `actual` is the operand. For an
+`expected` is the required boolean value, rendered `true` or `false`, and
+`actual` is the operand. For an
 `assert.equal-*` member, `expected` is the first operand and `actual` is the
 second operand; both are rendered with the canonical literal formatter. It
 does not throw, create a `result` value,
