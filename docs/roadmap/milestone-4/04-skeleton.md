@@ -69,7 +69,7 @@ needs to prove the pipeline end to end.
    `not lowered` count; keep the by-profile lines and the total unchanged
    otherwise.
 7. Parity inventory: a checked-in table `conformance/parity.tsv` with one row
-   per executable case (94 at the baseline), `matched` or `not-lowered` with an
+   per executable case (104 at `8a04c08`, the head Step 4 branched from), `matched` or `not-lowered` with an
    owning step, and the host test of
    [Differential execution](../../spec/07-diagnostics-and-conformance.md#differential-execution).
    Initialize every row to `not-lowered` with the step that owns the form the
@@ -120,6 +120,48 @@ Lowering of any source form (Steps 5a onward); a backend option on `run` or
 ## Completion evidence
 
 Both crates and the CI job exist; the inventory test and determinism test pass;
-the harness report shows the interpreter backend at 94 of 94 and the Wasm
+the harness report shows the interpreter backend at 104 of 104 and the Wasm
 backend with its matched and not-lowered counts; the dependency evidence is in
 the PR; the README row for Step 4 records the engine version.
+
+## As built
+
+The step landed as proposed, with these choices, which the later steps build on.
+
+- **Crates.** `vibra-wasm` (the emitter) depends on `vibra-ir` and `wasm-encoder`
+  only; its tests use `vibra-diagnostics`. `vibra-wasm-run` depends on `vibra-ir`,
+  `wasmparser`, and Wasmtime (Cranelift only, with no optional engine feature),
+  and no other crate depends on it but `vibra-conformance`. The export names, the
+  native import module, and the status, trap, and failure codes are written once
+  in `vibra_ir::boundary`, which both crates read, so neither depends on the other.
+- **The module.** One 32-bit memory of one page, exported as `vibra_v1_memory`;
+  no import and no custom section; and the exports `vibra_v1_entry`,
+  `vibra_v1_status`, `vibra_v1_trap_code`, `vibra_v1_origin`, `vibra_v1_result`, and
+  `vibra_v1_live_size`, which are the accessors of the boundary table that depend
+  on no value kind and no test. Step 5a adds the accessors of values and Step 11
+  `vibra_v1_test` and the failure accessors; the runner already reads every status.
+- **What lowers.** A function with no parameter, the result `void`, and a body
+  that is the `void` literal alone or in a sequence, which is what `(do)` checks
+  to. A body with no effect is lowered by lowering nothing. Every other node is
+  named: `NotLowered` lists each distinct form with the first origin that uses it,
+  and a registry row by its symbol and a call by its kind, because their lowering
+  differs by step. Type definitions lower nothing until a value is built of one.
+- **The harness.** The `interpreter-v1` handlers hand the checked program to
+  `vibra-conformance`'s Wasm module, which emits, validates, runs under the one
+  memory limit, and reports a `WasmObservation`; the runner compares it with the
+  case's one expectation and reports both backends. A rejected program reaches
+  neither backend and counts as matched ([ledger D6.5](decision-ledger.md)). A
+  `workspace-test` case that is accepted is not lowered, by `test-module`, until
+  Step 11. The `wasm` field of the case manifest, which the specification says no
+  case carries, is gone, and a manifest that writes it is a decoding error.
+- **The memory limit.** `INSTANCE_MEMORY_LIMIT_BYTES`, 64 MiB, replaces
+  `INSTANCE_MEMORY_BUDGET`. The interpreter's budget and the Wasm runner's limit
+  both derive from it, and a refused growth is the host event in both.
+- **The parity inventory.** `conformance/parity.tsv` has a row for each of the 104
+  executable cases: 8 matched, of which 7 are rejected programs and 1,
+  `V1-RUNTIME-void`, runs in the Wasm backend, and 96 not lowered, each with its
+  owning step. The owning step is the latest step among the forms the case needs.
+- **CI.** The `check` job builds and tests the workspace, Wasmtime included, on the
+  three platforms, and the `conformance` job runs the corpus in both backends on
+  the same three after `check`, sharing its build cache per platform, so the
+  engine compiles once per platform and not twice.

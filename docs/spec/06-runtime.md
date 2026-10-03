@@ -4,10 +4,10 @@ Status: normative target
 Implementation status: the reference interpreter executes successfully checked
 IR for the complete pure language through M3 and the pre-M4 binding revision,
 including tail calls and isolated tests, and holds activations on the heap, so
-depth is bounded only by the memory budget its runner supplies. The other
-Stage 4A contracts of this chapter (the value arena, reclamation, the module
-contract, traps, and native sources) and the WebAssembly backend, host
-operations, and effect checking remain specified and unimplemented.
+depth is bounded only by the memory budget its runner supplies. The WebAssembly
+backend lowers only the empty void entry since M4 Step 4, under the module
+contract and the feature baseline; the value arena, reclamation, traps, native
+sources, host operations, and effect checking remain specified and unimplemented.
 
 ## Semantic reference
 

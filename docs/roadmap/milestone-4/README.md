@@ -1,10 +1,11 @@
 # Milestone 4 step plan
 
 Status: in progress. Step 1, the Stage 4A contract freeze, has landed
-(PR #354), and so has Step 2, the contract-member forms and the binder fix
-(PR #355). Step 3, deep non-tail recursion in the reference interpreter, is
-proposed as `landed` by its pull request and is conditional on that PR
-merging; no other implementation step has landed
+(PR #354), and so have Step 2, the contract-member forms and the binder fix
+(PR #355), Step 2b, the boolean constants (PR #357), and Step 3, deep non-tail recursion in the reference interpreter
+(PR #356). Step 4, the WebAssembly backend skeleton and the differential
+harness, is proposed as `landed` by its pull request and is conditional on that
+PR merging; no other implementation step has landed
 Decision ledger: [decision-ledger.md](decision-ledger.md)
 Surface inventory: [supported-surface.md](supported-surface.md)
 Validation: [validation.md](validation.md)
@@ -31,6 +32,10 @@ Baseline at `2e7d257`: the independent corpus reports 82 reader, 224 static,
 94 interpreter, and 14 tooling cases — 414 passed, 0 failed, 0 unavailable.
 The 94 interpreter cases (67 `interpret`, 4 `workspace-run`, and 23
 `workspace-test`) are the executable corpus the Wasm backend must match.
+Steps 1 to 3 added cases, and at `8a04c08`, the head Step 4 branched from, the
+corpus reports 82 reader, 230 static, 104 interpreter, and 15 tooling cases —
+431 passed, 0 failed, 0 unavailable. The 104 interpreter cases are the
+executable cases the parity inventory covers.
 
 1. Read `AGENTS.md`, [the charter](../../spec/00-charter.md), the M4 section of
    [`v1.md`](../v1.md), this plan, and the chosen step's guide. Read the exact
@@ -62,12 +67,19 @@ evidences every exit-gate clause.
   Stage 4A step moves cases to matched and never back. A case still unmatched
   at Step 12 fails the stage sub-gate. A parity inventory test fails on a case
   with no disposition, as the surface inventory test does for AST variants.
-- **The emitter has no engine dependency.** A new backend crate lowers typed
-  IR to module bytes and depends only on `vibra-ir` and `vibra-diagnostics`,
-  as `vibra-interp` does. The Wasm engine is reached only by the code that
-  runs a module, and the emitter does not depend on the native-code crate
-  either, only on the import names in `vibra-ir`. The architecture boundary test
-  changes in the PR that adds each crate.
+- **The emitter has no engine dependency.** A new backend crate, `vibra-wasm`,
+  lowers typed IR to module bytes and depends only on `vibra-ir`,
+  `vibra-diagnostics`, and the encoder, as `vibra-interp` depends on the first
+  two (it uses `vibra-ir` and the encoder alone, and its tests use
+  `vibra-diagnostics`). The Wasm engine is reached only by the code that runs a
+  module, `vibra-wasm-run`, and the emitter does not depend on the native-code
+  crate either, only on the import names in `vibra-ir`. The boundary names and
+  codes of the module (export names, the native import module, the status, trap,
+  and failure codes) are written once in `vibra_ir::boundary`, which the
+  emitter and the runner both read. The architecture boundary test changes in
+  the PR that adds each crate; since Step 4 it also fails when any crate but
+  the runner depends on Wasmtime, or any crate but `vibra-conformance` on the
+  runner.
 - **Unoptimized only.** No wrapper erasure, compact enum layout, or in-place
   update enters M4. The runtime chapter's representation latitude is M7's,
   after parity, measured against the baseline Step 21 records.
@@ -137,7 +149,8 @@ evidences every exit-gate clause.
   resting on a compiler with a known gap in a feature M7 may adopt.
   `wasm-encoder` emits and `wasmparser` validates, with exactly the baseline
   feature set. Only the code that runs modules may depend on Wasmtime. Step 4
-  adds the dependencies; this step adds none. See
+  added the dependencies and the crates `vibra-wasm` (the emitter) and
+  `vibra-wasm-run` (the runner, the only crate that depends on Wasmtime); see
   [Dependency evidence](#dependency-evidence).
 - **Type arguments pass at run time (D9).** The Wasm backend passes type
   arguments as the interpreter does and emits one function per source function.
@@ -188,9 +201,9 @@ are closed in the owning specification by Step 1 (Stage 4A) or Step 13
 
 ## Dependency evidence
 
-Checked on 2026-10-02 against `rust-toolchain.toml`, which pins 1.94.1, with
-`cargo info` on the crates.io index. Step 4 re-checks these before it adds the
-dependencies.
+Checked on 2026-10-02 against `rust-toolchain.toml`, which then pinned 1.94.1,
+with `cargo info` on the crates.io index, and re-checked by Step 4 on 2026-10-03,
+when it added the dependencies; the latest versions were unchanged.
 
 | Crate | Version | Rust version | Licence |
 | --- | --- | --- | --- |
@@ -202,11 +215,54 @@ dependencies.
 **Decided (Hannah, 2026-10-02): use the latest versions.** Step 4 adopts the latest
 Wasmtime, `wasm-encoder`, and `wasmparser` at the time it runs, and raises
 `rust-toolchain.toml` to the Rust version they require, which is 1.96 for Wasmtime
-49.0.2, in the same PR. Step 1 changes neither `rust-toolchain.toml` nor
+49.0.2, in the same PR. Step 1 changed neither `rust-toolchain.toml` nor
 `Cargo.toml`. The workspace is `MIT OR Apache-2.0`, and each crate's licence permits
-linking it. Step 4 records the build time added and confirms that the three CI
-platforms (Ubuntu, Windows, and macOS) build the engine with Cranelift and default
-features off.
+linking it.
+
+### Step 4 record
+
+- **Versions and features.** The workspace declares `wasmtime` 49.0.2 with
+  `default-features = false` and the features `std`, `runtime`, and `cranelift`;
+  `wasm-encoder` 0.261.0 with `default-features = false` and `std`; and
+  `wasmparser` 0.261.0 with `default-features = false` and `std`, `validate`,
+  `features`, and `simd` (SIMD stays compiled in so that validation rejects it by
+  its feature flag, which the baseline test then proves). With no optional engine
+  feature, Wasmtime has no threads, garbage-collection, exception,
+  function-reference, or reference-type proposal at all. The toolchain pin is
+  1.96.1, the latest 1.96 patch release, and the workspace `rust-version` is 1.96.
+- **Who depends on them.** `vibra-wasm-run` depends on `wasmtime` and `wasmparser`;
+  `vibra-wasm` on `wasm-encoder`; and `vibra-wasm-run` has `wasm-encoder` as a
+  development dependency for its hand-built test modules. Nothing else does.
+- **Lockfile.** `Cargo.lock` gains 74 packages: the two new workspace crates and
+  72 third-party packages, among them Wasmtime and its `wasmtime-internal-*` crates
+  (49.0.2), the Cranelift crates (0.136.2), `regalloc2`, `gimli`, `object`, and
+  `target-lexicon`. Wasmtime 49.0.2 itself depends on `wasm-encoder`, `wasmparser`,
+  and `wasmprinter` 0.258.3, so the lock holds that version beside the 0.261.0 the
+  workspace names; the choice of the latest 0.261.0 for the workspace's own use is
+  Hannah's decision above, and it costs one extra compile of each of the two crates.
+- **Licences.** Wasmtime, the Cranelift crates, and `target-lexicon` are
+  Apache-2.0 WITH LLVM-exception; `wasm-encoder`, `wasmparser`, and `wasmprinter`
+  are that licence OR Apache-2.0 OR MIT; the rest of the new packages are MIT OR
+  Apache-2.0 or dual or permissive (`libm` and `generic-array` MIT, `foldhash`
+  Zlib, `memchr`, `termcolor`, and `winapi-util` Unlicense OR MIT, `fnv`
+  Apache-2.0 / MIT). None is copyleft, and each permits linking into a
+  `MIT OR Apache-2.0` workspace. `cargo tree -p vibra-wasm-run --format "{p} {l}"`
+  lists them.
+- **Added build time.** On the maintainer's Windows machine, a clean
+  `cargo test --locked --offline --workspace --all-targets --all-features --no-run`
+  into a fresh target directory took 38 s at `8a04c08` on Rust 1.94.1 and 94 s at
+  Step 4 on Rust 1.96.1, so the engine and the toolchain together add about 56 s
+  to a clean build. The incremental cost is the crates that depend on the runner:
+  `vibra-conformance` links Wasmtime, so a change to it relinks the engine.
+- **Offline.** After one `cargo fetch --locked`, which needs the network (it exited
+  0), and one `rustup toolchain install 1.96`, every command of the
+  [validation list](validation.md#before-merging-each-step) ran with `--locked
+  --offline` and passed, with no download.
+- **Platforms.** The CI `check` job compiles and tests the workspace, the engine
+  included, on Ubuntu, Windows, and macOS, and the `conformance` job runs the
+  corpus in both backends on the same three. The Windows build is proven locally; the
+  other two are proven by that CI run, and a failure of Wasmtime to build on one of
+  them stops the step for a report and does not swap the engine.
 
 ## Contract gaps found while planning
 
@@ -250,9 +306,9 @@ tail-recursive walk that grows neither stack nor arena.
 | --- | --- | --- | --- | --- |
 | 1 | [Freeze Stage 4A contracts](01-contracts.md) — specification/infrastructure prerequisite | M3 on `main`; this bootstrap | landed | PR #354, merge e7d2e08 |
 | 2 | [Contract-member forms reassigned from M3, and the binder defect](02-contract-members.md): an abstract contract member with its own generic parameters, labelled operands and written `types:` arguments on a contract member call, a dict variadic tail on a contract member, and such a member as a function value, in typed IR and the interpreter (per G8), plus the reserved-binder fix (per G11) | 1 | landed | PR #355, merge 3289ee75c68f4d68419597e0e7dfecd28c64c742 |
-| 2b | [Boolean constants and constant patterns](02b-boolean-constants.md): `true` and `false` become `@std.bool` values of the prelude with no source boolean literal, a pattern name that resolves to a constant module `def` is a value pattern, and every prelude name is reserved at a binder (per ledger D14.1 and D16) | 2 | landed, conditional on its PR merging | Branch `claude/m4-step-02b-boolean-constants`; merge commit to be recorded when the PR merges |
+| 2b | [Boolean constants and constant patterns](02b-boolean-constants.md): `true` and `false` become `@std.bool` values of the prelude with no source boolean literal, a pattern name that resolves to a constant module `def` is a value pattern, and every prelude name is reserved at a binder (per ledger D14.1 and D16) | 2 | landed | PR #357, merge 388dfe1 |
 | 3 | [The specified outcome of deep non-tail recursion](03-activations.md) in the reference interpreter, replacing the host-event rule: heap activations, a memory budget, and `@runtime.memory-exhausted` as the host event, with `expect.host_event` (per G1) | 2 | landed | PR #356, merge 8a04c08 |
-| 4 | [Wasm backend skeleton and differential harness](04-skeleton.md): the emitter crate, the engine and native-code crate behind the runner (latest Wasmtime and a raised toolchain), the corpus contract of G4, the parity inventory and its test, deterministic emission, and a CI job — infrastructure step | 3 | not started | — |
+| 4 | [Wasm backend skeleton and differential harness](04-skeleton.md): the emitter crate `vibra-wasm`, the runner crate `vibra-wasm-run` with Wasmtime 49.0.2 (the latest; Cranelift only) behind it, `wasm-encoder` and `wasmparser` 0.261.0, the toolchain raised to Rust 1.96.1, the corpus contract of G4, the parity inventory and its test, deterministic emission, and a CI job — infrastructure step | 3 | landed, conditional on its PR merging | Branch `claude/m4-step-04-wasm-skeleton`; PR and merge commit to be recorded when the PR merges |
 | 5a | [The value arena and its runtime](05a-arena.md): linear-memory arena, reference counting, the handle table, the exported accessors, memory exhaustion, scalars and literals, and the canonical result observation | 4 | not started | — |
 | 5b | [Data and core lowering](05b-core-lowering.md): declared and anonymous records, enums, tuples, wrappers, and unions with discriminants in written order, projection, module values, `let`, body sequences, `if`, `return`, and direct calls | 5a | not started | — |
 | 6 | [Calls](06-calls.md): generic instantiation, function values, closures, indirect calls, a tail call to every kind of callee, the deep non-tail recursion outcome, and a bounded live arena across a long allocating tail loop | 5b | not started | — |

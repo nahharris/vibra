@@ -283,6 +283,40 @@ fn the_limit_exactly_at_the_modules_need_runs_and_one_page_under_does_not() {
 }
 
 #[test]
+fn nan_canonicalization_is_on_in_the_engine() {
+    // A NaN with a payload, loaded from memory so that nothing folds it away,
+    // goes through an arithmetic instruction. The engine returns the canonical
+    // quiet NaN where it would otherwise propagate the payload.
+    let memarg = wasm_encoder::MemArg {
+        offset: 0,
+        align: 2,
+        memory_index: 0,
+    };
+    let entry = vec![
+        Instruction::I32Const(0),
+        Instruction::I32Const(0x7fc0_0001),
+        Instruction::I32Store(memarg),
+        Instruction::I32Const(0),
+        Instruction::F32Load(memarg),
+        Instruction::F32Const(0.0_f32.into()),
+        Instruction::F32Add,
+        Instruction::I32ReinterpretF32,
+        Instruction::I64ExtendI32U,
+        Instruction::GlobalSet(GLOBAL_RESULT),
+    ];
+    assert_eq!(
+        run(&Spec {
+            entry,
+            ..Spec::default()
+        }),
+        Outcome::Completed {
+            result: 0x7fc0_0000,
+            live_size: 0
+        }
+    );
+}
+
+#[test]
 fn a_native_import_nobody_supplies_is_refused_by_name() {
     let spec = Spec {
         imports: vec![("vibra_native_v1", "text_length")],
