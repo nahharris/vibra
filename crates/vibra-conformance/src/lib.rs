@@ -56,6 +56,14 @@ pub use runner::{
     QueryObservation, RunReport,
 };
 pub use types::{InterpreterV1Handler, StaticV1TypeHandler};
+
+/// The one finite memory budget the runner applies to every instance the
+/// interpreter handlers execute (`docs/spec/07-diagnostics-and-conformance.md`,
+/// "Conformance corpus"). The hundred-thousand-deep case needs about 38 MiB in
+/// the interpreter's accounting, so this leaves it a margin, and it is small
+/// enough that recursion with no base case reaches it in seconds.
+pub const INSTANCE_MEMORY_BUDGET: vibra_interp::MemoryBudget =
+    vibra_interp::MemoryBudget::new(64 * 1024 * 1024);
 pub use workspace_index::ToolingV1IndexHandler;
 pub use workspace_query::ToolingV1QueryHandler;
 pub use workspace_semantic::{

@@ -53,6 +53,9 @@ pub struct CaseObservation {
     pub queries: Vec<QueryObservation>,
     /// Reference-interpreter observation.
     pub interpreter: Option<ExecutionObservation>,
+    /// The host event that ended execution, instead of a result: the atom of
+    /// the unlocated diagnostic, such as `@runtime.memory-exhausted`.
+    pub host_event: Option<String>,
     /// Wasm observation.
     pub wasm: Option<ExecutionObservation>,
     /// Deterministic artifact hashes.
@@ -648,6 +651,12 @@ impl CaseExpectations {
                     expected.snapshot
                 ));
             }
+        }
+        if self.host_event != observation.host_event {
+            return Err(format!(
+                "host event mismatch: expected {:?}, got {:?}",
+                self.host_event, observation.host_event
+            ));
         }
         compare_execution(
             case,
