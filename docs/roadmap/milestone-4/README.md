@@ -12,7 +12,7 @@ Integration branch: `m4`
 
 M4 gives the typed IR its second consumer and the language its first contact
 with a host. The roadmap delivers it in two ordered stages on `m4`: the
-WebAssembly spine for the complete pure language, with no host import, and
+WebAssembly spine for the complete pure language, with no `@host` import, and
 then static effects and host operations, each landing in both backends in the
 same change. The reference interpreter stays the oracle throughout.
 
@@ -63,8 +63,9 @@ evidences every exit-gate clause.
 - **The emitter has no engine dependency.** A new backend crate lowers typed
   IR to module bytes and depends only on `vibra-ir` and `vibra-diagnostics`,
   as `vibra-interp` does. The Wasm engine is reached only by the code that
-  runs a module. The architecture boundary test changes in the PR that adds
-  each crate.
+  runs a module, and the emitter does not depend on the native-code crate
+  either, only on the import names in `vibra-ir`. The architecture boundary test
+  changes in the PR that adds each crate.
 - **Unoptimized only.** No wrapper erasure, compact enum layout, or in-place
   update enters M4. The runtime chapter's representation latitude is M7's,
   after parity, measured against the baseline Step 21 records.
@@ -107,8 +108,10 @@ evidences every exit-gate clause.
   an ID is never reused within an instance, and a handle table makes each live
   ID hold a reference to its value. In Stage 4B the host reads and builds
   compound values through functions the module exports, taking and returning IDs
-  and scalars, so no guest pointer crosses the boundary and linear memory is
-  never exported. A Stage 4A module has no import. An ID that is not an address
+  and scalars, so no guest pointer crosses the `@host` boundary. Linear memory is
+  exported once under the reserved name `vibra_v1_memory` for toolchain-owned
+  native code only. A Stage 4A module imports only the pure native import module
+  and has no `@host` import. An ID that is not an address
   lets a later ABI move values between instances and threads, as the beyond-v1
   obligations require, and lets the host read nothing it was not given.
 - **Reclamation is precise reference counting (D3).** The specification states
@@ -144,10 +147,25 @@ evidences every exit-gate clause.
   holding the member, the interface arguments, and its own type arguments, which
   selects its implementation from the operand at each application. The Step 2
   guide fixes the names.
-- **A native is its body (D10).** The Wasm backend lowers the Vibra body of every
-  `native:` function and has no native of its own. The interpreter's Rust natives
-  are accelerators held to the bodies by the harness. Four primitive rows and 20
-  tier moves follow; see the
+- **Natives are written once, in Rust, and called by both backends (D10,
+  "Bun style").** The Vibra runtime embeds Wasmtime, and where performance
+  matters the toolchain runs native Rust and escapes from Wasmtime into the host
+  process. This is not Rust compiled to Wasm. Each native implementation and each
+  looping primitive row (integer and float `to-str` and `parse`) is toolchain-owned
+  Rust in exactly one crate, proposed `vibra-native`. It is written once against a
+  value-access interface (a trait over reading and building arena values) that both
+  backends implement: the interpreter over its values, and the Wasm runner over the
+  instance's linear memory. The interpreter calls the functions directly, and a
+  module reaches them through the pure, versioned import module `vibra_native_v1`.
+  The closed list of import names and signatures is a table in `vibra-ir`, beside
+  the compiler registry. The emitter crate depends on that table's names and never
+  on `vibra-native`; the runner crate, which already depends on Wasmtime, depends on
+  `vibra-native` and supplies the imports. The Vibra body stays the meaning, and
+  the harness holds native code to it. Natives read the instance's memory directly
+  through the toolchain-reserved export `vibra_v1_memory`; no other host reads it,
+  and the `@host` ABI stays scalar-only over IDs. A module that must run outside the
+  Vibra runtime would instead use a self-contained form that runs the bodies; M7
+  decides the shipped form, and M4 emits the native-import form only. See the
   [D10 options](decision-ledger.md#d10-the-single-source-for-natives-and-primitives).
 - **The NaN defence is on (D11).** The engine runs with NaN canonicalization
   enabled because it is unobservable, while the specification canonicalizes at the
@@ -170,15 +188,14 @@ dependencies.
 | `wasmtime` | 47.0.4 | 1.94.0 | Apache-2.0 WITH LLVM-exception |
 | `wasm-encoder`, `wasmparser` | 0.261.0 | 1.88.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
 
-Only Wasmtime 47 builds on the pinned toolchain. Choosing a newer Wasmtime
-therefore means raising the toolchain, which the workspace manifest says is a
-deliberate change, and staying on 47 means taking its security-patch window as it
-is. This is an open question for the maintainer, and this step does not decide
-it: the recommendation is to start on 47.0.x with `--locked`, and to raise the
-toolchain and the engine together before Milestone 7. The workspace is
-`MIT OR Apache-2.0`, and each candidate crate's licence permits linking it. Step 4
-records the build time added and confirms that the three CI platforms (Ubuntu,
-Windows, and macOS) build the engine with Cranelift and default features off.
+**Decided (Hannah, 2026-10-02): use the latest versions.** Step 4 adopts the latest
+Wasmtime, `wasm-encoder`, and `wasmparser` at the time it runs, and raises
+`rust-toolchain.toml` to the Rust version they require, which is 1.96 for Wasmtime
+49.0.2, in the same PR. Step 1 changes neither `rust-toolchain.toml` nor
+`Cargo.toml`. The workspace is `MIT OR Apache-2.0`, and each crate's licence permits
+linking it. Step 4 records the build time added and confirms that the three CI
+platforms (Ubuntu, Windows, and macOS) build the engine with Cranelift and default
+features off.
 
 ## Contract gaps found while planning
 
@@ -214,7 +231,7 @@ the Stage 4A items; Step 13 closes the Stage 4B items.
 
 ## Steps
 
-Stage 4A — the WebAssembly spine, with no host import. Stage demo: the M3 demo
+Stage 4A — the WebAssembly spine, with no `@host` import (only pure native imports). Stage demo: the M3 demo
 library's tests produce identical results in both backends, including a deep
 tail-recursive walk that grows neither stack nor arena.
 
@@ -223,16 +240,16 @@ tail-recursive walk that grows neither stack nor arena.
 | 1 | [Freeze Stage 4A contracts](01-contracts.md) — specification/infrastructure prerequisite | M3 on `main`; this bootstrap | landed, conditional on its PR merging | Branch `claude/m4-step-01-contracts`; merge commit to be recorded when the PR merges |
 | 2 | [Contract-member forms reassigned from M3, and the binder defect](02-contract-members.md): an abstract contract member with its own generic parameters, labelled operands and written `types:` arguments on a contract member call, a dict variadic tail on a contract member, and such a member as a function value, in typed IR and the interpreter (per G8), plus the reserved-binder fix (per G11) | 1 | not started | — |
 | 3 | [The specified outcome of deep non-tail recursion](03-activations.md) in the reference interpreter, replacing the host-event rule: heap activations, a memory budget, and `@runtime.memory-exhausted` as the host event, with `expect.host_event` (per G1) | 2 | not started | — |
-| 4 | [Wasm backend skeleton and differential harness](04-skeleton.md): the emitter crate, the engine behind the runner, the corpus contract of G4, the parity inventory and its test, deterministic emission, and a CI job — infrastructure step | 3 | not started | — |
+| 4 | [Wasm backend skeleton and differential harness](04-skeleton.md): the emitter crate, the engine and native-code crate behind the runner (latest Wasmtime and a raised toolchain), the corpus contract of G4, the parity inventory and its test, deterministic emission, and a CI job — infrastructure step | 3 | not started | — |
 | 5a | [The value arena and its runtime](05a-arena.md): linear-memory arena, reference counting, the handle table, the exported accessors, memory exhaustion, scalars and literals, and the canonical result observation | 4 | not started | — |
 | 5b | [Data and core lowering](05b-core-lowering.md): declared and anonymous records, enums, tuples, wrappers, and unions with discriminants in written order, projection, module values, `let`, body sequences, `if`, `return`, and direct calls | 5a | not started | — |
 | 6 | [Calls](06-calls.md): generic instantiation, function values, closures, indirect calls, a tail call to every kind of callee, the deep non-tail recursion outcome, and a bounded live arena across a long allocating tail loop | 5b | not started | — |
 | 7 | [Patterns and typed failure](07-patterns-failure.md): `match` with every pattern kind, destructuring bindings, `let-else`, `as` narrowing, `try`, and `never` | 6 | not started | — |
 | 8a | [Integer and `char` primitive rows](08a-integer-primitives.md), lowered before emission and held to shared sample vectors | 7 | not started | — |
 | 8b | [Collections, text, bytes, and dict](08b-collections.md): arrays, variadic tails, checked lookups, the `array.*` and `dict.*` rows, and `str`, `bytes`, and `dict` through their standard-library bodies | 8a | not started | — |
-| 8c | [Number text, floats, and NaN](08c-number-text-floats.md): integer and float `to-str` and `parse` as Vibra bodies, the float rows with `to-bits` and `from-bits`, and NaN canonicalization | 8b | not started | — |
+| 8c | [Number text, floats, and NaN](08c-number-text-floats.md): the integer and float `to-str` and `parse` natives, written once in Rust and called by both backends, the float arithmetic rows, and NaN canonicalization | 8b | not started | — |
 | 9 | [Interfaces](09-interfaces.md): static dispatch, interface values, default members, destination dispatch and conversion, `iter` with its adapters, and the Step 2 forms | 8c | not started | — |
-| 10 | [Natives and the joined differential](10-natives.md): the body is the single source of G7, and the body/native differential joins the interpreter/Wasm harness | 9 | not started | — |
+| 10 | [Natives and the joined differential](10-natives.md): the native import module `vibra_native_v1`, the single Rust source of G7, and the body/native differential joined to the interpreter/Wasm harness | 9 | not started | — |
 | 11 | [Tests and traps in the Wasm backend](11-tests-traps.md): `workspace-test` observations, assertion outcomes, and every trap code with its origin | 10 | not started | — |
 | 12 | [Stage 4A demo and corpus sub-gate](12-stage-4a-evidence.md) — evidence step | 11 | not started | — |
 
@@ -265,11 +282,10 @@ handle table, and the host accessors are one self-contained contract with its ow
 proof (bounded live size, bounded-stack release, exhaustion), and carrying every
 compound form with it would give one change that cannot be reviewed against that
 proof. Step 8 became 8a, 8b, and 8c: its primitive registry is about two hundred
-rows, the collections need the integer rows, and the D10 decision adds float and
-number-text bodies in Vibra, which is real work in its own right. Step 8c may split
-further into number text and float text, as its guide says. The order of 8a–8c
-follows the dependencies: collections use `u64` arithmetic, and integer text bodies
-use arrays and `str`.
+rows, the collections need the integer rows, and number text and floats are their
+own body of work. The order of 8a-8c follows the dependencies still: collections
+use `u64` arithmetic, and the number-text natives build `str` values, so they
+come after the collection layout.
 
 The slices above are the planned decomposition, not a promise that each fits
 one PR. A step that proves too large is split before delivery, as M3 split

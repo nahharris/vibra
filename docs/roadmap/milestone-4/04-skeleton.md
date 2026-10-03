@@ -25,7 +25,9 @@ needs to prove the pipeline end to end.
    module bytes and an origin table. It depends only on `vibra-ir`,
    `vibra-diagnostics`, and `wasm-encoder`.
 2. The runner crate `vibra-wasm-run` (proposed): the only crate that depends on
-   Wasmtime. It validates a module with `wasmparser` under exactly the baseline
+   Wasmtime, and the one that supplies the `vibra_native_v1` imports from the
+   native-code crate `vibra-native` (proposed, Step 8c), which the emitter never
+   depends on. It validates a module with `wasmparser` under exactly the baseline
    feature set, instantiates it, calls the exports, and reads the statuses.
 3. The harness in `vibra-conformance`: the Wasm execution handler, the
    per-backend report lines, the memory limit, and the parity inventory with its
@@ -36,8 +38,8 @@ needs to prove the pipeline end to end.
 
 | File | Use |
 | --- | --- |
-| `Cargo.toml` `[workspace.dependencies]`, `Cargo.lock` | Add `wasm-encoder`, `wasmparser`, and `wasmtime` with `default-features = false` and the smallest feature set that compiles with Cranelift. Wasmtime 47.0.4 is the newest that builds on the pinned 1.94.1 toolchain; raising the toolchain is a deliberate change that this step does not make on its own |
-| `crates/vibra-conformance/tests/architecture_boundary.rs`: `ARCHITECTURE` | One row per new crate. `vibra-conformance` gains the runner crate; the emitter row lists no engine crate, and the test forbids every other crate from depending on the runner |
+| `Cargo.toml` `[workspace.dependencies]`, `Cargo.lock` | Add `wasm-encoder`, `wasmparser`, and `wasmtime` with `default-features = false` and the smallest feature set that compiles with Cranelift. Use the latest Wasmtime, `wasm-encoder`, and `wasmparser` (decided by Hannah, 2026-10-02), and raise `rust-toolchain.toml` in this same PR to the Rust version they require (1.96 for Wasmtime 49.0.2) |
+| `crates/vibra-conformance/tests/architecture_boundary.rs`: `ARCHITECTURE` | One row per new crate. `vibra-conformance` gains the runner crate; the emitter row lists no engine crate and not the native-code crate, and the test forbids every other crate from depending on the runner |
 | `crates/vibra-conformance/src/bin/conformance.rs`, `runner.rs`, `profile.rs` | Handler registration, `CaseReport`, and the summary lines |
 | `crates/vibra-conformance/src/corpus.rs` | Where the parity inventory file is discovered |
 | `.github/workflows/ci.yml` | The new job |
@@ -48,7 +50,7 @@ needs to prove the pipeline end to end.
    licences, and added build time, and prove `--offline` builds. Stop and
    report if any CI platform fails to build the engine.
 2. Add the crates and the architecture rows. Emit the smallest conforming
-   module: no import, one memory, the exports of the
+   module: one memory exported as `vibra_v1_memory`, only the imports of the pure `vibra_native_v1` module that the program uses (none for the empty entry), the exports of the
    [boundary table](../../spec/06-runtime.md#webassembly-boundary) that a
    program with a `void` entry needs, and no custom section. Every other
    form returns a typed `NotLowered` error naming the form, never a wrong module.
@@ -86,7 +88,7 @@ option and `build` stays `@tool.unavailable`.
 - Positive: the empty-entry program runs in both backends and matches;
   emission is byte-identical across runs; the module validates under the
   baseline; the report prints both backend lines.
-- Negative: a module with an import, a custom section, an exported memory, or a
+- Negative: a module with an import outside `vibra_native_v1`, a custom section, an exported memory under another name, or a
   non-baseline instruction is rejected by the validation test; a case whose row
   is missing, whose row names no case, or whose `not-lowered` row names no step
   fails the inventory test; a `matched` case on which Wasm disagrees fails; a

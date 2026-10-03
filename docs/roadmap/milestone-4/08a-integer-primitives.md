@@ -22,7 +22,9 @@ before emission and held to shared sample vectors: `add-checked`, `sub-checked`,
 `mul-checked`, `div-checked`, `rem-checked`, `neg-checked`,
 `shift-left-checked`, `shift-right`, `equal`, `compare`, every `to-U`
 conversion, and `char.to-u32` and `char.from-u32`. The `to-str` and `parse` rows
-of the integers are Step 8c's.
+of the integers are looping rows: Rust written once and called by both backends
+through the native import module, in Step 8c. The rows here are short enough for
+the emitter to lower inline.
 
 ## Entry points
 

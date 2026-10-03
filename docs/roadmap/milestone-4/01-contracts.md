@@ -109,13 +109,15 @@ anchors and proof owners, the [surface inventory](supported-surface.md) and its
 test close D12, [validation](validation.md) replaces the borrowed M3 commands, and
 the guides for Steps 2–12 are linked from the [README](README.md#steps). Two
 planned steps were split (5 into 5a and 5b, 8 into 8a–8c), with the reason
-recorded there. Three items are left to the maintainer's review of the pull
-request, not settled by an implementer:
+recorded there. Two decisions were revised by the maintainer after review, and one
+item remains:
 
-- **D10** (the single source for natives and primitives) chose the Vibra body and
-  reclassifies 20 registry rows; the options and costs are in the ledger.
-- **The engine version.** Only Wasmtime 47 builds on the pinned 1.94.1 toolchain,
-  so Step 4 either starts on 47 or raises the toolchain; see the
+- **D10** (the single source for natives and primitives) was decided by Hannah as
+  toolchain-owned Rust written once, called directly by the interpreter and
+  imported by modules from the pure `vibra_native_v1` module; the options are in
+  the ledger.
+- **The engine version** was decided by Hannah: Step 4 adopts the latest Wasmtime,
+  `wasm-encoder`, and `wasmparser` and raises the toolchain; see the
   [dependency evidence](README.md#dependency-evidence).
 - **The interim bound.** Until Step 3, the interpreter reports its 4,096-activation
   bound as `@runtime.memory-exhausted`.

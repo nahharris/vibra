@@ -137,7 +137,7 @@ that type. Literal range errors are rejected before execution.
 
 Floating-point operations follow IEEE 754. The sign and payload of a NaN are
 never observable: every operation that observes a float, namely `equal`,
-`compare-total`, `to-str`, `to-bits`, the canonical value encoding, and the
+`compare-total`, `to-str`, the canonical value encoding, and the
 canonical equality of a test assertion, first replaces a NaN by the one quiet
 NaN of its width, which has the positive sign and a zero payload. The other
 float operations MAY return any NaN, so a backend whose engine leaves an
@@ -278,13 +278,10 @@ the accelerated implementation a toolchain may run instead. Until a library
 type moves into the standard library, its rows are primitive operations over
 the toolchain's direct representation; the roadmap names each migration.
 
-The `to-str` and `parse` rows of the integer and float types are expressible
-in Vibra over the primitive operations, so they are native implementations
-whose meaning is a Vibra body declared in `@std.builtin`, and the float bodies
-read a float's bits through the primitive `to-bits` and `from-bits` rows. The
-single source of every native implementation is its body, as the **Native
-implementations** section states. Until Stage 4A moves them, a toolchain
-implements the rows as primitive operations, which is observationally the same.
+A primitive row whose algorithm needs a loop, the `to-str` and `parse` rows of
+the integer and float types, has no Vibra body. The toolchain implements it
+once, as the toolchain-owned native code of the **Native implementations**
+section, and both backends reach that one implementation.
 
 The error and ordering types are standard-library enums in `@std.core`, each
 variant with a `void` payload:
@@ -312,8 +309,8 @@ spelled `T.<name>`:
 | `shift-right` | `T u32 -> R T` | `floor(left / 2^amount)`; `invalid-shift` when the amount is at least the bit width |
 | `equal` | `T T -> bool` | Numeric equality |
 | `compare` | `T T -> ordering` | Numeric order |
-| `to-str` (native) | `T -> str` | Shortest decimal digits, with a leading `-` only for a negative value and no suffix |
-| `parse` (native) | `str -> C T` | Accepts an optional `-` (signed `T` only) followed by one or more ASCII decimal digits and nothing else; `invalid-format` otherwise, `out-of-range` for a well-formed value outside `T` |
+| `to-str` | `T -> str` | Shortest decimal digits, with a leading `-` only for a negative value and no suffix |
+| `parse` | `str -> C T` | Accepts an optional `-` (signed `T` only) followed by one or more ASCII decimal digits and nothing else; `invalid-format` otherwise, `out-of-range` for a well-formed value outside `T` |
 | `to-U`, for each other integer type `U` | `T -> U` when every `T` value is a `U` value, else `T -> C U` | The same integer as a `U`; `out-of-range` when `U` cannot hold it |
 
 For `F` among `f32` and `f64`, the builtin type `F` has:
@@ -324,10 +321,8 @@ For `F` among `f32` and `f64`, the builtin type `F` has:
 | `neg` | `F -> F` | IEEE 754 negation |
 | `equal` | `F F -> bool` | IEEE 754 equality, so NaN is unequal to itself |
 | `compare-total` | `F F -> ordering` | IEEE 754 `totalOrder` over canonicalized values |
-| `to-bits` | `f32 -> u32`, `f64 -> u64` | The IEEE 754 interchange bits of the canonicalized value, so every NaN reads as the canonical quiet NaN |
-| `from-bits` | `u32 -> f32`, `u64 -> f64` | The float with exactly those bits; a pattern that encodes a NaN yields a NaN, whose payload is unobservable |
-| `to-str` (native) | `F -> str` | The canonical float serialization of this chapter, without a suffix |
-| `parse` (native) | `str -> C F` | The unsuffixed decimal float literal grammar; `invalid-format` otherwise, `out-of-range` when the rounded value is infinite |
+| `to-str` | `F -> str` | The canonical float serialization of this chapter, without a suffix |
+| `parse` | `str -> C F` | The unsuffixed decimal float literal grammar; `invalid-format` otherwise, `out-of-range` when the rounded value is infinite |
 
 The remaining operations are bound by modules, except the `char.*`, `array.*`,
 and `dict.*` rows. The `text.*` and `bytes.*` rows are native implementations of
@@ -399,16 +394,30 @@ diagnostic. A toolchain MAY execute the body instead of the native
 implementation, so a native implementation is never needed for a correct
 result.
 
-The body is the single source of every native implementation. The WebAssembly
-backend executes the body: it has no native implementation of its own, a
-native symbol is never lowered into a module, and so the two backends cannot
-drift apart. A reference interpreter MAY run its toolchain-owned native
-implementation instead of the body. The conformance suite holds that native
-implementation to its body over the same inputs, and holds the body to itself
-across backends: for every sample input, the interpreter's native
-implementation, the interpreter's body, and the module's body produce the same
-result. This is not a foreign-function interface: packages cannot declare
-`native:`, and a native implementation reaches no host operation.
+Every native implementation, and every primitive row whose algorithm needs a
+loop, is toolchain-owned native code written once. The reference interpreter
+calls that code directly. A WebAssembly module reaches the same code through an
+import from the **native import module**, whose name is `vibra_native_v1`: a
+closed, versioned list of pure functions, one per native symbol or looping
+primitive row, that the toolchain owns and no source can name. Because both
+backends call one function, they cannot drift apart. A native import is not a
+host operation: it has no effect root, no audit event, no host registry entry,
+reads no ambient state, and is never visible to source. A native implementation
+reads and writes the instance's value storage through the toolchain's runtime
+only, as the **WebAssembly boundary** section states. The Vibra body remains
+the meaning of a native: the conformance suite holds the native code to its
+body over the same inputs, and for every sample input the interpreter calling
+the native code, the interpreter running the body, and the module calling the
+native import produce the same result. A native whose meaning applies a
+function value, such as `array.fold`, has no native import, because a pure
+import cannot call back into the module; a module runs its body, and the
+differential holds the interpreter's native code to it as before. A toolchain
+MAY instead emit a
+self-contained module that executes the bodies and imports nothing; a module
+that must run outside the Vibra runtime cannot rely on native imports, and
+which form a build product takes is decided with the build products. This is
+not a foreign-function interface: packages cannot declare `native:`, and a
+native implementation reaches no host operation.
 
 ## The value arena
 
@@ -443,7 +452,7 @@ boundary a **value ID** and gives the host only that ID:
 Within a WebAssembly module the arena lives in the module's own linear memory
 and is managed by compiler-emitted code. Values refer to one another by offset
 and never move, so an offset is stable for the life of its value. No offset
-crosses the guest/host boundary. The reference interpreter's arena is its own
+crosses to a host that is not toolchain-owned native code. The reference interpreter's arena is its own
 heap and needs no IDs until it serves a host.
 
 ## Reclamation
@@ -556,7 +565,8 @@ The unified source declaration surface has exactly two toolchain-owned external
 providers:
 
 - `@compiler` names a pure intrinsic with checked language semantics. It lowers
-  to typed IR and never creates a runtime import.
+  to typed IR and creates no `@host` import; a row whose algorithm needs a loop
+  is reached through a pure native import, which is not a host operation.
 - `@host` names an effectful host operation owned by its enclosing `deffect`.
   It lowers to the closed `vibra_v1` runtime registry.
 
@@ -635,19 +645,30 @@ threads, reference-type, memory64, or multi-memory features, so no conforming
 engine needs an optional proposal and a module does not depend on the engine's
 stack or collector. A v1 module validates under exactly that feature set.
 
-A module has one defined 32-bit linear memory, which holds its arena and is
-never exported, and no exported global. Its imports are empty in Stage 4A: it
-calls no host operation and reads no ambient state. From Stage 4B it imports
-only compiler-generated `@host` entries from `vibra_v1`. There is no
-source-level Wasm FFI, dependency-selected import module, or user-declared
-import. The guest/host boundary is scalar-only: values crossing it are
-fixed-width primitive scalars or value IDs of the instance's arena. A `char`
-crosses as a validated Unicode scalar in an `i32` slot, and the integer types
-narrower than 32 bits cross in an `i32` slot, signed ones sign-extended and
-unsigned ones zero-extended. Guest pointers, offsets into linear memory, and
-host internals do not cross the boundary.
+A module has one defined 32-bit linear memory, which holds its arena, and no
+exported global. The memory is exported once, under the toolchain-reserved name
+`vibra_v1_memory`, and only toolchain-owned native code reads or writes it: the
+native implementations of the **Native implementations** section run in the
+Vibra runtime against that memory directly, which is what makes them fast. No
+other host reads it.
 
-A Stage 4A module exports exactly the functions below. Every export name is
+A module's imports are the **native import module** `vibra_native_v1` and
+nothing else in Stage 4A: it calls no `@host` operation and reads no ambient
+state. A native import is pure, takes scalars and offsets into the module's own
+memory, and is not part of the boundary below. From Stage 4B a module also
+imports compiler-generated `@host` entries from `vibra_v1`. There is no
+source-level Wasm FFI, dependency-selected import module, or user-declared
+import. The `@host` boundary, and the boundary to any host that is not
+toolchain-owned native code, is scalar-only: values crossing it are fixed-width
+primitive scalars or value IDs of the instance's arena. A `char` crosses as a
+validated Unicode scalar in an `i32` slot, and the integer types narrower than
+32 bits cross in an `i32` slot, signed ones sign-extended and unsigned ones
+zero-extended. Guest pointers, offsets into linear memory, and host internals
+do not cross that boundary, and no offset appears in typed IR, a canonical value
+encoding, an audit event, or a snapshot.
+
+A Stage 4A module exports exactly `vibra_v1_memory` and the functions below.
+Every export name is
 prefixed `vibra_v1_`, which is the module's version: an incompatible change to
 a name, signature, or meaning requires `vibra_v2`. A program module exports
 `vibra_v1_entry` and a test module exports `vibra_v1_test`; no module exports

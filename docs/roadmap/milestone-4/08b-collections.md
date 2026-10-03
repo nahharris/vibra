@@ -27,23 +27,27 @@ arena names.
 
 | File | Use |
 | --- | --- |
-| `crates/vibra-ir/src/external.rs`, `stdlib/src/std/builtin.vib`, `text.vib`, `bytes.vib` | The primitive array rows and the bodies the backend lowers; natives are not lowered ([ledger D10.1](decision-ledger.md)) |
+| `crates/vibra-ir/src/external.rs`, `stdlib/src/std/builtin.vib`, `text.vib`, `bytes.vib` | The primitive array rows and the Vibra bodies, which stay the meaning of the natives ([ledger D10.1](decision-ledger.md)) |
+| `crates/vibra-native` (new, proposed) | The Rust of the `text.*`, `bytes.*`, `array.of`, and `dict.of` natives, written once against the value-access trait that the interpreter and the runner each implement; no Wasmtime dependency |
 | `crates/vibra-wasm` | Array layout with an element-count header, element `dup` on read and `drop` on release, dict as sorted entries with the key order of `ordered.compare` |
-| `crates/vibra-conformance/tests/natives_m3_step4b.rs` | The native samples this step's bodies must also pass |
+| `crates/vibra-conformance/tests/natives_m3_step4b.rs` | The native samples that the native code, the body, and the import must all pass |
 
 ## Ordered tasks
 
 1. Array layout, `array.length`, lookup, `append`, `concat`, `slice` with
    copy-on-construction (no in-place update, which is M7's), and variadic tails.
-2. `array.fold` as the library body over a function value.
+2. `array.fold` as its library body over a function value: it applies a function
+   value, so it has no native import and a module runs its body.
 3. `dict.of` and `dict.entries`: later pair replaces an equal key, order is the
    key type's canonical order for each closed key type, and nothing depends on
    insertion or a hash.
-4. `str`, `bytes`, and the text and bytes bodies, including UTF-8 encoding and
-   decoding, running as ordinary lowered Vibra.
+4. `str` and `bytes` values, and the text and bytes natives as imports of
+   `vibra_native_v1` backed by the native-code crate, including UTF-8 encoding and
+   decoding; the interpreter calls the same functions directly.
 5. Array patterns with exact length.
 6. Canonical encoding of every collection in the host-side encoder.
-7. Move the matched cases and extend the native samples to run the module body.
+7. Move the matched cases and extend the native samples to run the interpreter's
+   native, the interpreter's body, and the module's import.
 
 Invariants preserved: dict order is key order; a missing key or index is
 `option.none` and never a trap; element ownership is balanced; a value nested
@@ -70,14 +74,14 @@ None.
 
 The [8a–8c row](validation.md#focused-checks) and the full
 [pre-merge list](validation.md#before-merging-each-step), with the native
-harness run against the module body.
+harness run on all three paths.
 
 ## Excluded
 
 Integer and float `to-str` and `parse` (Step 8c); in-place update or any
-copy-avoidance (M7); the interpreter's natives as a Wasm path.
+copy-avoidance (M7); a Wasm-native reimplementation of any symbol.
 
 ## Completion evidence
 
 Every `Lowered` row owned by Step 8b in the [inventory](supported-surface.md)
-has a matched case; the 19 natives' bodies pass their samples in the module.
+has a matched case; the natives agree with their bodies on all three paths.

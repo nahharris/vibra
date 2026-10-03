@@ -30,7 +30,7 @@ users:
    a reference;
 4. the instance state: status, trap code, origin, failure record, the module
    values' lazy state, and the frame stack that holds activations;
-5. the exported accessors of the [boundary table](../../spec/06-runtime.md#webassembly-boundary)
+5. the `vibra_v1_memory` export, for toolchain-owned native code only, and the exported accessors of the [boundary table](../../spec/06-runtime.md#webassembly-boundary)
    (`vibra_v1_release`, `_length`, `_variant`, the `read_*` family, `_result`,
    `_live_size`, `_status`, `_trap_code`, `_origin`); and
 6. lowering of scalars, `void`, and literals, and the host-side canonical

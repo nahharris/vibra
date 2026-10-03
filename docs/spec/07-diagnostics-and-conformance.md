@@ -805,9 +805,11 @@ runner's result for a case disagrees with its disposition, including a
 `matched` case on which the Wasm backend disagrees. A step moves rows toward
 `matched` and never back, so the set of matched cases only grows.
 
-The native-implementation harness joins the same differential: for every sample
-input of every native symbol, the interpreter's native implementation, the
-interpreter's body, and the module's body agree.
+The native-implementation harness joins the same differential. For every sample
+input of every native symbol, the interpreter calling the native code, the
+interpreter running the body, and the module calling the native import agree. For
+a primitive row with no body, both backends call the same native code and are
+checked against the shared sample vectors.
 
 ## Required implementation suites
 
