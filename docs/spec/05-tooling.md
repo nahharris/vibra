@@ -1,9 +1,12 @@
 # Vibra v1 CLI, MCP, and code tooling
 
 Status: normative target
-Implementation status: M2 provides `project init`, `fmt`, `check`, `run`, and
-`test` through the shared workspace engine. MCP and the remaining v1 tooling
-commands remain unavailable.
+Implementation status: `project init`, `fmt`, `check`, `run`, and `test` run
+through the shared workspace engine, with `run` and `test` executing the
+reference interpreter for the complete pure language. M3 adds the index
+records and the workspace position envelope as library projections. MCP, the
+public `query` command, and the remaining v1 tooling commands remain
+unavailable.
 
 ## One workspace engine
 
@@ -226,7 +229,7 @@ primary span `0..0` and no source ID, and the CLI trap `origin` is `null`.
 The other trap code is `"@runtime.unobservable-function"`, whose origin in a
 test is the assertion call. `run` reports either trap as `@command.trap`, with
 the code in its payload's `trap` and a `null` origin. Only a host event, such
-as `@runtime.host-stack-exhausted`, is `@command.operational-failure`.
+as `@runtime.memory-exhausted`, is `@command.operational-failure`.
 
 The process exit mapping is fixed: `0` for `@command.ok`, `1` for
 `@command.diagnostics` or `@command.test-failed`, `2` for
@@ -257,6 +260,21 @@ All commands accept `--format human|json` where their output is structured.
 JSON goes to stdout, diagnostics and operational logs go to stderr, and a
 nonzero exit is classified by a stable result atom. No command infers an output
 format from a filename extension.
+
+### Execution backend of `run` and `test`
+
+`run` and `test` execute the reference interpreter. They take no option that
+selects a backend, and an unknown option remains `@command.invalid-input`.
+`build` stays `@command.unavailable` with `@tool.unavailable`. The WebAssembly
+backend is reached only through the conformance harness, which runs every
+executable case in both backends and fails on a disagreement, as the
+conformance chapter states; whether a shipped command ever executes a module is
+decided with the build products. A command's observable result is therefore the
+interpreter's, and the module the harness runs produces the same one.
+
+A host event ends `run` or `test` with an unlocated error diagnostic. The `run`
+payload then has a null `programResult` and a null `trap`; the `test` payload
+has zero `selected`, `passed`, and `failed` and an empty `tests` array.
 
 ## Project operations
 

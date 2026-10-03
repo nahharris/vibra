@@ -2,8 +2,11 @@
 
 Status: normative target
 Implementation status: M1 supplies the lossless source structure and position
-metadata; M2 resolves and checks the documented executable subset. Later-v1
-source forms remain deferred as recorded in the M2 surface inventory.
+metadata; M2 and M3 resolve and check every source form of the pure language,
+including binding sequences, `let-else`, `return`, and `never`. The effect
+forms, `deffect`, nonempty effect rows, and `@host` externals remain
+`@tool.unavailable` until Milestone 4 Stage 4B, as its surface inventory
+records.
 
 ## Reader
 
@@ -147,7 +150,10 @@ precedence when their spelling also satisfies the symbol production. `any`,
 `never`, and the primitive type names are ordinary symbols to the reader and are
 reserved by resolution, not by lexing. The reserved expression heads include
 `do`, `let`, `let-else`, `if`, `match`, `return`, `as`, `try`, `lambda`,
-`tupleof`, `recordof`, and `enumof`.
+`tupleof`, `recordof`, and `enumof`. A lexical binder, whatever form
+introduces it, that is spelled as a keyword, a boolean, `void`, `any`, `never`,
+or a primitive type name is `@name.reserved-declaration` at the binder name,
+and it still binds for the rest of its scope so that the error does not cascade.
 
 An atom is an ordinary value by default. Only a source grammar or `.vibon`
 schema position that explicitly expects an entity reference resolves an atom

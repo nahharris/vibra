@@ -1,14 +1,18 @@
 # Milestone 4 step plan
 
-Status: planned. No step has landed; this planning change is the branch
-bootstrap, not an implemented step
+Status: in progress. Step 1, the Stage 4A contract freeze, is proposed as
+`landed` by its pull request and is conditional on that PR merging; no
+implementation step has landed
+Decision ledger: [decision-ledger.md](decision-ledger.md)
+Surface inventory: [supported-surface.md](supported-surface.md)
+Validation: [validation.md](validation.md)
 Milestone: [Milestone 4 — WebAssembly spine, static effects, and host operations](../v1.md#milestone-4--webassembly-spine-static-effects-and-host-operations)
 Execution model: [execution.md](../execution.md)
 Integration branch: `m4`
 
 M4 gives the typed IR its second consumer and the language its first contact
 with a host. The roadmap delivers it in two ordered stages on `m4`: the
-WebAssembly spine for the complete pure language, with no host import, and
+WebAssembly spine for the complete pure language, with no `@host` import, and
 then static effects and host operations, each landing in both backends in the
 same change. The reference interpreter stays the oracle throughout.
 
@@ -33,9 +37,8 @@ The 94 interpreter cases (67 `interpret`, 4 `workspace-run`, and 23
    `main`, `m3`, or a previous step's unmerged branch.
 3. Implement the earliest unfinished step whose predecessors have merged.
    Every step of Stage 4A lands before the first step of Stage 4B.
-4. Reuse the [M3 validation commands](../milestone-3/validation.md#before-merging-each-step)
-   against `origin/m4`, and the [M3 handoff template](../milestone-3/validation.md#step-handoff),
-   until Step 1 lands an M4 `validation.md`.
+4. Run the [M4 validation commands](validation.md#before-merging-each-step)
+   against `origin/m4` and record the [M4 handoff](validation.md#step-handoff).
 5. The completing PR sets its row to `landed`, conditional on the merge. Record
    the PR and verified merge commit.
 
@@ -60,8 +63,9 @@ evidences every exit-gate clause.
 - **The emitter has no engine dependency.** A new backend crate lowers typed
   IR to module bytes and depends only on `vibra-ir` and `vibra-diagnostics`,
   as `vibra-interp` does. The Wasm engine is reached only by the code that
-  runs a module. The architecture boundary test changes in the PR that adds
-  each crate.
+  runs a module, and the emitter does not depend on the native-code crate
+  either, only on the import names in `vibra-ir`. The architecture boundary test
+  changes in the PR that adds each crate.
 - **Unoptimized only.** No wrapper erasure, compact enum layout, or in-place
   update enters M4. The runtime chapter's representation latitude is M7's,
   after parity, measured against the baseline Step 21 records.
@@ -87,10 +91,111 @@ evidences every exit-gate clause.
   `@tool.unavailable` to supported with positive and negative cases, and never
   reclassifies a valid form as malformed. Every M4-owned form still
   unavailable at Step 22 fails the gate.
+- **Activations live in the instance arena (D1).** The language rule is the
+  outcome: no host stack per activation, depth bounded by memory, exhaustion a
+  host event. The lowering is an implementation decision. The Wasm backend
+  holds activation frames in the arena and runs a dispatcher loop, so a non-tail
+  call pushes a frame and returns to the loop instead of nesting a Wasm call,
+  and a tail call replaces the current frame. The interpreter holds its frames
+  on the heap by the same plan (Step 3). Arena frames were chosen over a counted
+  limit because a limit would make every non-tail call a counted, trapping
+  operation and tie the lowering to the engine's stack, and because arena frames
+  are the representation the post-v1 process model needs, where a process's
+  stack is part of its heap and preemption counts function calls.
+- **The arena is the module's own linear memory (D2).** It is managed by
+  compiler-emitted code. Inside a module values refer to each other by offset,
+  because nothing moves. Host-facing value IDs are 64-bit, index 0 is invalid,
+  an ID is never reused within an instance, and a handle table makes each live
+  ID hold a reference to its value. In Stage 4B the host reads and builds
+  compound values through functions the module exports, taking and returning IDs
+  and scalars, so no guest pointer crosses the `@host` boundary. Linear memory is
+  exported once under the reserved name `vibra_v1_memory` for toolchain-owned
+  native code only. A Stage 4A module imports only the pure native import module
+  and has no `@host` import. An ID that is not an address
+  lets a later ABI move values between instances and threads, as the beyond-v1
+  obligations require, and lets the host read nothing it was not given.
+- **Reclamation is precise reference counting (D3).** The specification states
+  the rule only: liveness, unobservable release, a bounded live arena for an
+  allocating tail loop, bounded-stack release, and that values cannot form
+  cycles ([the premises are verified](decision-ledger.md#d34-the-no-cycle-premises)).
+  The implementation is Perceus-style and non-atomic, because v1 and the post-v1
+  plan are share-nothing with one instance per thread. M4 ships plain `dup` and
+  `drop` with no elision. Borrow inference, count fusion, and in-place reuse of
+  unshared values are M7 optimizations measured against the Step 21 baseline.
+  Freeing walks an explicit worklist, so the engine stack stays bounded for any
+  nesting depth.
+- **Wasmtime with Cranelift, `wasm-encoder`, and `wasmparser` (D5).** The
+  engine is Wasmtime for its mature Rust embedding API and its path to native
+  host integration: GUI and GPU operations arrive later through Vibra's own host
+  registry, and a Rust embedding reaches them without a second runtime. The
+  compiler is Cranelift for its speed. Winch is excluded: tail calls are disabled
+  under it, and an aarch64 Winch tail-call issue was opened on 2026-10-02 (as
+  reported by the maintainer; not independently re-verified here). The baseline
+  uses no tail-call instruction, but the exclusion keeps the engine choice from
+  resting on a compiler with a known gap in a feature M7 may adopt.
+  `wasm-encoder` emits and `wasmparser` validates, with exactly the baseline
+  feature set. Only the code that runs modules may depend on Wasmtime. Step 4
+  adds the dependencies; this step adds none. See
+  [Dependency evidence](#dependency-evidence).
+- **Type arguments pass at run time (D9).** The Wasm backend passes type
+  arguments as the interpreter does and emits one function per source function.
+  Monomorphization is an M7 optimization. Typed IR carries what both backends
+  need: a contract call holds the interface arguments and, new in Step 2, the
+  member's own type arguments in `where:` order; operands are already in resolved
+  parameter order, so labelled operands and a dict tail add checking and no IR
+  field; and a contract member used as a function value is its own expression
+  holding the member, the interface arguments, and its own type arguments, which
+  selects its implementation from the operand at each application. The Step 2
+  guide fixes the names.
+- **Natives are written once, in Rust, and called by both backends (D10,
+  "Bun style").** The Vibra runtime embeds Wasmtime, and where performance
+  matters the toolchain runs native Rust and escapes from Wasmtime into the host
+  process. This is not Rust compiled to Wasm. Each native implementation and each
+  looping primitive row (integer and float `to-str` and `parse`) is toolchain-owned
+  Rust in exactly one crate, proposed `vibra-native`. It is written once against a
+  value-access interface (a trait over reading and building arena values) that both
+  backends implement: the interpreter over its values, and the Wasm runner over the
+  instance's linear memory. The interpreter calls the functions directly, and a
+  module reaches them through the pure, versioned import module `vibra_native_v1`.
+  The closed list of import names and signatures is a table in `vibra-ir`, beside
+  the compiler registry. The emitter crate depends on that table's names and never
+  on `vibra-native`; the runner crate, which already depends on Wasmtime, depends on
+  `vibra-native` and supplies the imports. The Vibra body stays the meaning, and
+  the harness holds native code to it. Natives read the instance's memory directly
+  through the toolchain-reserved export `vibra_v1_memory`; no other host reads it,
+  and the `@host` ABI stays scalar-only over IDs. A module that must run outside the
+  Vibra runtime would instead use a self-contained form that runs the bodies; M7
+  decides the shipped form, and M4 emits the native-import form only. See the
+  [D10 options](decision-ledger.md#d10-the-single-source-for-natives-and-primitives).
+- **The NaN defence is on (D11).** The engine runs with NaN canonicalization
+  enabled because it is unobservable, while the specification canonicalizes at the
+  observation points.
 
 These are implementation constraints, not language rules. Observable decisions
 are closed in the owning specification by Step 1 (Stage 4A) or Step 13
 (Stage 4B) before dependent code.
+
+## Dependency evidence
+
+Checked on 2026-10-02 against `rust-toolchain.toml`, which pins 1.94.1, with
+`cargo info` on the crates.io index. Step 4 re-checks these before it adds the
+dependencies.
+
+| Crate | Version | Rust version | Licence |
+| --- | --- | --- | --- |
+| `wasmtime` | 49.0.2 (latest) | 1.96.0 | Apache-2.0 WITH LLVM-exception |
+| `wasmtime` | 48.0.0 | 1.95.0 | Apache-2.0 WITH LLVM-exception |
+| `wasmtime` | 47.0.4 | 1.94.0 | Apache-2.0 WITH LLVM-exception |
+| `wasm-encoder`, `wasmparser` | 0.261.0 | 1.88.0 | Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT |
+
+**Decided (Hannah, 2026-10-02): use the latest versions.** Step 4 adopts the latest
+Wasmtime, `wasm-encoder`, and `wasmparser` at the time it runs, and raises
+`rust-toolchain.toml` to the Rust version they require, which is 1.96 for Wasmtime
+49.0.2, in the same PR. Step 1 changes neither `rust-toolchain.toml` nor
+`Cargo.toml`. The workspace is `MIT OR Apache-2.0`, and each crate's licence permits
+linking it. Step 4 records the build time added and confirms that the three CI
+platforms (Ubuntu, Windows, and macOS) build the engine with Cranelift and default
+features off.
 
 ## Contract gaps found while planning
 
@@ -100,17 +205,17 @@ the Stage 4A items; Step 13 closes the Stage 4B items.
 
 | ID | Gap | Why it blocks | Owner |
 | --- | --- | --- | --- |
-| G1 | The runtime chapter still says v1 defines no portable stack-depth limit and that exhausting the host stack is a host event outside parity, reported as `@runtime.host-stack-exhausted` and `@command.operational-failure`. The roadmap requires that rule replaced by either (a) a counted activation-depth limit both backends trap on identically, or (b) activations held in the arena. The interpreter's current bound is an implementation constant of 4,096 activations. | The choice decides how the Wasm backend lowers every non-tail call, whether it depends on the engine's stack, and which diagnostic, command result, and exit code three chapters name. It is a maintainer decision. | Step 1 |
-| G2 | The runtime chapter names an instance-owned value arena of opaque indices only in **WebAssembly boundary**. It does not say where compound values live, what an index denotes, which kinds exist, or how a host reads a compound value when no guest pointer crosses the boundary. Stage 4A allows no import, so the arena cannot be a set of host functions the module calls. | Every compound value in the Wasm backend depends on it, and the Stage 4B host ABI is designed against it. | Step 1 |
-| G3 | The arena reclamation rule does not exist. The roadmap fixes its constraints: reclamation is unobservable apart from memory use, an index is never reused within an instance, and a tail-recursive loop that allocates per iteration holds a bounded live arena. Nothing states how wide an index is, what happens when the index space or the memory is exhausted, or that releasing a deeply nested value must not recurse on the engine stack. | The arena cannot be implemented first and given a rule later; the exit gate measures the live size. | Step 1 |
-| G4 | The conformance chapter lists "Wasm result and ordered audit trace where executable" but defines no operation, snapshot key, or reporting rule for it, and the closed operation list has only interpreter selectors. `wasm-v1` does not include `interpreter-v1`, so no declared profile runs both backends on one case. | The differential harness is a deliverable and the Stage 4A sub-gate; it needs a contract before it has a handler. | Step 1 |
-| G5 | The tooling chapter does not say which backend `vibra run` and `vibra test` execute once Wasm exists. The roadmap reaches Wasm only through the conformance harness in M4. | Without a rule, a step could add a backend flag, or silently switch `run`, and the command contract would change by accident. Recommendation: both commands keep the reference interpreter in M4 and gain no option; M7 decides the shipped behavior. | Step 1 |
-| G6 | The Wasm feature baseline is unstated: whether tail position lowers to the tail-call instructions or a trampoline, and which other proposals a v1 module may use. The workspace has no Wasm encoder or engine dependency, and the choice of engine bounds what G1 option (a) can prove about its stack. | Mandatory tail calls and the deep-recursion outcome are both lowered against it, and a dependency choice is a recorded milestone decision. It is a maintainer decision. | Step 1 |
-| G7 | A native implementation must have "one source shared by the reference interpreter and the WebAssembly backend". Today each of the 19 natives is a Rust function in the interpreter's registry, which cannot be lowered into a module. The primitive rows have the same problem at a larger scale: float `to-str` and `parse`, integer `parse`, and the `char` conversions need code inside the module. | The roadmap deliverable says natives are lowered from that single source and that the body/native differential joins the interpreter/Wasm harness. The form of the source decides both. | Step 1 |
-| G8 | The runtime chapter lets an implementation monomorphize or pass type arguments at run time, and the interpreter passes them. The typed IR cannot yet express an abstract contract member with its own generic parameters, which is why M3 reassigned it, with labelled operands, written `types:`, and a dict variadic tail on a contract member call. | The reassigned forms need one IR shape for both backends, and the Wasm instantiation strategy decides what that shape must carry. | Step 1; implemented by Step 2 |
-| G9 | A trap has a stable code and a source origin when its span is known. Nothing says how an engine trap, such as an unreachable instruction or an out-of-bounds access, becomes a stable `@runtime.*` code, or how a Wasm trap recovers its source origin before M7's source maps exist. | The exit gate requires trap parity, and `@test.trap` records an origin. | Step 1 |
-| G10 | WebAssembly leaves the payload of a NaN produced by an arithmetic instruction nondeterministic. The runtime chapter canonicalizes NaN in serialization and equality only. | A NaN that reaches `f64.to-str`, `compare-total`, a dict key order, or a result encoding must agree across backends. The rule must say where canonicalization happens. | Step 1 |
-| G11 | The pre-M4 revision pinned, without fixing, that a local binder may be named `if`, `i32`, `let-else`, `return`, or `never`, which the specification forbids. An interpreter test over a value nested 5,000 levels deep took about seven minutes in a debug build, with the cause not investigated. | Neither is an M4 form, but the first would be hardened by a second backend and the second distorts the performance baseline. Each needs an owning step or an explicit reassignment. | Step 1 assigns; recommendation: Step 2 and Step 21 |
+| G1 | The runtime chapter still says v1 defines no portable stack-depth limit and that exhausting the host stack is a host event outside parity, reported as `@runtime.host-stack-exhausted` and `@command.operational-failure`. The roadmap requires that rule replaced by either (a) a counted activation-depth limit both backends trap on identically, or (b) activations held in the arena. The interpreter's current bound is an implementation constant of 4,096 activations. | The choice decides how the Wasm backend lowers every non-tail call, whether it depends on the engine's stack, and which diagnostic, command result, and exit code three chapters name. It is a maintainer decision. | Closed by [D1.1–D1.4](decision-ledger.md); implemented by Steps 3 and 6 |
+| G2 | The runtime chapter names an instance-owned value arena of opaque indices only in **WebAssembly boundary**. It does not say where compound values live, what an index denotes, which kinds exist, or how a host reads a compound value when no guest pointer crosses the boundary. Stage 4A allows no import, so the arena cannot be a set of host functions the module calls. | Every compound value in the Wasm backend depends on it, and the Stage 4B host ABI is designed against it. | Closed by [D2.1–D2.3](decision-ledger.md); implemented by Step 5a |
+| G3 | The arena reclamation rule does not exist. The roadmap fixes its constraints: reclamation is unobservable apart from memory use, an index is never reused within an instance, and a tail-recursive loop that allocates per iteration holds a bounded live arena. Nothing states how wide an index is, what happens when the index space or the memory is exhausted, or that releasing a deeply nested value must not recurse on the engine stack. | The arena cannot be implemented first and given a rule later; the exit gate measures the live size. | Closed by [D3.1–D3.5](decision-ledger.md); implemented by Steps 5a and 6 |
+| G4 | The conformance chapter lists "Wasm result and ordered audit trace where executable" but defines no operation, snapshot key, or reporting rule for it, and the closed operation list has only interpreter selectors. `wasm-v1` does not include `interpreter-v1`, so no declared profile runs both backends on one case. | The differential harness is a deliverable and the Stage 4A sub-gate; it needs a contract before it has a handler. | Closed by [D6.1–D6.4](decision-ledger.md); implemented by Step 4 |
+| G5 | The tooling chapter does not say which backend `vibra run` and `vibra test` execute once Wasm exists. The roadmap reaches Wasm only through the conformance harness in M4. | Without a rule, a step could add a backend flag, or silently switch `run`, and the command contract would change by accident. Recommendation: both commands keep the reference interpreter in M4 and gain no option; M7 decides the shipped behavior. | Closed by [D7.1](decision-ledger.md) |
+| G6 | The Wasm feature baseline is unstated: whether tail position lowers to the tail-call instructions or a trampoline, and which other proposals a v1 module may use. The workspace has no Wasm encoder or engine dependency, and the choice of engine bounds what G1 option (a) can prove about its stack. | Mandatory tail calls and the deep-recursion outcome are both lowered against it, and a dependency choice is a recorded milestone decision. It is a maintainer decision. | Closed by [D4.1–D4.4 and D5.1–D5.3](decision-ledger.md); the toolchain version is an open maintainer question |
+| G7 | A native implementation must have "one source shared by the reference interpreter and the WebAssembly backend". Today each of the 19 natives is a Rust function in the interpreter's registry, which cannot be lowered into a module. The primitive rows have the same problem at a larger scale: float `to-str` and `parse`, integer `parse`, and the `char` conversions need code inside the module. | The roadmap deliverable says natives are lowered from that single source and that the body/native differential joins the interpreter/Wasm harness. The form of the source decides both. | Closed by [D10.1–D10.3](decision-ledger.md); implemented by Steps 8a, 8c, and 10 |
+| G8 | The runtime chapter lets an implementation monomorphize or pass type arguments at run time, and the interpreter passes them. The typed IR cannot yet express an abstract contract member with its own generic parameters, which is why M3 reassigned it, with labelled operands, written `types:`, and a dict variadic tail on a contract member call. | The reassigned forms need one IR shape for both backends, and the Wasm instantiation strategy decides what that shape must carry. | Closed by [D9.1–D9.2](decision-ledger.md); implemented by Step 2, lowered in Step 9 |
+| G9 | A trap has a stable code and a source origin when its span is known. Nothing says how an engine trap, such as an unreachable instruction or an out-of-bounds access, becomes a stable `@runtime.*` code, or how a Wasm trap recovers its source origin before M7's source maps exist. | The exit gate requires trap parity, and `@test.trap` records an origin. | Closed by [D8.1–D8.3 and D13.2](decision-ledger.md); implemented by Step 11 |
+| G10 | WebAssembly leaves the payload of a NaN produced by an arithmetic instruction nondeterministic. The runtime chapter canonicalizes NaN in serialization and equality only. | A NaN that reaches `f64.to-str`, `compare-total`, a dict key order, or a result encoding must agree across backends. The rule must say where canonicalization happens. | Closed by [D11.1–D11.2](decision-ledger.md); implemented by Step 8c |
+| G11 | The pre-M4 revision pinned, without fixing, that a local binder may be named `if`, `i32`, `let-else`, `return`, or `never`, which the specification forbids. An interpreter test over a value nested 5,000 levels deep took about seven minutes in a debug build, with the cause not investigated. | Neither is an M4 form, but the first would be hardened by a second backend and the second distorts the performance baseline. Each needs an owning step or an explicit reassignment. | Assigned by [D14.1–D14.2](decision-ledger.md): the binder fix to Step 2, the nested-value cost to Step 21 |
 | G12 | The host registry has no rows. The effects chapter reserves ten roots in five modules and shows two example operations; no closed symbol list, signature, or error type exists, and `path` and `fs-error` are named but never declared. "Whole-value" console input is not defined. | Steps 16–18 implement the registry and need every row before code, as M3's library steps did. | Step 13 |
 | G13 | An audit event is an opaque string in `@audit-trace.v1` and in the CLI's `auditTrace`. The roadmap requires one versioned event encoding shared by both backends that tolerates new event kinds, and a deterministic event shape per registry entry. | No host operation can be implemented without its event, and the demo gate compares traces byte for byte. | Step 13 |
 | G14 | There is no rule for whether adding a registry entry is a minor registry version, or how a build records the registry version it requires. `vibra_v1` is the only identity. | It is a named deliverable and a forward-compatibility obligation; the Wasm import module name depends on it. | Step 13 |
@@ -126,24 +231,27 @@ the Stage 4A items; Step 13 closes the Stage 4B items.
 
 ## Steps
 
-Stage 4A — the WebAssembly spine, with no host import. Stage demo: the M3 demo
+Stage 4A — the WebAssembly spine, with no `@host` import (only pure native imports). Stage demo: the M3 demo
 library's tests produce identical results in both backends, including a deep
 tail-recursive walk that grows neither stack nor arena.
 
 | Step | One-PR slice | Requires | Status | PR / merge evidence |
 | --- | --- | --- | --- | --- |
-| 1 | [Freeze Stage 4A contracts](01-contracts.md) — specification/infrastructure prerequisite | M3 on `main`; this bootstrap | not started | — |
-| 2 | Contract-member forms reassigned from M3, in typed IR and the interpreter: an abstract contract member with its own generic parameters, labelled operands and written `types:` arguments on a contract member call, a dict variadic tail on a contract member, and such a member as a function value (per G8) | 1 | not started | — |
-| 3 | The specified outcome of deep non-tail recursion in the reference interpreter, replacing the host-event rule, with its diagnostic, command result, and test result (per G1) | 2 | not started | — |
-| 4 | Wasm backend skeleton and differential harness: the emitter crate, the engine behind the runner, the corpus contract of G4, the parity inventory and its test, deterministic emission, and a CI job — infrastructure step | 3 | not started | — |
-| 5 | The value arena and core lowering: scalars and literals, the arena with its reclamation rule, declared and anonymous records, enums, tuples, wrappers, and unions with discriminants in written order, projection, module values, `let`, body sequences, `if`, `return`, direct calls, and the canonical result observation | 4 | not started | — |
-| 6 | Calls: generic instantiation, function values, closures, indirect calls, a tail call to every kind of callee, the deep non-tail recursion outcome, and a bounded live arena across a long allocating tail loop | 5 | not started | — |
-| 7 | Patterns and typed failure: `match` with every pattern kind, destructuring bindings, `let-else`, `as` narrowing, `try`, and `never` | 6 | not started | — |
-| 8 | Collections and the primitive registry: arrays, variadic tails, checked lookups, every `@compiler` primitive row lowered before emission, and `str`, `bytes`, and `dict` through their standard-library bodies | 7 | not started | — |
-| 9 | Interfaces: static dispatch, interface values, default members, destination dispatch and conversion, `iter` with its adapters, and the Step 2 forms | 8 | not started | — |
-| 10 | Native implementations lowered from the single source of G7, with the body/native differential joined to the interpreter/Wasm harness | 9 | not started | — |
-| 11 | Tests and traps in the Wasm backend: `workspace-test` observations, assertion outcomes, and every trap code with its origin | 10 | not started | — |
-| 12 | Stage 4A demo and corpus sub-gate — evidence step | 11 | not started | — |
+| 1 | [Freeze Stage 4A contracts](01-contracts.md) — specification/infrastructure prerequisite | M3 on `main`; this bootstrap | landed, conditional on its PR merging | Branch `claude/m4-step-01-contracts`; merge commit to be recorded when the PR merges |
+| 2 | [Contract-member forms reassigned from M3, and the binder defect](02-contract-members.md): an abstract contract member with its own generic parameters, labelled operands and written `types:` arguments on a contract member call, a dict variadic tail on a contract member, and such a member as a function value, in typed IR and the interpreter (per G8), plus the reserved-binder fix (per G11) | 1 | not started | — |
+| 3 | [The specified outcome of deep non-tail recursion](03-activations.md) in the reference interpreter, replacing the host-event rule: heap activations, a memory budget, and `@runtime.memory-exhausted` as the host event, with `expect.host_event` (per G1) | 2 | not started | — |
+| 4 | [Wasm backend skeleton and differential harness](04-skeleton.md): the emitter crate, the engine and native-code crate behind the runner (latest Wasmtime and a raised toolchain), the corpus contract of G4, the parity inventory and its test, deterministic emission, and a CI job — infrastructure step | 3 | not started | — |
+| 5a | [The value arena and its runtime](05a-arena.md): linear-memory arena, reference counting, the handle table, the exported accessors, memory exhaustion, scalars and literals, and the canonical result observation | 4 | not started | — |
+| 5b | [Data and core lowering](05b-core-lowering.md): declared and anonymous records, enums, tuples, wrappers, and unions with discriminants in written order, projection, module values, `let`, body sequences, `if`, `return`, and direct calls | 5a | not started | — |
+| 6 | [Calls](06-calls.md): generic instantiation, function values, closures, indirect calls, a tail call to every kind of callee, the deep non-tail recursion outcome, and a bounded live arena across a long allocating tail loop | 5b | not started | — |
+| 7 | [Patterns and typed failure](07-patterns-failure.md): `match` with every pattern kind, destructuring bindings, `let-else`, `as` narrowing, `try`, and `never` | 6 | not started | — |
+| 8a | [Integer and `char` primitive rows](08a-integer-primitives.md), lowered before emission and held to shared sample vectors | 7 | not started | — |
+| 8b | [Collections, text, bytes, and dict](08b-collections.md): arrays, variadic tails, checked lookups, the `array.*` and `dict.*` rows, and `str`, `bytes`, and `dict` through their standard-library bodies | 8a | not started | — |
+| 8c | [Number text, floats, and NaN](08c-number-text-floats.md): the integer and float `to-str` and `parse` natives, written once in Rust and called by both backends, the float arithmetic rows, and NaN canonicalization | 8b | not started | — |
+| 9 | [Interfaces](09-interfaces.md): static dispatch, interface values, default members, destination dispatch and conversion, `iter` with its adapters, and the Step 2 forms | 8c | not started | — |
+| 10 | [Natives and the joined differential](10-natives.md): the native import module `vibra_native_v1`, the single Rust source of G7, and the body/native differential joined to the interpreter/Wasm harness | 9 | not started | — |
+| 11 | [Tests and traps in the Wasm backend](11-tests-traps.md): `workspace-test` observations, assertion outcomes, and every trap code with its origin | 10 | not started | — |
+| 12 | [Stage 4A demo and corpus sub-gate](12-stage-4a-evidence.md) — evidence step | 11 | not started | — |
 
 Stage 4B — static effects and host operations, each in both backends.
 
@@ -168,6 +276,17 @@ Step 1 and guides for Steps 14–22 in Step 13, because their content depends on
 the contracts those steps close. Step 1 also records the decision ledger, the
 M4 surface inventory, and M4 validation. No step starts without its guide.
 
+Step 1 split two planned steps, and the split is recorded here, in the guides, and
+in the ledger. Step 5 became 5a and 5b: the arena, its reference counting, the
+handle table, and the host accessors are one self-contained contract with its own
+proof (bounded live size, bounded-stack release, exhaustion), and carrying every
+compound form with it would give one change that cannot be reviewed against that
+proof. Step 8 became 8a, 8b, and 8c: its primitive registry is about two hundred
+rows, the collections need the integer rows, and number text and floats are their
+own body of work. The order of 8a-8c follows the dependencies still: collections
+use `u64` arithmetic, and the number-text natives build `str` values, so they
+come after the collection layout.
+
 The slices above are the planned decomposition, not a promise that each fits
 one PR. A step that proves too large is split before delivery, as M3 split
 Steps 4, 8, 11, 14, and 15, with the split recorded in this table, the guides,
@@ -177,10 +296,10 @@ and the ledger.
 
 | Roadmap obligation | Owning steps |
 | --- | --- |
-| Unoptimized Wasm lowering of the complete pure language: mandatory tail calls, union discriminants in written order, checked lookups, `@compiler` externals lowered before emission | 4–9 |
-| Native implementations lowered from the single source; body/native differential joined to the interpreter/Wasm harness | 1, 10 |
-| Instance-owned value arena and opaque-index discipline; no index or instance identity in typed IR or build output | 1, 5, 16 |
-| Specified arena reclamation rule; bounded host memory for a long tail-recursive program | 1, 5, 6 |
+| Unoptimized Wasm lowering of the complete pure language: mandatory tail calls, union discriminants in written order, checked lookups, `@compiler` externals lowered before emission | 4–10 (5a–8c); NaN and number text in 8c |
+| Native implementations lowered from the single source; body/native differential joined to the interpreter/Wasm harness | 1, 8a, 8c, 10 |
+| Instance-owned value arena and opaque-index discipline; no index or instance identity in typed IR or build output | 1, 5a, 16 |
+| Specified arena reclamation rule; bounded host memory for a long tail-recursive program | 1, 5a, 6 |
 | Interpreter/Wasm differential harness over the entire executable corpus, through the conformance harness | 1, 4, 11, 12 |
 | Native `deffect` operations, default-empty ceilings, transitively closed performed rows, imported-symbol effect references | 14 |
 | Effect metadata in general queries; source-position metadata for performed, enclosing, and target rows | 20 |
