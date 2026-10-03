@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-constant-defaults"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "A labelled default written as a name or as a construction is an expression, and the formatter lays it out as it does any expression: spacing is normalized, and a literal default keeps its spelling."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"
