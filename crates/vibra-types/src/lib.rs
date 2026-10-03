@@ -2163,7 +2163,17 @@ fn syntax_function_targets(
                     .and_then(|index| globals.get(*index))
                     .map(|global| global.function_targets.clone())
             })
-            .unwrap_or_default(),
+            // A dotted path no function or module value owns may be a contract
+            // member named as a value, a closure that selects its
+            // implementation at each application. Its target is not known, so
+            // a call through it is still a tail transfer.
+            .unwrap_or_else(|| {
+                if name.segments().len() > 1 {
+                    FunctionTargetSet::unknown()
+                } else {
+                    FunctionTargetSet::default()
+                }
+            }),
         ExpressionKind::Do(expressions) => syntax_sequence_targets(
             expressions,
             global_indices,
@@ -2890,11 +2900,15 @@ fn first_invalid_dict_key(
 }
 
 /// The generic callee of one application and what the call site wrote.
-struct GenericCall<'a> {
-    parameters: &'a [String],
-    signature: &'a FunctionSignature,
-    type_arguments: Option<&'a [Type]>,
-    expected: Option<&'a Type>,
+pub(crate) struct GenericCall<'a> {
+    pub(crate) parameters: &'a [String],
+    pub(crate) signature: &'a FunctionSignature,
+    pub(crate) type_arguments: Option<&'a [Type]>,
+    pub(crate) expected: Option<&'a Type>,
+    /// A positional operand the caller already checked, by its index: a
+    /// contract call selects its implementation from it, so it is not checked
+    /// a second time.
+    pub(crate) checked: Option<(usize, &'a Expr)>,
 }
 
 /// Where one checked operand of a generic application belongs.
@@ -2905,15 +2919,17 @@ enum OperandSlot {
 }
 
 /// The checked operands of a generic application.
-struct GenericOperands {
+pub(crate) struct GenericOperands {
     /// The instantiated signature.
-    signature: FunctionSignature,
+    pub(crate) signature: FunctionSignature,
+    /// The type argument of each generic parameter, in `parameters` order.
+    pub(crate) arguments: Vec<Type>,
     /// Positional operands in order.
-    positional: Vec<Expr>,
+    pub(crate) positional: Vec<Expr>,
     /// Written labelled operands by name.
-    labelled: BTreeMap<String, Expr>,
+    pub(crate) labelled: BTreeMap<String, Expr>,
     /// Variadic tail operands in order, not yet packed.
-    tail: Vec<Expr>,
+    pub(crate) tail: Vec<Expr>,
 }
 
 /// Checks the written operands of a generic application and infers its
@@ -2925,7 +2941,7 @@ struct GenericOperands {
 /// literals and lambdas see a concrete expectation; the rest are checked
 /// alone and unified with their parameter type. Lambda operands wait until
 /// every other operand has had the chance to fix their parameter type.
-fn check_generic_operands(
+pub(crate) fn check_generic_operands(
     environment: &mut CheckEnvironment<'_>,
     application: &Application,
     call: GenericCall<'_>,
@@ -2944,12 +2960,21 @@ fn check_generic_operands(
     let opened = instantiation.open_signature(call.signature);
 
     let mut pending = Vec::new();
+    let mut positional = BTreeMap::new();
     for (index, (argument, pattern)) in ordered
         .iter()
         .take(opened.parameters().len())
         .zip(opened.parameters())
         .enumerate()
     {
+        if let Some((checked, value)) = call.checked
+            && checked == index
+        {
+            // Already checked; it still fixes what its own type determines.
+            instantiation.unify(pattern, &value.result_type());
+            positional.insert(index, value.clone());
+            continue;
+        }
         pending.push((OperandSlot::Positional(index), pattern.clone(), *argument));
     }
     for parameter in opened.labelled() {
@@ -2979,7 +3004,6 @@ fn check_generic_operands(
                 || unsuffixed_literal(argument.value())
         });
 
-    let mut positional = BTreeMap::new();
     let mut labelled_values = BTreeMap::new();
     let mut tail_values = BTreeMap::new();
     for (slot, pattern, argument) in others.into_iter().chain(lambdas) {
@@ -3013,8 +3037,17 @@ fn check_generic_operands(
         ambiguous_generic(environment, application.span(), &unbound);
         return None;
     };
+    let arguments = call
+        .parameters
+        .iter()
+        .filter_map(|name| {
+            let variable = instantiation.open(&Type::Param(name.clone()));
+            instantiation.resolved(&variable)
+        })
+        .collect();
     Some(GenericOperands {
         signature: *instantiated,
+        arguments,
         positional: positional.into_values().collect(),
         labelled: labelled_values,
         tail: tail_values.into_values().collect(),
@@ -4406,6 +4439,7 @@ fn check_form(
                     positional,
                     labelled: labelled_values,
                     tail,
+                    ..
                 } = check_generic_operands(
                     environment,
                     application,
@@ -4414,6 +4448,7 @@ fn check_form(
                         signature: &signature,
                         type_arguments: type_arguments.as_deref(),
                         expected: expected.as_ref(),
+                        checked: None,
                     },
                     &ordered,
                     &mut labelled,

@@ -18,7 +18,8 @@ fn diagnostics(source: &str) -> Vec<(DiagnosticCode, ByteSpan)> {
 /// `source` reports exactly one diagnostic, `@name.reserved-declaration` at
 /// `binder` inside the first `anchor`, and nothing else cascades from it.
 fn rejected(source: &str, anchor: &str, binder: &str) {
-    let start = source.find(anchor).expect("anchor") + anchor.find(binder).expect("binder");
+    let start =
+        source.find(anchor).expect("anchor") + anchor.find(binder).expect("binder");
     assert_eq!(
         diagnostics(source),
         vec![(
@@ -98,7 +99,6 @@ fn a_nested_pattern_binder_is_rejected_at_its_own_name() {
 
 #[test]
 fn ordinary_binders_and_discards_are_accepted() {
-    let source =
-        "(defn f (value i32 - i32) i32 (let result 1i32 - 2i32) (let option 3i32) value)";
+    let source = "(defn f (value i32 - i32) i32 (let result 1i32 - 2i32) (let option 3i32) value)";
     assert_eq!(diagnostics(source), vec![], "{source}");
 }

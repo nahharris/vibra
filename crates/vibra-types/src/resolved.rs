@@ -376,6 +376,16 @@ pub fn check_resolved(
                     };
                     let index = globals.len();
                     global_indices.insert(id.clone(), index);
+                    // A module value of function type may hold any function or
+                    // closure, including a contract member named as a value, so
+                    // its target is unknown and a call through it in tail
+                    // position still reuses the activation.
+                    let function_targets =
+                        if matches!(value_type, vibra_ir::Type::Function(_)) {
+                            FunctionTargetSet::unknown()
+                        } else {
+                            FunctionTargetSet::default()
+                        };
                     globals.push(GlobalHeader {
                         name: id.canonical(),
                         value_type,
@@ -384,7 +394,7 @@ pub fn check_resolved(
                         source_id: module.record.source_id().to_owned(),
                         module_index,
                         function_index: None,
-                        function_targets: FunctionTargetSet::default(),
+                        function_targets,
                     });
                 }
                 Declaration::Defn(function) => {

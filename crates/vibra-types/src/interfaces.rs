@@ -16,15 +16,16 @@ use vibra_ir::{
     CallTarget, ClosedContract, Expr, FunctionSignature, Implements, SourceOrigin, Type,
 };
 use vibra_syntax::{
-    Application, Attribute, Declaration, DefintDeclaration, DeftypeBody,
-    FunctionDeclaration, TypeExpr, TypeMember,
+    Application, ApplicationBinding, Attribute, BindingFacts, Declaration,
+    DefintDeclaration, DeftypeBody, FunctionDeclaration, TypeExpr, TypeMember,
 };
 
 use crate::nominal::{
     ContractMember, DeclaredInterface, Implementation, Scope, TypeNames,
 };
 use crate::{
-    CheckEnvironment, call_contract_error, check_expression, check_operand, mismatch,
+    CheckEnvironment, GenericCall, GenericOperands, call_contract_error,
+    check_expression, check_generic_operands, mismatch,
 };
 
 /// The receiver placeholder a contract signature is written over.
@@ -811,6 +812,293 @@ pub(crate) fn register(
     });
 }
 
+/// The `types:` list a contract call wrote, split at the member it addresses:
+/// the contract's own parameters come first and the member's own after them
+/// (`docs/spec/02-type-system.md`, "Generics").
+struct WrittenTypes {
+    /// The interface's type arguments.
+    interface: Vec<Type>,
+    /// The member's own type arguments, when the member is generic.
+    member: Option<Vec<Type>>,
+}
+
+/// Lowers and measures the `types:` list of a contract call. The outer `None`
+/// means a type failed to lower or the length is wrong, reported once; the
+/// inner `None` means nothing was written.
+fn written_types(
+    environment: &mut CheckEnvironment<'_>,
+    application: &Application,
+    declared: &DeclaredInterface,
+    contract: &ContractMember,
+) -> Option<Option<WrittenTypes>> {
+    let Some(mut list) = crate::lower_type_arguments(environment, application)? else {
+        return Some(None);
+    };
+    let interface = declared.parameters.len();
+    let total = interface + contract.generics.len();
+    if total == 0 {
+        crate::type_argument_mismatch(
+            environment,
+            application,
+            "the applied contract member declares no generic parameters".to_owned(),
+        );
+        return None;
+    }
+    if list.len() != total {
+        crate::type_argument_mismatch(
+            environment,
+            application,
+            format!(
+                "`types:` supplies {} type argument{}, but `{}.{}` takes {total}: the interface's, then the member's own",
+                list.len(),
+                if list.len() == 1 { "" } else { "s" },
+                declared.name,
+                contract.name
+            ),
+        );
+        return None;
+    }
+    let member = list.split_off(interface);
+    Some(Some(WrittenTypes {
+        interface: list,
+        member: (!member.is_empty()).then_some(member),
+    }))
+}
+
+/// Whether the interface arguments `arguments` are the ones `written` names.
+/// An argument that is a generic parameter of the receiver's own declaration
+/// is fixed there and agrees with anything.
+fn matches_written(written: &WrittenTypes, arguments: &[Type]) -> bool {
+    written.interface.is_empty()
+        || (written.interface.len() == arguments.len()
+            && written
+                .interface
+                .iter()
+                .zip(arguments)
+                .all(|(written, actual)| {
+                    matches!(actual, Type::Param(_))
+                        || crate::types_match(written, actual)
+                }))
+}
+
+/// Reports a written interface type argument list that is not the one the
+/// receiver conforms at.
+fn agrees(
+    environment: &mut CheckEnvironment<'_>,
+    application: &Application,
+    written: Option<&WrittenTypes>,
+    arguments: &[Type],
+) -> bool {
+    let Some(written) = written.filter(|written| !written.interface.is_empty()) else {
+        return true;
+    };
+    if matches_written(written, arguments) {
+        return true;
+    }
+    crate::type_argument_mismatch(
+        environment,
+        application,
+        format!(
+            "`types:` names the interface arguments {}, but the receiver implements it at {}",
+            written
+                .interface
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" "),
+            arguments
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+    );
+    false
+}
+
+/// What the operands of one contract call check to.
+struct MemberOperands {
+    /// The operands in resolved parameter order: the fixed ones, the labelled
+    /// ones in declaration order with a default for each one not written, and
+    /// the packed variadic tail.
+    arguments: Vec<Expr>,
+    /// The member's signature at this call: `self`, the interface's
+    /// arguments, and the member's own type arguments substituted.
+    signature: FunctionSignature,
+    /// The member's own type arguments in `where:` order.
+    member_types: Vec<Type>,
+}
+
+/// Checks the written operands of a call of `contract` with `self` and the
+/// interface's parameters replaced by `substitution`: binds labelled operands
+/// and a variadic tail by the member's signature, infers the member's own
+/// type arguments from the operands, `written`, and `expected`, and checks
+/// them against the member's bounds.
+///
+/// `checked` is a positional operand the caller already checked because it
+/// selects the implementation. The member's own generic names are renamed
+/// first, so a receiver that spells one of them lexically is never captured.
+fn check_member_operands(
+    environment: &mut CheckEnvironment<'_>,
+    application: &Application,
+    contract: &ContractMember,
+    substitution: &BTreeMap<String, Type>,
+    checked: Option<(usize, &Expr)>,
+    written: Option<&[Type]>,
+    expected: Option<&Type>,
+) -> Option<MemberOperands> {
+    let (renamed, _) = member_renaming(contract);
+    let signature = member_signature(contract, substitution);
+    let facts = BindingFacts::new(
+        signature.parameters().len(),
+        signature
+            .labelled()
+            .iter()
+            .map(|parameter| parameter.name().to_owned())
+            .collect(),
+        signature.variadic().map(crate::tail_binding),
+    );
+    let ordered = match application.ordered_arguments(&facts) {
+        Ok(ordered) => ordered,
+        Err(error) => {
+            call_contract_error(environment, application.span(), error.to_string());
+            return None;
+        }
+    };
+    let mut labelled = BTreeMap::new();
+    let mut tail = Vec::new();
+    for argument in ordered.iter().skip(signature.parameters().len()) {
+        if let Some(label) = argument.label() {
+            labelled.insert(label.value().to_owned(), *argument);
+        } else {
+            tail.push(*argument);
+        }
+    }
+    let GenericOperands {
+        signature: instantiated,
+        arguments: member_types,
+        positional,
+        labelled: mut written_labelled,
+        tail,
+    } = check_generic_operands(
+        environment,
+        application,
+        GenericCall {
+            parameters: &renamed,
+            signature: &signature,
+            type_arguments: written,
+            expected,
+            checked,
+        },
+        &ordered,
+        &mut labelled,
+        &tail,
+    )?;
+    if !crate::check_inferred_dict_keys(
+        environment,
+        application.span(),
+        &Type::Function(Box::new(instantiated.clone())),
+    ) {
+        return None;
+    }
+    // The member's own bounded parameters, at the arguments this call fixed.
+    if !contract.bounds.is_empty() {
+        let fixed = contract
+            .generics
+            .iter()
+            .cloned()
+            .zip(member_types.iter().cloned())
+            .collect::<BTreeMap<_, _>>();
+        if !check_bounds(environment, application.span(), &contract.bounds, &fixed) {
+            return None;
+        }
+    }
+    let origin = SourceOrigin::new(environment.source_id, application.span());
+    let mut arguments = positional;
+    for parameter in instantiated.labelled() {
+        if let Some(argument) = written_labelled.remove(parameter.name()) {
+            arguments.push(argument);
+        } else if let Some(default) = parameter.default() {
+            // An implementation keeps its contract's defaults, so the
+            // contract's value is the operand whichever one is selected.
+            arguments.push(Expr::literal(default.clone(), origin.clone()));
+        } else {
+            call_contract_error(
+                environment,
+                application.span(),
+                format!("labelled argument `{}` has no default", parameter.name()),
+            );
+            return None;
+        }
+    }
+    if let Some(tail_type) = instantiated.variadic() {
+        let key_order = match tail_type {
+            Type::Dict(key, _) => key_order(environment.types, key),
+            _ => None,
+        };
+        arguments.push(crate::pack_tail(tail_type, tail, key_order, origin));
+    }
+    if application.type_arguments_after_operands()
+        || ordered
+            .iter()
+            .zip(application.arguments())
+            .any(|(left, right)| !std::ptr::eq(*left, right))
+    {
+        environment.diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::StyleArgumentOrder,
+                application.span(),
+                "application operands are not in canonical declaration order",
+            )
+            .with_source_id(environment.source_id),
+        );
+    }
+    environment
+        .bindings
+        .push(ApplicationBinding::new(application.span(), facts));
+    Some(MemberOperands {
+        arguments,
+        signature: instantiated,
+        member_types,
+    })
+}
+
+/// The `index`th unlabelled operand: a fixed parameter binds the unlabelled
+/// operands in order, whatever labelled operands are written between them.
+fn positional_operand(
+    application: &Application,
+    index: usize,
+) -> Option<&vibra_syntax::CallArgument> {
+    application
+        .arguments()
+        .iter()
+        .filter(|operand| operand.label().is_none())
+        .nth(index)
+}
+
+/// Reports why the operands of `application` bind no parameter of `contract`:
+/// a missing fixed operand, an unknown or repeated label, an unexpected
+/// operand, or an odd dict tail.
+fn report_arity(
+    environment: &mut CheckEnvironment<'_>,
+    application: &Application,
+    contract: &ContractMember,
+) {
+    let facts = BindingFacts::new(
+        contract.signature.parameters().len(),
+        contract
+            .signature
+            .labelled()
+            .iter()
+            .map(|parameter| parameter.name().to_owned())
+            .collect(),
+        contract.signature.variadic().map(crate::tail_binding),
+    );
+    if let Err(error) = application.ordered_arguments(&facts) {
+        call_contract_error(environment, application.span(), error.to_string());
+    }
+}
+
 /// Checks `(interface.member operand…)`: the receiver operand selects the
 /// implementation, statically for a known type and at run time for a
 /// generic bounded by the interface.
@@ -825,23 +1113,7 @@ pub(crate) fn check_contract_call(
     let declared = environment.types.interface(interface)?.clone();
     let contract = declared.members.get(member)?.clone();
     let span = application.span();
-    let unavailable = |environment: &mut CheckEnvironment<'_>, message: &str| {
-        crate::unavailable(
-            environment.diagnostics,
-            environment.source_id,
-            span,
-            message,
-        );
-    };
-    if !contract.signature.labelled().is_empty()
-        || application.type_arguments().is_some()
-    {
-        unavailable(
-            environment,
-            "labelled operands and written type arguments on a contract member are outside the M3 profile",
-        );
-        return None;
-    }
+    let written = written_types(environment, application, &declared, &contract)?;
     // A default member is one function for every receiver.
     if contract.default
         && let Some(position) = contract.receiver
@@ -853,16 +1125,10 @@ pub(crate) fn check_contract_call(
             &declared,
             &contract,
             position,
+            written.as_ref(),
             expected,
             tail_position,
         );
-    }
-    if !contract.generics.is_empty() {
-        unavailable(
-            environment,
-            "an abstract contract member with its own generic parameters is outside the M3 profile",
-        );
-        return None;
     }
     // A destination-dispatched member, a generic interface, and a variadic
     // member select among implementations.
@@ -875,35 +1141,23 @@ pub(crate) fn check_contract_call(
             interface,
             &declared,
             &contract,
+            written.as_ref(),
             expected,
             tail_position,
         );
     };
-    let operands = application.arguments();
-    if operands.len() != contract.signature.parameters().len()
-        || operands.iter().any(|operand| operand.label().is_some())
-    {
-        call_contract_error(
-            environment,
-            span,
-            format!(
-                "`{}.{}` takes exactly {} unlabelled operands",
-                declared.name,
-                contract.name,
-                contract.signature.parameters().len()
-            ),
-        );
+    let Some(receiver_operand) = positional_operand(application, position) else {
+        report_arity(environment, application, &contract);
         return None;
-    }
-    let receiver_value =
-        check_expression(environment, operands.get(position)?.value(), None)?;
+    };
+    let receiver_value = check_expression(environment, receiver_operand.value(), None)?;
     let receiver = receiver_value.result_type();
     let dispatch = match &receiver {
         Type::Param(name) => {
             if environment.bounds.get(name) != Some(&interface) {
                 unsatisfied(
                     environment,
-                    operands.get(position)?.value().span(),
+                    receiver_operand.value().span(),
                     &receiver,
                     &declared.name,
                 );
@@ -921,7 +1175,7 @@ pub(crate) fn check_contract_call(
                 mismatch(
                     environment.diagnostics,
                     environment.source_id,
-                    operands.get(index)?.value().span(),
+                    positional_operand(application, index)?.value().span(),
                     self_type(),
                     receiver.clone(),
                     "a member with another `self` operand cannot be called through an interface value, which erases the type they must share",
@@ -950,7 +1204,7 @@ pub(crate) fn check_contract_call(
                 [] => {
                     unsatisfied(
                         environment,
-                        operands.get(position)?.value().span(),
+                        receiver_operand.value().span(),
                         &receiver,
                         &declared.name,
                     );
@@ -970,23 +1224,23 @@ pub(crate) fn check_contract_call(
             }
         }
     };
-    let signature = contract
-        .signature
-        .substitute(&BTreeMap::from([(SELF.to_owned(), receiver.clone())]));
-    let mut arguments = Vec::with_capacity(operands.len());
-    for (index, (operand, parameter)) in
-        operands.iter().zip(signature.parameters()).enumerate()
-    {
-        if index == position {
-            arguments.push(receiver_value.clone());
-        } else {
-            arguments.push(check_operand(
-                environment,
-                operand.value(),
-                Some(parameter.clone()),
-            )?);
-        }
-    }
+    // An interface that takes no parameters has no `types:` entry of its own.
+    let substitution = BTreeMap::from([(SELF.to_owned(), receiver.clone())]);
+    let MemberOperands {
+        arguments,
+        signature,
+        member_types,
+    } = check_member_operands(
+        environment,
+        application,
+        &contract,
+        &substitution,
+        Some((position, &receiver_value)),
+        written
+            .as_ref()
+            .and_then(|written| written.member.as_deref()),
+        expected.as_ref(),
+    )?;
     let result = signature.result();
     crate::ensure_expected(environment, span, expected.clone(), result.clone());
     if expected
@@ -997,7 +1251,10 @@ pub(crate) fn check_contract_call(
     }
     let origin = SourceOrigin::new(environment.source_id, span);
     Some(match dispatch {
-        Some(function) => crate::direct_call(
+        // A generic member's own type arguments reach the implementation
+        // through the contract call, which the run time binds, so it stays one
+        // even when the receiver type is known.
+        Some(function) if contract.generics.is_empty() => crate::direct_call(
             environment,
             function,
             arguments,
@@ -1005,12 +1262,13 @@ pub(crate) fn check_contract_call(
             origin,
             tail_position,
         ),
-        None => Expr::Call {
+        _ => Expr::Call {
             target: CallTarget::Contract {
                 interface: declared.id.clone(),
                 member: contract.name.clone(),
                 receiver: position,
                 arguments: Vec::new(),
+                member_types,
                 destination: None,
                 signature: Box::new(signature),
                 closed: closed_contract(environment.types, interface, &contract.name),
@@ -1155,6 +1413,12 @@ pub(crate) fn materialize(
                             .iter()
                             .map(|parameter| Type::Param(parameter.clone()))
                             .collect(),
+                        member_generics: member
+                            .generics
+                            .iter()
+                            .cloned()
+                            .map(Some)
+                            .collect(),
                     }),
                 });
             }
@@ -1224,6 +1488,17 @@ pub(crate) fn materialize(
                 continue;
             }
             written.insert(member_name.clone(), functions.len());
+            let member_generics = interface
+                .members
+                .iter()
+                .find(|member| member.name == *member_name)
+                .map(|member| {
+                    own_generics(
+                        &member.generics,
+                        &crate::nominal::generic_names(method.attributes().items()),
+                    )
+                })
+                .unwrap_or_default();
             functions.push(crate::FunctionHeader {
                 declaration_index: plan.declaration_index,
                 module_index: plan.module_index,
@@ -1246,6 +1521,7 @@ pub(crate) fn materialize(
                     member: member_name.clone(),
                     receiver: plan.receiver.clone(),
                     arguments: plan.arguments.clone(),
+                    member_generics,
                 }),
             });
         }
@@ -1254,6 +1530,25 @@ pub(crate) fn materialize(
     types.set_default_members(defaults);
     types.set_bounds_ready();
     check_header_bounds(types, modules, functions, diagnostics);
+}
+
+/// The generic parameter an implementation member declares for each of its
+/// contract member's own generic parameters, in the contract's order. A name
+/// the implementation also declares is the same parameter, as its signature
+/// must match the contract's; one the signature never mentions may be named
+/// differently, and then takes the next unmatched name in `where:` order.
+fn own_generics(contract: &[String], declared: &[String]) -> Vec<Option<String>> {
+    let mut unmatched = declared.iter().filter(|name| !contract.contains(name));
+    contract
+        .iter()
+        .map(|name| {
+            if declared.contains(name) {
+                Some(name.clone())
+            } else {
+                unmatched.next().cloned()
+            }
+        })
+        .collect()
 }
 
 /// Checks the bounds of every applied declared type in the signatures and
@@ -1436,9 +1731,13 @@ pub(crate) fn key_order(types: &TypeNames, key: &Type) -> Option<vibra_ir::TypeI
 }
 
 /// One implementation a contract call may select.
+#[derive(Clone)]
 struct Candidate {
-    /// The member's signature at this implementation.
+    /// The member's signature at this implementation, with its own generic
+    /// parameters still open.
     signature: FunctionSignature,
+    /// `self` and the interface's parameters at this implementation.
+    substitution: BTreeMap<String, Type>,
     target: CandidateTarget,
     /// The applied interface, for diagnostics.
     spelling: String,
@@ -1446,6 +1745,7 @@ struct Candidate {
     arguments: Vec<Type>,
 }
 
+#[derive(Clone)]
 enum CandidateTarget {
     /// A written or default member, by its function.
     Function(usize),
@@ -1463,41 +1763,29 @@ enum CandidateTarget {
 /// at several arguments (`docs/spec/02-type-system.md`, "Interfaces and
 /// methods"). Selection uses the written operand types and the written
 /// expected type, and never picks an order between two that remain.
+#[allow(clippy::too_many_arguments)]
 fn check_selected_call(
     environment: &mut CheckEnvironment<'_>,
     application: &Application,
     interface: usize,
     declared: &DeclaredInterface,
     contract: &ContractMember,
+    written: Option<&WrittenTypes>,
     expected: Option<Type>,
     tail_position: bool,
 ) -> Option<Expr> {
     let span = application.span();
     let operands = application.arguments();
-    let fixed = contract.signature.parameters().len();
-    let variadic = contract.signature.variadic().is_some();
-    if operands.iter().any(|operand| operand.label().is_some())
-        || operands.len() < fixed
-        || (!variadic && operands.len() != fixed)
-    {
-        call_contract_error(
-            environment,
-            span,
-            format!(
-                "`{}.{}` takes {}{fixed} unlabelled operands",
-                declared.name,
-                contract.name,
-                if variadic { "at least " } else { "exactly " },
-            ),
-        );
-        return None;
-    }
     let mut receiver_value = None;
     let mut dispatched = None;
     let receiver = match contract.receiver {
         Some(position) => {
-            let value =
-                check_expression(environment, operands.get(position)?.value(), None)?;
+            let Some(receiver_operand) = positional_operand(application, position)
+            else {
+                report_arity(environment, application, contract);
+                return None;
+            };
+            let value = check_expression(environment, receiver_operand.value(), None)?;
             let receiver = value.result_type();
             // The `self` of a default member and an interface value dispatch
             // at run time, at the interface's own or the value's arguments.
@@ -1524,7 +1812,7 @@ fn check_selected_call(
                         mismatch(
                             environment.diagnostics,
                             environment.source_id,
-                            operands.get(index)?.value().span(),
+                            positional_operand(application, index)?.value().span(),
                             self_type(),
                             receiver.clone(),
                             "a member with another `self` operand cannot be called through an interface value, which erases the type they must share",
@@ -1539,7 +1827,7 @@ fn check_selected_call(
                 Type::Param(_) | Type::Interface(_, _) | Type::Any => {
                     unsatisfied(
                         environment,
-                        operands.get(position)?.value().span(),
+                        receiver_operand.value().span(),
                         &receiver,
                         &declared.name,
                     );
@@ -1583,7 +1871,6 @@ fn check_selected_call(
         unsatisfied(environment, span, &receiver, &declared.name);
         return None;
     }
-    let position = receiver_value.as_ref().map(|(position, _)| *position);
     // An unsuffixed literal has no type of its own, so it cannot choose
     // among conversion sources: which one fits would depend on its value.
     if candidates.len() > 1
@@ -1608,14 +1895,37 @@ fn check_selected_call(
         environment.diagnostics.push(diagnostic);
         return None;
     }
+    // A written `types:` list names the interface arguments the call selects.
+    let candidates = match written.filter(|written| !written.interface.is_empty()) {
+        Some(written) => {
+            let matching = candidates
+                .iter()
+                .filter(|candidate| matches_written(written, &candidate.arguments))
+                .cloned()
+                .collect::<Vec<_>>();
+            if matching.is_empty() {
+                let first = candidates.first()?.arguments.clone();
+                agrees(environment, application, Some(written), &first);
+                return None;
+            }
+            matching
+        }
+        None => candidates,
+    };
+    let member_written = written.and_then(|written| written.member.as_deref());
+    let checked = receiver_value
+        .as_ref()
+        .map(|(position, value)| (*position, value));
     let fitting = candidates
         .iter()
         .filter(|candidate| {
             fits(
                 environment,
                 application,
+                contract,
                 candidate,
-                position,
+                checked,
+                member_written,
                 expected.as_ref(),
             )
         })
@@ -1661,44 +1971,20 @@ fn check_selected_call(
         }
     };
     let origin = SourceOrigin::new(environment.source_id, span);
-    let mut arguments = Vec::with_capacity(operands.len());
-    for (index, (operand, parameter)) in operands
-        .iter()
-        .zip(chosen.signature.parameters())
-        .enumerate()
-    {
-        match &receiver_value {
-            Some((position, value)) if *position == index => {
-                arguments.push(value.clone());
-            }
-            _ => arguments.push(check_operand(
-                environment,
-                operand.value(),
-                Some(parameter.clone()),
-            )?),
-        }
-    }
-    if let Some(tail) = chosen.signature.variadic() {
-        let Type::Array(element) = tail else {
-            crate::unavailable(
-                environment.diagnostics,
-                environment.source_id,
-                span,
-                "a dict variadic tail on a contract member is outside the M3 profile",
-            );
-            return None;
-        };
-        let mut items = Vec::new();
-        for operand in operands.iter().skip(fixed) {
-            items.push(check_operand(
-                environment,
-                operand.value(),
-                Some(element.as_ref().clone()),
-            )?);
-        }
-        arguments.push(crate::pack_tail(tail, items, None, origin.clone()));
-    }
-    let result = chosen.signature.result();
+    let MemberOperands {
+        arguments,
+        signature,
+        member_types,
+    } = check_member_operands(
+        environment,
+        application,
+        contract,
+        &chosen.substitution,
+        checked,
+        member_written,
+        expected.as_ref(),
+    )?;
+    let result = signature.result();
     crate::ensure_expected(environment, span, expected.clone(), result.clone());
     if expected
         .as_ref()
@@ -1707,25 +1993,30 @@ fn check_selected_call(
         return None;
     }
     Some(match chosen.target {
-        CandidateTarget::Function(function) => crate::direct_call(
-            environment,
-            function,
-            arguments,
-            result,
-            origin,
-            tail_position,
-        ),
+        // A generic member's own type arguments reach the implementation
+        // through the contract call, which the run time binds.
+        CandidateTarget::Function(function) if contract.generics.is_empty() => {
+            crate::direct_call(
+                environment,
+                function,
+                arguments,
+                result,
+                origin,
+                tail_position,
+            )
+        }
         CandidateTarget::Primitive(intrinsic) => {
             Expr::external_with_result(intrinsic, arguments, result, origin)
         }
-        CandidateTarget::Dispatch => Expr::Call {
+        CandidateTarget::Function(_) | CandidateTarget::Dispatch => Expr::Call {
             target: CallTarget::Contract {
                 interface: declared.id.clone(),
                 member: contract.name.clone(),
                 receiver: contract.receiver.unwrap_or(0),
                 arguments: chosen.arguments.clone(),
+                member_types,
                 destination: contract.receiver.is_none().then(|| receiver.clone()),
-                signature: Box::new(chosen.signature.clone()),
+                signature: Box::new(signature),
                 closed: closed_contract(environment.types, interface, &contract.name),
             },
             arguments,
@@ -1849,9 +2140,10 @@ fn check_selected_value(
         unsatisfied(environment, span, &receiver, &declared.name);
         return None;
     }
+    let (renamed, _) = member_renaming(contract);
     let fitting = candidates
         .iter()
-        .filter(|candidate| candidate.signature.same_shape(written))
+        .filter(|candidate| fits_value(&renamed, &candidate.signature, written))
         .collect::<Vec<_>>();
     let chosen = match fitting.as_slice() {
         [chosen] => *chosen,
@@ -1894,10 +2186,17 @@ fn check_selected_value(
             return None;
         }
     };
-    let signature = chosen.signature.clone();
+    let (signature, member_types) = instantiate_value(
+        environment,
+        span,
+        contract,
+        &renamed,
+        &chosen.signature,
+        written,
+    )?;
     let origin = SourceOrigin::new(environment.source_id, span);
-    // The closure's slots are the fixed parameters and then the tail, which
-    // arrives already packed.
+    // The closure's slots are the fixed parameters, the labelled ones, and
+    // then the tail, which arrives already packed.
     let slots = signature.slot_types();
     let arguments = slots
         .iter()
@@ -1909,23 +2208,26 @@ fn check_selected_value(
     let result = signature.result();
     let body = match chosen.target {
         // The closure body's call is in the tail position of its activation.
-        CandidateTarget::Function(function) => crate::direct_call(
-            environment,
-            function,
-            arguments,
-            result,
-            origin.clone(),
-            true,
-        ),
+        CandidateTarget::Function(function) if contract.generics.is_empty() => {
+            crate::direct_call(
+                environment,
+                function,
+                arguments,
+                result,
+                origin.clone(),
+                true,
+            )
+        }
         CandidateTarget::Primitive(intrinsic) => {
             Expr::external_with_result(intrinsic, arguments, result, origin.clone())
         }
-        CandidateTarget::Dispatch => Expr::Call {
+        CandidateTarget::Function(_) | CandidateTarget::Dispatch => Expr::Call {
             target: CallTarget::Contract {
                 interface: declared.id.clone(),
                 member: contract.name.clone(),
                 receiver: contract.receiver.unwrap_or(0),
                 arguments: chosen.arguments.clone(),
+                member_types,
                 destination: contract.receiver.is_none().then(|| receiver.clone()),
                 signature: Box::new(signature.clone()),
                 closed: closed_contract(environment.types, interface, &contract.name),
@@ -1947,6 +2249,54 @@ fn check_selected_value(
     ))
 }
 
+/// `self` as `receiver` and the interface's parameters as `arguments`.
+fn member_substitution(
+    declared: &DeclaredInterface,
+    receiver: &Type,
+    arguments: &[Type],
+) -> BTreeMap<String, Type> {
+    let mut substitution = BTreeMap::from([(SELF.to_owned(), receiver.clone())]);
+    substitution.extend(
+        declared
+            .parameters
+            .iter()
+            .cloned()
+            .zip(arguments.iter().cloned()),
+    );
+    substitution
+}
+
+/// The names a contract member's own generic parameters take at one call or
+/// value, and the renaming to them. Source names cannot contain `#`, so a
+/// receiver or interface argument that spells one of the member's generic
+/// names lexically is never captured when the two are substituted together.
+fn member_renaming(contract: &ContractMember) -> (Vec<String>, BTreeMap<String, Type>) {
+    let renamed = contract
+        .generics
+        .iter()
+        .map(|name| format!("{name}#member"))
+        .collect::<Vec<_>>();
+    let renaming = contract
+        .generics
+        .iter()
+        .cloned()
+        .zip(renamed.iter().map(|name| Type::Param(name.clone())))
+        .collect();
+    (renamed, renaming)
+}
+
+/// `contract`'s signature with `substitution` applied and its own generic
+/// parameters left open under their [`member_renaming`] names.
+fn member_signature(
+    contract: &ContractMember,
+    substitution: &BTreeMap<String, Type>,
+) -> FunctionSignature {
+    contract
+        .signature
+        .substitute(&member_renaming(contract).1)
+        .substitute(substitution)
+}
+
 /// One candidate: `contract`'s signature with `self` as `receiver` and the
 /// interface's parameters as `arguments`.
 fn candidate(
@@ -1956,17 +2306,11 @@ fn candidate(
     arguments: &[Type],
     target: CandidateTarget,
 ) -> Candidate {
-    let mut substitution = BTreeMap::from([(SELF.to_owned(), receiver.clone())]);
-    substitution.extend(
-        declared
-            .parameters
-            .iter()
-            .cloned()
-            .zip(arguments.iter().cloned()),
-    );
+    let substitution = member_substitution(declared, receiver, arguments);
     Candidate {
         arguments: arguments.to_vec(),
-        signature: contract.signature.substitute(&substitution),
+        signature: member_signature(contract, &substitution),
+        substitution,
         target,
         spelling: if arguments.is_empty() {
             declared.name.clone()
@@ -2024,6 +2368,9 @@ fn destination(
     };
     let mut names = vec![SELF.to_owned()];
     names.extend(declared.parameters.iter().cloned());
+    // The member's own parameters may appear in its result; the written
+    // type leaves them open, as they are fixed from the operands.
+    names.extend(contract.generics.iter().cloned());
     let mut instantiation = crate::infer::Instantiation::new(&names);
     let written = contract.signature.result();
     let opened = instantiation.open(&written);
@@ -2053,31 +2400,6 @@ fn candidates(
     contract: &ContractMember,
     receiver: &Type,
 ) -> Vec<Candidate> {
-    let spell = |arguments: &[Type]| {
-        if arguments.is_empty() {
-            declared.name.clone()
-        } else {
-            format!(
-                "({}{})",
-                declared.name,
-                arguments
-                    .iter()
-                    .map(|argument| format!(" {argument}"))
-                    .collect::<String>()
-            )
-        }
-    };
-    let signature = |arguments: &[Type]| {
-        let mut substitution = BTreeMap::from([(SELF.to_owned(), receiver.clone())]);
-        substitution.extend(
-            declared
-                .parameters
-                .iter()
-                .cloned()
-                .zip(arguments.iter().cloned()),
-        );
-        contract.signature.substitute(&substitution)
-    };
     let mut found = Vec::new();
     for implementation in types.implementations() {
         if implementation.interface != interface
@@ -2091,12 +2413,13 @@ fn candidates(
         ) else {
             continue;
         };
-        found.push(Candidate {
-            signature: signature(&arguments),
-            target: CandidateTarget::Function(function),
-            spelling: spell(&arguments),
-            arguments,
-        });
+        found.push(candidate(
+            declared,
+            contract,
+            receiver,
+            &arguments,
+            CandidateTarget::Function(function),
+        ));
     }
     // The builtin constructor types iterate through the closed registry.
     if is_iter(types, interface)
@@ -2125,15 +2448,13 @@ fn candidates(
             {
                 continue;
             }
-            let arguments = [source.to_type()];
-            found.push(Candidate {
-                signature: signature(&arguments),
-                target: CandidateTarget::Primitive(CompilerIntrinsic::Convert(
-                    source, target,
-                )),
-                spelling: spell(&arguments),
-                arguments: arguments.to_vec(),
-            });
+            found.push(candidate(
+                declared,
+                contract,
+                receiver,
+                &[source.to_type()],
+                CandidateTarget::Primitive(CompilerIntrinsic::Convert(source, target)),
+            ));
         }
     }
     found
@@ -2211,46 +2532,41 @@ fn instantiate_arguments(
 fn fits(
     environment: &mut CheckEnvironment<'_>,
     application: &Application,
+    contract: &ContractMember,
     candidate: &Candidate,
-    receiver: Option<usize>,
+    checked: Option<(usize, &Expr)>,
+    written: Option<&[Type]>,
     expected: Option<&Type>,
 ) -> bool {
-    if expected.is_some_and(|expected| {
-        !crate::types_match(expected, &candidate.signature.result())
-    }) {
+    // A member with no generic parameter has its result fixed already.
+    if contract.generics.is_empty()
+        && expected.is_some_and(|expected| {
+            !crate::types_match(expected, &candidate.signature.result())
+        })
+    {
         return false;
     }
     let diagnostics = environment.diagnostics.len();
     let bindings = environment.bindings.len();
-    let element = match candidate.signature.variadic() {
-        Some(Type::Array(element)) => Some(element.as_ref().clone()),
-        _ => None,
-    };
-    let fits = {
+    let operands = {
         let mut scope = environment.scoped();
-        application
-            .arguments()
-            .iter()
-            .enumerate()
-            .all(|(index, operand)| {
-                if receiver == Some(index) {
-                    return true;
-                }
-                candidate
-                    .signature
-                    .parameters()
-                    .get(index)
-                    .cloned()
-                    .or_else(|| element.clone())
-                    .is_some_and(|parameter| {
-                        check_operand(&mut scope, operand.value(), Some(parameter))
-                            .is_some()
-                    })
-            })
+        check_member_operands(
+            &mut scope,
+            application,
+            contract,
+            &candidate.substitution,
+            checked,
+            written,
+            expected,
+        )
     };
     environment.diagnostics.truncate(diagnostics);
     environment.bindings.truncate(bindings);
-    fits
+    operands.is_some_and(|operands| {
+        expected.is_none_or(|expected| {
+            crate::types_match(expected, &operands.signature.result())
+        })
+    })
 }
 
 /// Whether `interface` is a conversion contract of `@std.core`: `Some(true)`
@@ -2277,30 +2593,19 @@ fn check_default_call(
     declared: &DeclaredInterface,
     contract: &ContractMember,
     position: usize,
+    written: Option<&WrittenTypes>,
     expected: Option<Type>,
     tail_position: bool,
 ) -> Option<Expr> {
     let span = application.span();
-    let operands = application.arguments();
-    if operands.len() != contract.signature.parameters().len()
-        || operands.iter().any(|operand| operand.label().is_some())
-    {
-        call_contract_error(
-            environment,
-            span,
-            format!(
-                "`{}.{}` takes exactly {} unlabelled operands",
-                declared.name,
-                contract.name,
-                contract.signature.parameters().len()
-            ),
-        );
-        return None;
-    }
     let function = environment
         .types
         .default_member(interface, &contract.name)?;
-    let receiver_operand = operands.get(position)?.value();
+    let Some(receiver_argument) = positional_operand(application, position) else {
+        report_arity(environment, application, contract);
+        return None;
+    };
+    let receiver_operand = receiver_argument.value();
     let receiver_value = check_expression(environment, receiver_operand, None)?;
     let receiver = receiver_value.result_type();
     let own = || {
@@ -2321,7 +2626,7 @@ fn check_default_call(
             mismatch(
                 environment.diagnostics,
                 environment.source_id,
-                operands.get(index)?.value().span(),
+                positional_operand(application, index)?.value().span(),
                 self_type(),
                 receiver.clone(),
                 "a member with another `self` operand cannot be called through an interface value, which erases the type they must share",
@@ -2382,59 +2687,23 @@ fn check_default_call(
         );
         return None;
     };
-    let mut substitution = BTreeMap::from([(SELF.to_owned(), receiver.clone())]);
-    substitution.extend(
-        declared
-            .parameters
-            .iter()
-            .cloned()
-            .zip(arguments.iter().cloned()),
-    );
-    let signature = contract.signature.substitute(&substitution);
-    let mut instantiation = crate::infer::Instantiation::new(&contract.generics);
-    let opened = instantiation.open_signature(&signature);
-    if let Some(expected) = &expected {
-        // A written expected type may fix a generic the operands leave open.
-        let _ = instantiation.unify(&opened.result(), expected);
-    }
-    let mut checked = Vec::with_capacity(operands.len());
-    for (index, (operand, pattern)) in
-        operands.iter().zip(opened.parameters()).enumerate()
-    {
-        if index == position {
-            checked.push(receiver_value.clone());
-        } else {
-            checked.push(crate::check_inferred_operand(
-                environment,
-                &mut instantiation,
-                operand.value(),
-                pattern,
-                false,
-            )?);
-        }
-    }
-    let unbound = instantiation.unbound();
-    let Some(Type::Function(instantiated)) = instantiation
-        .resolved(&Type::Function(Box::new(opened)))
-        .filter(|_| unbound.is_empty())
-    else {
-        crate::ambiguous_generic(environment, span, &unbound);
+    if !agrees(environment, application, written, &arguments) {
         return None;
-    };
-    // The member's own bounded parameters, at the arguments this call fixed.
-    if !contract.bounds.is_empty() {
-        let fixed = contract
-            .generics
-            .iter()
-            .filter_map(|name| {
-                let variable = instantiation.open(&Type::Param(name.clone()));
-                Some((name.clone(), instantiation.resolved(&variable)?))
-            })
-            .collect::<BTreeMap<_, _>>();
-        if !check_bounds(environment, span, &contract.bounds, &fixed) {
-            return None;
-        }
     }
+    let substitution = member_substitution(declared, &receiver, &arguments);
+    let MemberOperands {
+        arguments: checked,
+        signature: instantiated,
+        member_types,
+    } = check_member_operands(
+        environment,
+        application,
+        contract,
+        &substitution,
+        Some((position, &receiver_value)),
+        written.and_then(|written| written.member.as_deref()),
+        expected.as_ref(),
+    )?;
     let result = instantiated.result();
     crate::ensure_expected(environment, span, expected.clone(), result.clone());
     if expected
@@ -2453,8 +2722,9 @@ fn check_default_call(
             member: contract.name.clone(),
             receiver: position,
             arguments,
+            member_types,
             destination: None,
-            signature: instantiated,
+            signature: Box::new(instantiated),
             closed: None,
         },
         arguments: checked,
@@ -2483,16 +2753,6 @@ pub(crate) fn check_contract_value(
     // A default member with a receiver is one function for every receiver.
     if contract.default && contract.receiver.is_some() {
         return None;
-    }
-    // The forms a contract call cannot take yet are not values either.
-    if !contract.generics.is_empty() || !contract.signature.labelled().is_empty() {
-        crate::unavailable(
-            environment.diagnostics,
-            environment.source_id,
-            span,
-            "a contract member with its own generic parameters or with labelled parameters is not a function value in the M3 profile",
-        );
-        return Some(None);
     }
     let position = contract.receiver.filter(|_| {
         declared.parameters.is_empty() && contract.signature.variadic().is_none()
@@ -2530,14 +2790,18 @@ pub(crate) fn check_contract_value(
         );
         return Some(None);
     };
-    let signature = contract
-        .signature
-        .substitute(&BTreeMap::from([(SELF.to_owned(), receiver.clone())]));
-    let actual = Type::Function(Box::new(signature.clone()));
-    crate::ensure_expected(environment, span, expected.cloned(), actual.clone());
-    if !expected.is_some_and(|expected| crate::types_match(expected, &actual)) {
+    let (renamed, _) = member_renaming(&contract);
+    let substitution = BTreeMap::from([(SELF.to_owned(), receiver.clone())]);
+    let Some((signature, member_types)) = instantiate_value(
+        environment,
+        span,
+        &contract,
+        &renamed,
+        &member_signature(&contract, &substitution),
+        written,
+    ) else {
         return Some(None);
-    }
+    };
     let holds = match &receiver {
         Type::Interface(id, _) if *id == declared.id => {
             let shared = contract.signature.parameters().iter().enumerate().any(
@@ -2572,8 +2836,10 @@ pub(crate) fn check_contract_value(
         return Some(None);
     }
     let origin = SourceOrigin::new(environment.source_id, span);
-    let parameters = signature.parameters().to_vec();
-    let arguments = parameters
+    // The closure's slots are the fixed parameters, the labelled ones, and
+    // then the tail, which arrives already packed.
+    let slots = signature.slot_types();
+    let arguments = slots
         .iter()
         .enumerate()
         .map(|(slot, value_type)| {
@@ -2586,6 +2852,7 @@ pub(crate) fn check_contract_value(
             member: contract.name.clone(),
             receiver: position,
             arguments: Vec::new(),
+            member_types,
             destination: None,
             signature: Box::new(signature.clone()),
             closed: closed_contract(environment.types, interface, &contract.name),
@@ -2595,13 +2862,101 @@ pub(crate) fn check_contract_value(
         tail: true,
         origin: origin.clone(),
     };
-    let slot_count = parameters.len();
+    let parameters = signature.parameters().to_vec();
     Some(Some(Expr::closure(
         signature,
         parameters,
         Vec::new(),
         body,
-        slot_count,
+        slots.len(),
         origin,
     )))
+}
+
+/// Whether a candidate's signature, its own generic parameters renamed to
+/// `renamed` and still open, is the written `fn` type of a contract member
+/// named as a value.
+fn fits_value(
+    renamed: &[String],
+    candidate: &FunctionSignature,
+    written: &FunctionSignature,
+) -> bool {
+    if renamed.is_empty() {
+        return candidate.same_shape(written);
+    }
+    let mut instantiation = crate::infer::Instantiation::new(renamed);
+    let opened = instantiation.open_signature(candidate);
+    instantiation.unify(
+        &Type::Function(Box::new(opened)),
+        &Type::Function(Box::new(written.clone())),
+    )
+}
+
+/// The signature of a contract member named as a value at the written `fn`
+/// type `written`, and the member's own type arguments that type fixes
+/// (`docs/spec/02-type-system.md`, "Functions as values"). The written type
+/// stands for a call's operands and expected type, exactly as for a generic
+/// function named as a value: one that leaves a generic parameter open is
+/// `@type.ambiguous-inference`, and each argument is checked against its
+/// bound.
+fn instantiate_value(
+    environment: &mut CheckEnvironment<'_>,
+    span: ByteSpan,
+    contract: &ContractMember,
+    renamed: &[String],
+    signature: &FunctionSignature,
+    written: &FunctionSignature,
+) -> Option<(FunctionSignature, Vec<Type>)> {
+    let expected = Type::Function(Box::new(written.clone()));
+    if renamed.is_empty() {
+        let actual = Type::Function(Box::new(signature.clone()));
+        crate::ensure_expected(
+            environment,
+            span,
+            Some(expected.clone()),
+            actual.clone(),
+        );
+        return crate::types_match(&expected, &actual)
+            .then(|| (signature.clone(), Vec::new()));
+    }
+    let mut instantiation = crate::infer::Instantiation::new(renamed);
+    let opened = instantiation.open_signature(signature);
+    let value_type = Type::Function(Box::new(opened));
+    if !instantiation.unify(&value_type, &expected) {
+        crate::ensure_expected(
+            environment,
+            span,
+            Some(expected),
+            crate::infer::display(&Type::Function(Box::new(signature.clone()))),
+        );
+        return None;
+    }
+    let unbound = instantiation.unbound();
+    if !unbound.is_empty() {
+        crate::ambiguous_generic(environment, span, &unbound);
+        return None;
+    }
+    let Some(Type::Function(instantiated)) = instantiation.resolved(&value_type) else {
+        return None;
+    };
+    let arguments = renamed
+        .iter()
+        .filter_map(|name| {
+            let variable = instantiation.open(&Type::Param(name.clone()));
+            instantiation.resolved(&variable)
+        })
+        .collect::<Vec<_>>();
+    // The member's own bounded parameters, at the arguments the type fixed.
+    if !contract.bounds.is_empty() {
+        let fixed = contract
+            .generics
+            .iter()
+            .cloned()
+            .zip(arguments.iter().cloned())
+            .collect::<BTreeMap<_, _>>();
+        if !check_bounds(environment, span, &contract.bounds, &fixed) {
+            return None;
+        }
+    }
+    Some((*instantiated, arguments))
 }

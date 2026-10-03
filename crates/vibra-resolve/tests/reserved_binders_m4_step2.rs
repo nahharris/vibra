@@ -24,7 +24,8 @@ fn diagnostics(source: &str) -> Vec<(DiagnosticCode, ByteSpan)> {
 /// The one diagnostic `source` reports, which must be
 /// `@name.reserved-declaration` at `binder` inside the first `anchor`.
 fn rejected(source: &str, anchor: &str, binder: &str) {
-    let start = source.find(anchor).expect("anchor") + anchor.find(binder).expect("binder");
+    let start =
+        source.find(anchor).expect("anchor") + anchor.find(binder).expect("binder");
     assert_eq!(
         diagnostics(source),
         vec![(
