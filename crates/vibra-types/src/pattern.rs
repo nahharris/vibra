@@ -11,7 +11,7 @@
 use std::collections::BTreeSet;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_ir::{Pattern, Type, TypeBody, Value};
+use vibra_ir::{Constant, Pattern, Type, TypeBody, Value};
 use vibra_syntax::{Literal, PatternArgument, PatternKind};
 
 use crate::nominal::{ConstructorTarget, TypeNames, declared_self_type};
@@ -347,17 +347,17 @@ pub(crate) fn pattern_value_global(
     None
 }
 
-/// The pattern of a constant module value: the pattern its initializer's
-/// value would have if it were written there. A constant expression is a
-/// literal, an atom, or `void`; a construction whose operands are all
+/// The constant a module value denotes, when it is one. A constant expression
+/// is a literal, an atom, or `void`; a construction whose operands are all
 /// constant; or a read of another constant. A call never is one, so the
 /// property is syntactic. The initializer is checked as its own module checks
-/// it, so the pattern reads nothing at run time.
-pub(crate) fn constant_pattern(
+/// it, and a read of another module value is replaced by that value's own
+/// constant, so a constant reads nothing at run time.
+pub(crate) fn constant_of_global(
     environment: &CheckEnvironment<'_>,
     index: usize,
     depth: usize,
-) -> Option<Pattern> {
+) -> Option<Constant> {
     if depth > environment.globals.len() {
         return None;
     }
@@ -382,68 +382,58 @@ pub(crate) fn constant_pattern(
         &header.expression,
         Some(header.value_type.clone()),
     )?;
-    expression_pattern(environment, &value, depth)
+    constant_of_expression(environment, &value, depth)
 }
 
-fn expression_pattern(
+/// The constant a checked expression denotes, when it is a constant
+/// expression.
+pub(crate) fn constant_of_expression(
     environment: &CheckEnvironment<'_>,
     expression: &vibra_ir::Expr,
     depth: usize,
+) -> Option<Constant> {
+    Constant::from_expr_with(expression, &mut |index| {
+        constant_of_global(environment, index, depth + 1)
+    })
+}
+
+/// The pattern of a constant module value: the pattern its initializer's
+/// value would have if it were written there.
+pub(crate) fn constant_pattern(
+    environment: &CheckEnvironment<'_>,
+    index: usize,
+    depth: usize,
 ) -> Option<Pattern> {
-    use vibra_ir::Expr;
-    match expression {
-        Expr::Literal { value, .. } => Some(Pattern::Literal(value.clone())),
-        Expr::Variant {
-            value_type,
-            variant,
-            payload,
-            ..
-        } => {
-            let payload = match payload {
-                Some(payload) => {
-                    Some(Box::new(expression_pattern(environment, payload, depth)?))
-                }
-                None => None,
-            };
-            // A `bool` variant is the literal of its representation.
-            if *value_type == Type::Bool && payload.is_none() {
-                return Some(Pattern::Literal(Value::Bool(variant == "true")));
-            }
-            Some(Pattern::Variant {
-                variant: variant.clone(),
-                payload,
-            })
+    constant_of_global(environment, index, depth).map(|constant| pattern_of(&constant))
+}
+
+/// The pattern a constant's value has.
+fn pattern_of(constant: &Constant) -> Pattern {
+    match constant {
+        Constant::Primitive(value) => Pattern::Literal(value.clone()),
+        Constant::Variant {
+            variant, payload, ..
+        } => Pattern::Variant {
+            variant: variant.clone(),
+            payload: payload
+                .as_ref()
+                .map(|payload| Box::new(pattern_of(payload))),
+        },
+        Constant::Tuple { components, .. } => {
+            Pattern::Tuple(components.iter().map(pattern_of).collect())
         }
-        Expr::Tuple { components, .. } => components
-            .iter()
-            .map(|component| expression_pattern(environment, component, depth))
-            .collect::<Option<Vec<_>>>()
-            .map(Pattern::Tuple),
-        Expr::Record { fields, .. } => fields
-            .iter()
-            .map(|(name, field)| {
-                Some((name.clone(), expression_pattern(environment, field, depth)?))
-            })
-            .collect::<Option<Vec<_>>>()
-            .map(Pattern::Record),
-        Expr::Wrap { value, .. } => Some(Pattern::Wrap(Box::new(expression_pattern(
-            environment,
-            value,
-            depth,
-        )?))),
-        Expr::Widen { value, member, .. } => {
-            let inner = expression_pattern(environment, value, depth)?;
-            Some(match member {
-                None => inner,
-                Some(index) => Pattern::Member {
-                    index: *index,
-                    member: value.result_type(),
-                    pattern: Box::new(inner),
-                },
-            })
-        }
-        Expr::Global { index, .. } => constant_pattern(environment, *index, depth + 1),
-        _ => None,
+        Constant::Record { fields, .. } => Pattern::Record(
+            fields
+                .iter()
+                .map(|(name, field)| (name.clone(), pattern_of(field)))
+                .collect(),
+        ),
+        Constant::Wrap { value, .. } => Pattern::Wrap(Box::new(pattern_of(value))),
+        Constant::Member { index, value, .. } => Pattern::Member {
+            index: *index,
+            member: value.value_type(),
+            pattern: Box::new(pattern_of(value)),
+        },
     }
 }
 

@@ -1094,8 +1094,15 @@ pub enum LabelledDefault {
     Literal(Literal),
     /// An atom literal, `@name`.
     Atom(Name),
-    /// A name that resolves to a constant module value, such as `true`.
-    Constant(Name),
+    /// Any other expression, such as the name `true` or the construction
+    /// `(bool.true)`. It must be a constant expression, which the checker
+    /// decides.
+    Expression {
+        /// The parsed expression.
+        expression: Expression,
+        /// Its exact source spelling.
+        raw: String,
+    },
 }
 
 impl LabelledDefault {
@@ -1104,7 +1111,8 @@ impl LabelledDefault {
     pub fn raw(&self) -> &str {
         match self {
             Self::Literal(literal) => literal.raw(),
-            Self::Atom(name) | Self::Constant(name) => name.raw(),
+            Self::Atom(name) => name.raw(),
+            Self::Expression { raw, .. } => raw,
         }
     }
 }
@@ -3464,24 +3472,23 @@ impl AstParser {
                 return None;
             }
             let value_type = self.parse_type_expr(triple[1])?;
-            // An atom name is a literal of the source grammar, and a symbol
-            // names a constant module value.
+            // An atom name is a literal of the source grammar; any other
+            // form is an expression, which must be a constant one.
             let default = match triple[2].source_name() {
                 Some(NameClassification::Name(atom))
                     if atom.kind() == NameKind::Atom =>
                 {
                     LabelledDefault::Atom(atom)
                 }
-                Some(NameClassification::Name(constant))
-                    if constant.kind() == NameKind::Symbol
-                        && !constant.is_discard() =>
-                {
-                    LabelledDefault::Constant(constant)
-                }
-                _ => LabelledDefault::Literal(self.literal(
-                    triple[2],
-                    "labelled defaults must be literals or names of constants",
-                )?),
+                _ => match triple[2].source_literal() {
+                    Some(LiteralClassification::Literal(literal)) => {
+                        LabelledDefault::Literal(literal)
+                    }
+                    _ => LabelledDefault::Expression {
+                        expression: self.parse_expression(triple[2])?,
+                        raw: triple[2].to_source(),
+                    },
+                },
             };
             parameters.push(LabelledParameter {
                 name,

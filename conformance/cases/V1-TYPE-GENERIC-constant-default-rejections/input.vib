@@ -10,6 +10,10 @@
   labelled: (n i32 one)
   n)
 
+(defn inline-call-default () i32
+  labelled: (n i32 (one))
+  n)
+
 (defn type-default () i32
   labelled: (n i32 true)
   n)

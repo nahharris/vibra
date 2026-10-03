@@ -148,7 +148,7 @@ pub(crate) struct ContractMember {
     /// The default of each labelled parameter, by name, as it is written and
     /// as the value it denotes at the parameter's type: a default is not part
     /// of the signature, and an implementation must keep its value.
-    pub(crate) defaults: BTreeMap<String, (String, Option<vibra_ir::Value>)>,
+    pub(crate) defaults: BTreeMap<String, (String, Option<vibra_ir::Constant>)>,
     /// The position of the fixed positional `self` parameter that selects the
     /// implementation, or `None` for a destination-dispatched member.
     pub(crate) receiver: Option<usize>,
@@ -222,11 +222,13 @@ pub(crate) struct TypeNames {
 /// What a labelled default written as a name denotes.
 #[derive(Clone, Debug)]
 pub(crate) enum DefaultConstant {
-    /// The primitive value of the constant module value it names.
-    Value(vibra_ir::Value),
-    /// A module value that is not a constant of a primitive type, or a name
-    /// that is not a module value.
-    NotConstant,
+    /// The constant the expression denotes.
+    Value(vibra_ir::Constant),
+    /// The expression is not a constant expression. When it is a name of a
+    /// module value, that value's source identity and span.
+    NotConstant(Option<(String, ByteSpan)>),
+    /// The expression did not check, and the diagnostics said why.
+    Failed,
 }
 
 /// A value path that names a type constructor or an enum variant.

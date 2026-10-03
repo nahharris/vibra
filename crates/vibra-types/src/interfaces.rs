@@ -689,7 +689,7 @@ fn labelled_defaults(
     source_id: &str,
     attributes: &[Attribute],
     signature: &FunctionSignature,
-) -> BTreeMap<String, (String, Option<vibra_ir::Value>)> {
+) -> BTreeMap<String, (String, Option<vibra_ir::Constant>)> {
     attributes
         .iter()
         .filter_map(|attribute| match attribute {
@@ -1026,7 +1026,7 @@ fn check_member_operands(
         } else if let Some(default) = parameter.default() {
             // An implementation keeps its contract's defaults, so the
             // contract's value is the operand whichever one is selected.
-            arguments.push(Expr::literal(default.clone(), origin.clone()));
+            arguments.push(default.to_expr(&origin));
         } else {
             call_contract_error(
                 environment,

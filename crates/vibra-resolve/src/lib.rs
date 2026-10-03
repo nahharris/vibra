@@ -2387,12 +2387,14 @@ impl Resolution {
                     for parameter in parameters {
                         // A default written as a name denotes a module value:
                         // no parameter is in scope there.
-                        if let LabelledDefault::Constant(name) = parameter.default() {
-                            self.resolve_reference(
+                        if let LabelledDefault::Expression { expression, .. } =
+                            parameter.default()
+                        {
+                            self.resolve_expression(
                                 module,
                                 from,
-                                name,
-                                parameter.default_span(),
+                                expression,
+                                &[],
                                 source_id,
                             );
                         }

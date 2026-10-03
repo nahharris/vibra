@@ -21,9 +21,9 @@ use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
-    CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature, IrError,
-    LabelledParameter as IrLabelledParameter, SourceOrigin, TestAssertion, Type, Value,
-    external::CompilerIntrinsic,
+    CheckedFunction, CheckedGlobal, CheckedProgram, Constant, Expr, FunctionSignature,
+    IrError, LabelledParameter as IrLabelledParameter, SourceOrigin, TestAssertion,
+    Type, Value, external::CompilerIntrinsic,
 };
 use vibra_syntax::{
     Application, ApplicationBinding, Attribute, BindingFacts, CallArgument,
@@ -5455,38 +5455,48 @@ fn check_resolved_reference(
     }
 }
 
-/// The value of a labelled parameter's default at its written type. An atom
-/// default has the type `atom` or its own singleton.
+/// The constant a labelled parameter's default denotes at its written type. A
+/// default is a constant expression: a literal, an atom, or any other
+/// expression the checker decided is constant before it checked a signature.
+/// An atom default has the type `atom` or its own singleton.
 fn check_default(
     source_id: &str,
     types: &nominal::TypeNames,
     entry: &vibra_syntax::LabelledParameter,
     value_type: &Type,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<Value> {
+) -> Option<Constant> {
     let span = entry.span();
     match entry.default() {
-        vibra_syntax::LabelledDefault::Constant(_) => {
-            // The constant a name denotes was decided before any signature: a
-            // default is a constant expression, as a constant pattern is.
-            let Some(nominal::DefaultConstant::Value(value)) =
-                types.default_constant(source_id, entry.default_span())
-            else {
-                diagnostics.push(
-                    Diagnostic::new(
-                        DiagnosticCode::SyntaxInvalidForm,
-                        entry.default_span(),
-                        "a labelled default must be a literal or a name of a constant of a primitive type",
+        vibra_syntax::LabelledDefault::Expression { expression, .. } => {
+            let value = match types.default_constant(source_id, entry.default_span()) {
+                Some(nominal::DefaultConstant::Value(value)) => value,
+                // The checker already said why the expression did not check.
+                Some(nominal::DefaultConstant::Failed) | None => return None,
+                Some(nominal::DefaultConstant::NotConstant(definition)) => {
+                    let mut diagnostic = Diagnostic::new(
+                        DiagnosticCode::TypeNotConstant,
+                        expression.span(),
+                        "a labelled default must be a constant expression",
                     )
-                    .with_source_id(source_id),
-                );
-                return None;
+                    .with_source_id(source_id);
+                    if let Some((definition_source, definition_span)) = definition {
+                        diagnostic = diagnostic.with_related_source(
+                            definition_source.clone(),
+                            *definition_span,
+                            "this module value is not a constant",
+                        );
+                    }
+                    diagnostics.push(diagnostic);
+                    return None;
+                }
             };
-            let actual = match (value_type, value) {
-                (Type::AtomSingleton(_), Value::Atom(_)) => value_type.clone(),
-                _ => value.ty(),
-            };
-            if *value_type != actual {
+            let actual = value.value_type();
+            if !value_type.same_shape(&actual)
+                && !(matches!(value, Constant::Primitive(Value::Atom(_)))
+                    && (*value_type == Type::Atom
+                        || matches!(value_type, Type::AtomSingleton(_))))
+            {
                 mismatch(
                     diagnostics,
                     source_id,
@@ -5505,7 +5515,8 @@ fn check_default(
             literal,
             Some(value_type.clone()),
             diagnostics,
-        ),
+        )
+        .map(Constant::Primitive),
         vibra_syntax::LabelledDefault::Atom(name) => {
             let singleton = Type::AtomSingleton(name.value().to_owned());
             if *value_type != Type::Atom && *value_type != singleton {
@@ -5519,7 +5530,7 @@ fn check_default(
                 );
                 return None;
             }
-            Some(Value::Atom(name.value().to_owned()))
+            Some(Constant::Primitive(Value::Atom(name.value().to_owned())))
         }
     }
 }

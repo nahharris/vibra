@@ -14,10 +14,12 @@ use std::sync::Arc;
 
 use vibra_diagnostics::ByteSpan;
 
+mod constant;
 mod nominal;
 mod observed;
 mod pattern;
 
+pub use constant::Constant;
 pub use nominal::{TypeBody, TypeDefinition, TypeId, canonical_members};
 use nominal::{
     type_table, validate_declared_expr, validate_declared_signature,
@@ -422,7 +424,7 @@ impl fmt::Display for Type {
 pub struct LabelledParameter {
     name: String,
     value_type: Type,
-    default: Option<Value>,
+    default: Option<Constant>,
 }
 
 impl LabelledParameter {
@@ -432,7 +434,7 @@ impl LabelledParameter {
     pub fn new(
         name: impl Into<String>,
         value_type: Type,
-        default: Option<Value>,
+        default: Option<Constant>,
     ) -> Self {
         Self {
             name: name.into(),
@@ -455,7 +457,7 @@ impl LabelledParameter {
 
     /// The declaration default, when this is a callable declaration value.
     #[must_use]
-    pub const fn default(&self) -> Option<&Value> {
+    pub const fn default(&self) -> Option<&Constant> {
         self.default.as_ref()
     }
 }
@@ -4974,14 +4976,14 @@ fn validate_signature_shape(signature: &FunctionSignature) -> Result<(), String>
         // An atom default has its own singleton type, which is one atom of
         // `atom`.
         if let Some(default) = parameter.default()
-            && !default.ty().same_shape(&parameter.value_type())
-            && !(matches!(default, Value::Atom(_))
+            && !default.value_type().same_shape(&parameter.value_type())
+            && !(matches!(default, Constant::Primitive(Value::Atom(_)))
                 && parameter.value_type() == Type::Atom)
         {
             return Err(format!(
                 "default for labelled parameter `{}` has type {}, expected {}",
                 parameter.name(),
-                default.ty(),
+                default.value_type(),
                 parameter.value_type()
             ));
         }
