@@ -283,7 +283,7 @@ local-name           = kebab-name ;
 binding-name         = local-name | discard ;
 parameters           = "(", { pattern, type-expr }, ")" ;
 labelled-parameters  = "(", { local-name, type-expr, default }, ")" ;
-default              = literal | symbol ;
+default              = literal | expression ;
 variadic-parameter   = "(", binding-name, variadic-type, ")" ;
 variadic-type        = "(", "array", type-expr, ")"
                      | "(", "dict", type-expr, type-expr, ")" ;
@@ -330,13 +330,13 @@ pair; there is no wrapper list around each parameter. The pattern MUST be
 irrefutable for the written type. `labelled:` is one flat list of
 name/type/default triples. Every labelled parameter MUST have a constant
 default and a real unqualified local name because its name is part of the call
-contract. A default is a literal, an atom, or a symbol that names a constant
-module value, such as `true` or a user constant; the type chapter defines which
-module values are constants, as it does for constant patterns, and a default
-that names a module value that is not a constant, or a function, is
-`@syntax.invalid-form`. The toolchain stores a default as a primitive value, so
-the constant a name denotes must be one; a constant of a compound type is
-rejected the same way until a later milestone widens it. `variadic:` contains exactly one name/type pair, and its type MUST be
+contract. A default is a constant expression, written as a literal, an atom,
+or any other expression, such as the name `true` or the construction
+`(bool.true)`; the type chapter defines what a constant expression is, as it
+does for constant patterns, and a default of any type is admitted. A default
+that is not a constant expression is `@type.not-constant`, and one whose
+shape cannot be an expression at all is a syntax error. `variadic:` contains
+exactly one name/type pair, and its type MUST be
 an `array` or `dict`. A function has at most one variadic parameter. A variadic
 parameter may use any discard spelling when its value is intentionally unused.
 

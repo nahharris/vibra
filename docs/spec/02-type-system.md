@@ -664,10 +664,10 @@ emits `@name.reserved-value-spelling`, as does an import alias spelled as a
 builtin type name or as `true` or `false`, and a lexical binder spelled as a
 prelude name emits `@name.reserved-declaration`, exactly as one spelled `bool`
 does. Only the embedded standard library declares a prelude name. An import
-alias spelled as a role type (`(import option @std.option)`,
-`(import iter @std.iter.iter)`) is the one spelling not rejected, because it
-is how a declaration import names its declaration; a binder spelled `true` or
-`false` is only possible where the name is not a pattern.
+alias is checked only against the builtin type names and `true` and `false`;
+the role-type names are not checked there, so `(import option @std.option)` and
+`(import iter @std.iter.iter)` are accepted, as they always were. A binder
+spelled `true` or `false` is only possible where the name is not a pattern.
 
 ## Functions as values
 
@@ -1350,10 +1350,13 @@ module that declares it checks it, and the pattern reads nothing when it
 matches beyond what the expanded literal or constructor pattern would.
 
 The same definition decides a **labelled default**, which is a constant
-expression written as a literal, an atom, or a name of a constant module value.
-Two defaults are the same when they denote the same value, so a contract that
-writes `true` and an implementation that writes a constant of that value keep
-one default.
+expression in any form, a literal, an atom, a name of a constant module value,
+or a construction of constants, and of any type. A default that is not a
+constant expression is `@type.not-constant` at the expression, and it
+relates the module value when the expression is a name. Two defaults are the
+same when they denote the same value, so a contract that writes `true` and an
+implementation that writes a constant of that value, or a record construction
+and a constant record of the same fields, keep one default.
 
 A constant pattern has no restriction of its own: whatever the expanded literal
 or constructor pattern admits or rejects at the expected type decides the

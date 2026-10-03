@@ -269,6 +269,7 @@ owning source identity:
 | lexical binder of any form (parameter, `let`, `let-else`, `match` arm, or `lambda` parameter) spelled as a keyword, `any`, or a name of the prelude (a primitive type name, `option`, `result`, `iter`, `array`, `dict`, `true`, or `false`) | `@name.reserved-declaration` | the binder name | none; `true` and `false` reach this only as a plain name, because they are constant patterns at a pattern site |
 | module value or function spelled as a prelude name (`true`, `false`, `option`, `result`, `iter`, or a builtin type name), or an import alias spelled as a builtin type name, `true`, or `false`, outside the embedded standard library | `@name.reserved-value-spelling` | the declaration or the name | none |
 | pattern name that resolves to a module value that is not a compile-time constant | `@name.redeclaration` | the name | the module value, with a note that it is not a compile-time constant |
+| labelled default that is not a constant expression: a call, a function, or a module value whose initializer is not constant | `@type.not-constant` | the default expression | the module value, when the expression is a name of one |
 | declaration named `never` | `@name.reserved-declaration` | the name | none |
 | generic argument that only diverging operands could fix | `@type.ambiguous-inference` | the application | one note per missing constraint |
 | `never` as a type argument for a bound other than `any` | `@type.unsatisfied-bound` | the type argument, as that code reports an argument that does not satisfy a bound elsewhere | the bound |
@@ -691,7 +692,7 @@ prelude name at a plain-name site (a labelled or variadic parameter, or a
 `let-else` binder spelled `option`) is `@name.reserved-declaration`, that a
 `let` pattern spelled `true` is `@pattern.refutable-binding`, and that a module
 value or function spelled `true` or `false` is
-`@name.reserved-value-spelling` in a single source and in a workspace.
+`@name.reserved-value-spelling` in a single source and in a workspace. Constant-default coverage proves that a labelled default is a constant expression in any form and of any type, a literal, `true`, a user constant, a constant defined by another constant, an inline constructor, a record, an enum variant with a payload, and a tuple, that a contract and an implementation whose defaults denote the same value keep one default however each is spelled, and, as rejections, that a call, a function, a module value with a call initializer, and an inline call are each `@type.not-constant`, relating the module value when one is named.
 
 Unification coverage fixes the bound-agnostic reading: a union whose members are
 `(array t)` and `(array i32)` where `t` is bound by an interface `i32` does not
