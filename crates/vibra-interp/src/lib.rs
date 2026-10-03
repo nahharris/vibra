@@ -245,7 +245,7 @@ impl RuntimeError {
     pub fn host_diagnostic(&self) -> Option<vibra_diagnostics::Diagnostic> {
         matches!(self, Self::HostStackExhausted { .. }).then(|| {
             vibra_diagnostics::Diagnostic::new(
-                vibra_diagnostics::DiagnosticCode::RuntimeHostStackExhausted,
+                vibra_diagnostics::DiagnosticCode::RuntimeMemoryExhausted,
                 vibra_diagnostics::ByteSpan::empty_at(0),
                 self.to_string(),
             )
@@ -255,10 +255,12 @@ impl RuntimeError {
 
 /// Live language activations the reference interpreter admits at once.
 ///
-/// V1 has no portable stack-depth limit (06-runtime); this is the reference
-/// interpreter's host budget. Reaching it stops execution with
-/// [`RuntimeError::HostStackExhausted`] instead of overflowing the host
-/// stack. Calls in tail position reuse their activation and never approach it.
+/// V1 has no portable stack-depth limit (06-runtime, "Activation depth"); this
+/// is an interim host budget that Milestone 4 Step 3 retires by holding
+/// activations in the heap. Until then, reaching it stops execution with
+/// [`RuntimeError::HostStackExhausted`] and the host event
+/// `@runtime.memory-exhausted` instead of overflowing the host stack. Calls in
+/// tail position reuse their activation and never approach it.
 pub const MAX_ACTIVATION_DEPTH: usize = 4096;
 
 /// Host stack reserved for the interpreter thread, independent of the

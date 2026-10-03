@@ -3,11 +3,16 @@
 Status: normative target
 Implementation status: M3 checks and runs this chapter for pure programs:
 nominal and generic types, unions, patterns and exhaustive matching,
-interfaces, conversion, and iteration. Effects, `@host` externals, and the
-forms the M3 exit evidence reassigns remain deferred. The pre-M4 revision of
-binding sequences, `let-else`, `return`, and `never`, specified below, is
-implemented by the checklist in
+interfaces, conversion, and iteration, and the pre-M4 revision of binding
+sequences, `let-else`, `return`, and `never` is implemented by
 [`../roadmap/pre-m4/01-bindings-return-never.md`](../roadmap/pre-m4/01-bindings-return-never.md).
+Three forms the M3 exit evidence reassigns to Milestone 4 remain
+`@tool.unavailable`: an abstract contract member with its own generic
+parameters, labelled operands and written `types:` arguments on a contract
+member call, and a dict variadic tail on a contract member, together with such
+a member used as a function value. Milestone 4 Step 2 implements them in the
+reference interpreter. Effects and `@host` externals remain deferred to Stage
+4B. The WebAssembly backend executes none of this chapter yet.
 
 ## Model
 

@@ -1,9 +1,12 @@
 # Vibra v1 diagnostics and conformance
 
 Status: normative target
-Implementation status: M1 reader diagnostics and M2 static, interpreter, and
-tooling observations have conformance coverage. The M2 exit evidence and exact
-profile counts are recorded in Step 14.
+Implementation status: reader, static, interpreter, and tooling observations
+have conformance coverage for the complete pure language through M3 and the
+pre-M4 binding revision; the current counts are recorded in the milestone
+exit evidence. The differential execution of the Wasm backend, its parity
+inventory, and the host-event expectation of this chapter are specified and
+unimplemented.
 
 ## Diagnostics are a language surface
 
@@ -104,7 +107,7 @@ table governs.
 | `@runtime.invalid-host-value` | `@error` |
 | `@runtime.invalid-checked-program` | `@error` |
 | `@runtime.unobservable-function` | `@error` |
-| `@runtime.host-stack-exhausted` | `@error` |
+| `@runtime.memory-exhausted` | `@error` |
 | `@style.argument-order` | `@warning` |
 | `@contract.unused-effect` | `@warning` |
 | `@tool.unavailable` | `@error` |
@@ -191,16 +194,24 @@ the string name of the module's first test declaration. It is an ordinary
 source diagnostic, so the selected suite is invalid and no selected test
 executes.
 
-`@runtime.invalid-checked-program` identifies an M2 execution-boundary trap
-when a checked program has no executable entry or its body violates checked-IR
-invariants. Its diagnostic has no source ID and an empty primary span `0..0`;
+The runtime chapter's **Traps** section closes the trap codes.
+`@runtime.invalid-checked-program` identifies an execution-boundary trap
+when a checked program has no executable entry, its body violates checked-IR
+invariants, or the toolchain fails, including an engine trap that generated code
+did not record. Its diagnostic has no source ID and an empty primary span `0..0`;
 the corresponding CLI `trapCode` and VIBON `trap-code` are the exact string
 `"@runtime.invalid-checked-program"`, with no source origin (`null` in JSON
 and omitted from the closed VIBON trap record). `@runtime.invalid-host-value`
-remains reserved for invalid host-value IDs and does not describe these
-checked-program failures. `@runtime.unobservable-function` is the trap of a
+is the trap of a host operation that receives a value ID or index it does not
+admit, and does not describe checked-program failures; no checked program
+reaches it before a host operation exists, so the CLI and test schemas add it
+with the host registry. `@runtime.unobservable-function` is the trap of a
 value holding a function that reaches a test assertion or the entry's result;
 in a test its diagnostic and trap origin are the assertion call.
+`@runtime.memory-exhausted` is the host event that ends execution when the
+memory or the value-ID space of an instance runs out: an unlocated error
+diagnostic that is never a trap, so it has no `trapCode`, and `run` and `test`
+report it as `@command.operational-failure`.
 
 During source enumeration, `@module.invalid-segment` is attached to the empty
 span `0..0` of the affected project-relative path when a directory or file
@@ -254,6 +265,7 @@ owning source identity:
 | expression of type `never` in a position that does not admit one | `@type.unreachable-code` | the expression | none |
 | element following an element of type `never` in one body sequence | `@type.unreachable-code` | the first following element | the diverging element |
 | binder repeating a name a `let` or `let-else` left visible | `@name.redeclaration` | the later binder | the earlier binder |
+| lexical binder of any form (parameter, `let`, `let-else`, `match` arm, or `lambda` parameter) spelled as a keyword, boolean, `void`, `any`, `never`, or primitive type name | `@name.reserved-declaration` | the binder name | none |
 | declaration named `never` | `@name.reserved-declaration` | the name | none |
 | generic argument that only diverging operands could fix | `@type.ambiguous-inference` | the application | one note per missing constraint |
 | `never` as a type argument for a bound other than `any` | `@type.unsatisfied-bound` | the type argument, as that code reports an argument that does not satisfy a bound elsewhere | the bound |
@@ -352,8 +364,14 @@ specification rule, not compiler module. Each case records:
   `(record format: @test-run.v1 result: @command.ok tests: (array ...))`; this
   snapshot embeds one `@audit-trace.v1` per test and replaces the separate
   `interpreter.audit_trace` snapshot;
-- Wasm result and ordered audit trace where executable; and
+- for an `interpret` or `workspace-run` case that ends in a host event, an
+  `expect.host_event` field naming the event atom, `@runtime.memory-exhausted`,
+  in place of the result and audit-trace snapshots, so that a case never
+  records a value for a run that has none; and
 - deterministic build hashes for artifact cases.
+
+An executable case has no Wasm snapshot of its own: **Differential execution**
+below runs it in a second backend against the same expectation.
 
 Every `workspace-test` case, accepted or rejected, MUST supply exactly one
 `interpreter.result` snapshot and MUST omit `interpreter.audit_trace`. The
@@ -606,12 +624,19 @@ conformance for `(array t)`, `(dict k v)`, `str`, and `(option t)`, explicit
 `taken-iter`, pure `iter` default methods with `effects: ()` callbacks only,
 and effectful walks written as tail-recursive module-level functions over
 `iter.next`.
-Tail-call cases belong to `V1-RUNTIME`. Each runs its loop for more iterations
-than the reference interpreter's activation bound and checks the result, and
-together they cover a callee in another module, a function-value parameter, a
-closure, a contract member called through an interface value, and an unrelated
-module-level function; deep non-tail recursion still stops with
-`@runtime.host-stack-exhausted`. `@name.reserved-value-spelling` and
+Tail-call cases belong to `V1-RUNTIME`. Each runs its loop for a million
+iterations and checks the result, and together they cover a callee in another
+module, a function-value parameter, a closure, a contract member called through
+an interface value, and an unrelated module-level function. Activation-depth
+coverage proves that non-tail recursion a million activations deep, with a
+base case, completes with its result in both backends, and that a non-tail
+recursion with no base case ends with `expect.host_event =
+"@runtime.memory-exhausted"` under the runner's memory limit. Arena coverage
+proves, in the Wasm backend, that a tail-recursive loop allocating a fresh
+compound value on each iteration leaves a live arena size that does not grow
+with the iteration count, measured at two iteration counts a factor of ten
+apart through `vibra_v1_live_size`, and that releasing a value nested five
+thousand levels deep completes. `@name.reserved-value-spelling` and
 `@type.function-not-equatable` have fixed level `@error`.
 
 Union coverage includes a two-member declaration, rejection of a one-member
@@ -735,11 +760,54 @@ Profiles are capability statements, not source dialects. The same source is
 never reinterpreted differently by a smaller profile; unsupported execution is
 reported as unavailable.
 
-For the M2 implementation profile, a valid source or command surface that is
-outside the admitted subset emits `@tool.unavailable` through the normal
-diagnostic result. A corpus handler with no implementation remains an
-`unavailable` observation and fails the relevant gate; it must not be turned
+For an implementation profile narrower than v1, a valid source or command
+surface that is outside the admitted subset emits `@tool.unavailable` through
+the normal diagnostic result. A corpus handler with no implementation remains
+an `unavailable` observation and fails the relevant gate; it must not be turned
 into a passing case by selecting a smaller profile.
+
+### Differential execution
+
+An **executable case** is a case whose operation is `interpret`,
+`workspace-run`, or `workspace-test`. It requires the `interpreter-v1` profile
+and has exactly one expected result and, where the operation exposes one, one
+expected audit trace, or one `expect.host_event`. No case carries a second
+expectation for the WebAssembly backend, and no operation selector, snapshot
+key, or case field is added for it.
+
+`wasm-v1` does not include `interpreter-v1`, and `full-v1` includes both. A
+runner that has both an interpreter handler and a Wasm execution handler runs
+every executable case in both backends against that one expectation. A case
+passes only when both backends match it, and a disagreement from either backend
+fails the case, with a failure reason that names the backend. An expectation is
+reviewed against the specification and is never regenerated from either
+backend's output.
+
+The runner runs every instance of either backend under one finite memory limit,
+which is a runner setting and not case data, so that a case that exhausts memory
+ends. A case MUST NOT depend on where in a run exhaustion happens, only on
+whether it does.
+
+The runner reports, besides the counts by required profile, one count line per
+backend over the executable cases: the interpreter backend as passed, failed,
+and unavailable, and the Wasm backend as matched, failed, and not lowered. A
+**not lowered** case is one whose parity-inventory disposition says the Wasm
+backend does not implement a form it uses yet: the runner runs only the
+interpreter on it, counts it as not lowered, and neither passes nor fails the
+Wasm backend on it. A not-lowered case does not fail a run. The Stage 4A
+sub-gate and the `full-v1` claim require a count of zero.
+
+The **parity inventory** is a checked-in table with one row for every executable
+case, giving its disposition: `matched`, or `not lowered` with the owning
+implementation step. A host test fails when an executable case has no row,
+when a row names no case, when a `not lowered` row names no step, and when the
+runner's result for a case disagrees with its disposition, including a
+`matched` case on which the Wasm backend disagrees. A step moves rows toward
+`matched` and never back, so the set of matched cases only grows.
+
+The native-implementation harness joins the same differential: for every sample
+input of every native symbol, the interpreter's native implementation, the
+interpreter's body, and the module's body agree.
 
 ## Required implementation suites
 

@@ -1,9 +1,13 @@
 # Vibra v1 runtime and WebAssembly
 
 Status: normative target
-Implementation status: M2 executes successfully checked IR for its supported
-pure subset, including tail calls and isolated tests. WebAssembly and complete
-v1 interpreter parity remain unimplemented.
+Implementation status: the reference interpreter executes successfully checked
+IR for the complete pure language through M3 and the pre-M4 binding revision,
+including tail calls and isolated tests, with an interim activation bound that
+Stage 4A replaces. The Stage 4A contracts of this chapter (activations and
+memory, the value arena, reclamation, the module contract, traps, and native
+sources) are specified and unimplemented. The WebAssembly backend, host
+operations, and effect checking remain unimplemented.
 
 ## Semantic reference
 
@@ -17,11 +21,18 @@ The interpreter is not a second frontend: it consumes the same resolved typed
 IR as the Wasm backend. Parsing, name resolution, type checking, performed-row
 calculation, and external-registry validation are shared.
 
-The M2 interpreter consumes only successfully checked IR from the M2 supported
-surface. It has no host provider execution, ambient filesystem/environment/time
-reads, or Wasm path. A valid later-v1 operation that is outside this profile is
-reported as `@tool.unavailable` before lowering; it is never reinterpreted as a
-generic application.
+Both backends consume only successfully checked IR. A toolchain's implemented
+profile may be narrower than v1: a valid operation outside it is reported as
+`@tool.unavailable` before lowering and is never reinterpreted as a generic
+application. Neither backend reads ambient filesystem, environment, time, or
+randomness state on behalf of an effect-free operation.
+
+The reference interpreter is the oracle. The two backends are compared on
+results, canonical value encodings, ordered audit traces, trap codes with their
+origins, and the host events of the **Activations and memory** section, and on
+nothing else: a backend's value layout, instantiation strategy, and stack use
+are not observable. The conformance chapter defines how a runner executes one
+case in both.
 
 WebAssembly is a compiler output backend, not a source interoperability
 surface. V1 source cannot import a `.wasm` module or name a WebAssembly
@@ -59,9 +70,9 @@ Evaluation is strict and deterministic:
 - a call in tail position reuses the current activation instead of growing
   language-level stack, whatever its callee is.
 
-### M2 module-value initialization
+### Module-value initialization
 
-Before accepting an M2 checked program, the checker MUST build the dependency
+Before accepting a checked program, the checker MUST build the dependency
 graph of its immutable module-level `def` initializers. An
 initializer may depend on a module value directly or through a function call
 or callable alias reached while evaluating that initializer. A cycle is
@@ -70,7 +81,9 @@ function-only recursion cycle reached from an initializer is not a module
 initializer cycle. A module-value cycle is rejected with the error-level
 `@type.initializer-cycle` before an executable checked program is produced or
 any initializer is evaluated or program executed; no checked program is
-produced. Its primary span is the complete source form of a `def` participating
+produced. A closure holds only the local values it captured and its
+type arguments: a module-level value its body names is read from the
+instance's module state when the body runs and is never held by the closure. Its primary span is the complete source form of a `def` participating
 in the cycle, selected by the deterministic dependency traversal. Acyclic
 forward references remain valid. Type checking never evaluates an initializer
 to infer its written type.
@@ -124,9 +137,16 @@ Numeric suffixes are erased after fixing the literal's primitive type in typed
 IR. They do not alter the runtime representation or arithmetic semantics of
 that type. Literal range errors are rejected before execution.
 
-Floating-point operations follow IEEE 754. Serialization and equality
-canonicalize all NaN payloads to one quiet NaN per width and normalize negative
-zero only where the relevant standard operation explicitly says so.
+Floating-point operations follow IEEE 754. The sign and payload of a NaN are
+never observable: every operation that observes a float, namely `equal`,
+`compare-total`, `to-str`, `to-bits`, the canonical value encoding, and the
+canonical equality of a test assertion, first replaces a NaN by the one quiet
+NaN of its width, which has the positive sign and a zero payload. The other
+float operations MAY return any NaN, so a backend whose engine leaves an
+arithmetic NaN payload unspecified, as WebAssembly does, conforms without
+canonicalizing each result. A backend MAY canonicalize eagerly as defence in
+depth, since doing so is unobservable. Negative zero is normalized only where
+the relevant standard operation explicitly says so.
 
 The canonical float serialization writes NaN as `nan`, the infinities as `inf`
 and `-inf`, and a finite value as the shortest decimal digits that round-trip
@@ -201,45 +221,38 @@ constructor, a projection, a lookup, a `@compiler` external, or a native
 implementation, is not a call for this rule. This rule does not change which
 positions are tail positions.
 
-The interpreter and WebAssembly backend MAY implement this with explicit
-tail-call instructions or an internal trampoline; the strategy is not
-observable except that conforming programs do not overflow language-level stack
-through calls in tail position.
+A backend MAY implement this with explicit tail-call instructions, a dispatch
+loop, or any other strategy; the strategy is not observable except that
+conforming programs do not grow language-level stack through calls in tail
+position. Default `iter` method bodies MAY lower to internal loops; that
+mutation is not a source feature.
 
-V1 defines no portable stack-depth limit. Non-tail recursion and non-tail calls
-that exhaust an embedding host's stack are host events, not portable semantic
-results, and are outside interpreter/Wasm parity. The M2 reference interpreter
-runs on a host thread with a fixed stack and bounds live language activations
-so that exhaustion never aborts the process. Reaching that bound stops
-execution with the unlocated error diagnostic
-`@runtime.host-stack-exhausted` (primary span `0..0`, no source ID). It is not
-a trap: `run` and `test` report it as `@command.operational-failure` (exit 3),
-and `test` then reports zero selected, passed, and failed tests. Default `iter` method bodies
-MAY lower to internal loops; that mutation is not a source feature.
+## Activations and memory
 
-## M2 compiler intrinsic profile
+V1 defines no activation-depth limit. A non-tail call creates an activation
+that lasts until the call returns, and the depth of nested activations is
+bounded only by the memory available to the instance, exactly as the size of
+any other value is. A conforming backend MUST NOT consume host or engine stack
+per language activation: it holds activations in the instance's own storage
+(the arena of **The value arena**), so a program that recurses to any depth the
+instance's memory admits behaves as if depth were unbounded, in both backends.
+A call in tail position replaces its caller's activation in that storage, as
+the **Tail calls** section requires.
 
-The M2 `@compiler` registry is closed to two pure operations; its versioned
-identity is `vibra_v1`. A trusted standard-library declaration may bind
-`text.concat` with signature `str str -> str` and `text.length` with signature
-`str -> u64`. Concatenation preserves Unicode scalar order; length counts
-Unicode scalars rather than UTF-8 bytes. Both operations are total,
-deterministic, and host-event free.
-They accept no ambient input and have no runtime trap outcome.
+Exhausting the memory available to an instance, whether by deep recursion,
+by allocation, or by exhausting the value-ID space defined below, is a **host
+event**: it is not a trap and not a portable semantic result of the program,
+because the limit belongs to the host. It stops execution with the unlocated
+error diagnostic `@runtime.memory-exhausted` (primary span `0..0`, no source
+ID). `run` and `test` report it as `@command.operational-failure` (exit 3), and
+`test` then reports zero selected, passed, and failed tests. A program that
+completes under one memory limit and exhausts a smaller one has not
+violated parity. Both backends MUST report the same host event when memory is
+exhausted, and a conformance case that exhausts memory states only that event.
 
-No integer or floating compiler operation is admitted in M2. The v1
-`integer.add-checked` declaration remains a valid source spelling but is
-`@tool.unavailable` until its nominal `result` contract and overflow behavior
-are implemented. `integer.increment` and `integer.to-str` likewise require
-their own reviewed signatures. The checker must report availability before
-lowering instead of wrapping, trapping, or fabricating a private result type.
+## Test assertions
 
-Adding a compiler symbol requires a specification change to this table and its
-registry tests; a string in source or a copied declaration cannot authorize an
-operation. The M3 registry below replaces this profile as the Stage 3A steps
-implement it; until then these two symbols are the implemented set.
-
-M2 test assertions are a separate closed test-runner outcome surface described
+Test assertions are a separate closed test-runner outcome surface described
 in the projects chapter. They evaluate through the ordinary typed call path,
 perform no host operation, and have no compiler or host registry symbol. A
 false assertion records `@test.assertion-failed` and stops only its current
@@ -267,6 +280,14 @@ the accelerated implementation a toolchain may run instead. Until a library
 type moves into the standard library, its rows are primitive operations over
 the toolchain's direct representation; the roadmap names each migration.
 
+The `to-str` and `parse` rows of the integer and float types are expressible
+in Vibra over the primitive operations, so they are native implementations
+whose meaning is a Vibra body declared in `@std.builtin`, and the float bodies
+read a float's bits through the primitive `to-bits` and `from-bits` rows. The
+single source of every native implementation is its body, as the **Native
+implementations** section states. Until Stage 4A moves them, a toolchain
+implements the rows as primitive operations, which is observationally the same.
+
 The error and ordering types are standard-library enums in `@std.core`, each
 variant with a `void` payload:
 
@@ -293,8 +314,8 @@ spelled `T.<name>`:
 | `shift-right` | `T u32 -> R T` | `floor(left / 2^amount)`; `invalid-shift` when the amount is at least the bit width |
 | `equal` | `T T -> bool` | Numeric equality |
 | `compare` | `T T -> ordering` | Numeric order |
-| `to-str` | `T -> str` | Shortest decimal digits, with a leading `-` only for a negative value and no suffix |
-| `parse` | `str -> C T` | Accepts an optional `-` (signed `T` only) followed by one or more ASCII decimal digits and nothing else; `invalid-format` otherwise, `out-of-range` for a well-formed value outside `T` |
+| `to-str` (native) | `T -> str` | Shortest decimal digits, with a leading `-` only for a negative value and no suffix |
+| `parse` (native) | `str -> C T` | Accepts an optional `-` (signed `T` only) followed by one or more ASCII decimal digits and nothing else; `invalid-format` otherwise, `out-of-range` for a well-formed value outside `T` |
 | `to-U`, for each other integer type `U` | `T -> U` when every `T` value is a `U` value, else `T -> C U` | The same integer as a `U`; `out-of-range` when `U` cannot hold it |
 
 For `F` among `f32` and `f64`, the builtin type `F` has:
@@ -305,8 +326,10 @@ For `F` among `f32` and `f64`, the builtin type `F` has:
 | `neg` | `F -> F` | IEEE 754 negation |
 | `equal` | `F F -> bool` | IEEE 754 equality, so NaN is unequal to itself |
 | `compare-total` | `F F -> ordering` | IEEE 754 `totalOrder` over canonicalized values |
-| `to-str` | `F -> str` | The canonical float serialization of this chapter, without a suffix |
-| `parse` | `str -> C F` | The unsuffixed decimal float literal grammar; `invalid-format` otherwise, `out-of-range` when the rounded value is infinite |
+| `to-bits` | `f32 -> u32`, `f64 -> u64` | The IEEE 754 interchange bits of the canonicalized value, so every NaN reads as the canonical quiet NaN |
+| `from-bits` | `u32 -> f32`, `u64 -> f64` | The float with exactly those bits; a pattern that encodes a NaN yields a NaN, whose payload is unobservable |
+| `to-str` (native) | `F -> str` | The canonical float serialization of this chapter, without a suffix |
+| `parse` (native) | `str -> C F` | The unsuffixed decimal float literal grammar; `invalid-format` otherwise, `out-of-range` when the rounded value is infinite |
 
 The remaining operations are bound by modules, except the `char.*`, `array.*`,
 and `dict.*` rows. The `text.*` and `bytes.*` rows are native implementations of
@@ -376,11 +399,91 @@ manifest lists every native symbol, and a symbol the toolchain does not
 implement is a toolchain defect reported as an operational provenance
 diagnostic. A toolchain MAY execute the body instead of the native
 implementation, so a native implementation is never needed for a correct
-result. Each native implementation has one source shared by the reference
-interpreter and the WebAssembly backend, so the two cannot drift apart, and
-the conformance suite runs every native implementation against its body over
-the same inputs. This is not a foreign-function interface: packages cannot
-declare `native:`, and a native implementation reaches no host operation.
+result.
+
+The body is the single source of every native implementation. The WebAssembly
+backend executes the body: it has no native implementation of its own, a
+native symbol is never lowered into a module, and so the two backends cannot
+drift apart. A reference interpreter MAY run its toolchain-owned native
+implementation instead of the body. The conformance suite holds that native
+implementation to its body over the same inputs, and holds the body to itself
+across backends: for every sample input, the interpreter's native
+implementation, the interpreter's body, and the module's body produce the same
+result. This is not a foreign-function interface: packages cannot declare
+`native:`, and a native implementation reaches no host operation.
+
+## The value arena
+
+An **instance** is one execution of a program: it owns its module-value state,
+its activations, and every value it creates, and it shares none of them with
+another instance. A value is never observed across instances, and a value
+that has crossed a host boundary is observed only through the operations that
+boundary defines.
+
+A value is a **scalar** or an **arena value**. The scalars are the values of
+`bool`, `void`, `char`, the integer types, and the float types. Every other
+value is an arena value of one of the closed kinds `atom`, `str`, `bytes`,
+`tuple`, `array`, `dict`, `record`, `enum`, `wrapper`, `union`, and `function`.
+The arena is the instance's own value storage. A representation MAY keep a
+value of some other kind unboxed, and the kinds name what a host can see, not
+what a layout stores.
+
+A backend with a host boundary assigns each arena value that crosses the
+boundary a **value ID** and gives the host only that ID:
+
+- an ID is an unsigned 64-bit integer, and `0` is never a valid ID;
+- an ID is assigned by the instance, valid for that instance alone, and never
+  reused within it, even after its value is released;
+- the instance keeps a handle table in which each ID the host holds keeps its
+  value live; and
+- an ID names a value and not a place: no ID, offset, or address of the arena
+  appears in typed IR, in a canonical value encoding, in an audit event, or in
+  any conformance snapshot.
+
+Within a WebAssembly module the arena lives in the module's own linear memory
+and is managed by compiler-emitted code. Values refer to one another by offset
+and never move, so an offset is stable for the life of its value. No offset
+crosses the guest/host boundary. The reference interpreter's arena is its own
+heap and needs no IDs until it serves a host.
+
+## Reclamation
+
+A value is **live** while it is reachable from a live activation, from a
+module-level value, or from a value ID the host holds. The storage of a value
+that is no longer live MAY be released at any time, and a backend MUST release
+it before it lets a program whose live data stays bounded grow without bound.
+Reclamation is unobservable apart from memory use: no result, trap, audit
+event, or ID changes because storage was or was not released.
+
+In particular, a tail-recursive loop that allocates a fresh compound value on
+each iteration and keeps none of the earlier ones live runs with a bounded live
+arena: the live arena after a million iterations exceeds the live arena after
+a thousand by at most a constant that depends on the program and not on the
+iteration count. A WebAssembly backend MUST be able to report its live arena
+size, in bytes of storage held by live values and by the handle table, so a
+conformance harness can measure this. Releasing a value
+MUST use bounded engine stack however deeply that value is nested, so a
+backend releases through an explicit worklist and never through recursion on
+the host stack.
+
+Running out of memory, or of IDs, while allocating is the host event
+`@runtime.memory-exhausted` of **Activations and memory**. It is not a trap.
+
+No value can reach itself, so a backend MAY reclaim by counting references to
+each value and releasing a value when its count reaches zero, without a
+cycle collector:
+
+- values are immutable and are built only from values that already exist, so a
+  value refers only to values older than itself;
+- a module-level `def` cannot reach itself, because an initializer cycle is
+  rejected with `@type.initializer-cycle`;
+- a module function is named by its identity and never held by a counted
+  reference, and a closure holds only the local values it captured;
+- a `let` or `let-else` binding is visible only from the end of its own pair, so
+  a `lambda` cannot capture the value that is being bound to it; and
+- an in-place update, where a backend performs one, applies only to a value
+  that no other live reference reaches, so it cannot make that value refer to a
+  younger value that refers back to it.
 
 ## Representation latitude
 
@@ -478,14 +581,35 @@ lifetime semantics in v1.
 Host responses that are ordinary environmental outcomes use typed `result`
 errors. ABI mismatch, impossible typed IR, invalid host value IDs, and runtime
 invariant violation are traps. A trap has a stable code and a source origin
-when its failing source span is known; otherwise it has no origin. M2 failures
-at the checked-program execution boundary (no executable entry or a body that
-violates checked-IR invariants) use `@runtime.invalid-checked-program`. These
-failures have no source origin and use an unlocated diagnostic primary at
-`0..0` with no source ID. The CLI `trapCode` is the exact diagnostic-code
-spelling as a string, and its `origin` is `null`. `run` reports the trap the
-same way `test` does: the result is `@command.trap`, the diagnostic is in the
-envelope, and the payload's `trap` holds the code.
+when its failing source span is known; otherwise it has no origin. The trap
+codes are closed:
+
+| Code | Raised when | Origin |
+| --- | --- | --- |
+| `@runtime.invalid-checked-program` | The checked program has no executable entry, a body violates the checked-IR invariants, or the toolchain itself fails, including every engine trap that generated code did not raise | None |
+| `@runtime.unobservable-function` | A value that holds a function reaches an observation | The assertion call in a test; none for the entry's result |
+| `@runtime.invalid-host-value` | A host operation receives a value ID that is zero, was never issued by the instance, has been released, or names a value of a kind the operation does not admit, or an index outside the value | None |
+
+A failure with no origin uses an unlocated diagnostic primary at `0..0` with no
+source ID. The CLI `trapCode` is the exact diagnostic-code spelling as a
+string, and its `origin` is `null` when the trap has none. `run` reports the
+trap the same way `test` does: the result is `@command.trap`, the diagnostic is
+in the envelope, and the payload's `trap` holds the code.
+
+An engine reports traps by its own rules, such as an unreachable instruction,
+an out-of-bounds access, a mismatched indirect call, an arithmetic trap, or an
+exhausted call stack. None of these is a language outcome, because every
+partial operation of the language returns an `option` or a `result` and no
+checked program performs an operation that traps by an engine's rules. Code a
+backend generates raises the registered traps itself: it records the trap code
+and its origin in the instance before it stops, and a host reads that record.
+An engine trap with no such record is a defect of the toolchain, reported as
+`@runtime.invalid-checked-program` with no origin, and no conformance case
+expects it. Exhausting memory is the host event of **Activations and memory**,
+never a trap. A module carries no source map before Milestone 7, so it names a
+trap's origin by an ordinal into an origin table that the toolchain produces
+with the module and that maps each ordinal to one source span. Both backends
+MUST report the same code and the same origin for every registered trap.
 
 `@runtime.unobservable-function` is the trap of a value that holds a function
 reaching an observation. A test assertion compares canonical value encodings
@@ -500,19 +624,68 @@ Traps are not catchable by user code.
 
 ## WebAssembly boundary
 
-The emitted module imports only compiler-generated `@host` entries from
-`vibra_v1`. There is no source-level Wasm FFI, dependency-selected import
-module, or user-declared import. The guest/host boundary is scalar-only: values
-crossing it are fixed-width primitive scalars or checked opaque indices into an
-instance-owned value arena. A `char` crosses as a validated Unicode scalar in
-an `i32` slot. Guest pointers, shared linear-memory pointers, and host internals
-do not cross the boundary.
+A WebAssembly module the toolchain emits is a **v1 module**. It uses only the
+core features of WebAssembly 2.0 that this paragraph names: the MVP
+instruction set and function tables, multiple results, bulk memory operations,
+sign-extension operators, and non-trapping float-to-integer conversions. It
+does not use the tail-call, garbage-collection, exception-handling, SIMD,
+threads, reference-type, memory64, or multi-memory features, so no conforming
+engine needs an optional proposal and a module does not depend on the engine's
+stack or collector. A v1 module validates under exactly that feature set.
 
-The host validates every opaque value index for instance, kind, and liveness.
-Index zero is invalid and IDs are not reused within an instance. The module
-exports a versioned entry function and embeds deterministic custom sections for
-source/build fingerprint, required registry entries, required effects, and
-source-origin mapping.
+A module has one defined 32-bit linear memory, which holds its arena and is
+never exported, and no exported global. Its imports are empty in Stage 4A: it
+calls no host operation and reads no ambient state. From Stage 4B it imports
+only compiler-generated `@host` entries from `vibra_v1`. There is no
+source-level Wasm FFI, dependency-selected import module, or user-declared
+import. The guest/host boundary is scalar-only: values crossing it are
+fixed-width primitive scalars or value IDs of the instance's arena. A `char`
+crosses as a validated Unicode scalar in an `i32` slot, and the integer types
+narrower than 32 bits cross in an `i32` slot, signed ones sign-extended and
+unsigned ones zero-extended. Guest pointers, offsets into linear memory, and
+host internals do not cross the boundary.
+
+A Stage 4A module exports exactly the functions below. Every export name is
+prefixed `vibra_v1_`, which is the module's version: an incompatible change to
+a name, signature, or meaning requires `vibra_v2`. A program module exports
+`vibra_v1_entry` and a test module exports `vibra_v1_test`; no module exports
+both.
+
+| Export | Type | Meaning |
+| --- | --- | --- |
+| `vibra_v1_entry` | `() -> ()` | Runs the binary target's entry |
+| `vibra_v1_test` | `(i32) -> ()` | Runs the test at that zero-based position in canonical discovery order; a host runs each test in a fresh instance |
+| `vibra_v1_status` | `() -> i32` | What the last call recorded: `0` nothing, `1` a trap, `2` the memory host event, `3` a failed assertion |
+| `vibra_v1_trap_code` | `() -> i32` | After status `1`: `1` for `@runtime.invalid-checked-program`, `2` for `@runtime.unobservable-function`, `3` for `@runtime.invalid-host-value` |
+| `vibra_v1_origin` | `() -> i32` | After status `1` or `3`: the origin ordinal of the trap or the assertion call, `0` for none |
+| `vibra_v1_failure` | `() -> i32` | After status `3`: `1` for `assert.true`, `2` for `assert.false`, `3` for `assert.equal` |
+| `vibra_v1_failure_expected`, `vibra_v1_failure_actual` | `() -> i64` | After status `3` and `assert.equal`: the two operands, as the bits of a scalar or as a value ID, by the operand type that the origin table records |
+| `vibra_v1_result` | `() -> i64` | After a completed entry: the ID of its result, `0` when the result is `void` |
+| `vibra_v1_live_size` | `() -> i64` | The live arena size in bytes, as the **Reclamation** section requires |
+| `vibra_v1_release` | `(i64) -> ()` | The host drops its hold on a value ID |
+| `vibra_v1_variant` | `(i64) -> i32` | The variant index of an enum, in declaration order, or the member index of a union, in written order |
+| `vibra_v1_length` | `(i64) -> i64` | The scalar count of an `atom` or `str`, the byte count of `bytes`, the element count of an `array`, the entry count of a `dict`, and the component count of a `tuple` or `record` |
+| `vibra_v1_read_i32`, `vibra_v1_read_i64`, `vibra_v1_read_f32`, `vibra_v1_read_f64` | `(i64, i64) -> T` | The scalar component at an index: a character of a `str` or `atom`, a byte of `bytes`, an element, a tuple or record component in field order, or the payload of an enum, wrapper, or union |
+| `vibra_v1_read_id` | `(i64, i64) -> i64` | A compound component at an index, as a new ID that the host MUST release; the entry at an index of a `dict` is a two-component `tuple` |
+
+A call to `vibra_v1_entry` or `vibra_v1_test` that returns has completed. A call
+that stops, as an engine trap, did so because generated code recorded one of
+the statuses above before it stopped, and the host reads the record with the
+accessors; a stop with status `0` is a toolchain defect, reported as
+`@runtime.invalid-checked-program`. An ID, index, or kind that an accessor does
+not admit records the trap `@runtime.invalid-host-value`. A function value has
+no components, so a host that reaches one while observing reports
+`@runtime.unobservable-function`. Stage 4B adds the operations by which a host
+builds compound values and the host imports, and writes them against this
+interface.
+
+The host validates every value ID for instance, kind, and liveness. Index zero
+is invalid and IDs are not reused within an instance. A v1 module the
+toolchain emits before `vibra build` exists embeds no custom section. The
+origin table is produced beside the module and is not part of its bytes. A
+build product embeds deterministic custom sections for source/build
+fingerprint, required registry entries, required effects, and the
+source-origin mapping that replaces the origin table.
 
 Required-effect metadata is descriptive. The runtime validates ABI shape and
 value types but receives no grant table, applies no effect-root policy, and
@@ -536,12 +709,17 @@ observable only through their registered operations in source accepted by the
 checker. Test hosts inject deterministic or recorded responses. The runtime
 never reads ambient host state on behalf of an effect-free operation.
 
-V1 defines no fuel, logical-memory, host-operation, or handle-count budget. An
-embedding host may enforce external process or platform limits, but termination
-by such a limit is a host event rather than a portable Vibra semantic result.
+V1 defines no fuel, host-operation, or handle-count budget, and no portable
+memory limit: the limit that produces `@runtime.memory-exhausted` belongs to the
+embedding host. An embedding host may enforce other external process or
+platform limits, but termination by such a limit is a host event rather than a
+portable Vibra semantic result.
 
 Compilation is deterministic: identical compiler version, typed program, and
-options produce byte-identical Wasm and build data. Optimization is permitted
+options produce byte-identical Wasm and build data. A module depends on no
+clock, absolute path, address, hash-table order, or thread, so emission from an
+identical checked program is byte-identical from the first module the toolchain
+emits, before any build command exists. Optimization is permitted
 only after unoptimized interpreter/Wasm parity exists, and every optimization
 must preserve conformance observations.
 

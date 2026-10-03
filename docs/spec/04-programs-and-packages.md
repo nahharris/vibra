@@ -3,8 +3,9 @@
 Status: normative target
 Implementation status: M1 supplies generic VIBON data and structural query
 metadata; M2 decodes projects, resolves local modules, and supports init,
-check, run, and test for its pure subset. Ordinary dependency delivery remains
-deferred.
+check, run, and test; M3 embeds the standard library as the toolchain input.
+Ordinary dependency delivery (M5) and build products (M7) remain unimplemented,
+and `run` and `test` execute the reference interpreter.
 
 ## VIBON data documents
 
