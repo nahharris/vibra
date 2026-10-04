@@ -147,7 +147,7 @@ The representation is written once, in the documentation of
   `ValueId` that carries its instance and shows no number, and
   `Runner::run_observed` runs the entry and reads the result by its type into the
   value the interpreter's canonical encoding takes. A scalar entry result is read
-  from its bits in `vibra_v1_result`, which the specification does not state
+  from its bits in `vibra_v1_result`, which the runtime chapter now states
   ([D2.8](decision-ledger.md)).
 - **For Step 5b.** The module-value state (`module_values`) and the frame stack
   (`frame_segment`, `frame_top`, `frame_limit`, `frame_depth`) are reserved and

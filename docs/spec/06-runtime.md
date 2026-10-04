@@ -683,7 +683,7 @@ both.
 | `vibra_v1_origin` | `() -> i32` | After status `1` or `3`: the origin ordinal of the trap or the assertion call, `0` for none |
 | `vibra_v1_failure` | `() -> i32` | After status `3`: `1` for `assert.true`, `2` for `assert.false`, `3` for `assert.equal` |
 | `vibra_v1_failure_expected`, `vibra_v1_failure_actual` | `() -> i64` | After status `3` and `assert.equal`: the two operands, as the bits of a scalar or as a value ID, by the operand type that the origin table records |
-| `vibra_v1_result` | `() -> i64` | After a completed entry: the ID of its result, `0` when the result is `void` |
+| `vibra_v1_result` | `() -> i64` | After a completed entry: the entry's result, read by the entry's result type like the operands of a failed `assert.equal`: its bits when the type is a scalar, and the ID of the value otherwise. A `void` result carries no information, so its slot is `0` |
 | `vibra_v1_live_size` | `() -> i64` | The live arena size in bytes, as the **Reclamation** section requires |
 | `vibra_v1_release` | `(i64) -> ()` | The host drops its hold on a value ID |
 | `vibra_v1_variant` | `(i64) -> i32` | The variant index of an enum, in declaration order, or the member index of a union, in written order |

@@ -136,9 +136,7 @@
 //! result that is an arena value it is the ID of the value, which the host
 //! releases. For a scalar result it is the scalar's bits, zero-extended from
 //! 32 bits for an `i32`-slot type, and the host reads it by the entry's result
-//! type, as a failed assertion's operands are read. The specification states
-//! the first two and is silent on a scalar entry result, so the last is
-//! recorded in the M4 ledger.
+//! type, as a failed assertion's operands are read (ledger D2.8).
 //!
 //! # Frame storage
 //!
