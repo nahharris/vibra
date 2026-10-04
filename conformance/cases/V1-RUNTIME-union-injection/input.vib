@@ -1,0 +1,4 @@
+(deftype number (union str i32))
+
+(defn main () (tuple number number (union str i32) (union str i32))
+  (tupleof 5i32 "five" 6i32 "six"))

@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-enum-payload-classes"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "An enum variant carries a payload of any scalar width, a reference value, or none, and a variant's discriminant is its position in the declaration."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }
