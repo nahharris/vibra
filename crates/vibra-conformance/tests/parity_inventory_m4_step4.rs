@@ -32,7 +32,7 @@ fn corpus_root() -> PathBuf {
 /// case is the latest step among the forms it needs.
 fn suggested_step(form: &str) -> Option<&'static str> {
     Some(match form {
-        "literal" | "non-void-result" => "5a",
+        "result" => "5b",
         "sequence" | "variable" | "let" | "if" | "return" | "global"
         | "module-value" | "record" | "variant" | "wrap" | "project" | "tuple"
         | "tuple-project" | "widen" | "parameters" | "call:direct" => "5b",

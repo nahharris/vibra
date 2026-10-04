@@ -19,14 +19,12 @@ pub enum Form {
     ModuleValue,
     /// A function with a fixed, labelled, or variadic parameter.
     Parameters,
-    /// A function whose result is not `void`.
-    NonVoidResult,
+    /// A function whose result type no lowered value kind represents.
+    Result,
     /// One of the closed verified test assertion functions.
     TestAssertion,
     /// A function that implements a contract member.
     ContractImplementation,
-    /// A literal other than the `void` literal.
-    Literal,
     /// A call of a compiler registry operation.
     External,
     /// An omitted labelled argument, resolved to the callee's default.
@@ -83,10 +81,9 @@ impl Form {
             Self::ModuleSize => "module-size",
             Self::ModuleValue => "module-value",
             Self::Parameters => "parameters",
-            Self::NonVoidResult => "non-void-result",
+            Self::Result => "result",
             Self::TestAssertion => "test-assertion",
             Self::ContractImplementation => "contract-implementation",
-            Self::Literal => "literal",
             Self::External => "external",
             Self::Default => "default",
             Self::Variable => "variable",

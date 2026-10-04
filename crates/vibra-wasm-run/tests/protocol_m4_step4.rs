@@ -16,7 +16,7 @@ use common::{
     GLOBAL_ACTUAL, GLOBAL_EXPECTED, GLOBAL_FAILURE, GLOBAL_RESULT, Spec, module, record,
 };
 use vibra_ir::boundary::{Failure, TrapCode};
-use vibra_wasm_run::{MemoryLimit, Outcome, Runner, RunnerError};
+use vibra_wasm_run::{MemoryLimit, Outcome, ResultSlot, Runner, RunnerError};
 use wasm_encoder::Instruction;
 
 const PAGE: usize = 65_536;
@@ -36,7 +36,7 @@ fn a_returning_call_has_completed() {
     assert_eq!(
         run(&Spec::default()),
         Outcome::Completed {
-            result: 0,
+            result: ResultSlot::from_bits(0),
             live_size: 0
         }
     );
@@ -54,7 +54,7 @@ fn a_completed_entry_reports_its_result_id() {
     assert_eq!(
         run(&spec),
         Outcome::Completed {
-            result: 5,
+            result: ResultSlot::from_bits(5),
             live_size: 0
         }
     );
@@ -241,7 +241,7 @@ fn growth_within_the_limit_succeeds() {
     assert_eq!(
         runner.run_entry(&module(&spec)).expect("runnable"),
         Outcome::Completed {
-            result: 0,
+            result: ResultSlot::from_bits(0),
             live_size: 0
         }
     );
@@ -255,7 +255,7 @@ fn the_limit_exactly_at_the_modules_need_runs_and_one_page_under_does_not() {
     assert_eq!(
         exactly.run_entry(&empty).expect("runnable"),
         Outcome::Completed {
-            result: 0,
+            result: ResultSlot::from_bits(0),
             live_size: 0
         }
     );
@@ -310,7 +310,7 @@ fn nan_canonicalization_is_on_in_the_engine() {
             ..Spec::default()
         }),
         Outcome::Completed {
-            result: 0x7fc0_0000,
+            result: ResultSlot::from_bits(0x7fc0_0000),
             live_size: 0
         }
     );

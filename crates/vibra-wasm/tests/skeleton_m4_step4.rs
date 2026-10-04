@@ -96,12 +96,18 @@ fn a_sequence_of_void_literals_is_the_empty_entry_too() {
 
 #[test]
 fn a_sequence_adds_nothing_to_what_its_expressions_need() {
+    let binding = Expr::Let {
+        slot: None,
+        value: Box::new(void_literal()),
+        body: Box::new(void_literal()),
+        origin: origin(),
+    };
     let body = Expr::Sequence {
-        expressions: vec![Expr::literal(Value::I32(1), origin()), void_literal()],
+        expressions: vec![binding, void_literal()],
         origin: origin(),
     };
     let f = function("seq", Vec::new(), Type::Void, body);
-    assert_eq!(forms(&not_lowered(&program(vec![f], 0))), ["literal"]);
+    assert_eq!(forms(&not_lowered(&program(vec![f], 0))), ["let"]);
 }
 
 #[test]
@@ -150,17 +156,14 @@ fn a_parameter_is_named_not_lowered() {
 }
 
 #[test]
-fn a_non_void_result_names_the_result_and_the_literal() {
+fn a_literal_result_lowers_since_step_5a() {
     let f = function(
         "answer",
         Vec::new(),
         Type::I32,
         Expr::literal(Value::I32(1), origin()),
     );
-    assert_eq!(
-        forms(&not_lowered(&program(vec![f], 0))),
-        ["non-void-result", "literal"]
-    );
+    assert!(emit(&program(vec![f], 0)).is_ok());
 }
 
 #[test]

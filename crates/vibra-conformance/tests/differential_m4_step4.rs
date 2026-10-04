@@ -215,11 +215,7 @@ fn a_program_that_does_not_lower_still_passes_in_the_interpreter() {
     let WasmStatus::NotLowered { forms } = wasm else {
         panic!("expected not lowered, got {wasm:?}");
     };
-    assert!(
-        forms.iter().any(|form| form == "non-void-result")
-            && forms.iter().any(|form| form == "literal"),
-        "{forms:?}"
-    );
+    assert!(forms.iter().any(|form| form == "module-value"), "{forms:?}");
     assert_eq!(
         report.status,
         CaseStatus::Passed,

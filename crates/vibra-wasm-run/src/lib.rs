@@ -24,20 +24,25 @@
 //! limit to every memory. The engine's own call stack is not part of the
 //! language: activations of a later step live in the module's arena.
 
+mod instance;
 mod natives;
+mod observe;
 mod validate;
 
 use std::fmt;
 
 use vibra_ir::boundary::{
-    ENTRY_EXPORT, FAILURE_ACTUAL_EXPORT, FAILURE_EXPECTED_EXPORT, FAILURE_EXPORT,
-    Failure, LIVE_SIZE_EXPORT, ORIGIN_EXPORT, RESULT_EXPORT, STATUS_EXPORT, Status,
+    FAILURE_ACTUAL_EXPORT, FAILURE_EXPECTED_EXPORT, FAILURE_EXPORT, Failure,
+    LIVE_SIZE_EXPORT, ORIGIN_EXPORT, RESULT_EXPORT, STATUS_EXPORT, Status,
     TRAP_CODE_EXPORT, TrapCode,
 };
 use wasmtime::{
-    Config, Engine, Instance, Linker, Module, ResourceLimiter, Store, Strategy,
+    Config, Engine, Instance as EngineInstance, Linker, Module, ResourceLimiter, Store,
+    Strategy,
 };
 
+pub use instance::{Instance, Started, ValueId};
+pub use observe::{LiveSizes, Observed};
 pub use validate::{ModuleSummary, ValidationError, baseline_features, validate};
 
 /// The most memory an instance may hold, in bytes of linear memory.
@@ -67,13 +72,13 @@ impl MemoryLimit {
 
 /// The state the store carries for the host functions and the limiter.
 pub(crate) struct Host {
-    limiter: Limiter,
+    pub(crate) limiter: Limiter,
 }
 
 /// Applies the memory limit and remembers that it refused a request.
-struct Limiter {
-    limit: MemoryLimit,
-    refused: bool,
+pub(crate) struct Limiter {
+    pub(crate) limit: MemoryLimit,
+    pub(crate) refused: bool,
 }
 
 impl ResourceLimiter for Limiter {
@@ -103,11 +108,11 @@ impl ResourceLimiter for Limiter {
 /// How a call into a module ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outcome {
-    /// The call returned. `result` is the ID `vibra_v1_result` reports, `0` for
-    /// a `void` entry.
+    /// The call returned. `result` is what `vibra_v1_result` reports, which
+    /// [`Instance::observe`] reads by the entry's result type.
     Completed {
-        /// The ID of the entry's result.
-        result: u64,
+        /// The entry's result slot.
+        result: ResultSlot,
         /// The live arena size in bytes that `vibra_v1_live_size` reports
         /// after the call.
         live_size: u64,
@@ -140,6 +145,29 @@ pub enum Outcome {
         /// What the runner saw.
         cause: String,
     },
+}
+
+/// The 64-bit slot `vibra_v1_result` reports after a completed entry.
+///
+/// It is `0` for a `void` result, the bits of a scalar result, or the value ID
+/// of an arena result, and only the entry's result type says which. The slot
+/// does not show its number: an ID never leaves the runner in a public result,
+/// and [`Instance::observe`] turns a slot into the value it stands for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ResultSlot(u64);
+
+impl ResultSlot {
+    /// A slot holding `bits`, for a module whose entry reports a scalar.
+    #[must_use]
+    pub const fn from_bits(bits: u64) -> Self {
+        Self(bits)
+    }
+}
+
+impl fmt::Debug for ResultSlot {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ResultSlot(..)")
+    }
 }
 
 impl Outcome {
@@ -213,7 +241,7 @@ impl From<ValidationError> for RunnerError {
 /// Validates and runs v1 modules under one memory limit.
 pub struct Runner {
     engine: Engine,
-    limit: MemoryLimit,
+    pub(crate) limit: MemoryLimit,
 }
 
 impl fmt::Debug for Runner {
@@ -232,7 +260,30 @@ impl Runner {
     ///
     /// [`RunnerError::Engine`] when the engine rejects the configuration.
     pub fn new(limit: MemoryLimit) -> Result<Self, RunnerError> {
-        let engine = Engine::new(&engine_config())
+        Self::build(limit, None)
+    }
+
+    /// Creates a runner like [`Runner::new`] whose engine allows a module no
+    /// more than `stack_bytes` of its own call stack. A test uses a small one
+    /// to show that a routine does not recurse in proportion to its input: the
+    /// language's activations live in the arena, so no language depth ever
+    /// reaches this stack.
+    ///
+    /// # Errors
+    ///
+    /// [`RunnerError::Engine`] when the engine rejects the configuration.
+    pub fn with_wasm_stack(
+        limit: MemoryLimit,
+        stack_bytes: usize,
+    ) -> Result<Self, RunnerError> {
+        Self::build(limit, Some(stack_bytes))
+    }
+
+    fn build(
+        limit: MemoryLimit,
+        stack_bytes: Option<usize>,
+    ) -> Result<Self, RunnerError> {
+        let engine = Engine::new(&engine_config(stack_bytes))
             .map_err(|error| RunnerError::Engine(format!("{error:#}")))?;
         Ok(Self { engine, limit })
     }
@@ -253,6 +304,22 @@ impl Runner {
     /// run that exhausts memory is the [`Outcome::MemoryExhausted`] host event,
     /// including when the module's own initial memory exceeds the limit.
     pub fn run_entry(&self, bytes: &[u8]) -> Result<Outcome, RunnerError> {
+        match self.start(bytes)? {
+            Started::MemoryExhausted => Ok(Outcome::MemoryExhausted),
+            Started::Ready(mut instance) => instance.call_entry(),
+        }
+    }
+
+    /// Validates `bytes` and instantiates the module under the runner's limit,
+    /// without running it. The instance stays usable after any stop: the host
+    /// reads values and the live size through its accessors.
+    ///
+    /// # Errors
+    ///
+    /// The same [`RunnerError`]s as [`Runner::run_entry`], before the entry
+    /// runs. A module whose own memory exceeds the limit is
+    /// [`Started::MemoryExhausted`].
+    pub fn start(&self, bytes: &[u8]) -> Result<Started, RunnerError> {
         validate(bytes)?;
         let module = Module::new(&self.engine, bytes)
             .map_err(|error| RunnerError::Compile(format!("{error:#}")))?;
@@ -281,16 +348,11 @@ impl Runner {
             Ok(instance) => instance,
             // The module's own memory does not fit the limit.
             Err(_) if store.data().limiter.refused => {
-                return Ok(Outcome::MemoryExhausted);
+                return Ok(Started::MemoryExhausted);
             }
             Err(error) => return Err(RunnerError::Instantiate(format!("{error:#}"))),
         };
-        let entry = instance
-            .get_typed_func::<(), ()>(&mut store, ENTRY_EXPORT)
-            .map_err(|error| export_error(ENTRY_EXPORT, &error))?;
-        let call = entry.call(&mut store, ());
-        let stop = call.err().map(|error| format!("{error:#}"));
-        interpret(&mut store, &instance, stop)
+        Ok(Started::Ready(Instance::new(store, instance)))
     }
 }
 
@@ -301,8 +363,11 @@ impl Runner {
 /// proposals do not exist in this engine. The rest are turned off here, and
 /// [`validate`] refuses a module that uses any of them before it reaches the
 /// engine.
-fn engine_config() -> Config {
+fn engine_config(stack_bytes: Option<usize>) -> Config {
     let mut config = Config::new();
+    if let Some(stack_bytes) = stack_bytes {
+        config.max_wasm_stack(stack_bytes);
+    }
     config
         .strategy(Strategy::Cranelift)
         .cranelift_nan_canonicalization(true)
@@ -321,16 +386,16 @@ fn engine_config() -> Config {
     config
 }
 
-fn export_error(name: &'static str, error: &wasmtime::Error) -> RunnerError {
+pub(crate) fn export_error(name: &'static str, error: &wasmtime::Error) -> RunnerError {
     RunnerError::Export {
         name,
         reason: format!("{error:#}"),
     }
 }
 
-fn call_i32(
+pub(crate) fn call_i32(
     store: &mut Store<Host>,
-    instance: &Instance,
+    instance: &EngineInstance,
     name: &'static str,
 ) -> Result<i32, RunnerError> {
     let function = instance
@@ -341,9 +406,9 @@ fn call_i32(
         .map_err(|error| export_error(name, &error))
 }
 
-fn call_i64(
+pub(crate) fn call_i64(
     store: &mut Store<Host>,
-    instance: &Instance,
+    instance: &EngineInstance,
     name: &'static str,
 ) -> Result<i64, RunnerError> {
     let function = instance
@@ -357,7 +422,7 @@ fn call_i64(
 /// Reads an origin ordinal: `0` is no origin.
 fn origin(
     store: &mut Store<Host>,
-    instance: &Instance,
+    instance: &EngineInstance,
 ) -> Result<Option<u32>, RunnerError> {
     let ordinal = call_i32(store, instance, ORIGIN_EXPORT)?;
     // The accessor returns an `i32` that is an unsigned ordinal.
@@ -366,9 +431,9 @@ fn origin(
 
 /// Interprets what a call recorded. `stop` is the engine's report when the
 /// call did not return.
-fn interpret(
+pub(crate) fn interpret(
     store: &mut Store<Host>,
-    instance: &Instance,
+    instance: &EngineInstance,
     stop: Option<String>,
 ) -> Result<Outcome, RunnerError> {
     // A refused growth is the host event, whatever the module did next.
@@ -387,7 +452,7 @@ fn interpret(
             let live_size = call_i64(store, instance, LIVE_SIZE_EXPORT)?;
             // An ID and a size are unsigned 64-bit values carried in an `i64`.
             Ok(Outcome::Completed {
-                result: u64::from_ne_bytes(result.to_ne_bytes()),
+                result: ResultSlot(u64::from_ne_bytes(result.to_ne_bytes())),
                 live_size: u64::from_ne_bytes(live_size.to_ne_bytes()),
             })
         }

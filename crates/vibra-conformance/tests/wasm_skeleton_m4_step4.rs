@@ -20,13 +20,14 @@ use std::process::Command;
 
 use vibra_diagnostics::ByteSpan;
 use vibra_ir::boundary::{
-    ENTRY_EXPORT, LIVE_SIZE_EXPORT, MEMORY_EXPORT, ORIGIN_EXPORT, RESULT_EXPORT,
-    STATUS_EXPORT, TRAP_CODE_EXPORT,
+    ENTRY_EXPORT, LENGTH_EXPORT, LIVE_SIZE_EXPORT, MEMORY_EXPORT, ORIGIN_EXPORT,
+    READ_F32_EXPORT, READ_F64_EXPORT, READ_I32_EXPORT, READ_I64_EXPORT, READ_ID_EXPORT,
+    RELEASE_EXPORT, RESULT_EXPORT, STATUS_EXPORT, TRAP_CODE_EXPORT, VARIANT_EXPORT,
 };
 use vibra_ir::{
     CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Type, Value,
 };
-use vibra_wasm_run::{MemoryLimit, Outcome, Runner, validate};
+use vibra_wasm_run::{MemoryLimit, Outcome, ResultSlot, Runner, validate};
 
 fn origin() -> SourceOrigin {
     SourceOrigin::new("input.vib", ByteSpan::new(0, 1))
@@ -82,7 +83,7 @@ fn the_empty_entry_is_emitted_validated_and_run() {
         assert_eq!(
             runner.run_entry(&bytes).expect("runs"),
             Outcome::Completed {
-                result: 0,
+                result: ResultSlot::from_bits(0),
                 live_size: 0
             }
         );
@@ -94,6 +95,9 @@ fn the_module_declares_the_boundary_a_void_entry_needs() {
     let summary = validate(&emitted(&empty_entry())).expect("valid");
     // The empty entry uses no native, so the module imports nothing.
     assert!(summary.imports.is_empty(), "{:?}", summary.imports);
+    // Every accessor of the boundary table that no test needs, in the order of
+    // the specification's table (Step 5a). Step 11 adds the test and failure
+    // exports.
     assert_eq!(
         summary.exports,
         [
@@ -104,6 +108,14 @@ fn the_module_declares_the_boundary_a_void_entry_needs() {
             ORIGIN_EXPORT,
             RESULT_EXPORT,
             LIVE_SIZE_EXPORT,
+            RELEASE_EXPORT,
+            VARIANT_EXPORT,
+            LENGTH_EXPORT,
+            READ_I32_EXPORT,
+            READ_I64_EXPORT,
+            READ_F32_EXPORT,
+            READ_F64_EXPORT,
+            READ_ID_EXPORT,
         ]
     );
     assert_eq!(summary.initial_pages, 1);
@@ -197,11 +209,11 @@ fn a_checked_program_carries_the_prelude_values_and_does_not_lower_yet() {
 fn a_program_the_emitter_cannot_lower_has_no_module() {
     let result = vibra_types::check_source("input.vib", "(defn answer () u64 7u64)\n");
     let error = vibra_wasm::emit(result.program().expect("accepted"))
-        .expect_err("a literal result is not lowered yet");
+        .expect_err("the prelude's module values are not lowered yet");
     let names = error
         .forms()
         .iter()
         .map(|used| used.form().name())
         .collect::<Vec<_>>();
-    assert!(names.contains(&"non-void-result") && names.contains(&"literal"));
+    assert!(names.contains(&"module-value"), "{names:?}");
 }
