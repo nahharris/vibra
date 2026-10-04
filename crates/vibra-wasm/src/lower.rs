@@ -45,9 +45,7 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use vibra_ir::{
-    CallTarget, CheckedProgram, Expr, SourceOrigin, Type, Value,
-};
+use vibra_ir::{CallTarget, CheckedProgram, Expr, SourceOrigin, Type, Value};
 use wasm_encoder::{BlockType, Instruction as I, ValType};
 
 use crate::classify;
@@ -171,7 +169,11 @@ impl<'a> Lowering<'a> {
                         .globals()
                         .get(index.saturating_sub(functions))
                         .ok_or_else(|| NotLowered::single(crate::Form::ModuleSize))?;
-                    (global.initializer(), global.slot_count(), global.value_type())
+                    (
+                        global.initializer(),
+                        global.slot_count(),
+                        global.value_type(),
+                    )
                 }
             };
         let ir_slots = u32::try_from(ir_slots)
@@ -352,7 +354,11 @@ impl<'l, 'a> Builder<'l, 'a> {
     }
 
     /// The class of a value of `ty`, or the form that reports it.
-    fn class(&self, ty: &Type, origin: &SourceOrigin) -> Result<ValueClass, NotLowered> {
+    fn class(
+        &self,
+        ty: &Type,
+        origin: &SourceOrigin,
+    ) -> Result<ValueClass, NotLowered> {
         class_of(ty).map_err(|kind| NotLowered::type_of(kind, Some(origin.clone())))
     }
 
@@ -415,7 +421,13 @@ impl<'l, 'a> Builder<'l, 'a> {
                 variant,
                 payload,
                 ..
-            } => self.variant(value_type, variant, payload.as_deref(), expr.origin(), dest),
+            } => self.variant(
+                value_type,
+                variant,
+                payload.as_deref(),
+                expr.origin(),
+                dest,
+            ),
             Expr::Wrap {
                 value_type, value, ..
             } => self.wrap(value_type, value, expr.origin(), dest),
@@ -430,7 +442,13 @@ impl<'l, 'a> Builder<'l, 'a> {
                 field,
                 value_type,
                 ..
-            } => self.project(record, Projection::Field(field), value_type, expr.origin(), dest),
+            } => self.project(
+                record,
+                Projection::Field(field),
+                value_type,
+                expr.origin(),
+                dest,
+            ),
             Expr::Tuple {
                 value_type,
                 components,
@@ -441,7 +459,13 @@ impl<'l, 'a> Builder<'l, 'a> {
                 index,
                 value_type,
                 ..
-            } => self.project(tuple, Projection::Index(*index), value_type, expr.origin(), dest),
+            } => self.project(
+                tuple,
+                Projection::Index(*index),
+                value_type,
+                expr.origin(),
+                dest,
+            ),
             other => Err(classify::forms_of(other)),
         }
     }
@@ -606,7 +630,12 @@ impl<'l, 'a> Builder<'l, 'a> {
             self.new_block(),
             self.new_block(),
         );
-        self.push(&[c32(0), ld32(state::MODULE_VALUES), ld64(flag), I::I32WrapI64]);
+        self.push(&[
+            c32(0),
+            ld32(state::MODULE_VALUES),
+            ld64(flag),
+            I::I32WrapI64,
+        ]);
         self.end(Term::Branch {
             then_block: ready,
             else_block: init,
@@ -615,7 +644,13 @@ impl<'l, 'a> Builder<'l, 'a> {
         // Read: the table keeps its count and the reader takes one more.
         self.start(ready);
         let to = self.cell(dest);
-        self.push(&[get(FRAME), c32(0), ld32(state::MODULE_VALUES), ld64(value), st64(to)]);
+        self.push(&[
+            get(FRAME),
+            c32(0),
+            ld32(state::MODULE_VALUES),
+            ld64(value),
+            st64(to),
+        ]);
         self.take_copy(dest, class);
         self.goto(join, init);
 
@@ -1068,7 +1103,13 @@ enum Projection<'a> {
 
 /// Writes the instructions of a terminator. `loop_depth` is the label depth of
 /// the dispatching loop from the end of this block.
-fn expand(fns: &Routines, known: u32, term: &Term, loop_depth: u32, body: &mut Vec<Ins>) {
+fn expand(
+    fns: &Routines,
+    known: u32,
+    term: &Term,
+    loop_depth: u32,
+    body: &mut Vec<Ins>,
+) {
     match term {
         Term::Goto(block) => {
             body.extend([c32(block.cast_signed()), set(PC), I::Br(loop_depth)]);
@@ -1165,4 +1206,3 @@ fn utf32(text: &str) -> (u32, Vec<u8>) {
     }
     (count, bytes)
 }
-

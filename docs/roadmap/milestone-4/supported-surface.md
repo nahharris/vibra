@@ -17,6 +17,12 @@ M3's inventory fixed that a valid form is never reclassified as malformed.
 Availability shrinks monotonically in M4: each step moves forms from
 `@tool.unavailable` to supported with positive and negative cases.
 
+Step 5b's rows are lowered to WebAssembly (exercised by the matched cases of
+`conformance/parity.tsv` and by `core_lowering_m4_step5b`): the exceptions inside
+them are the forms still named by `NotLowered`, which their notes give to later
+steps (`call:tail-direct` and generics to Step 6, `match` to Step 7, `array` and
+`dict` to Step 8b, interface values to Step 9).
+
 | AST variant | Disposition | Owner | Notes |
 | --- | --- | --- | --- |
 | `ExpressionKind::Literal` | Lowered | Step 5a | Scalars, `void`, and the `atom`, `str`, and `bytes` literals, which Step 5a builds as arena objects from passive data segments so the accessors have emitted values to read; their operations follow in Step 8b |

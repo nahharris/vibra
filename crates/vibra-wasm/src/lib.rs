@@ -120,7 +120,9 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
     let counts = u32::try_from(program.functions().len())
         .ok()
         .zip(u32::try_from(program.globals().len()).ok())
-        .and_then(|(functions, globals)| Some((functions, globals, functions.checked_add(globals)?)));
+        .and_then(|(functions, globals)| {
+            Some((functions, globals, functions.checked_add(globals)?))
+        });
     let entry = u32::try_from(program.entry_index()).ok();
     let Some(((_, globals, total), entry)) = counts.zip(entry) else {
         return Err(NotLowered::single(Form::ModuleSize));
@@ -131,13 +133,18 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
     let entry_function = program.entry();
     if !entry_function.signature().slot_types().is_empty() {
         return Err(NotLowered::from_uses(vec![
-            form::UnloweredForm::new(Form::Parameters, Some(entry_function.origin().clone()))
-                .with_detail("entry"),
+            form::UnloweredForm::new(
+                Form::Parameters,
+                Some(entry_function.origin().clone()),
+            )
+            .with_detail("entry"),
         ])
         .unwrap_or_else(|| NotLowered::single(Form::Parameters)));
     }
-    let class = types::class_of(&entry_function.signature().result())
-        .map_err(|kind| NotLowered::type_of(kind, Some(entry_function.origin().clone())))?;
+    let class =
+        types::class_of(&entry_function.signature().result()).map_err(|kind| {
+            NotLowered::type_of(kind, Some(entry_function.origin().clone()))
+        })?;
 
     let fns = encode::routines_for(total);
     // A call pushes a frame of the callee's size, which is known only once the

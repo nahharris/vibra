@@ -1241,10 +1241,7 @@ fn push_frame(fns: &Routines) -> Routine {
     };
     let mut code = Vec::new();
     // size = HEADER + ((slots + 7) & -8) + slots * 8, as an i64.
-    push(
-        &mut code,
-        &[get(slots), I::I64ExtendI32U, set(top_slots)],
-    );
+    push(&mut code, &[get(slots), I::I64ExtendI32U, set(top_slots)]);
     push(&mut code, &[c64(i64::from(layout::frame::HEADER))]);
     pad(&mut code, top_slots);
     push(
@@ -1259,7 +1256,10 @@ fn push_frame(fns: &Routines) -> Routine {
         ],
     );
     push(&mut code, &load_state32(state::FRAME_TOP));
-    push(&mut code, &[set(top), c32(0), set(fits), get(top), I::If(EMPTY)]);
+    push(
+        &mut code,
+        &[set(top), c32(0), set(fits), get(top), I::If(EMPTY)],
+    );
     // next = top + the size of the top frame; it fits when it ends within the
     // segment.
     push(
@@ -1293,7 +1293,14 @@ fn push_frame(fns: &Routines) -> Routine {
     push(&mut code, &load_state32(state::FRAME_LIMIT));
     push(
         &mut code,
-        &[I::I64ExtendI32U, I::I64LeU, set(fits), I::End, get(fits), I::I32Eqz],
+        &[
+            I::I64ExtendI32U,
+            I::I64LeU,
+            set(fits),
+            I::End,
+            get(fits),
+            I::I32Eqz,
+        ],
     );
     push(&mut code, &[I::If(EMPTY)]);
     // A new segment of at least the minimum size that holds the frame.

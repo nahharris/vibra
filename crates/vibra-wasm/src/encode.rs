@@ -23,8 +23,8 @@ use wasm_encoder::{
 };
 
 use crate::runtime::{
-    Ins, Routine, Routines, ValueClass, accessor_exports, core_routines,
-    entry_export, frame_routines, new_object, raw_entry_export,
+    Ins, Routine, Routines, ValueClass, accessor_exports, core_routines, entry_export,
+    frame_routines, new_object, raw_entry_export,
 };
 
 /// The pages of linear memory the module defines. The arena grows from here by

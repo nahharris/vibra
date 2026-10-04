@@ -60,7 +60,8 @@ fn function_forms(function: &CheckedFunction, found: &mut Vec<UnloweredForm>) {
     let signature = function.signature();
     if signature.variadic().is_some() {
         found.push(
-            UnloweredForm::new(Form::Parameters, origin.clone()).with_detail("variadic"),
+            UnloweredForm::new(Form::Parameters, origin.clone())
+                .with_detail("variadic"),
         );
     }
     for slot in signature.slot_types() {

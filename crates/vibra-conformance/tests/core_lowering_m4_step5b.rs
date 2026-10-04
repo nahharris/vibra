@@ -92,7 +92,10 @@ fn agree(source: &str) -> (String, LiveSizes) {
 /// is written from the canonical value encoding of the runtime chapter.
 fn agree_on(source: &str, expected: &str) -> LiveSizes {
     let (observed, live) = agree(source);
-    assert_eq!(observed, expected, "not the specified encoding for:\n{source}");
+    assert_eq!(
+        observed, expected,
+        "not the specified encoding for:\n{source}"
+    );
     live
 }
 
@@ -232,9 +235,7 @@ fn tuples_declared_and_anonymous_are_built_and_projected() {
         "(deftype pair (tuple i32 str))\n(defn main () (tuple pair (tuple bool char)) (tupleof (pair 1i32 \"x\") (tupleof true \\z)))\n",
         "(record type: (record type: @tuple arguments: (array @pair (record type: @tuple arguments: (array @bool @char)))) value: (record kind: @tuple values: (array (record kind: @tuple type: @pair values: (array 1i32 \"x\")) (record kind: @tuple values: (array true \\z)))))\n",
     );
-    agree(
-        "(deftype pair (tuple i32 str))\n(defn main () str ((pair 1i32 \"x\") 1))\n",
-    );
+    agree("(deftype pair (tuple i32 str))\n(defn main () str ((pair 1i32 \"x\") 1))\n");
 }
 
 #[test]
@@ -256,9 +257,11 @@ fn an_enum_with_only_void_payloads_has_discriminants_in_declaration_order() {
 fn an_anonymous_enum_orders_its_variants_canonically() {
     // Written `some` then `none`; the canonical order is by name, so `none` is
     // discriminant 0 and `some` is 1, whichever order the type was written in.
-    let program = checked("(defn main () (enum some i32 none void) (enumof some: 4i32))\n");
+    let program =
+        checked("(defn main () (enum some i32 none void) (enumof some: 4i32))\n");
     assert_eq!(result_variant(&program), 1);
-    let none = checked("(defn main () (enum some i32 none void) (enumof none: void))\n");
+    let none =
+        checked("(defn main () (enum some i32 none void) (enumof none: void))\n");
     assert_eq!(result_variant(&none), 0);
     agree("(defn main () (enum some i32 none void) (enumof none: void))\n");
 }
@@ -536,7 +539,9 @@ fn programs_of_every_kind_return_the_live_size_to_what_the_module_values_keep() 
 
 #[test]
 fn the_host_holds_exactly_the_result_until_it_releases_it() {
-    let (_, live) = agree("(deftype point (record x str y str))\n(defn main () point (point x: \"a\" y: \"b\"))\n");
+    let (_, live) = agree(
+        "(deftype point (record x str y str))\n(defn main () point (point x: \"a\" y: \"b\"))\n",
+    );
     assert_eq!(live.start, 0);
     assert!(live.with_result > live.end, "{live:?}");
     assert!(live.end > 0, "the module values the program keeps");
@@ -561,7 +566,10 @@ fn a_tail_call_is_not_lowered_as_a_call_that_grows_the_frame_stack() {
 fn the_forms_of_later_steps_are_named_and_never_approximated() {
     for (source, form) in [
         ("(defn main () i32 ((lambda () i32 7i32)))\n", "closure"),
-        ("(defn main () i32 (match 1i32 1i32 2i32 - 3i32))\n", "match"),
+        (
+            "(defn main () i32 (match 1i32 1i32 2i32 - 3i32))\n",
+            "match",
+        ),
         ("(defn main () (array i32) (array.of 1i32))\n", "type"),
     ] {
         let program = checked(source);
@@ -618,7 +626,8 @@ fn integer_chain(depth: usize) -> CheckedProgram {
                 origin: origin(),
             }
         } else {
-            let next = Expr::call(position + 1, Vec::new(), maybe_type.clone(), origin());
+            let next =
+                Expr::call(position + 1, Vec::new(), maybe_type.clone(), origin());
             Expr::Variant {
                 value_type: maybe_type.clone(),
                 variant: "some".to_owned(),
@@ -673,7 +682,10 @@ fn non_tail_recursion_five_thousand_deep_runs_on_a_small_engine_stack() {
     assert_eq!(text.matches("variant: @some").count(), depth - 1);
     assert_eq!(text.matches("variant: @none").count(), 1);
     assert_eq!(live.start, 0);
-    assert_eq!(live.end, 0, "the nested value is released and no frame remains");
+    assert_eq!(
+        live.end, 0,
+        "the nested value is released and no frame remains"
+    );
     drop(value);
     println!(
         "depth {depth}: live with the result {} bytes, after release {} bytes",
@@ -703,7 +715,9 @@ fn depth_is_bounded_only_by_memory() {
     ))
     .expect("runner");
     assert_eq!(
-        tight.run_observed(&bytes, &ty, program.types()).expect("runs"),
+        tight
+            .run_observed(&bytes, &ty, program.types())
+            .expect("runs"),
         Observed::Stopped(Outcome::MemoryExhausted)
     );
 }
@@ -711,7 +725,8 @@ fn depth_is_bounded_only_by_memory() {
 fn depth_at_exhaustion(runner: &Runner, source: &str) -> u32 {
     let program = checked(source);
     let bytes = emitted(&program);
-    let Started::Ready(mut instance) = runner.start(&bytes).expect("a v1 module") else {
+    let Started::Ready(mut instance) = runner.start(&bytes).expect("a v1 module")
+    else {
         panic!("the module's own memory exceeds the limit");
     };
     assert_eq!(
@@ -724,14 +739,14 @@ fn depth_at_exhaustion(runner: &Runner, source: &str) -> u32 {
     word(&mut instance, state::FRAME_DEPTH)
 }
 
-const FOREVER: &str =
-    "(defn main () void (do (forever) void))\n(defn forever () void (do (forever) void))\n";
+const FOREVER: &str = "(defn main () void (do (forever) void))\n(defn forever () void (do (forever) void))\n";
 
 #[test]
 fn a_recursion_with_no_base_case_is_the_host_event_at_any_engine_stack() {
     let normal = depth_at_exhaustion(&runner(), FOREVER);
     let small = depth_at_exhaustion(
-        &Runner::with_wasm_stack(MemoryLimit::new(64 * MIB), 64 * 1024).expect("runner"),
+        &Runner::with_wasm_stack(MemoryLimit::new(64 * MIB), 64 * 1024)
+            .expect("runner"),
         FOREVER,
     );
     assert!(normal > 1_000_000, "{normal} activations in 64 MiB");
@@ -744,10 +759,16 @@ fn recovery_after_exhaustion_a_new_instance_runs_with_a_larger_limit() {
     let program = checked(FOREVER);
     let bytes = emitted(&program);
     let tiny = Runner::new(MemoryLimit::new(MIB)).expect("runner");
-    assert_eq!(tiny.run_entry(&bytes).expect("runs"), Outcome::MemoryExhausted);
+    assert_eq!(
+        tiny.run_entry(&bytes).expect("runs"),
+        Outcome::MemoryExhausted
+    );
     let depth_tiny = depth_at_exhaustion(&tiny, FOREVER);
     let depth_big = depth_at_exhaustion(&runner(), FOREVER);
-    assert!(depth_big > 32 * depth_tiny, "{depth_tiny} against {depth_big}");
+    assert!(
+        depth_big > 32 * depth_tiny,
+        "{depth_tiny} against {depth_big}"
+    );
     // A program that does not recurse forever completes on a fresh instance of
     // the same runner.
     agree("(defn main () i32 1i32)\n");

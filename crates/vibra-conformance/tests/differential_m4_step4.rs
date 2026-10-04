@@ -234,7 +234,8 @@ fn a_not_lowered_case_does_not_fail_the_run_and_is_counted() {
     let report = runner.run(&corpus.corpus());
     assert!(report.is_success());
     let wasm = report.wasm_counts();
-    assert_eq!((wasm.matched, wasm.failed, wasm.not_lowered), (0, 0, 1));    let interpreter = report.interpreter_counts();
+    assert_eq!((wasm.matched, wasm.failed, wasm.not_lowered), (0, 0, 1));
+    let interpreter = report.interpreter_counts();
     assert_eq!(
         (
             interpreter.passed,

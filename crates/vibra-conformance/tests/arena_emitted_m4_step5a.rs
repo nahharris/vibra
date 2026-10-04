@@ -299,7 +299,9 @@ fn a_literal_larger_than_the_limit_is_the_host_event_with_no_partial_result() {
     );
     // The limit the harness applies runs it.
     assert!(matches!(
-        runner().run_observed(&bytes, &Type::Bytes, &[]).expect("runs"),
+        runner()
+            .run_observed(&bytes, &Type::Bytes, &[])
+            .expect("runs"),
         Observed::Completed { .. }
     ));
 }

@@ -76,9 +76,7 @@ impl Shape {
     /// The index of a field of a record shape.
     pub(crate) fn field(&self, name: &str) -> Option<usize> {
         match self {
-            Self::Record(fields) => {
-                fields.iter().position(|(field, _)| field == name)
-            }
+            Self::Record(fields) => fields.iter().position(|(field, _)| field == name),
             _ => None,
         }
     }
@@ -157,6 +155,7 @@ fn from_body(body: TypeBody) -> Shape {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -169,7 +168,10 @@ mod tests {
         );
         assert_eq!(class_of(&Type::Array(Box::new(Type::I32))), Err("array"));
         assert_eq!(class_of(&Type::Any), Err("interface"));
-        assert_eq!(class_of(&Type::Tuple(vec![Type::Array(Box::new(Type::I32))])), Ok(ValueClass::Ref));
+        assert_eq!(
+            class_of(&Type::Tuple(vec![Type::Array(Box::new(Type::I32))])),
+            Ok(ValueClass::Ref)
+        );
     }
 
     #[test]

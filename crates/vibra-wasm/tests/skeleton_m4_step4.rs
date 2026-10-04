@@ -164,7 +164,10 @@ fn a_variadic_parameter_is_named_and_a_fixed_one_lowers() {
     assert_eq!(forms(&error), ["parameters", "type"]);
     assert_eq!(error.forms()[0].detail(), Some("variadic"));
     assert_eq!(error.forms()[1].detail(), Some("array"));
-    assert!(error.to_string().contains("parameters `variadic`"), "{error}");
+    assert!(
+        error.to_string().contains("parameters `variadic`"),
+        "{error}"
+    );
     assert_eq!(
         error.forms()[0].origin().map(SourceOrigin::source_id),
         Some("skeleton.vib")

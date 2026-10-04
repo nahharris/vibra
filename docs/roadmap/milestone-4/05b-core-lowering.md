@@ -92,3 +92,53 @@ Calls through function values, closures, generics, and tail calls (Step 6);
 Every `Lowered` row owned by Step 5b in the [inventory](supported-surface.md)
 is exercised by a matched case; the determinism and validation tests still
 pass; the parity inventory count of matched cases only grew.
+
+## As built
+
+The step landed as one change, with these choices, which Step 6 builds on. The
+design is written once in the documentation of `crates/vibra-wasm/src/layout.rs`
+("Cells" and "Activations and the dispatcher") and in `lower.rs`, and the ledger
+records it ([D2.10–D2.13, D3.9, D4.5](decision-ledger.md)).
+
+- **Frames and the dispatcher.** Where the plan said "a call pushes a frame in
+  the arena and returns to the dispatcher loop", that is what is built, and the
+  5a as-built remark that every function is a Wasm function of its result class
+  is replaced: every language function and module-value initializer is one Wasm
+  function `(frame) -> ()` in one table, made of numbered basic blocks entered
+  through a `br_table` on the frame's `resume` word. A call stores `resume`,
+  pushes the callee's frame, moves the operands into it, and returns to the
+  dispatcher; a return hands its cell to `ret` and leaves the frame. No Wasm
+  call is made per language activation, so a recursion is bounded only by
+  memory.
+- **Ownership.** One class byte per slot says whether it owns a reference;
+  moving out clears it, and leaving a frame drops what still owns. Every
+  intermediate value is a frame slot, and nothing is elided.
+- **Lowered.** Literals, sequences, `let`, `if`, `return`, module values, fixed
+  and labelled parameters, direct calls in non-tail position, `Record`,
+  `Variant`, `Wrap`, `Tuple`, both projections, and `Widen` into a union (an atom
+  widening is erased). A tail call (`call:tail-direct`), a call of any other
+  kind, an omitted labelled operand, and every type with a generic parameter, a
+  function, an `array`, a `dict`, or an interface are named by `NotLowered`
+  (`type:param`, `type:function`, `type:array`, `type:dict`, `type:interface`).
+  A function that implements a contract member is an ordinary function.
+- **Discriminants.** Declared enum variants, union members, and record fields
+  are in declaration order, anonymous ones in canonical order; a host test
+  reads each through `vibra_v1_variant`.
+- **The host reader.** `Runner::run_observed` and `Instance::observe` take the
+  program's declared types and read a value by its type with an explicit
+  worklist, so a value nested to any depth is read and released on a bounded
+  host stack.
+- **Evidence.** Matched: 20 cases (the 12 owned by 5b, `V1-RUNTIME-generic-void-payload`,
+  `V1-RUNTIME-never-type-encoding`, `V1-RUNTIME-tail-negative`, and the six cases
+  this step adds). A recursion with no base case reaches 1,670,760 nested
+  activations under 64 MiB on a 64 KiB engine stack; a chain of 5,000 nested
+  non-tail calls building a value 10,000 levels deep holds 640,160 bytes with
+  its result and 0 after release. The checker's validation of a program is
+  quadratic in its function count, so a hundred-thousand-deep recursion that
+  completes needs Step 8a's arithmetic and is Step 6's case.
+- **Found.** The reference interpreter reports `InvalidBody` for a module
+  initializer that calls a function with an operand (`(def v i32 (one 1i32))`);
+  the Wasm backend runs it, and the case waits for a fix to the oracle.
+- **For Step 6.** Tail calls rewrite the frame in place ([D2.12](decision-ledger.md));
+  indirect calls and closures reuse the table and signature; type arguments are
+  slots; `Default` and `Closure` are the first forms to lower.

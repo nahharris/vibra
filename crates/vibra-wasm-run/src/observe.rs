@@ -216,7 +216,9 @@ impl Instance {
         let mut done: Vec<ObservedValue> = Vec::new();
         while let Some(task) = tasks.pop() {
             match task {
-                Task::Visit(id, ty) => self.visit(declared, id, &ty, &mut tasks, &mut done)?,
+                Task::Visit(id, ty) => {
+                    self.visit(declared, id, &ty, &mut tasks, &mut done)?
+                }
                 Task::Build(build, items) => {
                     let pending = items.iter().filter(|item| item.is_none()).count();
                     let at = done.len().checked_sub(pending).ok_or_else(|| {
@@ -283,9 +285,9 @@ impl Instance {
             done.push(ObservedValue::Primitive(value));
             return Ok(());
         }
-        let shape = declared
-            .shape(ty)
-            .ok_or_else(|| defect(format!("the host has no reader for the type {ty}")))?;
+        let shape = declared.shape(ty).ok_or_else(|| {
+            defect(format!("the host has no reader for the type {ty}"))
+        })?;
         let type_id = declared_id(ty);
         let (build, components) = match shape {
             Shape::Record(fields) => {
@@ -305,7 +307,9 @@ impl Instance {
                 let (name, payload) = usize::try_from(chosen)
                     .ok()
                     .and_then(|chosen| variants.get(chosen))
-                    .ok_or_else(|| defect(format!("an enum with the variant {chosen}")))?;
+                    .ok_or_else(|| {
+                        defect(format!("an enum with the variant {chosen}"))
+                    })?;
                 // A `void` payload slot has no payload.
                 let types = if *payload == Type::Void {
                     Vec::new()
@@ -423,7 +427,10 @@ impl Instance {
 }
 
 /// A node of the value, built from its components in order.
-fn assemble(build: Build, values: Vec<ObservedValue>) -> Result<ObservedValue, Outcome> {
+fn assemble(
+    build: Build,
+    values: Vec<ObservedValue>,
+) -> Result<ObservedValue, Outcome> {
     let mut values = values.into_iter();
     Ok(match build {
         Build::Record { type_id, names } => ObservedValue::Record {

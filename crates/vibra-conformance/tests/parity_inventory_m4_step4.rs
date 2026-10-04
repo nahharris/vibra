@@ -40,8 +40,13 @@ fn suggested_step(form: &str) -> Option<&'static str> {
         | "call:tail-direct" | "call:tail-indirect" | "type:param"
         | "type:function" => "6",
         "match" | "try" => "7",
-        "array" | "dict" | "lookup" | "type:array" | "type:dict"
-        | "parameters:variadic" | "wrap" => "8b",
+        "array"
+        | "dict"
+        | "lookup"
+        | "type:array"
+        | "type:dict"
+        | "parameters:variadic"
+        | "wrap" => "8b",
         "type:interface" => "9",
         "call:contract" | "call:tail-contract" | "contract-implementation" => "9",
         "test-module" => "11",
