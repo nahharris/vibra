@@ -331,6 +331,24 @@ fn every_vector_of_every_row_is_the_same_in_both_backends_and_in_the_table() {
 }
 
 #[test]
+fn the_manifest_lists_exactly_the_rows_that_have_vectors_and_more() {
+    // Every row with vectors is a symbol of the standard library's manifest, and
+    // each is still declared `external: @compiler` there.
+    let manifest = include_str!("../../../stdlib/manifest.vibon");
+    for intrinsic in CompilerIntrinsic::all() {
+        let quoted = format!("\"{}\"", intrinsic.symbol());
+        assert!(manifest.contains(&quoted), "{}", intrinsic.symbol());
+        if !intrinsic.vectors().is_empty() {
+            assert!(
+                !intrinsic.is_native(),
+                "{} is a primitive row",
+                intrinsic.symbol()
+            );
+        }
+    }
+}
+
+#[test]
 fn every_integer_type_has_every_row_and_every_boundary_in_the_table() {
     let mut per_type: BTreeMap<&str, usize> = BTreeMap::new();
     for numeric in NumericType::ALL.into_iter().filter(|n| n.is_integer()) {

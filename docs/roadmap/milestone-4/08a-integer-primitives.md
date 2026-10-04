@@ -83,3 +83,43 @@ text, and bytes (Step 8b); any change to registry semantics.
 
 Every integer and `char` row has vectors that both backends pass; the manifest
 list and the vectors agree; the parity inventory only grew.
+
+## As built
+
+- **One table.** `crates/vibra-wasm/src/primitive.rs` maps a `CompilerIntrinsic`
+  to a plan: the operands (each an integer type; `char` is a `u32`), the outcome
+  (scalar, `bool`, `ordering`, `(result t e)`, or `(option char)`), and the
+  computation. `vibra_wasm::lowers_primitive` and the classifier read the same
+  table, so a row is lowered exactly when it has a plan. No routine of the
+  lowering names a row. The two width classes are one property of the type: a type
+  of at most 32 bits is computed exactly in 64 bits and overflows when the result
+  lies outside it, and a 64-bit type reads overflow from the operands and the
+  wrapped result.
+- **Inline, trap-free.** Operands load as exact integers into three new 64-bit
+  locals, a row computes one value and one `i32` selector, and no engine
+  arithmetic trap is reachable: a divisor is replaced by `1` before it can be
+  zero or `-1`, and a shift is checked before its result is used. The lowering
+  builds the result from the selector the same way for every row of an outcome,
+  as ordinary arena enums (`ok` of a cell, `err` of an enum of `void` variants,
+  `some`, `none`, `bool`, `ordering`), with discriminants found by name in the
+  checked result type. The error object moves into the `err`, so counts balance on
+  every path. A primitive application creates no activation.
+- **Shared vectors.** `CompilerIntrinsic::vectors` (`vibra-ir`,
+  `external/vectors.rs`) holds 11,414 vectors of 134 rows over the eight integer
+  types and `char`, with each boundary value of each type, the signed minimum
+  divided by `-1`, zero divisors, shift amounts of `0`, `1`, `width - 1`,
+  `width`, `width + 1`, and `u32::MAX`, the edge of every conversion target, and
+  the surrogate edges and U+10FFFF. Expected outcomes are computed from the Rust
+  integer types, not from either backend, and hand-written examples from the
+  specification hold the table. The interpreter's registry test and
+  `primitives_m4_step8a` (one program per row, both backends, about 8 s) run
+  them all.
+- **Native crate.** None. No row of this step loops, so no value-access trait or
+  `vibra-native` crate was needed; Steps 8b and 8c create them.
+- **Parity.** `V1-RUNTIME-activation-depth`, `-activation-exhaustion`,
+  `-workspace-run-activation-exhaustion`, `-tail-closure-captured-loop`,
+  `-tail-function-value-parameter`, and `-tail-unrelated-function-loop` moved to
+  `matched`. `V1-RUNTIME-registry-integers` stays 8c's: it uses `to-str` and
+  `parse`.
+- **Left for later.** Integer `to-str` and `parse` and the float rows (8c); the
+  array, text, and bytes rows (8b).
