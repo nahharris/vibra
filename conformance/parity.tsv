@@ -133,3 +133,8 @@ V1-RUNTIME-tail-counter-function-value-parameter	matched
 V1-RUNTIME-tail-counter-method	matched
 V1-RUNTIME-tail-counter-mutual	matched
 V1-RUNTIME-tail-counter-unrelated-function-loop	matched
+V1-RUNTIME-literal-patterns	matched
+V1-RUNTIME-constructor-patterns	matched
+V1-RUNTIME-union-narrowing	matched
+V1-RUNTIME-union-atom-member	matched
+V1-RUNTIME-try-and-never	matched
