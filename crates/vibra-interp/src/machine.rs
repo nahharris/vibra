@@ -1216,92 +1216,11 @@ impl<'a> Machine<'a> {
         }
         let value = match (intrinsic, values.as_slice()) {
             (
-                CompilerIntrinsic::TextConcat,
-                [
-                    RuntimeValue::Primitive(Value::Str(left)),
-                    RuntimeValue::Primitive(Value::Str(right)),
-                ],
-            ) => RuntimeValue::Primitive(Value::Str(format!("{left}{right}"))),
-            (
                 CompilerIntrinsic::TextLength,
                 [RuntimeValue::Primitive(Value::Str(value))],
             ) => RuntimeValue::Primitive(Value::U64(value.chars().count() as u64)),
-            // A dict keeps its entries in key order already.
-            (
-                CompilerIntrinsic::DictEntries,
-                [
-                    RuntimeValue::Dict {
-                        value_type: Type::Dict(key, value),
-                        entries,
-                    },
-                ],
-            ) => {
-                let entry_type =
-                    Type::Tuple(vec![key.as_ref().clone(), value.as_ref().clone()]);
-                RuntimeValue::Array {
-                    value_type: Type::Array(Box::new(entry_type.clone())),
-                    values: entries
-                        .iter()
-                        .map(|(key, value)| RuntimeValue::Tuple {
-                            value_type: entry_type.clone(),
-                            values: vec![key.clone(), value.clone()].into(),
-                        })
-                        .collect::<Vec<_>>()
-                        .into(),
-                }
-            }
             (CompilerIntrinsic::ArrayLength, [RuntimeValue::Array { values, .. }]) => {
                 RuntimeValue::Primitive(Value::U64(values.len() as u64))
-            }
-            (
-                CompilerIntrinsic::ArrayAppend,
-                [RuntimeValue::Array { value_type, values }, element],
-            ) => {
-                let mut values = Vec::clone(values);
-                values.push(element.clone());
-                RuntimeValue::Array {
-                    value_type: value_type.clone(),
-                    values: values.into(),
-                }
-            }
-            (
-                CompilerIntrinsic::ArrayConcat,
-                [
-                    RuntimeValue::Array { value_type, values },
-                    RuntimeValue::Array { values: right, .. },
-                ],
-            ) => {
-                let mut values = Vec::clone(values);
-                values.extend(right.iter().cloned());
-                RuntimeValue::Array {
-                    value_type: value_type.clone(),
-                    values: values.into(),
-                }
-            }
-            (
-                CompilerIntrinsic::ArraySlice,
-                [
-                    RuntimeValue::Array { value_type, values },
-                    RuntimeValue::Primitive(Value::U64(start)),
-                    RuntimeValue::Primitive(Value::U64(end)),
-                ],
-            ) => {
-                let range = usize::try_from(*start)
-                    .ok()
-                    .zip(usize::try_from(*end).ok())
-                    .filter(|(start, end)| start <= end && *end <= values.len());
-                let slice = range.and_then(|(start, end)| values.get(start..end));
-                RuntimeValue::Enum {
-                    // The checked result is the type playing `@option`.
-                    value_type: result.clone(),
-                    variant: if slice.is_some() { "some" } else { "none" }.to_owned(),
-                    payload: slice.map(|slice| {
-                        Inner::new(RuntimeValue::Array {
-                            value_type: value_type.clone(),
-                            values: slice.to_vec().into(),
-                        })
-                    }),
-                }
             }
             _ => registry::apply(intrinsic, &values, result).ok_or(Halt::Invalid)?,
         };

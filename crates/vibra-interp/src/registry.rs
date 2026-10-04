@@ -21,6 +21,11 @@ pub(crate) fn apply(
     operands: &[RuntimeValue],
     result: &Type,
 ) -> Option<RuntimeValue> {
+    // A row of the closed table of native imports is the one implementation
+    // of `vibra-native`, which a module reaches through its import.
+    if intrinsic.native_import().is_some() {
+        return crate::native::apply(intrinsic, operands, result);
+    }
     let primitives = operands
         .iter()
         .map(|operand| match operand {
@@ -50,20 +55,16 @@ pub(crate) fn apply(
                 }
             })
         }
-        CompilerIntrinsic::TextToChars
-        | CompilerIntrinsic::TextFromChars
-        | CompilerIntrinsic::BytesToArray
-        | CompilerIntrinsic::BytesFromArray => sequences(intrinsic, operands, result),
         _ => module_row(intrinsic, &primitives?, result),
     }
 }
 
-fn primitive(value: Value) -> RuntimeValue {
+pub(crate) fn primitive(value: Value) -> RuntimeValue {
     RuntimeValue::Primitive(value)
 }
 
 /// `some value` or `none` of the checked `option` type.
-fn option(result: &Type, value: Option<RuntimeValue>) -> RuntimeValue {
+pub(crate) fn option(result: &Type, value: Option<RuntimeValue>) -> RuntimeValue {
     RuntimeValue::Enum {
         value_type: result.clone(),
         variant: if value.is_some() { "some" } else { "none" }.to_owned(),
@@ -72,7 +73,7 @@ fn option(result: &Type, value: Option<RuntimeValue>) -> RuntimeValue {
 }
 
 /// `ok value` of the checked `result` type.
-fn ok(result: &Type, value: RuntimeValue) -> RuntimeValue {
+pub(crate) fn ok(result: &Type, value: RuntimeValue) -> RuntimeValue {
     RuntimeValue::Enum {
         value_type: result.clone(),
         variant: "ok".to_owned(),
@@ -82,7 +83,7 @@ fn ok(result: &Type, value: RuntimeValue) -> RuntimeValue {
 
 /// `err error` of the checked `result` type, whose error type is its second
 /// argument and whose error variants all have `void` payloads.
-fn err(result: &Type, error: &str) -> RuntimeValue {
+pub(crate) fn err(result: &Type, error: &str) -> RuntimeValue {
     let error_type = match result {
         Type::Applied(_, arguments) => arguments.get(1).cloned().unwrap_or(Type::Void),
         _ => Type::Void,
@@ -99,7 +100,7 @@ fn err(result: &Type, error: &str) -> RuntimeValue {
 }
 
 /// The checked `ordering` value.
-fn ordering(result: &Type, order: Ordering) -> RuntimeValue {
+pub(crate) fn ordering(result: &Type, order: Ordering) -> RuntimeValue {
     RuntimeValue::Enum {
         value_type: result.clone(),
         variant: match order {
@@ -395,15 +396,6 @@ fn is_float_literal(text: &str) -> bool {
 // Modules
 // ---------------------------------------------------------------------------
 
-/// Elements in the half-open range, or `None` when start exceeds end or end
-/// exceeds the length.
-fn range<T>(items: &[T], start: u64, end: u64) -> Option<&[T]> {
-    let start = usize::try_from(start).ok()?;
-    let end = usize::try_from(end).ok()?;
-    (start <= end).then_some(())?;
-    items.get(start..end)
-}
-
 fn module_row(
     intrinsic: CompilerIntrinsic,
     operands: &[&Value],
@@ -417,116 +409,17 @@ fn module_row(
             result,
             char::from_u32(*scalar).map(|value| primitive(Value::Char(value))),
         ),
-        (CompilerIntrinsic::TextConcat, [Value::Str(left), Value::Str(right)]) => {
-            primitive(Value::Str(format!("{left}{right}")))
-        }
         (CompilerIntrinsic::TextLength, [Value::Str(value)]) => {
             primitive(Value::U64(value.chars().count() as u64))
         }
         (CompilerIntrinsic::TextEqual, [Value::Str(left), Value::Str(right)]) => {
             primitive(Value::Bool(left == right))
         }
-        // UTF-8 byte order is scalar-value order.
-        (CompilerIntrinsic::TextCompare, [Value::Str(left), Value::Str(right)]) => {
-            ordering(result, left.cmp(right))
-        }
-        (
-            CompilerIntrinsic::TextSlice,
-            [Value::Str(value), Value::U64(start), Value::U64(end)],
-        ) => {
-            let scalars = value.chars().collect::<Vec<_>>();
-            option(
-                result,
-                range(&scalars, *start, *end)
-                    .map(|slice| primitive(Value::Str(slice.iter().collect()))),
-            )
-        }
-        (CompilerIntrinsic::TextToUtf8, [Value::Str(value)]) => {
-            primitive(Value::Bytes(value.as_bytes().to_vec()))
-        }
-        (CompilerIntrinsic::TextFromUtf8, [Value::Bytes(encoded)]) => {
-            match String::from_utf8(encoded.clone()) {
-                Ok(value) => ok(result, primitive(Value::Str(value))),
-                Err(_) => err(result, "invalid-format"),
-            }
-        }
         (CompilerIntrinsic::BytesLength, [Value::Bytes(value)]) => {
             primitive(Value::U64(value.len() as u64))
         }
-        (CompilerIntrinsic::BytesConcat, [Value::Bytes(left), Value::Bytes(right)]) => {
-            let mut joined = left.clone();
-            joined.extend_from_slice(right);
-            primitive(Value::Bytes(joined))
-        }
         (CompilerIntrinsic::BytesEqual, [Value::Bytes(left), Value::Bytes(right)]) => {
             primitive(Value::Bool(left == right))
-        }
-        (
-            CompilerIntrinsic::BytesCompare,
-            [Value::Bytes(left), Value::Bytes(right)],
-        ) => ordering(result, left.cmp(right)),
-        (
-            CompilerIntrinsic::BytesSlice,
-            [Value::Bytes(value), Value::U64(start), Value::U64(end)],
-        ) => option(
-            result,
-            range(value, *start, *end)
-                .map(|slice| primitive(Value::Bytes(slice.to_vec()))),
-        ),
-        _ => return None,
-    })
-}
-
-/// Conversions between a string or bytes and an array of its items.
-fn sequences(
-    intrinsic: CompilerIntrinsic,
-    operands: &[RuntimeValue],
-    result: &Type,
-) -> Option<RuntimeValue> {
-    let array = |values: Vec<RuntimeValue>| RuntimeValue::Array {
-        value_type: result.clone(),
-        values: values.into(),
-    };
-    Some(match (intrinsic, operands) {
-        (
-            CompilerIntrinsic::TextToChars,
-            [RuntimeValue::Primitive(Value::Str(value))],
-        ) => array(
-            value
-                .chars()
-                .map(|value| primitive(Value::Char(value)))
-                .collect(),
-        ),
-        (
-            CompilerIntrinsic::BytesToArray,
-            [RuntimeValue::Primitive(Value::Bytes(value))],
-        ) => array(
-            value
-                .iter()
-                .map(|value| primitive(Value::U8(*value)))
-                .collect(),
-        ),
-        (CompilerIntrinsic::TextFromChars, [RuntimeValue::Array { values, .. }]) => {
-            primitive(Value::Str(
-                values
-                    .iter()
-                    .map(|value| match value {
-                        RuntimeValue::Primitive(Value::Char(value)) => Some(*value),
-                        _ => None,
-                    })
-                    .collect::<Option<String>>()?,
-            ))
-        }
-        (CompilerIntrinsic::BytesFromArray, [RuntimeValue::Array { values, .. }]) => {
-            primitive(Value::Bytes(
-                values
-                    .iter()
-                    .map(|value| match value {
-                        RuntimeValue::Primitive(Value::U8(value)) => Some(*value),
-                        _ => None,
-                    })
-                    .collect::<Option<Vec<_>>>()?,
-            ))
         }
         _ => return None,
     })
