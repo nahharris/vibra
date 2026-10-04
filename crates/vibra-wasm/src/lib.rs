@@ -146,16 +146,23 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
             NotLowered::type_of(kind, Some(entry_function.origin().clone()))
         })?;
 
+    // The lambdas of the program follow its functions and module values in the
+    // table, in the order a traversal meets them.
+    let lambdas = lower::collect(program);
+    let total = u32::try_from(lambdas.len())
+        .ok()
+        .and_then(|lambdas| total.checked_add(lambdas))
+        .ok_or_else(|| NotLowered::single(Form::ModuleSize))?;
     let fns = encode::routines_for(total);
     // A call pushes a frame of the callee's size, which is known only once the
     // callee is lowered: the first pass finds every size.
     let count = total as usize;
-    let mut first = lower::Lowering::new(&fns, program, vec![0; count]);
+    let mut first = lower::Lowering::new(&fns, program, &lambdas, vec![0; count]);
     let mut sizes = Vec::with_capacity(count);
     for index in 0..count {
         sizes.push(first.function(index)?.slots);
     }
-    let mut lowering = lower::Lowering::new(&fns, program, sizes.clone());
+    let mut lowering = lower::Lowering::new(&fns, program, &lambdas, sizes.clone());
     let mut lowered = Vec::with_capacity(count);
     for index in 0..count {
         lowered.push(lowering.function(index)?.code);

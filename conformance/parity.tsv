@@ -16,17 +16,17 @@
 V1-RUNTIME-activation-depth	not-lowered	8a
 V1-RUNTIME-activation-exhaustion	not-lowered	8a
 V1-RUNTIME-anonymous-enum	matched
-V1-RUNTIME-anonymous-record	not-lowered	6
-V1-RUNTIME-atom-labelled-default	not-lowered	6
-V1-RUNTIME-bindings	not-lowered	6
+V1-RUNTIME-anonymous-record	matched
+V1-RUNTIME-atom-labelled-default	matched
+V1-RUNTIME-bindings	matched
 V1-RUNTIME-bounded-deftype-lambda	not-lowered	9
 V1-RUNTIME-contract-member-dict-tail	not-lowered	9
 V1-RUNTIME-contract-member-form-values	not-lowered	9
 V1-RUNTIME-contract-member-generics	not-lowered	9
 V1-RUNTIME-contract-member-labelled	not-lowered	9
 V1-RUNTIME-contract-member-values	not-lowered	9
-V1-RUNTIME-compound-constant-defaults	not-lowered	6
-V1-RUNTIME-constant-defaults	not-lowered	6
+V1-RUNTIME-compound-constant-defaults	matched
+V1-RUNTIME-constant-defaults	matched
 V1-RUNTIME-constant-patterns	not-lowered	7
 V1-RUNTIME-conversion	not-lowered	8b
 V1-RUNTIME-dict-compare-nesting	not-lowered	8b
@@ -36,11 +36,11 @@ V1-RUNTIME-external-std-text-concat	not-lowered	8b
 V1-RUNTIME-external-std-text-length	not-lowered	8b
 V1-RUNTIME-factory-self-tail	not-lowered	8b
 V1-RUNTIME-forward-global	matched
-V1-RUNTIME-functions-closures	not-lowered	6
+V1-RUNTIME-functions-closures	matched
 V1-RUNTIME-generic-dispatch	not-lowered	9
-V1-RUNTIME-generic-functions	not-lowered	6
-V1-RUNTIME-generic-lambda	not-lowered	6
-V1-RUNTIME-generic-types	not-lowered	6
+V1-RUNTIME-generic-functions	matched
+V1-RUNTIME-generic-lambda	matched
+V1-RUNTIME-generic-types	matched
 V1-RUNTIME-generic-void-payload	matched
 V1-RUNTIME-if-selected	matched
 V1-RUNTIME-inference-order	not-lowered	8b
@@ -59,16 +59,16 @@ V1-RUNTIME-literal	matched
 V1-RUNTIME-lookups	not-lowered	8b
 V1-RUNTIME-match-patterns	not-lowered	8b
 V1-RUNTIME-never-type-encoding	matched
-V1-RUNTIME-never-unreached	not-lowered	6
-V1-RUNTIME-nominal-enum	not-lowered	6
+V1-RUNTIME-never-unreached	matched
+V1-RUNTIME-nominal-enum	matched
 V1-RUNTIME-nominal-enum-payload	matched
-V1-RUNTIME-nominal-method	not-lowered	6
-V1-RUNTIME-nominal-record	not-lowered	6
+V1-RUNTIME-nominal-method	matched
+V1-RUNTIME-nominal-record	matched
 V1-RUNTIME-nominal-wrapper	matched
 V1-RUNTIME-registry-floats	not-lowered	8c
 V1-RUNTIME-registry-integers	not-lowered	8c
 V1-RUNTIME-registry-modules	not-lowered	11
-V1-RUNTIME-return	not-lowered	6
+V1-RUNTIME-return	matched
 V1-RUNTIME-return-tail-call	not-lowered	8b
 V1-RUNTIME-sequence	matched
 V1-RUNTIME-tail-calls-through-flow	not-lowered	9
@@ -77,7 +77,7 @@ V1-RUNTIME-tail-contract-member-forms	not-lowered	9
 V1-RUNTIME-tail-contract-member-interface-value	not-lowered	9
 V1-RUNTIME-tail-cross-module-mutual	not-lowered	11
 V1-RUNTIME-tail-function-value-parameter	not-lowered	8a
-V1-RUNTIME-tail-mutual	not-lowered	6
+V1-RUNTIME-tail-mutual	matched
 V1-RUNTIME-tail-negative	matched
 V1-RUNTIME-tail-unrelated-function-loop	not-lowered	8a
 V1-RUNTIME-try-propagation	not-lowered	8b
@@ -91,12 +91,12 @@ V1-RUNTIME-variadics	not-lowered	8b
 V1-RUNTIME-void	matched
 V1-RUNTIME-void-payload-shapes	not-lowered	8b
 V1-RUNTIME-widened-tail-call	not-lowered	9
-V1-RUNTIME-workspace-run	not-lowered	6
+V1-RUNTIME-workspace-run	matched
 V1-RUNTIME-workspace-run-activation-exhaustion	not-lowered	8a
-V1-RUNTIME-workspace-run-higher-order-entry	not-lowered	6
+V1-RUNTIME-workspace-run-higher-order-entry	matched
 V1-RUNTIME-workspace-run-tail-module-values	not-lowered	9
-V1-RUNTIME-workspace-run-uninvoked-higher-order-closure	not-lowered	6
-V1-RUNTIME-workspace-run-unused-imported-higher-order-helper	not-lowered	6
+V1-RUNTIME-workspace-run-uninvoked-higher-order-closure	matched
+V1-RUNTIME-workspace-run-unused-imported-higher-order-helper	matched
 V1-RUNTIME-workspace-test-assert-equal	not-lowered	11
 V1-RUNTIME-workspace-test-contract-laws	not-lowered	11
 V1-RUNTIME-workspace-test-empty	not-lowered	11

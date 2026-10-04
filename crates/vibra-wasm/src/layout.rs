@@ -45,6 +45,7 @@
 //! | 72 | `frame_limit` (u32) | End of that segment as a 32-bit address; a segment that ends at the 4 GiB edge reads `0`, which makes it full |
 //! | 76 | `frame_depth` (u32) | Activations on the frame stack |
 //! | 80 | `ret` (u64) | The cell a returning activation hands to its caller (see "Activations and the dispatcher") |
+//! | 88 | `ret_class` (u32) | The class byte of that cell: the reference class exactly when the cell is a count the caller now owns |
 //!
 //! # The arena
 //!
@@ -322,8 +323,10 @@ pub mod state {
     pub const FRAME_DEPTH: u32 = 76;
     /// `ret`.
     pub const RET: u32 = 80;
+    /// `ret_class`.
+    pub const RET_CLASS: u32 = 88;
     /// The end of the fields.
-    pub const END: u32 = 88;
+    pub const END: u32 = 92;
     /// The free-list heads: one `u32` per size class, indexed by the class.
     pub const FREE_LISTS: u32 = 128;
 }

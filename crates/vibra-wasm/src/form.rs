@@ -19,29 +19,20 @@ pub enum Form {
     ModuleSize,
     /// A function with a variadic parameter.
     Parameters,
-    /// A value of a type that no lowered value kind represents yet: a type with
-    /// a generic parameter, a function type, an `array` or `dict`, or an
-    /// interface value.
+    /// A value of a type that no lowered value kind represents yet: an `array`
+    /// or `dict`, or an interface value.
     Type,
     /// One of the closed verified test assertion functions.
     TestAssertion,
     /// A call of a compiler registry operation.
     External,
-    /// An omitted labelled argument, resolved to the callee's default.
-    Default,
-    /// A module-level function used as a value.
-    Function,
-    /// A `lambda` with its closure environment.
-    Closure,
-    /// A read of a closure-environment slot.
-    Captured,
     /// A `match`.
     Match,
     /// A `try`.
     Try,
     /// A wrapper constructor over a builtin text type.
     Wrap,
-    /// A call that is not a direct call in non-tail position.
+    /// A call of a contract member, which dispatches from a run-time type.
     Call,
     /// An array built from element operands.
     Array,
@@ -61,10 +52,6 @@ impl Form {
             Self::Type => "type",
             Self::TestAssertion => "test-assertion",
             Self::External => "external",
-            Self::Default => "default",
-            Self::Function => "function",
-            Self::Closure => "closure",
-            Self::Captured => "captured",
             Self::Match => "match",
             Self::Try => "try",
             Self::Wrap => "wrap",
@@ -114,10 +101,10 @@ impl UnloweredForm {
     /// What further distinguishes the use within its form, for the forms whose
     /// lowering differs by case and is owned by different steps: the registry
     /// symbol of an [`Form::External`]; the kind of a [`Form::Call`]
-    /// (`direct`, `indirect`, or `contract`, each also `tail-` when it is an
-    /// explicit tail transfer); the kind of type of a [`Form::Type`] (`param`,
-    /// `function`, `array`, `dict`, or `interface`); and `variadic` for a
-    /// [`Form::Parameters`]. `None` for every other form.
+    /// (`contract`, also `tail-contract` when it is an explicit tail
+    /// transfer); the kind of type of a [`Form::Type`] (`array`, `dict`, or
+    /// `interface`); and `variadic` for a [`Form::Parameters`]. `None` for
+    /// every other form.
     #[must_use]
     pub const fn detail(&self) -> Option<&'static str> {
         self.detail
