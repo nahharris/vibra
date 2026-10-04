@@ -85,6 +85,9 @@ pub struct Routines {
     pub new_id: u32,
     /// `(id) -> i32`: the handle-table entry of a valid ID, or the trap.
     pub entry_of: u32,
+    /// `(a, b) -> i32`: whether two objects of characters or bytes (a `str`, an
+    /// atom, or `bytes`) hold the same elements.
+    pub equal: u32,
     /// The first of the exported accessors, in the order they are exported.
     pub first_accessor: u32,
     /// `() -> ()`: the `vibra_v1_entry` export.
@@ -167,7 +170,7 @@ impl Accessor {
 }
 
 /// The routines before the accessors.
-const CORE: u32 = 10;
+const CORE: u32 = 11;
 
 impl Routines {
     /// Assigns indices from `base`: the core routines, the accessors, the entry
@@ -187,6 +190,7 @@ impl Routines {
             release: base + 7,
             new_id: base + 8,
             entry_of: base + 9,
+            equal: base + 10,
             first_accessor,
             entry_export: first_accessor + accessors,
             push_frame: first_accessor + accessors + 1,
@@ -222,6 +226,7 @@ pub(crate) fn core_routines(fns: &Routines) -> Vec<Routine> {
         release(fns),
         new_id(fns),
         entry_of(fns),
+        equal(),
     ];
     for accessor in ACCESSORS {
         list.push(accessor_routine(fns, accessor));
@@ -635,6 +640,63 @@ pub(crate) fn new_object(fns: &Routines) -> Routine {
         ],
     );
     make(&[I32, I32, I32, I32], &[I32], &[I32, I64, I64, I64], code)
+}
+
+/// `(a, b) -> i32`: `1` when two objects whose payload is characters or bytes
+/// have the same length and the same payload bytes, and `0` otherwise. It reads
+/// the header and the stride, and names no kind.
+fn equal() -> Routine {
+    // Params: 0 a, 1 b. Locals: 2 payload bytes, 3 position.
+    let (bytes, position) = (2, 3);
+    let code = vec![
+        get(0),
+        ld32(header::LEN),
+        get(1),
+        ld32(header::LEN),
+        I::I32Ne,
+        I::If(EMPTY),
+        c32(0),
+        I::Return,
+        I::End,
+        // bytes = len * stride
+        get(0),
+        ld32(header::LEN),
+        get(0),
+        ld8(header::STRIDE),
+        I::I32Mul,
+        set(bytes),
+        c32(0),
+        set(position),
+        I::Block(EMPTY),
+        I::Loop(EMPTY),
+        get(position),
+        get(bytes),
+        I::I32GeU,
+        I::BrIf(1),
+        get(0),
+        get(position),
+        I::I32Add,
+        ld8(header::SIZE),
+        get(1),
+        get(position),
+        I::I32Add,
+        ld8(header::SIZE),
+        I::I32Ne,
+        I::If(EMPTY),
+        c32(0),
+        I::Return,
+        I::End,
+        get(position),
+        c32(1),
+        I::I32Add,
+        set(position),
+        I::Br(0),
+        I::End,
+        I::End,
+        c32(1),
+        I::End,
+    ];
+    make(&[I32, I32], &[I32], &[I32, I32], code)
 }
 
 /// `(object) -> ()`: one more reference.

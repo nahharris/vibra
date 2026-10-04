@@ -234,15 +234,15 @@ fn a_checked_program_carries_the_prelude_values_and_lowers_since_step_5b() {
 fn a_program_the_emitter_cannot_lower_has_no_module() {
     let result = vibra_types::check_source(
         "input.vib",
-        "(defn answer () i32 (match 1i32 1i32 7i32 - 8i32))\n",
+        "(defn answer () i32 (match (array.of 1i32) (array -) 7i32 - 8i32))\n",
     );
     let error = vibra_wasm::emit(result.program().expect("accepted"))
-        .expect_err("a `match` is not lowered before Step 7");
+        .expect_err("an array pattern is not lowered before Step 8b");
     let names = error
         .forms()
         .iter()
         .map(|used| used.form().name())
         .collect::<Vec<_>>();
-    assert!(names.contains(&"match"), "{names:?}");
+    assert!(names.contains(&"array"), "{names:?}");
     assert!(!names.contains(&"module-size"), "{names:?}");
 }

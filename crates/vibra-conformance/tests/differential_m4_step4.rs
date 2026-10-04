@@ -201,7 +201,7 @@ fn a_program_that_does_not_lower_still_passes_in_the_interpreter() {
     let corpus = TempCorpus::new();
     corpus.interpret(
         "V1-RUNTIME-synthetic-literal",
-        "(defn answer () i32 (match 1i32 1i32 7i32 - 8i32))\n",
+        "(defn answer () i32 (match (array.of 1i32) (array -) 7i32 - 8i32))\n",
         true,
         Some("(record type: @i32 value: 7i32)\n"),
         "",
@@ -212,7 +212,7 @@ fn a_program_that_does_not_lower_still_passes_in_the_interpreter() {
     let WasmStatus::NotLowered { forms } = wasm else {
         panic!("expected not lowered, got {wasm:?}");
     };
-    assert!(forms.iter().any(|form| form == "match"), "{forms:?}");
+    assert!(forms.iter().any(|form| form == "array"), "{forms:?}");
     assert_eq!(
         report.status,
         CaseStatus::Passed,
@@ -225,7 +225,7 @@ fn a_not_lowered_case_does_not_fail_the_run_and_is_counted() {
     let corpus = TempCorpus::new();
     corpus.interpret(
         "V1-RUNTIME-synthetic-literal",
-        "(defn answer () i32 (match 1i32 1i32 7i32 - 8i32))\n",
+        "(defn answer () i32 (match (array.of 1i32) (array -) 7i32 - 8i32))\n",
         true,
         Some("(record type: @i32 value: 7i32)\n"),
         "",
@@ -383,7 +383,7 @@ fn a_not_lowered_observation_is_recovered_and_counted() {
         Fixed(expected_observation(
             Some(void_execution()),
             Some(WasmObservation::NotLowered {
-                forms: vec!["match".to_owned()],
+                forms: vec!["array".to_owned()],
             }),
         )),
     );
@@ -391,7 +391,7 @@ fn a_not_lowered_observation_is_recovered_and_counted() {
     assert_eq!(
         backends(&report).1,
         &WasmStatus::NotLowered {
-            forms: vec!["match".to_owned()]
+            forms: vec!["array".to_owned()]
         }
     );
 }
@@ -500,7 +500,7 @@ fn the_report_prints_both_backend_lines() {
     );
     corpus.interpret(
         "V1-RUNTIME-synthetic-literal",
-        "(defn answer () i32 (match 1i32 1i32 7i32 - 8i32))\n",
+        "(defn answer () i32 (match (array.of 1i32) (array -) 7i32 - 8i32))\n",
         true,
         Some("(record type: @i32 value: 7i32)\n"),
         "",

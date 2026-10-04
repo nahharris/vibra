@@ -1,0 +1,1 @@
+(record type: (record type: @tuple arguments: (array @str @str @str @str @str @str @str @str @str @str @str @bool @bool @bool @bool @bool)) value: (record kind: @tuple values: (array "one" "minus five" "other" "ten billion" "other" "first" "other" "empty" "a" "green" "other" true true true true false)))

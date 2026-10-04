@@ -17,15 +17,20 @@ M3's inventory fixed that a valid form is never reclassified as malformed.
 Availability shrinks monotonically in M4: each step moves forms from
 `@tool.unavailable` to supported with positive and negative cases.
 
-Step 5b's and Step 6's rows are lowered to WebAssembly (exercised by the matched
-cases of `conformance/parity.tsv`, by `core_lowering_m4_step5b`, and by
-`calls_m4_step6`): the exceptions inside them are the forms still named by
-`NotLowered`, which their notes give to later steps (`match` to Step 7, `array`,
-`dict`, and a variadic tail to Step 8b, interface values and contract calls to
-Step 9). Step 6 lowers function values, `lambda` and its captures, calls through
-function values, a tail call to every kind of callee, omitted labelled operands,
-and generic functions and types, so no form of a call is named by `NotLowered`
-but a contract call.
+The rows of Steps 5b, 6, and 7 are lowered to WebAssembly (exercised by the
+matched cases of `conformance/parity.tsv`, by `core_lowering_m4_step5b`,
+`calls_m4_step6`, and `patterns_m4_step7`): the exceptions inside them are the
+forms still named by `NotLowered`, which their notes give to later steps
+(`array`, `dict`, a variadic tail, the array pattern, and a wrapper over `str`
+or `bytes` to Step 8b, interface values and contract calls to Step 9). Step 6
+lowers function values, `lambda` and its captures, calls through function
+values, a tail call to every kind of callee, omitted labelled operands, and
+generic functions and types, so no form of a call is named by `NotLowered` but a
+contract call. Step 7 lowers `match` with every pattern kind, which also serves
+a destructuring `let`, parameter, and `lambda` parameter and `let-else`, since
+typed IR writes each of them as a `match`; `as` narrowing; `try`; and `never`.
+The array pattern is the one form of control flow or failure `NotLowered` still
+names.
 
 | AST variant | Disposition | Owner | Notes |
 | --- | --- | --- | --- |
@@ -34,25 +39,25 @@ but a contract call.
 | `ExpressionKind::Application` | Lowered | Step 5b | Constructors, projection, and direct calls: Step 5b; calls through function values, `types:`, and tail calls to every kind of callee: Step 6; lookups, `array.of`, and `dict.of`: Step 8b; contract-member calls: Step 9 |
 | `ExpressionKind::Lambda` | Lowered | Step 6 | Closures, captures, and generic lambdas (landed: `calls_m4_step6`) |
 | `ExpressionKind::Do` | Lowered | Step 5b | Body sequences |
-| `ExpressionKind::Let` | Lowered | Step 5b | Binder patterns; destructuring: Step 7 |
-| `ExpressionKind::LetElse` | Lowered | Step 7 | Needs the pattern matcher |
+| `ExpressionKind::Let` | Lowered | Step 5b | Binder patterns; destructuring is a one-arm `match`: Step 7 (landed) |
+| `ExpressionKind::LetElse` | Lowered | Step 7 | Typed IR writes it as a two-arm `match` with a wildcard fallback of type `never` (landed: `patterns_m4_step7`, `V1-RUNTIME-let-else`) |
 | `ExpressionKind::Return` | Lowered | Step 5b | The operand is a tail call: Step 6 (landed) |
 | `ExpressionKind::If` | Lowered | Step 5b | — |
-| `ExpressionKind::Match` | Lowered | Step 7 | Every pattern kind and union arms |
-| `ExpressionKind::As` | Lowered | Step 7 | Erased in expression position; the `as` pattern narrows a union |
-| `ExpressionKind::Try` | Lowered | Step 7 | `option` and `result` early exit |
+| `ExpressionKind::Match` | Lowered | Step 7 | Every pattern kind and union arms, in the order of the arms; the array pattern stays with Step 8b (landed: `patterns_m4_step7`) |
+| `ExpressionKind::As` | Lowered | Step 7 | Erased in expression position, as the widening typed IR already carries; the `as` pattern narrows a union (landed) |
+| `ExpressionKind::Try` | Lowered | Step 7 | `option` and `result` early exit (landed: `patterns_m4_step7`, `V1-RUNTIME-try-and-never`) |
 | `ExpressionKind::TupleOf` | Lowered | Step 5b | — |
 | `ExpressionKind::RecordOf` | Lowered | Step 5b | — |
 | `ExpressionKind::EnumOf` | Lowered | Step 5b | — |
-| `PatternKind::Binding` | Lowered | Step 5b | Parameters and `let`; destructuring: Step 7 |
-| `PatternKind::Literal` | Lowered | Step 7 | — |
-| `PatternKind::Atom` | Lowered | Step 7 | — |
-| `PatternKind::Constructor` | Lowered | Step 7 | Record, tuple, enum, and wrapper constructors |
-| `PatternKind::Tuple` | Lowered | Step 7 | — |
-| `PatternKind::RecordOf` | Lowered | Step 7 | — |
-| `PatternKind::EnumOf` | Lowered | Step 7 | — |
+| `PatternKind::Binding` | Lowered | Step 5b | Parameters and `let`; destructuring: Step 7 (landed) |
+| `PatternKind::Literal` | Lowered | Step 7 | A scalar of every width, a `char`, a `str`, and an atom; `bool` and a constant name read as the pattern of their value (landed: `V1-RUNTIME-literal-patterns`, `V1-RUNTIME-constant-patterns`) |
+| `PatternKind::Atom` | Lowered | Step 7 | An atom literal (landed: `V1-RUNTIME-literal-patterns`) |
+| `PatternKind::Constructor` | Lowered | Step 7 | Record, tuple, enum, and wrapper constructors; a wrapper over `str` or `bytes` is `wrap`, Step 8b (landed: `V1-RUNTIME-constructor-patterns`) |
+| `PatternKind::Tuple` | Lowered | Step 7 | (landed: `V1-RUNTIME-constructor-patterns`) |
+| `PatternKind::RecordOf` | Lowered | Step 7 | (landed: `V1-RUNTIME-constructor-patterns`) |
+| `PatternKind::EnumOf` | Lowered | Step 7 | (landed: `V1-RUNTIME-constructor-patterns`) |
 | `PatternKind::Array` | Lowered | Step 8b | Exact length over arrays |
-| `PatternKind::As` | Lowered | Step 7 | Compares the union discriminant |
+| `PatternKind::As` | Lowered | Step 7 | Compares the union discriminant in written member order (landed: `V1-RUNTIME-union-narrowing`, `V1-RUNTIME-union-atom-member`) |
 | `VariadicBinding::Array` | Lowered | Step 8b | — |
 | `VariadicBinding::Dict` | Lowered | Step 8b | — |
 | `Declaration::Import` | Static | — | Resolved before lowering |

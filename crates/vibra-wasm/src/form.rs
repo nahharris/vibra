@@ -26,15 +26,12 @@ pub enum Form {
     TestAssertion,
     /// A call of a compiler registry operation.
     External,
-    /// A `match`.
-    Match,
-    /// A `try`.
-    Try,
-    /// A wrapper constructor over a builtin text type.
+    /// A wrapper constructor, or a wrapper pattern, over a builtin text type.
     Wrap,
     /// A call of a contract member, which dispatches from a run-time type.
     Call,
-    /// An array built from element operands.
+    /// An array built from element operands, or an array pattern (detail
+    /// `pattern`).
     Array,
     /// A dict built from entries.
     Dict,
@@ -52,8 +49,6 @@ impl Form {
             Self::Type => "type",
             Self::TestAssertion => "test-assertion",
             Self::External => "external",
-            Self::Match => "match",
-            Self::Try => "try",
             Self::Wrap => "wrap",
             Self::Call => "call",
             Self::Array => "array",
@@ -103,7 +98,8 @@ impl UnloweredForm {
     /// symbol of an [`Form::External`]; the kind of a [`Form::Call`]
     /// (`contract`, also `tail-contract` when it is an explicit tail
     /// transfer); the kind of type of a [`Form::Type`] (`array`, `dict`, or
-    /// `interface`); and `variadic` for a [`Form::Parameters`]. `None` for
+    /// `interface`); `pattern` for a [`Form::Array`] that is a pattern; and
+    /// `variadic` for a [`Form::Parameters`]. `None` for
     /// every other form.
     #[must_use]
     pub const fn detail(&self) -> Option<&'static str> {

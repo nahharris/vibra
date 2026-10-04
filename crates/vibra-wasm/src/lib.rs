@@ -22,9 +22,13 @@
 //! kind: function values and closures, a call through one, a tail call to every
 //! kind of callee (the callee replaces the current frame), omitted labelled
 //! operands, and generic functions and types, whose type arguments are passed to
-//! each activation at run time. Every other form returns [`NotLowered`], naming
-//! each form, and never a module that omits part of the program. Steps 7 onward
-//! move forms out of [`NotLowered`] one step at a time.
+//! each activation at run time. Step 7 lowers patterns and typed failure:
+//! `match` with every pattern kind, destructuring in `let`, parameters, and
+//! lambdas, `let-else`, `as` narrowing, `try`, and `never`, by one recursive
+//! scheme over a table of what each kind of pattern asks of a value, so the
+//! array pattern is the one pattern form left. Every other form returns
+//! [`NotLowered`], naming each form, and never a module that omits part of the
+//! program. Steps 8 onward move forms out of [`NotLowered`] one step at a time.
 //!
 //! # The module
 //!
@@ -40,6 +44,7 @@ mod encode;
 mod form;
 pub mod layout;
 mod lower;
+mod pattern;
 mod runtime;
 pub mod support;
 mod types;

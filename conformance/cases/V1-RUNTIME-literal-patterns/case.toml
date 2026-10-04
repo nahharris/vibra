@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-literal-patterns"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A literal pattern compares a scalar of every width, a character, a text, and an atom by value, and the first arm that matches wins."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

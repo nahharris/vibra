@@ -56,8 +56,37 @@
 //! reference class: that is [`ValueClass::Dyn`], and it is the only place the
 //! code branches on a class.
 //!
-//! An expression of type `never` (`return` and what contains it) writes no
-//! destination; the code that follows it is reachable from no block.
+//! An expression of type `never` (`return`, a call of a function whose result
+//! is `never`, and what contains them) writes no destination; the code that
+//! follows it is reachable from no block, and no slot or representation exists
+//! for it.
+//!
+//! # Patterns and typed failure
+//!
+//! A destructuring `let`, a destructuring parameter, a `lambda` parameter, and
+//! `let-else` are all `match` in the checked IR (a single arm, or an arm and a
+//! wildcard fallback), so one lowering serves them. A `match` evaluates its
+//! subject once into a slot and tries its arms in order, each a run of blocks:
+//! the **tests** of its pattern, which read the parts of the subject in place
+//! and jump to the next arm's blocks on the first that fails and so change
+//! nothing; then its **binders**, each one `dup` of the part it names; then the
+//! subject is dropped, and the arm's result is evaluated into the destination
+//! and its binders dropped. A pattern is lowered by one recursive scheme over
+//! the table of [`crate::pattern`], which says, per kind, the one test the
+//! pattern makes in place, the binder it fills, and the parts its sub-patterns
+//! meet; no routine here names a kind of pattern. A part that is a reference is
+//! borrowed into a temporary whose class byte says it owns nothing, so a failed
+//! test or a leaving frame never drops it. Because the arm results are lowered
+//! like any other expression, a call in tail position in an arm, in the rest of
+//! a body after a `let-else`, or in the operand of a `return` is the tail call
+//! the checker marked.
+//!
+//! `try` evaluates its operand into a slot, compares its discriminant with the
+//! success variant (`some` or `ok`, by name, as the reference interpreter reads
+//! it), and continues with a `dup` of the payload and a drop of the operand, or
+//! builds the failure variant (`none` or `err`) again at the enclosing result
+//! type, from the same payload, and returns it like `return`, which drops
+//! whatever the frame still owns.
 //!
 //! # Calls
 //!
@@ -94,8 +123,8 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 
 use vibra_ir::{
-    CallTarget, CheckedProgram, Constant, Expr, FunctionSignature, SourceOrigin, Type,
-    Value,
+    CallTarget, CheckedProgram, Constant, Expr, FunctionSignature, MatchArm,
+    SourceOrigin, Type, Value,
 };
 use wasm_encoder::{BlockType, Instruction as I, ValType};
 
@@ -103,6 +132,7 @@ use crate::classify;
 use crate::encode::FunctionCode;
 use crate::form::NotLowered;
 use crate::layout::{self, CellClass, Kind, frame, header, state};
+use crate::pattern::{Literal, Node, Presence, Test, decompose, literal};
 use crate::runtime::{
     Ins, Routines, ValueClass, c32, c64, get, index, ld8, ld32, ld64, set, st8, st32,
     st64,
@@ -682,6 +712,27 @@ enum Part {
     Zero,
 }
 
+/// Where a value that a pattern meets is: a frame slot, or a component of an
+/// object, which the pattern reads in place.
+#[derive(Clone, Copy, Debug)]
+enum Place {
+    /// The cell of a frame slot.
+    Slot(u32),
+    /// Component `position` of the object of `len` cells that slot `object`
+    /// holds, a reference the pattern borrows and does not own.
+    Component {
+        object: u32,
+        position: u32,
+        len: u32,
+    },
+}
+
+/// The variants of `option` and `result` that `try` continues with, and the ones
+/// it leaves the activation with, by name, as the reference interpreter reads
+/// them. The checker admits no other operand.
+const SUCCESS: [&str; 2] = ["some", "ok"];
+const FAILURE: [&str; 2] = ["none", "err"];
+
 /// Where the class byte of a value of a generic type is read from.
 #[derive(Clone, Copy, Debug)]
 enum ByteSource {
@@ -799,6 +850,11 @@ impl<'l, 'a> Builder<'l, 'a> {
 
     fn push(&mut self, instructions: &[Ins]) {
         self.code.extend_from_slice(instructions);
+    }
+
+    /// The forms of `expr` that the emitter does not lower.
+    fn forms_of(&self, expr: &Expr) -> NotLowered {
+        classify::forms_of(&self.lowering.env, expr)
     }
 
     /// The `i32` offset in `slot`, a reference.
@@ -988,6 +1044,12 @@ impl<'l, 'a> Builder<'l, 'a> {
                 self.start(dead);
                 Ok(())
             }
+            Expr::Match {
+                scrutinee, arms, ..
+            } => self.matching(scrutinee, arms, expr.origin(), dest),
+            Expr::Try {
+                value, exit_type, ..
+            } => self.propagate(value, exit_type, expr.origin(), dest),
             Expr::Call {
                 target,
                 arguments,
@@ -1051,7 +1113,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 expr.origin(),
                 dest,
             ),
-            other => Err(classify::forms_of(other)),
+            other => Err(self.forms_of(other)),
         }
     }
 
@@ -1134,6 +1196,424 @@ impl<'l, 'a> Builder<'l, 'a> {
         Ok(())
     }
 
+    // -- patterns and typed failure ---------------------------------------------
+
+    /// A `match`: the subject is evaluated once into a slot, and the arms are
+    /// tried in order, the first that matches winning. Each arm is a run of
+    /// tests, then its binders, then its result.
+    ///
+    /// A test that fails jumps to the next arm's block, and the subject is still
+    /// owned there, so a failed arm has changed nothing. An arm that matches
+    /// binds each of its binders with one `dup` of the part it names, drops the
+    /// subject, evaluates its result into the destination, and drops its
+    /// binders, as a `let` drops its binding, so a binder is not held until the
+    /// frame ends.
+    /// Past the last arm no pattern matched, which the checker's exhaustiveness
+    /// rules out, so it is the toolchain's defect.
+    fn matching(
+        &mut self,
+        scrutinee: &Expr,
+        arms: &[MatchArm],
+        origin: &SourceOrigin,
+        dest: u32,
+    ) -> Result<(), NotLowered> {
+        let subject_type = scrutinee.result_type();
+        let class = self.class(&subject_type, origin)?;
+        let mark = self.next_temp;
+        let subject = self.temp();
+        self.expr(scrutinee, subject)?;
+        let after_subject = self.next_temp;
+        let join = self.new_block();
+        for arm in arms {
+            let next = self.new_block();
+            let node =
+                decompose(&self.lowering.env, &arm.pattern, &subject_type, origin)?;
+            self.test_node(&node, Place::Slot(subject), next, origin)?;
+            self.bind_node(&node, Place::Slot(subject), origin)?;
+            // What the tests borrowed is no longer needed, and the subject is
+            // owned by its binders now.
+            self.release_to(after_subject);
+            self.discard(subject, class);
+            self.expr(&arm.body, dest)?;
+            for (slot, ty) in arm.pattern.bindings() {
+                let class = self.class(&ty, origin)?;
+                let slot = self.ir_slot(slot)?;
+                self.discard(slot, class);
+            }
+            self.goto(join, next);
+        }
+        let stop = self.lowering.fns.stop_trap;
+        self.push(&[c32(TrapCode::InvalidCheckedProgram.code()), I::Call(stop)]);
+        self.goto(join, join);
+        self.release_to(mark);
+        Ok(())
+    }
+
+    /// Jumps to `fail` when the `i32` on the operand stack is zero, and
+    /// otherwise continues in a new block.
+    fn continue_unless(&mut self, fail: u32) {
+        let held = self.new_block();
+        self.end(Term::Branch {
+            then_block: held,
+            else_block: fail,
+        });
+        self.start(held);
+    }
+
+    /// Pushes the low 32 bits of the cell at `place`, or all 64: a scalar, or
+    /// the offset of the object a reference cell holds.
+    fn push_cell(&mut self, place: Place, wide: bool) {
+        let load = |offset: u32| if wide { ld64(offset) } else { ld32(offset) };
+        match place {
+            Place::Slot(slot) => {
+                let at = self.cell(slot);
+                self.push(&[get(FRAME), load(at)]);
+            }
+            Place::Component {
+                object,
+                position,
+                len,
+            } => {
+                let held = self.cell(object);
+                self.push(&[
+                    get(FRAME),
+                    ld32(held),
+                    load(layout::cells_offset(len) + 8 * position),
+                ]);
+            }
+        }
+    }
+
+    /// Copies the cell at `place` into `to`, which does not change who owns
+    /// what.
+    fn copy_place(&mut self, to: u32, place: Place) {
+        match place {
+            Place::Slot(from) => self.copy_cell(to, from),
+            Place::Component {
+                object,
+                position,
+                len,
+            } => {
+                let (at, held, to) = (
+                    layout::cells_offset(len) + 8 * position,
+                    self.cell(object),
+                    self.cell(to),
+                );
+                self.push(&[get(FRAME), get(FRAME), ld32(held), ld64(at), st64(to)]);
+            }
+        }
+    }
+
+    /// The slot that holds the object at `place`, as a reference the pattern
+    /// borrows and does not own, so that the parts of the object have places
+    /// of their own. `held` remembers it, so one object is borrowed once.
+    fn object_slot(&mut self, place: Place, held: &mut Option<u32>) -> u32 {
+        if let Some(slot) = *held {
+            return slot;
+        }
+        let slot = match place {
+            Place::Slot(slot) => slot,
+            Place::Component { .. } => {
+                let slot = self.temp();
+                self.copy_place(slot, place);
+                self.disown(slot);
+                slot
+            }
+        };
+        *held = Some(slot);
+        slot
+    }
+
+    /// Emits the tests of `node` at `place`, and of the sub-patterns below it,
+    /// which see the parts of the value in place and never copy one. A test
+    /// that fails jumps to `fail`, and the code after it runs only when every
+    /// test so far held.
+    fn test_node(
+        &mut self,
+        node: &Node<'_>,
+        place: Place,
+        fail: u32,
+        origin: &SourceOrigin,
+    ) -> Result<(), NotLowered> {
+        match node.test {
+            Test::Always => {}
+            Test::Cell { wide, bits } => {
+                self.push_cell(place, wide);
+                if wide {
+                    self.push(&[c64(bits.cast_signed()), I::I64Eq]);
+                } else {
+                    let bits = u32::try_from(bits).unwrap_or(u32::MAX);
+                    self.push(&[c32(bits.cast_signed()), I::I32Eq]);
+                }
+                self.continue_unless(fail);
+            }
+            Test::Variant(discriminant) => {
+                self.push_cell(place, false);
+                self.push(&[
+                    ld32(header::VARIANT),
+                    c32(discriminant.cast_signed()),
+                    I::I32Eq,
+                ]);
+                self.continue_unless(fail);
+            }
+            Test::Data(value) => {
+                // The literal is built, compared, and dropped.
+                let mark = self.next_temp;
+                let built = self.temp();
+                self.literal(value, built);
+                self.push_cell(place, false);
+                self.load_ref(built);
+                let equal = self.lowering.fns.equal;
+                self.push(&[I::Call(equal), set(SCRATCH)]);
+                self.drop_slot(built);
+                self.push(&[get(SCRATCH)]);
+                self.release_to(mark);
+                self.continue_unless(fail);
+            }
+        }
+        let mut object = None;
+        for child in &node.children {
+            let sub = decompose(&self.lowering.env, child.pattern, &child.ty, origin)?;
+            if sub.is_inert() {
+                continue;
+            }
+            match child.presence {
+                Presence::Always => {
+                    let held = self.object_slot(place, &mut object);
+                    let part = Place::Component {
+                        object: held,
+                        position: child.position,
+                        len: child.len,
+                    };
+                    self.test_node(&sub, part, fail, origin)?;
+                }
+                // A part that may have no cell can be bound and nothing else.
+                Presence::Never | Presence::Runtime => {
+                    if !sub.only_binds() {
+                        return Err(NotLowered::type_of("shape", Some(origin.clone())));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Stores each binder of `node`, and of the sub-patterns below it, in its
+    /// slot, with one `dup` of the part it names. It runs only after every test
+    /// of the arm held.
+    fn bind_node(
+        &mut self,
+        node: &Node<'_>,
+        place: Place,
+        origin: &SourceOrigin,
+    ) -> Result<(), NotLowered> {
+        if let Some((slot, ty)) = node.binder {
+            let class = self.class(ty, origin)?;
+            let to = self.ir_slot(slot)?;
+            self.copy_place(to, place);
+            let source = match place {
+                Place::Slot(slot) => ByteSource::Slot(slot),
+                Place::Component {
+                    object, position, ..
+                } => ByteSource::Component {
+                    slot: object,
+                    position,
+                },
+            };
+            self.claim(to, class, source);
+        }
+        let mut object = None;
+        for child in &node.children {
+            if child.pattern.bindings().is_empty() {
+                continue;
+            }
+            let sub = decompose(&self.lowering.env, child.pattern, &child.ty, origin)?;
+            let held = self.object_slot(place, &mut object);
+            let part = Place::Component {
+                object: held,
+                position: child.position,
+                len: child.len,
+            };
+            self.on_presence(
+                held,
+                child.presence,
+                |this| this.bind_node(&sub, part, origin),
+                |this| {
+                    // No cell: the value is `void`.
+                    if !sub.only_binds() {
+                        return Err(NotLowered::type_of("shape", Some(origin.clone())));
+                    }
+                    if let Some((slot, _)) = sub.binder {
+                        let to = this.ir_slot(slot)?;
+                        this.store_bits(to, 0, ValueClass::Void);
+                    }
+                    Ok(())
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Runs `present` when the payload of the enum in `object` has a cell, and
+    /// `absent` when it has none. The payload of `void` never has one, a
+    /// payload of another type always does, and the payload of a generic type
+    /// has one exactly when its type argument is not `void`, which the object
+    /// says by its length.
+    fn on_presence(
+        &mut self,
+        object: u32,
+        presence: Presence,
+        present: impl FnOnce(&mut Self) -> Result<(), NotLowered>,
+        absent: impl FnOnce(&mut Self) -> Result<(), NotLowered>,
+    ) -> Result<(), NotLowered> {
+        match presence {
+            Presence::Always => present(self),
+            Presence::Never => absent(self),
+            Presence::Runtime => {
+                let at = self.cell(object);
+                self.push(&[get(FRAME), ld32(at), ld32(header::LEN)]);
+                let (some, none, join) =
+                    (self.new_block(), self.new_block(), self.new_block());
+                self.end(Term::Branch {
+                    then_block: some,
+                    else_block: none,
+                });
+                self.start(some);
+                present(self)?;
+                self.goto(join, none);
+                absent(self)?;
+                self.goto(join, join);
+                Ok(())
+            }
+        }
+    }
+
+    /// `try`: the operand, an `option` or a `result`, is inspected. On `some` or
+    /// `ok` the payload is the value of the expression. On `none` or `err` the
+    /// activation is left with that variant and its payload, rebuilt at the
+    /// enclosing function's result type, which returns it like `return` does,
+    /// dropping what the frame still owns. Nothing else happens, and the
+    /// operand is never a tail call.
+    fn propagate(
+        &mut self,
+        value: &Expr,
+        exit_type: &Type,
+        origin: &SourceOrigin,
+        dest: u32,
+    ) -> Result<(), NotLowered> {
+        let operand_type = value.result_type();
+        let (Shape::Enum(variants), Shape::Enum(exits)) = (
+            self.shape(&operand_type, origin)?,
+            self.shape(exit_type, origin)?,
+        ) else {
+            return Err(classify::forms_of_type(&operand_type, origin));
+        };
+        let find = |names: &[&str]| {
+            variants
+                .iter()
+                .enumerate()
+                .find(|(_, (name, _))| names.contains(&name.as_str()))
+        };
+        let (
+            Some((success, (_, success_type))),
+            Some((_, (failure_name, failure_type))),
+        ) = (find(&SUCCESS), find(&FAILURE))
+        else {
+            return Err(classify::forms_of_type(&operand_type, origin));
+        };
+        let exit_discriminant = exits
+            .iter()
+            .position(|(name, _)| name == failure_name)
+            .and_then(|position| u32::try_from(position).ok())
+            .ok_or_else(|| classify::forms_of_type(exit_type, origin))?;
+        let success = u32::try_from(success).unwrap_or(u32::MAX);
+
+        let mark = self.next_temp;
+        let subject = self.temp();
+        self.expr(value, subject)?;
+        let at = self.cell(subject);
+        self.push(&[
+            get(FRAME),
+            ld32(at),
+            ld32(header::VARIANT),
+            c32(success.cast_signed()),
+            I::I32Eq,
+        ]);
+        let (proceed, leave) = (self.new_block(), self.new_block());
+        self.end(Term::Branch {
+            then_block: proceed,
+            else_block: leave,
+        });
+
+        // The early exit.
+        self.start(leave);
+        let exit = self.temp();
+        let class = self.class(failure_type, origin)?;
+        self.on_presence(
+            subject,
+            Presence::of_payload(failure_type),
+            |this| {
+                let part = this.temp();
+                this.copy_part(part, subject, 0, 1, class);
+                this.build(
+                    Kind::Enum,
+                    exit_discriminant,
+                    &[Part::Slot { slot: part, class }],
+                    exit,
+                );
+                Ok(())
+            },
+            |this| {
+                this.build(Kind::Enum, exit_discriminant, &[], exit);
+                Ok(())
+            },
+        )?;
+        self.drop_slot(subject);
+        self.end(Term::Return { slot: exit });
+
+        // The payload.
+        self.start(proceed);
+        let class = self.class(success_type, origin)?;
+        self.on_presence(
+            subject,
+            Presence::of_payload(success_type),
+            |this| {
+                this.copy_part(dest, subject, 0, 1, class);
+                Ok(())
+            },
+            |this| {
+                this.store_bits(dest, 0, ValueClass::Void);
+                Ok(())
+            },
+        )?;
+        self.drop_slot(subject);
+        self.release_to(mark);
+        Ok(())
+    }
+
+    /// Copies component `position` of the `len`-cell object that `object` holds
+    /// into `to`, which then owns what the component is, with its class byte.
+    fn copy_part(
+        &mut self,
+        to: u32,
+        object: u32,
+        position: u32,
+        len: u32,
+        class: ValueClass,
+    ) {
+        let at = layout::cells_offset(len) + 8 * position;
+        let (to_cell, from) = (self.cell(to), self.cell(object));
+        self.push(&[get(FRAME), get(FRAME), ld32(from), ld64(at), st64(to_cell)]);
+        self.claim(
+            to,
+            class,
+            ByteSource::Component {
+                slot: object,
+                position,
+            },
+        );
+    }
+
     // -- calls ----------------------------------------------------------------
 
     /// A call: the callee is evaluated first, and once, when it is a function
@@ -1176,7 +1656,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 }
                 CallTarget::Indirect { callee, .. } => {
                     let Type::Function(signature) = callee.result_type() else {
-                        return Err(classify::forms_of(callee));
+                        return Err(self.forms_of(callee));
                     };
                     let slot = self.temp();
                     self.expr(callee, slot)?;
@@ -1208,7 +1688,7 @@ impl<'l, 'a> Builder<'l, 'a> {
             if matches!(argument, Expr::Default { .. }) {
                 let labelled = position
                     .checked_sub(positional)
-                    .ok_or_else(|| classify::forms_of(argument))?;
+                    .ok_or_else(|| self.forms_of(argument))?;
                 self.default_operand(&callee, &signature, labelled, argument, slot)?;
             } else {
                 self.expr(argument, slot)?;
@@ -1294,7 +1774,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                     .labelled()
                     .get(labelled)
                     .and_then(|parameter| parameter.default())
-                    .ok_or_else(|| classify::forms_of(argument))?;
+                    .ok_or_else(|| self.forms_of(argument))?;
                 self.constant(constant, argument.origin(), slot)
             }
             Callee::Value { slot: value } => {
@@ -1376,7 +1856,7 @@ impl<'l, 'a> Builder<'l, 'a> {
             .by_node
             .get(&node(expr))
             .copied()
-            .ok_or_else(|| classify::forms_of(expr))?;
+            .ok_or_else(|| self.forms_of(expr))?;
         let lambdas = lowering.lambdas;
         let lambda = lambdas
             .list
@@ -1416,7 +1896,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                         &[],
                     )
                 }
-                _ => return Err(classify::forms_of(expr)),
+                _ => return Err(self.forms_of(expr)),
             };
         let own = u32::try_from(lambda.own.len()).map_err(|_| module_size())?;
         for bits in [
@@ -1652,52 +2132,27 @@ impl<'l, 'a> Builder<'l, 'a> {
 
     // -- literals -------------------------------------------------------------
 
+    /// A literal: a scalar is an immediate, and every other literal is an
+    /// arena object built from its elements.
     fn literal(&mut self, value: &Value, dest: u32) {
-        match value {
-            Value::Void => self.store_bits(dest, 0, ValueClass::Void),
-            Value::Char(value) => {
-                self.store_bits(dest, u64::from(u32::from(*value)), ValueClass::I32);
-            }
-            Value::I8(value) => {
-                self.store_bits(dest, narrow(i32::from(*value)), ValueClass::I32);
-            }
-            Value::I16(value) => {
-                self.store_bits(dest, narrow(i32::from(*value)), ValueClass::I32);
-            }
-            Value::I32(value) => self.store_bits(dest, narrow(*value), ValueClass::I32),
-            Value::U8(value) => {
-                self.store_bits(dest, u64::from(*value), ValueClass::I32);
-            }
-            Value::U16(value) => {
-                self.store_bits(dest, u64::from(*value), ValueClass::I32);
-            }
-            Value::U32(value) => {
-                self.store_bits(dest, u64::from(*value), ValueClass::I32);
-            }
-            Value::I64(value) => {
-                self.store_bits(dest, value.cast_unsigned(), ValueClass::I64);
-            }
-            Value::U64(value) => self.store_bits(dest, *value, ValueClass::I64),
-            Value::F32(bits) => {
-                self.store_bits(dest, u64::from(*bits), ValueClass::F32)
-            }
-            Value::F64(bits) => self.store_bits(dest, *bits, ValueClass::F64),
+        match literal(value) {
+            Literal::Scalar(class, bits) => self.store_bits(dest, bits, class),
             // `bool` is the enum whose variants are `false` and `true`, in
             // declaration order, with `void` payloads.
-            Value::Bool(value) => {
-                self.literal_object(Kind::Enum, 0, u32::from(*value), None, dest);
+            Literal::Bool(value) => {
+                self.literal_object(Kind::Enum, 0, u32::from(value), None, dest);
             }
-            Value::Str(text) => {
+            Literal::Str(text) => {
                 let (length, bytes) = utf32(text);
                 self.literal_object(Kind::Str, length, 0, Some(bytes), dest);
             }
-            Value::Atom(name) => {
+            Literal::Atom(name) => {
                 let (length, bytes) = utf32(name);
                 self.literal_object(Kind::Atom, length, 0, Some(bytes), dest);
             }
-            Value::Bytes(bytes) => {
+            Literal::Bytes(bytes) => {
                 let length = u32::try_from(bytes.len()).unwrap_or(u32::MAX);
-                self.literal_object(Kind::Bytes, length, 0, Some(bytes.clone()), dest);
+                self.literal_object(Kind::Bytes, length, 0, Some(bytes.to_vec()), dest);
             }
         }
     }
@@ -2073,13 +2528,10 @@ impl<'l, 'a> Builder<'l, 'a> {
         );
         let len = u32::try_from(types.len()).unwrap_or(u32::MAX);
         let position = u32::try_from(position).unwrap_or(0);
-        let at = layout::cells_offset(len) + 8 * position;
         let mark = self.next_temp;
         let slot = self.temp();
         self.expr(aggregate, slot)?;
-        let (to, from) = (self.cell(dest), self.cell(slot));
-        self.push(&[get(FRAME), get(FRAME), ld32(from), ld64(at), st64(to)]);
-        self.claim(dest, class, ByteSource::Component { slot, position });
+        self.copy_part(dest, slot, position, len, class);
         self.drop_slot(slot);
         self.release_to(mark);
         Ok(())
@@ -2479,11 +2931,6 @@ const fn cell_class(class: ValueClass) -> CellClass {
         ValueClass::F64 => CellClass::F64,
         ValueClass::Ref => CellClass::Ref,
     }
-}
-
-/// The 32-bit pattern of an integer of at most 32 bits, as a cell holds it.
-fn narrow(value: i32) -> u64 {
-    u64::from(value.cast_unsigned())
 }
 
 /// The scalar count and the 4-byte little-endian encoding of a string's
