@@ -27,7 +27,7 @@ V1-RUNTIME-contract-member-labelled	not-lowered	9
 V1-RUNTIME-contract-member-values	not-lowered	9
 V1-RUNTIME-compound-constant-defaults	matched
 V1-RUNTIME-constant-defaults	matched
-V1-RUNTIME-constant-patterns	not-lowered	7
+V1-RUNTIME-constant-patterns	matched
 V1-RUNTIME-conversion	not-lowered	8b
 V1-RUNTIME-dict-compare-nesting	not-lowered	8b
 V1-RUNTIME-dict-order	not-lowered	8b
@@ -51,7 +51,7 @@ V1-RUNTIME-iter-defaults	not-lowered	9
 V1-RUNTIME-iter-next	not-lowered	9
 V1-RUNTIME-iter-skip-filter-depth	not-lowered	9
 V1-RUNTIME-key-contracts	not-lowered	9
-V1-RUNTIME-let-else	not-lowered	7
+V1-RUNTIME-let-else	matched
 V1-RUNTIME-library-composites	not-lowered	11
 V1-RUNTIME-library-dict	not-lowered	8b
 V1-RUNTIME-library-roles	not-lowered	8b

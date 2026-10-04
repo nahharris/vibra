@@ -40,6 +40,7 @@ fn suggested_step(form: &str) -> Option<&'static str> {
         "closure" | "captured" | "function" | "default" | "call:indirect"
         | "call:tail-direct" | "call:tail-indirect" | "type:param"
         | "type:function" => "6",
+        // Lowered by Step 7; no longer reported, kept for a stale row.
         "match" | "try" => "7",
         "array"
         | "dict"
@@ -47,6 +48,7 @@ fn suggested_step(form: &str) -> Option<&'static str> {
         | "type:array"
         | "type:dict"
         | "parameters:variadic"
+        | "array:pattern"
         | "wrap" => "8b",
         "type:interface" => "9",
         "call:contract" | "call:tail-contract" | "contract-implementation" => "9",
