@@ -1,6 +1,12 @@
-//! The WebAssembly skeleton end to end (milestone 4 Step 4): the checked empty
-//! entry is emitted, validated under the v1 baseline, and run, and emission is
+//! The WebAssembly skeleton end to end (milestone 4 Step 4): the empty entry is
+//! emitted, validated under the v1 baseline, and run, and emission is
 //! deterministic from the first module (ledger D4.4).
+//!
+//! The empty entry is built from IR constructors, not checked from source: every
+//! checked program now carries the prelude's `true` and `false` module values
+//! (Step 2b), which need the arena of Step 5a, so no source program lowers yet.
+//! A test below pins that fact, so the first step that lowers module values
+//! updates it deliberately.
 
 #![allow(
     clippy::expect_used,
@@ -12,22 +18,46 @@
 use std::fmt::Write as _;
 use std::process::Command;
 
-use vibra_ir::CheckedProgram;
+use vibra_diagnostics::ByteSpan;
 use vibra_ir::boundary::{
     ENTRY_EXPORT, LIVE_SIZE_EXPORT, MEMORY_EXPORT, ORIGIN_EXPORT, RESULT_EXPORT,
     STATUS_EXPORT, TRAP_CODE_EXPORT,
 };
+use vibra_ir::{
+    CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Type, Value,
+};
 use vibra_wasm_run::{MemoryLimit, Outcome, Runner, validate};
 
-/// The empty entry, as a source document.
-const EMPTY_ENTRY: &str = "(defn done () void)\n";
-/// What `(do)` checks to: a sequence holding the `void` literal.
-const EMPTY_DO_ENTRY: &str = "(defn main () void (do))\n";
+fn origin() -> SourceOrigin {
+    SourceOrigin::new("input.vib", ByteSpan::new(0, 1))
+}
 
-fn checked(source: &str) -> CheckedProgram {
-    let result = vibra_types::check_source("input.vib", source);
-    assert!(result.accepted(), "{:?}", result.diagnostics());
-    result.program().expect("an accepted program").clone()
+/// `(defn done () void)` as the checker would build it, without the prelude.
+fn empty_entry() -> CheckedProgram {
+    let done = CheckedFunction::new(
+        "done",
+        FunctionSignature::new(Vec::new(), Type::Void),
+        Expr::literal(Value::Void, origin()),
+        origin(),
+    )
+    .expect("a checked function");
+    CheckedProgram::try_new(vec![done], 0).expect("a checked program")
+}
+
+/// `(defn main () void (do))`: a sequence holding the `void` literal.
+fn empty_do_entry() -> CheckedProgram {
+    let body = Expr::Sequence {
+        expressions: vec![Expr::literal(Value::Void, origin())],
+        origin: origin(),
+    };
+    let main = CheckedFunction::new(
+        "main",
+        FunctionSignature::new(Vec::new(), Type::Void),
+        body,
+        origin(),
+    )
+    .expect("a checked function");
+    CheckedProgram::try_new(vec![main], 0).expect("a checked program")
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -37,16 +67,16 @@ fn hex(bytes: &[u8]) -> String {
     })
 }
 
-fn emitted(source: &str) -> Vec<u8> {
-    vibra_wasm::emit(&checked(source))
+fn emitted(program: &CheckedProgram) -> Vec<u8> {
+    vibra_wasm::emit(program)
         .expect("the empty entry lowers")
         .into_bytes()
 }
 
 #[test]
-fn the_checked_empty_entry_is_emitted_validated_and_run() {
-    for source in [EMPTY_ENTRY, EMPTY_DO_ENTRY] {
-        let bytes = emitted(source);
+fn the_empty_entry_is_emitted_validated_and_run() {
+    for program in [empty_entry(), empty_do_entry()] {
+        let bytes = emitted(&program);
         validate(&bytes).expect("the module validates under the baseline");
         let runner = Runner::new(MemoryLimit::new(64 * 1024 * 1024)).expect("engine");
         assert_eq!(
@@ -54,15 +84,14 @@ fn the_checked_empty_entry_is_emitted_validated_and_run() {
             Outcome::Completed {
                 result: 0,
                 live_size: 0
-            },
-            "{source}"
+            }
         );
     }
 }
 
 #[test]
-fn the_module_declares_exactly_the_boundary_a_void_entry_needs() {
-    let summary = validate(&emitted(EMPTY_ENTRY)).expect("valid");
+fn the_module_declares_the_boundary_a_void_entry_needs() {
+    let summary = validate(&emitted(&empty_entry())).expect("valid");
     // The empty entry uses no native, so the module imports nothing.
     assert!(summary.imports.is_empty(), "{:?}", summary.imports);
     assert_eq!(
@@ -84,7 +113,7 @@ fn the_module_declares_exactly_the_boundary_a_void_entry_needs() {
 fn the_module_has_no_custom_section() {
     // Section ids follow the 8-byte header; 0 is a custom section. Walk the
     // sections by their LEB128 sizes.
-    let bytes = emitted(EMPTY_ENTRY);
+    let bytes = emitted(&empty_entry());
     let mut offset = 8;
     let mut ids = Vec::new();
     while offset < bytes.len() {
@@ -108,10 +137,8 @@ fn the_module_has_no_custom_section() {
 }
 
 #[test]
-fn emission_is_byte_identical_across_checks_in_one_process() {
-    let first = emitted(EMPTY_ENTRY);
-    let second = emitted(EMPTY_ENTRY);
-    assert_eq!(first, second);
+fn emission_is_byte_identical_across_builds_in_one_process() {
+    assert_eq!(emitted(&empty_entry()), emitted(&empty_entry()));
 }
 
 /// Prints the module of the empty entry, for the parent test to compare.
@@ -119,17 +146,12 @@ fn emission_is_byte_identical_across_checks_in_one_process() {
 #[ignore = "run only as the child of `emission_is_byte_identical_across_processes`"]
 fn emit_in_child_process() {
     // The harness prints its own text on this line, so start a fresh one.
-    println!(
-        "
-EMITTED:{}",
-        hex(&emitted(EMPTY_ENTRY))
-    );
+    println!("\nEMITTED:{}", hex(&emitted(&empty_entry())));
 }
 
 #[test]
 fn emission_is_byte_identical_across_processes() {
-    let own = hex(&emitted(EMPTY_ENTRY));
-    let mut seen = Vec::new();
+    let own = hex(&emitted(&empty_entry()));
     for _ in 0..2 {
         let output = Command::new(std::env::current_exe().expect("this test binary"))
             .args([
@@ -151,21 +173,35 @@ fn emission_is_byte_identical_across_processes() {
             .lines()
             .find_map(|line| line.strip_prefix("EMITTED:"))
             .unwrap_or_else(|| panic!("the child printed no module:\n{stdout}"));
-        seen.push(line.to_owned());
+        assert_eq!(line, own, "another process emitted other bytes");
     }
-    assert_eq!(seen[0], own, "a second process emitted other bytes");
-    assert_eq!(seen[1], own);
 }
 
 #[test]
-fn a_program_the_emitter_cannot_lower_has_no_module() {
-    let program = checked("(defn answer () u64 7u64)\n");
+fn a_checked_program_carries_the_prelude_values_and_does_not_lower_yet() {
+    // `true` and `false` are module values of every checked program (Step 2b),
+    // and a module value needs the arena of Step 5a.
+    let result = vibra_types::check_source("input.vib", "(defn done () void)\n");
+    let program = result.program().expect("an accepted program");
     let error =
-        vibra_wasm::emit(&program).expect_err("a literal result is not lowered yet");
+        vibra_wasm::emit(program).expect_err("module values are not lowered yet");
     let names = error
         .forms()
         .iter()
         .map(|used| used.form().name())
         .collect::<Vec<_>>();
-    assert_eq!(names, ["non-void-result", "literal"]);
+    assert!(names.contains(&"module-value"), "{names:?}");
+}
+
+#[test]
+fn a_program_the_emitter_cannot_lower_has_no_module() {
+    let result = vibra_types::check_source("input.vib", "(defn answer () u64 7u64)\n");
+    let error = vibra_wasm::emit(result.program().expect("accepted"))
+        .expect_err("a literal result is not lowered yet");
+    let names = error
+        .forms()
+        .iter()
+        .map(|used| used.form().name())
+        .collect::<Vec<_>>();
+    assert!(names.contains(&"non-void-result") && names.contains(&"literal"));
 }

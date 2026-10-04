@@ -792,7 +792,7 @@ into a passing case by selecting a smaller profile.
 ### Differential execution
 
 An **executable case** is a case whose operation is `interpret`,
-`workspace-run`, or `workspace-test`. It requires the `interpreter-v1` profile
+`workspace-run`, or `workspace-test`, and whose expectation is accepted, because a rejected program reaches no backend. It requires the `interpreter-v1` profile
 and has exactly one expected result and, where the operation exposes one, one
 expected audit trace, or one `expect.host_event`. No case carries a second
 expectation for the WebAssembly backend, and no operation selector, snapshot

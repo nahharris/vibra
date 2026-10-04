@@ -34,8 +34,11 @@ The 94 interpreter cases (67 `interpret`, 4 `workspace-run`, and 23
 `workspace-test`) are the executable corpus the Wasm backend must match.
 Steps 1 to 3 added cases, and at `8a04c08`, the head Step 4 branched from, the
 corpus reports 82 reader, 230 static, 104 interpreter, and 15 tooling cases —
-431 passed, 0 failed, 0 unavailable. The 104 interpreter cases are the
-executable cases the parity inventory covers.
+431 passed, 0 failed, 0 unavailable. Step 2b then added cases, and at `388dfe1`
+the corpus reports 83 reader, 239 static, 107 interpreter, and 15 tooling cases
+— 444 passed, 0 failed, 0 unavailable. Of the 107 interpreter cases, 100 expect
+acceptance, and those are the executable cases the parity inventory covers; a
+rejected case reaches no backend and has no row.
 
 1. Read `AGENTS.md`, [the charter](../../spec/00-charter.md), the M4 section of
    [`v1.md`](../v1.md), this plan, and the chosen step's guide. Read the exact
@@ -308,8 +311,8 @@ tail-recursive walk that grows neither stack nor arena.
 | 2 | [Contract-member forms reassigned from M3, and the binder defect](02-contract-members.md): an abstract contract member with its own generic parameters, labelled operands and written `types:` arguments on a contract member call, a dict variadic tail on a contract member, and such a member as a function value, in typed IR and the interpreter (per G8), plus the reserved-binder fix (per G11) | 1 | landed | PR #355, merge 3289ee75c68f4d68419597e0e7dfecd28c64c742 |
 | 2b | [Boolean constants and constant patterns](02b-boolean-constants.md): `true` and `false` become `@std.bool` values of the prelude with no source boolean literal, a pattern name that resolves to a constant module `def` is a value pattern, and every prelude name is reserved at a binder (per ledger D14.1 and D16) | 2 | landed | PR #357, merge 388dfe1 |
 | 3 | [The specified outcome of deep non-tail recursion](03-activations.md) in the reference interpreter, replacing the host-event rule: heap activations, a memory budget, and `@runtime.memory-exhausted` as the host event, with `expect.host_event` (per G1) | 2 | landed | PR #356, merge 8a04c08 |
-| 4 | [Wasm backend skeleton and differential harness](04-skeleton.md): the emitter crate `vibra-wasm`, the runner crate `vibra-wasm-run` with Wasmtime 49.0.2 (the latest; Cranelift only) behind it, `wasm-encoder` and `wasmparser` 0.261.0, the toolchain raised to Rust 1.96.1, the corpus contract of G4, the parity inventory and its test, deterministic emission, and a CI job — infrastructure step | 3 | landed, conditional on its PR merging | Branch `claude/m4-step-04-wasm-skeleton`; PR and merge commit to be recorded when the PR merges |
-| 5a | [The value arena and its runtime](05a-arena.md): linear-memory arena, reference counting, the handle table, the exported accessors, memory exhaustion, scalars and literals, and the canonical result observation | 4 | not started | — |
+| 4 | [Wasm backend skeleton and differential harness](04-skeleton.md): the emitter crate `vibra-wasm`, the runner crate `vibra-wasm-run` with Wasmtime 49.0.2 (the latest; Cranelift only) behind it, `wasm-encoder` and `wasmparser` 0.261.0, the toolchain raised to Rust 1.96.1, a module that exports the six accessors that depend on no value kind and no test (the rest of the export table arrives in 5a and 11), the corpus contract of G4, the parity inventory and its test, deterministic emission, and a CI job — infrastructure step | 3 | landed, conditional on its PR merging | Branch `claude/m4-step-04-wasm-skeleton`; PR and merge commit to be recorded when the PR merges |
+| 5a | [The value arena and its runtime](05a-arena.md): linear-memory arena, reference counting, the handle table, the exported accessors that Step 4 left out (`vibra_v1_release`, `vibra_v1_variant`, `vibra_v1_length`, `vibra_v1_read_i32`, `vibra_v1_read_i64`, `vibra_v1_read_f32`, `vibra_v1_read_f64`, and `vibra_v1_read_id`), memory exhaustion, scalars and literals, and the canonical result observation | 4 | not started | — |
 | 5b | [Data and core lowering](05b-core-lowering.md): declared and anonymous records, enums, tuples, wrappers, and unions with discriminants in written order, projection, module values, `let`, body sequences, `if`, `return`, and direct calls | 5a | not started | — |
 | 6 | [Calls](06-calls.md): generic instantiation, function values, closures, indirect calls, a tail call to every kind of callee, the deep non-tail recursion outcome, and a bounded live arena across a long allocating tail loop | 5b | not started | — |
 | 7 | [Patterns and typed failure](07-patterns-failure.md): `match` with every pattern kind, destructuring bindings, `let-else`, `as` narrowing, `try`, and `never` | 6 | not started | — |
@@ -318,7 +321,7 @@ tail-recursive walk that grows neither stack nor arena.
 | 8c | [Number text, floats, and NaN](08c-number-text-floats.md): the integer and float `to-str` and `parse` natives, written once in Rust and called by both backends, the float arithmetic rows, and NaN canonicalization | 8b | not started | — |
 | 9 | [Interfaces](09-interfaces.md): static dispatch, interface values, default members, destination dispatch and conversion, `iter` with its adapters, and the Step 2 forms | 8c | not started | — |
 | 10 | [Natives and the joined differential](10-natives.md): the native import module `vibra_native_v1`, the single Rust source of G7, and the body/native differential joined to the interpreter/Wasm harness | 9 | not started | — |
-| 11 | [Tests and traps in the Wasm backend](11-tests-traps.md): `workspace-test` observations, assertion outcomes, and every trap code with its origin | 10 | not started | — |
+| 11 | [Tests and traps in the Wasm backend](11-tests-traps.md): `workspace-test` observations, the `vibra_v1_test` export and the `vibra_v1_failure`, `vibra_v1_failure_expected`, and `vibra_v1_failure_actual` exports, assertion outcomes, and every trap code with its origin | 10 | not started | — |
 | 12 | [Stage 4A demo and corpus sub-gate](12-stage-4a-evidence.md) — evidence step | 11 | not started | — |
 
 Stage 4B — static effects and host operations, each in both backends.

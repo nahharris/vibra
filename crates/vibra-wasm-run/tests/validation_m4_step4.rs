@@ -237,6 +237,36 @@ fn an_export_outside_the_versioned_table_is_rejected() {
 }
 
 #[test]
+fn the_full_export_table_validates_and_so_does_a_subset() {
+    // Today's modules export a subset of the table; by the end of Stage 4A they
+    // export all of it. Validation admits both and nothing outside it.
+    let mut types = TypeSection::new();
+    types.ty().function([], []);
+    let names = vibra_ir::boundary::FUNCTION_EXPORTS;
+    let mut functions = FunctionSection::new();
+    let mut code = CodeSection::new();
+    let mut exports = ExportSection::new();
+    exports.export("vibra_v1_memory", ExportKind::Memory, 0);
+    for (index, name) in names.iter().enumerate() {
+        functions.function(0);
+        let mut body = Function::new([]);
+        body.instruction(&Instruction::End);
+        code.function(&body);
+        exports.export(name, ExportKind::Func, u32::try_from(index).unwrap());
+    }
+    let mut memories = MemorySection::new();
+    memories.memory(one_page());
+    let mut module = Module::new();
+    module.section(&types);
+    module.section(&functions);
+    module.section(&memories);
+    module.section(&exports);
+    module.section(&code);
+    let summary = validate(&module.finish()).expect("the full table validates");
+    assert_eq!(summary.exports.len(), names.len() + 1);
+}
+
+#[test]
 fn an_exported_global_is_rejected() {
     let mut memories = MemorySection::new();
     memories.memory(one_page());

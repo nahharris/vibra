@@ -29,9 +29,11 @@ fn runner() -> Result<&'static Runner, String> {
         .map_err(Clone::clone)
 }
 
-/// Lowers `program`, runs its entry in the Wasm backend, and reports the
-/// observation.
-pub(crate) fn observe(program: &CheckedProgram) -> WasmObservation {
+/// Lowers `program`, runs its entry in the Wasm backend under the runner's
+/// memory limit, and reports the observation. The interpreter handlers call it
+/// on each program they run; it is public so that a host test can run a
+/// hand-built program through the same path.
+pub fn observe(program: &CheckedProgram) -> WasmObservation {
     let module = match vibra_wasm::emit(program) {
         Ok(module) => module,
         Err(not_lowered) => {

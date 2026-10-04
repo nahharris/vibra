@@ -108,8 +108,8 @@ pub struct CaseObservation {
     /// the unlocated diagnostic, such as `@runtime.memory-exhausted`.
     pub host_event: Option<String>,
     /// What the WebAssembly backend did with the case. A handler that runs an
-    /// executable case sets it for every accepted program. A rejected program
-    /// reaches no backend, so a handler leaves it unset.
+    /// executable case sets it for every program it runs. A rejected program
+    /// is no executable case, so a handler leaves it unset.
     pub wasm: Option<WasmObservation>,
     /// Deterministic artifact hashes.
     pub artifact_hashes: Vec<String>,
@@ -380,8 +380,7 @@ pub enum CaseStatus {
 /// The WebAssembly backend's status on one executable case.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WasmStatus {
-    /// The backend ran the case and reproduced its one expectation, or no
-    /// backend had a program to run because checking rejected it.
+    /// The backend ran the case and reproduced its one expectation.
     Matched,
     /// The backend ran the case and disagreed with the expectation.
     Failed {
@@ -525,7 +524,7 @@ pub struct InterpreterCounts {
 /// The WebAssembly backend's counts over the executable cases.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct WasmCounts {
-    /// Cases the backend reproduced, or that no backend had a program for.
+    /// Cases the backend reproduced.
     pub matched: usize,
     /// Cases on which the backend disagreed with the expectation.
     pub failed: usize,
@@ -561,7 +560,7 @@ impl ConformanceRunner {
     #[must_use]
     pub fn run_case(&self, case: &Case) -> CaseReport {
         let case_id = case.manifest().id.clone();
-        let executable = case.manifest().operation.is_executable();
+        let executable = case.manifest().is_executable();
         match self.dispatcher.dispatch(case) {
             DispatchResult::Executed {
                 required,
@@ -858,9 +857,7 @@ impl CaseExpectations {
 fn wasm_status(case: &Case, observation: &CaseObservation) -> WasmStatus {
     let expectations = &case.manifest().expectations;
     match &observation.wasm {
-        // Checking rejected the program, so neither backend had one to run and
-        // the one expectation is the shared checker's diagnostics.
-        None if !observation.accepted => WasmStatus::Matched,
+        // No Wasm execution handler took part, so nothing is lowered.
         None => WasmStatus::NotLowered { forms: Vec::new() },
         Some(WasmObservation::NotLowered { forms }) => WasmStatus::NotLowered {
             forms: forms.clone(),

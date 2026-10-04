@@ -28,9 +28,13 @@ tooling cases. From Step 4 the runner also reports the per-backend and parity
 counts of the
 [differential execution](../../spec/07-diagnostics-and-conformance.md#differential-execution)
 rule (two lines, `interpreter backend:` and `wasm backend:`), and later steps
-record their own counts. At Step 4 the interpreter backend is 104 passed, 0
-failed, 0 unavailable, and the Wasm backend is 8 matched, 0 failed, 96 not
-lowered; each step reports how many rows it moved from not lowered to matched.
+record their own counts. The backend lines count the executable cases, which
+are the interpreter cases that expect acceptance. At Step 4, on `388dfe1`, the
+corpus is 444 passed (83 reader, 239 static, 107 interpreter, 15 tooling), the
+interpreter backend is 100 passed, 0 failed, 0 unavailable, and the Wasm backend
+is 0 matched, 0 failed, 100 not lowered, because every checked program carries
+the prelude's module values until Step 5b; each step reports how many rows it
+moved from not lowered to matched.
 
 ## Before merging each step
 

@@ -14,10 +14,15 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use vibra_diagnostics::ByteSpan;
+use vibra_ir::{
+    CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Type, Value,
+};
+
 use vibra_conformance::{
     CaseObservation, CaseReport, CaseStatus, ConformanceProfile, ConformanceRunner,
     Corpus, ExecutionObservation, HandlerError, ProfileDispatcher, ProfileHandler,
-    WasmObservation, WasmStatus, standard_dispatcher,
+    WasmObservation, WasmStatus, observe_wasm, standard_dispatcher,
 };
 
 static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
@@ -150,9 +155,30 @@ fn expected_observation(
     }
 }
 
+/// The Wasm observation of the hand-built empty entry, which runs the module
+/// the emitter produces through the same path the interpreter handlers use.
+/// No checked source program lowers yet, because every one carries the
+/// prelude's module values, so this is how the empty entry enters the harness.
+fn empty_entry_wasm_observation() -> WasmObservation {
+    let origin = || SourceOrigin::new("input.vib", ByteSpan::new(0, 1));
+    let done = CheckedFunction::new(
+        "main",
+        FunctionSignature::new(Vec::new(), Type::Void),
+        Expr::literal(Value::Void, origin()),
+        origin(),
+    )
+    .expect("a checked function");
+    observe_wasm(&CheckedProgram::try_new(vec![done], 0).expect("a program"))
+}
+
 #[test]
 fn the_empty_entry_runs_in_both_backends_and_matches() {
-    let report = run_real(&void_case());
+    let wasm = empty_entry_wasm_observation();
+    assert_eq!(wasm, WasmObservation::Completed(void_execution()));
+    let report = run_with(
+        &void_case(),
+        Fixed(expected_observation(Some(void_execution()), Some(wasm))),
+    );
     let (interpreter, wasm) = backends(&report);
     assert_eq!(interpreter, &CaseStatus::Passed, "{report:?}");
     assert_eq!(wasm, &WasmStatus::Matched, "{report:?}");
@@ -160,21 +186,17 @@ fn the_empty_entry_runs_in_both_backends_and_matches() {
 }
 
 #[test]
-fn the_corpus_void_case_is_run_by_the_wasm_backend() {
-    // Not a vacuous match: the program is accepted and the module runs.
-    let corpus = Corpus::discover(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases"),
-    )
-    .expect("the corpus loads");
-    let case = corpus
-        .cases()
-        .iter()
-        .find(|case| case.manifest().id == "V1-RUNTIME-void")
-        .expect("the void case exists");
-    let report = ConformanceRunner::new(standard_dispatcher()).run_case(case);
+fn a_checked_source_program_is_not_lowered_while_it_carries_module_values() {
+    // Every checked program holds the prelude's `true` and `false` (Step 2b),
+    // so the corpus's own void case runs in the interpreter only until Step 5b.
+    let report = run_real(&void_case());
     let (interpreter, wasm) = backends(&report);
-    assert_eq!(interpreter, &CaseStatus::Passed);
-    assert_eq!(wasm, &WasmStatus::Matched);
+    assert_eq!(interpreter, &CaseStatus::Passed, "{report:?}");
+    let WasmStatus::NotLowered { forms } = wasm else {
+        panic!("expected not lowered, got {wasm:?}");
+    };
+    assert!(forms.iter().any(|form| form == "module-value"), "{forms:?}");
+    assert_eq!(report.status, CaseStatus::Passed);
 }
 
 #[test]
@@ -193,7 +215,11 @@ fn a_program_that_does_not_lower_still_passes_in_the_interpreter() {
     let WasmStatus::NotLowered { forms } = wasm else {
         panic!("expected not lowered, got {wasm:?}");
     };
-    assert_eq!(forms, &["non-void-result", "literal"]);
+    assert!(
+        forms.iter().any(|form| form == "non-void-result")
+            && forms.iter().any(|form| form == "literal"),
+        "{forms:?}"
+    );
     assert_eq!(
         report.status,
         CaseStatus::Passed,
@@ -228,7 +254,7 @@ fn a_not_lowered_case_does_not_fail_the_run_and_is_counted() {
 }
 
 #[test]
-fn a_rejected_program_reaches_no_backend_and_matches() {
+fn a_rejected_case_is_no_executable_case_and_is_in_neither_backend_line() {
     let corpus = TempCorpus::new();
     corpus.interpret(
         "V1-RUNTIME-synthetic-rejected",
@@ -237,10 +263,14 @@ fn a_rejected_program_reaches_no_backend_and_matches() {
         None,
         "\n[[expect.diagnostics]]\ncode = \"@type.mismatch\"\nlevel = \"@error\"\nsource = \"input.vib\"\nspan = [20, 24]\n",
     );
+    assert!(!corpus.corpus().cases()[0].manifest().is_executable());
     let report = run_real(&corpus);
-    let (_, wasm) = backends(&report);
-    assert_eq!(wasm, &WasmStatus::Matched, "{report:?}");
     assert_eq!(report.status, CaseStatus::Passed, "{report:?}");
+    assert_eq!(report.backends, None, "{report:?}");
+    let all = ConformanceRunner::new(standard_dispatcher()).run(&corpus.corpus());
+    assert_eq!(all.interpreter_counts().passed, 0);
+    assert_eq!(all.wasm_counts().matched, 0);
+    assert_eq!(all.passed(), 1);
 }
 
 #[test]
@@ -499,7 +529,7 @@ fn the_report_prints_both_backend_lines() {
         "{stdout}"
     );
     assert!(
-        stdout.contains("wasm backend: 1 matched, 0 failed, 1 not lowered\n"),
+        stdout.contains("wasm backend: 0 matched, 0 failed, 2 not lowered\n"),
         "{stdout}"
     );
     assert!(

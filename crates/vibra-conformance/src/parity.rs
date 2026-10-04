@@ -22,8 +22,7 @@ pub const OWNING_STEPS: &[&str] =
 /// One case's disposition.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Disposition {
-    /// The WebAssembly backend reproduces the case's one expectation, or no
-    /// backend had a program to run because checking rejected it.
+    /// The WebAssembly backend reproduces the case's one expectation.
     Matched,
     /// The program uses a form the backend does not lower yet.
     NotLowered {

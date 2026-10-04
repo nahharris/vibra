@@ -1,20 +1,18 @@
 # The parity inventory of the differential harness (milestone 4).
 #
 # One row for every executable case: a case whose operation is `interpret`,
-# `workspace-run`, or `workspace-test`. Columns are separated by one tab:
+# `workspace-run`, or `workspace-test` and whose expectation is accepted, because
+# a rejected program reaches no backend. Columns are separated by one tab:
 #
 #   case-id    matched
 #   case-id    not-lowered    owning-step
 #
-# `matched` means the WebAssembly backend reproduces the case's one expectation,
-# or no backend had a program to run because checking rejected it. `not-lowered`
-# means the program uses a form the backend does not lower yet, and the owning
+# `matched` means the WebAssembly backend reproduces the case's one expectation.
+# `not-lowered` means the program uses a form the backend does not lower yet, and the owning
 # step is the latest milestone 4 step whose delivery the case needs (5a, 5b, 6,
 # 7, 8a, 8b, 8c, 9, 10, or 11). A step moves rows toward `matched` and never
 # back. The host test crates/vibra-conformance/tests/parity_inventory_m4_step4.rs
 # holds this table to the runner's result for every case.
-V1-PROJECT-workspace-test-builtin-import	matched
-V1-PROJECT-workspace-test-invalid-missing-assert-import	matched
 V1-RUNTIME-activation-depth	not-lowered	8a
 V1-RUNTIME-activation-exhaustion	not-lowered	8a
 V1-RUNTIME-anonymous-enum	not-lowered	5b
@@ -27,13 +25,15 @@ V1-RUNTIME-contract-member-form-values	not-lowered	9
 V1-RUNTIME-contract-member-generics	not-lowered	9
 V1-RUNTIME-contract-member-labelled	not-lowered	9
 V1-RUNTIME-contract-member-values	not-lowered	9
+V1-RUNTIME-compound-constant-defaults	not-lowered	9
+V1-RUNTIME-constant-defaults	not-lowered	9
+V1-RUNTIME-constant-patterns	not-lowered	7
 V1-RUNTIME-conversion	not-lowered	9
 V1-RUNTIME-dict-compare-nesting	not-lowered	9
 V1-RUNTIME-dict-order	not-lowered	8b
 V1-RUNTIME-dict-repeated-key	not-lowered	9
 V1-RUNTIME-external-std-text-concat	not-lowered	8b
 V1-RUNTIME-external-std-text-length	not-lowered	8b
-V1-RUNTIME-external-untrusted	matched
 V1-RUNTIME-factory-self-tail	not-lowered	9
 V1-RUNTIME-forward-global	not-lowered	5b
 V1-RUNTIME-functions-closures	not-lowered	6
@@ -55,7 +55,7 @@ V1-RUNTIME-let-else	not-lowered	7
 V1-RUNTIME-library-composites	not-lowered	11
 V1-RUNTIME-library-dict	not-lowered	9
 V1-RUNTIME-library-roles	not-lowered	8b
-V1-RUNTIME-literal	not-lowered	5a
+V1-RUNTIME-literal	not-lowered	5b
 V1-RUNTIME-lookups	not-lowered	8b
 V1-RUNTIME-match-patterns	not-lowered	8b
 V1-RUNTIME-never-type-encoding	not-lowered	7
@@ -68,10 +68,9 @@ V1-RUNTIME-nominal-wrapper	not-lowered	5b
 V1-RUNTIME-registry-floats	not-lowered	8c
 V1-RUNTIME-registry-integers	not-lowered	8c
 V1-RUNTIME-registry-modules	not-lowered	11
-V1-RUNTIME-rejected	matched
 V1-RUNTIME-return	not-lowered	6
 V1-RUNTIME-return-tail-call	not-lowered	8b
-V1-RUNTIME-sequence	not-lowered	5a
+V1-RUNTIME-sequence	not-lowered	5b
 V1-RUNTIME-tail-calls-through-flow	not-lowered	8b
 V1-RUNTIME-tail-closure-captured-loop	not-lowered	8a
 V1-RUNTIME-tail-contract-member-forms	not-lowered	9
@@ -84,12 +83,12 @@ V1-RUNTIME-tail-unrelated-function-loop	not-lowered	8a
 V1-RUNTIME-try-propagation	not-lowered	8b
 V1-RUNTIME-tuple-user-key	not-lowered	9
 V1-RUNTIME-tuples	not-lowered	5b
-V1-RUNTIME-unicode	not-lowered	5a
+V1-RUNTIME-unicode	not-lowered	5b
 V1-RUNTIME-union-keys	not-lowered	9
 V1-RUNTIME-union-values	not-lowered	8b
 V1-RUNTIME-user-dict-keys	not-lowered	9
 V1-RUNTIME-variadics	not-lowered	8b
-V1-RUNTIME-void	matched
+V1-RUNTIME-void	not-lowered	5b
 V1-RUNTIME-void-payload-shapes	not-lowered	8b
 V1-RUNTIME-widened-tail-call	not-lowered	9
 V1-RUNTIME-workspace-run	not-lowered	5b
@@ -112,8 +111,5 @@ V1-RUNTIME-workspace-test-passing	not-lowered	11
 V1-RUNTIME-workspace-test-patterns	not-lowered	11
 V1-RUNTIME-workspace-test-selected-member-values	not-lowered	11
 V1-RUNTIME-workspace-test-structural-key-equal	not-lowered	11
-V1-RUNTIME-wrong-trace	not-lowered	5a
-V1-TYPE-CONTROL-invalid-try-test-body	matched
-V1-TYPE-CONTROL-return-in-test-body	matched
+V1-RUNTIME-wrong-trace	not-lowered	5b
 V1-TYPE-CONTROL-return-in-test-lambda	not-lowered	11
-V1-TYPE-CONVERT-assert-equal-function	matched

@@ -147,11 +147,10 @@ impl ConformanceOperation {
         }
     }
 
-    /// Whether a case of this operation is an **executable case** of
-    /// `docs/spec/07-diagnostics-and-conformance.md`, "Differential
-    /// execution": one that both backends run against its one expectation.
+    /// Whether this operation executes a program, which is the operation half
+    /// of an **executable case** (`CaseManifest::is_executable` adds the other).
     #[must_use]
-    pub const fn is_executable(self) -> bool {
+    pub const fn executes_programs(self) -> bool {
         matches!(
             self,
             Self::Interpret | Self::WorkspaceRun | Self::WorkspaceTest
@@ -281,6 +280,17 @@ pub struct CaseManifest {
 }
 
 impl CaseManifest {
+    /// Whether this is an **executable case** of
+    /// `docs/spec/07-diagnostics-and-conformance.md`, "Differential
+    /// execution": its operation executes a program and its expectation is
+    /// accepted, because a rejected program reaches no backend. Both backends
+    /// run such a case against its one expectation, and only such a case has a
+    /// parity row.
+    #[must_use]
+    pub fn is_executable(&self) -> bool {
+        self.operation.executes_programs() && self.expectations.accepted
+    }
+
     /// Decodes and validates a TOML manifest.
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(text: &str) -> Result<Self, ManifestError> {

@@ -71,6 +71,7 @@ pub use runner::{
 };
 pub use standard::standard_dispatcher;
 pub use types::{InterpreterV1Handler, StaticV1TypeHandler};
+pub use wasm::observe as observe_wasm;
 pub use workspace_index::ToolingV1IndexHandler;
 pub use workspace_query::ToolingV1QueryHandler;
 pub use workspace_semantic::{

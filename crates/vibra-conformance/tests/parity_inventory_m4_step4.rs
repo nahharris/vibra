@@ -91,7 +91,7 @@ fn the_inventory_matches_the_corpus_and_the_runner() {
     let reports = corpus
         .cases()
         .iter()
-        .filter(|case| case.manifest().operation().is_executable())
+        .filter(|case| case.manifest().is_executable())
         .map(|case| runner.run_case(case))
         .collect::<Vec<_>>();
     assert!(!reports.is_empty(), "the corpus has no executable case");
@@ -159,7 +159,7 @@ fn every_executable_case_has_a_row_and_no_row_is_extra() {
     let executable = corpus
         .cases()
         .iter()
-        .filter(|case| case.manifest().operation().is_executable())
+        .filter(|case| case.manifest().is_executable())
         .map(|case| case.manifest().id.as_str())
         .collect::<std::collections::BTreeSet<_>>();
     let rows = inventory
