@@ -133,6 +133,7 @@ use crate::encode::FunctionCode;
 use crate::form::NotLowered;
 use crate::layout::{self, CellClass, Kind, frame, header, state};
 use crate::pattern::{Literal, Node, Presence, Test, decompose, literal};
+use crate::primitive::{self, Names};
 use crate::runtime::{
     Ins, Routines, ValueClass, c32, c64, get, index, ld8, ld32, ld64, set, st8, st32,
     st64,
@@ -143,7 +144,7 @@ use crate::types::{
 use vibra_ir::boundary::TrapCode;
 
 /// The WebAssembly function's parameter: the offset of its frame.
-const FRAME: u32 = 0;
+pub(crate) const FRAME: u32 = 0;
 /// The block the function runs next.
 const PC: u32 = 1;
 /// The frame a call has just pushed.
@@ -160,11 +161,30 @@ const FUNC: u32 = 6;
 const SLOTS: u32 = 7;
 /// The first cell of the function value.
 const CELLS: u32 = 8;
-/// The locals a function declares after its parameter.
-const FIXED: [ValType; 8] = [ValType::I32; 8];
+/// The first operand of a primitive row, as its exact integer.
+pub(crate) const WA: u32 = 9;
+/// The second operand of a primitive row.
+pub(crate) const WB: u32 = 10;
+/// The value a primitive row computes.
+pub(crate) const WR: u32 = 11;
+/// The locals a function declares after its parameter: the eight words above,
+/// and the three 64-bit locals of a primitive row.
+const FIXED: [ValType; 11] = [
+    ValType::I32,
+    ValType::I32,
+    ValType::I32,
+    ValType::I32,
+    ValType::I32,
+    ValType::I32,
+    ValType::I32,
+    ValType::I32,
+    ValType::I64,
+    ValType::I64,
+    ValType::I64,
+];
 /// The first staging local, an `i64` for a cell, and then an `i32` for its class
 /// byte, for each operand of a tail call.
-const STAGE: u32 = 9;
+const STAGE: u32 = 12;
 
 /// The head of the descriptor of `void`.
 pub(crate) const HEAD_VOID: u32 = 1;
@@ -733,6 +753,16 @@ enum Place {
 const SUCCESS: [&str; 2] = ["some", "ok"];
 const FAILURE: [&str; 2] = ["none", "err"];
 
+/// The discriminant of an object that is being built.
+#[derive(Clone, Copy, Debug)]
+enum Variant {
+    /// A discriminant the code knows.
+    Fixed(u32),
+    /// The low 32 bits of the cell of a slot, plus `bias`: a discriminant that a
+    /// primitive row computed.
+    Cell { slot: u32, bias: i32 },
+}
+
 /// Where the class byte of a value of a generic type is read from.
 #[derive(Clone, Copy, Debug)]
 enum ByteSource {
@@ -1057,6 +1087,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 tail,
                 ..
             } => self.call(target, arguments, result, *tail, expr.origin(), dest),
+            Expr::External { .. } => self.primitive(expr, dest),
             Expr::Closure { .. } | Expr::Function { .. } => {
                 self.function_value(expr, dest)
             }
@@ -2167,7 +2198,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         data: Option<Vec<u8>>,
         dest: u32,
     ) {
-        self.new_object(kind, len, variant);
+        self.new_object(kind, len, Variant::Fixed(variant));
         if let Some(data) = data {
             let count = u32::try_from(data.len()).unwrap_or(u32::MAX);
             let segment = self.lowering.segments.intern(data);
@@ -2187,17 +2218,24 @@ impl<'l, 'a> Builder<'l, 'a> {
     }
 
     /// Calls the constructor and leaves the new object in the `OBJECT` local.
-    fn new_object(&mut self, kind: Kind, len: u32, variant: u32) {
+    fn new_object(&mut self, kind: Kind, len: u32, variant: Variant) {
         self.lowering.built_object = true;
         let new = self.lowering.fns.new;
         self.push(&[
             c32(kind.code().cast_signed()),
             c32(index(layout::row(kind).stride)),
             c32(len.cast_signed()),
-            c32(variant.cast_signed()),
-            I::Call(new),
-            set(OBJECT),
         ]);
+        match variant {
+            Variant::Fixed(discriminant) => {
+                self.push(&[c32(discriminant.cast_signed())]);
+            }
+            Variant::Cell { slot, bias } => {
+                let at = self.cell(slot);
+                self.push(&[get(FRAME), ld32(at), c32(bias), I::I32Add]);
+            }
+        }
+        self.push(&[I::Call(new), set(OBJECT)]);
     }
 
     /// Hands the object in the `OBJECT` local to `dest`.
@@ -2231,6 +2269,11 @@ impl<'l, 'a> Builder<'l, 'a> {
     /// `dest`: each component's cell and class byte move into the object, and a
     /// slot that owned a reference is disowned.
     fn build(&mut self, kind: Kind, variant: u32, parts: &[Part], dest: u32) {
+        self.build_with(kind, Variant::Fixed(variant), parts, dest);
+    }
+
+    /// [`Self::build`] of an object whose discriminant is chosen at run time.
+    fn build_with(&mut self, kind: Kind, variant: Variant, parts: &[Part], dest: u32) {
         let len = u32::try_from(parts.len()).unwrap_or(u32::MAX);
         self.new_object(kind, len, variant);
         let cells = layout::cells_offset(len);
@@ -2535,6 +2578,220 @@ impl<'l, 'a> Builder<'l, 'a> {
         self.drop_slot(slot);
         self.release_to(mark);
         Ok(())
+    }
+
+    // -- primitive rows ---------------------------------------------------------
+
+    /// The discriminant of `variant` in the enum `ty`, which the checker's
+    /// signature of the row names.
+    fn discriminant(
+        &self,
+        ty: &Type,
+        variant: &str,
+        origin: &SourceOrigin,
+    ) -> Result<u32, NotLowered> {
+        self.shape(ty, origin)?
+            .variant(variant)
+            .and_then(|position| u32::try_from(position).ok())
+            .ok_or_else(|| classify::forms_of_type(ty, origin))
+    }
+
+    /// A call of a registry row that is a few instructions, lowered inline by
+    /// the table of [`crate::primitive`] and no activation of its own.
+    ///
+    /// The operands are evaluated left to right into temporaries, loaded as
+    /// exact integers, and computed into one value and one selector. A scalar
+    /// row stores its value. Any other row builds its result from the selector
+    /// in the one way its outcome fixes: a `bool` or an `ordering` takes the
+    /// selector as its discriminant, a checked result is `ok` of the value when
+    /// the selector is `0` and otherwise `err` of the error variant it names,
+    /// and `option` is `some` of the operand when the selector is set. Every
+    /// reference built is moved into the object that holds it, so the counts
+    /// balance on the `ok` path and on the error path alike.
+    fn primitive(&mut self, expr: &Expr, dest: u32) -> Result<(), NotLowered> {
+        let Expr::External {
+            intrinsic,
+            arguments,
+            result,
+            origin,
+        } = expr
+        else {
+            return Err(self.forms_of(expr));
+        };
+        let plan = primitive::plan(*intrinsic).ok_or_else(|| self.forms_of(expr))?;
+        if arguments.len() != plan.operands().len() {
+            return Err(self.forms_of(expr));
+        }
+        let mark = self.next_temp;
+        let mut slots = Vec::with_capacity(arguments.len());
+        for argument in arguments {
+            self.class(&argument.result_type(), argument.origin())?;
+            let slot = self.temp();
+            self.expr(argument, slot)?;
+            slots.push(slot);
+        }
+        let offsets = slots
+            .iter()
+            .map(|slot| self.cell(*slot))
+            .collect::<Vec<_>>();
+
+        // The discriminants the computation selects among.
+        let mut names = Names::default();
+        match plan.outcome() {
+            primitive::Outcome::Ordering => {
+                for (position, variant) in
+                    ["less", "equal", "greater"].into_iter().enumerate()
+                {
+                    let discriminant = self.discriminant(result, variant, origin)?;
+                    if let Some(name) = names.order.get_mut(position) {
+                        *name = discriminant.cast_signed();
+                    }
+                }
+            }
+            primitive::Outcome::Checked(_) => {
+                let error = self.error_type(result, origin)?;
+                for fault in plan.faults() {
+                    let discriminant =
+                        self.discriminant(&error, fault.variant(), origin)?;
+                    if let Some(name) = names.faults.get_mut(fault as usize) {
+                        *name = discriminant.cast_signed() + 1;
+                    }
+                }
+            }
+            primitive::Outcome::Scalar(_)
+            | primitive::Outcome::Bool
+            | primitive::Outcome::Option => {}
+        }
+
+        let code = plan.compute(&offsets, &names);
+        self.push(&code);
+        let value = |this: &mut Self, slot: u32| {
+            let at = this.cell(slot);
+            this.push(&[get(FRAME)]);
+            this.push(&plan.value());
+            this.push(&[st64(at)]);
+            this.set_byte(slot, cell_class(plan.class()).code());
+        };
+        if let primitive::Outcome::Scalar(_) = plan.outcome() {
+            value(self, dest);
+            self.release_to(mark);
+            return Ok(());
+        }
+
+        // The selector lives in a slot, so it survives the blocks below.
+        let selector = self.temp();
+        let at = self.cell(selector);
+        self.push(&[
+            set(SCRATCH),
+            get(FRAME),
+            get(SCRATCH),
+            I::I64ExtendI32U,
+            st64(at),
+        ]);
+        self.set_byte(selector, cell_class(ValueClass::I32).code());
+        match plan.outcome() {
+            primitive::Outcome::Bool | primitive::Outcome::Ordering => {
+                self.build_with(
+                    Kind::Enum,
+                    Variant::Cell {
+                        slot: selector,
+                        bias: 0,
+                    },
+                    &[],
+                    dest,
+                );
+            }
+            primitive::Outcome::Checked(_) => {
+                let held = self.temp();
+                value(self, held);
+                let ok = self.discriminant(result, "ok", origin)?;
+                let err = self.discriminant(result, "err", origin)?;
+                self.push(&[get(FRAME), ld32(at), I::I32Eqz]);
+                let (ok_block, err_block, join) =
+                    (self.new_block(), self.new_block(), self.new_block());
+                self.end(Term::Branch {
+                    then_block: ok_block,
+                    else_block: err_block,
+                });
+                self.start(ok_block);
+                self.build(
+                    Kind::Enum,
+                    ok,
+                    &[Part::Slot {
+                        slot: held,
+                        class: plan.class(),
+                    }],
+                    dest,
+                );
+                self.goto(join, err_block);
+                // The error is an enum of `void` variants, which the result
+                // then holds.
+                let error = self.temp();
+                self.build_with(
+                    Kind::Enum,
+                    Variant::Cell {
+                        slot: selector,
+                        bias: -1,
+                    },
+                    &[],
+                    error,
+                );
+                self.build(
+                    Kind::Enum,
+                    err,
+                    &[Part::Slot {
+                        slot: error,
+                        class: ValueClass::Ref,
+                    }],
+                    dest,
+                );
+                self.goto(join, join);
+            }
+            primitive::Outcome::Option => {
+                let some = self.discriminant(result, "some", origin)?;
+                let none = self.discriminant(result, "none", origin)?;
+                self.push(&[get(FRAME), ld32(at)]);
+                let (some_block, none_block, join) =
+                    (self.new_block(), self.new_block(), self.new_block());
+                self.end(Term::Branch {
+                    then_block: some_block,
+                    else_block: none_block,
+                });
+                self.start(some_block);
+                self.build(
+                    Kind::Enum,
+                    some,
+                    &[Part::Slot {
+                        slot: slots.first().copied().unwrap_or(selector),
+                        class: ValueClass::I32,
+                    }],
+                    dest,
+                );
+                self.goto(join, none_block);
+                self.build(Kind::Enum, none, &[], dest);
+                self.goto(join, join);
+            }
+            primitive::Outcome::Scalar(_) => {}
+        }
+        self.release_to(mark);
+        Ok(())
+    }
+
+    /// The error type of a checked result: the type of its `err` payload.
+    fn error_type(
+        &self,
+        result: &Type,
+        origin: &SourceOrigin,
+    ) -> Result<Type, NotLowered> {
+        let shape = self.shape(result, origin)?;
+        let Shape::Enum(variants) = &shape else {
+            return Err(classify::forms_of_type(result, origin));
+        };
+        variants
+            .iter()
+            .find(|(name, _)| name == "err")
+            .map(|(_, ty)| ty.clone())
+            .ok_or_else(|| classify::forms_of_type(result, origin))
     }
 
     // -- the function ---------------------------------------------------------

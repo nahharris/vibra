@@ -45,6 +45,7 @@ mod form;
 pub mod layout;
 mod lower;
 mod pattern;
+mod primitive;
 mod runtime;
 pub mod support;
 mod types;
@@ -199,4 +200,13 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
         bytes,
         origins: OriginTable::default(),
     })
+}
+
+/// Whether the emitter lowers the registry row `intrinsic` inline: the integer
+/// rows but `to-str` and `parse`, the integer conversions, and the `char` rows,
+/// which `vibra_ir::external::CompilerIntrinsic::vectors` holds to samples. A
+/// row it does not lower is reported by [`emit`] as [`Form::External`].
+#[must_use]
+pub fn lowers_primitive(intrinsic: vibra_ir::external::CompilerIntrinsic) -> bool {
+    primitive::plan(intrinsic).is_some()
 }
