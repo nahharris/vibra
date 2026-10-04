@@ -84,6 +84,14 @@ pub struct Routines {
     pub first_accessor: u32,
     /// `() -> ()`: the `vibra_v1_entry` export.
     pub entry_export: u32,
+    /// `(function, slots) -> frame`: pushes an activation's frame on the frame
+    /// stack and makes it the top.
+    pub push_frame: u32,
+    /// `(frame) -> ()`: drops what a frame still owns and pops it.
+    pub leave: u32,
+    /// `() -> ()`: the dispatcher, which runs the top frame's function until no
+    /// frame is left.
+    pub run: u32,
     /// `(kind, stride, len, variant) -> i32`: allocates and initializes an
     /// object, with a count of one. It is the last routine and is present only
     /// when the module builds an object.
@@ -155,8 +163,8 @@ const CORE: u32 = 10;
 
 impl Routines {
     /// Assigns indices from `base`: the core routines, the accessors, the entry
-    /// export, and last the object constructor, which a module includes only
-    /// when it builds an object.
+    /// export, the frame routines, and last the object constructor, which a
+    /// module includes only when it builds an object.
     pub(crate) const fn plan(base: u32) -> Self {
         let first_accessor = base + CORE;
         let accessors = ACCESSORS.len() as u32;
@@ -173,7 +181,10 @@ impl Routines {
             entry_of: base + 9,
             first_accessor,
             entry_export: first_accessor + accessors,
-            new: first_accessor + accessors + 1,
+            push_frame: first_accessor + accessors + 1,
+            leave: first_accessor + accessors + 2,
+            run: first_accessor + accessors + 3,
+            new: first_accessor + accessors + 4,
         }
     }
 }
@@ -220,7 +231,7 @@ pub(crate) fn accessor_exports(fns: &Routines) -> Vec<(&'static str, u32)> {
 
 // -- instruction helpers ----------------------------------------------------
 
-const fn mem(offset: u32, align: u32) -> MemArg {
+pub(crate) const fn mem(offset: u32, align: u32) -> MemArg {
     MemArg {
         offset: offset as u64,
         align,
@@ -228,52 +239,52 @@ const fn mem(offset: u32, align: u32) -> MemArg {
     }
 }
 
-const fn c32(value: i32) -> Ins {
+pub(crate) const fn c32(value: i32) -> Ins {
     I::I32Const(value)
 }
 
-const fn c64(value: i64) -> Ins {
+pub(crate) const fn c64(value: i64) -> Ins {
     I::I64Const(value)
 }
 
-const fn get(local: u32) -> Ins {
+pub(crate) const fn get(local: u32) -> Ins {
     I::LocalGet(local)
 }
 
-const fn set(local: u32) -> Ins {
+pub(crate) const fn set(local: u32) -> Ins {
     I::LocalSet(local)
 }
 
-const fn tee(local: u32) -> Ins {
+pub(crate) const fn tee(local: u32) -> Ins {
     I::LocalTee(local)
 }
 
-const fn ld32(offset: u32) -> Ins {
+pub(crate) const fn ld32(offset: u32) -> Ins {
     I::I32Load(mem(offset, 2))
 }
 
-const fn st32(offset: u32) -> Ins {
+pub(crate) const fn st32(offset: u32) -> Ins {
     I::I32Store(mem(offset, 2))
 }
 
-const fn ld64(offset: u32) -> Ins {
+pub(crate) const fn ld64(offset: u32) -> Ins {
     I::I64Load(mem(offset, 3))
 }
 
-const fn st64(offset: u32) -> Ins {
+pub(crate) const fn st64(offset: u32) -> Ins {
     I::I64Store(mem(offset, 3))
 }
 
-const fn ld8(offset: u32) -> Ins {
+pub(crate) const fn ld8(offset: u32) -> Ins {
     I::I32Load8U(mem(offset, 0))
 }
 
-const fn st8(offset: u32) -> Ins {
+pub(crate) const fn st8(offset: u32) -> Ins {
     I::I32Store8(mem(offset, 0))
 }
 
 /// A signed constant for an unsigned layout offset or size.
-const fn index(value: u32) -> i32 {
+pub(crate) const fn index(value: u32) -> i32 {
     value.cast_signed()
 }
 
@@ -1215,11 +1226,381 @@ fn read_component(fns: &Routines, read: Read) -> Routine {
     make(&[I64, I64], &[result], &[I32, I32, I32], code)
 }
 
-/// The entry export: clears the record and the result, runs the program's
-/// entry, and stores its result in the result slot. A reference is registered
-/// in the handle table, which takes its own count, and the entry's count is
-/// dropped.
-pub(crate) fn entry_export(fns: &Routines, entry: u32, class: ValueClass) -> Routine {
+/// `(function, slots) -> frame`: pushes the frame of an activation of
+/// `function` with `slots` slots, whose class bytes are clear, after the top
+/// frame, or in a new segment when the top frame's segment has no room, and
+/// makes it the top. Running out of memory for a segment is the host event.
+fn push_frame(fns: &Routines) -> Routine {
+    // Params: 0 function, 1 slots. Locals: 2 top, 3 fr, 4 seg, 5 fits,
+    // 6 size (i64), 7 next (i64), 8 tail slots (i64), 9 bytes (i64).
+    let (function, slots) = (0, 1);
+    let (top, fr, seg, fits, size, next, top_slots, bytes) = (2, 3, 4, 5, 6, 7, 8, 9);
+    let pad = |code: &mut Vec<Ins>, count: u32| {
+        // (count + 7) & -8 as an i64.
+        push(code, &[get(count), c64(7), I::I64Add, c64(-8), I::I64And]);
+    };
+    let mut code = Vec::new();
+    // size = HEADER + ((slots + 7) & -8) + slots * 8, as an i64.
+    push(
+        &mut code,
+        &[get(slots), I::I64ExtendI32U, set(top_slots)],
+    );
+    push(&mut code, &[c64(i64::from(layout::frame::HEADER))]);
+    pad(&mut code, top_slots);
+    push(
+        &mut code,
+        &[
+            I::I64Add,
+            get(top_slots),
+            c64(3),
+            I::I64Shl,
+            I::I64Add,
+            set(size),
+        ],
+    );
+    push(&mut code, &load_state32(state::FRAME_TOP));
+    push(&mut code, &[set(top), c32(0), set(fits), get(top), I::If(EMPTY)]);
+    // next = top + the size of the top frame; it fits when it ends within the
+    // segment.
+    push(
+        &mut code,
+        &[
+            get(top),
+            ld32(layout::frame::SLOTS),
+            I::I64ExtendI32U,
+            set(top_slots),
+            get(top),
+            I::I64ExtendI32U,
+            c64(i64::from(layout::frame::HEADER)),
+            I::I64Add,
+        ],
+    );
+    pad(&mut code, top_slots);
+    push(
+        &mut code,
+        &[
+            I::I64Add,
+            get(top_slots),
+            c64(3),
+            I::I64Shl,
+            I::I64Add,
+            set(next),
+            get(next),
+            get(size),
+            I::I64Add,
+        ],
+    );
+    push(&mut code, &load_state32(state::FRAME_LIMIT));
+    push(
+        &mut code,
+        &[I::I64ExtendI32U, I::I64LeU, set(fits), I::End, get(fits), I::I32Eqz],
+    );
+    push(&mut code, &[I::If(EMPTY)]);
+    // A new segment of at least the minimum size that holds the frame.
+    push(
+        &mut code,
+        &[
+            c64(i64::from(layout::segment::HEADER)),
+            get(size),
+            I::I64Add,
+            set(bytes),
+            get(bytes),
+            c64(i64::from(layout::segment::MIN_SIZE)),
+            I::I64LtU,
+            I::If(EMPTY),
+            c64(i64::from(layout::segment::MIN_SIZE)),
+            set(bytes),
+            I::End,
+            get(bytes),
+            I::Call(fns.alloc),
+            set(seg),
+            get(seg),
+        ],
+    );
+    push(&mut code, &load_state32(state::FRAME_SEGMENT));
+    push(
+        &mut code,
+        &[
+            st32(layout::segment::PREVIOUS),
+            get(seg),
+            get(seg),
+            get(seg),
+            ld32(header::BLOCK_SIZE),
+            I::I32Add,
+            st32(layout::segment::END),
+            ZERO,
+            get(seg),
+            st32(state::FRAME_SEGMENT),
+            ZERO,
+            get(seg),
+            ld32(layout::segment::END),
+            st32(state::FRAME_LIMIT),
+            get(seg),
+            c32(index(layout::segment::HEADER)),
+            I::I32Add,
+            set(fr),
+            I::Else,
+            get(next),
+            I::I32WrapI64,
+            set(fr),
+            I::End,
+        ],
+    );
+    // The frame's header, and every class byte clear.
+    push(
+        &mut code,
+        &[
+            get(fr),
+            c32(0),
+            st32(layout::frame::RESUME),
+            get(fr),
+            get(function),
+            st32(layout::frame::FUNCTION),
+            get(fr),
+            get(slots),
+            st32(layout::frame::SLOTS),
+            get(fr),
+            get(top),
+            st32(layout::frame::CALLER),
+            get(fr),
+            c32(index(layout::frame::HEADER)),
+            I::I32Add,
+            c32(0),
+            get(slots),
+            c32(7),
+            I::I32Add,
+            c32(-8),
+            I::I32And,
+            I::MemoryFill(0),
+            ZERO,
+            get(fr),
+            st32(state::FRAME_TOP),
+            ZERO,
+        ],
+    );
+    push(&mut code, &load_state32(state::FRAME_DEPTH));
+    push(
+        &mut code,
+        &[c32(1), I::I32Add, st32(state::FRAME_DEPTH), get(fr), I::End],
+    );
+    make(
+        &[I32, I32],
+        &[I32],
+        &[I32, I32, I32, I32, I64, I64, I64, I64],
+        code,
+    )
+}
+
+/// `(frame) -> ()`: leaves an activation. It drops every cell of the frame that
+/// still owns a reference, pops the frame, and frees its segment when it was
+/// the first frame of the segment.
+fn leave(fns: &Routines) -> Routine {
+    // Param 0 is the frame. Locals: 1 slots, 2 i, 3 cells, 4 segment, 5 previous.
+    let (fr, slots, i, cells, seg, previous) = (0, 1, 2, 3, 4, 5);
+    let mut code = vec![
+        get(fr),
+        ld32(layout::frame::SLOTS),
+        set(slots),
+        get(fr),
+        c32(index(layout::frame::HEADER)),
+        I::I32Add,
+        get(slots),
+        c32(7),
+        I::I32Add,
+        c32(-8),
+        I::I32And,
+        I::I32Add,
+        set(cells),
+        c32(0),
+        set(i),
+        I::Block(EMPTY),
+        I::Loop(EMPTY),
+        get(i),
+        get(slots),
+        I::I32GeU,
+        I::BrIf(1),
+        get(fr),
+        get(i),
+        I::I32Add,
+        ld8(layout::frame::HEADER),
+        c32(i32::from(CellClass::Ref.code())),
+        I::I32Eq,
+        I::If(EMPTY),
+        get(cells),
+        get(i),
+        c32(3),
+        I::I32Shl,
+        I::I32Add,
+        ld32(0),
+        I::Call(fns.drop),
+        I::End,
+        get(i),
+        c32(1),
+        I::I32Add,
+        set(i),
+        I::Br(0),
+        I::End,
+        I::End,
+        // Pop: the caller is the top again.
+        ZERO,
+        get(fr),
+        ld32(layout::frame::CALLER),
+        st32(state::FRAME_TOP),
+        ZERO,
+    ];
+    code.extend(load_state32(state::FRAME_DEPTH));
+    code.extend([c32(1), I::I32Sub, st32(state::FRAME_DEPTH)]);
+    code.extend(load_state32(state::FRAME_SEGMENT));
+    code.extend([
+        set(seg),
+        get(fr),
+        get(seg),
+        c32(index(layout::segment::HEADER)),
+        I::I32Add,
+        I::I32Eq,
+        I::If(EMPTY),
+        // The first frame of its segment: the segment is empty and goes.
+        get(seg),
+        ld32(layout::segment::PREVIOUS),
+        set(previous),
+        get(seg),
+        I::Call(fns.free),
+        ZERO,
+        get(previous),
+        st32(state::FRAME_SEGMENT),
+        ZERO,
+        get(previous),
+        I::If(BlockType::Result(I32)),
+        get(previous),
+        ld32(layout::segment::END),
+        I::Else,
+        c32(0),
+        I::End,
+        st32(state::FRAME_LIMIT),
+        I::End,
+        I::End,
+    ]);
+    make(&[I32], &[], &[I32, I32, I32, I32, I32], code)
+}
+
+/// `() -> ()`: the dispatcher. It runs the function of the top frame, over and
+/// over, until the frame stack is empty. A language function returns to it
+/// when its activation calls or returns, so the engine's stack holds this loop
+/// and one function at any depth of the language's recursion.
+fn run(dispatch_type: u32) -> Routine {
+    let mut code = vec![I::Block(EMPTY), I::Loop(EMPTY)];
+    code.extend(load_state32(state::FRAME_TOP));
+    code.extend([
+        tee(0),
+        I::I32Eqz,
+        I::BrIf(1),
+        get(0),
+        get(0),
+        ld32(layout::frame::FUNCTION),
+        I::CallIndirect {
+            type_index: dispatch_type,
+            table_index: 0,
+        },
+        I::Br(0),
+        I::End,
+        I::End,
+        I::End,
+    ]);
+    make(&[], &[], &[I32], code)
+}
+
+/// The frame routines, in index order after the entry export.
+pub(crate) fn frame_routines(fns: &Routines, dispatch_type: u32) -> Vec<Routine> {
+    vec![push_frame(fns), leave(fns), run(dispatch_type)]
+}
+
+/// The entry export of a program: clears the record and the result, allocates
+/// the module-value state when the program has module values, pushes the
+/// entry's frame, runs the dispatcher, and stores the entry's result in the
+/// result slot. A reference result is registered in the handle table, which
+/// takes its own count, and the activation's count is dropped.
+pub(crate) fn entry_export(
+    fns: &Routines,
+    entry: u32,
+    entry_slots: u32,
+    module_values: u32,
+    class: ValueClass,
+) -> Routine {
+    // Local 0 is the ID slot (i64), 1 the object.
+    let (slot, object) = (0, 1);
+    let mut code = vec![I::Call(fns.begin), ZERO, c64(0), st64(state::RESULT)];
+    if module_values != 0 {
+        // The instance's module-value state: two cells for each value.
+        code.extend(load_state32(state::MODULE_VALUES));
+        code.extend([
+            I::I32Eqz,
+            I::If(EMPTY),
+            c32(layout::Kind::Tuple.code().cast_signed()),
+            c32(index(layout::STRIDE_CELLS)),
+            c32(index(module_values.saturating_mul(2))),
+            c32(0),
+            I::Call(fns.new),
+            set(object),
+            ZERO,
+            get(object),
+            st32(state::MODULE_VALUES),
+            I::End,
+        ]);
+    }
+    code.extend([
+        c32(index(entry)),
+        c32(index(entry_slots)),
+        I::Call(fns.push_frame),
+        I::Drop,
+        I::Call(fns.run),
+    ]);
+    code.extend(take_ret(fns, class, slot, object));
+    code.push(I::End);
+    make(&[], &[], &[I64, I32], code)
+}
+
+/// What a completed entry does with the cell it was handed: a scalar's bits go
+/// to the result slot, and an arena value is registered in the handle table.
+fn take_ret(fns: &Routines, class: ValueClass, slot: u32, object: u32) -> Vec<Ins> {
+    match class {
+        ValueClass::Ref => {
+            let mut code = Vec::new();
+            code.extend(load_state32(state::RET));
+            code.extend([
+                set(object),
+                get(object),
+                I::Call(fns.new_id),
+                set(slot),
+                get(object),
+                I::Call(fns.drop),
+                ZERO,
+                get(slot),
+                st64(state::RESULT),
+            ]);
+            code
+        }
+        ValueClass::Void
+        | ValueClass::I32
+        | ValueClass::I64
+        | ValueClass::F32
+        | ValueClass::F64 => {
+            let mut code = vec![ZERO];
+            code.extend(load_state64(state::RET));
+            code.push(st64(state::RESULT));
+            code
+        }
+    }
+}
+
+/// The entry export of a scaffold module (`support`): the entry is a plain
+/// WebAssembly function that leaves its result on the operand stack, which
+/// host tests of the memory layer write by hand. It is not a language
+/// function and has no frame.
+pub(crate) fn raw_entry_export(
+    fns: &Routines,
+    entry: u32,
+    class: ValueClass,
+) -> Routine {
     // Locals: 0 slot (i64), 1 object (i32).
     let (slot, object) = (0, 1);
     let mut code = vec![
@@ -1261,13 +1642,18 @@ mod tests {
     fn the_plan_numbers_the_routines_in_the_order_they_are_built() {
         let fns = Routines::plan(7);
         let routines = core_routines(&fns);
-        // The entry export and the constructor follow the core routines and the
-        // accessors, so the constructor can be left out without renumbering.
+        // The entry export, the frame routines, and the constructor follow the
+        // core routines and the accessors, so the constructor can be left out
+        // without renumbering.
         assert_eq!(
             fns.entry_export,
             7 + u32::try_from(routines.len()).unwrap_or(0)
         );
-        assert_eq!(fns.new, fns.entry_export + 1);
+        assert_eq!(fns.push_frame, fns.entry_export + 1);
+        assert_eq!(fns.leave, fns.entry_export + 2);
+        assert_eq!(fns.run, fns.entry_export + 3);
+        assert_eq!(fns.new, fns.entry_export + 4);
+        assert_eq!(frame_routines(&fns, 0).len(), 3);
         let exports = accessor_exports(&fns);
         assert_eq!(exports.len(), ACCESSORS.len());
         assert_eq!(

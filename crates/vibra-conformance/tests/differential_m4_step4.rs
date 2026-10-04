@@ -186,16 +186,13 @@ fn the_empty_entry_runs_in_both_backends_and_matches() {
 }
 
 #[test]
-fn a_checked_source_program_is_not_lowered_while_it_carries_module_values() {
+fn a_checked_source_program_lowers_with_its_module_values() {
     // Every checked program holds the prelude's `true` and `false` (Step 2b),
-    // so the corpus's own void case runs in the interpreter only until Step 5b.
+    // which Step 5b lowers, so the corpus's own void case runs in both backends.
     let report = run_real(&void_case());
     let (interpreter, wasm) = backends(&report);
     assert_eq!(interpreter, &CaseStatus::Passed, "{report:?}");
-    let WasmStatus::NotLowered { forms } = wasm else {
-        panic!("expected not lowered, got {wasm:?}");
-    };
-    assert!(forms.iter().any(|form| form == "module-value"), "{forms:?}");
+    assert_eq!(wasm, &WasmStatus::Matched, "{report:?}");
     assert_eq!(report.status, CaseStatus::Passed);
 }
 
@@ -204,9 +201,9 @@ fn a_program_that_does_not_lower_still_passes_in_the_interpreter() {
     let corpus = TempCorpus::new();
     corpus.interpret(
         "V1-RUNTIME-synthetic-literal",
-        "(defn answer () u64 7u64)\n",
+        "(defn answer () i32 ((lambda () i32 7i32)))\n",
         true,
-        Some("(record type: @u64 value: 7u64)\n"),
+        Some("(record type: @i32 value: 7i32)\n"),
         "",
     );
     let report = run_real(&corpus);
@@ -215,7 +212,7 @@ fn a_program_that_does_not_lower_still_passes_in_the_interpreter() {
     let WasmStatus::NotLowered { forms } = wasm else {
         panic!("expected not lowered, got {wasm:?}");
     };
-    assert!(forms.iter().any(|form| form == "module-value"), "{forms:?}");
+    assert!(forms.iter().any(|form| form == "closure"), "{forms:?}");
     assert_eq!(
         report.status,
         CaseStatus::Passed,
@@ -228,17 +225,16 @@ fn a_not_lowered_case_does_not_fail_the_run_and_is_counted() {
     let corpus = TempCorpus::new();
     corpus.interpret(
         "V1-RUNTIME-synthetic-literal",
-        "(defn answer () u64 7u64)\n",
+        "(defn answer () i32 ((lambda () i32 7i32)))\n",
         true,
-        Some("(record type: @u64 value: 7u64)\n"),
+        Some("(record type: @i32 value: 7i32)\n"),
         "",
     );
     let runner = ConformanceRunner::new(standard_dispatcher());
     let report = runner.run(&corpus.corpus());
     assert!(report.is_success());
     let wasm = report.wasm_counts();
-    assert_eq!((wasm.matched, wasm.failed, wasm.not_lowered), (0, 0, 1));
-    let interpreter = report.interpreter_counts();
+    assert_eq!((wasm.matched, wasm.failed, wasm.not_lowered), (0, 0, 1));    let interpreter = report.interpreter_counts();
     assert_eq!(
         (
             interpreter.passed,
@@ -503,9 +499,9 @@ fn the_report_prints_both_backend_lines() {
     );
     corpus.interpret(
         "V1-RUNTIME-synthetic-literal",
-        "(defn answer () u64 7u64)\n",
+        "(defn answer () i32 ((lambda () i32 7i32)))\n",
         true,
-        Some("(record type: @u64 value: 7u64)\n"),
+        Some("(record type: @i32 value: 7i32)\n"),
         "",
     );
 
@@ -525,7 +521,7 @@ fn the_report_prints_both_backend_lines() {
         "{stdout}"
     );
     assert!(
-        stdout.contains("wasm backend: 0 matched, 0 failed, 2 not lowered\n"),
+        stdout.contains("wasm backend: 1 matched, 0 failed, 1 not lowered\n"),
         "{stdout}"
     );
     assert!(

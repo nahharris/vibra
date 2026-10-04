@@ -1,18 +1,19 @@
 //! Decides which parts of a checked program the emitter lowers.
 //!
-//! Step 5a lowers a function with no parameter whose body is a primitive
-//! literal, alone or in a sequence, and whose result is a type that a lowered
-//! value represents: `void`, `bool`, `char`, the integers, the floats, `str`,
-//! `bytes`, and the atoms. Every other node is reported, so a program that the
-//! emitter cannot lower completely produces an error and never a module that
-//! omits part of it.
-//! Each `match` below is exhaustive on purpose: a new checked-IR variant
-//! cannot compile until it is given a disposition here.
+//! Step 5b lowers the literals and sequences of Step 5a and, with them: module
+//! values; functions with fixed and labelled parameters; reads of a local;
+//! `let`, `if`, and `return`; direct calls in non-tail position; and the data
+//! forms (a record, a variant, a wrapper, a tuple, their projections, and the
+//! widening of a member into a union), over every type that has a lowered value
+//! kind. Every other node is reported, so a program that the emitter cannot
+//! lower completely produces an error and never a module that omits part of it.
+//! Each `match` below is exhaustive on purpose: a new checked-IR variant cannot
+//! compile until it is given a disposition here.
 
-use vibra_ir::{CallTarget, CheckedFunction, CheckedProgram, Expr};
+use vibra_ir::{CallTarget, CheckedFunction, CheckedProgram, Expr, Type};
 
 use crate::form::{Form, NotLowered, UnloweredForm};
-use crate::lower;
+use crate::types::class_of;
 
 /// The forms of one expression that the emitter does not lower, for the
 /// lowering to return when it meets the expression. It names at least one form
@@ -20,17 +21,21 @@ use crate::lower;
 pub(crate) fn forms_of(expr: &Expr) -> NotLowered {
     let mut found = Vec::new();
     walk(expr, &mut found);
-    NotLowered::from_uses(found).unwrap_or_else(|| NotLowered::single(Form::Result))
+    NotLowered::from_uses(found).unwrap_or_else(|| NotLowered::single(Form::Type))
 }
 
-/// Every use of a form the skeleton does not lower, in program order.
+/// The form that reports a type whose components the lowering cannot find:
+/// a type of an unlowered kind, or a declared type with no definition.
+pub(crate) fn forms_of_type(ty: &Type, origin: &vibra_ir::SourceOrigin) -> NotLowered {
+    NotLowered::type_of(class_of(ty).err().unwrap_or("shape"), Some(origin.clone()))
+}
+
+/// Every use of a form the emitter does not lower, in program order.
 pub(crate) fn unlowered(program: &CheckedProgram) -> Vec<UnloweredForm> {
     let mut found = Vec::new();
     for global in program.globals() {
-        found.push(UnloweredForm::new(
-            Form::ModuleValue,
-            Some(global.origin().clone()),
-        ));
+        let origin = Some(global.origin().clone());
+        type_forms(&global.value_type(), origin, &mut found);
         walk(global.initializer(), &mut found);
     }
     for function in program.functions() {
@@ -39,18 +44,29 @@ pub(crate) fn unlowered(program: &CheckedProgram) -> Vec<UnloweredForm> {
     found
 }
 
+/// Reports a type no lowered value kind represents.
+fn type_forms(
+    ty: &Type,
+    origin: Option<vibra_ir::SourceOrigin>,
+    found: &mut Vec<UnloweredForm>,
+) {
+    if let Err(kind) = class_of(ty) {
+        found.push(UnloweredForm::new(Form::Type, origin).with_detail(kind));
+    }
+}
+
 fn function_forms(function: &CheckedFunction, found: &mut Vec<UnloweredForm>) {
     let origin = Some(function.origin().clone());
     let signature = function.signature();
-    if !signature.parameters().is_empty()
-        || !signature.labelled().is_empty()
-        || signature.variadic().is_some()
-    {
-        found.push(UnloweredForm::new(Form::Parameters, origin.clone()));
+    if signature.variadic().is_some() {
+        found.push(
+            UnloweredForm::new(Form::Parameters, origin.clone()).with_detail("variadic"),
+        );
     }
-    if lower::class_of(&signature.result()).is_none() {
-        found.push(UnloweredForm::new(Form::Result, origin.clone()));
+    for slot in signature.slot_types() {
+        type_forms(&slot, origin.clone(), found);
     }
+    type_forms(&signature.result(), origin.clone(), found);
     if function.test_assertion().is_some() {
         found.push(UnloweredForm::new(Form::TestAssertion, origin.clone()));
     }
@@ -60,15 +76,17 @@ fn function_forms(function: &CheckedFunction, found: &mut Vec<UnloweredForm>) {
     walk(function.body(), found);
 }
 
-/// Records a node and every node below it that the skeleton does not lower.
+/// Records a node and every node below it that the emitter does not lower.
 fn walk(expr: &Expr, found: &mut Vec<UnloweredForm>) {
+    type_forms(&expr.result_type(), Some(expr.origin().clone()), found);
     let mut report = |form: Form| {
         found.push(UnloweredForm::new(form, Some(expr.origin().clone())));
     };
     match expr {
         // Every primitive literal is lowered: a scalar is an immediate, and
-        // `bool`, `str`, `bytes`, and an atom are arena objects.
-        Expr::Literal { .. } => {}
+        // `bool`, `str`, `bytes`, and an atom are arena objects. A read of a
+        // local or of a module value is a copy of its cell.
+        Expr::Literal { .. } | Expr::Variable { .. } | Expr::Global { .. } => {}
         // A sequence evaluates its expressions in order and has the value of
         // the last, so it adds nothing to what its expressions already need.
         Expr::Sequence { expressions, .. } => walk_all(expressions, found),
@@ -84,8 +102,6 @@ fn walk(expr: &Expr, found: &mut Vec<UnloweredForm>) {
             walk_all(arguments, found);
         }
         Expr::Default { .. } => report(Form::Default),
-        Expr::Variable { .. } => report(Form::Variable),
-        Expr::Global { .. } => report(Form::Global),
         Expr::Function { .. } => report(Form::Function),
         Expr::Closure { captures, body, .. } => {
             report(Form::Closure);
@@ -94,7 +110,6 @@ fn walk(expr: &Expr, found: &mut Vec<UnloweredForm>) {
         }
         Expr::Captured { .. } => report(Form::Captured),
         Expr::Let { value, body, .. } => {
-            report(Form::Let);
             walk(value, found);
             walk(body, found);
         }
@@ -107,25 +122,21 @@ fn walk(expr: &Expr, found: &mut Vec<UnloweredForm>) {
                 walk(&arm.body, found);
             }
         }
-        Expr::Widen { value, .. } => {
-            report(Form::Widen);
-            walk(value, found);
-        }
+        // Widening to a union attaches the member's discriminant, and widening
+        // an atom singleton to `atom` is erased. Widening to an interface or
+        // `any` has an interface type, which is reported as such.
+        Expr::Widen { value, .. } => walk(value, found),
         Expr::Try { value, .. } => {
             report(Form::Try);
             walk(value, found);
         }
-        Expr::Return { value, .. } => {
-            report(Form::Return);
-            walk(value, found);
-        }
+        Expr::Return { value, .. } => walk(value, found),
         Expr::If {
             condition,
             then_branch,
             else_branch,
             ..
         } => {
-            report(Form::If);
             walk(condition, found);
             walk(then_branch, found);
             walk(else_branch, found);
@@ -136,51 +147,50 @@ fn walk(expr: &Expr, found: &mut Vec<UnloweredForm>) {
             tail,
             ..
         } => {
-            let kind = match (target, tail) {
-                (CallTarget::Direct(_), false) => "direct",
-                (CallTarget::Direct(_), true) => "tail-direct",
-                (CallTarget::Indirect { .. }, false) => "indirect",
-                (CallTarget::Indirect { .. }, true) => "tail-indirect",
-                (CallTarget::Contract { .. }, false) => "contract",
-                (CallTarget::Contract { .. }, true) => "tail-contract",
-            };
-            found.push(
-                UnloweredForm::new(Form::Call, Some(expr.origin().clone()))
-                    .with_detail(kind),
-            );
+            // A direct call in non-tail position pushes a frame. Every other
+            // call is the work of Step 6 (a tail call, an indirect call) or
+            // Step 9 (a contract call).
+            if !matches!((target, tail), (CallTarget::Direct(_), false)) {
+                let kind = match (target, tail) {
+                    (CallTarget::Direct(_), false) => "direct",
+                    (CallTarget::Direct(_), true) => "tail-direct",
+                    (CallTarget::Indirect { .. }, false) => "indirect",
+                    (CallTarget::Indirect { .. }, true) => "tail-indirect",
+                    (CallTarget::Contract { .. }, false) => "contract",
+                    (CallTarget::Contract { .. }, true) => "tail-contract",
+                };
+                found.push(
+                    UnloweredForm::new(Form::Call, Some(expr.origin().clone()))
+                        .with_detail(kind),
+                );
+            }
             if let CallTarget::Indirect { callee, .. } = target {
                 walk(callee, found);
             }
             walk_all(arguments, found);
         }
         Expr::Record { fields, .. } => {
-            report(Form::Record);
             for (_, field) in fields {
                 walk(field, found);
             }
         }
         Expr::Variant { payload, .. } => {
-            report(Form::Variant);
             if let Some(payload) = payload {
                 walk(payload, found);
             }
         }
-        Expr::Wrap { value, .. } => {
-            report(Form::Wrap);
+        // A wrapper over a builtin text type is written over an array.
+        Expr::Wrap {
+            value, value_type, ..
+        } => {
+            if matches!(value_type, Type::Str | Type::Bytes) {
+                report(Form::Wrap);
+            }
             walk(value, found);
         }
-        Expr::Project { record, .. } => {
-            report(Form::Project);
-            walk(record, found);
-        }
-        Expr::Tuple { components, .. } => {
-            report(Form::Tuple);
-            walk_all(components, found);
-        }
-        Expr::TupleProject { tuple, .. } => {
-            report(Form::TupleProject);
-            walk(tuple, found);
-        }
+        Expr::Project { record, .. } => walk(record, found),
+        Expr::Tuple { components, .. } => walk_all(components, found),
+        Expr::TupleProject { tuple, .. } => walk(tuple, found),
         Expr::Array { elements, .. } => {
             report(Form::Array);
             walk_all(elements, found);

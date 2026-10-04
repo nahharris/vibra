@@ -94,20 +94,23 @@ fn a_sequence_of_void_literals_is_the_empty_entry_too() {
     }
 }
 
+/// An array built from no element: a form no step before 8b lowers.
+fn empty_array() -> Expr {
+    Expr::Array {
+        value_type: Type::Array(Box::new(Type::U64)),
+        elements: Vec::new(),
+        origin: origin(),
+    }
+}
+
 #[test]
 fn a_sequence_adds_nothing_to_what_its_expressions_need() {
-    let binding = Expr::Let {
-        slot: None,
-        value: Box::new(void_literal()),
-        body: Box::new(void_literal()),
-        origin: origin(),
-    };
     let body = Expr::Sequence {
-        expressions: vec![binding, void_literal()],
+        expressions: vec![empty_array(), void_literal()],
         origin: origin(),
     };
     let f = function("seq", Vec::new(), Type::Void, body);
-    assert_eq!(forms(&not_lowered(&program(vec![f], 0))), ["let"]);
+    assert_eq!(forms(&not_lowered(&program(vec![f], 0))), ["type", "array"]);
 }
 
 #[test]
@@ -143,16 +146,31 @@ fn every_function_is_lowered_and_the_entry_is_the_one_exported() {
     assert_ne!(first.bytes(), two.bytes(), "the entry names its function");
 }
 
+/// A function with a variadic tail, which no step before 8b lowers.
+fn variadic_function(name: &str) -> CheckedFunction {
+    CheckedFunction::new(
+        name,
+        FunctionSignature::new(Vec::new(), Type::Void)
+            .with_variadic(Type::Array(Box::new(Type::U64))),
+        void_literal(),
+        origin(),
+    )
+    .expect("a checked function")
+}
+
 #[test]
-fn a_parameter_is_named_not_lowered() {
-    let f = function("f", vec![Type::U64], Type::Void, void_literal());
-    let error = not_lowered(&program(vec![f], 0));
-    assert_eq!(forms(&error), ["parameters"]);
-    assert!(error.to_string().contains("parameters"), "{error}");
+fn a_variadic_parameter_is_named_and_a_fixed_one_lowers() {
+    let error = not_lowered(&program(vec![variadic_function("f")], 0));
+    assert_eq!(forms(&error), ["parameters", "type"]);
+    assert_eq!(error.forms()[0].detail(), Some("variadic"));
+    assert_eq!(error.forms()[1].detail(), Some("array"));
+    assert!(error.to_string().contains("parameters `variadic`"), "{error}");
     assert_eq!(
         error.forms()[0].origin().map(SourceOrigin::source_id),
         Some("skeleton.vib")
     );
+    let fixed = function("g", vec![Type::U64], Type::Void, void_literal());
+    assert!(emit(&program(vec![empty_function("entry"), fixed], 0)).is_ok());
 }
 
 #[test]
@@ -167,7 +185,7 @@ fn a_literal_result_lowers_since_step_5a() {
 }
 
 #[test]
-fn a_binding_is_named() {
+fn a_binding_lowers_since_step_5b() {
     let body = Expr::Let {
         slot: None,
         value: Box::new(void_literal()),
@@ -182,28 +200,30 @@ fn a_binding_is_named() {
         0,
     )
     .expect("a checked function");
-    assert_eq!(forms(&not_lowered(&program(vec![f], 0))), ["let"]);
+    assert!(emit(&program(vec![f], 0)).is_ok());
 }
 
 #[test]
-fn a_direct_call_is_named_with_its_kind() {
-    let call = Expr::Call {
+fn a_direct_call_lowers_and_a_tail_call_is_named_with_its_kind() {
+    let call = |tail| Expr::Call {
         target: CallTarget::Direct(1),
         arguments: Vec::new(),
         result: Type::Void,
-        tail: false,
+        tail,
         origin: origin(),
     };
-    let caller = function("caller", Vec::new(), Type::Void, call);
-    let callee = empty_function("callee");
-    let error = not_lowered(&program(vec![caller, callee], 0));
+    let lowered = function("caller", Vec::new(), Type::Void, call(false));
+    assert!(emit(&program(vec![lowered, empty_function("callee")], 0)).is_ok());
+
+    let caller = function("caller", Vec::new(), Type::Void, call(true));
+    let error = not_lowered(&program(vec![caller, empty_function("callee")], 0));
     assert_eq!(forms(&error), ["call"]);
-    assert_eq!(error.forms()[0].detail(), Some("direct"));
-    assert!(error.to_string().contains("call `direct`"), "{error}");
+    assert_eq!(error.forms()[0].detail(), Some("tail-direct"));
+    assert!(error.to_string().contains("call `tail-direct`"), "{error}");
 }
 
 #[test]
-fn a_module_value_is_named() {
+fn a_module_value_lowers_since_step_5b() {
     let global = CheckedGlobal::new("value", Type::Void, void_literal(), origin())
         .expect("a checked global");
     let program = CheckedProgram::try_new_with_globals(
@@ -212,24 +232,27 @@ fn a_module_value_is_named() {
         0,
     )
     .expect("a checked program");
-    assert_eq!(forms(&not_lowered(&program)), ["module-value"]);
+    assert!(emit(&program).is_ok());
 }
 
 #[test]
 fn the_error_lists_each_distinct_form_once_in_form_order() {
-    // A program with two parameterized functions names `parameters` once.
-    let a = function("a", vec![Type::U64], Type::Void, void_literal());
-    let b = function("b", vec![Type::U64, Type::U64], Type::Void, void_literal());
-    let error = not_lowered(&program(vec![a, b], 0));
-    assert_eq!(forms(&error), ["parameters"]);
+    // A program with two variadic functions names `parameters` once.
+    let error = not_lowered(&program(
+        vec![variadic_function("a"), variadic_function("b")],
+        0,
+    ));
+    assert_eq!(forms(&error), ["parameters", "type"]);
 }
 
 #[test]
 fn no_module_is_produced_for_a_program_the_emitter_cannot_lower_completely() {
     // The entry is empty, but another function is not: the emitter reports it
     // rather than emitting a module without it.
-    let helper = function("helper", vec![Type::U64], Type::Void, void_literal());
-    let result = emit(&program(vec![empty_function("entry"), helper], 0));
+    let result = emit(&program(
+        vec![empty_function("entry"), variadic_function("helper")],
+        0,
+    ));
     assert!(
         result.is_err(),
         "a program with an unlowered function has no module"

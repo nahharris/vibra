@@ -39,11 +39,12 @@
 //! | 48 | `table_used` (u32) | The high-water mark of slots ever handed out of this block |
 //! | 52 | `table_count` (u32) | Live IDs |
 //! | 56 | `table_free` (u32) | Head of the free-slot list, as slot plus one, `0` for none |
-//! | 60 | `module_values` (u32) | Offset of the lazy module-value state, `0` until Step 5b allocates it |
-//! | 64 | `frame_segment` (u32) | Offset of the frame segment holding the top activation, `0` for none (Steps 5b and 6) |
-//! | 68 | `frame_top` (u32) | Offset of the top activation inside that segment |
-//! | 72 | `frame_limit` (u32) | End of that segment |
+//! | 60 | `module_values` (u32) | Offset of the module-value state (see below), `0` until the entry allocates it |
+//! | 64 | `frame_segment` (u32) | Offset of the frame segment holding the top activation, `0` for none |
+//! | 68 | `frame_top` (u32) | Offset of the top activation inside that segment, `0` for none |
+//! | 72 | `frame_limit` (u32) | End of that segment as a 32-bit address; a segment that ends at the 4 GiB edge reads `0`, which makes it full |
 //! | 76 | `frame_depth` (u32) | Activations on the frame stack |
+//! | 80 | `ret` (u64) | The cell a returning activation hands to its caller (see "Activations and the dispatcher") |
 //!
 //! # The arena
 //!
@@ -138,20 +139,146 @@
 //! 32 bits for an `i32`-slot type, and the host reads it by the entry's result
 //! type, as a failed assertion's operands are read (ledger D2.8).
 //!
-//! # Frame storage
+//! # Cells
 //!
-//! A language activation lives in the arena and never on the engine's stack,
-//! and the call routines of Steps 5b and 6 own the dispatcher that runs them.
-//! Step 5a reserves the state fields `frame_segment`, `frame_top`,
-//! `frame_limit`, and `frame_depth`, and fixes this representation. The frame
-//! stack is a list of segments, each an ordinary arena block (so the live size
-//! counts it and a deep recursion exhausts memory as the host event) that
-//! starts with its previous segment's offset and its own end. A frame is
-//! `[resume: u32][function: u32][slots: u32][caller: u32]` followed by the
-//! cells layout of its slots, class bytes then cells, so leaving a frame
-//! drops its reference cells by the same scan that releases an object. A tail
-//! call replaces the frame in place or pops and pushes. No frame is a value,
-//! and none has a header or an ID.
+//! One representation serves every place a value is stored: an **8-byte cell**
+//! with a **class byte** that says whether the cell owns a reference. A cell
+//! holds a scalar's bits zero-extended to 64 bits (an `i32`-slot value is its
+//! 32-bit two's complement pattern, an `f32` its bit pattern), or the offset of
+//! an arena value in its low 32 bits. The cells of an object, of a frame, and of
+//! the module-value state are all laid out as in "Payloads", so copying a value
+//! from one place to another is a copy of 8 bytes and a class byte, whatever the
+//! value's type is, and no routine branches on a type. A `void` value is a
+//! scalar cell holding `0`. The class bytes of an object are written as the host
+//! reads them; for a frame and the module-value state only the reference class
+//! matters, because it is what a scan drops.
+//!
+//! # Activations and the dispatcher
+//!
+//! A language activation lives in the arena and never on the engine's stack.
+//! This is the one mechanism of every call, and Step 6 extends it: indirect
+//! calls, closures, tail calls to every kind of callee, and generics are other
+//! ways to choose the frame to push or replace, not other mechanisms.
+//!
+//! **Frame.** A frame is `[resume: u32][function: u32][slots: u32][caller: u32]`
+//! followed by the cells layout of its `slots`: the class bytes padded to 8, and
+//! then the cells ([`frame`]). A function's slots are its parameters in
+//! parameter order, then its `let` bindings, then the temporaries of its own
+//! lowering. A slot's class byte is the reference class exactly while the slot
+//! **owns** a count: a value is moved out of a slot by copying its cell and
+//! clearing the byte, and leaving a frame drops every cell whose byte is still
+//! the reference class, by one scan. That scan is what balances an early
+//! `return`, which leaves temporaries half-built. A new frame has every class
+//! byte clear. No frame is a value, and none has a header or an ID.
+//!
+//! **Segments.** Frames are bump-allocated in **segments**, which are ordinary
+//! arena blocks (so `vibra_v1_live_size` counts them and a deep recursion
+//! exhausts memory as the host event). A segment is a block header, then
+//! `[previous: u32][end: u32]` (`previous` is the segment below it), then its
+//! frames from [`segment::HEADER`]. A new frame goes after the top frame, which
+//! knows its own size from `slots`, and a frame that does not fit takes a new
+//! segment of at least [`segment::MIN_SIZE`] bytes. Returning from the first
+//! frame of a segment frees the segment. The frame stack is therefore a list of
+//! blocks whose total size is the only bound on the depth of the recursion.
+//!
+//! **Function.** Every language function, and every module-value initializer, is
+//! one WebAssembly function `(frame: i32) -> ()` with the same signature, in
+//! the one function table at the position of its function index. It runs the
+//! activation from the resume point the frame holds until the activation calls
+//! or returns, and then it returns to the dispatcher. Its body is a set of
+//! **basic blocks**, numbered, in a `loop` over a `br_table` on a `pc` local, so
+//! that any block can be entered from the top: a block ends in a jump, a branch
+//! on a `bool`, a call, or a return, and a call ends the Wasm function, because
+//! nothing on the engine's operand stack or in its locals survives a return to
+//! the dispatcher. Every value that lives across a block boundary lives in a
+//! frame slot, which is why every intermediate value does.
+//!
+//! **Call.** A non-tail call evaluates its operands into temporaries of the
+//! caller's frame, stores the number of the block that continues the caller in
+//! the caller's `resume`, and asks the runtime to push a callee frame
+//! (`push_frame(function, slots)`, which links `caller`, makes it the top, and
+//! counts the depth). It moves each operand into the callee's parameter slot
+//! (copying the cell and the class byte, and clearing the temporary's byte), and
+//! returns to the dispatcher. The dispatcher runs `table[top.function](top)`
+//! until no frame is left. The caller's continuation block first stores `ret`
+//! into the result's slot.
+//!
+//! **Return.** A function moves its result's cell into the state's `ret`,
+//! clears the byte of that slot, and leaves the frame: it drops what the frame
+//! still owns, pops it, and frees its segment when it was the segment's first
+//! frame. The caller owns what `ret` holds from the moment it is resumed.
+//!
+//! **Tail call (Step 6).** The callee replaces the current frame: after the
+//! operands are in temporaries, the scan runs over the slots that are not
+//! operands, and the frame is rewritten in place (`function`, `slots`, class
+//! bytes) with the operands moved into its parameter slots; when the callee's
+//! frame is larger than the room left in the segment it is popped and pushed.
+//! `caller` is kept, so the depth does not grow.
+//!
+//! **Module values.** The module-value state is one cells object of two cells
+//! per module value (a flag, then the value), allocated by the entry and held by
+//! the instance until it is dropped. A read tests the flag. When it is clear the
+//! reader pushes the value's initializer as a frame like any callee, and its
+//! continuation moves the returned cell into the table, sets the flag, and keeps
+//! its own count with a `dup`, so the initializer runs once and a later read
+//! only copies the cell. An initializer cycle is rejected before a program
+//! exists, so a flag is never read while its initializer is running.
+//!
+//! **Engine stack.** The dispatcher, one function, the runtime routines, and the
+//! release worklist are the whole engine call chain at any language depth, so
+//! the engine stack use is constant.
+
+/// The frame layout, see "Activations and the dispatcher".
+pub mod frame {
+    /// The bytes before a frame's class bytes.
+    pub const HEADER: u32 = 16;
+    /// `resume`: the block that continues the activation.
+    pub const RESUME: u32 = 0;
+    /// `function`: the function index, which is the position in the table.
+    pub const FUNCTION: u32 = 4;
+    /// `slots`: the number of slots.
+    pub const SLOTS: u32 = 8;
+    /// `caller`: the offset of the frame below, `0` for the first.
+    pub const CALLER: u32 = 12;
+
+    /// The class bytes of `slots` slots, padded to a multiple of 8.
+    #[must_use]
+    pub const fn classes(slots: u32) -> u32 {
+        slots.div_ceil(8) * 8
+    }
+
+    /// The size in bytes of a frame of `slots` slots.
+    #[must_use]
+    pub const fn size(slots: u32) -> u32 {
+        HEADER + classes(slots) + 8 * slots
+    }
+
+    /// The offset of a slot's class byte from the start of the frame.
+    #[must_use]
+    pub const fn class_offset(slot: u32) -> u32 {
+        HEADER + slot
+    }
+
+    /// The offset of a slot's cell from the start of a frame of `slots` slots.
+    #[must_use]
+    pub const fn cell_offset(slots: u32, slot: u32) -> u32 {
+        HEADER + classes(slots) + 8 * slot
+    }
+}
+
+/// The frame segments, see "Activations and the dispatcher".
+pub mod segment {
+    use super::header;
+
+    /// `previous`: the segment below, `0` for the first.
+    pub const PREVIOUS: u32 = header::SIZE;
+    /// `end`: the address just past the segment's block.
+    pub const END: u32 = header::SIZE + 4;
+    /// The offset of a segment's first frame.
+    pub const HEADER: u32 = header::SIZE + 8;
+    /// The least size of a segment's block.
+    pub const MIN_SIZE: u32 = 16 * 1024;
+}
 
 /// The first byte of the arena. Everything below is the instance state and the
 /// free-list heads.
@@ -193,8 +320,10 @@ pub mod state {
     pub const FRAME_LIMIT: u32 = 72;
     /// `frame_depth`.
     pub const FRAME_DEPTH: u32 = 76;
+    /// `ret`.
+    pub const RET: u32 = 80;
     /// The end of the fields.
-    pub const END: u32 = 80;
+    pub const END: u32 = 88;
     /// The free-list heads: one `u32` per size class, indexed by the class.
     pub const FREE_LISTS: u32 = 128;
 }

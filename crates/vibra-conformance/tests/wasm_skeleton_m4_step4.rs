@@ -2,11 +2,10 @@
 //! emitted, validated under the v1 baseline, and run, and emission is
 //! deterministic from the first module (ledger D4.4).
 //!
-//! The empty entry is built from IR constructors, not checked from source: every
-//! checked program now carries the prelude's `true` and `false` module values
-//! (Step 2b), which need the arena of Step 5a, so no source program lowers yet.
-//! A test below pins that fact, so the first step that lowers module values
-//! updates it deliberately.
+//! The empty entry is built from IR constructors, not checked from source, so
+//! that it is the program the Step 4 skeleton lowered. A checked source program
+//! carries the prelude's `true` and `false` module values (Step 2b), which Step
+//! 5b lowers; a test below pins that.
 
 #![allow(
     clippy::expect_used,
@@ -221,30 +220,29 @@ fn emission_is_byte_identical_across_processes() {
 }
 
 #[test]
-fn a_checked_program_carries_the_prelude_values_and_does_not_lower_yet() {
+fn a_checked_program_carries_the_prelude_values_and_lowers_since_step_5b() {
     // `true` and `false` are module values of every checked program (Step 2b),
-    // and a module value needs the arena of Step 5a.
+    // and Step 5b lowers a module value.
     let result = vibra_types::check_source("input.vib", "(defn done () void)\n");
     let program = result.program().expect("an accepted program");
-    let error =
-        vibra_wasm::emit(program).expect_err("module values are not lowered yet");
-    let names = error
-        .forms()
-        .iter()
-        .map(|used| used.form().name())
-        .collect::<Vec<_>>();
-    assert!(names.contains(&"module-value"), "{names:?}");
+    assert_eq!(program.globals().len(), 2, "the prelude's two values");
+    let module = vibra_wasm::emit(program).expect("a checked program lowers");
+    validate(module.bytes()).expect("a v1 module");
 }
 
 #[test]
 fn a_program_the_emitter_cannot_lower_has_no_module() {
-    let result = vibra_types::check_source("input.vib", "(defn answer () u64 7u64)\n");
+    let result = vibra_types::check_source(
+        "input.vib",
+        "(defn answer () i32 ((lambda () i32 7i32)))\n",
+    );
     let error = vibra_wasm::emit(result.program().expect("accepted"))
-        .expect_err("the prelude's module values are not lowered yet");
+        .expect_err("a lambda is not lowered before Step 6");
     let names = error
         .forms()
         .iter()
         .map(|used| used.form().name())
         .collect::<Vec<_>>();
-    assert!(names.contains(&"module-value"), "{names:?}");
+    assert!(names.contains(&"closure"), "{names:?}");
+    assert!(!names.contains(&"module-size"), "{names:?}");
 }
