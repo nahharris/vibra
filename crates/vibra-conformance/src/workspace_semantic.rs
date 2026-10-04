@@ -8,6 +8,7 @@ use crate::corpus::Case;
 use crate::manifest::ConformanceOperation;
 use crate::runner::{
     CaseObservation, ExecutionObservation, HandlerError, ProfileHandler,
+    WasmObservation,
 };
 
 const BOOTSTRAP_PROVENANCE_FAILURE: &str = "bootstrap provenance verification failed";
@@ -75,11 +76,20 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             &snapshot,
             target,
             verification.as_ref(),
-            crate::INSTANCE_MEMORY_BUDGET,
+            crate::runner::interpreter_budget(),
         );
         let accepted =
             result.check().status() == vibra_workspace::semantic::CheckStatus::Accepted;
         let mut host_event = None;
+        // Both backends run the one checked program of the target.
+        let wasm = if accepted {
+            result
+                .check()
+                .program_for_target(target)
+                .map(crate::wasm::observe)
+        } else {
+            None
+        };
         let interpreter = if accepted {
             match result.outcome() {
                 Some(vibra_workspace::semantic::RunOutcome::Program(execution)) => {
@@ -116,6 +126,7 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             diagnostics: result.check().diagnostics().to_vec(),
             interpreter,
             host_event,
+            wasm,
             ..CaseObservation::default()
         })
     }
@@ -181,6 +192,11 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
             interpreter: Some(ExecutionObservation {
                 result: Some(format_test_run(command_result, result.items())),
                 audit_trace: Vec::new(),
+            }),
+            // A test module, with its `vibra_v1_test` export and the test
+            // observations, is not emitted yet.
+            wasm: accepted.then(|| WasmObservation::NotLowered {
+                forms: vec!["test-module".to_owned()],
             }),
             ..CaseObservation::default()
         })

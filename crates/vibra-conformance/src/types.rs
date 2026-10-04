@@ -161,7 +161,7 @@ impl ProfileHandler for InterpreterV1Handler {
         };
         let execution = match vibra_interp::Interpreter::run_with_budget(
             program,
-            crate::INSTANCE_MEMORY_BUDGET,
+            crate::runner::interpreter_budget(),
         ) {
             Ok(execution) => execution,
             // A host event ends the run with no result and no trace, so the
@@ -171,6 +171,7 @@ impl ProfileHandler for InterpreterV1Handler {
                     accepted: checked.accepted(),
                     diagnostics: checked.diagnostics().to_vec(),
                     host_event: host_event_atom(&error),
+                    wasm: Some(crate::wasm::observe(program)),
                     ..CaseObservation::default()
                 });
             }
@@ -183,6 +184,7 @@ impl ProfileHandler for InterpreterV1Handler {
                 result: Some(execution.canonical_result()),
                 audit_trace: execution.audit_trace().to_vec(),
             }),
+            wasm: Some(crate::wasm::observe(program)),
             ..CaseObservation::default()
         })
     }

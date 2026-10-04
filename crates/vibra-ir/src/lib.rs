@@ -28,6 +28,7 @@ use nominal::{
 pub use observed::ObservedValue;
 pub use pattern::{MatchArm, Pattern};
 
+pub mod boundary;
 pub mod external;
 
 /// One of the primitive types admitted by the M2 literal profile.

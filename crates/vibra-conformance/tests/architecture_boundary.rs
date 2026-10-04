@@ -81,6 +81,16 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // Resolution owns its neutral graph input and depends only on language
     // structure; workspace and conformance adapt filesystem snapshots into it.
     ("vibra-resolve", &["vibra-diagnostics", "vibra-syntax"]),
+    // The WebAssembly emitter is the second consumer of checked IR, beside the
+    // interpreter. It reaches no engine, and it does not reach the native-code
+    // crate either: a module names a native only by the import names recorded
+    // in `vibra-ir`.
+    ("vibra-wasm", &["vibra-diagnostics", "vibra-ir"]),
+    // The runner is the only crate that depends on the engine. It reads the
+    // boundary names and codes recorded in `vibra-ir`, and it will supply the
+    // imports of the native-code crate when that crate exists (Step 8c). It
+    // does not depend on the emitter: the harness joins them.
+    ("vibra-wasm-run", &["vibra-ir"]),
     // The harness. Legitimately sits above every node.
     (
         "vibra-conformance",
@@ -90,6 +100,8 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-schema",
             "vibra-resolve",
             "vibra-syntax",
+            "vibra-wasm",
+            "vibra-wasm-run",
             "vibra-workspace",
             "vibra-interp",
             "vibra-ir",
@@ -322,7 +334,101 @@ const SEMANTIC_CRATES: &[&str] = &[
     "vibra-ir",
     "vibra-interp",
     "vibra-fmt",
+    "vibra-wasm",
 ];
+
+/// The one crate that may depend on the WebAssembly engine, and the engine's
+/// package name. Every other crate, the emitter included, reaches a module only
+/// through bytes.
+const ENGINE_CRATE: &str = "vibra-wasm-run";
+const ENGINE: &str = "wasmtime";
+
+/// The crates only the harness may depend on, because they run modules.
+const RUNNER_CRATE: &str = "vibra-wasm-run";
+
+/// Every dependency, of any package, named in any dependency section.
+fn all_dependencies(manifest: &toml::Table) -> BTreeSet<String> {
+    let mut found = BTreeSet::new();
+    for section in DEPENDENCY_SECTIONS {
+        if let Some(table) = manifest.get(*section).and_then(toml::Value::as_table) {
+            found.extend(table.keys().cloned());
+        }
+    }
+    found
+}
+
+#[test]
+fn only_the_runner_depends_on_the_engine() {
+    for (path, manifest) in crate_manifests(&workspace_root()) {
+        let name = manifest
+            .get("package")
+            .and_then(|package| package.get("name"))
+            .and_then(toml::Value::as_str)
+            .expect("a package name");
+        let dependencies = all_dependencies(&manifest);
+        assert_eq!(
+            dependencies.contains(ENGINE),
+            name == ENGINE_CRATE,
+            "{}: `{ENGINE}` is a dependency of `{ENGINE_CRATE}` and of no other crate",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn only_the_harness_depends_on_the_runner() {
+    for (name, edges) in workspace_graph(&workspace_root()) {
+        assert_eq!(
+            edges.contains(RUNNER_CRATE),
+            name == "vibra-conformance",
+            "`{name}`: only `vibra-conformance` depends on `{RUNNER_CRATE}`"
+        );
+    }
+}
+
+#[test]
+fn the_emitter_has_no_engine_and_no_native_code_crate() {
+    let mut checked = false;
+    for (_, manifest) in crate_manifests(&workspace_root()) {
+        let is_emitter = manifest
+            .get("package")
+            .and_then(|package| package.get("name"))
+            .and_then(toml::Value::as_str)
+            == Some("vibra-wasm");
+        if !is_emitter {
+            continue;
+        }
+        checked = true;
+        let section = |name: &str| -> BTreeSet<String> {
+            manifest
+                .get(name)
+                .and_then(toml::Value::as_table)
+                .map(|table| table.keys().cloned().collect())
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            section("dependencies"),
+            BTreeSet::from(["vibra-ir".to_owned(), "wasm-encoder".to_owned()]),
+            "the emitter depends on `vibra-ir` and the encoder only (`vibra-diagnostics` \
+             is permitted but unused)"
+        );
+        assert!(
+            section("dev-dependencies")
+                .is_subset(&BTreeSet::from(["vibra-diagnostics".to_owned()])),
+            "the emitter's tests may use `vibra-diagnostics` and nothing else"
+        );
+        assert!(section("build-dependencies").is_empty());
+    }
+    assert!(checked, "the emitter crate exists");
+}
+
+#[test]
+fn a_dependency_on_the_engine_is_reported() {
+    let manifest = "[package]\nname = \"vibra-other\"\n[dependencies]\nwasmtime.workspace = true\n"
+        .parse::<toml::Table>()
+        .expect("a manifest");
+    assert!(all_dependencies(&manifest).contains(ENGINE));
+}
 
 /// Filesystem entry points a semantic crate must not name.
 const FILESYSTEM_PATTERNS: &[&str] = &["std::fs", "fs::", "File::open", "read_dir("];

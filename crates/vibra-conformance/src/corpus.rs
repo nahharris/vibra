@@ -7,6 +7,9 @@ use std::path::{Component, Path, PathBuf};
 use crate::manifest::{CaseManifest, MANIFEST_FILE_NAME, ManifestError};
 use vibra_syntax::DocumentMode;
 
+/// The name of the parity inventory file, beside the corpus root.
+pub const PARITY_INVENTORY_FILE_NAME: &str = "parity.tsv";
+
 /// One immutable document supplied to a profile handler.
 ///
 /// The path is the neutral source identity used by diagnostics and snapshots;
@@ -254,6 +257,14 @@ impl Corpus {
         &self.cases
     }
 
+    /// Where this corpus's parity inventory is: `parity.tsv` beside the corpus
+    /// root, so that `conformance/cases` has `conformance/parity.tsv`. The
+    /// file need not exist, because a synthetic corpus has no inventory.
+    #[must_use]
+    pub fn parity_inventory_path(&self) -> Option<PathBuf> {
+        Some(self.root.parent()?.join(PARITY_INVENTORY_FILE_NAME))
+    }
+
     /// Number of loaded cases.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -483,13 +494,7 @@ fn validate_declared_files(
     for query in &expectations.queries {
         let _ = resolve_file(directory, &query.snapshot, &manifest.id)?;
     }
-    for execution in [
-        expectations.interpreter.as_ref(),
-        expectations.wasm.as_ref(),
-    ]
-    .into_iter()
-    .flatten()
-    {
+    if let Some(execution) = expectations.interpreter.as_ref() {
         for snapshot in [execution.result.as_ref(), execution.audit_trace.as_ref()]
             .into_iter()
             .flatten()

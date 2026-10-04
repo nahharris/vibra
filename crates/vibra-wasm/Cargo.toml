@@ -1,0 +1,19 @@
+[package]
+name = "vibra-wasm"
+description = "Deterministic WebAssembly emission for checked Vibra IR."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+vibra-ir.workspace = true
+wasm-encoder.workspace = true
+
+[dev-dependencies]
+vibra-diagnostics.workspace = true
+
+[lints]
+workspace = true

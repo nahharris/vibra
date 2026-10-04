@@ -20,6 +20,8 @@ vibra-resolve.workspace = true
 vibra-schema.workspace = true
 vibra-syntax.workspace = true
 vibra-types.workspace = true
+vibra-wasm.workspace = true
+vibra-wasm-run.workspace = true
 vibra-workspace.workspace = true
 
 [[bin]]
