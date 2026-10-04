@@ -25,8 +25,6 @@ pub enum Form {
     Type,
     /// One of the closed verified test assertion functions.
     TestAssertion,
-    /// A function that implements a contract member.
-    ContractImplementation,
     /// A call of a compiler registry operation.
     External,
     /// An omitted labelled argument, resolved to the callee's default.
@@ -62,7 +60,6 @@ impl Form {
             Self::Parameters => "parameters",
             Self::Type => "type",
             Self::TestAssertion => "test-assertion",
-            Self::ContractImplementation => "contract-implementation",
             Self::External => "external",
             Self::Default => "default",
             Self::Function => "function",

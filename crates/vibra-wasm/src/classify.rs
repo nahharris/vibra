@@ -68,11 +68,11 @@ fn function_forms(function: &CheckedFunction, found: &mut Vec<UnloweredForm>) {
     }
     type_forms(&signature.result(), origin.clone(), found);
     if function.test_assertion().is_some() {
-        found.push(UnloweredForm::new(Form::TestAssertion, origin.clone()));
+        found.push(UnloweredForm::new(Form::TestAssertion, origin));
     }
-    if function.implements().is_some() {
-        found.push(UnloweredForm::new(Form::ContractImplementation, origin));
-    }
+    // A function that implements a contract member is an ordinary function
+    // here: what dispatches to it is a contract call, which is reported where
+    // it is made (Step 9).
     walk(function.body(), found);
 }
 

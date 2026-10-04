@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-nested-data"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Aggregates nest through every kind: a wrapper of a wrapper, a record holding an option of another record, a single-component declared tuple, and an anonymous tuple of them."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

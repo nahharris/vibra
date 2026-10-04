@@ -1,0 +1,9 @@
+(deftype box (record text str))
+
+(def third (tuple box i32) (tupleof one second))
+(def second i32 41i32)
+(def one box (box text: "payload"))
+(def unused i32 5i32)
+
+(defn main () (tuple (tuple box i32) box box i32)
+  (tupleof third one one second))
