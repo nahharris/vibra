@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-tail-counter-closure-captured-loop"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A closure that tail-calls its creator's loop through a captured function value, and the loop that tail-calls the closure, reuse one activation for a hundred thousand rounds. The count comes from a counter built only from `if`, a tuple of digits, and a call."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

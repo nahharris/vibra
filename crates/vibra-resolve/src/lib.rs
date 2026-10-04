@@ -22,8 +22,8 @@ use std::path::Path;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 use vibra_syntax::{
     Attribute, Declaration, DeftypeBody, Expression, ExpressionKind,
-    FunctionDeclaration, Literal, Name, Pattern, PatternKind, TypeExpr, TypeMember,
-    parse_source,
+    FunctionDeclaration, LabelledDefault, Literal, Name, Pattern, PatternKind,
+    TypeExpr, TypeMember, parse_source,
 };
 
 /// Package provenance carried by every declaration identity.
@@ -1182,45 +1182,11 @@ impl Resolution {
             }
             let index = self.modules.len();
             self.module_indexes.insert(key, index);
-            let ast = match std::str::from_utf8(&module.bytes) {
-                Ok(source) => {
-                    match parse_source(Path::new(&module.source_id), source) {
-                        Ok(document) => {
-                            self.diagnostics.extend(
-                                document.diagnostics().iter().cloned().map(
-                                    |diagnostic| {
-                                        diagnostic
-                                            .with_source_id(module.source_id.clone())
-                                    },
-                                ),
-                            );
-                            document.ast().cloned()
-                        }
-                        Err(error) => {
-                            self.diagnostics.push(
-                                Diagnostic::new(
-                                    DiagnosticCode::ModuleIoError,
-                                    ByteSpan::empty_at(0),
-                                    error.to_string(),
-                                )
-                                .with_source_id(module.source_id.clone()),
-                            );
-                            None
-                        }
-                    }
-                }
-                Err(error) => {
-                    self.diagnostics.push(
-                        Diagnostic::new(
-                            DiagnosticCode::ModuleIoError,
-                            ByteSpan::empty_at(0),
-                            format!("source module is not UTF-8: {error}"),
-                        )
-                        .with_source_id(module.source_id.clone()),
-                    );
-                    None
-                }
-            };
+            // A verified overlay module parses to the same tree every time, so
+            // it is parsed once per process; a local module always parses.
+            let (parse_diagnostics, ast) =
+                parse_module(&module, package != self.input.package);
+            self.diagnostics.extend(parse_diagnostics);
             self.modules.push(ParsedModule {
                 package,
                 module,
@@ -1315,7 +1281,9 @@ impl Resolution {
         span: ByteSpan,
         source_id: &str,
     ) {
-        if vibra_syntax::is_reserved_value_spelling(name) {
+        if vibra_syntax::is_reserved_value_spelling(name)
+            || vibra_syntax::is_prelude_value_spelling(name)
+        {
             self.diagnostics.push(
                 Diagnostic::new(
                     DiagnosticCode::NameReservedValueSpelling,
@@ -1459,8 +1427,11 @@ impl Resolution {
             } else {
                 names.insert(name.to_owned(), (span, source_id.to_owned()));
             }
+            // Only the embedded standard library declares a vocabulary name.
             if matches!(kind, EntityKind::Value | EntityKind::Function)
-                && vibra_syntax::is_reserved_value_spelling(name)
+                && (vibra_syntax::is_reserved_value_spelling(name)
+                    || (vibra_syntax::is_prelude_value_spelling(name)
+                        && module.package.name() != "vibra-stdlib"))
             {
                 self.diagnostics.push(
                     Diagnostic::new(
@@ -2205,7 +2176,9 @@ impl Resolution {
                 }
                 BodyWork::Function(function) => {
                     let mut scope = Vec::new();
-                    self.bind_parameters(&module, &function, &mut scope, &source_id);
+                    self.bind_parameters(
+                        &module, &from, &function, &mut scope, &source_id,
+                    );
                     self.resolve_sequence(
                         &module,
                         &from,
@@ -2227,20 +2200,173 @@ impl Resolution {
         }
     }
 
+    /// Every named binder a written pattern introduces. A name that resolves to
+    /// a module-level value, bare or dotted, is not a binder: it is a constant
+    /// pattern, and the resolver records the reference for the checker.
+    fn collect_pattern_names(
+        &mut self,
+        module: &ModuleKey,
+        from: &DeclarationId,
+        pattern: &Pattern,
+        scope: &[(String, ByteSpan)],
+        source_id: &str,
+        names: &mut Vec<(String, ByteSpan)>,
+    ) {
+        match pattern.kind() {
+            PatternKind::Binding(name) if !name.is_discard() => {
+                if !self.reference_value_pattern(
+                    module,
+                    from,
+                    name,
+                    pattern.span(),
+                    scope,
+                    source_id,
+                ) {
+                    names.push((name.value().to_owned(), pattern.span()));
+                }
+            }
+            PatternKind::Constructor { head, arguments } => {
+                if arguments.is_empty() {
+                    self.reference_value_pattern(
+                        module,
+                        from,
+                        head,
+                        pattern.span(),
+                        scope,
+                        source_id,
+                    );
+                }
+                for argument in arguments {
+                    self.collect_pattern_names(
+                        module,
+                        from,
+                        argument.pattern(),
+                        scope,
+                        source_id,
+                        names,
+                    );
+                }
+            }
+            PatternKind::Tuple(patterns) | PatternKind::Array(patterns) => {
+                for pattern in patterns {
+                    self.collect_pattern_names(
+                        module, from, pattern, scope, source_id, names,
+                    );
+                }
+            }
+            PatternKind::RecordOf(fields) => {
+                for field in fields {
+                    self.collect_pattern_names(
+                        module,
+                        from,
+                        field.pattern(),
+                        scope,
+                        source_id,
+                        names,
+                    );
+                }
+            }
+            PatternKind::EnumOf(variant) => self.collect_pattern_names(
+                module,
+                from,
+                variant.pattern(),
+                scope,
+                source_id,
+                names,
+            ),
+            PatternKind::As { pattern, .. } => {
+                self.collect_pattern_names(
+                    module, from, pattern, scope, source_id, names,
+                );
+            }
+            PatternKind::Binding(_)
+            | PatternKind::Literal(_)
+            | PatternKind::Atom(_) => {}
+        }
+    }
+
+    /// Records a reference when a pattern name resolves to a module-level
+    /// value, and says whether it did. A name already bound lexically is a
+    /// repeated binder, never a reference.
+    fn reference_value_pattern(
+        &mut self,
+        module: &ModuleKey,
+        from: &DeclarationId,
+        name: &Name,
+        span: ByteSpan,
+        scope: &[(String, ByteSpan)],
+        source_id: &str,
+    ) -> bool {
+        if name.kind() != vibra_syntax::NameKind::Symbol {
+            return false;
+        }
+        let path = name.segments();
+        if path.len() == 1 && scope.iter().any(|(bound, _)| Some(bound) == path.first())
+        {
+            return false;
+        }
+        let (target_module, declaration_path, imported) = self.locate(module, path);
+        let Some(target) = target_module
+            .and_then(|target_module| {
+                self.declaration_indexes
+                    .get(&(target_module, declaration_path))
+            })
+            .and_then(|index| self.declarations.get(*index))
+            .map(|work| work.declaration.clone())
+        else {
+            return false;
+        };
+        if target.id.kind() != EntityKind::Value {
+            return false;
+        }
+        if imported && target.visibility == Visibility::Private {
+            self.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::NamePrivateAccess,
+                    span,
+                    "imported declaration is private",
+                )
+                .with_source_id(source_id)
+                .with_related_source(
+                    target.source_id.clone(),
+                    target.span,
+                    "the private declaration is here",
+                ),
+            );
+        }
+        self.references.push(ResolvedReference {
+            from: from.clone(),
+            written: name.value().to_owned(),
+            target: Some(target.id),
+            source_id: source_id.to_owned(),
+            span,
+        });
+        true
+    }
+
     fn bind_parameters(
         &mut self,
         module: &ModuleKey,
+        from: &DeclarationId,
         function: &FunctionDeclaration,
         scope: &mut Vec<(String, ByteSpan)>,
         source_id: &str,
     ) {
         for parameter in function.parameters() {
             let mut names = Vec::new();
-            collect_pattern_names(parameter.parsed_pattern(), &mut names);
+            self.collect_pattern_names(
+                module,
+                from,
+                parameter.parsed_pattern(),
+                scope,
+                source_id,
+                &mut names,
+            );
             self.bind_names(module, scope, names, source_id);
         }
         self.bind_function_attributes(
             module,
+            from,
             function.attributes().items(),
             scope,
             source_id,
@@ -2250,6 +2376,7 @@ impl Resolution {
     fn bind_function_attributes(
         &mut self,
         module: &ModuleKey,
+        from: &DeclarationId,
         attributes: &[Attribute],
         scope: &mut Vec<(String, ByteSpan)>,
         source_id: &str,
@@ -2258,6 +2385,19 @@ impl Resolution {
             match attribute {
                 Attribute::Labelled(parameters) => {
                     for parameter in parameters {
+                        // A default written as a name denotes a module value:
+                        // no parameter is in scope there.
+                        if let LabelledDefault::Expression { expression, .. } =
+                            parameter.default()
+                        {
+                            self.resolve_expression(
+                                module,
+                                from,
+                                expression,
+                                &[],
+                                source_id,
+                            );
+                        }
                         self.bind_names(
                             module,
                             scope,
@@ -2274,7 +2414,10 @@ impl Resolution {
                         self.bind_names(
                             module,
                             scope,
-                            [(parameter.name().value().to_owned(), parameter.span())],
+                            [(
+                                parameter.name().value().to_owned(),
+                                parameter.name_span(),
+                            )],
                             source_id,
                         );
                     }
@@ -2303,6 +2446,18 @@ impl Resolution {
         for (name, span) in names {
             if name == "-" || name == "@-" || name == "-:" {
                 continue;
+            }
+            // A reserved spelling is rejected at the binder and still binds,
+            // so the rest of its scope resolves without a cascade.
+            if vibra_syntax::is_reserved_binder_spelling(&name) {
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::NameReservedDeclaration,
+                        span,
+                        "a lexical binder uses a keyword, `any`, or a name of the closed import-free vocabulary",
+                    )
+                    .with_source_id(source_id),
+                );
             }
             // One diagnostic per introduction, relating the nearest earlier
             // one: the innermost lexical binding, else the module binding.
@@ -2369,7 +2524,14 @@ impl Resolution {
                             source_id,
                         );
                         let mut names = Vec::new();
-                        collect_pattern_names(binding.pattern(), &mut names);
+                        self.collect_pattern_names(
+                            module,
+                            from,
+                            binding.pattern(),
+                            &local,
+                            source_id,
+                            &mut names,
+                        );
                         self.bind_names(module, &mut local, names, source_id);
                     }
                 }
@@ -2381,7 +2543,9 @@ impl Resolution {
                     self.resolve_expression(module, from, value, &local, source_id);
                     self.resolve_expression(module, from, fallback, &local, source_id);
                     let mut names = Vec::new();
-                    collect_pattern_names(pattern, &mut names);
+                    self.collect_pattern_names(
+                        module, from, pattern, &local, source_id, &mut names,
+                    );
                     self.bind_names(module, &mut local, names, source_id);
                 }
                 _ => self.resolve_expression(module, from, element, &local, source_id),
@@ -2437,11 +2601,19 @@ impl Resolution {
                 let mut nested_scope = scope.to_vec();
                 for parameter in lambda.parameters() {
                     let mut names = Vec::new();
-                    collect_pattern_names(parameter.parsed_pattern(), &mut names);
+                    self.collect_pattern_names(
+                        module,
+                        from,
+                        parameter.parsed_pattern(),
+                        &nested_scope,
+                        source_id,
+                        &mut names,
+                    );
                     self.bind_names(module, &mut nested_scope, names, source_id);
                 }
                 self.bind_function_attributes(
                     module,
+                    from,
                     lambda.attributes().items(),
                     &mut nested_scope,
                     source_id,
@@ -2477,7 +2649,14 @@ impl Resolution {
                 for arm in arms {
                     let mut nested_scope = scope.to_vec();
                     let mut names = Vec::new();
-                    collect_pattern_names(arm.pattern(), &mut names);
+                    self.collect_pattern_names(
+                        module,
+                        from,
+                        arm.pattern(),
+                        &nested_scope,
+                        source_id,
+                        &mut names,
+                    );
                     self.bind_names(module, &mut nested_scope, names, source_id);
                     self.resolve_expression(
                         module,
@@ -2590,37 +2769,7 @@ impl Resolution {
             });
             return;
         }
-        let (target_module, declaration_path, imported) =
-            if let Some(first) = path.first() {
-                let import = self
-                    .imports
-                    .iter()
-                    .find(|(owner, import)| owner == module && import.alias == *first);
-                if let Some((_, import)) = import {
-                    match &import.declaration {
-                        // A declaration alias stands for that declaration,
-                        // whose visibility was checked at the import. A
-                        // member reached through it is checked here, as it
-                        // is through a module alias.
-                        Some(declaration) => (
-                            import.module.clone(),
-                            std::iter::once(declaration.clone())
-                                .chain(path.iter().skip(1).cloned())
-                                .collect::<Vec<_>>(),
-                            path.len() > 1,
-                        ),
-                        None => (
-                            import.module.clone(),
-                            path.iter().skip(1).cloned().collect::<Vec<_>>(),
-                            true,
-                        ),
-                    }
-                } else {
-                    (Some(module.clone()), path.to_vec(), false)
-                }
-            } else {
-                (Some(module.clone()), Vec::new(), false)
-            };
+        let (target_module, declaration_path, imported) = self.locate(module, path);
         if imported
             && declaration_path.is_empty()
             && let Some(target_module) = target_module.as_ref()
@@ -2694,7 +2843,11 @@ impl Resolution {
                     && target.segments == ["assert"]
                     && imported
             });
-            let code = if unavailable_assertion {
+            // The vocabulary's values live in the verified standard library.
+            let unavailable_vocabulary = matches!(path, [only]
+                if vibra_syntax::is_prelude_value_spelling(only))
+                && self.input.overlay.is_none();
+            let code = if unavailable_assertion || unavailable_vocabulary {
                 DiagnosticCode::ToolUnavailable
             } else {
                 DiagnosticCode::NameUnknownSymbol
@@ -2705,6 +2858,8 @@ impl Resolution {
                     span,
                     if unavailable_assertion {
                         "assertion members outside the closed M2 table are unavailable"
+                    } else if unavailable_vocabulary {
+                        "the vocabulary's values require the verified standard library"
                     } else {
                         "symbol does not resolve to a declaration"
                     },
@@ -2754,6 +2909,64 @@ impl Resolution {
         });
     }
 
+    /// The module, declaration path inside it, and whether an import was
+    /// crossed, for a path written in `module`.
+    ///
+    /// The path's first segment is an import alias, else a declaration of the
+    /// module itself, else a value of the closed import-free vocabulary, which
+    /// every module sees and which `@std.bool` declares.
+    fn locate(
+        &self,
+        module: &ModuleKey,
+        path: &[String],
+    ) -> (Option<ModuleKey>, Vec<String>, bool) {
+        let Some(first) = path.first() else {
+            return (Some(module.clone()), Vec::new(), false);
+        };
+        let import = self
+            .imports
+            .iter()
+            .find(|(owner, import)| owner == module && import.alias == *first);
+        if let Some((_, import)) = import {
+            return match &import.declaration {
+                // A declaration alias stands for that declaration, whose
+                // visibility was checked at the import. A member reached
+                // through it is checked here, as it is through a module
+                // alias.
+                Some(declaration) => (
+                    import.module.clone(),
+                    std::iter::once(declaration.clone())
+                        .chain(path.iter().skip(1).cloned())
+                        .collect::<Vec<_>>(),
+                    path.len() > 1,
+                ),
+                None => (
+                    import.module.clone(),
+                    path.iter().skip(1).cloned().collect::<Vec<_>>(),
+                    true,
+                ),
+            };
+        }
+        if let [name] = path
+            && vibra_syntax::is_prelude_value_spelling(name)
+            && !self
+                .declaration_indexes
+                .contains_key(&(module.clone(), path.to_vec()))
+            && let Some(overlay) = self.input.overlay.as_ref()
+        {
+            return (
+                Some(ModuleKey {
+                    package: overlay.package.clone(),
+                    unit: "std".to_owned(),
+                    segments: vec!["bool".to_owned()],
+                }),
+                path.to_vec(),
+                false,
+            );
+        }
+        (Some(module.clone()), path.to_vec(), false)
+    }
+
     fn resolve_module_path(
         &self,
         package: &PackageId,
@@ -2787,32 +3000,6 @@ impl Resolution {
             unit: work.module.unit.clone(),
             segments: work.module.segments.clone(),
         })
-    }
-}
-
-fn collect_pattern_names(pattern: &Pattern, names: &mut Vec<(String, ByteSpan)>) {
-    match pattern.kind() {
-        PatternKind::Binding(name) if !name.is_discard() => {
-            names.push((name.value().to_owned(), pattern.span()));
-        }
-        PatternKind::Constructor { arguments, .. } => {
-            for argument in arguments {
-                collect_pattern_names(argument.pattern(), names);
-            }
-        }
-        PatternKind::Tuple(patterns) | PatternKind::Array(patterns) => {
-            for pattern in patterns {
-                collect_pattern_names(pattern, names);
-            }
-        }
-        PatternKind::RecordOf(fields) => {
-            for field in fields {
-                collect_pattern_names(field.pattern(), names);
-            }
-        }
-        PatternKind::EnumOf(variant) => collect_pattern_names(variant.pattern(), names),
-        PatternKind::As { pattern, .. } => collect_pattern_names(pattern, names),
-        PatternKind::Binding(_) | PatternKind::Literal(_) | PatternKind::Atom(_) => {}
     }
 }
 
@@ -2864,6 +3051,65 @@ impl SpanOr for Name {
         let _ = self;
         fallback
     }
+}
+
+/// Parses one source module into its diagnostics and tree. With `memoize`, the
+/// result is kept for the life of the process, keyed by identity and bytes.
+fn parse_module(
+    module: &SourceModule,
+    memoize: bool,
+) -> (Vec<Diagnostic>, Option<vibra_syntax::SourceAst>) {
+    type Parsed = (Vec<Diagnostic>, Option<vibra_syntax::SourceAst>);
+    type Memo = std::sync::Mutex<std::collections::HashMap<(String, Vec<u8>), Parsed>>;
+    static MEMO: std::sync::OnceLock<Memo> = std::sync::OnceLock::new();
+    let key = (module.source_id.clone(), module.bytes.clone());
+    if memoize
+        && let Ok(memo) = MEMO.get_or_init(Default::default).lock()
+        && let Some(parsed) = memo.get(&key)
+    {
+        return parsed.clone();
+    }
+    let parsed: Parsed = match std::str::from_utf8(&module.bytes) {
+        Ok(source) => match parse_source(Path::new(&module.source_id), source) {
+            Ok(document) => (
+                document
+                    .diagnostics()
+                    .iter()
+                    .cloned()
+                    .map(|diagnostic| {
+                        diagnostic.with_source_id(module.source_id.clone())
+                    })
+                    .collect(),
+                document.ast().cloned(),
+            ),
+            Err(error) => (
+                vec![
+                    Diagnostic::new(
+                        DiagnosticCode::ModuleIoError,
+                        ByteSpan::empty_at(0),
+                        error.to_string(),
+                    )
+                    .with_source_id(module.source_id.clone()),
+                ],
+                None,
+            ),
+        },
+        Err(error) => (
+            vec![
+                Diagnostic::new(
+                    DiagnosticCode::ModuleIoError,
+                    ByteSpan::empty_at(0),
+                    format!("source module is not UTF-8: {error}"),
+                )
+                .with_source_id(module.source_id.clone()),
+            ],
+            None,
+        ),
+    };
+    if memoize && let Ok(mut memo) = MEMO.get_or_init(Default::default).lock() {
+        memo.insert(key, parsed.clone());
+    }
+    parsed
 }
 
 /// The identity of a builtin type's static method, declared by the embedded

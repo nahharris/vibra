@@ -1,0 +1,53 @@
+id = "V1-TYPE-INTERFACE-contract-call-rejections"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "Operands of a contract member call bind by the member's signature: an unknown or repeated label, a mistyped labelled operand, a missing receiver, an odd dict tail, and a dict tail key of the wrong type are @type.argument-mismatch, and two implementations that both take the operands are @type.ambiguous-implementation. A valid labelled call, a valid and an empty dict tail, and a call that names the interface argument still check around them."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [41, 86]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [132, 183]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [265, 269]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [317, 340]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [483, 525]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [610, 614]
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-implementation"
+level = "@error"
+source = "input.vib"
+span = [855, 892]

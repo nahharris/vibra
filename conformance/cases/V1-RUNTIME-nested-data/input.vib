@@ -1,0 +1,11 @@
+(deftype celsius f64)
+(deftype reading celsius)
+(deftype leaf (record value i32))
+(deftype node (record value i32 next (option leaf)))
+(deftype solo (tuple i32))
+
+(defn main () (tuple reading (tuple node node) solo)
+  (tupleof
+    (reading (celsius 21.5f64))
+    (tupleof (node value: 1i32 next: (option.some (leaf value: 2i32))) (node value: 3i32 next: (option.none)))
+    (solo 7i32)))

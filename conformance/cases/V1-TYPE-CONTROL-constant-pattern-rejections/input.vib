@@ -1,0 +1,15 @@
+(defn one () i32 1i32)
+(def computed i32 (one))
+(def ratio f64 1.5f64)
+
+(defn call-site (n i32) str
+  (match n computed "computed" - "other"))
+
+(defn function-site (n i32) str
+  (match n one "one"))
+
+(defn float-site (x f64) str
+  (match x ratio "ratio" - "other"))
+
+(defn nested-site (first i32 pair (tuple i32 i32)) i32
+  (match pair (tupleof first -) first))

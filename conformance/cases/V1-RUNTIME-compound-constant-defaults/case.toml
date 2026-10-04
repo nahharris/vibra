@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-compound-constant-defaults"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A labelled default is a constant expression in any form and of any type: an inline constructor `(bool.true)`, a record, an enum variant with a payload, an anonymous tuple, and a constant record. A contract that writes its default as a record construction and an implementation that writes a constant of the same value keep one default."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

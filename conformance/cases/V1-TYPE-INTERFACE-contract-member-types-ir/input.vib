@@ -1,0 +1,12 @@
+(defn answer () (array str)
+  (mapper.map-to types: (str) (box n: 1i32) (lambda (b box) str "x")))
+
+(defint mapper
+  (defn map-to (value self f (fn (self) u)) (array u)
+    where: (u any)))
+
+(deftype box (record n i32)
+  (impl mapper
+    (defn map-to (value self f (fn (self) u)) (array u)
+      where: (u any)
+      (array.of (f value)))))

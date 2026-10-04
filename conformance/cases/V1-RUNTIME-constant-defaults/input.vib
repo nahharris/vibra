@@ -1,0 +1,36 @@
+(defn main () (tuple bool bool i32 i32 bool bool)
+  (tupleof
+    (by-flag)
+    (by-flag flag: false)
+    (limited)
+    (chained)
+    (switch.read (flip on: true))
+    (switch.read (flip on: true) strict: false)))
+
+(def limit i32 10i32)
+(def same-limit i32 limit)
+(def yes bool true)
+
+(defn by-flag () bool
+  labelled: (flag bool true)
+  flag)
+
+(defn limited () i32
+  labelled: (cap i32 limit)
+  cap)
+
+(defn chained () i32
+  labelled: (cap i32 same-limit)
+  cap)
+
+; The contract writes its default as `true` and the implementation as `yes`,
+; a constant of the same value, which is the same default.
+(defint switch
+  (defn read (value self) bool
+    labelled: (strict bool true)))
+
+(deftype flip (record on bool)
+  (impl switch
+    (defn read (value self) bool
+      labelled: (strict bool yes)
+      strict)))

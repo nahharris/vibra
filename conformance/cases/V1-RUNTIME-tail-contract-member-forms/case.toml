@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-tail-contract-member-forms"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A call in tail position reuses the activation through a contract member with its own generic parameter, one with labelled parameters, one with a dict variadic tail, and one named as a function value in a module value: each runs ten thousand calls, beyond what non-tail activations could reach."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

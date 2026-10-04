@@ -14,10 +14,12 @@ use std::sync::Arc;
 
 use vibra_diagnostics::ByteSpan;
 
+mod constant;
 mod nominal;
 mod observed;
 mod pattern;
 
+pub use constant::Constant;
 pub use nominal::{TypeBody, TypeDefinition, TypeId, canonical_members};
 use nominal::{
     type_table, validate_declared_expr, validate_declared_signature,
@@ -26,6 +28,7 @@ use nominal::{
 pub use observed::ObservedValue;
 pub use pattern::{MatchArm, Pattern};
 
+pub mod boundary;
 pub mod external;
 
 /// One of the primitive types admitted by the M2 literal profile.
@@ -422,7 +425,7 @@ impl fmt::Display for Type {
 pub struct LabelledParameter {
     name: String,
     value_type: Type,
-    default: Option<Value>,
+    default: Option<Constant>,
 }
 
 impl LabelledParameter {
@@ -432,7 +435,7 @@ impl LabelledParameter {
     pub fn new(
         name: impl Into<String>,
         value_type: Type,
-        default: Option<Value>,
+        default: Option<Constant>,
     ) -> Self {
         Self {
             name: name.into(),
@@ -455,7 +458,7 @@ impl LabelledParameter {
 
     /// The declaration default, when this is a callable declaration value.
     #[must_use]
-    pub const fn default(&self) -> Option<&Value> {
+    pub const fn default(&self) -> Option<&Constant> {
         self.default.as_ref()
     }
 }
@@ -1180,6 +1183,12 @@ pub enum CallTarget {
         /// The interface's type arguments at this call, for a generic
         /// interface: one receiver may implement it at several.
         arguments: Vec<Type>,
+        /// The member's own type arguments at this call, one for each generic
+        /// parameter of its `where:` clause in order, or none when the member
+        /// is not generic. They are fixed by inference, the expected type, or
+        /// a written `types:` list, and may name the enclosing activation's
+        /// own generic parameters.
+        member_types: Vec<Type>,
         /// For a member selected by its destination, the type that selects
         /// the implementation in place of the operand at `receiver`: a
         /// generic parameter bounded by the interface, instantiated at run
@@ -2649,6 +2658,11 @@ pub struct Implements {
     /// same generic parameters as `receiver`. A default member names the
     /// interface's own parameters.
     pub arguments: Vec<Type>,
+    /// The generic parameter this function declares for each of the contract
+    /// member's own generic parameters, in the contract's `where:` order, or
+    /// `None` where the function declares none that matches. A
+    /// [`CallTarget::Contract`] binds each to the call's `member_types`.
+    pub member_generics: Vec<Option<String>>,
 }
 
 impl CheckedFunction {
@@ -3596,10 +3610,35 @@ fn validate_program_expr(
             if let CallTarget::Direct(function) = target {
                 targets.insert(*function);
             } else if let CallTarget::Contract {
-                interface, member, ..
+                interface,
+                member,
+                member_types,
+                ..
             } = target
             {
-                targets.extend(contract_targets(functions, interface, member));
+                let selected = contract_targets(functions, interface, member);
+                // Every implementation of a member declares one slot for each
+                // of the member's generic parameters, which the call fills.
+                for function in
+                    selected.iter().filter_map(|index| functions.get(*index))
+                {
+                    let declared = function
+                        .implements()
+                        .map(|implements| implements.member_generics.len());
+                    if declared.is_some_and(|declared| declared != member_types.len())
+                        && function.implements().is_some_and(|implements| {
+                            implements.interface == *interface
+                                && implements.member == *member
+                        })
+                    {
+                        return Err(IrError::InvalidExpression(format!(
+                            "contract call of {member} passes {} member type arguments, but an implementation declares {}",
+                            member_types.len(),
+                            declared.unwrap_or_default()
+                        )));
+                    }
+                }
+                targets.extend(selected);
             } else if let Some(callee_expression) = callee_expression {
                 let summary = possible_function_targets(
                     callee_expression,
@@ -4938,14 +4977,14 @@ fn validate_signature_shape(signature: &FunctionSignature) -> Result<(), String>
         // An atom default has its own singleton type, which is one atom of
         // `atom`.
         if let Some(default) = parameter.default()
-            && !default.ty().same_shape(&parameter.value_type())
-            && !(matches!(default, Value::Atom(_))
+            && !default.value_type().same_shape(&parameter.value_type())
+            && !(matches!(default, Constant::Primitive(Value::Atom(_)))
                 && parameter.value_type() == Type::Atom)
         {
             return Err(format!(
                 "default for labelled parameter `{}` has type {}, expected {}",
                 parameter.name(),
-                default.ty(),
+                default.value_type(),
                 parameter.value_type()
             ));
         }
@@ -5403,14 +5442,28 @@ fn canonical_expr(expression: &Expr) -> String {
                     interface,
                     member,
                     receiver,
+                    member_types,
                     closed,
                     ..
                 } => format!(
-                    "(record kind: @call contract: @{} member: @{member} receiver: {receiver}u64{}{} result: {} arguments: {})",
+                    "(record kind: @call contract: @{} member: @{member} receiver: {receiver}u64{}{}{} result: {} arguments: {})",
                     interface.path(),
                     closed
                         .map(|closed| format!(" closed: @{}", closed.symbol()))
                         .unwrap_or_default(),
+                    if member_types.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            " types: {}",
+                            canonical_array(
+                                &member_types
+                                    .iter()
+                                    .map(canonical_type)
+                                    .collect::<Vec<_>>()
+                            )
+                        )
+                    },
                     tail_field,
                     canonical_type(result),
                     canonical_array(&values)
@@ -6169,7 +6222,7 @@ mod tests {
             vec![super::LabelledParameter::new(
                 "value",
                 Type::I32,
-                Some(Value::I32(7)),
+                Some(crate::Constant::Primitive(Value::I32(7))),
             )],
             Type::I32,
         );
@@ -6295,7 +6348,7 @@ mod tests {
             vec![super::LabelledParameter::new(
                 "value",
                 Type::I32,
-                Some(Value::Str("wrong".to_owned())),
+                Some(crate::Constant::Primitive(Value::Str("wrong".to_owned()))),
             )],
             Type::I32,
         );

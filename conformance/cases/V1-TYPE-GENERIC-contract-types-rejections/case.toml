@@ -1,0 +1,59 @@
+id = "V1-TYPE-GENERIC-contract-types-rejections"
+rule = "V1-TYPE-GENERIC"
+profile = "static-v1"
+operation = "type-check"
+description = "On a contract member call, types: is defined by the member the call addresses, the interface's parameters and then the member's own. A list of the wrong length, one for a member that declares no generic parameter, one that contradicts an operand or the written result type, and one that names interface arguments the receiver does not implement are @type.type-argument-mismatch. An argument that misses the member's bound is @type.unsatisfied-bound, a generic nothing fixes is @type.ambiguous-inference, and a valid call written after each of them still checks."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [51, 67]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [183, 195]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [273, 285]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [420, 424]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [506, 522]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [626, 644]
+
+[[expect.diagnostics]]
+code = "@type.unsatisfied-bound"
+level = "@error"
+source = "input.vib"
+span = [698, 740]
+
+[[expect.diagnostics]]
+code = "@type.ambiguous-inference"
+level = "@error"
+source = "input.vib"
+span = [772, 801]

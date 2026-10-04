@@ -22,23 +22,32 @@
 //! confined source-graph observations, and M2 Step 4 adds the filesystem-free
 //! resolver observation and its `@resolved.v1` artifact. Later language
 //! backends remain unavailable until their milestones land. M2 Step 11 adds
-//! the tooling-profile snapshot-backed formatter observation.
+//! the tooling-profile snapshot-backed formatter observation. M4 Step 4 adds
+//! the differential harness: each accepted executable case also runs in the
+//! WebAssembly backend when it lowers, against the case's one expectation,
+//! and the checked-in parity inventory records which cases do.
 
 mod corpus;
 mod format;
 mod graph;
 mod manifest;
+mod parity;
 mod profile;
 mod project;
 mod reader;
 mod resolve;
 mod runner;
+mod standard;
 mod types;
+mod wasm;
 mod workspace_index;
 mod workspace_query;
 mod workspace_semantic;
 
-pub use corpus::{Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError};
+pub use corpus::{
+    Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError,
+    PARITY_INVENTORY_FILE_NAME,
+};
 pub use format::ToolingV1FormatHandler;
 pub use graph::StaticV1SourceGraphHandler;
 pub use manifest::{
@@ -46,16 +55,23 @@ pub use manifest::{
     ExpectedDiagnostic, ExpectedExecution, ExpectedFix, ExpectedQuery,
     ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError, NORMATIVE_SECTION_IDS,
 };
+pub use parity::{
+    Disposition, Findings, MissingRow, OWNING_STEPS, Observed, ParityError,
+    ParityInventory,
+};
 pub use profile::{ConformanceProfile, UnknownProfile};
 pub use project::StaticV1ProjectHandler;
 pub use reader::ReaderV1Handler;
 pub use resolve::StaticV1ResolveHandler;
 pub use runner::{
-    CaseObservation, CaseReport, CaseStatus, ConformanceRunner, DispatchResult,
-    ExecutionObservation, HandlerError, ProfileDispatcher, ProfileHandler,
-    QueryObservation, RunReport,
+    BackendStatuses, CaseObservation, CaseReport, CaseStatus, ConformanceRunner,
+    DispatchResult, ExecutionObservation, HandlerError, INSTANCE_MEMORY_LIMIT_BYTES,
+    InterpreterCounts, ProfileDispatcher, ProfileHandler, QueryObservation, RunReport,
+    WasmCounts, WasmObservation, WasmStatus,
 };
+pub use standard::standard_dispatcher;
 pub use types::{InterpreterV1Handler, StaticV1TypeHandler};
+pub use wasm::observe as observe_wasm;
 pub use workspace_index::ToolingV1IndexHandler;
 pub use workspace_query::ToolingV1QueryHandler;
 pub use workspace_semantic::{

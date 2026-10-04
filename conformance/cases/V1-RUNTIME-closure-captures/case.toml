@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-closure-captures"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A closure owns what it captured: a closure with no capture, one that captures a value, one that captures a closure across two lambdas, and one returned from the function that made it, which captures a closure of its own."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

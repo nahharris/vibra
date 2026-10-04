@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-constant-patterns"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A name that resolves to a constant module value matches exactly that value: an integer, a constant defined by another constant, a declared enum value, and a tuple, and true and false, which need no import, match bool. `if` reads the constants as ordinary module values."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

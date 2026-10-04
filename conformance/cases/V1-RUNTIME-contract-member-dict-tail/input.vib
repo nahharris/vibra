@@ -1,0 +1,22 @@
+(defn main () (tuple (dict str i32) (dict str i32) (dict str i32) (dict str i32))
+  (tupleof
+    (collector.collect (gauge base: 1i32) "b" 2i32 "a" 1i32)
+    (collector.collect (gauge base: 1i32))
+    (via-value (as collector (gauge base: 1i32)))
+    (collector.collect (gauge base: 1i32) "k" 1i32 "k" 2i32)))
+
+; A dict variadic tail on a contract member: entries in written order are
+; one dict in canonical key order, the tail may be empty, and a repeated key
+; keeps its last value.
+(defint collector
+  (defn collect (value self) (dict str i32)
+    variadic: (entries (dict str i32))))
+
+(deftype gauge (record base i32)
+  (impl collector
+    (defn collect (value self) (dict str i32)
+      variadic: (entries (dict str i32))
+      entries)))
+
+(defn via-value (value collector) (dict str i32)
+  (collector.collect value "z" 26i32))

@@ -1,0 +1,80 @@
+(defn main () (tuple (array str) (array i32) (array u64) str str (tuple str bool) (tuple i64 bool) crate)
+  (tupleof
+    (mapper.map-to (box n: 3i32) (lambda (b box) str "boxed"))
+    (mapper.map-to types: (i32) (box n: 4i32) (lambda (b box) i32 9i32))
+    (mapper.map-to (pair left: 1i32 right: 2i32) (lambda (p (pair i32)) u64 5u64))
+    (probing.probe types: (red) (holder 0i32))
+    (probing.probe types: (blue) (holder 0i32))
+    (as (tuple str bool) (tagged.tag-with (crate n: 1i32) true))
+    (tagged.tag-with types: (i64 bool) (crate n: 1i32) false)
+    (as crate (builder.build "seed"))))
+
+; An abstract member with its own generic parameter, implemented by an owner
+; with no generics and by one with a generic of its own.
+(defint mapper
+  (defn map-to (value self f (fn (self) u)) (array u)
+    where: (u any)))
+
+(deftype box (record n i32)
+  (impl mapper
+    (defn map-to (value self f (fn (self) u)) (array u)
+      where: (u any)
+      (array.of (f value) (f value)))))
+
+(deftype pair (record left t right t)
+  where: (t any)
+  (impl mapper
+    (defn map-to (value self f (fn (self) u)) (array u)
+      where: (u any)
+      (array.of (f value)))))
+
+; `u` is in no signature slot, so only the written list fixes it, and the
+; implementation dispatches on the type it names.
+(defint maker
+  (defn make () self)
+  (defn tag (value self) str))
+
+(deftype red i32
+  (impl maker
+    (defn make () self (red 1i32))
+    (defn tag (value self) str "red")))
+
+(deftype blue i32
+  (impl maker
+    (defn make () self (blue 2i32))
+    (defn tag (value self) str "blue")))
+
+(defint probing
+  (defn probe (value self) str
+    where: (u maker)))
+
+(deftype holder i32
+  (impl probing
+    (defn probe (value self) str
+      where: (u maker)
+      (maker.tag (as u (maker.make))))))
+
+; A generic interface: `types:` names the interface's parameter, then the
+; member's own, and a member selected by its destination takes its own too.
+(defint tagged
+  where: (t any)
+  (defn tag-with (value self other u) (tuple t u)
+    where: (u any)))
+
+(defint builder
+  (defn build (seed u) self
+    where: (u any)))
+
+(deftype crate (record n i32)
+  (impl (tagged str)
+    (defn tag-with (value self other u) (tuple str u)
+      where: (u any)
+      (tupleof "s" other)))
+  (impl (tagged i64)
+    (defn tag-with (value self other u) (tuple i64 u)
+      where: (u any)
+      (tupleof 7i64 other)))
+  (impl builder
+    (defn build (seed u) self
+      where: (u any)
+      (crate n: 9i32))))

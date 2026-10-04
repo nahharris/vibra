@@ -146,6 +146,16 @@ impl ConformanceOperation {
             Self::WorkspaceTest => "workspace-test",
         }
     }
+
+    /// Whether this operation executes a program, which is the operation half
+    /// of an **executable case** (`CaseManifest::is_executable` adds the other).
+    #[must_use]
+    pub const fn executes_programs(self) -> bool {
+        matches!(
+            self,
+            Self::Interpret | Self::WorkspaceRun | Self::WorkspaceTest
+        )
+    }
 }
 
 impl fmt::Display for ConformanceOperation {
@@ -241,8 +251,10 @@ pub struct CaseExpectations {
     pub queries: Vec<ExpectedQuery>,
     /// Expected reference-interpreter output.
     pub interpreter: Option<ExpectedExecution>,
-    /// Expected Wasm output.
-    pub wasm: Option<ExpectedExecution>,
+    /// The host event an `interpret` or `workspace-run` case ends in, which
+    /// replaces the result and audit-trace snapshots because such a run has
+    /// neither.
+    pub host_event: Option<String>,
     /// Expected deterministic artifact hashes, when the case covers an
     /// artifact-producing backend.
     pub artifact_hashes: Option<Vec<String>>,
@@ -268,6 +280,17 @@ pub struct CaseManifest {
 }
 
 impl CaseManifest {
+    /// Whether this is an **executable case** of
+    /// `docs/spec/07-diagnostics-and-conformance.md`, "Differential
+    /// execution": its operation executes a program and its expectation is
+    /// accepted, because a rejected program reaches no backend. Both backends
+    /// run such a case against its one expectation, and only such a case has a
+    /// parity row.
+    #[must_use]
+    pub fn is_executable(&self) -> bool {
+        self.operation.executes_programs() && self.expectations.accepted
+    }
+
     /// Decodes and validates a TOML manifest.
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(text: &str) -> Result<Self, ManifestError> {
@@ -353,6 +376,16 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
         let operation = decode_operation(raw.operation.as_deref(), profile, &inputs)?;
 
         let expectations = decode_expectations(raw.expect)?;
+        if expectations.host_event.is_some()
+            && !matches!(
+                operation,
+                ConformanceOperation::Interpret | ConformanceOperation::WorkspaceRun
+            )
+        {
+            return Err(ManifestError::Invalid(format!(
+                "host_event is valid only on interpret and workspace-run cases, not {operation}"
+            )));
+        }
         if operation == ConformanceOperation::Index && expectations.index.is_none() {
             return Err(ManifestError::Invalid(
                 "index cases must declare the expected index document".to_owned(),
@@ -369,7 +402,9 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
                 "format cases must declare a formatted snapshot".to_owned(),
             ));
         }
-        if operation == ConformanceOperation::WorkspaceRun {
+        if operation == ConformanceOperation::WorkspaceRun
+            && expectations.host_event.is_none()
+        {
             if expectations.accepted
                 && expectations.interpreter.as_ref().is_none_or(|execution| {
                     execution.result.is_none() || execution.audit_trace.is_none()
@@ -748,6 +783,11 @@ pub(crate) fn section_for(value: &str) -> Option<&str> {
         .max_by_key(|section| section.len())
 }
 
+/// The closed host events a case may end in. A host event is an unlocated
+/// error diagnostic that is never a trap (`docs/spec/06-runtime.md`,
+/// "Activations and memory"); memory exhaustion is the only one.
+const HOST_EVENTS: [&str; 1] = ["@runtime.memory-exhausted"];
+
 fn decode_expectations(
     raw: RawExpectations,
 ) -> Result<CaseExpectations, ManifestError> {
@@ -793,7 +833,26 @@ fn decode_expectations(
         ));
     }
     let interpreter = raw.interpreter.map(decode_execution).transpose()?;
-    let wasm = raw.wasm.map(decode_execution).transpose()?;
+    let host_event = raw.host_event;
+    if let Some(event) = &host_event {
+        if !HOST_EVENTS.contains(&event.as_str()) {
+            return Err(ManifestError::Invalid(format!(
+                "host_event `{event}` is not a registered host event; expected one of {HOST_EVENTS:?}"
+            )));
+        }
+        if interpreter.is_some() {
+            return Err(ManifestError::Invalid(
+                "host_event replaces the result and audit-trace snapshots; a case cannot declare both"
+                    .to_owned(),
+            ));
+        }
+        if !accepted {
+            return Err(ManifestError::Invalid(
+                "host_event requires an accepted case: a program the checker rejects never runs"
+                    .to_owned(),
+            ));
+        }
+    }
     let artifact_hashes = raw.artifact.map(|artifact| artifact.hashes);
 
     Ok(CaseExpectations {
@@ -815,7 +874,7 @@ fn decode_expectations(
             })
             .collect(),
         interpreter,
-        wasm,
+        host_event,
         artifact_hashes,
     })
 }
@@ -974,7 +1033,7 @@ pub(crate) struct RawExpectations {
     #[serde(default)]
     pub(crate) interpreter: Option<RawExecution>,
     #[serde(default)]
-    pub(crate) wasm: Option<RawExecution>,
+    pub(crate) host_event: Option<String>,
     #[serde(default)]
     pub(crate) artifact: Option<RawArtifact>,
 }

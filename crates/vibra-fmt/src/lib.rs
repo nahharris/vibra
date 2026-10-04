@@ -35,10 +35,10 @@ use vibra_syntax::{
     Application, ApplicationBinding, Attribute, BindingError, BindingFacts,
     CallArgument, CstNode, Declaration, DeftypeBody, Document, DocumentMode,
     DocumentModeError, Expression, ExpressionKind, FunctionDeclaration, FunctionType,
-    ImplDeclaration, LambdaExpression, Literal, LiteralClassification, Parameter,
-    Pattern, PatternArgument, PatternKind, SourceAst, SyntaxKind, TypeExpr, TypeField,
-    TypeMember, TypeSlot, VariadicType, canonical_character_spelling, canonical_data,
-    classify, parse_document,
+    ImplDeclaration, LabelledDefault, LambdaExpression, Literal, LiteralClassification,
+    Parameter, Pattern, PatternArgument, PatternKind, SourceAst, SyntaxKind, TypeExpr,
+    TypeField, TypeMember, TypeSlot, VariadicType, canonical_character_spelling,
+    canonical_data, classify, parse_document,
 };
 
 /// An error selecting or formatting a document.
@@ -848,7 +848,17 @@ fn render_attributes(attributes: &[Attribute], output: &mut String) {
                     output.push(' ');
                     render_type(parameter.value_type(), output);
                     output.push(' ');
-                    output.push_str(&format_leaf(parameter.default().raw()));
+                    match parameter.default() {
+                        LabelledDefault::Expression { expression, .. } => {
+                            // A default has no application binding to reorder by.
+                            render_expression(
+                                expression,
+                                output,
+                                &mut RenderContext::new(&[]),
+                            );
+                        }
+                        other => output.push_str(&format_leaf(other.raw())),
+                    }
                 }
                 output.push(')');
             }

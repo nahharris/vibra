@@ -8,6 +8,7 @@ use crate::corpus::Case;
 use crate::manifest::ConformanceOperation;
 use crate::runner::{
     CaseObservation, ExecutionObservation, HandlerError, ProfileHandler,
+    WasmObservation,
 };
 
 const BOOTSTRAP_PROVENANCE_FAILURE: &str = "bootstrap provenance verification failed";
@@ -32,7 +33,7 @@ impl ProfileHandler for StaticV1WorkspaceCheckHandler {
                 });
             }
         };
-        let verification = verified_bootstrap_if_used(&snapshot)?;
+        let verification = verified_bootstrap()?;
         let checked = match verification.as_ref() {
             Some(verification) => vibra_workspace::semantic::check_all_with_bootstrap(
                 &snapshot,
@@ -70,17 +71,25 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             }
         };
         let target = unique_binary_target(&snapshot)?;
-        let verification = verified_bootstrap_if_used(&snapshot)?;
-        let result = match verification.as_ref() {
-            Some(verification) => vibra_workspace::semantic::run_target_with_bootstrap(
-                &snapshot,
-                target,
-                Some(verification),
-            ),
-            None => vibra_workspace::semantic::run_target(&snapshot, target),
-        };
+        let verification = verified_bootstrap()?;
+        let result = vibra_workspace::semantic::run_target_with_budget(
+            &snapshot,
+            target,
+            verification.as_ref(),
+            crate::runner::interpreter_budget(),
+        );
         let accepted =
             result.check().status() == vibra_workspace::semantic::CheckStatus::Accepted;
+        let mut host_event = None;
+        // Both backends run the one checked program of the target.
+        let wasm = if accepted {
+            result
+                .check()
+                .program_for_target(target)
+                .map(crate::wasm::observe)
+        } else {
+            None
+        };
         let interpreter = if accepted {
             match result.outcome() {
                 Some(vibra_workspace::semantic::RunOutcome::Program(execution)) => {
@@ -88,6 +97,13 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
                         result: Some(execution.canonical_result()),
                         audit_trace: execution.audit_trace().to_vec(),
                     })
+                }
+                // A host event ends the run with no result and no trace.
+                Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(
+                    error,
+                )) if error.is_host_event() => {
+                    host_event = crate::types::host_event_atom(error);
+                    None
                 }
                 Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(
                     error,
@@ -109,6 +125,8 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             accepted,
             diagnostics: result.check().diagnostics().to_vec(),
             interpreter,
+            host_event,
+            wasm,
             ..CaseObservation::default()
         })
     }
@@ -138,7 +156,7 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
                 });
             }
         };
-        let verification = verified_bootstrap_if_used(&snapshot)?;
+        let verification = verified_bootstrap()?;
         let result = vibra_workspace::semantic::run_tests(
             &snapshot,
             None,
@@ -174,6 +192,11 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
             interpreter: Some(ExecutionObservation {
                 result: Some(format_test_run(command_result, result.items())),
                 audit_trace: Vec::new(),
+            }),
+            // A test module, with its `vibra_v1_test` export and the test
+            // observations, is not emitted yet.
+            wasm: accepted.then(|| WasmObservation::NotLowered {
+                forms: vec!["test-module".to_owned()],
             }),
             ..CaseObservation::default()
         })
@@ -266,15 +289,9 @@ fn load_workspace(case: &Case) -> Result<WorkspaceLoad, HandlerError> {
     }
 }
 
-fn verified_bootstrap_if_used(
-    snapshot: &WorkspaceSnapshot,
-) -> Result<Option<Stdlib>, HandlerError> {
-    let requires_verification = snapshot
-        .requires_bootstrap_verification()
-        .map_err(|error| HandlerError::new(error.to_string()))?;
-    if !requires_verification {
-        return Ok(None);
-    }
+/// The standard library every workspace is checked against: its vocabulary
+/// module is in every checked graph.
+fn verified_bootstrap() -> Result<Option<Stdlib>, HandlerError> {
     load_stdlib().map(Some).map_err(|error| {
         HandlerError::new(format!("{BOOTSTRAP_PROVENANCE_FAILURE}: {error}"))
     })
