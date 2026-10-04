@@ -415,8 +415,8 @@ pub const KINDS: [KindRow; 11] = [
 
 /// The row of a kind.
 #[must_use]
+#[allow(clippy::indexing_slicing)] // The table is in kind order, which a test holds it to.
 pub fn row(kind: Kind) -> &'static KindRow {
-    // The table is in kind order, and a test holds it to that.
     &KINDS[kind as usize]
 }
 
@@ -443,14 +443,6 @@ pub fn variant_mask() -> u32 {
 #[must_use]
 pub fn components_mask() -> u32 {
     mask(|row| row.components)
-}
-
-/// The offset of the first component of an object of `len` components and the
-/// given stride, from the start of the block. For the cells layout this is the
-/// first class byte, and the cells follow at [`cells_offset`].
-#[must_use]
-pub const fn payload_offset() -> u32 {
-    header::SIZE
 }
 
 /// The offset of the first cell of a cells-layout object of `len` cells, from
@@ -521,12 +513,14 @@ mod tests {
 
     #[test]
     fn the_state_fields_do_not_overlap_the_free_lists_or_the_arena() {
-        assert!(state::END <= state::FREE_LISTS);
-        assert!(
-            state::FREE_LISTS + 4 * (MAX_CLASS + 1) <= ARENA_START,
-            "a head for every class fits below the arena"
-        );
-        assert_eq!(ARENA_START % 32, 0, "blocks stay aligned");
+        const {
+            assert!(state::END <= state::FREE_LISTS);
+            assert!(
+                state::FREE_LISTS + 4 * (MAX_CLASS + 1) <= ARENA_START,
+                "a head for every class fits below the arena"
+            );
+            assert!(ARENA_START.is_multiple_of(32), "blocks stay aligned");
+        }
     }
 
     #[test]

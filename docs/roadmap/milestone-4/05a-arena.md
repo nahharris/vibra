@@ -108,3 +108,48 @@ imports (Step 13); source maps.
 The accessor table of the specification is implemented in full; the host tests
 above pass; the cases moved to `matched` are listed; the deep-release and
 balanced-live-size results are recorded.
+
+## As built
+
+The step landed as proposed, with these choices, which the later steps build on.
+The representation is written once, in the documentation of
+`crates/vibra-wasm/src/layout.rs`, and the ledger records each decision
+([D2.4–D2.8, D3.6–D3.8](decision-ledger.md)).
+
+- **The layout.** The instance state is a block of fixed addresses at the start
+  of linear memory, with the free-list heads after it and the arena from byte
+  256. Every arena value is one block with a 24-byte header and a payload that
+  depends on its stride alone (cells with class bytes, 4-byte characters, or
+  bytes); a kind table gives each of the eleven kinds a row, and the accessors
+  admit kinds by masks the table computes, so a step adds a kind by adding a
+  row. The handle table is a block of the arena that is freed with its last ID.
+- **The routines.** `crates/vibra-wasm/src/runtime.rs` builds the allocator,
+  `dup`, `drop`, the worklist release, the handle table, and the fourteen
+  function exports of the boundary table that need no test, in a fixed order; the
+  object constructor is the only routine a module includes conditionally. Release
+  threads its worklist through the dying blocks, so the engine stack is bounded
+  at any depth or width and the worklist needs no storage and cannot fail.
+  `vibra_wasm::support::module_with_entry` builds a module around a
+  hand-written entry body for host tests of values no lowered form builds yet.
+- **What lowers.** The `void` and scalar literals, `bool` (an enum with
+  variants `false` and `true`), and the `atom`, `str`, and `bytes` literals,
+  which are arena objects built from passive data segments, and the sequence,
+  which drops every value but the last. Every function is a Wasm function of its
+  result class, none of which is called until Step 5b. The `NonVoidResult` and
+  `Literal` forms are gone, and `Result` names a result type that no lowered
+  value represents.
+- **No case matches yet.** Every checked source program carries the prelude's
+  `true` and `false` module values, which Step 5b lowers, so the parity inventory
+  is unchanged at 0 matched of 100 and the step is proved by hand-built IR (the
+  literals of every type against the interpreter byte for byte) and by hand-built
+  modules over the runtime routines.
+- **The runner.** `Runner::start` gives an `Instance` whose accessors take a
+  `ValueId` that carries its instance and shows no number, and
+  `Runner::run_observed` runs the entry and reads the result by its type into the
+  value the interpreter's canonical encoding takes. A scalar entry result is read
+  from its bits in `vibra_v1_result`, which the specification does not state
+  ([D2.8](decision-ledger.md)).
+- **For Step 5b.** The module-value state (`module_values`) and the frame stack
+  (`frame_segment`, `frame_top`, `frame_limit`, `frame_depth`) are reserved and
+  zero, with their representation fixed in the layout; the object constructor
+  and the cell classes are what a constructor lowers to.

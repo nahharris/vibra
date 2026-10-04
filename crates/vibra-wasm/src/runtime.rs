@@ -1252,3 +1252,49 @@ pub(crate) fn entry_export(fns: &Routines, entry: u32, class: ValueClass) -> Rou
     code.push(I::End);
     make(&[], &[], &[I64, I32], code)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_plan_numbers_the_routines_in_the_order_they_are_built() {
+        let fns = Routines::plan(7);
+        let routines = core_routines(&fns);
+        // The entry export and the constructor follow the core routines and the
+        // accessors, so the constructor can be left out without renumbering.
+        assert_eq!(
+            fns.entry_export,
+            7 + u32::try_from(routines.len()).unwrap_or(0)
+        );
+        assert_eq!(fns.new, fns.entry_export + 1);
+        let exports = accessor_exports(&fns);
+        assert_eq!(exports.len(), ACCESSORS.len());
+        assert_eq!(
+            exports.first().map(|export| export.1),
+            Some(fns.first_accessor)
+        );
+        let exported = routines
+            .iter()
+            .filter_map(|routine| routine.export)
+            .collect::<Vec<_>>();
+        let named = exports.iter().map(|export| export.0).collect::<Vec<_>>();
+        assert_eq!(
+            exported, named,
+            "each accessor routine is exported under its name"
+        );
+    }
+
+    #[test]
+    fn every_export_is_in_the_boundary_table_and_unique() {
+        let fns = Routines::plan(0);
+        let mut seen = std::collections::BTreeSet::new();
+        for (name, _) in accessor_exports(&fns) {
+            assert!(
+                vibra_ir::boundary::FUNCTION_EXPORTS.contains(&name),
+                "{name}"
+            );
+            assert!(seen.insert(name), "{name} is exported twice");
+        }
+    }
+}

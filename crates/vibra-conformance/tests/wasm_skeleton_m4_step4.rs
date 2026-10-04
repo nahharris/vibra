@@ -153,17 +153,48 @@ fn emission_is_byte_identical_across_builds_in_one_process() {
     assert_eq!(emitted(&empty_entry()), emitted(&empty_entry()));
 }
 
-/// Prints the module of the empty entry, for the parent test to compare.
+/// A program whose entry builds arena values: data segments, the constructor,
+/// and a handle-table registration, so what the arena adds is emitted in order.
+fn literal_entry() -> CheckedProgram {
+    let body = Expr::Sequence {
+        expressions: vec![
+            Expr::literal(Value::Str("h\u{e9}llo".to_owned()), origin()),
+            Expr::literal(Value::Atom("ok".to_owned()), origin()),
+            Expr::literal(Value::Bytes(vec![1, 2, 3]), origin()),
+            Expr::literal(Value::Bool(true), origin()),
+        ],
+        origin: origin(),
+    };
+    let main = CheckedFunction::new(
+        "main",
+        FunctionSignature::new(Vec::new(), Type::Bool),
+        body,
+        origin(),
+    )
+    .expect("a checked function");
+    CheckedProgram::try_new(vec![main], 0).expect("a checked program")
+}
+
+/// Prints the modules of the empty entry and of an arena program, for the
+/// parent test to compare.
 #[test]
 #[ignore = "run only as the child of `emission_is_byte_identical_across_processes`"]
 fn emit_in_child_process() {
     // The harness prints its own text on this line, so start a fresh one.
-    println!("\nEMITTED:{}", hex(&emitted(&empty_entry())));
+    println!(
+        "\nEMITTED:{}{}",
+        hex(&emitted(&empty_entry())),
+        hex(&emitted(&literal_entry()))
+    );
 }
 
 #[test]
 fn emission_is_byte_identical_across_processes() {
-    let own = hex(&emitted(&empty_entry()));
+    let own = format!(
+        "{}{}",
+        hex(&emitted(&empty_entry())),
+        hex(&emitted(&literal_entry()))
+    );
     for _ in 0..2 {
         let output = Command::new(std::env::current_exe().expect("this test binary"))
             .args([
