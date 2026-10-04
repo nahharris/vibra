@@ -36,6 +36,7 @@ fn suggested_step(form: &str) -> Option<&'static str> {
         "sequence" | "variable" | "let" | "if" | "return" | "global"
         | "module-value" | "record" | "variant" | "project" | "tuple"
         | "tuple-project" | "widen" | "call:direct" => "5b",
+        // Lowered by Step 6; no longer reported, kept for a stale row.
         "closure" | "captured" | "function" | "default" | "call:indirect"
         | "call:tail-direct" | "call:tail-indirect" | "type:param"
         | "type:function" => "6",

@@ -5,7 +5,10 @@
 //! `let`, `if`, and `return`; direct calls in non-tail position; and the data
 //! forms (a record, a variant, a wrapper, a tuple, their projections, and the
 //! widening of a member into a union), over every type that has a lowered value
-//! kind. Every other node is reported, so a program that the emitter cannot
+//! kind. Step 6 adds function values, `lambda` and what it captures, calls of
+//! every kind but a contract call (tail or not), omitted labelled operands, and
+//! the generic types, so a function type and a generic parameter have value
+//! kinds too. Every other node is reported, so a program that the emitter cannot
 //! lower completely produces an error and never a module that omits part of it.
 //! Each `match` below is exhaustive on purpose: a new checked-IR variant cannot
 //! compile until it is given a disposition here.
@@ -102,14 +105,26 @@ fn walk(expr: &Expr, found: &mut Vec<UnloweredForm>) {
             );
             walk_all(arguments, found);
         }
-        Expr::Default { .. } => report(Form::Default),
-        Expr::Function { .. } => report(Form::Function),
-        Expr::Closure { captures, body, .. } => {
-            report(Form::Closure);
+        // An omitted labelled operand is the callee's default, a constant; a
+        // module function used as a value, a `lambda`, and a read of what it
+        // captured are the function values of a call, and a function value is
+        // an arena value like any other.
+        Expr::Default { .. } | Expr::Function { .. } | Expr::Captured { .. } => {}
+        Expr::Closure {
+            signature,
+            captures,
+            body,
+            ..
+        } => {
+            if signature.variadic().is_some() {
+                found.push(
+                    UnloweredForm::new(Form::Parameters, Some(expr.origin().clone()))
+                        .with_detail("variadic"),
+                );
+            }
             walk_all(captures, found);
             walk(body, found);
         }
-        Expr::Captured { .. } => report(Form::Captured),
         Expr::Let { value, body, .. } => {
             walk(value, found);
             walk(body, found);
@@ -148,21 +163,14 @@ fn walk(expr: &Expr, found: &mut Vec<UnloweredForm>) {
             tail,
             ..
         } => {
-            // A direct call in non-tail position pushes a frame. Every other
-            // call is the work of Step 6 (a tail call, an indirect call) or
-            // Step 9 (a contract call).
-            if !matches!((target, tail), (CallTarget::Direct(_), false)) {
-                let kind = match (target, tail) {
-                    (CallTarget::Direct(_), false) => "direct",
-                    (CallTarget::Direct(_), true) => "tail-direct",
-                    (CallTarget::Indirect { .. }, false) => "indirect",
-                    (CallTarget::Indirect { .. }, true) => "tail-indirect",
-                    (CallTarget::Contract { .. }, false) => "contract",
-                    (CallTarget::Contract { .. }, true) => "tail-contract",
-                };
+            // A call of a module function or of a function value, in tail
+            // position or not, is one mechanism of frames. A contract call
+            // selects its implementation from a run-time type, which is the
+            // work of Step 9.
+            if let CallTarget::Contract { .. } = target {
                 found.push(
                     UnloweredForm::new(Form::Call, Some(expr.origin().clone()))
-                        .with_detail(kind),
+                        .with_detail(if *tail { "tail-contract" } else { "contract" }),
                 );
             }
             if let CallTarget::Indirect { callee, .. } = target {

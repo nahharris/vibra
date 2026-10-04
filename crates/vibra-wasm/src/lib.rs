@@ -18,9 +18,13 @@
 //! calls between them; and the nominal and structural data kinds with their
 //! constructors, projections, and the injection of a member into a union.
 //! Activations live in the arena and a call does not nest a WebAssembly call
-//! ([`layout`], "Activations and the dispatcher"). Every other form returns
-//! [`NotLowered`], naming each form, and never a module that omits part of the
-//! program. Steps 6 onward move forms out of [`NotLowered`] one step at a time.
+//! ([`layout`], "Activations and the dispatcher"). Step 6 lowers calls of every
+//! kind: function values and closures, a call through one, a tail call to every
+//! kind of callee (the callee replaces the current frame), omitted labelled
+//! operands, and generic functions and types, whose type arguments are passed to
+//! each activation at run time. Every other form returns [`NotLowered`], naming
+//! each form, and never a module that omits part of the program. Steps 7 onward
+//! move forms out of [`NotLowered`] one step at a time.
 //!
 //! # The module
 //!
@@ -146,16 +150,23 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
             NotLowered::type_of(kind, Some(entry_function.origin().clone()))
         })?;
 
+    // The lambdas of the program follow its functions and module values in the
+    // table, in the order a traversal meets them.
+    let lambdas = lower::collect(program);
+    let total = u32::try_from(lambdas.len())
+        .ok()
+        .and_then(|lambdas| total.checked_add(lambdas))
+        .ok_or_else(|| NotLowered::single(Form::ModuleSize))?;
     let fns = encode::routines_for(total);
     // A call pushes a frame of the callee's size, which is known only once the
     // callee is lowered: the first pass finds every size.
     let count = total as usize;
-    let mut first = lower::Lowering::new(&fns, program, vec![0; count]);
+    let mut first = lower::Lowering::new(&fns, program, &lambdas, vec![0; count]);
     let mut sizes = Vec::with_capacity(count);
     for index in 0..count {
         sizes.push(first.function(index)?.slots);
     }
-    let mut lowering = lower::Lowering::new(&fns, program, sizes.clone());
+    let mut lowering = lower::Lowering::new(&fns, program, &lambdas, sizes.clone());
     let mut lowered = Vec::with_capacity(count);
     for index in 0..count {
         lowered.push(lowering.function(index)?.code);

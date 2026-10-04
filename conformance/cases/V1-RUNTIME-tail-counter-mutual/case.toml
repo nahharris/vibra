@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-tail-counter-mutual"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Two module functions that call each other in tail position run a hundred thousand rounds in one activation and preserve the returned value. The count comes from a counter built only from `if`, a tuple of digits, and a call."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

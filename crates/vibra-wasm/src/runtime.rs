@@ -41,6 +41,10 @@ pub enum ValueClass {
     F64,
     /// An offset of an arena value, which the holder owns one count of.
     Ref,
+    /// A value of a generic type: its class is the class byte of the cell that
+    /// holds it, written at run time, so one slot of generic code holds a
+    /// scalar or a reference as its type argument decides.
+    Dyn,
 }
 
 impl ValueClass {
@@ -49,6 +53,7 @@ impl ValueClass {
     pub const fn val_type(self) -> Option<ValType> {
         match self {
             Self::Void => None,
+            Self::Dyn => Some(ValType::I64),
             Self::I32 | Self::Ref => Some(ValType::I32),
             Self::I64 => Some(ValType::I64),
             Self::F32 => Some(ValType::F32),
@@ -92,6 +97,9 @@ pub struct Routines {
     /// `() -> ()`: the dispatcher, which runs the top frame's function until no
     /// frame is left.
     pub run: u32,
+    /// `(frame, function, slots) -> frame`: replaces the top activation by an
+    /// activation of `function`, in place when it fits (a tail transfer).
+    pub reframe: u32,
     /// `(kind, stride, len, variant) -> i32`: allocates and initializes an
     /// object, with a count of one. It is the last routine and is present only
     /// when the module builds an object.
@@ -184,7 +192,8 @@ impl Routines {
             push_frame: first_accessor + accessors + 1,
             leave: first_accessor + accessors + 2,
             run: first_accessor + accessors + 3,
-            new: first_accessor + accessors + 4,
+            reframe: first_accessor + accessors + 4,
+            new: first_accessor + accessors + 5,
         }
     }
 }
@@ -1398,13 +1407,11 @@ fn push_frame(fns: &Routines) -> Routine {
     )
 }
 
-/// `(frame) -> ()`: leaves an activation. It drops every cell of the frame that
-/// still owns a reference, pops the frame, and frees its segment when it was
-/// the first frame of the segment.
-fn leave(fns: &Routines) -> Routine {
-    // Param 0 is the frame. Locals: 1 slots, 2 i, 3 cells, 4 segment, 5 previous.
-    let (fr, slots, i, cells, seg, previous) = (0, 1, 2, 3, 4, 5);
-    let mut code = vec![
+/// The instructions that drop every cell of the frame in local `fr` whose class
+/// byte is the reference class. They use `slots`, `i`, and `cells` as locals and
+/// leave `slots` holding the frame's slot count.
+fn scan_frame(fns: &Routines, fr: u32, slots: u32, i: u32, cells: u32) -> Vec<Ins> {
+    vec![
         get(fr),
         ld32(layout::frame::SLOTS),
         set(slots),
@@ -1448,7 +1455,14 @@ fn leave(fns: &Routines) -> Routine {
         I::Br(0),
         I::End,
         I::End,
-        // Pop: the caller is the top again.
+    ]
+}
+
+/// The instructions that pop the frame in local `fr`: its caller is the top
+/// again, the depth falls, and the segment is freed when `fr` was its first
+/// frame. They use `seg` and `previous` as locals.
+fn pop_frame(fns: &Routines, fr: u32, seg: u32, previous: u32) -> Vec<Ins> {
+    let mut code = vec![
         ZERO,
         get(fr),
         ld32(layout::frame::CALLER),
@@ -1485,9 +1499,105 @@ fn leave(fns: &Routines) -> Routine {
         I::End,
         st32(state::FRAME_LIMIT),
         I::End,
-        I::End,
     ]);
+    code
+}
+
+/// `(frame) -> ()`: leaves an activation. It drops every cell of the frame that
+/// still owns a reference, pops the frame, and frees its segment when it was
+/// the first frame of the segment.
+fn leave(fns: &Routines) -> Routine {
+    // Param 0 is the frame. Locals: 1 slots, 2 i, 3 cells, 4 segment, 5 previous.
+    let mut code = scan_frame(fns, 0, 1, 2, 3);
+    code.extend(pop_frame(fns, 0, 4, 5));
+    code.push(I::End);
     make(&[I32], &[], &[I32, I32, I32, I32, I32], code)
+}
+
+/// `(frame, function, slots) -> frame`: a tail transfer. The top activation's
+/// frame drops what it still owns and becomes an activation of `function` of
+/// `slots` slots, with every class byte clear, `resume` at the first block, and
+/// its `caller` kept, so the depth does not grow. The frame is rewritten in
+/// place when the new frame ends within its segment, and otherwise it is
+/// popped and the new frame pushed, which takes a larger segment. The operands
+/// are not in the frame while this runs: the caller holds them and moves them
+/// into the frame it returns.
+fn reframe(fns: &Routines) -> Routine {
+    // Params: 0 frame, 1 function, 2 slots. Locals: 3 old slots, 4 i, 5 cells,
+    // 6 segment, 7 previous, 8 size (i64), 9 padded (i64).
+    let (fr, function, slots, size, padded) = (0, 1, 2, 8, 9);
+    let mut code = scan_frame(fns, fr, 3, 4, 5);
+    push(
+        &mut code,
+        &[
+            // padded = (slots + 7) & -8, size = HEADER + padded + slots * 8.
+            get(slots),
+            I::I64ExtendI32U,
+            c64(7),
+            I::I64Add,
+            c64(-8),
+            I::I64And,
+            set(padded),
+            c64(i64::from(layout::frame::HEADER)),
+            get(padded),
+            I::I64Add,
+            get(slots),
+            I::I64ExtendI32U,
+            c64(3),
+            I::I64Shl,
+            I::I64Add,
+            set(size),
+            // The frame fits in place when it ends within its segment.
+            get(fr),
+            I::I64ExtendI32U,
+            get(size),
+            I::I64Add,
+        ],
+    );
+    push(&mut code, &load_state32(state::FRAME_LIMIT));
+    push(
+        &mut code,
+        &[
+            I::I64ExtendI32U,
+            I::I64LeU,
+            I::If(BlockType::Result(I32)),
+            get(fr),
+            c32(0),
+            st32(layout::frame::RESUME),
+            get(fr),
+            get(function),
+            st32(layout::frame::FUNCTION),
+            get(fr),
+            get(slots),
+            st32(layout::frame::SLOTS),
+            get(fr),
+            c32(index(layout::frame::HEADER)),
+            I::I32Add,
+            c32(0),
+            get(padded),
+            I::I32WrapI64,
+            I::MemoryFill(0),
+            get(fr),
+            I::Else,
+        ],
+    );
+    code.extend(pop_frame(fns, fr, 6, 7));
+    push(
+        &mut code,
+        &[
+            get(function),
+            get(slots),
+            I::Call(fns.push_frame),
+            I::End,
+            I::End,
+        ],
+    );
+    make(
+        &[I32, I32, I32],
+        &[I32],
+        &[I32, I32, I32, I32, I32, I64, I64],
+        code,
+    )
 }
 
 /// `() -> ()`: the dispatcher. It runs the function of the top frame, over and
@@ -1518,7 +1628,12 @@ fn run(dispatch_type: u32) -> Routine {
 
 /// The frame routines, in index order after the entry export.
 pub(crate) fn frame_routines(fns: &Routines, dispatch_type: u32) -> Vec<Routine> {
-    vec![push_frame(fns), leave(fns), run(dispatch_type)]
+    vec![
+        push_frame(fns),
+        leave(fns),
+        run(dispatch_type),
+        reframe(fns),
+    ]
 }
 
 /// The entry export of a program: clears the record and the result, allocates
@@ -1590,7 +1705,8 @@ fn take_ret(fns: &Routines, class: ValueClass, slot: u32, object: u32) -> Vec<In
         | ValueClass::I32
         | ValueClass::I64
         | ValueClass::F32
-        | ValueClass::F64 => {
+        | ValueClass::F64
+        | ValueClass::Dyn => {
             let mut code = vec![ZERO];
             code.extend(load_state64(state::RET));
             code.push(st64(state::RESULT));
@@ -1620,7 +1736,7 @@ pub(crate) fn raw_entry_export(
     match class {
         ValueClass::Void => {}
         ValueClass::I32 => code.extend([I::I64ExtendI32U, set(slot)]),
-        ValueClass::I64 => code.push(set(slot)),
+        ValueClass::I64 | ValueClass::Dyn => code.push(set(slot)),
         ValueClass::F32 => {
             code.extend([I::I32ReinterpretF32, I::I64ExtendI32U, set(slot)])
         }
@@ -1659,8 +1775,9 @@ mod tests {
         assert_eq!(fns.push_frame, fns.entry_export + 1);
         assert_eq!(fns.leave, fns.entry_export + 2);
         assert_eq!(fns.run, fns.entry_export + 3);
-        assert_eq!(fns.new, fns.entry_export + 4);
-        assert_eq!(frame_routines(&fns, 0).len(), 3);
+        assert_eq!(fns.reframe, fns.entry_export + 4);
+        assert_eq!(fns.new, fns.entry_export + 5);
+        assert_eq!(frame_routines(&fns, 0).len(), 4);
         let exports = accessor_exports(&fns);
         assert_eq!(exports.len(), ACCESSORS.len());
         assert_eq!(
