@@ -118,6 +118,8 @@ fn start(program: &CheckedProgram, limit: usize) -> Instance {
 /// What a run left: the bytes of live arena after the host released the result,
 /// the high-water mark of the arena, and the frames that were left.
 struct Footprint {
+    /// The live size when the entry completed, while the host held the result.
+    with_result: u64,
     live: u64,
     /// The bytes the module values reach, which an instance keeps for its life.
     kept: u64,
@@ -128,7 +130,11 @@ struct Footprint {
 /// Runs the entry once on a fresh instance and reads the result, then measures.
 fn footprint(program: &CheckedProgram, limit: usize) -> Footprint {
     let mut instance = start(program, limit);
-    let Outcome::Completed { result, .. } = instance.call_entry().expect("runs") else {
+    let Outcome::Completed {
+        result,
+        live_size: with_result,
+    } = instance.call_entry().expect("runs")
+    else {
         panic!("the entry did not complete");
     };
     instance
@@ -137,6 +143,7 @@ fn footprint(program: &CheckedProgram, limit: usize) -> Footprint {
     let live = instance.live_size().expect("live size");
     let kept = module_values_bytes(&mut instance);
     Footprint {
+        with_result,
         live,
         kept,
         arena_used: word(&mut instance, state::ARENA_USED),
@@ -520,36 +527,23 @@ fn a_tail_loop_that_allocates_each_round_holds_a_bounded_live_arena() {
     // and the arena's high-water mark, which is what a frame stack or a garbage
     // heap that grew with the rounds would show even after the run freed it.
     for kind in Loop::ALL {
-        let program = |n| checked(&kind.source(n));
-        let measure = |n| {
-            let program = program(n);
-            let bytes = emitted(&program);
-            let ty = entry_type(&program);
-            let Observed::Completed { live, .. } = runner()
-                .run_observed(&bytes, &ty, program.types())
-                .expect("runs")
-            else {
-                panic!("{kind:?} did not complete");
-            };
-            (live, footprint(&program, 64 * MIB))
-        };
-        let (small_live, small) = measure(10_000);
-        let (large_live, large) = measure(100_000);
+        let measure = |n| footprint(&checked(&kind.source(n)), 64 * MIB);
+        let small = measure(10_000);
+        let large = measure(100_000);
         println!(
             "{kind:?}: live with the result {} then {}, after release {} then {}, arena {} then {}",
-            small_live.with_result,
-            large_live.with_result,
+            small.with_result,
+            large.with_result,
             small.live,
             large.live,
             small.arena_used,
             large.arena_used
         );
         assert!(
-            large_live.with_result.abs_diff(small_live.with_result)
-                <= LIVE_GROWTH_BOUND,
+            large.with_result.abs_diff(small.with_result) <= LIVE_GROWTH_BOUND,
             "{kind:?}: live {} against {}",
-            small_live.with_result,
-            large_live.with_result
+            small.with_result,
+            large.with_result
         );
         assert!(
             large.live.abs_diff(small.live) <= LIVE_GROWTH_BOUND,
