@@ -11,6 +11,10 @@ use std::sync::OnceLock;
 
 use super::{FunctionSignature, Type, TypeId};
 
+mod vectors;
+
+pub use vectors::{CHARS, Outcome, SCALARS, Vector};
+
 /// The compiler registry identity used by the runtime contract.
 ///
 /// `vibra_v1` is the version named by the v1 runtime specification. The
@@ -585,6 +589,17 @@ impl CompilerIntrinsic {
                 | Self::ArrayConcat
                 | Self::ArraySlice
         )
+    }
+
+    /// The sample vectors of this row: operands, and the outcome the
+    /// specification gives them, computed once from the language's own integer
+    /// types and independent of any backend. Every backend that lowers the row
+    /// is held to them. A row without vectors has none yet: the vectors cover
+    /// the integer rows but `to-str` and `parse`, the integer conversions, and
+    /// the `char` rows.
+    #[must_use]
+    pub fn vectors(self) -> &'static [Vector] {
+        vectors::of(self)
     }
 
     /// The generic parameters of the exact signature, in `where:` order.
