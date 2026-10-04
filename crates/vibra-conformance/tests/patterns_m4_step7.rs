@@ -235,7 +235,7 @@ fn literal_patterns_test_a_scalar_a_wide_scalar_a_character_a_text_and_an_atom()
 (defn word (s str) str (match s \"alpha\" \"first\" \"\" \"empty\" - \"other\"))\n\
 (defn letter (c char) str (match c \\a \"a\" - \"other\"))\n\
 (defn color (c atom) str (match c @red \"red\" @green \"green\" - \"other\"))\n";
-    agree_on(
+    balanced_on(
         source,
         &strs(&[
             "one",
@@ -261,7 +261,7 @@ fn a_literal_of_every_narrow_integer_type_matches_its_own_value_only() {
 (defn c (n i16) bool (match n -300i16 true - false))\n\
 (defn d (n u8) bool (match n 200u8 true - false))\n\
 (defn e (n u32) bool (match n 4000000000u32 true - false))\n";
-    agree_on(
+    balanced_on(
         source,
         &result(
             &tuple_type(&["@bool"; 8]),
@@ -290,7 +290,7 @@ fn constructor_patterns_match_a_record_a_tuple_an_enum_and_a_wrapper() {
     (shape.rect (dims w: width)) width))\n\
 (defn second ((pair - label) pair) str label)\n\
 (defn unwrap ((meters length) meters) i32 length)\n";
-    agree_on(
+    balanced_on(
         source,
         &result(
             &tuple_type(&["@i32", "@i32", "@i32", "@i32", "@str", "@i32"]),
@@ -317,7 +317,7 @@ fn tuple_recordof_and_enumof_patterns_match_anonymous_values() {
   (match value\n\
     (enumof a: -) \"a\"\n\
     (enumof b: text) text))\n";
-    agree_on(
+    balanced_on(
         source,
         &result(
             &tuple_type(&["@atom", "@atom", "@atom", "@atom", "@i32", "@str", "@str"]),
@@ -350,7 +350,7 @@ fn a_constant_pattern_is_the_pattern_of_the_constants_value() {
 (defn by-color (value color) str (match value favorite \"favorite\" - \"other\"))\n\
 (defn by-origin (point (tuple i32 i32)) str (match point origin \"origin\" - \"elsewhere\"))\n\
 (defn by-flag (flag bool) str (match flag true \"yes\" false \"no\"))\n";
-    agree_on(
+    balanced_on(
         source,
         &strs(&[
             "limit",
@@ -377,7 +377,7 @@ fn an_as_pattern_narrows_a_union_by_its_discriminant() {
   (match value (as bool true) \"yes\" (as bool false) \"no\" (as u8 -) \"byte\"))\n\
 (defn width (value (union bool u8)) i32\n\
   (match value (as u8 8u8) 8i32 (as u8 -) 1i32 (as bool -) 0i32))\n";
-    agree_on(
+    balanced_on(
         source,
         &result(
             &tuple_type(&["@str", "@str", "@str", "@i32"]),
@@ -412,7 +412,7 @@ fn a_union_of_many_members_has_an_arm_for_each_discriminant() {
 (defn main () (tuple str str str str str str str) (tupleof {calls}))\n\
 (defn kind (value many) str (match value {arms}))\n"
     );
-    agree_on(&source, &strs(&["a", "b", "c", "d", "e", "f", "g"]));
+    balanced_on(&source, &strs(&["a", "b", "c", "d", "e", "f", "g"]));
 }
 
 #[test]
@@ -422,7 +422,7 @@ fn a_binder_on_an_as_pattern_has_the_member_type() {
   (tupleof (get-int 5i32) (get-text \"five\")))\n\
 (defn get-int (value number) i32 (match value (as i32 n) n (as str -) 0i32))\n\
 (defn get-text (value number) str (match value (as str s) s (as i32 -) \"\"))\n";
-    agree_on(
+    balanced_on(
         source,
         &result(
             &tuple_type(&["@i32", "@str"]),
@@ -442,7 +442,7 @@ fn the_first_matching_arm_wins() {
     (tupleof 1i32 3i32) \"first\"\n\
     (tupleof 1i32 -) \"second\"\n\
     - \"third\"))\n";
-    agree_on(source, &strs(&["second", "first", "third"]));
+    balanced_on(source, &strs(&["second", "first", "third"]));
 }
 
 #[test]
@@ -466,7 +466,7 @@ fn a_single_arm_match_and_an_empty_payload_variant() {
   (tupleof (only (tupleof 4i32 \"x\")) (empty-shape (shape.empty)) (empty-shape (shape.circle 2i32))))\n\
 (defn only (value (tuple i32 str)) i32 (match value (tupleof n -) n))\n\
 (defn empty-shape (value shape) bool (match value (shape.empty) true (shape.circle -) false))\n";
-    agree_on(
+    balanced_on(
         source,
         &result(
             &tuple_type(&["@i32", "@bool", "@bool"]),
@@ -488,7 +488,7 @@ fn deeply_nested_destructuring_binds_the_innermost_parts() {
     (deep a: (tupleof - (option.some (tupleof - (recordof d: (leaf.y text)))))) text\n\
     (deep a: (tupleof - (option.some (tupleof tag -)))) tag\n\
     (deep a: -) \"none\"))\n";
-    agree_on(source, &strs(&["inner", "s", "none"]));
+    balanced_on(source, &strs(&["inner", "s", "none"]));
 }
 
 // -- destructuring in let, parameters, and lambdas ---------------------------------
@@ -502,7 +502,7 @@ fn let_parameters_and_lambdas_destructure() {
                            (recordof a: 5i32 b: \"z\")))\n\
   (let (tupleof first (recordof k: second)) (tupleof \"one\" (recordof k: 2i32)))\n\
   (tupleof only picked first second))\n";
-    agree_on(
+    balanced_on(
         source,
         &result(
             &tuple_type(&["@i32", "@i32", "@str", "@i32"]),
@@ -534,7 +534,7 @@ fn let_else_binds_on_a_match_and_runs_its_fallback_otherwise() {
 (defn pick (o (option i32)) i32\n\
   (let-else (option.some v) o (return 100i32))\n\
   v)\n";
-    agree_on(
+    balanced_on(
         source,
         &result(
             &tuple_type(&["@i32", "@i32"]),
@@ -553,7 +553,7 @@ fn let_else_as_the_final_element_of_a_body() {
   (match o (option.some -) true (option.none) false))\n\
 (defn unused (o (option i32)) void\n\
   (let-else (option.some -) o (return void)))\n";
-    agree_on(
+    balanced_on(
         source,
         &result(
             &tuple_type(&["@i32", "@i32"]),
@@ -576,7 +576,7 @@ fn a_let_else_with_an_as_pattern_narrows_for_the_rest_of_the_body() {
 (defn int-or (value number) i32\n\
   (let-else (as i32 n) value (return -1i32))\n\
   n)\n";
-    agree_on(
+    balanced_on(
         source,
         &result(
             &tuple_type(&["@i32", "@i32"]),
@@ -596,7 +596,7 @@ fn a_fallback_that_calls_a_function_of_type_never() {
   (let-else (option.some n) o (fail \"missing\"))\n\
   n)\n\
 (defn describe (flag bool) str (if flag \"yes\" (fail \"no\")))\n";
-    agree_on(
+    balanced_on(
         source,
         &result(
             &tuple_type(&["@i32", "@str"]),
@@ -620,7 +620,7 @@ fn try_continues_with_a_payload_or_leaves_with_the_variant() {
   (let value (try (parse flag)))\n\
   (result.ok value))\n\
 (defn text (r (result i32 str)) str (match r (result.ok -) \"ok\" (result.err message) message))\n";
-    agree_on(
+    balanced_on(
         source,
         &result(
             &tuple_type(&["@i32", "@i32", "@str", "@str"]),
@@ -639,7 +639,7 @@ fn try_changes_the_success_type_and_keeps_the_error() {
   (let n (try (parse flag)))\n\
   (result.ok \"parsed\"))\n\
 (defn text (r (result str str)) str (match r (result.ok s) s (result.err message) message))\n";
-    agree_on(source, &strs(&["parsed", "e"]));
+    balanced_on(source, &strs(&["parsed", "e"]));
 }
 
 #[test]
@@ -649,7 +649,7 @@ fn nested_try_leaves_at_the_first_failure() {
            (code (flatten (option.none)))))\n\
 (defn flatten (nested (option (option i32))) (option i32) (option.some (try (try nested))))\n\
 (defn code (o (option i32)) i32 (match o (option.some n) n (option.none) -1i32))\n";
-    agree_on(
+    balanced_on(
         source,
         &result(
             &tuple_type(&["@i32", "@i32", "@i32"]),
@@ -664,7 +664,7 @@ fn try_leaves_a_lambda_and_not_the_function_around_it() {
   (let run (lambda (o (option i32)) (option i32) (option.some (try o))))\n\
   (tupleof (code (run (option.some 2i32))) (code (run (option.none)))))\n\
 (defn code (o (option i32)) i32 (match o (option.some n) n (option.none) -1i32))\n";
-    agree_on(
+    balanced_on(
         source,
         &result(
             &tuple_type(&["@i32", "@i32"]),
@@ -692,7 +692,7 @@ fn try_in_generic_code_with_a_payload_that_may_be_void() {
 (defn is-some (value (option t)) str\n\
   where: (t any)\n\
   (match value (option.some present) \"some\" (option.none) \"none\"))\n";
-    agree_on(source, &strs(&["ok", "bad", "ok", "some"]));
+    balanced_on(source, &strs(&["ok", "bad", "ok", "some"]));
 }
 
 #[test]
@@ -708,7 +708,7 @@ fn a_generic_binder_on_a_payload_that_may_be_void_binds_void() {
   where: (t any)\n\
   (match value (option.some present) (is-void present) (option.none) false))\n\
 (defn is-void (value t) bool where: (t any) true)\n";
-    agree_on(
+    balanced_on(
         source,
         &result(
             &tuple_type(&["@i32", "@str", "@bool", "@bool"]),
@@ -1094,7 +1094,7 @@ fn a_try_operand_is_not_a_tail_position() {
             .expect("runs"),
         Observed::Stopped(Outcome::MemoryExhausted)
     );
-    agree_on(
+    balanced_on(
         &source.replace(&counter(100_000), &counter(50)),
         &result("@i32", "7i32"),
     );

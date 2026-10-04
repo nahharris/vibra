@@ -553,8 +553,8 @@ fn the_host_holds_exactly_the_result_until_it_releases_it() {
 fn the_forms_of_later_steps_are_named_and_never_approximated() {
     for (source, form) in [
         (
-            "(defn main () i32 (match 1i32 1i32 2i32 - 3i32))\n",
-            "match",
+            "(defn main () i32 (match (array.of 1i32) (array -) 2i32 - 3i32))\n",
+            "array",
         ),
         ("(defn main () (array i32) (array.of 1i32))\n", "type"),
     ] {
