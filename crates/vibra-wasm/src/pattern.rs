@@ -291,3 +291,136 @@ pub(crate) fn decompose<'p>(
         }
     })
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::indexing_slicing)]
+mod tests {
+    use super::*;
+    use vibra_diagnostics::ByteSpan;
+
+    fn origin() -> SourceOrigin {
+        SourceOrigin::new("input.vib", ByteSpan::new(0, 1))
+    }
+
+    fn node<'p>(pattern: &'p Pattern, ty: &Type) -> Node<'p> {
+        decompose(&TypeEnv::new(&[]), pattern, ty, &origin())
+            .expect("a lowered pattern")
+    }
+
+    #[test]
+    fn a_discard_does_nothing_and_a_binder_only_binds() {
+        let discard = node(&Pattern::Wildcard, &Type::I32);
+        assert!(discard.is_inert());
+        let binder = Pattern::Bind {
+            slot: 3,
+            value_type: Type::Str,
+        };
+        let bound = node(&binder, &Type::Str);
+        assert!(bound.only_binds() && !bound.is_inert());
+        assert_eq!(bound.binder, Some((3, &Type::Str)));
+    }
+
+    #[test]
+    fn a_literal_is_the_test_its_representation_asks() {
+        let narrow = Pattern::Literal(Value::I8(-3));
+        assert_eq!(
+            node(&narrow, &Type::I8).test,
+            Test::Cell {
+                wide: false,
+                bits: 0xFFFF_FFFD
+            }
+        );
+        let wide = Pattern::Literal(Value::U64(7));
+        assert_eq!(
+            node(&wide, &Type::U64).test,
+            Test::Cell {
+                wide: true,
+                bits: 7
+            }
+        );
+        // `bool` is an enum, so its literal is a discriminant.
+        let truth = Pattern::Literal(Value::Bool(true));
+        assert_eq!(node(&truth, &Type::Bool).test, Test::Variant(1));
+        let text = Pattern::Literal(Value::Str("a".to_owned()));
+        assert!(matches!(node(&text, &Type::Str).test, Test::Data(_)));
+        let atom = Pattern::Literal(Value::Atom("ok".to_owned()));
+        assert!(matches!(node(&atom, &Type::Atom).test, Test::Data(_)));
+    }
+
+    #[test]
+    fn a_variant_tests_its_discriminant_and_a_void_payload_has_no_cell() {
+        let ty = Type::Enum(vec![
+            ("none".to_owned(), Type::Void),
+            ("some".to_owned(), Type::I32),
+        ]);
+        let pattern = Pattern::Variant {
+            variant: "some".to_owned(),
+            payload: Some(Box::new(Pattern::Wildcard)),
+        };
+        let found = node(&pattern, &ty);
+        assert_eq!(found.test, Test::Variant(1));
+        assert_eq!(found.children[0].presence, Presence::Always);
+        let none = Pattern::Variant {
+            variant: "none".to_owned(),
+            payload: Some(Box::new(Pattern::Wildcard)),
+        };
+        assert_eq!(node(&none, &ty).children[0].presence, Presence::Never);
+        assert_eq!(
+            Presence::of_payload(&Type::Param("t".to_owned())),
+            Presence::Runtime
+        );
+    }
+
+    #[test]
+    fn a_tuple_and_a_record_name_the_parts_their_patterns_meet() {
+        let tuple = Type::Tuple(vec![Type::I32, Type::Str]);
+        let pattern = Pattern::Tuple(vec![Pattern::Wildcard, Pattern::Wildcard]);
+        let found = node(&pattern, &tuple);
+        assert_eq!(found.test, Test::Always);
+        let parts = found
+            .children
+            .iter()
+            .map(|child| (child.position, child.len, child.ty.clone()))
+            .collect::<Vec<_>>();
+        assert_eq!(parts, vec![(0, 2, Type::I32), (1, 2, Type::Str)]);
+        let record = Type::Record(vec![
+            ("a".to_owned(), Type::I32),
+            ("b".to_owned(), Type::Str),
+        ]);
+        let pattern = Pattern::Record(vec![("b".to_owned(), Pattern::Wildcard)]);
+        let found = node(&pattern, &record);
+        assert_eq!(found.children.len(), 1);
+        assert_eq!((found.children[0].position, found.children[0].len), (1, 2));
+    }
+
+    #[test]
+    fn a_member_tests_its_position_in_the_union() {
+        let pattern = Pattern::Member {
+            index: 2,
+            member: Type::U8,
+            pattern: Box::new(Pattern::Wildcard),
+        };
+        let union = Type::Union(vec![Type::Bool, Type::Str, Type::U8]);
+        let found = node(&pattern, &union);
+        assert_eq!(found.test, Test::Variant(2));
+        assert_eq!(found.children[0].ty, Type::U8);
+    }
+
+    #[test]
+    fn an_array_pattern_and_a_wrapper_over_text_name_their_forms() {
+        let array = Pattern::Array(vec![Pattern::Wildcard]);
+        let error = decompose(
+            &TypeEnv::new(&[]),
+            &array,
+            &Type::Array(Box::new(Type::I32)),
+            &origin(),
+        )
+        .expect_err("not lowered");
+        assert_eq!(error.forms()[0].form(), Form::Array);
+        assert_eq!(error.forms()[0].detail(), Some("pattern"));
+        let wrapper = Pattern::Wrap(Box::new(Pattern::Wildcard));
+        let error = decompose(&TypeEnv::new(&[]), &wrapper, &Type::Str, &origin())
+            .expect_err("not lowered");
+        assert_eq!(error.forms()[0].form(), Form::Wrap);
+    }
+}
