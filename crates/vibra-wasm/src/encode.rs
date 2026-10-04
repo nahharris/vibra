@@ -5,63 +5,99 @@
 //! the checked program: no clock, path, address, or hash-table order reaches
 //! them. No custom section is written, not even a `name` section, because a v1
 //! module the toolchain emits before `vibra build` exists carries none.
+//!
+//! The function index space is the lowered functions in source order, then the
+//! runtime routines of [`crate::runtime`], the entry export, and last the object
+//! constructor when the program builds an object.
 
-use vibra_ir::boundary::{
-    ENTRY_EXPORT, LIVE_SIZE_EXPORT, MEMORY_EXPORT, ORIGIN_EXPORT, RESULT_EXPORT,
-    STATUS_EXPORT, TRAP_CODE_EXPORT,
-};
+use vibra_ir::boundary::{ENTRY_EXPORT, MEMORY_EXPORT};
 use wasm_encoder::{
-    CodeSection, ConstExpr, ExportKind, ExportSection, Function, FunctionSection,
-    GlobalSection, GlobalType, Instruction, MemorySection, MemoryType, Module,
-    TypeSection, ValType,
+    CodeSection, DataCountSection, DataSection, ExportKind, ExportSection, Function,
+    FunctionSection, MemorySection, MemoryType, Module, TypeSection, ValType,
 };
 
-/// The pages of linear memory the module defines. The arena of a later step
-/// grows from here; a module with none still defines one memory.
+use crate::lower::FunctionCode;
+use crate::runtime::{
+    Routine, Routines, accessor_exports, core_routines, entry_export, new_object,
+};
+
+/// The pages of linear memory the module defines. The arena grows from here by
+/// `memory.grow`.
 const INITIAL_PAGES: u64 = 1;
 
-/// `() -> ()`, the type of every lowered function and of the entry export.
-const TYPE_UNIT: u32 = 0;
-/// `() -> i32`, the type of the status accessors.
-const TYPE_I32: u32 = 1;
-/// `() -> i64`, the type of the result and size accessors.
-const TYPE_I64: u32 = 2;
+/// The function signatures of a module, numbered in the order they are first
+/// used, so the type section depends only on the program.
+#[derive(Debug, Default)]
+struct Types {
+    list: Vec<(Vec<ValType>, Vec<ValType>)>,
+}
 
-/// The recorded-state globals, in the order they are defined.
-const GLOBAL_STATUS: u32 = 0;
-const GLOBAL_TRAP_CODE: u32 = 1;
-const GLOBAL_ORIGIN: u32 = 2;
-const GLOBAL_RESULT: u32 = 3;
+impl Types {
+    fn intern(&mut self, params: &[ValType], results: &[ValType]) -> u32 {
+        let position = self
+            .list
+            .iter()
+            .position(|(known_params, known_results)| {
+                known_params == params && known_results == results
+            })
+            .unwrap_or_else(|| {
+                self.list.push((params.to_vec(), results.to_vec()));
+                self.list.len() - 1
+            });
+        u32::try_from(position).unwrap_or(u32::MAX)
+    }
+}
 
-/// Encodes a module with one `() -> ()` function per source function, in
-/// source order, and the exports of a program whose entry is `entry`.
-///
-/// The caller has established that every function is lowered, which for the
-/// skeleton means each one is the empty `void` function.
-pub(crate) fn module(function_count: u32, entry: u32) -> Vec<u8> {
-    let mut types = TypeSection::new();
-    types.ty().function([], []);
-    types.ty().function([], [ValType::I32]);
-    types.ty().function([], [ValType::I64]);
+/// What a module is made of.
+#[derive(Debug)]
+pub(crate) struct Parts {
+    pub(crate) functions: Vec<FunctionCode>,
+    pub(crate) entry: u32,
+    pub(crate) segments: Vec<Vec<u8>>,
+    pub(crate) include_new: bool,
+}
 
-    // Lowered functions first, then the six accessors the exports name.
-    let entry_wrapper = function_count;
-    let status = function_count + 1;
-    let trap_code = function_count + 2;
-    let origin = function_count + 3;
-    let result = function_count + 4;
-    let live_size = function_count + 5;
+/// The routine indices of a module of `function_count` lowered functions.
+pub(crate) const fn routines_for(function_count: u32) -> Routines {
+    Routines::plan(function_count)
+}
 
+/// Encodes the module, or `None` when the entry is not one of its functions.
+pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
+    let function_count = u32::try_from(parts.functions.len()).ok()?;
+    let fns = routines_for(function_count);
+    let entry_class = parts
+        .functions
+        .get(usize::try_from(parts.entry).ok()?)?
+        .class;
+
+    let mut types = Types::default();
     let mut functions = FunctionSection::new();
-    for _ in 0..function_count {
-        functions.function(TYPE_UNIT);
+    let mut code = CodeSection::new();
+    for lowered in &parts.functions {
+        let results = lowered.class.val_type();
+        let results = results.as_slice();
+        functions.function(types.intern(&[], results));
+        let mut function =
+            Function::new_with_locals_types(lowered.locals.iter().copied());
+        for instruction in &lowered.body {
+            function.instruction(instruction);
+        }
+        code.function(&function);
     }
-    functions.function(TYPE_UNIT);
-    for _ in 0..3 {
-        functions.function(TYPE_I32);
+    let mut routines = core_routines(&fns);
+    routines.push(entry_export(&fns, parts.entry, entry_class));
+    if parts.include_new {
+        routines.push(new_object(&fns));
     }
-    for _ in 0..2 {
-        functions.function(TYPE_I64);
+    let mut exports = ExportSection::new();
+    exports.export(MEMORY_EXPORT, ExportKind::Memory, 0);
+    exports.export(ENTRY_EXPORT, ExportKind::Func, fns.entry_export);
+    for (name, index) in accessor_exports(&fns) {
+        exports.export(name, ExportKind::Func, index);
+    }
+    for routine in &routines {
+        add_routine(&mut types, &mut functions, &mut code, routine);
     }
 
     let mut memories = MemorySection::new();
@@ -73,68 +109,44 @@ pub(crate) fn module(function_count: u32, entry: u32) -> Vec<u8> {
         page_size_log2: None,
     });
 
-    let mut globals = GlobalSection::new();
-    for _ in 0..3 {
-        globals.global(
-            GlobalType {
-                val_type: ValType::I32,
-                mutable: true,
-                shared: false,
-            },
-            &ConstExpr::i32_const(0),
-        );
+    let mut type_section = TypeSection::new();
+    for (params, results) in &types.list {
+        type_section
+            .ty()
+            .function(params.iter().copied(), results.iter().copied());
     }
-    globals.global(
-        GlobalType {
-            val_type: ValType::I64,
-            mutable: true,
-            shared: false,
-        },
-        &ConstExpr::i64_const(0),
-    );
-
-    let mut exports = ExportSection::new();
-    exports.export(MEMORY_EXPORT, ExportKind::Memory, 0);
-    exports.export(ENTRY_EXPORT, ExportKind::Func, entry_wrapper);
-    exports.export(STATUS_EXPORT, ExportKind::Func, status);
-    exports.export(TRAP_CODE_EXPORT, ExportKind::Func, trap_code);
-    exports.export(ORIGIN_EXPORT, ExportKind::Func, origin);
-    exports.export(RESULT_EXPORT, ExportKind::Func, result);
-    exports.export(LIVE_SIZE_EXPORT, ExportKind::Func, live_size);
-
-    let mut code = CodeSection::new();
-    for _ in 0..function_count {
-        code.function(&body(&[]));
-    }
-    // The entry export runs the entry. Its result is `void`, whose ID is `0`,
-    // and the result global already holds `0`.
-    code.function(&body(&[Instruction::Call(entry)]));
-    for global in [
-        GLOBAL_STATUS,
-        GLOBAL_TRAP_CODE,
-        GLOBAL_ORIGIN,
-        GLOBAL_RESULT,
-    ] {
-        code.function(&body(&[Instruction::GlobalGet(global)]));
-    }
-    // No arena exists yet, so no byte of it is live.
-    code.function(&body(&[Instruction::I64Const(0)]));
 
     let mut module = Module::new();
-    module.section(&types);
+    module.section(&type_section);
     module.section(&functions);
     module.section(&memories);
-    module.section(&globals);
     module.section(&exports);
+    if !parts.segments.is_empty() {
+        let count = u32::try_from(parts.segments.len()).ok()?;
+        module.section(&DataCountSection { count });
+    }
     module.section(&code);
-    module.finish()
+    if !parts.segments.is_empty() {
+        let mut data = DataSection::new();
+        for segment in &parts.segments {
+            data.passive(segment.iter().copied());
+        }
+        module.section(&data);
+    }
+    Some(module.finish())
 }
 
-fn body(instructions: &[Instruction<'_>]) -> Function {
-    let mut function = Function::new([]);
-    for instruction in instructions {
+fn add_routine(
+    types: &mut Types,
+    functions: &mut FunctionSection,
+    code: &mut CodeSection,
+    routine: &Routine,
+) {
+    functions.function(types.intern(&routine.params, &routine.results));
+    // A routine's locals follow its parameters.
+    let mut function = Function::new_with_locals_types(routine.locals.iter().copied());
+    for instruction in &routine.body {
         function.instruction(instruction);
     }
-    function.instruction(&Instruction::End);
-    function
+    code.function(&function);
 }

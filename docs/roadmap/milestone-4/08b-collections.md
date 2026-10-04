@@ -19,7 +19,10 @@ Prerequisite: Step 8a merged. Stage 4A behavior step, WebAssembly backend.
 `array` construction, `array.of`, variadic array and dict tails, checked lookups
 returning `option`, `array.length`, `append`, `concat`, `slice`, `array.fold`,
 `dict.of` and `dict.entries` in canonical key order, array patterns, and
-`str`, `bytes`, and `dict` through their standard-library bodies. A `str` is a
+`str`, `bytes`, and `dict` through their standard-library bodies. The `str`,
+`bytes`, and `atom` literals themselves are already lowered by Step 5a, as arena
+objects built from passive data segments; this step adds the operations on them
+([surface inventory](supported-surface.md)). A `str` is a
 wrapper over an array of `char`, so it needs no kind of its own beyond what the
 arena names.
 

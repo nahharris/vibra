@@ -12,8 +12,8 @@
 use std::sync::OnceLock;
 
 use vibra_diagnostics::DiagnosticCode;
-use vibra_ir::{CheckedProgram, ObservedValue, Type, Value};
-use vibra_wasm_run::{Outcome, Runner};
+use vibra_ir::CheckedProgram;
+use vibra_wasm_run::{Observed, Outcome, Runner};
 
 use crate::runner::{ExecutionObservation, WasmObservation, wasm_memory_limit};
 
@@ -53,35 +53,34 @@ pub fn observe(program: &CheckedProgram) -> WasmObservation {
         Ok(runner) => runner,
         Err(reason) => return WasmObservation::Failed { reason },
     };
-    match runner.run_entry(module.bytes()) {
-        Ok(outcome) => observation(&outcome),
+    // The entry's result type says how the host reads the result slot.
+    let Some(entry) = program.functions().get(program.entry_index()) else {
+        return WasmObservation::Failed {
+            reason: "the program's entry is not one of its functions".to_owned(),
+        };
+    };
+    let result = entry.signature().result();
+    match runner.run_observed(module.bytes(), &result) {
+        Ok(Observed::Completed { value, .. }) => {
+            WasmObservation::Completed(ExecutionObservation {
+                result: Some(value.canonical_observation(&result)),
+                // Stage 4A has no host operation, so a run has no audit event.
+                audit_trace: Vec::new(),
+            })
+        }
+        Ok(Observed::Stopped(outcome)) => stopped(&outcome),
         Err(error) => WasmObservation::Failed {
             reason: error.to_string(),
         },
     }
 }
 
-/// What a finished run observed.
-fn observation(outcome: &Outcome) -> WasmObservation {
+/// What a run that did not complete observed.
+fn stopped(outcome: &Outcome) -> WasmObservation {
     match outcome {
-        // The skeleton lowers only the empty `void` entry, whose result ID is
-        // `0`. Reading any other result needs the arena accessors of a later
-        // step, so an ID the module does not report as `0` is a failure
-        // rather than a guess.
-        Outcome::Completed { result: 0, .. } => {
-            WasmObservation::Completed(ExecutionObservation {
-                result: Some(
-                    ObservedValue::Primitive(Value::Void)
-                        .canonical_observation(&Type::Void),
-                ),
-                // Stage 4A has no host operation, so a run has no audit event.
-                audit_trace: Vec::new(),
-            })
-        }
-        Outcome::Completed { result, .. } => WasmObservation::Failed {
-            reason: format!(
-                "the module reported the result ID {result} for a void entry"
-            ),
+        // `run_observed` reports a completed run as `Observed::Completed`.
+        Outcome::Completed { .. } => WasmObservation::Failed {
+            reason: "a completed run was reported as stopped".to_owned(),
         },
         Outcome::MemoryExhausted => WasmObservation::HostEvent(
             DiagnosticCode::RuntimeMemoryExhausted.as_atom().to_owned(),
@@ -133,31 +132,27 @@ mod tests {
     }
 
     #[test]
-    fn a_void_result_is_the_one_the_interpreter_observes() {
-        let observed = observation(&Outcome::Completed {
-            result: 0,
-            live_size: 0,
-        });
-        assert_eq!(
-            observed,
-            WasmObservation::Completed(ExecutionObservation {
-                result: Some("(record type: @void value: void)\n".to_owned()),
-                audit_trace: Vec::new(),
-            })
-        );
+    fn a_completed_run_is_not_a_stop() {
+        assert!(matches!(
+            stopped(&Outcome::Completed {
+                result: vibra_wasm_run::ResultSlot::from_bits(0),
+                live_size: 0
+            }),
+            WasmObservation::Failed { .. }
+        ));
     }
 
     #[test]
     fn memory_exhaustion_is_the_host_event_in_both_backends() {
         assert_eq!(
-            observation(&Outcome::MemoryExhausted),
+            stopped(&Outcome::MemoryExhausted),
             WasmObservation::HostEvent("@runtime.memory-exhausted".to_owned())
         );
     }
 
     #[test]
     fn a_stop_with_no_recorded_status_is_invalid_checked_program() {
-        let WasmObservation::Failed { reason } = observation(&Outcome::Defect {
+        let WasmObservation::Failed { reason } = stopped(&Outcome::Defect {
             cause: "the call stopped with no recorded status".to_owned(),
         }) else {
             panic!("a defect fails the Wasm backend");
@@ -170,7 +165,7 @@ mod tests {
 
     #[test]
     fn traps_and_failed_assertions_fail_the_backend_with_their_codes() {
-        let WasmObservation::Failed { reason } = observation(&Outcome::Trapped {
+        let WasmObservation::Failed { reason } = stopped(&Outcome::Trapped {
             code: TrapCode::InvalidHostValue,
             origin: Some(3),
         }) else {
@@ -178,21 +173,10 @@ mod tests {
         };
         assert!(reason.contains("@runtime.invalid-host-value"), "{reason}");
         assert!(matches!(
-            observation(&Outcome::AssertionFailed {
+            stopped(&Outcome::AssertionFailed {
                 failure: Failure::True,
                 origin: None,
                 operands: None
-            }),
-            WasmObservation::Failed { .. }
-        ));
-    }
-
-    #[test]
-    fn a_result_id_the_skeleton_cannot_read_is_a_failure() {
-        assert!(matches!(
-            observation(&Outcome::Completed {
-                result: 9,
-                live_size: 0
             }),
             WasmObservation::Failed { .. }
         ));

@@ -19,7 +19,7 @@ Availability shrinks monotonically in M4: each step moves forms from
 
 | AST variant | Disposition | Owner | Notes |
 | --- | --- | --- | --- |
-| `ExpressionKind::Literal` | Lowered | Step 5a | Scalars; `atom`, `str`, and `bytes` literals follow their kinds in Step 8b |
+| `ExpressionKind::Literal` | Lowered | Step 5a | Scalars, `void`, and the `atom`, `str`, and `bytes` literals, which Step 5a builds as arena objects from passive data segments so the accessors have emitted values to read; their operations follow in Step 8b |
 | `ExpressionKind::Name` | Lowered | Step 5b | Locals, module values, and function values as names: Step 6 |
 | `ExpressionKind::Application` | Lowered | Step 5b | Constructors, projection, and direct calls: Step 5b; calls through function values, `types:`, and tail calls: Step 6; lookups, `array.of`, and `dict.of`: Step 8b; contract-member calls: Step 9 |
 | `ExpressionKind::Lambda` | Lowered | Step 6 | Closures, captures, and generic lambdas |

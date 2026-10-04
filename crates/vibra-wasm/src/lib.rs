@@ -9,23 +9,29 @@
 //!
 //! # Status
 //!
-//! Milestone 4 Step 4 is the skeleton. It lowers one program shape, the empty
-//! `void` entry, which is what the differential harness needs to prove the
-//! pipeline end to end. Every other form returns [`NotLowered`], naming each
-//! form, and never a module that omits part of the program. Steps 5a onward
-//! move forms out of [`NotLowered`] one step at a time.
+//! Milestone 4 Step 5a builds the memory layer of every module: the value arena,
+//! precise reference counting with a worklist release, the handle table, the
+//! instance state, and the host accessors ([`layout`] states the
+//! representation). It lowers the scalar and `void` literals, the `bool`, `str`,
+//! `bytes`, and atom literals, and the sequence. Every other form returns
+//! [`NotLowered`], naming each form, and never a module that omits part of the
+//! program. Steps 5b onward move forms out of [`NotLowered`] one step at a time.
 //!
 //! # The module
 //!
 //! A module defines one 32-bit linear memory exported as `vibra_v1_memory`,
-//! imports nothing (the empty entry uses no native), exports the accessors of
-//! `docs/spec/06-runtime.md`, "WebAssembly boundary", that do not depend on a
-//! value kind or on tests, and has no custom section. Emission is
-//! deterministic: the bytes depend only on the checked program.
+//! imports nothing (no program lowered so far uses a native), exports the
+//! accessors of `docs/spec/06-runtime.md`, "WebAssembly boundary", that do not
+//! depend on a test, and has no custom section. Emission is deterministic: the
+//! bytes depend only on the checked program.
 
 mod classify;
 mod encode;
 mod form;
+pub mod layout;
+mod lower;
+mod runtime;
+pub mod support;
 
 use vibra_ir::{CheckedProgram, SourceOrigin};
 
@@ -113,8 +119,23 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
     if let Some(not_lowered) = NotLowered::from_uses(classify::unlowered(program)) {
         return Err(not_lowered);
     }
+    let fns = encode::routines_for(functions);
+    let mut lowering = lower::Lowering::new(&fns);
+    let mut lowered = Vec::new();
+    for function in program.functions() {
+        lowered.push(lowering.function(function)?);
+    }
+    let include_new = lowering.built_object();
+    let parts = encode::Parts {
+        functions: lowered,
+        entry,
+        segments: lowering.into_segments(),
+        include_new,
+    };
+    let bytes =
+        encode::module(&parts).ok_or_else(|| NotLowered::single(Form::ModuleSize))?;
     Ok(EmittedModule {
-        bytes: encode::module(functions, entry),
+        bytes,
         origins: OriginTable::default(),
     })
 }
