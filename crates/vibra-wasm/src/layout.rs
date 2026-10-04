@@ -110,17 +110,19 @@
 //!
 //! The handle table is one block of 16-byte entries from the arena itself,
 //! `[id: u64][offset: u32][next_free: u32]`, grown by allocating a block of
-//! twice the capacity, copying, and freeing the old one. It is freed when its
-//! last ID is released, so a balanced program returns the live size to its
-//! start. An ID is `counter << 32 | slot`: the counter is the instance's
+//! twice the capacity, copying, and freeing the old one. Entry 0 is the block's
+//! own header (its `count` and `size` words, like every block's), so the first
+//! slot is 1 and the first block of 16 entries holds 15 IDs. The table is freed
+//! when its last ID is released, so a balanced program returns the live size to
+//! its start. An ID is `counter << 32 | slot`: the counter is the instance's
 //! `id_counter` after an increment, so it is at least `1`, which makes `0`
 //! invalid and the IDs strictly increasing, and the slot is the entry's index.
 //! A released slot is reused by a later ID, but the counter is not, so an ID is
-//! never reused. A lookup checks that the slot is in range and that the entry
-//! holds exactly that ID, which rejects a zero, a stale, a never-issued, and a
-//! released ID. The counter has 32 bits: an ID that would exceed them is the
-//! host event, like exhausted memory. Each live entry holds one reference to
-//! its value.
+//! never reused. A lookup checks that the slot is neither the header nor out of
+//! range and that the entry holds exactly that ID, which rejects a zero, a
+//! stale, a never-issued, and a released ID. The counter has 32 bits: an ID
+//! that would exceed them is the host event, like exhausted memory. Each live
+//! entry holds one reference to its value.
 //!
 //! The IDs of two instances are not told apart by the instance, which cannot
 //! know of the other. The host does: it tags each ID with its instance and
@@ -232,7 +234,8 @@ pub const STRIDE_BYTES: u32 = 1;
 
 /// The handle table's entry size in bytes.
 pub const TABLE_ENTRY_SIZE: u32 = 16;
-/// The entry count of the first handle-table block.
+/// The entry count of the first handle-table block, entry 0 (its header)
+/// included.
 pub const TABLE_FIRST_CAPACITY: u32 = 16;
 
 /// What a cell of the cells layout holds. The codes are the class bytes, and

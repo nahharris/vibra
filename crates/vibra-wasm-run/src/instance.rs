@@ -41,6 +41,17 @@ pub struct ValueId {
     id: u64,
 }
 
+impl ValueId {
+    /// The ID's number, for a test of the rules the specification states about
+    /// IDs: strictly increasing, never reused, never zero. No other code reads
+    /// it, and it appears in no result, encoding, or snapshot.
+    #[doc(hidden)]
+    #[must_use]
+    pub const fn number_for_tests(&self) -> u64 {
+        self.id
+    }
+}
+
 impl fmt::Debug for ValueId {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("ValueId(..)")
@@ -90,8 +101,10 @@ impl Instance {
     }
 
     /// The ID an entry's result slot holds, for a result that is an arena
-    /// value. The caller releases it.
-    pub(crate) fn adopt(&self, slot: ResultSlot) -> ValueId {
+    /// value, which the host holds until it releases it. A slot that holds a
+    /// scalar or `void` gives an ID the module rejects.
+    #[must_use]
+    pub const fn result_id(&self, slot: ResultSlot) -> ValueId {
         ValueId {
             instance: self.tag,
             id: slot.0,

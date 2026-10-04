@@ -96,6 +96,10 @@ pub struct ModuleSummary {
     pub exports: Vec<String>,
     /// The pages of the one memory the module defines at instantiation.
     pub initial_pages: u64,
+    /// The functions the module defines, imports excluded.
+    pub functions: usize,
+    /// The passive and active data segments the module carries.
+    pub data_segments: usize,
 }
 
 /// Validates `bytes` as a v1 module and reports what it declares.
@@ -144,6 +148,14 @@ pub fn validate(bytes: &[u8]) -> Result<ModuleSummary, ValidationError> {
                         .imports
                         .push((import.module.to_owned(), import.name.to_owned()));
                 }
+            }
+            Payload::FunctionSection(reader) => {
+                summary.functions =
+                    usize::try_from(reader.count()).unwrap_or(usize::MAX);
+            }
+            Payload::DataSection(reader) => {
+                summary.data_segments =
+                    usize::try_from(reader.count()).unwrap_or(usize::MAX);
             }
             Payload::MemorySection(reader) => {
                 for memory in reader {

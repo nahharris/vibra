@@ -840,15 +840,22 @@ fn new_id(fns: &Routines) -> Routine {
             set(new_table),
             get(capacity),
             I::If(EMPTY),
-            // Copy the used entries (every slot of a full table is used).
+            // Copy the used entries, which follow the block header that entry 0
+            // is. Every slot of a full table is used.
             get(new_table),
+            c32(index(TABLE_ENTRY_SIZE)),
+            I::I32Add,
         ],
     );
     push(&mut code, &load_state32(state::TABLE));
     push(
         &mut code,
         &[
+            c32(index(TABLE_ENTRY_SIZE)),
+            I::I32Add,
             get(slot),
+            c32(1),
+            I::I32Sub,
             shift.clone(),
             I::I32Shl,
             I::MemoryCopy {
@@ -869,6 +876,13 @@ fn new_id(fns: &Routines) -> Routine {
             ZERO,
             get(new_capacity),
             st32(state::TABLE_CAPACITY),
+            // A fresh table's entry 0 is its block header, so slots start at 1.
+            get(slot),
+            I::I32Eqz,
+            I::If(EMPTY),
+            c32(1),
+            set(slot),
+            I::End,
             I::End,
         ],
     );
@@ -926,12 +940,12 @@ fn entry_of(fns: &Routines) -> Routine {
     let mut code = Vec::new();
     push(&mut code, &[get(0), I::I64Eqz, I::If(EMPTY)]);
     push(&mut code, &invalid_host_value(fns));
-    push(
-        &mut code,
-        &[I::End, get(0), I::I32WrapI64, set(slot), get(slot)],
-    );
+    push(&mut code, &[I::End, get(0), I::I32WrapI64, set(slot)]);
+    // Slot 0 is the table block's own header, and a slot at or past the
+    // high-water mark was never handed out.
+    push(&mut code, &[get(slot), I::I32Eqz, get(slot)]);
     push(&mut code, &load_state32(state::TABLE_USED));
-    push(&mut code, &[I::I32GeU, I::If(EMPTY)]);
+    push(&mut code, &[I::I32GeU, I::I32Or, I::If(EMPTY)]);
     push(&mut code, &invalid_host_value(fns));
     code.push(I::End);
     push(&mut code, &load_state32(state::TABLE));

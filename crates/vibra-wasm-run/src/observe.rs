@@ -104,7 +104,7 @@ impl Instance {
         if let Some(value) = scalar(slot, result)? {
             return Ok(ObservedValue::Primitive(value));
         }
-        let id = self.adopt(slot);
+        let id = self.result_id(slot);
         let read = self.read_arena(result, &id);
         let released = self.release(id);
         let value = read?;
