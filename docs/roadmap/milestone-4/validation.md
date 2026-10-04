@@ -89,6 +89,7 @@ the anchors of headings it renames.
 | 4 | `cargo test --locked --offline -p vibra-wasm -p vibra-wasm-run -p vibra-ir`<br>`cargo test --locked --offline -p vibra-conformance --test parity_inventory_m4_step4 --test wasm_skeleton_m4_step4 --test differential_m4_step4 --test typed_ir_identity_m4_step4 --test architecture_boundary --test corpus_step3 --test activations_m4_step3` |
 | 5b | `cargo test --locked --offline -p vibra-conformance --test core_lowering_m4_step5b` (the host tests of the core lowering, depth, and balance) and the Step 4 row |
 | 6 | `cargo test --locked --offline -p vibra-conformance --test calls_m4_step6 --test initializer_calls_m4_step6` (the host tests of calls, generics, tail calls, depth, and reclamation; the second holds every module-initializer shape in the interpreter) and the Step 4 and Step 5b rows |
+| 7 | `cargo test --locked --offline -p vibra-conformance --test patterns_m4_step7` (the host tests of every pattern kind, destructuring, `let-else`, `as`, `try`, and `never`, the balance of every path, and tail position through each form) and the Step 4, Step 5b, and Step 6 rows |
 | 5a–12 | the emitter crate `vibra-wasm` and the runner crate `vibra-wasm-run`, with `cargo test --locked --offline -p vibra-conformance` for the parity inventory and the native harness (`natives_m3_step4b`) |
 | 8a–8c | `cargo test --locked --offline -p vibra-types` for the standard-library input and registry, and the registry vectors the step adds |
 | 11 | `cargo test --locked --offline -p vibra-cli` for `run` and `test` output |
