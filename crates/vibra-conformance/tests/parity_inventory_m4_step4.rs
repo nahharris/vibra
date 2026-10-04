@@ -32,14 +32,22 @@ fn corpus_root() -> PathBuf {
 /// case is the latest step among the forms it needs.
 fn suggested_step(form: &str) -> Option<&'static str> {
     Some(match form {
-        "result" => "5b",
+        // Lowered by Step 5b; no longer reported, kept for a stale row.
         "sequence" | "variable" | "let" | "if" | "return" | "global"
-        | "module-value" | "record" | "variant" | "wrap" | "project" | "tuple"
-        | "tuple-project" | "widen" | "parameters" | "call:direct" => "5b",
+        | "module-value" | "record" | "variant" | "project" | "tuple"
+        | "tuple-project" | "widen" | "call:direct" => "5b",
         "closure" | "captured" | "function" | "default" | "call:indirect"
-        | "call:tail-direct" | "call:tail-indirect" => "6",
+        | "call:tail-direct" | "call:tail-indirect" | "type:param"
+        | "type:function" => "6",
         "match" | "try" => "7",
-        "array" | "dict" | "lookup" => "8b",
+        "array"
+        | "dict"
+        | "lookup"
+        | "type:array"
+        | "type:dict"
+        | "parameters:variadic"
+        | "wrap" => "8b",
+        "type:interface" => "9",
         "call:contract" | "call:tail-contract" | "contract-implementation" => "9",
         "test-module" => "11",
         other => {

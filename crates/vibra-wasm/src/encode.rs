@@ -6,24 +6,39 @@
 //! them. No custom section is written, not even a `name` section, because a v1
 //! module the toolchain emits before `vibra build` exists carries none.
 //!
-//! The function index space is the lowered functions in source order, then the
-//! runtime routines of [`crate::runtime`], the entry export, and last the object
-//! constructor when the program builds an object.
+//! The function index space is the lowered functions (the language functions in
+//! source order, then the module-value initializers), then the runtime routines
+//! of [`crate::runtime`], the entry export, the frame routines, and last the
+//! object constructor when the program builds an object. The one function table
+//! holds the language functions at their own indices, which is how the
+//! dispatcher reaches the function of a frame.
+
+use std::borrow::Cow;
 
 use vibra_ir::boundary::{ENTRY_EXPORT, MEMORY_EXPORT};
 use wasm_encoder::{
-    CodeSection, DataCountSection, DataSection, ExportKind, ExportSection, Function,
-    FunctionSection, MemorySection, MemoryType, Module, TypeSection, ValType,
+    CodeSection, ConstExpr, DataCountSection, DataSection, ElementSection, Elements,
+    ExportKind, ExportSection, Function, FunctionSection, MemorySection, MemoryType,
+    Module, RefType, TableSection, TableType, TypeSection, ValType,
 };
 
-use crate::lower::FunctionCode;
 use crate::runtime::{
-    Routine, Routines, accessor_exports, core_routines, entry_export, new_object,
+    Ins, Routine, Routines, ValueClass, accessor_exports, core_routines, entry_export,
+    frame_routines, new_object, raw_entry_export,
 };
 
 /// The pages of linear memory the module defines. The arena grows from here by
 /// `memory.grow`.
 const INITIAL_PAGES: u64 = 1;
+
+/// A lowered function: its signature, locals after its parameters, and body.
+#[derive(Debug)]
+pub(crate) struct FunctionCode {
+    pub(crate) params: Vec<ValType>,
+    pub(crate) results: Vec<ValType>,
+    pub(crate) locals: Vec<ValType>,
+    pub(crate) body: Vec<Ins>,
+}
 
 /// The function signatures of a module, numbered in the order they are first
 /// used, so the type section depends only on the program.
@@ -48,11 +63,31 @@ impl Types {
     }
 }
 
+/// How the entry export starts the program.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Entry {
+    /// A program: the entry is the language function `function`, run on a
+    /// frame of `slots` slots by the dispatcher, in a module with
+    /// `module_values` module values.
+    Program {
+        function: u32,
+        slots: u32,
+        module_values: u32,
+        class: ValueClass,
+    },
+    /// A scaffold (`support`): the entry is the plain function `function`,
+    /// which leaves a value of `class` on the operand stack.
+    Raw { function: u32, class: ValueClass },
+}
+
 /// What a module is made of.
 #[derive(Debug)]
 pub(crate) struct Parts {
     pub(crate) functions: Vec<FunctionCode>,
-    pub(crate) entry: u32,
+    /// The functions of the function table, in table order: the indices of the
+    /// language functions.
+    pub(crate) table: Vec<u32>,
+    pub(crate) entry: Entry,
     pub(crate) segments: Vec<Vec<u8>>,
     pub(crate) include_new: bool,
 }
@@ -62,22 +97,18 @@ pub(crate) const fn routines_for(function_count: u32) -> Routines {
     Routines::plan(function_count)
 }
 
-/// Encodes the module, or `None` when the entry is not one of its functions.
+/// Encodes the module, or `None` when a size does not fit 32 bits.
 pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
     let function_count = u32::try_from(parts.functions.len()).ok()?;
     let fns = routines_for(function_count);
-    let entry_class = parts
-        .functions
-        .get(usize::try_from(parts.entry).ok()?)?
-        .class;
 
     let mut types = Types::default();
+    // The type of every function the dispatcher can reach.
+    let dispatch_type = types.intern(&[ValType::I32], &[]);
     let mut functions = FunctionSection::new();
     let mut code = CodeSection::new();
     for lowered in &parts.functions {
-        let results = lowered.class.val_type();
-        let results = results.as_slice();
-        functions.function(types.intern(&[], results));
+        functions.function(types.intern(&lowered.params, &lowered.results));
         let mut function =
             Function::new_with_locals_types(lowered.locals.iter().copied());
         for instruction in &lowered.body {
@@ -86,7 +117,16 @@ pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
         code.function(&function);
     }
     let mut routines = core_routines(&fns);
-    routines.push(entry_export(&fns, parts.entry, entry_class));
+    routines.push(match parts.entry {
+        Entry::Program {
+            function,
+            slots,
+            module_values,
+            class,
+        } => entry_export(&fns, function, slots, module_values, class),
+        Entry::Raw { function, class } => raw_entry_export(&fns, function, class),
+    });
+    routines.extend(frame_routines(&fns, dispatch_type));
     if parts.include_new {
         routines.push(new_object(&fns));
     }
@@ -99,6 +139,22 @@ pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
     for routine in &routines {
         add_routine(&mut types, &mut functions, &mut code, routine);
     }
+
+    let table_size = u64::try_from(parts.table.len()).ok()?;
+    let mut tables = TableSection::new();
+    tables.table(TableType {
+        element_type: RefType::FUNCREF,
+        table64: false,
+        minimum: table_size,
+        maximum: Some(table_size),
+        shared: false,
+    });
+    let mut elements = ElementSection::new();
+    elements.active(
+        None,
+        &ConstExpr::i32_const(0),
+        Elements::Functions(Cow::Borrowed(&parts.table)),
+    );
 
     let mut memories = MemorySection::new();
     memories.memory(MemoryType {
@@ -119,8 +175,10 @@ pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
     let mut module = Module::new();
     module.section(&type_section);
     module.section(&functions);
+    module.section(&tables);
     module.section(&memories);
     module.section(&exports);
+    module.section(&elements);
     if !parts.segments.is_empty() {
         let count = u32::try_from(parts.segments.len()).ok()?;
         module.section(&DataCountSection { count });

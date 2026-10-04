@@ -9,62 +9,40 @@ use vibra_ir::SourceOrigin;
 ///
 /// A form is either lowered or named by [`NotLowered`]; the emitter never
 /// approximates one. Each later step of Stage 4A moves forms from the second
-/// kind to the first, and the order of the variants is the order of the
-/// checked program's own structure, not an order of delivery.
+/// kind to the first, and the order of the variants is the order of the checked
+/// program's own structure, not an order of delivery. A form whose lowering
+/// differs by case carries a detail naming the case: see
+/// [`UnloweredForm::detail`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Form {
     /// A program with more functions than the 32-bit indices of a module admit.
     ModuleSize,
-    /// A module-level value.
-    ModuleValue,
-    /// A function with a fixed, labelled, or variadic parameter.
+    /// A function with a variadic parameter.
     Parameters,
-    /// A function whose result type no lowered value kind represents.
-    Result,
+    /// A value of a type that no lowered value kind represents yet: a type with
+    /// a generic parameter, a function type, an `array` or `dict`, or an
+    /// interface value.
+    Type,
     /// One of the closed verified test assertion functions.
     TestAssertion,
-    /// A function that implements a contract member.
-    ContractImplementation,
     /// A call of a compiler registry operation.
     External,
     /// An omitted labelled argument, resolved to the callee's default.
     Default,
-    /// A read of an activation slot.
-    Variable,
-    /// A read of a module-level value.
-    Global,
     /// A module-level function used as a value.
     Function,
     /// A `lambda` with its closure environment.
     Closure,
     /// A read of a closure-environment slot.
     Captured,
-    /// An immutable binding.
-    Let,
     /// A `match`.
     Match,
-    /// A widening to a union or `atom`.
-    Widen,
     /// A `try`.
     Try,
-    /// A `return`.
-    Return,
-    /// An `if`.
-    If,
-    /// A call.
-    Call,
-    /// A record constructor.
-    Record,
-    /// An enum variant constructor.
-    Variant,
-    /// A wrapper constructor.
+    /// A wrapper constructor over a builtin text type.
     Wrap,
-    /// A record projection.
-    Project,
-    /// A tuple constructor.
-    Tuple,
-    /// A tuple projection.
-    TupleProject,
+    /// A call that is not a direct call in non-tail position.
+    Call,
     /// An array built from element operands.
     Array,
     /// A dict built from entries.
@@ -79,31 +57,18 @@ impl Form {
     pub const fn name(self) -> &'static str {
         match self {
             Self::ModuleSize => "module-size",
-            Self::ModuleValue => "module-value",
             Self::Parameters => "parameters",
-            Self::Result => "result",
+            Self::Type => "type",
             Self::TestAssertion => "test-assertion",
-            Self::ContractImplementation => "contract-implementation",
             Self::External => "external",
             Self::Default => "default",
-            Self::Variable => "variable",
-            Self::Global => "global",
             Self::Function => "function",
             Self::Closure => "closure",
             Self::Captured => "captured",
-            Self::Let => "let",
             Self::Match => "match",
-            Self::Widen => "widen",
             Self::Try => "try",
-            Self::Return => "return",
-            Self::If => "if",
-            Self::Call => "call",
-            Self::Record => "record",
-            Self::Variant => "variant",
             Self::Wrap => "wrap",
-            Self::Project => "project",
-            Self::Tuple => "tuple",
-            Self::TupleProject => "tuple-project",
+            Self::Call => "call",
             Self::Array => "array",
             Self::Dict => "dict",
             Self::Lookup => "lookup",
@@ -146,12 +111,13 @@ impl UnloweredForm {
         self.form
     }
 
-    /// What further distinguishes the use within its form, for the two forms
-    /// whose lowering differs by case: the registry symbol of an
-    /// [`Form::External`], whose rows are lowered by different steps, and the
-    /// kind of a [`Form::Call`] (`direct`, `indirect`, or `contract`, each also
-    /// `tail-` when it is an explicit tail transfer). `None` for every other
-    /// form.
+    /// What further distinguishes the use within its form, for the forms whose
+    /// lowering differs by case and is owned by different steps: the registry
+    /// symbol of an [`Form::External`]; the kind of a [`Form::Call`]
+    /// (`direct`, `indirect`, or `contract`, each also `tail-` when it is an
+    /// explicit tail transfer); the kind of type of a [`Form::Type`] (`param`,
+    /// `function`, `array`, `dict`, or `interface`); and `variadic` for a
+    /// [`Form::Parameters`]. `None` for every other form.
     #[must_use]
     pub const fn detail(&self) -> Option<&'static str> {
         self.detail
@@ -184,6 +150,13 @@ impl NotLowered {
     pub(crate) fn single(form: Form) -> Self {
         Self {
             forms: vec![UnloweredForm::new(form, None)],
+        }
+    }
+
+    /// A value of a type no lowered kind represents, named by its kind.
+    pub(crate) fn type_of(kind: &'static str, origin: Option<SourceOrigin>) -> Self {
+        Self {
+            forms: vec![UnloweredForm::new(Form::Type, origin).with_detail(kind)],
         }
     }
 

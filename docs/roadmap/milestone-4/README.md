@@ -4,9 +4,10 @@ Status: in progress. Step 1, the Stage 4A contract freeze, has landed
 (PR #354), and so have Step 2, the contract-member forms and the binder fix
 (PR #355), Step 2b, the boolean constants (PR #357), and Step 3, deep non-tail recursion in the reference interpreter
 (PR #356), and Step 4, the WebAssembly backend skeleton and the differential
-harness (PR #358). Step 5a, the value arena and its runtime, is proposed as
-`landed` by its pull request and is conditional on that PR merging; no other
-implementation step has landed
+harness (PR #358), and Step 5a, the value arena and its runtime (PR #359).
+Step 5b, the data forms and core lowering, is proposed as `landed` by its pull
+request and is conditional on that PR merging; no other implementation step has
+landed
 Decision ledger: [decision-ledger.md](decision-ledger.md)
 Surface inventory: [supported-surface.md](supported-surface.md)
 Validation: [validation.md](validation.md)
@@ -313,8 +314,8 @@ tail-recursive walk that grows neither stack nor arena.
 | 2b | [Boolean constants and constant patterns](02b-boolean-constants.md): `true` and `false` become `@std.bool` values of the prelude with no source boolean literal, a pattern name that resolves to a constant module `def` is a value pattern, and every prelude name is reserved at a binder (per ledger D14.1 and D16) | 2 | landed | PR #357, merge 388dfe1 |
 | 3 | [The specified outcome of deep non-tail recursion](03-activations.md) in the reference interpreter, replacing the host-event rule: heap activations, a memory budget, and `@runtime.memory-exhausted` as the host event, with `expect.host_event` (per G1) | 2 | landed | PR #356, merge 8a04c08 |
 | 4 | [Wasm backend skeleton and differential harness](04-skeleton.md): the emitter crate `vibra-wasm`, the runner crate `vibra-wasm-run` with Wasmtime 49.0.2 (the latest; Cranelift only) behind it, `wasm-encoder` and `wasmparser` 0.261.0, the toolchain raised to Rust 1.96.1, a module that exports the six accessors that depend on no value kind and no test (the rest of the export table arrives in 5a and 11), the corpus contract of G4, the parity inventory and its test, deterministic emission, and a CI job — infrastructure step | 3 | landed | PR #358, merge 704b7ad |
-| 5a | [The value arena and its runtime](05a-arena.md): linear-memory arena, reference counting, the handle table, the exported accessors that Step 4 left out (`vibra_v1_release`, `vibra_v1_variant`, `vibra_v1_length`, `vibra_v1_read_i32`, `vibra_v1_read_i64`, `vibra_v1_read_f32`, `vibra_v1_read_f64`, and `vibra_v1_read_id`), memory exhaustion, scalars and literals, and the canonical result observation | 4 | landed, conditional on its PR merging | Branch `claude/m4-step-05a-arena`; PR and merge commit to be recorded when the PR merges |
-| 5b | [Data and core lowering](05b-core-lowering.md): declared and anonymous records, enums, tuples, wrappers, and unions with discriminants in written order, projection, module values, `let`, body sequences, `if`, `return`, and direct calls | 5a | not started | — |
+| 5a | [The value arena and its runtime](05a-arena.md): linear-memory arena, reference counting, the handle table, the exported accessors that Step 4 left out (`vibra_v1_release`, `vibra_v1_variant`, `vibra_v1_length`, `vibra_v1_read_i32`, `vibra_v1_read_i64`, `vibra_v1_read_f32`, `vibra_v1_read_f64`, and `vibra_v1_read_id`), memory exhaustion, scalars and literals, and the canonical result observation | 4 | landed | PR #359, merge fc374df |
+| 5b | [Data and core lowering](05b-core-lowering.md): declared and anonymous records, enums, tuples, wrappers, and unions with discriminants in written order, projection, module values, `let`, body sequences, `if`, `return`, and direct calls | 5a | landed, conditional on its PR merging | Branch `claude/m4-step-05b-core-lowering`; PR and merge commit to be recorded when the PR merges |
 | 6 | [Calls](06-calls.md): generic instantiation, function values, closures, indirect calls, a tail call to every kind of callee, the deep non-tail recursion outcome, and a bounded live arena across a long allocating tail loop | 5b | not started | — |
 | 7 | [Patterns and typed failure](07-patterns-failure.md): `match` with every pattern kind, destructuring bindings, `let-else`, `as` narrowing, `try`, and `never` | 6 | not started | — |
 | 8a | [Integer and `char` primitive rows](08a-integer-primitives.md), lowered before emission and held to shared sample vectors | 7 | not started | — |

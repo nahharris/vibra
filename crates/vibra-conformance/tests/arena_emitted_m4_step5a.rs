@@ -83,7 +83,7 @@ fn interpreter_result(program: &CheckedProgram) -> String {
 
 fn observed_result(program: &CheckedProgram, ty: &Type) -> String {
     match runner()
-        .run_observed(&emitted(program), ty)
+        .run_observed(&emitted(program), ty, &[])
         .expect("the module runs")
     {
         Observed::Completed { value, .. } => value.canonical_observation(ty),
@@ -205,7 +205,7 @@ fn a_literal_program_is_balanced_and_only_its_arena_result_is_held() {
     for value in literals() {
         let ty = value.ty();
         let Observed::Completed { live, .. } = runner
-            .run_observed(&emitted(&literal(value.clone())), &ty)
+            .run_observed(&emitted(&literal(value.clone())), &ty, &[])
             .expect("runs")
         else {
             panic!("{value:?} did not complete");
@@ -294,12 +294,14 @@ fn a_literal_larger_than_the_limit_is_the_host_event_with_no_partial_result() {
     let bytes = emitted(&literal(Value::Bytes(vec![0xAB; 600 * 1024])));
     let small = Runner::new(MemoryLimit::new(512 * 1024)).expect("engine");
     assert_eq!(
-        small.run_observed(&bytes, &Type::Bytes).expect("runs"),
+        small.run_observed(&bytes, &Type::Bytes, &[]).expect("runs"),
         Observed::Stopped(Outcome::MemoryExhausted)
     );
     // The limit the harness applies runs it.
     assert!(matches!(
-        runner().run_observed(&bytes, &Type::Bytes).expect("runs"),
+        runner()
+            .run_observed(&bytes, &Type::Bytes, &[])
+            .expect("runs"),
         Observed::Completed { .. }
     ));
 }
@@ -310,7 +312,7 @@ fn the_limit_at_exactly_the_programs_need_runs_and_one_page_under_does_not() {
     let runs = |pages: usize| {
         Runner::new(MemoryLimit::new(pages * 65_536))
             .expect("engine")
-            .run_observed(&bytes, &Type::Bytes)
+            .run_observed(&bytes, &Type::Bytes, &[])
             .expect("runs")
     };
     let need = (1..=16)

@@ -1,0 +1,19 @@
+(defn main () (tuple i32 i32 str i64 bool i32)
+  (tupleof (early true) (early false) (join (left) (right)) (wide 2i64) (echo true) (scale 4i32 factor: 3i32)))
+
+(defn early (flag bool) i32
+  (let held (tupleof "c" "d"))
+  (if flag (return 1i32) void)
+  2i32)
+
+(defn left () str "l")
+(defn right () str "r")
+
+(defn join (a str b str) str
+  (let joined (pair a b))
+  joined)
+
+(defn pair (a str b str) str a)
+(defn wide (value i64) i64 (let copy value) copy)
+(defn echo (value bool) bool (let copy value) copy)
+(defn scale (value i32) i32 labelled: (factor i32 1i32) (let copy value) copy)

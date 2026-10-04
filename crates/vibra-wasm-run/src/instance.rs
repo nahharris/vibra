@@ -211,6 +211,35 @@ impl Instance {
         })
     }
 
+    /// Reads `length` bytes of the module's linear memory at `offset`, for the
+    /// host tests of the layout (`vibra_wasm::layout`): the depth the frame
+    /// stack reached, and which blocks a module-value table holds. Only
+    /// toolchain-owned code reads the memory, and no result, encoding, or
+    /// snapshot holds what it reads.
+    ///
+    /// # Errors
+    ///
+    /// A defect when the module exports no memory or the range is outside it.
+    #[doc(hidden)]
+    pub fn read_memory_for_tests(
+        &mut self,
+        offset: u32,
+        length: usize,
+    ) -> Result<Vec<u8>, Outcome> {
+        let defect = |cause: &str| Outcome::Defect {
+            cause: cause.to_owned(),
+        };
+        let memory = self
+            .instance
+            .get_memory(&mut self.store, vibra_ir::boundary::MEMORY_EXPORT)
+            .ok_or_else(|| defect("the module exports no memory"))?;
+        let mut bytes = vec![0_u8; length];
+        memory
+            .read(&self.store, offset as usize, &mut bytes)
+            .map_err(|_| defect("the range is outside the memory"))?;
+        Ok(bytes)
+    }
+
     /// Drops the host's hold on an ID. The ID is invalid from then on.
     ///
     /// # Errors

@@ -60,7 +60,7 @@ pub fn observe(program: &CheckedProgram) -> WasmObservation {
         };
     };
     let result = entry.signature().result();
-    match runner.run_observed(module.bytes(), &result) {
+    match runner.run_observed(module.bytes(), &result, program.types()) {
         Ok(Observed::Completed { value, .. }) => {
             WasmObservation::Completed(ExecutionObservation {
                 result: Some(value.canonical_observation(&result)),

@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-union-injection"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A member value widens to a declared or an anonymous union and attaches its member: the encoding names the member type, a declared union keeps its written member order, and an anonymous union its canonical order."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }
