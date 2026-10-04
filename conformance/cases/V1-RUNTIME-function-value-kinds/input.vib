@@ -1,0 +1,15 @@
+(deftype holder (record run (fn (i32) i32)))
+
+(defn main () (tuple i32 i32 i32 atom atom)
+  (let bound id)
+  (let held (holder run: id))
+  (let f level)
+  (tupleof (apply id 1i32) (bound 2i32) ((held @run) 3i32) (f "a") (f "b" severity: @error)))
+
+(defn id (value i32) i32 value)
+
+(defn apply (f (fn (i32) i32) value i32) i32 (f value))
+
+(defn level (message str) atom
+  labelled: (severity atom @info)
+  severity)

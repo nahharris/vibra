@@ -550,22 +550,8 @@ fn the_host_holds_exactly_the_result_until_it_releases_it() {
 // -- negative: what is still not lowered ----------------------------------------
 
 #[test]
-fn a_tail_call_is_not_lowered_as_a_call_that_grows_the_frame_stack() {
-    let program = checked("(defn main () i32 (leaf))\n(defn leaf () i32 7i32)\n");
-    let error = vibra_wasm::emit(&program).expect_err("a tail call is Step 6's");
-    let kinds = error
-        .forms()
-        .iter()
-        .filter(|used| used.form().name() == "call")
-        .map(|used| used.detail())
-        .collect::<Vec<_>>();
-    assert_eq!(kinds, [Some("tail-direct")]);
-}
-
-#[test]
 fn the_forms_of_later_steps_are_named_and_never_approximated() {
     for (source, form) in [
-        ("(defn main () i32 ((lambda () i32 7i32)))\n", "closure"),
         (
             "(defn main () i32 (match 1i32 1i32 2i32 - 3i32))\n",
             "match",

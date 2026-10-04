@@ -106,7 +106,7 @@
 //! | `dict` | 8 | the entries, each a reference to a two-component `tuple`, so a dict's entry reads like an array element |
 //! | `enum` | 8 | `len` is `0`, or `1` for a non-`void` payload |
 //! | `wrapper`, `union` | 8 | one cell, the representation or the member value |
-//! | `function` | 8 | the captured values, which no host reads |
+//! | `function` | 8 | the function value's cells (see "Activations and the dispatcher"), which no host reads |
 //!
 //! # The handle table
 //!
@@ -157,15 +157,17 @@
 //! # Activations and the dispatcher
 //!
 //! A language activation lives in the arena and never on the engine's stack.
-//! This is the one mechanism of every call, and Step 6 extends it: indirect
-//! calls, closures, tail calls to every kind of callee, and generics are other
-//! ways to choose the frame to push or replace, not other mechanisms.
+//! This is the one mechanism of every call: indirect calls, closures, tail
+//! calls to every kind of callee, and generics are other ways to choose the
+//! frame to push or replace, not other mechanisms.
 //!
 //! **Frame.** A frame is `[resume: u32][function: u32][slots: u32][caller: u32]`
 //! followed by the cells layout of its `slots`: the class bytes padded to 8, and
 //! then the cells ([`frame`]). A function's slots are its parameters in
-//! parameter order, then its `let` bindings, then the temporaries of its own
-//! lowering. A slot's class byte is the reference class exactly while the slot
+//! parameter order, an environment slot, the type arguments of its own generic
+//! parameters, its `let` bindings, and then the temporaries of its own lowering
+//! ("What a frame holds", below). A slot's class byte is the class of the value
+//! it holds, and the reference class exactly while the slot
 //! **owns** a count: a value is moved out of a slot by copying its cell and
 //! clearing the byte, and leaving a frame drops every cell whose byte is still
 //! the reference class, by one scan. That scan is what balances an early
@@ -204,17 +206,48 @@
 //! until no frame is left. The caller's continuation block first stores `ret`
 //! into the result's slot.
 //!
-//! **Return.** A function moves its result's cell into the state's `ret`,
-//! clears the byte of that slot, and leaves the frame: it drops what the frame
-//! still owns, pops it, and frees its segment when it was the segment's first
-//! frame. The caller owns what `ret` holds from the moment it is resumed.
+//! **Return.** A function moves its result's cell into the state's `ret` and the
+//! cell's class byte into `ret_class`, clears the byte of that slot, and leaves
+//! the frame: it drops what the frame still owns, pops it, and frees its segment
+//! when it was the segment's first frame. The caller owns what `ret` holds from
+//! the moment it is resumed, and takes the class byte with the cell.
 //!
-//! **Tail call (Step 6).** The callee replaces the current frame: after the
-//! operands are in temporaries, the scan runs over the slots that are not
-//! operands, and the frame is rewritten in place (`function`, `slots`, class
-//! bytes) with the operands moved into its parameter slots; when the callee's
-//! frame is larger than the room left in the segment it is popped and pushed.
-//! `caller` is kept, so the depth does not grow.
+//! **Tail call.** The callee replaces the current frame, whatever the callee
+//! is: a module function, or a function value. The operands are evaluated into
+//! temporaries and moved into locals of the Wasm function together with their
+//! class bytes, so the frame owns nothing of them; then `reframe` drops what the
+//! frame still owns (the same scan as `leave`) and rewrites the frame in place
+//! (`function`, `slots`, `resume`, class bytes) when the new frame ends within
+//! the segment, or pops it and pushes the callee's frame otherwise, and the
+//! operands are stored into the frame it returns. `caller` is kept, so the
+//! depth does not grow, and the engine's stack is not used at all.
+//!
+//! **What a frame holds.** `[parameters][environment][type arguments]
+//! [bindings][temporaries]`: the parameters in slot order (fixed, then
+//! labelled), one environment slot, the type arguments of the activation's own
+//! generic parameters, the bindings of the checked IR, and the temporaries of
+//! the lowering. The environment is the function value being run, which holds
+//! what a closure captured; it is empty for a module function. A move copies a
+//! cell and its class byte, so the same code moves a scalar, a reference, and a
+//! value of a generic type.
+//!
+//! **Function value.** An object of kind `function` whose cells are
+//! `[function][slots][arity][own][defaults..][captures..][types..]`: the table
+//! index and frame size of the body that runs when the value is called, the
+//! number of operands the body takes (which every call checks), the number of
+//! type arguments the body is passed, one default for each labelled parameter,
+//! the values a `lambda` captured, and the type argument descriptors of the
+//! activation that made it. The first four cells are scalars. A body is the
+//! function of a `lambda`, or, for a module function used as a value, a function
+//! of one tail call of it, so a call through any function value enters a body
+//! the same way.
+//!
+//! **Type arguments.** Each is a **descriptor**: an arena `tuple` whose first
+//! cell numbers the constructor of the type (`void` is `1`) and whose other cells
+//! are the descriptors of its arguments. A slot that holds none (a parameter
+//! nothing fixed) has a clear class byte. Nothing in the runtime reads one but
+//! the code that needs a type only the argument knows, as an enum payload of
+//! generic type, which is absent when the argument is `void`.
 //!
 //! **Module values.** The module-value state is one cells object of two cells
 //! per module value (a flag, then the value), allocated by the entry and held by

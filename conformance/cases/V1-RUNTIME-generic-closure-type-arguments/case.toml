@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-generic-closure-type-arguments"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A closure runs at the type arguments of the activation that created it: the same generic function makes a closure at `void` and one at `i32`, and each builds the enum payload of its own instantiation when it is called."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

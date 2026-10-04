@@ -136,9 +136,12 @@ records it ([D2.10–D2.13, D3.9, D4.5](decision-ledger.md)).
   its result and 0 after release. The checker's validation of a program is
   quadratic in its function count, so a hundred-thousand-deep recursion that
   completes needs Step 8a's arithmetic and is Step 6's case.
-- **Found.** The reference interpreter reports `InvalidBody` for a module
-  initializer that calls a function with an operand (`(def v i32 (one 1i32))`);
-  the Wasm backend runs it, and the case waits for a fix to the oracle.
+- **Found, and corrected by Step 6.** The reference interpreter reported
+  `InvalidBody` for `(def v i32 (one 1i32))` when `one` was written first. That
+  was not a defect of the initializer: a single source's entry is its first
+  function, so the entry was `one`, which has an operand, and an entry takes
+  none. With `main` first, the interpreter runs every initializer shape; see
+  [Step 6](06-calls.md#as-built).
 - **For Step 6.** Tail calls rewrite the frame in place ([D2.12](decision-ledger.md));
   indirect calls and closures reuse the table and signature; type arguments are
   slots; `Default` and `Closure` are the first forms to lower.

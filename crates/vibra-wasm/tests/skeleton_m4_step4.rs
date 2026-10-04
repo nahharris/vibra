@@ -207,7 +207,7 @@ fn a_binding_lowers_since_step_5b() {
 }
 
 #[test]
-fn a_direct_call_lowers_and_a_tail_call_is_named_with_its_kind() {
+fn a_direct_call_lowers_in_and_out_of_tail_position() {
     let call = |tail| Expr::Call {
         target: CallTarget::Direct(1),
         arguments: Vec::new(),
@@ -218,11 +218,9 @@ fn a_direct_call_lowers_and_a_tail_call_is_named_with_its_kind() {
     let lowered = function("caller", Vec::new(), Type::Void, call(false));
     assert!(emit(&program(vec![lowered, empty_function("callee")], 0)).is_ok());
 
+    // A tail call replaces the caller's frame (Step 6); nothing names it.
     let caller = function("caller", Vec::new(), Type::Void, call(true));
-    let error = not_lowered(&program(vec![caller, empty_function("callee")], 0));
-    assert_eq!(forms(&error), ["call"]);
-    assert_eq!(error.forms()[0].detail(), Some("tail-direct"));
-    assert!(error.to_string().contains("call `tail-direct`"), "{error}");
+    assert!(emit(&program(vec![caller, empty_function("callee")], 0)).is_ok());
 }
 
 #[test]

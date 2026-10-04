@@ -119,3 +119,17 @@ V1-RUNTIME-module-value-once	matched
 V1-RUNTIME-nested-data	matched
 V1-RUNTIME-record-projection	matched
 V1-RUNTIME-union-injection	matched
+V1-RUNTIME-activation-depth-counter	matched
+V1-RUNTIME-activation-exhaustion-discarded-call	matched
+V1-RUNTIME-closure-captures	matched
+V1-RUNTIME-function-value-kinds	matched
+V1-RUNTIME-generic-closure-type-arguments	matched
+V1-RUNTIME-generic-payload-in-generic-code	matched
+V1-RUNTIME-module-value-initializer-call	matched
+V1-RUNTIME-tail-counter-closure-captured-loop	matched
+V1-RUNTIME-tail-counter-direct	matched
+V1-RUNTIME-tail-counter-field-and-binding	matched
+V1-RUNTIME-tail-counter-function-value-parameter	matched
+V1-RUNTIME-tail-counter-method	matched
+V1-RUNTIME-tail-counter-mutual	matched
+V1-RUNTIME-tail-counter-unrelated-function-loop	matched

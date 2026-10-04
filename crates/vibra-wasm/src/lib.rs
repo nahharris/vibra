@@ -18,9 +18,13 @@
 //! calls between them; and the nominal and structural data kinds with their
 //! constructors, projections, and the injection of a member into a union.
 //! Activations live in the arena and a call does not nest a WebAssembly call
-//! ([`layout`], "Activations and the dispatcher"). Every other form returns
-//! [`NotLowered`], naming each form, and never a module that omits part of the
-//! program. Steps 6 onward move forms out of [`NotLowered`] one step at a time.
+//! ([`layout`], "Activations and the dispatcher"). Step 6 lowers calls of every
+//! kind: function values and closures, a call through one, a tail call to every
+//! kind of callee (the callee replaces the current frame), omitted labelled
+//! operands, and generic functions and types, whose type arguments are passed to
+//! each activation at run time. Every other form returns [`NotLowered`], naming
+//! each form, and never a module that omits part of the program. Steps 7 onward
+//! move forms out of [`NotLowered`] one step at a time.
 //!
 //! # The module
 //!

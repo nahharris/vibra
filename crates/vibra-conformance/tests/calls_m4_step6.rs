@@ -107,7 +107,8 @@ fn word(instance: &mut Instance, address: u32) -> u32 {
 /// A started instance of `program`.
 fn start(program: &CheckedProgram, limit: usize) -> Instance {
     let bytes = emitted(program);
-    let Started::Ready(instance) = runner_with(limit).start(&bytes).expect("a v1 module")
+    let Started::Ready(instance) =
+        runner_with(limit).start(&bytes).expect("a v1 module")
     else {
         panic!("the module's own memory exceeds the limit");
     };
@@ -118,6 +119,8 @@ fn start(program: &CheckedProgram, limit: usize) -> Instance {
 /// the high-water mark of the arena, and the frames that were left.
 struct Footprint {
     live: u64,
+    /// The bytes the module values reach, which an instance keeps for its life.
+    kept: u64,
     arena_used: u32,
     frame_depth: u32,
 }
@@ -131,8 +134,11 @@ fn footprint(program: &CheckedProgram, limit: usize) -> Footprint {
     instance
         .observe(result, &entry_type(program), program.types())
         .expect("the host reads the result");
+    let live = instance.live_size().expect("live size");
+    let kept = module_values_bytes(&mut instance);
     Footprint {
-        live: instance.live_size().expect("live size"),
+        live,
+        kept,
         arena_used: word(&mut instance, state::ARENA_USED),
         frame_depth: word(&mut instance, state::FRAME_DEPTH),
     }
@@ -264,67 +270,115 @@ fn a_function_value_of_a_module_function_carries_the_functions_defaults() {
 
 // -- a counter without arithmetic ------------------------------------------------
 
-/// How many bits a counter that reaches `n` needs.
-const fn counter_bits(n: u32) -> u32 {
-    32 - n.leading_zeros()
+/// The bits of a digit of the counter: a digit is one of `2^DIGIT_BITS` shared
+/// module values.
+const DIGIT_BITS: u32 = 6;
+
+/// How many digits a counter that reaches `n` needs.
+fn counter_digits(n: u32) -> u32 {
+    (32 - n.leading_zeros()).div_ceil(DIGIT_BITS).max(1)
 }
 
-/// The text of a record of `bits` bools, made from `value(bit)`.
-fn state_of(bits: u32, value: impl Fn(u32) -> String) -> String {
-    let fields = (0..bits)
-        .map(|bit| format!(" b{bit}: {}", value(bit)))
-        .collect::<String>();
-    format!("(state{fields})")
+/// A decision tree over the bits `bit..` of the digit `d`, with the bits chosen
+/// so far in `value`, whose leaves are `leaf(value)`.
+fn digit_tree(bit: u32, value: u32, leaf: &dyn Fn(u32) -> String) -> String {
+    if bit == DIGIT_BITS {
+        return leaf(value);
+    }
+    let set = digit_tree(bit + 1, value | 1 << bit, leaf);
+    let clear = digit_tree(bit + 1, value, leaf);
+    format!("(if (d @b{bit}) {set} {clear})")
 }
 
-/// The definitions of a counter with no arithmetic, which counts to `n`: the
-/// record `state` of bools, `(zero)`, `(inc s)`, which makes the next state by
-/// carrying through the bits, and `(done s)`, true exactly when the state is
-/// `n`. The language has no arithmetic until Step 8a, and a counter still
-/// needs only `if`, a record, and a call, so it drives a loop of any length.
+/// The definitions of a counter with no arithmetic, which counts to `n`:
+/// `state`, `(zero)`, `(inc s)`, which makes the next state, and `(done s)`,
+/// true exactly when the state is `n`. The language has no arithmetic until
+/// Step 8a, and a counter still needs only `if`, a record, and a call, so it
+/// drives a loop of any length. A state is a tuple of digits, and a digit is a
+/// record of bools that is one of sixty-four module values, so a state of a long
+/// recursion holds a few references and not a few dozen bools, which keeps the
+/// reference interpreter's accounting of a recursion a hundred thousand deep
+/// inside the runner's memory limit. No expression nests more than five `if`s.
 fn counter(n: u32) -> String {
+    use std::collections::BTreeSet;
     use std::fmt::Write as _;
-    let bits = counter_bits(n);
+    let digits = counter_digits(n);
+    let values = 1_u32 << DIGIT_BITS;
     let mut text = String::new();
-    let fields = (0..bits)
+    let fields = (0..DIGIT_BITS)
         .map(|bit| format!(" b{bit} bool"))
         .collect::<String>();
-    writeln!(text, "(deftype state (record{fields}))").expect("a string");
+    writeln!(text, "(deftype digit (record{fields}))").expect("a string");
     writeln!(
         text,
-        "(defn zero () state {})",
-        state_of(bits, |_| "false".to_owned())
+        "(deftype state (tuple{}))",
+        " digit".repeat(digits as usize)
     )
     .expect("a string");
-    fn done(bit: u32, bits: u32, n: u32) -> String {
-        if bit == bits {
-            return "true".to_owned();
-        }
-        let rest = done(bit + 1, bits, n);
-        if n >> bit & 1 == 1 {
-            format!("(if (s @b{bit}) {rest} false)")
+    for value in 0..values {
+        let bits = (0..DIGIT_BITS)
+            .map(|bit| format!(" b{bit}: {}", value >> bit & 1 == 1))
+            .collect::<String>();
+        writeln!(text, "(def d{value} digit (digit{bits}))").expect("a string");
+    }
+    let zeros = " d0".repeat(digits as usize);
+    writeln!(text, "(defn zero () state (state{zeros}))").expect("a string");
+    writeln!(
+        text,
+        "(defn is-max (d digit) bool {})",
+        digit_tree(0, 0, &|value| (value == values - 1).to_string())
+    )
+    .expect("a string");
+    writeln!(
+        text,
+        "(defn next-digit (d digit) digit {})",
+        digit_tree(0, 0, &|value| format!("d{}", (value + 1) % values))
+    )
+    .expect("a string");
+    writeln!(text, "(defn inc (s state) state (carry-0 s))").expect("a string");
+    for place in 0..digits {
+        let carry = if place + 1 == digits {
+            format!("(state{zeros})")
         } else {
-            format!("(if (s @b{bit}) false {rest})")
-        }
+            format!("(carry-{} s)", place + 1)
+        };
+        let set = (0..digits)
+            .map(|other| match other.cmp(&place) {
+                std::cmp::Ordering::Less => " d0".to_owned(),
+                std::cmp::Ordering::Equal => format!(" (next-digit (s {place}))"),
+                std::cmp::Ordering::Greater => format!(" (s {other})"),
+            })
+            .collect::<String>();
+        writeln!(
+            text,
+            "(defn carry-{place} (s state) state\n  (if (is-max (s {place})) {carry} (state{set})))"
+        )
+        .expect("a string");
     }
-    writeln!(
-        text,
-        "(defn done (s state) bool\n  {})",
-        done(0, bits, n)
-    )
-    .expect("a string");
-    fn next(bit: u32, bits: u32) -> String {
-        if bit == bits {
-            return state_of(bits, |_| "false".to_owned());
-        }
-        let set = state_of(bits, |other| match other.cmp(&bit) {
-            std::cmp::Ordering::Less => "false".to_owned(),
-            std::cmp::Ordering::Equal => "true".to_owned(),
-            std::cmp::Ordering::Greater => format!("(s @b{other})"),
-        });
-        format!("(if (s @b{bit}) {} {set})", next(bit + 1, bits))
+    writeln!(text, "(defn done (s state) bool (done-0 s))").expect("a string");
+    let mut wanted = BTreeSet::new();
+    for place in 0..digits {
+        let value = (n >> (DIGIT_BITS * place)) & (values - 1);
+        wanted.insert(value);
+        let rest = if place + 1 == digits {
+            "true".to_owned()
+        } else {
+            format!("(done-{} s)", place + 1)
+        };
+        writeln!(
+            text,
+            "(defn done-{place} (s state) bool\n  (if (is-digit-{value} (s {place})) {rest} false))"
+        )
+        .expect("a string");
     }
-    writeln!(text, "(defn inc (s state) state\n  {})", next(0, bits)).expect("a string");
+    for value in wanted {
+        writeln!(
+            text,
+            "(defn is-digit-{value} (d digit) bool {})",
+            digit_tree(0, 0, &|other| (other == value).to_string())
+        )
+        .expect("a string");
+    }
     text
 }
 
@@ -411,7 +465,7 @@ impl Loop {
 fn depth_source(n: u32) -> String {
     format!(
         "(defn main () i32 (depth (zero)))\n\
-(defn depth (s state) i32\n  (if (done s) 0i32 (do (let - (depth (inc s))) 5i32)))\n{}",
+(defn depth (s state) i32\n  (if (done s) 0i32 (do (depth (inc s)) 5i32)))\n{}",
         counter(n)
     )
 }
@@ -491,7 +545,8 @@ fn a_tail_loop_that_allocates_each_round_holds_a_bounded_live_arena() {
             large.arena_used
         );
         assert!(
-            large_live.with_result.abs_diff(small_live.with_result) <= LIVE_GROWTH_BOUND,
+            large_live.with_result.abs_diff(small_live.with_result)
+                <= LIVE_GROWTH_BOUND,
             "{kind:?}: live {} against {}",
             small_live.with_result,
             large_live.with_result
@@ -509,6 +564,7 @@ fn a_tail_loop_that_allocates_each_round_holds_a_bounded_live_arena() {
             large.arena_used
         );
         assert_eq!(large.frame_depth, 0);
+        assert_eq!(large.live, large.kept, "{kind:?}: only the module values");
     }
 }
 
@@ -538,7 +594,7 @@ fn the_same_loop_without_a_tail_call_does_not_run_in_that_memory() {
     // frames pile up, the limit is exhausted, and both are the host event.
     let source = format!(
         "(defn main () i32 (run (zero)))\n\
-(defn run (s state) i32\n  (if (done s) 7i32 (do (let - (run (inc s))) 7i32)))\n{}",
+(defn run (s state) i32\n  (if (done s) 7i32 (do (run (inc s)) 7i32)))\n{}",
         counter(100_000)
     );
     let program = checked(&source);
@@ -574,9 +630,10 @@ fn non_tail_recursion_a_hundred_thousand_deep_completes_in_both_backends() {
     };
     assert_eq!(value.canonical_observation(&ty), expected);
     assert_eq!(live.start, 0);
-    assert!(live.end <= 128, "the module values and nothing else: {live:?}");
     let used = footprint(&program, 64 * MIB);
     assert_eq!(used.frame_depth, 0);
+    assert_eq!(live.end, used.kept, "the module values and nothing else");
+    assert_eq!(used.live, used.kept);
     println!(
         "depth 100000: arena high-water {} bytes, live after release {}",
         used.arena_used, used.live
@@ -588,9 +645,34 @@ fn non_tail_recursion_a_hundred_thousand_deep_completes_in_both_backends() {
     );
 }
 
+#[test]
+fn the_engine_stack_a_deep_recursion_needs_does_not_depend_on_its_depth() {
+    // The smallest engine stack, in KiB, under which a recursion runs: the same
+    // for a recursion a hundred times deeper, because no activation takes any.
+    let smallest = |n: u32| {
+        let program = checked(&depth_source(n));
+        let bytes = emitted(&program);
+        let ty = entry_type(&program);
+        [8, 12, 16, 24, 32, 48, 64].into_iter().find(|kib| {
+            let runner =
+                Runner::with_wasm_stack(MemoryLimit::new(64 * MIB), kib * 1024)
+                    .expect("a runner");
+            matches!(
+                runner.run_observed(&bytes, &ty, program.types()),
+                Ok(Observed::Completed { .. })
+            )
+        })
+    };
+    let shallow = smallest(1_000).expect("some stack up to 64 KiB runs it");
+    let deep = smallest(100_000).expect("some stack up to 64 KiB runs it");
+    println!(
+        "engine stack needed: {shallow} KiB at 1,000 activations, {deep} KiB at 100,000"
+    );
+    assert_eq!(shallow, deep);
+}
+
 /// Non-tail recursion that never reaches a base case, with no arithmetic.
-const FOREVER: &str =
-    "(defn main () void (do (forever) void))\n(defn forever () void (do (forever) void))\n";
+const FOREVER: &str = "(defn main () void (do (forever) void))\n(defn forever () void (do (forever) void))\n";
 
 /// Whether `program` completes under `limit` bytes of memory, or ends in the
 /// host event.
@@ -602,7 +684,9 @@ fn completes_under(program: &CheckedProgram, limit: usize) -> bool {
     {
         Observed::Completed { .. } => true,
         Observed::Stopped(Outcome::MemoryExhausted) => false,
-        Observed::Stopped(other) => panic!("neither a result nor the host event: {other:?}"),
+        Observed::Stopped(other) => {
+            panic!("neither a result nor the host event: {other:?}")
+        }
     }
 }
 
@@ -622,10 +706,7 @@ fn a_recursion_with_no_base_case_is_the_host_event_and_a_larger_limit_recovers()
     let program = checked(&depth_source(20_000));
     assert!(!completes_under(&program, 512 * 1024));
     assert!(completes_under(&program, 64 * MIB));
-    agree_on(
-        &depth_source(20_000),
-        "(record type: @i32 value: 5i32)\n",
-    );
+    agree_on(&depth_source(20_000), "(record type: @i32 value: 5i32)\n");
 }
 
 #[test]
@@ -644,7 +725,11 @@ fn a_recursion_exactly_at_the_memory_limit_runs_and_a_page_under_does_not() {
         }
     }
     assert!(completes_under(&program, low * page), "{low} pages");
-    assert!(!completes_under(&program, (low - 1) * page), "{} pages", low - 1);
+    assert!(
+        !completes_under(&program, (low - 1) * page),
+        "{} pages",
+        low - 1
+    );
     println!("2000 activations need exactly {low} pages");
 }
 
@@ -668,7 +753,10 @@ fn a_tail_call_to_a_callee_with_more_locals_than_its_caller_replaces_the_frame()
     let program = checked(&source);
     let used = footprint(&program, 64 * MIB);
     assert_eq!(used.frame_depth, 0);
-    let longer = footprint(&checked(&source.replace(&counter(200), &counter(2_000))), 64 * MIB);
+    let longer = footprint(
+        &checked(&source.replace(&counter(200), &counter(2_000))),
+        64 * MIB,
+    );
     assert!(
         longer.arena_used.abs_diff(used.arena_used) <= ARENA_GROWTH_BOUND,
         "{} against {}",
@@ -709,7 +797,8 @@ fn programs_of_every_call_kind_return_the_live_size_to_the_module_values() {
         let program = checked(source);
         let mut instance = start(&program, 64 * MIB);
         for run in 1..=2 {
-            let Outcome::Completed { result, .. } = instance.call_entry().expect("runs")
+            let Outcome::Completed { result, .. } =
+                instance.call_entry().expect("runs")
             else {
                 panic!("the entry did not complete");
             };
@@ -735,9 +824,8 @@ fn a_function_value_that_takes_another_number_of_operands_is_a_defect() {
     // The call checks the arity the value records against the operands it
     // passes, before it enters any frame. The test forges the constant the call
     // compares with: the one indirect call of this program passes one operand.
-    let program = checked(
-        "(defn main () i32 (let f (lambda (n i32) i32 n)) (f 1i32))\n",
-    );
+    let program =
+        checked("(defn main () i32 (let f (lambda (n i32) i32 n)) (f 1i32))\n");
     let mut bytes = emitted(&program);
     // local.get CELLS; i32.load offset=16; i32.const 1; i32.ne; if
     let pattern = [0x20, 0x08, 0x28, 0x02, 0x10, 0x41, 0x01, 0x47, 0x04, 0x40];
@@ -754,7 +842,9 @@ fn a_function_value_that_takes_another_number_of_operands_is_a_defect() {
         "one indirect call"
     );
     bytes[at + 6] = 0x02;
-    let outcome = runner().run_entry(&bytes).expect("a valid module that traps");
+    let outcome = runner()
+        .run_entry(&bytes)
+        .expect("a valid module that traps");
     assert_eq!(
         outcome,
         Outcome::Trapped {
@@ -864,6 +954,132 @@ fn a_generic_function_used_as_a_value_is_called_at_the_type_it_was_given() {
 (defn wrap (value t) (maybe t)\n  where: (t any)\n  (maybe.some value))\n{MAYBE}"
     );
     agree(&source);
+}
+
+#[test]
+fn a_union_widened_in_generic_code_has_the_discriminant_of_its_instantiation() {
+    // The risk Step 5b noted: the host reads a union member by its position in
+    // the instantiated member list, and generic code attaches the position it
+    // knows. They agree for every union a program can write. An anonymous union
+    // is canonically ordered, and its members must be concrete, so a member
+    // that mentions a type parameter is rejected before any program exists. A
+    // declared union may mention one, and it takes its written member order,
+    // which substitution does not change.
+    let anonymous = "(deftype box (record inner t)\n  where: (t any))\n(defn main () i32 1i32)\n(defn inject (value (box t)) (union (box t) str)\n  where: (t any)\n  value)\n";
+    let result = check_source("input.vib", anonymous);
+    assert!(!result.accepted(), "{anonymous}");
+    assert!(
+        result.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code()
+                == vibra_diagnostics::DiagnosticCode::TypeUnionMemberNotConcrete
+        }),
+        "{:?}",
+        result.diagnostics()
+    );
+    let declared = "(defn main () (tuple (either i32) (either str) (either str))\n\
+  (tupleof (left (box inner: 1i32)) (left (box inner: \"s\")) (right \"t\")))\n\
+(deftype box (record inner t)\n  where: (t any))\n\
+(deftype either (union (box t) str)\n  where: (t any))\n\
+(defn left (value (box t)) (either t)\n  where: (t any)\n  value)\n\
+(defn right (value str) (either t)\n  where: (t any)\n  value)\n";
+    agree(declared);
+    let variant = |value: &str| {
+        result_variant(&checked(&format!(
+            "(defn main () (either i32) (left (box inner: {value})))\n\
+(deftype box (record inner t)\n  where: (t any))\n\
+(deftype either (union (box t) str)\n  where: (t any))\n\
+(defn left (value (box t)) (either t)\n  where: (t any)\n  value)\n"
+        )))
+    };
+    assert_eq!(variant("1i32"), 0, "the first written member");
+}
+
+/// The union variant of the arena object `main` returns.
+fn result_variant(program: &CheckedProgram) -> u32 {
+    let mut instance = start(program, 64 * MIB);
+    let Outcome::Completed { result, .. } = instance.call_entry().expect("runs") else {
+        panic!("the entry did not complete");
+    };
+    let id = instance.result_id(result);
+    let variant = instance.variant(&id).expect("an enum or union");
+    instance.release(id).expect("release");
+    variant
+}
+
+#[test]
+fn a_closure_captures_a_value_of_a_generic_type_of_either_class() {
+    let source = "(defn main () (tuple str i64 f64 bool)\n\
+  (tupleof ((keep \"text\")) ((keep 9i64)) ((keep 2.5f64)) ((keep true))))\n\
+(defn keep (value t) (fn () t)\n  where: (t any)\n  (lambda () t value))\n";
+    agree(source);
+}
+
+#[test]
+fn a_lambda_inside_a_generic_lambda_sees_both_activations_type_arguments() {
+    let source = format!(
+        "(defn main () (tuple (maybe void) (maybe i32) (maybe str))\n\
+  (let outer (lambda (value t) (fn () (maybe t))\n\
+    where: (t any)\n\
+    (lambda () (maybe t) (maybe.some value))))\n\
+  (tupleof ((outer void)) ((outer 4i32)) ((outer \"s\"))))\n{MAYBE}"
+    );
+    agree(&source);
+}
+
+#[test]
+fn a_module_value_holds_a_function_value_that_a_tail_call_enters() {
+    let source = "(def seven (fn () i32) (lambda () i32 7i32))\n\
+(def pick (fn (i32 i32) i32) (lambda (left i32 right i32) i32 right))\n\
+(defn main () (tuple i32 i32) (tupleof (via-value) (seven)))\n\
+(defn via-value () i32 (pick 1i32 (seven)))\n";
+    agree_on(
+        source,
+        "(record type: (record type: @tuple arguments: (array @i32 @i32)) value: (record kind: @tuple values: (array 7i32 7i32)))\n",
+    );
+}
+
+#[test]
+fn a_tail_call_through_a_function_value_takes_the_default_of_its_callee() {
+    let source = "(defn main () (tuple atom atom) (tupleof (via-value) (via-given)))\n\
+(defn via-value () atom\n  (let f level)\n  (f \"a\"))\n\
+(defn via-given () atom\n  (let f level)\n  (f \"b\" severity: @error))\n\
+(defn level (message str) atom\n  labelled: (severity atom @info)\n  severity)\n";
+    agree_on(
+        source,
+        "(record type: (record type: @tuple arguments: (array @atom @atom)) value: (record kind: @tuple values: (array @info @error)))\n",
+    );
+}
+
+#[test]
+fn a_generic_function_that_wraps_its_own_type_recurses_with_a_new_type_each_time() {
+    // Polymorphic recursion: each activation is passed a type that names the
+    // one before, and the descriptors are counted and freed with the frames.
+    // A generic function whose type argument changes at every call has no closed
+    // set of instantiations, which a monomorphizing backend could not emit.
+    let source = format!(
+        "(defn main () (maybe void) (nest (zero) void))\n\
+(defn nest (s state value t) (maybe void)\n  where: (t any)\n  (if (done s) (maybe.some) (nest (inc s) (maybe.some value))))\n{MAYBE}{}",
+        counter(5)
+    );
+    agree(&source);
+    assert_balanced_source(&source);
+}
+
+/// The live size of a finished run is exactly what the module values keep.
+fn assert_balanced_source(source: &str) {
+    let program = checked(source);
+    let mut instance = start(&program, 64 * MIB);
+    for _ in 0..2 {
+        let Outcome::Completed { result, .. } = instance.call_entry().expect("runs")
+        else {
+            panic!("the entry did not complete");
+        };
+        instance
+            .observe(result, &entry_type(&program), program.types())
+            .expect("the host reads the result");
+        let live = instance.live_size().expect("live size");
+        assert_eq!(live, module_values_bytes(&mut instance), "{source}");
+    }
 }
 
 #[test]

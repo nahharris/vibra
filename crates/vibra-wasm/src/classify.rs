@@ -5,7 +5,10 @@
 //! `let`, `if`, and `return`; direct calls in non-tail position; and the data
 //! forms (a record, a variant, a wrapper, a tuple, their projections, and the
 //! widening of a member into a union), over every type that has a lowered value
-//! kind. Every other node is reported, so a program that the emitter cannot
+//! kind. Step 6 adds function values, `lambda` and what it captures, calls of
+//! every kind but a contract call (tail or not), omitted labelled operands, and
+//! the generic types, so a function type and a generic parameter have value
+//! kinds too. Every other node is reported, so a program that the emitter cannot
 //! lower completely produces an error and never a module that omits part of it.
 //! Each `match` below is exhaustive on purpose: a new checked-IR variant cannot
 //! compile until it is given a disposition here.
