@@ -99,12 +99,12 @@ fn the_inventory_matches_the_corpus_and_the_runner() {
         ParityInventory::parse(&text).unwrap_or_else(|error| panic!("{error}"));
 
     let runner = ConformanceRunner::new(standard_dispatcher());
-    let reports = corpus
+    let executable = corpus
         .cases()
         .iter()
         .filter(|case| case.manifest().is_executable())
-        .map(|case| runner.run_case(case))
         .collect::<Vec<_>>();
+    let reports = runner.run_cases(&executable);
     assert!(!reports.is_empty(), "the corpus has no executable case");
     let statuses = reports
         .iter()
