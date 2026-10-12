@@ -182,8 +182,17 @@ fn interface_function(name: &str) -> CheckedFunction {
 
 #[test]
 fn a_variadic_parameter_lowers_since_step_8b_and_an_interface_one_is_named() {
-    assert!(emit(&program(vec![variadic_function("f")], 0)).is_ok());
-    let error = not_lowered(&program(vec![interface_function("f")], 0));
+    assert!(
+        emit(&program(
+            vec![empty_function("entry"), variadic_function("f")],
+            0
+        ))
+        .is_ok()
+    );
+    let error = not_lowered(&program(
+        vec![empty_function("entry"), interface_function("f")],
+        0,
+    ));
     assert_eq!(forms(&error), ["type"]);
     assert_eq!(error.forms()[0].detail(), Some("interface"));
     assert_eq!(

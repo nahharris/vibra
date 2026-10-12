@@ -252,27 +252,47 @@ fn owned_by_step_8a(intrinsic: CompilerIntrinsic) -> bool {
     }
 }
 
+/// The collection rows that are a few instructions, so the same table lowers
+/// them inline (Step 8b): the lengths, the equality of text and bytes, and the
+/// two identities.
+fn inline_collection_row(intrinsic: CompilerIntrinsic) -> bool {
+    matches!(
+        intrinsic,
+        CompilerIntrinsic::TextLength
+            | CompilerIntrinsic::BytesLength
+            | CompilerIntrinsic::ArrayLength
+            | CompilerIntrinsic::TextEqual
+            | CompilerIntrinsic::BytesEqual
+            | CompilerIntrinsic::ArrayOf
+            | CompilerIntrinsic::DictOf
+    )
+}
+
 #[test]
-fn the_rows_the_emitter_lowers_are_exactly_the_rows_that_have_vectors() {
+fn the_rows_the_emitter_lowers_inline_are_the_integer_rows_and_the_short_collection_rows()
+ {
     let mut lowered = 0_usize;
     for intrinsic in CompilerIntrinsic::all() {
         assert_eq!(
             vibra_wasm::lowers_primitive(intrinsic),
-            owned_by_step_8a(intrinsic),
+            owned_by_step_8a(intrinsic) || inline_collection_row(intrinsic),
             "{}",
             intrinsic.symbol()
         );
-        assert_eq!(
-            vibra_wasm::lowers_primitive(intrinsic),
-            !intrinsic.vectors().is_empty(),
-            "{} has vectors exactly when it is lowered",
-            intrinsic.symbol()
-        );
+        // A row with vectors is lowered, inline or as a native import.
+        if !intrinsic.vectors().is_empty() {
+            assert!(
+                vibra_wasm::lowers_primitive(intrinsic)
+                    || intrinsic.native_import().is_some(),
+                "{} has vectors and is not lowered",
+                intrinsic.symbol()
+            );
+        }
         lowered += usize::from(vibra_wasm::lowers_primitive(intrinsic));
     }
-    // Eight integer types of ten rows, `neg-checked` for the four signed ones,
-    // fifty-six conversions, and the two `char` rows.
-    assert_eq!(lowered, 8 * 9 + 4 + 56 + 2);
+    // Eight integer types of nine rows, `neg-checked` for the four signed ones,
+    // fifty-six conversions, the two `char` rows, and seven collection rows.
+    assert_eq!(lowered, 8 * 9 + 4 + 56 + 2 + 7);
 }
 
 /// The rows, grouped so a few threads share the work, with each thread its own
@@ -338,7 +358,7 @@ fn the_manifest_lists_exactly_the_rows_that_have_vectors_and_more() {
     for intrinsic in CompilerIntrinsic::all() {
         let quoted = format!("\"{}\"", intrinsic.symbol());
         assert!(manifest.contains(&quoted), "{}", intrinsic.symbol());
-        if !intrinsic.vectors().is_empty() {
+        if !intrinsic.vectors().is_empty() && owned_by_step_8a(intrinsic) {
             assert!(
                 !intrinsic.is_native(),
                 "{} is a primitive row",

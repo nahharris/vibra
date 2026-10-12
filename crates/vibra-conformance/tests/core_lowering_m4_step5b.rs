@@ -558,7 +558,8 @@ fn the_forms_of_later_steps_are_named_and_never_approximated() {
             "type",
         ),
         (
-            "(defn main () str (shape.name (point x: 1i32)))\n\
+            "(defn main () str (describe (point x: 1i32)))\n\
+(defn describe (value shape) str (shape.name value))\n\
 (defint shape (defn name (value self) str))\n\
 (deftype point (record x i32) (impl shape (defn name (value self) str \"point\")))\n",
             "type",

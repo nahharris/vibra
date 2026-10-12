@@ -24,7 +24,6 @@ use std::collections::BTreeSet;
 use vibra_ir::{CheckedProgram, Type};
 use vibra_types::check_source;
 use vibra_wasm::layout::{self, header, state};
-use vibra_wasm::{Form, NotLowered};
 use vibra_wasm_run::{
     Instance, LiveSizes, MemoryLimit, Observed, Outcome, Runner, Started,
 };
@@ -1100,43 +1099,23 @@ fn a_try_operand_is_not_a_tail_position() {
     );
 }
 
-// -- what stays for Step 8b ---------------------------------------------------------
-
-fn not_lowered(source: &str) -> NotLowered {
-    vibra_wasm::emit(&checked(source)).expect_err("the program is not lowered")
-}
+// -- the array pattern and the text wrapper pattern (Step 8b) ------------------------
 
 #[test]
-fn an_array_pattern_is_not_lowered_until_step_8b() {
-    let source = "(defn main () i32 (size (array.of 1i32)))\n\
-(defn size (items (array i32)) i32 (match items (array) 0i32 (array -) 1i32 - 2i32))\n";
-    let forms = not_lowered(source);
-    assert!(
-        forms
-            .forms()
-            .iter()
-            .any(|used| used.form() == Form::Array && used.detail() == Some("pattern")),
-        "{forms}"
+fn an_array_pattern_and_a_wrapper_pattern_over_text_lower_since_step_8b() {
+    // An array pattern is an exact length and its elements in place, and the
+    // `str` constructor pattern meets the array the registry makes of the text.
+    balanced_on(
+        "(defn main () i32 (size (array.of 1i32)))\n\
+(defn size (items (array i32)) i32 (match items (array) 0i32 (array -) 1i32 - 2i32))\n",
+        &result("@i32", "1i32"),
     );
-    // A pattern kind of this step is no longer reported.
-    assert!(
-        forms
-            .forms()
-            .iter()
-            .all(|used| used.form().name() != "match" && used.form().name() != "try"),
-        "{forms}"
-    );
-}
-
-#[test]
-fn a_wrapper_pattern_over_text_is_not_lowered_until_step_8b() {
-    // A string literal is the wrapper over its scalars, so the `str` constructor
-    // pattern over an array of characters is a wrapper pattern over text.
-    let source = "(defn main () i32 (size \"ab\"))\n\
-(defn size (text str) i32 (match text (str (array - -)) 2i32 - 0i32))\n";
-    let forms = not_lowered(source);
-    assert!(
-        forms.forms().iter().any(|used| used.form() == Form::Wrap),
-        "{forms}"
+    balanced_on(
+        "(defn main () (tuple i32 i32)\n  (tupleof (size \"ab\") (size \"abc\")))\n\
+(defn size (text str) i32 (match text (str (array - -)) 2i32 - 0i32))\n",
+        &result(
+            "(record type: @tuple arguments: (array @i32 @i32))",
+            "(record kind: @tuple values: (array 2i32 0i32))",
+        ),
     );
 }
