@@ -19,18 +19,19 @@
 //! | enum variant | the discriminant | none | the payload, when there is one |
 //! | record | none | none | each written field |
 //! | tuple | none | none | each component |
-//! | wrapper | none | none | the representation |
+//! | wrapper | none | none | the representation (over `str` or `bytes`, the array the registry makes of it) |
 //! | `(as member p)` | the member's discriminant | none | the payload |
-//! | array | not lowered (Step 8b) | | |
+//! | array | the length is exactly the pattern's | none | each element |
 //!
 //! A pattern that names a constant is already the pattern of the constant's
 //! value in the checked program, and `bool` has no pattern of its own: the
 //! checker writes its two variants as boolean literals, which the table reads
 //! as the discriminant of the enum `bool` is.
 
+use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::{Pattern, SourceOrigin, Type, Value};
 
-use crate::form::{Form, NotLowered, UnloweredForm};
+use crate::form::NotLowered;
 use crate::runtime::ValueClass;
 use crate::types::{Shape, TypeEnv, class_of};
 
@@ -45,6 +46,8 @@ pub(crate) enum Test<'p> {
     Variant(u32),
     /// The object holds the same characters or bytes as this literal.
     Data(&'p Value),
+    /// The object has exactly this many components.
+    Len(u32),
 }
 
 /// Whether a part of a value has a cell in the object that holds it.
@@ -76,6 +79,10 @@ impl Presence {
 /// One part of a value that a sub-pattern meets.
 #[derive(Clone, Debug)]
 pub(crate) struct Child<'p> {
+    /// The registry row that makes the part from the object when the part is
+    /// not stored in it: a wrapper pattern over `str` or `bytes` meets the
+    /// array the text is written over, which is the row's result.
+    pub(crate) derive: Option<CompilerIntrinsic>,
     pub(crate) pattern: &'p Pattern,
     /// The type of the part.
     pub(crate) ty: Type,
@@ -202,6 +209,7 @@ pub(crate) fn decompose<'p>(
             let mut node = Node::new(Test::Variant(position(discriminant)));
             if let (Some(payload), Some(slot)) = (payload.as_deref(), slot) {
                 node.children.push(Child {
+                    derive: None,
                     pattern: payload,
                     presence: Presence::of_payload(&slot),
                     ty: slot,
@@ -218,6 +226,7 @@ pub(crate) fn decompose<'p>(
             for (name, field) in fields {
                 let index = shape.field(name).ok_or_else(unshaped)?;
                 node.children.push(Child {
+                    derive: None,
                     pattern: field,
                     ty: types.get(index).cloned().ok_or_else(unshaped)?,
                     position: position(index),
@@ -236,6 +245,7 @@ pub(crate) fn decompose<'p>(
             let mut node = Node::new(Test::Always);
             for (index, (item, component)) in items.iter().zip(types).enumerate() {
                 node.children.push(Child {
+                    derive: None,
                     pattern: item,
                     ty: component,
                     position: position(index),
@@ -245,13 +255,25 @@ pub(crate) fn decompose<'p>(
             }
             node
         }
-        // A wrapper over `str` or `bytes` is written over an array.
-        Pattern::Wrap(_) if matches!(ty, Type::Str | Type::Bytes) => {
-            return Err(NotLowered::from_uses(vec![UnloweredForm::new(
-                Form::Wrap,
-                Some(origin.clone()),
-            )])
-            .unwrap_or_else(|| NotLowered::single(Form::Wrap)));
+        // A wrapper over `str` or `bytes` is written over an array of `char` or
+        // `u8`, which the object does not store: the part is the array that the
+        // registry's conversion (`text.to-chars`, `bytes.to-array`) makes of it.
+        Pattern::Wrap(inner) if matches!(ty, Type::Str | Type::Bytes) => {
+            let (derive, element) = if *ty == Type::Str {
+                (CompilerIntrinsic::TextToChars, Type::Char)
+            } else {
+                (CompilerIntrinsic::BytesToArray, Type::U8)
+            };
+            let mut node = Node::new(Test::Always);
+            node.children.push(Child {
+                derive: Some(derive),
+                pattern: inner,
+                ty: Type::Array(Box::new(element)),
+                position: 0,
+                len: 1,
+                presence: Presence::Always,
+            });
+            node
         }
         Pattern::Wrap(inner) => {
             let Shape::Wrapper(representation) = shape()? else {
@@ -259,6 +281,7 @@ pub(crate) fn decompose<'p>(
             };
             let mut node = Node::new(Test::Always);
             node.children.push(Child {
+                derive: None,
                 pattern: inner,
                 ty: representation,
                 position: 0,
@@ -267,12 +290,25 @@ pub(crate) fn decompose<'p>(
             });
             node
         }
-        Pattern::Array(_) => {
-            return Err(NotLowered::from_uses(vec![
-                UnloweredForm::new(Form::Array, Some(origin.clone()))
-                    .with_detail("pattern"),
-            ])
-            .unwrap_or_else(|| NotLowered::single(Form::Array)));
+        // An array pattern matches exactly its length, and then each element in
+        // place, as a tuple pattern meets its components.
+        Pattern::Array(items) => {
+            let Type::Array(element) = ty else {
+                return Err(unshaped());
+            };
+            let count = position(items.len());
+            let mut node = Node::new(Test::Len(count));
+            for (index, item) in items.iter().enumerate() {
+                node.children.push(Child {
+                    derive: None,
+                    pattern: item,
+                    ty: element.as_ref().clone(),
+                    position: position(index),
+                    len: count,
+                    presence: Presence::Always,
+                });
+            }
+            node
         }
         Pattern::Member {
             index,
@@ -281,6 +317,7 @@ pub(crate) fn decompose<'p>(
         } => {
             let mut node = Node::new(Test::Variant(position(*index)));
             node.children.push(Child {
+                derive: None,
                 pattern,
                 ty: member.clone(),
                 position: 0,
@@ -407,20 +444,40 @@ mod tests {
     }
 
     #[test]
-    fn an_array_pattern_and_a_wrapper_over_text_name_their_forms() {
-        let array = Pattern::Array(vec![Pattern::Wildcard]);
-        let error = decompose(
-            &TypeEnv::new(&[]),
-            &array,
-            &Type::Array(Box::new(Type::I32)),
-            &origin(),
-        )
-        .expect_err("not lowered");
-        assert_eq!(error.forms()[0].form(), Form::Array);
-        assert_eq!(error.forms()[0].detail(), Some("pattern"));
+    fn an_array_pattern_is_an_exact_length_and_its_elements_in_place() {
+        let array = Pattern::Array(vec![Pattern::Wildcard, Pattern::Wildcard]);
+        let found = node(&array, &Type::Array(Box::new(Type::I32)));
+        assert_eq!(found.test, Test::Len(2));
+        let parts = found
+            .children
+            .iter()
+            .map(|child| (child.position, child.len, child.ty.clone(), child.derive))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            parts,
+            vec![(0, 2, Type::I32, None), (1, 2, Type::I32, None)]
+        );
+        // The empty pattern matches the empty array and nothing else.
+        let empty = Pattern::Array(Vec::new());
+        assert_eq!(
+            node(&empty, &Type::Array(Box::new(Type::I32))).test,
+            Test::Len(0)
+        );
+    }
+
+    #[test]
+    fn a_wrapper_over_text_meets_the_array_the_registry_makes_of_it() {
         let wrapper = Pattern::Wrap(Box::new(Pattern::Wildcard));
-        let error = decompose(&TypeEnv::new(&[]), &wrapper, &Type::Str, &origin())
-            .expect_err("not lowered");
-        assert_eq!(error.forms()[0].form(), Form::Wrap);
+        let text = node(&wrapper, &Type::Str);
+        assert_eq!(text.test, Test::Always);
+        let child = &text.children[0];
+        assert_eq!(child.derive, Some(CompilerIntrinsic::TextToChars));
+        assert_eq!(child.ty, Type::Array(Box::new(Type::Char)));
+        let bytes = node(&wrapper, &Type::Bytes);
+        assert_eq!(
+            bytes.children[0].derive,
+            Some(CompilerIntrinsic::BytesToArray)
+        );
+        assert_eq!(bytes.children[0].ty, Type::Array(Box::new(Type::U8)));
     }
 }

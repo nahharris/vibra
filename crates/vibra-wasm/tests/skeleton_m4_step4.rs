@@ -94,7 +94,7 @@ fn a_sequence_of_void_literals_is_the_empty_entry_too() {
     }
 }
 
-/// An array built from no element: a form no step before 8b lowers.
+/// An array built from no element, which Step 8b lowers.
 fn empty_array() -> Expr {
     Expr::Array {
         value_type: Type::Array(Box::new(Type::U64)),
@@ -103,14 +103,29 @@ fn empty_array() -> Expr {
     }
 }
 
+/// A read of a parameter of interface type, which no step before 9 lowers.
+fn interface_read() -> Expr {
+    Expr::variable(0, Type::Any, origin())
+}
+
 #[test]
-fn a_sequence_adds_nothing_to_what_its_expressions_need() {
+fn an_array_lowers_since_step_8b() {
     let body = Expr::Sequence {
         expressions: vec![empty_array(), void_literal()],
         origin: origin(),
     };
     let f = function("seq", Vec::new(), Type::Void, body);
-    assert_eq!(forms(&not_lowered(&program(vec![f], 0))), ["type", "array"]);
+    assert!(emit(&program(vec![f], 0)).is_ok());
+}
+
+#[test]
+fn a_sequence_adds_nothing_to_what_its_expressions_need() {
+    let body = Expr::Sequence {
+        expressions: vec![interface_read(), void_literal()],
+        origin: origin(),
+    };
+    let f = function("seq", vec![Type::Any], Type::Void, body);
+    assert_eq!(forms(&not_lowered(&program(vec![f], 0))), ["type"]);
 }
 
 #[test]
@@ -146,7 +161,8 @@ fn every_function_is_lowered_and_the_entry_is_the_one_exported() {
     assert_ne!(first.bytes(), two.bytes(), "the entry names its function");
 }
 
-/// A function with a variadic tail, which no step before 8b lowers.
+/// A function with a variadic tail, which Step 8b lowers: the tail is one more
+/// slot, which a call fills with the array it already packed.
 fn variadic_function(name: &str) -> CheckedFunction {
     CheckedFunction::new(
         name,
@@ -158,16 +174,18 @@ fn variadic_function(name: &str) -> CheckedFunction {
     .expect("a checked function")
 }
 
+/// A function with a parameter of interface type, which no step before 9
+/// lowers.
+fn interface_function(name: &str) -> CheckedFunction {
+    function(name, vec![Type::Any], Type::Void, void_literal())
+}
+
 #[test]
-fn a_variadic_parameter_is_named_and_a_fixed_one_lowers() {
-    let error = not_lowered(&program(vec![variadic_function("f")], 0));
-    assert_eq!(forms(&error), ["parameters", "type"]);
-    assert_eq!(error.forms()[0].detail(), Some("variadic"));
-    assert_eq!(error.forms()[1].detail(), Some("array"));
-    assert!(
-        error.to_string().contains("parameters `variadic`"),
-        "{error}"
-    );
+fn a_variadic_parameter_lowers_since_step_8b_and_an_interface_one_is_named() {
+    assert!(emit(&program(vec![variadic_function("f")], 0)).is_ok());
+    let error = not_lowered(&program(vec![interface_function("f")], 0));
+    assert_eq!(forms(&error), ["type"]);
+    assert_eq!(error.forms()[0].detail(), Some("interface"));
     assert_eq!(
         error.forms()[0].origin().map(SourceOrigin::source_id),
         Some("skeleton.vib")
@@ -238,12 +256,12 @@ fn a_module_value_lowers_since_step_5b() {
 
 #[test]
 fn the_error_lists_each_distinct_form_once_in_form_order() {
-    // A program with two variadic functions names `parameters` once.
+    // A program with two functions of interface parameters names `type` once.
     let error = not_lowered(&program(
-        vec![variadic_function("a"), variadic_function("b")],
+        vec![interface_function("a"), interface_function("b")],
         0,
     ));
-    assert_eq!(forms(&error), ["parameters", "type"]);
+    assert_eq!(forms(&error), ["type"]);
 }
 
 #[test]
@@ -251,7 +269,7 @@ fn no_module_is_produced_for_a_program_the_emitter_cannot_lower_completely() {
     // The entry is empty, but another function is not: the emitter reports it
     // rather than emitting a module without it.
     let result = emit(&program(
-        vec![empty_function("entry"), variadic_function("helper")],
+        vec![empty_function("entry"), interface_function("helper")],
         0,
     ));
     assert!(

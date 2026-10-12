@@ -42,6 +42,7 @@
 mod classify;
 mod encode;
 mod form;
+mod key;
 pub mod layout;
 mod lower;
 mod pattern;
@@ -163,16 +164,33 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
         .ok()
         .and_then(|lambdas| total.checked_add(lambdas))
         .ok_or_else(|| NotLowered::single(Form::ModuleSize))?;
-    let fns = encode::routines_for(total);
     // A call pushes a frame of the callee's size, which is known only once the
-    // callee is lowered: the first pass finds every size.
+    // callee is lowered: the first pass finds every size, and which natives the
+    // program calls. The natives are imported, and an import takes a function
+    // index before every defined function, so the second pass numbers the
+    // routines after them.
     let count = total as usize;
-    let mut first = lower::Lowering::new(&fns, program, &lambdas, vec![0; count]);
+    let first_fns = encode::routines_for(total);
+    let mut first =
+        lower::Lowering::new(&first_fns, program, &lambdas, vec![0; count], Vec::new());
     let mut sizes = Vec::with_capacity(count);
     for index in 0..count {
         sizes.push(first.function(index)?.slots);
     }
-    let mut lowering = lower::Lowering::new(&fns, program, &lambdas, sizes.clone());
+    let natives = first.used_natives();
+    let imports = natives
+        .iter()
+        .filter_map(|intrinsic| intrinsic.native_import())
+        .collect::<Vec<_>>();
+    let import_count = u32::try_from(imports.len())
+        .map_err(|_| NotLowered::single(Form::ModuleSize))?;
+    let fns = encode::routines_for(
+        total
+            .checked_add(import_count)
+            .ok_or_else(|| NotLowered::single(Form::ModuleSize))?,
+    );
+    let mut lowering =
+        lower::Lowering::new(&fns, program, &lambdas, sizes.clone(), natives);
     let mut lowered = Vec::with_capacity(count);
     for index in 0..count {
         lowered.push(lowering.function(index)?.code);
@@ -182,9 +200,11 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
         .copied()
         .ok_or_else(|| NotLowered::single(Form::ModuleSize))?;
     let include_new = lowering.built_object() || globals != 0;
+    let extra = lowering.comparer_routines();
     let parts = encode::Parts {
         functions: lowered,
-        table: (0..total).collect(),
+        // The table holds function indices, which the imports come before.
+        table: (import_count..import_count + total).collect(),
         entry: encode::Entry::Program {
             function: entry,
             slots: entry_slots,
@@ -193,6 +213,8 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
         },
         segments: lowering.into_segments(),
         include_new,
+        imports,
+        extra,
     };
     let bytes =
         encode::module(&parts).ok_or_else(|| NotLowered::single(Form::ModuleSize))?;

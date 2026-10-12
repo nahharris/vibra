@@ -39,6 +39,8 @@ pub fn module_with_entry(
         entry: Entry::Raw { function: 0, class },
         segments: Vec::new(),
         include_new: true,
+        imports: Vec::new(),
+        extra: Vec::new(),
     };
     // The one function is the entry, so the module always encodes.
     encode::module(&parts).unwrap_or_default()

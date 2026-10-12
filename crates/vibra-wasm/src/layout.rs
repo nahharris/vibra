@@ -370,30 +370,13 @@ pub const MIN_CLASS: u32 = 5;
 /// event.
 pub const MAX_CLASS: u32 = 30;
 
-/// The object header.
-pub mod header {
-    /// The header's size in bytes.
-    pub const SIZE: u32 = 24;
-    /// `count`.
-    pub const COUNT: u32 = 0;
-    /// `size`.
-    pub const BLOCK_SIZE: u32 = 4;
-    /// `kind`.
-    pub const KIND: u32 = 8;
-    /// `stride`.
-    pub const STRIDE: u32 = 9;
-    /// `len`.
-    pub const LEN: u32 = 12;
-    /// `variant`.
-    pub const VARIANT: u32 = 16;
-}
-
-/// The stride of the cells layout.
-pub const STRIDE_CELLS: u32 = 8;
-/// The stride of the chars layout.
-pub const STRIDE_CHARS: u32 = 4;
-/// The stride of the bytes layout.
-pub const STRIDE_BYTES: u32 = 1;
+/// The object header, the strides, and the cells offset are written once in
+/// `vibra_ir::arena`, because the native code that reads and writes an object
+/// (`vibra-native`) needs them too, and depends on `vibra-ir` and not on this
+/// crate.
+pub use vibra_ir::arena::{
+    STRIDE_BYTES, STRIDE_CELLS, STRIDE_CHARS, cells_offset, header,
+};
 
 /// The handle table's entry size in bytes.
 pub const TABLE_ENTRY_SIZE: u32 = 16;
@@ -422,11 +405,11 @@ impl CellClass {
     #[must_use]
     pub const fn code(self) -> u8 {
         match self {
-            Self::I32 => 0,
-            Self::I64 => 1,
-            Self::F32 => 2,
-            Self::F64 => 3,
-            Self::Ref => 4,
+            Self::I32 => vibra_ir::arena::class::I32,
+            Self::I64 => vibra_ir::arena::class::I64,
+            Self::F32 => vibra_ir::arena::class::F32,
+            Self::F64 => vibra_ir::arena::class::F64,
+            Self::Ref => vibra_ir::arena::class::REF,
         }
     }
 }
@@ -608,13 +591,6 @@ pub fn components_mask() -> u32 {
     mask(|row| row.components)
 }
 
-/// The offset of the first cell of a cells-layout object of `len` cells, from
-/// the start of the block: the header and the class bytes padded to 8.
-#[must_use]
-pub const fn cells_offset(len: u32) -> u32 {
-    header::SIZE + len.div_ceil(8) * 8
-}
-
 /// The size in bytes of an object of `len` components and a stride, header
 /// included, before it is rounded to a size class.
 #[must_use]
@@ -649,6 +625,22 @@ mod tests {
     fn the_kind_table_is_in_kind_order() {
         for (index, row) in KINDS.iter().enumerate() {
             assert_eq!(row.kind as usize, index, "{}", row.name);
+        }
+        // The codes native code reads are the ones this table writes.
+        for (kind, code) in [
+            (Kind::Atom, vibra_ir::arena::kind::ATOM),
+            (Kind::Str, vibra_ir::arena::kind::STR),
+            (Kind::Bytes, vibra_ir::arena::kind::BYTES),
+            (Kind::Tuple, vibra_ir::arena::kind::TUPLE),
+            (Kind::Array, vibra_ir::arena::kind::ARRAY),
+            (Kind::Dict, vibra_ir::arena::kind::DICT),
+            (Kind::Record, vibra_ir::arena::kind::RECORD),
+            (Kind::Enum, vibra_ir::arena::kind::ENUM),
+            (Kind::Wrapper, vibra_ir::arena::kind::WRAPPER),
+            (Kind::Union, vibra_ir::arena::kind::UNION),
+            (Kind::Function, vibra_ir::arena::kind::FUNCTION),
+        ] {
+            assert_eq!(kind.code(), u32::from(code), "{kind:?}");
         }
         assert_eq!(super::row(Kind::Enum).name, "enum");
     }

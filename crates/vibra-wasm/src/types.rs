@@ -11,13 +11,16 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use vibra_ir::{FunctionSignature, Type, TypeBody, TypeDefinition, TypeId};
+use vibra_ir::{
+    CheckedFunction, FunctionSignature, Type, TypeBody, TypeDefinition, TypeId,
+};
 
 use crate::runtime::ValueClass;
 
 /// The class of a value of `ty`, or the name of the kind of type that no
-/// lowered value represents yet: `array` and `dict` (Step 8b), and `interface`
-/// for an interface value or `any` (Step 9). A generic parameter has no class
+/// lowered value represents yet: `interface` for an interface value or `any`
+/// (Step 9). An `array` and a `dict` are arena values of their own kinds
+/// (Step 8b). A generic parameter has no class
 /// of its own: a value of it is whatever its type argument says, so the class
 /// is read from the cell at run time ([`ValueClass::Dyn`]). A compound type
 /// that mentions a parameter is an arena value like any other.
@@ -48,10 +51,10 @@ pub(crate) fn class_of(ty: &Type) -> Result<ValueClass, &'static str> {
         | Type::Enum(_)
         | Type::Tuple(_)
         | Type::Union(_)
+        | Type::Array(_)
+        | Type::Dict(..)
         | Type::Function(_) => ValueClass::Ref,
         Type::Param(_) => ValueClass::Dyn,
-        Type::Array(_) => return Err("array"),
-        Type::Dict(..) => return Err("dict"),
         Type::Interface(..) | Type::Any => return Err("interface"),
     })
 }
@@ -224,10 +227,12 @@ impl Shape {
     }
 }
 
-/// The declared types of a program, by identity.
+/// The declared types of a program, by identity, and its functions, which a
+/// dict ordered by a declared key's own `compare` selects that `compare` from.
 #[derive(Debug)]
 pub(crate) struct TypeEnv<'a> {
     definitions: BTreeMap<&'a TypeId, &'a TypeDefinition>,
+    functions: &'a [CheckedFunction],
 }
 
 impl<'a> TypeEnv<'a> {
@@ -237,7 +242,22 @@ impl<'a> TypeEnv<'a> {
                 .iter()
                 .map(|definition| (definition.id(), definition))
                 .collect(),
+            functions: &[],
         }
+    }
+
+    /// The same environment over the functions of a program.
+    pub(crate) const fn with_functions(
+        mut self,
+        functions: &'a [CheckedFunction],
+    ) -> Self {
+        self.functions = functions;
+        self
+    }
+
+    /// The functions of the program.
+    pub(crate) const fn functions(&self) -> &'a [CheckedFunction] {
+        self.functions
     }
 
     /// The shape of a compound type: a declared or applied type by its
@@ -292,7 +312,14 @@ mod tests {
             )))),
             Ok(ValueClass::Ref)
         );
-        assert_eq!(class_of(&Type::Array(Box::new(Type::I32))), Err("array"));
+        assert_eq!(
+            class_of(&Type::Array(Box::new(Type::I32))),
+            Ok(ValueClass::Ref)
+        );
+        assert_eq!(
+            class_of(&Type::Dict(Box::new(Type::Str), Box::new(Type::I32))),
+            Ok(ValueClass::Ref)
+        );
         assert_eq!(class_of(&Type::Any), Err("interface"));
         assert_eq!(
             class_of(&Type::Tuple(vec![Type::Array(Box::new(Type::I32))])),

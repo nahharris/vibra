@@ -118,6 +118,8 @@ enum Build {
     },
     Wrapper(TypeId),
     Tuple(Option<TypeId>),
+    Array,
+    Dict,
     Union {
         type_id: Option<TypeId>,
         member: Type,
@@ -138,6 +140,10 @@ enum Shape {
     Wrapper(Type),
     Tuple(Vec<Type>),
     Union(Vec<Type>),
+    /// An array: its element type.
+    Array(Type),
+    /// A dict: its key and value types.
+    Dict(Type, Type),
 }
 
 /// The declared types of a program by identity.
@@ -156,6 +162,12 @@ impl<'a> Declared<'a> {
             Type::Enum(variants) => return Some(Shape::Enum(variants.clone())),
             Type::Tuple(components) => return Some(Shape::Tuple(components.clone())),
             Type::Union(members) => return Some(Shape::Union(members.clone())),
+            Type::Array(element) => {
+                return Some(Shape::Array(element.as_ref().clone()));
+            }
+            Type::Dict(key, value) => {
+                return Some(Shape::Dict(key.as_ref().clone(), value.as_ref().clone()));
+            }
             _ => return None,
         };
         Some(match body {
@@ -340,6 +352,17 @@ impl Instance {
                     vec![member],
                 )
             }
+            // An array reads each element by its type, and a dict each entry,
+            // which the host reads as a two-component tuple, in the order the
+            // module stores them: canonical key order.
+            Shape::Array(element) => {
+                let count = self.length(&id)?;
+                (Build::Array, repeat(&element, count)?)
+            }
+            Shape::Dict(key, value) => {
+                let count = self.length(&id)?;
+                (Build::Dict, repeat(&Type::Tuple(vec![key, value]), count)?)
+            }
         };
         let mut items = Vec::with_capacity(components.len());
         let mut children = Vec::new();
@@ -464,6 +487,21 @@ fn assemble(
             type_id,
             values: values.collect(),
         },
+        Build::Array => ObservedValue::Array(values.collect()),
+        Build::Dict => ObservedValue::Dict(
+            values
+                .map(|mut entry| match &mut entry {
+                    ObservedValue::Tuple { values, .. } => {
+                        let mut parts = std::mem::take(values).into_iter();
+                        match (parts.next(), parts.next(), parts.next()) {
+                            (Some(key), Some(value), None) => Ok((key, value)),
+                            _ => Err(defect("a dict entry is not a pair".to_owned())),
+                        }
+                    }
+                    _ => Err(defect("a dict entry is not a tuple".to_owned())),
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
         Build::Union { type_id, member } => ObservedValue::Union {
             type_id,
             member: Box::new(member),
@@ -474,6 +512,14 @@ fn assemble(
             ),
         },
     })
+}
+
+/// `count` copies of `ty`: the component types of a collection of that many
+/// elements. A count the host cannot hold is a defect, never an allocation.
+fn repeat(ty: &Type, count: u64) -> Result<Vec<Type>, Outcome> {
+    let count = usize::try_from(count)
+        .map_err(|_| defect("a collection longer than the host can read".to_owned()))?;
+    Ok(vec![ty.clone(); count])
 }
 
 fn defect(cause: String) -> Outcome {

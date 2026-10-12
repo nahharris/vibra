@@ -120,8 +120,12 @@
 //! body, and the second emits the code with every size known.
 
 use std::borrow::Cow;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
+use vibra_ir::external::{
+    Answer, CompilerIntrinsic, NATIVE_ROWS, NativeRow, ObjectKind, Operand as Wide,
+    Totality,
+};
 use vibra_ir::{
     CallTarget, CheckedProgram, Constant, Expr, FunctionSignature, MatchArm,
     SourceOrigin, Type, Value,
@@ -131,12 +135,13 @@ use wasm_encoder::{BlockType, Instruction as I, ValType};
 use crate::classify;
 use crate::encode::FunctionCode;
 use crate::form::NotLowered;
+use crate::key::{self, Calls, KeyShape, Order};
 use crate::layout::{self, CellClass, Kind, frame, header, state};
 use crate::pattern::{Literal, Node, Presence, Test, decompose, literal};
 use crate::primitive::{self, Names};
 use crate::runtime::{
-    Ins, Routines, ValueClass, c32, c64, get, index, ld8, ld32, ld64, set, st8, st32,
-    st64,
+    Ins, Routine, Routines, ValueClass, c32, c64, get, index, ld8, ld32, ld64, set,
+    st8, st32, st64,
 };
 use crate::types::{
     Shape, TypeEnv, bind, class_of, head_key, signature_params, written_name,
@@ -509,6 +514,17 @@ pub(crate) struct Lowering<'a> {
     built_object: bool,
     /// The number each type constructor has in a descriptor.
     heads: BTreeMap<String, u32>,
+    /// The native imports of the module, in the order of their function
+    /// indices (which come before every defined function). They are what the
+    /// first pass found the program calls: during that pass the list is empty.
+    imports: Vec<CompilerIntrinsic>,
+    /// The natives this lowering called.
+    used: BTreeSet<CompilerIntrinsic>,
+    /// The comparers of closed key shapes the dicts of the program order by,
+    /// each with the function indices of the comparers of its components. A
+    /// comparer is a routine after the constructor, numbered in the order the
+    /// lowering first needs one, so emission stays byte-identical.
+    comparers: Vec<(KeyShape, Vec<u32>)>,
 }
 
 impl<'a> Lowering<'a> {
@@ -517,6 +533,7 @@ impl<'a> Lowering<'a> {
         program: &'a CheckedProgram,
         lambdas: &'a Lambdas<'a>,
         sizes: Vec<u32>,
+        imports: Vec<CompilerIntrinsic>,
     ) -> Self {
         let mut heads = BTreeMap::new();
         heads.insert("void".to_owned(), HEAD_VOID);
@@ -524,12 +541,94 @@ impl<'a> Lowering<'a> {
             fns,
             program,
             lambdas,
-            env: TypeEnv::new(program.types()),
+            env: TypeEnv::new(program.types()).with_functions(program.functions()),
             sizes,
             segments: Segments::default(),
             built_object: false,
             heads,
+            imports,
+            used: BTreeSet::new(),
+            comparers: Vec::new(),
         }
+    }
+
+    /// The function index of the routine that orders keys of `shape`, which is
+    /// registered with the routines of its components first.
+    fn comparer(&mut self, shape: &KeyShape) -> u32 {
+        let components: Vec<KeyShape> = match shape {
+            KeyShape::Components(parts) => parts.clone(),
+            KeyShape::Variants(parts) => parts.iter().flatten().cloned().collect(),
+            _ => Vec::new(),
+        };
+        let children = components
+            .iter()
+            .map(|component| self.comparer(component))
+            .collect::<Vec<_>>();
+        match shape {
+            KeyShape::Text => {
+                self.import(CompilerIntrinsic::TextCompare);
+            }
+            KeyShape::Bytes => {
+                self.import(CompilerIntrinsic::BytesCompare);
+            }
+            _ => {}
+        }
+        // The comparers follow the constructor, which a module with a dict
+        // always has.
+        self.built_object = true;
+        let position = match self.comparers.iter().position(|(known, _)| known == shape)
+        {
+            Some(position) => position,
+            None => {
+                self.comparers.push((shape.clone(), children));
+                self.comparers.len() - 1
+            }
+        };
+        self.fns.new + 1 + u32::try_from(position).unwrap_or(0)
+    }
+
+    /// The function index of the native import of `intrinsic`, without
+    /// recording a use.
+    fn import_index(&self, intrinsic: CompilerIntrinsic) -> u32 {
+        self.imports
+            .iter()
+            .position(|known| *known == intrinsic)
+            .and_then(|position| u32::try_from(position).ok())
+            .unwrap_or(0)
+    }
+
+    /// The routines of the comparers the lowering registered, in the order of
+    /// their function indices.
+    pub(crate) fn comparer_routines(&self) -> Vec<Routine> {
+        let calls = Calls {
+            text: self.import_index(CompilerIntrinsic::TextCompare),
+            bytes: self.import_index(CompilerIntrinsic::BytesCompare),
+        };
+        self.comparers
+            .iter()
+            .map(|(shape, children)| key::routine(shape, children, calls))
+            .collect()
+    }
+
+    /// The function index of the native import of `intrinsic`, which the call
+    /// records as used. During the first pass no import is known and the index
+    /// is `0`, because that pass only finds frame sizes.
+    fn import(&mut self, intrinsic: CompilerIntrinsic) -> u32 {
+        self.used.insert(intrinsic);
+        self.imports
+            .iter()
+            .position(|known| *known == intrinsic)
+            .and_then(|position| u32::try_from(position).ok())
+            .unwrap_or(0)
+    }
+
+    /// The natives this lowering called, in the order of the closed table.
+    pub(crate) fn used_natives(&self) -> Vec<CompilerIntrinsic> {
+        NATIVE_ROWS
+            .iter()
+            .map(|row| row.intrinsic)
+            .filter(|intrinsic| self.used.contains(intrinsic))
+            .collect()
     }
 
     /// Whether any lowered function builds an arena object, so the module needs
@@ -747,6 +846,59 @@ enum Place {
     },
 }
 
+/// How a dict orders its keys, as the lowering uses it.
+#[derive(Clone, Copy, Debug)]
+enum KeyOrder {
+    /// The routine of a closed key shape: `(a, b) -> -1, 0, 1`.
+    Closed { comparer: u32 },
+    /// The `compare` the program writes for a declared key type, a language
+    /// function of two keys that answers an `ordering`, whose `less` and
+    /// `greater` discriminants are these.
+    User {
+        function: u32,
+        slots: u32,
+        less: u32,
+        greater: u32,
+    },
+}
+
+/// Where one of the two keys a comparison reads is.
+#[derive(Clone, Copy, Debug)]
+enum KeyAt {
+    /// The cell of a slot.
+    Slot(u32),
+    /// The key of the entry tuple that a slot holds.
+    OfTuple(u32),
+    /// The key of the entry at an index, in the cells object a slot holds: the
+    /// index is in the low 32 bits of the cell of another slot.
+    OfEntry { object: u32, index: u32 },
+}
+
+/// The address of a checked pattern, which names it while one arm is lowered.
+fn pattern_key(pattern: &vibra_ir::Pattern) -> usize {
+    std::ptr::from_ref(pattern).addr()
+}
+
+/// How a lookup reads an element out of the object it indexes.
+#[derive(Clone, Copy, Debug)]
+enum Access {
+    /// The cells of an array.
+    Cells,
+    /// The Unicode scalars of a `str`.
+    Chars,
+    /// The bytes of `bytes`.
+    Bytes,
+}
+
+/// The form that reports a registry row used where the emitter cannot lower it.
+fn unlowered_row(row: &NativeRow, origin: &SourceOrigin) -> NotLowered {
+    NotLowered::from_uses(vec![
+        crate::form::UnloweredForm::new(crate::Form::External, Some(origin.clone()))
+            .with_detail(row.name()),
+    ])
+    .unwrap_or_else(|| NotLowered::single(crate::Form::External))
+}
+
 /// The variants of `option` and `result` that `try` continues with, and the ones
 /// it leaves the activation with, by name, as the reference interpreter reads
 /// them. The checker admits no other operand.
@@ -774,6 +926,9 @@ enum ByteSource {
     Value { position: u32 },
     /// The `value` cell of a module value of the state's table.
     Table { class_value: u32 },
+    /// The element of the cells object a slot holds at the index in the low 32
+    /// bits of another slot's cell.
+    Indexed { object: u32, index: u32 },
 }
 
 #[derive(Debug)]
@@ -789,6 +944,9 @@ struct Builder<'l, 'a> {
     known: u32,
     shape: Shape1,
     next_temp: u32,
+    /// The parts the running arm made of its subject, by the address of the
+    /// pattern that meets each, and the slot that holds each.
+    derived: BTreeMap<usize, u32>,
     max_slots: u32,
     blocks: Vec<Option<Block>>,
     current: u32,
@@ -815,6 +973,7 @@ impl<'l, 'a> Builder<'l, 'a> {
             known,
             shape,
             next_temp: first_temp,
+            derived: BTreeMap::new(),
             max_slots: first_temp,
             blocks: Vec::new(),
             current: 0,
@@ -1002,6 +1161,17 @@ impl<'l, 'a> Builder<'l, 'a> {
                             ld8(class_value),
                         ]);
                     }
+                    ByteSource::Indexed { object, index } => {
+                        let (object, index) = (self.cell(object), self.cell(index));
+                        self.push(&[
+                            get(FRAME),
+                            ld32(object),
+                            get(FRAME),
+                            ld32(index),
+                            I::I32Add,
+                            ld8(header::SIZE),
+                        ]);
+                    }
                 }
                 self.push(&[set(SCRATCH)]);
                 self.push(&[
@@ -1132,6 +1302,39 @@ impl<'l, 'a> Builder<'l, 'a> {
                 components,
                 ..
             } => self.tuple(value_type, components, expr.origin(), dest),
+            Expr::Array {
+                value_type,
+                elements,
+                ..
+            } => self.array(value_type, elements, expr.origin(), dest),
+            Expr::Dict {
+                value_type,
+                entries,
+                key_order,
+                ..
+            } => {
+                self.dict(value_type, entries, key_order.as_ref(), expr.origin(), dest)
+            }
+            Expr::Lookup {
+                collection,
+                key,
+                key_order,
+                value_type,
+                ..
+            } => {
+                if matches!(collection.result_type(), Type::Dict(..)) {
+                    self.dict_lookup(
+                        collection,
+                        key,
+                        key_order.as_ref(),
+                        value_type,
+                        expr.origin(),
+                        dest,
+                    )
+                } else {
+                    self.lookup(collection, key, value_type, expr.origin(), dest)
+                }
+            }
             Expr::TupleProject {
                 tuple,
                 index,
@@ -1259,11 +1462,18 @@ impl<'l, 'a> Builder<'l, 'a> {
             let next = self.new_block();
             let node =
                 decompose(&self.lowering.env, &arm.pattern, &subject_type, origin)?;
+            self.derived.clear();
             self.test_node(&node, Place::Slot(subject), next, origin)?;
             self.bind_node(&node, Place::Slot(subject), origin)?;
             // What the tests borrowed is no longer needed, and the subject is
-            // owned by its binders now.
+            // owned by its binders now. A part the arm made of the subject (the
+            // array a text pattern meets) is dropped here, and by the next arm
+            // when a test fails, which is a no-op while nothing owns it.
+            let made = self.derived.values().copied().collect::<Vec<_>>();
             self.release_to(after_subject);
+            for part in &made {
+                self.discard(*part, ValueClass::Dyn);
+            }
             self.discard(subject, class);
             self.expr(&arm.body, dest)?;
             for (slot, ty) in arm.pattern.bindings() {
@@ -1272,6 +1482,9 @@ impl<'l, 'a> Builder<'l, 'a> {
                 self.discard(slot, class);
             }
             self.goto(join, next);
+            for part in &made {
+                self.discard(*part, ValueClass::Dyn);
+            }
         }
         let stop = self.lowering.fns.stop_trap;
         self.push(&[c32(TrapCode::InvalidCheckedProgram.code()), I::Call(stop)]);
@@ -1387,6 +1600,11 @@ impl<'l, 'a> Builder<'l, 'a> {
                 ]);
                 self.continue_unless(fail);
             }
+            Test::Len(count) => {
+                self.push_cell(place, false);
+                self.push(&[ld32(header::LEN), c32(count.cast_signed()), I::I32Eq]);
+                self.continue_unless(fail);
+            }
             Test::Data(value) => {
                 // The literal is built, compared, and dropped.
                 let mark = self.next_temp;
@@ -1406,6 +1624,16 @@ impl<'l, 'a> Builder<'l, 'a> {
         for child in &node.children {
             let sub = decompose(&self.lowering.env, child.pattern, &child.ty, origin)?;
             if sub.is_inert() {
+                continue;
+            }
+            // A part the object does not store is made once, here, by the
+            // registry's conversion, and met in place like any other. The arm
+            // drops it when it ends or fails.
+            if let Some(derive) = child.derive {
+                let held = self.object_slot(place, &mut object);
+                let part = self.derive(derive, held, origin)?;
+                self.derived.insert(pattern_key(child.pattern), part);
+                self.test_node(&sub, Place::Slot(part), fail, origin)?;
                 continue;
             }
             match child.presence {
@@ -1459,6 +1687,17 @@ impl<'l, 'a> Builder<'l, 'a> {
                 continue;
             }
             let sub = decompose(&self.lowering.env, child.pattern, &child.ty, origin)?;
+            if child.derive.is_some() {
+                let part = self
+                    .derived
+                    .get(&pattern_key(child.pattern))
+                    .copied()
+                    .ok_or_else(|| {
+                        NotLowered::type_of("shape", Some(origin.clone()))
+                    })?;
+                self.bind_node(&sub, Place::Slot(part), origin)?;
+                continue;
+            }
             let held = self.object_slot(place, &mut object);
             let part = Place::Component {
                 object: held,
@@ -2428,7 +2667,21 @@ impl<'l, 'a> Builder<'l, 'a> {
         };
         let slot = self.temp();
         self.expr(payload, slot)?;
-        match &slot_type {
+        self.variant_payload(&slot_type, discriminant_word, slot, class, dest);
+        self.release_to(mark);
+        Ok(())
+    }
+
+    /// A variant whose payload cell is in `slot`, of a slot of type `slot_type`.
+    fn variant_payload(
+        &mut self,
+        slot_type: &Type,
+        discriminant_word: u32,
+        slot: u32,
+        class: ValueClass,
+        dest: u32,
+    ) {
+        match slot_type {
             // A `void` payload is no payload; its operand is evaluated for its
             // effects only.
             Type::Void => self.build(Kind::Enum, discriminant_word, &[], dest),
@@ -2489,11 +2742,13 @@ impl<'l, 'a> Builder<'l, 'a> {
                 dest,
             ),
         }
-        self.release_to(mark);
-        Ok(())
     }
 
-    /// A wrapper: one cell holding the representation.
+    /// A wrapper: one cell holding the representation. The builtin text types
+    /// are the exception the language itself makes: `str` and `bytes` are
+    /// written over an array of `char` or `u8`, and a value of either is one
+    /// object of its own kind, so wrapping an array is the native conversion
+    /// of the registry (`text.from-chars`, `bytes.from-array`).
     fn wrap(
         &mut self,
         value_type: &Type,
@@ -2501,6 +2756,20 @@ impl<'l, 'a> Builder<'l, 'a> {
         origin: &SourceOrigin,
         dest: u32,
     ) -> Result<(), NotLowered> {
+        let conversion = match value_type {
+            Type::Str => Some(CompilerIntrinsic::TextFromChars),
+            Type::Bytes => Some(CompilerIntrinsic::BytesFromArray),
+            _ => None,
+        };
+        if let Some(row) = conversion.and_then(CompilerIntrinsic::native_import) {
+            return self.native(
+                row,
+                std::slice::from_ref(value),
+                value_type,
+                origin,
+                dest,
+            );
+        }
         let shape = self.shape(value_type, origin)?;
         let types = shape.components();
         let mark = self.next_temp;
@@ -2580,6 +2849,1077 @@ impl<'l, 'a> Builder<'l, 'a> {
         Ok(())
     }
 
+    // -- arrays and lookups -----------------------------------------------------
+
+    /// An array built from element operands: one object of the cells layout,
+    /// whose class bytes say what each element holds, built as any aggregate is.
+    fn array(
+        &mut self,
+        value_type: &Type,
+        elements: &[Expr],
+        origin: &SourceOrigin,
+        dest: u32,
+    ) -> Result<(), NotLowered> {
+        let Type::Array(element) = value_type else {
+            return Err(classify::forms_of_type(value_type, origin));
+        };
+        let mark = self.next_temp;
+        let operands = elements.iter().collect::<Vec<_>>();
+        let types = vec![element.as_ref().clone(); operands.len()];
+        let parts = self.parts(&operands, &types, origin)?;
+        self.build(Kind::Array, 0, &parts, dest);
+        self.release_to(mark);
+        Ok(())
+    }
+
+    /// A checked lookup in an array, a `str`, or `bytes`: one bounds check, and
+    /// then `some` of the element, whose reference takes a `dup`, or `none`. The
+    /// collection is dropped on both paths.
+    fn lookup(
+        &mut self,
+        collection: &Expr,
+        key: &Expr,
+        value_type: &Type,
+        origin: &SourceOrigin,
+        dest: u32,
+    ) -> Result<(), NotLowered> {
+        let collection_type = collection.result_type();
+        let (element, access) = match &collection_type {
+            Type::Array(element) => (element.as_ref().clone(), Access::Cells),
+            Type::Str => (Type::Char, Access::Chars),
+            Type::Bytes => (Type::U8, Access::Bytes),
+            _ => return Err(self.forms_of(collection)),
+        };
+        let class = self.class(&element, origin)?;
+        let shape = self.shape(value_type, origin)?;
+        let Shape::Enum(variants) = &shape else {
+            return Err(classify::forms_of_type(value_type, origin));
+        };
+        let some = shape
+            .variant("some")
+            .zip(shape.variant("none"))
+            .ok_or_else(|| classify::forms_of_type(value_type, origin))?;
+        let slot_type = variants
+            .get(some.0)
+            .map(|(_, ty)| ty.clone())
+            .ok_or_else(|| classify::forms_of_type(value_type, origin))?;
+        let (some, none) = (
+            u32::try_from(some.0).unwrap_or(u32::MAX),
+            u32::try_from(some.1).unwrap_or(u32::MAX),
+        );
+
+        let mark = self.next_temp;
+        let held = self.temp();
+        self.expr(collection, held)?;
+        let index = self.temp();
+        self.expr(key, index)?;
+        let (held_at, index_at) = (self.cell(held), self.cell(index));
+        // In range exactly when the index is below the component count.
+        self.push(&[
+            get(FRAME),
+            ld64(index_at),
+            get(FRAME),
+            ld32(held_at),
+            ld32(header::LEN),
+            I::I64ExtendI32U,
+            I::I64LtU,
+        ]);
+        let (found, missing, join) =
+            (self.new_block(), self.new_block(), self.new_block());
+        self.end(Term::Branch {
+            then_block: found,
+            else_block: missing,
+        });
+
+        self.start(found);
+        let item = self.temp();
+        let to = self.cell(item);
+        match access {
+            Access::Cells => {
+                self.push(&[
+                    get(FRAME),
+                    get(FRAME),
+                    ld32(held_at),
+                    get(FRAME),
+                    ld32(held_at),
+                    ld32(header::LEN),
+                    c32(7),
+                    I::I32Add,
+                    c32(-8),
+                    I::I32And,
+                    I::I32Add,
+                    get(FRAME),
+                    ld32(index_at),
+                    c32(3),
+                    I::I32Shl,
+                    I::I32Add,
+                    ld64(header::SIZE),
+                    st64(to),
+                ]);
+                self.claim(
+                    item,
+                    class,
+                    ByteSource::Indexed {
+                        object: held,
+                        index,
+                    },
+                );
+            }
+            Access::Chars => {
+                self.push(&[
+                    get(FRAME),
+                    get(FRAME),
+                    ld32(held_at),
+                    get(FRAME),
+                    ld32(index_at),
+                    c32(2),
+                    I::I32Shl,
+                    I::I32Add,
+                    ld32(header::SIZE),
+                    I::I64ExtendI32U,
+                    st64(to),
+                ]);
+                self.set_byte(item, CellClass::I32.code());
+            }
+            Access::Bytes => {
+                self.push(&[
+                    get(FRAME),
+                    get(FRAME),
+                    ld32(held_at),
+                    get(FRAME),
+                    ld32(index_at),
+                    I::I32Add,
+                    ld8(header::SIZE),
+                    I::I64ExtendI32U,
+                    st64(to),
+                ]);
+                self.set_byte(item, CellClass::I32.code());
+            }
+        }
+        self.drop_slot(held);
+        self.variant_payload(&slot_type, some, item, class, dest);
+        self.goto(join, missing);
+        self.drop_slot(held);
+        self.build(Kind::Enum, none, &[], dest);
+        self.goto(join, join);
+        self.release_to(mark);
+        Ok(())
+    }
+
+    // -- dicts ------------------------------------------------------------------
+
+    /// The order a dict of keys of type `key` is kept in: the routine of a
+    /// closed shape, or the function that implements a declared key's own
+    /// `compare`. A key this step cannot order names the dict form, whose owner
+    /// is Step 9: a declared key inside a structure is dispatched from a run-time
+    /// type.
+    fn key_order(
+        &mut self,
+        key: &Type,
+        key_order: Option<&vibra_ir::TypeId>,
+        origin: &SourceOrigin,
+    ) -> Result<KeyOrder, NotLowered> {
+        let unordered = || {
+            NotLowered::from_uses(vec![
+                crate::form::UnloweredForm::new(
+                    crate::Form::Dict,
+                    Some(origin.clone()),
+                )
+                .with_detail("user-key"),
+            ])
+            .unwrap_or_else(|| NotLowered::single(crate::Form::Dict))
+        };
+        match key::order_of(&self.lowering.env, key, key_order).ok_or_else(unordered)? {
+            Order::Closed(shape) => Ok(KeyOrder::Closed {
+                comparer: self.lowering.comparer(&shape),
+            }),
+            Order::User(function) => {
+                let program = self.lowering.program;
+                let compare = program
+                    .functions()
+                    .get(function)
+                    .ok_or_else(|| NotLowered::single(crate::Form::ModuleSize))?;
+                let ordering = compare.signature().result();
+                let shape = self.shape(&ordering, origin)?;
+                let (Some(less), Some(greater)) =
+                    (shape.variant("less"), shape.variant("greater"))
+                else {
+                    return Err(unordered());
+                };
+                Ok(KeyOrder::User {
+                    function: u32::try_from(function)
+                        .map_err(|_| NotLowered::single(crate::Form::ModuleSize))?,
+                    slots: self.lowering.sizes.get(function).copied().unwrap_or(0),
+                    less: u32::try_from(less).unwrap_or(u32::MAX),
+                    greater: u32::try_from(greater).unwrap_or(u32::MAX),
+                })
+            }
+        }
+    }
+
+    /// Pushes the address, without the object header, of the cell at the index
+    /// in the low 32 bits of slot `index` in the cells object that slot `object`
+    /// holds.
+    fn push_element_address(&mut self, object: u32, index: u32) {
+        let (object, index) = (self.cell(object), self.cell(index));
+        self.push(&[
+            get(FRAME),
+            ld32(object),
+            get(FRAME),
+            ld32(object),
+            ld32(header::LEN),
+            c32(7),
+            I::I32Add,
+            c32(-8),
+            I::I32And,
+            I::I32Add,
+            get(FRAME),
+            ld32(index),
+            c32(3),
+            I::I32Shl,
+            I::I32Add,
+        ]);
+    }
+
+    /// Pushes the 64 bits of a key.
+    fn push_key_bits(&mut self, at: KeyAt) {
+        match at {
+            KeyAt::Slot(slot) => {
+                let cell = self.cell(slot);
+                self.push(&[get(FRAME), ld64(cell)]);
+            }
+            KeyAt::OfTuple(slot) => {
+                let cell = self.cell(slot);
+                self.push(&[get(FRAME), ld32(cell), ld64(layout::cells_offset(2))]);
+            }
+            KeyAt::OfEntry { object, index } => {
+                self.push_element_address(object, index);
+                self.push(&[ld32(header::SIZE), ld64(layout::cells_offset(2))]);
+            }
+        }
+    }
+
+    /// Compares two keys by `order`, and leaves `-1`, `0`, or `1` in the cell of
+    /// `out`. A closed order is a call of a routine. A declared key's own
+    /// `compare` is a language call like any other: it takes a count of each key
+    /// and pushes a frame, and the code that follows is the block that the call
+    /// returns to.
+    fn compare_keys(&mut self, order: &KeyOrder, a: KeyAt, b: KeyAt, out: u32) {
+        let at = self.cell(out);
+        match *order {
+            KeyOrder::Closed { comparer } => {
+                self.push(&[get(FRAME)]);
+                self.push_key_bits(a);
+                self.push_key_bits(b);
+                self.push(&[I::Call(comparer), I::I64ExtendI32S, st64(at)]);
+                self.set_byte(out, CellClass::I32.code());
+            }
+            KeyOrder::User {
+                function,
+                slots,
+                less,
+                greater,
+            } => {
+                let (left, right) = (self.temp(), self.temp());
+                for (key, slot) in [(a, left), (b, right)] {
+                    let to = self.cell(slot);
+                    self.push(&[get(FRAME)]);
+                    self.push_key_bits(key);
+                    self.push(&[st64(to)]);
+                    // A declared key is an arena value, which the callee owns.
+                    self.claim(slot, ValueClass::Ref, ByteSource::Slot(slot));
+                }
+                let resume = self.new_block();
+                self.end(Term::Call {
+                    callee: Callee::Named { function, slots },
+                    moves: vec![
+                        Move {
+                            from: left,
+                            to: 0,
+                            only_below: None,
+                        },
+                        Move {
+                            from: right,
+                            to: 1,
+                            only_below: None,
+                        },
+                    ],
+                    arity: 2,
+                    resume,
+                });
+                self.start(resume);
+                let answer = self.temp();
+                self.take_return(answer);
+                let held = self.cell(answer);
+                self.push(&[
+                    get(FRAME),
+                    get(FRAME),
+                    ld32(held),
+                    ld32(header::VARIANT),
+                    set(SCRATCH),
+                    get(SCRATCH),
+                    c32(greater.cast_signed()),
+                    I::I32Eq,
+                    get(SCRATCH),
+                    c32(less.cast_signed()),
+                    I::I32Eq,
+                    I::I32Sub,
+                    I::I64ExtendI32S,
+                    st64(at),
+                ]);
+                self.set_byte(out, CellClass::I32.code());
+                self.drop_slot(answer);
+            }
+        }
+    }
+
+    /// Stores `value` in the scalar slot `slot`.
+    fn store_word(&mut self, slot: u32, value: &[Ins]) {
+        let at = self.cell(slot);
+        self.push(&[get(FRAME)]);
+        self.push(value);
+        self.push(&[I::I64ExtendI32U, st64(at)]);
+        self.set_byte(slot, CellClass::I32.code());
+    }
+
+    /// Pushes the 32-bit word of a scalar slot.
+    fn word(&self, slot: u32) -> [Ins; 2] {
+        [get(FRAME), ld32(self.cell(slot))]
+    }
+
+    /// A dict built from key and value operands. The entries are evaluated in
+    /// order, key then value, and each becomes a two-component tuple. They are
+    /// inserted one at a time into a scratch array that is kept in key order by
+    /// a binary search for the place of each key: an equal key is the same key,
+    /// so the later entry replaces the earlier one whole. The dict is then
+    /// built to the length that remains, from the scratch array's cells.
+    fn dict(
+        &mut self,
+        value_type: &Type,
+        entries: &[(Expr, Expr)],
+        key_order: Option<&vibra_ir::TypeId>,
+        origin: &SourceOrigin,
+        dest: u32,
+    ) -> Result<(), NotLowered> {
+        let Type::Dict(key, value) = value_type else {
+            return Err(classify::forms_of_type(value_type, origin));
+        };
+        let order = self.key_order(key, key_order, origin)?;
+        let (key_class, value_class) =
+            (self.class(key, origin)?, self.class(value, origin)?);
+        let mark = self.next_temp;
+        let mut tuples = Vec::with_capacity(entries.len());
+        for (key_operand, value_operand) in entries {
+            let (key_slot, value_slot, tuple) = (self.temp(), self.temp(), self.temp());
+            self.expr(key_operand, key_slot)?;
+            self.expr(value_operand, value_slot)?;
+            self.build(
+                Kind::Tuple,
+                0,
+                &[
+                    Part::Slot {
+                        slot: key_slot,
+                        class: key_class,
+                    },
+                    Part::Slot {
+                        slot: value_slot,
+                        class: value_class,
+                    },
+                ],
+                tuple,
+            );
+            tuples.push(tuple);
+        }
+        if tuples.is_empty() {
+            self.build(Kind::Dict, 0, &[], dest);
+            self.release_to(mark);
+            return Ok(());
+        }
+        let capacity = u32::try_from(tuples.len())
+            .map_err(|_| NotLowered::single(crate::Form::ModuleSize))?;
+        let scratch = self.temp();
+        self.build(Kind::Array, 0, &vec![Part::Zero; tuples.len()], scratch);
+        let [count, low, high, mid, answer] = [
+            self.temp(),
+            self.temp(),
+            self.temp(),
+            self.temp(),
+            self.temp(),
+        ];
+        self.store_word(count, &[c32(0)]);
+        for tuple in &tuples {
+            self.insert_entry(
+                &order,
+                *tuple,
+                scratch,
+                capacity,
+                [count, low, high, mid, answer],
+            );
+        }
+        // The dict has the length that remains, and takes the cells of the
+        // scratch array, whose own length then counts none, so dropping it
+        // drops nothing the dict holds.
+        self.lowering.built_object = true;
+        let new = self.lowering.fns.new;
+        let held = self.cell(scratch);
+        let remaining = self.cell(count);
+        self.push(&[
+            c32(Kind::Dict.code().cast_signed()),
+            c32(index(layout::STRIDE_CELLS)),
+            get(FRAME),
+            ld32(remaining),
+            c32(0),
+            I::Call(new),
+            set(OBJECT),
+            // The class bytes.
+            get(OBJECT),
+            c32(index(header::SIZE)),
+            I::I32Add,
+            get(FRAME),
+            ld32(held),
+            c32(index(header::SIZE)),
+            I::I32Add,
+            get(FRAME),
+            ld32(remaining),
+            I::MemoryCopy {
+                src_mem: 0,
+                dst_mem: 0,
+            },
+            // The cells, after the class bytes padded to 8.
+            get(OBJECT),
+            get(FRAME),
+            ld32(remaining),
+            c32(7),
+            I::I32Add,
+            c32(-8),
+            I::I32And,
+            I::I32Add,
+            c32(index(header::SIZE)),
+            I::I32Add,
+            get(FRAME),
+            ld32(held),
+            c32(index(layout::cells_offset(capacity))),
+            I::I32Add,
+            get(FRAME),
+            ld32(remaining),
+            c32(3),
+            I::I32Shl,
+            I::MemoryCopy {
+                src_mem: 0,
+                dst_mem: 0,
+            },
+            get(FRAME),
+            ld32(held),
+            c32(0),
+            st32(header::LEN),
+        ]);
+        self.drop_slot(scratch);
+        self.store_object(dest);
+        self.release_to(mark);
+        Ok(())
+    }
+
+    /// Inserts the entry in slot `tuple` into the scratch array, which holds
+    /// `count` entries in key order: a binary search for the place of its key
+    /// over `low..high`, and then either the replacement of the entry whose key
+    /// is equal or the shift of the entries after the place.
+    fn insert_entry(
+        &mut self,
+        order: &KeyOrder,
+        tuple: u32,
+        scratch: u32,
+        capacity: u32,
+        [count, low, high, mid, answer]: [u32; 5],
+    ) {
+        self.store_word(low, &[c32(0)]);
+        let upper = self.word(count);
+        self.store_word(high, &upper);
+        let (head, body, place, after) = (
+            self.new_block(),
+            self.new_block(),
+            self.new_block(),
+            self.new_block(),
+        );
+        self.end(Term::Goto(head));
+        self.start(head);
+        let (below, above) = (self.word(low), self.word(high));
+        self.push(&[
+            below[0].clone(),
+            below[1].clone(),
+            above[0].clone(),
+            above[1].clone(),
+            I::I32LtU,
+        ]);
+        self.end(Term::Branch {
+            then_block: body,
+            else_block: place,
+        });
+
+        self.start(body);
+        let middle = [
+            self.word(low)[0].clone(),
+            self.word(low)[1].clone(),
+            self.word(high)[0].clone(),
+            self.word(high)[1].clone(),
+            I::I32Add,
+            c32(1),
+            I::I32ShrU,
+        ];
+        self.store_word(mid, &middle);
+        self.compare_keys(
+            order,
+            KeyAt::OfTuple(tuple),
+            KeyAt::OfEntry {
+                object: scratch,
+                index: mid,
+            },
+            answer,
+        );
+        let (smaller, not_smaller, equal, larger) = (
+            self.new_block(),
+            self.new_block(),
+            self.new_block(),
+            self.new_block(),
+        );
+        let verdict = self.word(answer);
+        self.push(&[verdict[0].clone(), verdict[1].clone(), c32(0), I::I32LtS]);
+        self.end(Term::Branch {
+            then_block: smaller,
+            else_block: not_smaller,
+        });
+        self.start(smaller);
+        let at_mid = self.word(mid);
+        self.store_word(high, &at_mid);
+        self.end(Term::Goto(head));
+        self.start(not_smaller);
+        let verdict = self.word(answer);
+        self.push(&[verdict[0].clone(), verdict[1].clone(), I::I32Eqz]);
+        self.end(Term::Branch {
+            then_block: equal,
+            else_block: larger,
+        });
+        self.start(larger);
+        let after_mid = [
+            self.word(mid)[0].clone(),
+            self.word(mid)[1].clone(),
+            c32(1),
+            I::I32Add,
+        ];
+        self.store_word(low, &after_mid);
+        self.end(Term::Goto(head));
+
+        // An equal key: the later entry replaces the earlier one.
+        self.start(equal);
+        self.push_element_address(scratch, mid);
+        self.push(&[ld32(header::SIZE), I::Call(self.lowering.fns.drop)]);
+        let held = self.cell(tuple);
+        self.push_element_address(scratch, mid);
+        self.push(&[get(FRAME), ld64(held), st64(header::SIZE)]);
+        self.disown(tuple);
+        self.end(Term::Goto(after));
+
+        // A new key: the entries from its place move up by one.
+        self.start(place);
+        let scratch_at = self.cell(scratch);
+        let cells = layout::cells_offset(capacity);
+        let (start, remaining) = (self.word(low), self.word(count));
+        // The class bytes.
+        self.push(&[
+            get(FRAME),
+            ld32(scratch_at),
+            start[0].clone(),
+            start[1].clone(),
+            I::I32Add,
+            c32(index(header::SIZE + 1)),
+            I::I32Add,
+            get(FRAME),
+            ld32(scratch_at),
+            start[0].clone(),
+            start[1].clone(),
+            I::I32Add,
+            c32(index(header::SIZE)),
+            I::I32Add,
+            remaining[0].clone(),
+            remaining[1].clone(),
+            start[0].clone(),
+            start[1].clone(),
+            I::I32Sub,
+            I::MemoryCopy {
+                src_mem: 0,
+                dst_mem: 0,
+            },
+        ]);
+        // The cells.
+        self.push(&[
+            get(FRAME),
+            ld32(scratch_at),
+            start[0].clone(),
+            start[1].clone(),
+            c32(3),
+            I::I32Shl,
+            I::I32Add,
+            c32(index(cells + 8)),
+            I::I32Add,
+            get(FRAME),
+            ld32(scratch_at),
+            start[0].clone(),
+            start[1].clone(),
+            c32(3),
+            I::I32Shl,
+            I::I32Add,
+            c32(index(cells)),
+            I::I32Add,
+            remaining[0].clone(),
+            remaining[1].clone(),
+            start[0].clone(),
+            start[1].clone(),
+            I::I32Sub,
+            c32(3),
+            I::I32Shl,
+            I::MemoryCopy {
+                src_mem: 0,
+                dst_mem: 0,
+            },
+        ]);
+        // The entry takes its place.
+        let held = self.cell(tuple);
+        self.push(&[
+            get(FRAME),
+            ld32(scratch_at),
+            start[0].clone(),
+            start[1].clone(),
+            c32(3),
+            I::I32Shl,
+            I::I32Add,
+            get(FRAME),
+            ld64(held),
+            st64(cells),
+            get(FRAME),
+            ld32(scratch_at),
+            start[0].clone(),
+            start[1].clone(),
+            I::I32Add,
+            c32(i32::from(CellClass::Ref.code())),
+            st8(header::SIZE),
+        ]);
+        self.disown(tuple);
+        let grown = [
+            self.word(count)[0].clone(),
+            self.word(count)[1].clone(),
+            c32(1),
+            I::I32Add,
+        ];
+        self.store_word(count, &grown);
+        self.end(Term::Goto(after));
+        self.start(after);
+    }
+
+    /// A lookup of a key in a dict: a binary search by the dict's order, and
+    /// then `some` of the value, which takes a `dup`, or `none`.
+    fn dict_lookup(
+        &mut self,
+        collection: &Expr,
+        key: &Expr,
+        key_order: Option<&vibra_ir::TypeId>,
+        value_type: &Type,
+        origin: &SourceOrigin,
+        dest: u32,
+    ) -> Result<(), NotLowered> {
+        let Type::Dict(key_type, element) = collection.result_type() else {
+            return Err(self.forms_of(collection));
+        };
+        let order = self.key_order(&key_type, key_order, origin)?;
+        let class = self.class(&element, origin)?;
+        let key_class = self.class(&key_type, origin)?;
+        let shape = self.shape(value_type, origin)?;
+        let Shape::Enum(variants) = &shape else {
+            return Err(classify::forms_of_type(value_type, origin));
+        };
+        let (some, none) = shape
+            .variant("some")
+            .zip(shape.variant("none"))
+            .ok_or_else(|| classify::forms_of_type(value_type, origin))?;
+        let slot_type = variants
+            .get(some)
+            .map(|(_, ty)| ty.clone())
+            .ok_or_else(|| classify::forms_of_type(value_type, origin))?;
+        let (some, none) = (
+            u32::try_from(some).unwrap_or(u32::MAX),
+            u32::try_from(none).unwrap_or(u32::MAX),
+        );
+
+        let mark = self.next_temp;
+        let held = self.temp();
+        self.expr(collection, held)?;
+        let wanted = self.temp();
+        self.expr(key, wanted)?;
+        let [low, high, mid, answer] =
+            [self.temp(), self.temp(), self.temp(), self.temp()];
+        self.store_word(low, &[c32(0)]);
+        let length = [get(FRAME), ld32(self.cell(held)), ld32(header::LEN)];
+        self.store_word(high, &length);
+        let (head, body, missing, found, join) = (
+            self.new_block(),
+            self.new_block(),
+            self.new_block(),
+            self.new_block(),
+            self.new_block(),
+        );
+        self.end(Term::Goto(head));
+        self.start(head);
+        let (below, above) = (self.word(low), self.word(high));
+        self.push(&[
+            below[0].clone(),
+            below[1].clone(),
+            above[0].clone(),
+            above[1].clone(),
+            I::I32LtU,
+        ]);
+        self.end(Term::Branch {
+            then_block: body,
+            else_block: missing,
+        });
+
+        self.start(body);
+        let middle = [
+            self.word(low)[0].clone(),
+            self.word(low)[1].clone(),
+            self.word(high)[0].clone(),
+            self.word(high)[1].clone(),
+            I::I32Add,
+            c32(1),
+            I::I32ShrU,
+        ];
+        self.store_word(mid, &middle);
+        self.compare_keys(
+            &order,
+            KeyAt::Slot(wanted),
+            KeyAt::OfEntry {
+                object: held,
+                index: mid,
+            },
+            answer,
+        );
+        let (smaller, not_smaller, larger) =
+            (self.new_block(), self.new_block(), self.new_block());
+        let verdict = self.word(answer);
+        self.push(&[verdict[0].clone(), verdict[1].clone(), c32(0), I::I32LtS]);
+        self.end(Term::Branch {
+            then_block: smaller,
+            else_block: not_smaller,
+        });
+        self.start(smaller);
+        let at_mid = self.word(mid);
+        self.store_word(high, &at_mid);
+        self.end(Term::Goto(head));
+        self.start(not_smaller);
+        let verdict = self.word(answer);
+        self.push(&[verdict[0].clone(), verdict[1].clone(), I::I32Eqz]);
+        self.end(Term::Branch {
+            then_block: found,
+            else_block: larger,
+        });
+        self.start(larger);
+        let after_mid = [
+            self.word(mid)[0].clone(),
+            self.word(mid)[1].clone(),
+            c32(1),
+            I::I32Add,
+        ];
+        self.store_word(low, &after_mid);
+        self.end(Term::Goto(head));
+
+        // Found: `some` of the entry's value.
+        self.start(found);
+        let entry = self.temp();
+        let to = self.cell(entry);
+        self.push(&[get(FRAME)]);
+        self.push_element_address(held, mid);
+        self.push(&[ld32(header::SIZE), I::I64ExtendI32U, st64(to)]);
+        self.set_byte(entry, CellClass::I32.code());
+        let item = self.temp();
+        let item_cell = self.cell(item);
+        self.push(&[
+            get(FRAME),
+            get(FRAME),
+            ld32(to),
+            ld64(layout::cells_offset(2) + 8),
+            st64(item_cell),
+        ]);
+        self.claim(
+            item,
+            class,
+            ByteSource::Component {
+                slot: entry,
+                position: 1,
+            },
+        );
+        self.discard(wanted, key_class);
+        self.drop_slot(held);
+        self.variant_payload(&slot_type, some, item, class, dest);
+        self.end(Term::Goto(join));
+
+        self.start(missing);
+        self.discard(wanted, key_class);
+        self.drop_slot(held);
+        self.build(Kind::Enum, none, &[], dest);
+        self.end(Term::Goto(join));
+        self.start(join);
+        self.release_to(mark);
+        Ok(())
+    }
+
+    // -- native imports ---------------------------------------------------------
+
+    /// Makes the part `intrinsic` derives of the object in `from`, which the
+    /// pattern borrows, into a new temporary that owns it.
+    fn derive(
+        &mut self,
+        intrinsic: CompilerIntrinsic,
+        from: u32,
+        origin: &SourceOrigin,
+    ) -> Result<u32, NotLowered> {
+        let row = intrinsic
+            .native_import()
+            .ok_or_else(|| NotLowered::type_of("shape", Some(origin.clone())))?;
+        let part = self.temp();
+        // The slot owns nothing until the conversion has made the part, so an
+        // arm that fails before it does not drop what the slot held before.
+        self.disown(part);
+        self.native_on(
+            row,
+            &[from],
+            &[ValueClass::Ref],
+            &Type::Void,
+            origin,
+            false,
+            part,
+        )?;
+        Ok(part)
+    }
+
+    /// A call of a registry row that the module imports from the native import
+    /// module: the operands are evaluated left to right and the row is run
+    /// over them.
+    fn native(
+        &mut self,
+        row: NativeRow,
+        arguments: &[Expr],
+        result: &Type,
+        origin: &SourceOrigin,
+        dest: u32,
+    ) -> Result<(), NotLowered> {
+        if arguments.len() != row.operands.len() {
+            return Err(unlowered_row(&row, origin));
+        }
+        let mark = self.next_temp;
+        let mut slots = Vec::with_capacity(arguments.len());
+        let mut classes = Vec::with_capacity(arguments.len());
+        for argument in arguments {
+            classes.push(self.class(&argument.result_type(), argument.origin())?);
+            let slot = self.temp();
+            self.expr(argument, slot)?;
+            slots.push(slot);
+        }
+        self.native_on(row, &slots, &classes, result, origin, true, dest)?;
+        self.release_to(mark);
+        Ok(())
+    }
+
+    /// Pushes the scalars of the operands of an import: an offset, an index, or
+    /// a cell and its class.
+    fn push_native_operands(
+        &mut self,
+        row: &NativeRow,
+        slots: &[u32],
+        classes: &[ValueClass],
+    ) {
+        for ((operand, slot), class) in row.operands.iter().zip(slots).zip(classes) {
+            let at = self.cell(*slot);
+            match operand {
+                Wide::Text | Wide::Bytes | Wide::Cells => {
+                    self.push(&[get(FRAME), ld32(at)]);
+                }
+                Wide::Index => self.push(&[get(FRAME), ld64(at)]),
+                Wide::Element => {
+                    self.push(&[get(FRAME), ld64(at)]);
+                    match class {
+                        ValueClass::Dyn => {
+                            self.push(&[get(FRAME), ld8(frame::class_offset(*slot))])
+                        }
+                        fixed => {
+                            self.push(&[c32(i32::from(cell_class(*fixed).code()))]);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Runs an import over operands that are already in `slots`.
+    ///
+    /// A row that builds an object runs twice, once to measure and once to fill
+    /// the object the module allocated to that size, as the table of imports
+    /// states. The operands are dropped afterwards when `consume` is set, and
+    /// are left alone when they are borrowed.
+    #[allow(clippy::too_many_arguments)]
+    fn native_on(
+        &mut self,
+        row: NativeRow,
+        slots: &[u32],
+        classes: &[ValueClass],
+        result: &Type,
+        origin: &SourceOrigin,
+        consume: bool,
+        dest: u32,
+    ) -> Result<(), NotLowered> {
+        let import = self.lowering.import(row.intrinsic);
+        let release = |this: &mut Self| {
+            if consume {
+                for (slot, class) in slots.iter().zip(classes) {
+                    this.discard(*slot, *class);
+                }
+            }
+        };
+        match row.answer {
+            Answer::Order => {
+                let mut names = Names::default();
+                for (position, variant) in
+                    ["less", "equal", "greater"].into_iter().enumerate()
+                {
+                    let discriminant = self.discriminant(result, variant, origin)?;
+                    if let Some(name) = names.order.get_mut(position) {
+                        *name = discriminant.cast_signed();
+                    }
+                }
+                self.push_native_operands(&row, slots, classes);
+                let [less, equal, greater] = names.order;
+                self.push(&[
+                    I::Call(import),
+                    set(SCRATCH),
+                    c32(less),
+                    c32(equal),
+                    c32(greater),
+                    get(SCRATCH),
+                    I::I32Eqz,
+                    I::Select,
+                    get(SCRATCH),
+                    c32(0),
+                    I::I32LtS,
+                    I::Select,
+                    set(SCRATCH),
+                ]);
+                let selector = self.temp();
+                let at = self.cell(selector);
+                self.push(&[get(FRAME), get(SCRATCH), I::I64ExtendI32U, st64(at)]);
+                self.set_byte(selector, CellClass::I32.code());
+                self.build_with(
+                    Kind::Enum,
+                    Variant::Cell {
+                        slot: selector,
+                        bias: 0,
+                    },
+                    &[],
+                    dest,
+                );
+                release(self);
+            }
+            Answer::Object { kind, totality } => {
+                let kind = match kind {
+                    ObjectKind::Str => Kind::Str,
+                    ObjectKind::Bytes => Kind::Bytes,
+                    ObjectKind::Array => Kind::Array,
+                };
+                // Measure: with no destination the import writes nothing and
+                // answers the length, or `-1` when there is no object.
+                self.push_native_operands(&row, slots, classes);
+                self.push(&[c32(0), I::Call(import), set(WR)]);
+                let object = self.temp();
+                // Allocates the object to the measured length and fills it.
+                let fill = |this: &mut Self| {
+                    this.lowering.built_object = true;
+                    let new = this.lowering.fns.new;
+                    this.push(&[
+                        c32(kind.code().cast_signed()),
+                        c32(index(layout::row(kind).stride)),
+                        get(WR),
+                        I::I32WrapI64,
+                        c32(0),
+                        I::Call(new),
+                        set(OBJECT),
+                    ]);
+                    this.store_object(object);
+                    this.push_native_operands(&row, slots, classes);
+                    this.load_ref(object);
+                    this.push(&[I::Call(import), I::Drop]);
+                };
+                match totality {
+                    Totality::Total => {
+                        fill(self);
+                        self.copy_cell(dest, object);
+                        self.own(dest);
+                        self.disown(object);
+                    }
+                    Totality::Option | Totality::Conversion => {
+                        let success = if totality == Totality::Option {
+                            "some"
+                        } else {
+                            "ok"
+                        };
+                        let success = self.discriminant(result, success, origin)?;
+                        self.push(&[get(WR), c64(0), I::I64LtS]);
+                        let (absent, present, join) =
+                            (self.new_block(), self.new_block(), self.new_block());
+                        self.end(Term::Branch {
+                            then_block: absent,
+                            else_block: present,
+                        });
+                        self.start(present);
+                        fill(self);
+                        self.build(
+                            Kind::Enum,
+                            success,
+                            &[Part::Slot {
+                                slot: object,
+                                class: ValueClass::Ref,
+                            }],
+                            dest,
+                        );
+                        self.goto(join, absent);
+                        if totality == Totality::Option {
+                            let none = self.discriminant(result, "none", origin)?;
+                            self.build(Kind::Enum, none, &[], dest);
+                        } else {
+                            // The error is an enum of `void` variants, which the
+                            // result then holds.
+                            let error_type = self.error_type(result, origin)?;
+                            let invalid = self.discriminant(
+                                &error_type,
+                                "invalid-format",
+                                origin,
+                            )?;
+                            let err = self.discriminant(result, "err", origin)?;
+                            let error = self.temp();
+                            self.build(Kind::Enum, invalid, &[], error);
+                            self.build(
+                                Kind::Enum,
+                                err,
+                                &[Part::Slot {
+                                    slot: error,
+                                    class: ValueClass::Ref,
+                                }],
+                                dest,
+                            );
+                        }
+                        self.goto(join, join);
+                    }
+                }
+                release(self);
+            }
+        }
+        Ok(())
+    }
+
     // -- primitive rows ---------------------------------------------------------
 
     /// The discriminant of `variant` in the enum `ty`, which the checker's
@@ -2618,7 +3958,13 @@ impl<'l, 'a> Builder<'l, 'a> {
         else {
             return Err(self.forms_of(expr));
         };
-        let plan = primitive::plan(*intrinsic).ok_or_else(|| self.forms_of(expr))?;
+        // A row that is not a few inline instructions is a native import.
+        let Some(plan) = primitive::plan(*intrinsic) else {
+            return match intrinsic.native_import() {
+                Some(row) => self.native(row, arguments, result, origin, dest),
+                None => Err(self.forms_of(expr)),
+            };
+        };
         if arguments.len() != plan.operands().len() {
             return Err(self.forms_of(expr));
         }
@@ -2660,11 +4006,33 @@ impl<'l, 'a> Builder<'l, 'a> {
             }
             primitive::Outcome::Scalar(_)
             | primitive::Outcome::Bool
-            | primitive::Outcome::Option => {}
+            | primitive::Outcome::Option
+            | primitive::Outcome::Moved => {}
         }
 
-        let code = plan.compute(&offsets, &names);
+        // The operand is the result: the tail a registry row packs is already
+        // the collection it builds.
+        if plan.outcome() == primitive::Outcome::Moved {
+            if let Some(slot) = slots.first() {
+                self.copy_cell(dest, *slot);
+                self.own(dest);
+                self.disown(*slot);
+            }
+            self.release_to(mark);
+            return Ok(());
+        }
+        let code = plan.compute(&offsets, &names, self.lowering.fns);
         self.push(&code);
+        // A row that reads an object has read it by now; the selector it left
+        // stays on the operand stack below the drops.
+        for (slot, operand) in slots.iter().zip(plan.operands()) {
+            if matches!(
+                operand,
+                primitive::Operand::Count | primitive::Operand::Object
+            ) {
+                self.drop_slot(*slot);
+            }
+        }
         let value = |this: &mut Self, slot: u32| {
             let at = this.cell(slot);
             this.push(&[get(FRAME)]);
@@ -2771,7 +4139,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 self.build(Kind::Enum, none, &[], dest);
                 self.goto(join, join);
             }
-            primitive::Outcome::Scalar(_) => {}
+            primitive::Outcome::Scalar(_) | primitive::Outcome::Moved => {}
         }
         self.release_to(mark);
         Ok(())
