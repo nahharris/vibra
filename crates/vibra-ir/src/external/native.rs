@@ -31,10 +31,21 @@
 //!
 //! A native whose meaning applies a function value, such as `array.fold`, is
 //! not in this table, because a pure import cannot call back into the module:
-//! its module runs the Vibra body. Neither are the rows that are a few inline
-//! instructions (`array.length`, `text.length`, `bytes.length`, `text.equal`,
-//! `bytes.equal`), nor `array.of` and `dict.of`, whose meaning is the packed tail
-//! they receive.
+//! its module runs the Vibra body.
+//!
+//! # What the table holds
+//!
+//! One property decides how a row is lowered. A **native implementation** (the
+//! standard library declares it with `native:`) and a **looping primitive row**
+//! are imports, and both are rows of this table; a native that applies a function
+//! value is neither, and a module runs its body. Only a primitive row that does
+//! not loop is a few instructions the emitter writes inline (`array.length` and
+//! the integer and `char` rows): [`CompilerIntrinsic::is_native`] says which side a
+//! row is on, and the emitter's inline table holds no native.
+//!
+//! `array.of` and `dict.of` are natives whose meaning is the packed tail they
+//! receive, so their import answers its operand; `text.length`, `bytes.length`,
+//! `text.equal`, and `bytes.equal` answer a count and a `bool`.
 
 use super::CompilerIntrinsic;
 
@@ -104,6 +115,13 @@ pub enum Totality {
 pub enum Answer {
     /// An `ordering` of the two operands, as `-1`, `0`, or `1` (`i32`).
     Order,
+    /// The number of components of the operand (`i64`).
+    Length,
+    /// Whether the two operands hold the same components, as `0` or `1` (`i32`).
+    Same,
+    /// The operand itself, as the offset it was given (`i32`): the native whose
+    /// meaning is the packed tail it receives.
+    Operand,
     /// An object, built into the destination the last operand names.
     Object {
         /// The kind of object.
@@ -151,8 +169,8 @@ impl NativeRow {
     #[must_use]
     pub const fn result(&self) -> Scalar {
         match self.answer {
-            Answer::Order => Scalar::I32,
-            Answer::Object { .. } => Scalar::I64,
+            Answer::Order | Answer::Same | Answer::Operand => Scalar::I32,
+            Answer::Length | Answer::Object { .. } => Scalar::I64,
         }
     }
 }
@@ -180,12 +198,14 @@ use Totality::{Conversion, Option as Maybe, Total};
 /// Every native import, in canonical registry order. The row's own place in this
 /// list is nothing a module can see: a module imports the rows it uses, in this
 /// order.
-pub const NATIVE_ROWS: [NativeRow; 16] = [
+pub const NATIVE_ROWS: [NativeRow; 22] = [
     row(
         CompilerIntrinsic::TextConcat,
         &[Text, Text],
         object(Str, Total),
     ),
+    row(CompilerIntrinsic::TextLength, &[Text], Answer::Length),
+    row(CompilerIntrinsic::TextEqual, &[Text, Text], Answer::Same),
     row(CompilerIntrinsic::TextCompare, &[Text, Text], Answer::Order),
     row(
         CompilerIntrinsic::TextSlice,
@@ -217,6 +237,8 @@ pub const NATIVE_ROWS: [NativeRow; 16] = [
         &[Bytes, Bytes],
         object(BytesObject, Total),
     ),
+    row(CompilerIntrinsic::BytesLength, &[Bytes], Answer::Length),
+    row(CompilerIntrinsic::BytesEqual, &[Bytes, Bytes], Answer::Same),
     row(
         CompilerIntrinsic::BytesCompare,
         &[Bytes, Bytes],
@@ -237,6 +259,8 @@ pub const NATIVE_ROWS: [NativeRow; 16] = [
         &[Cells],
         object(BytesObject, Total),
     ),
+    row(CompilerIntrinsic::ArrayOf, &[Cells], Answer::Operand),
+    row(CompilerIntrinsic::DictOf, &[Cells], Answer::Operand),
     row(
         CompilerIntrinsic::DictEntries,
         &[Cells],

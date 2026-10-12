@@ -66,7 +66,11 @@ fn run(
             })?;
     let value = match row.result() {
         // An `ordering` is `-1`, `0`, or `1`.
-        Scalar::I32 => Val::I32(i32::try_from(answer).unwrap_or(0)),
+        Scalar::I32 => Val::I32(
+            u32::try_from(answer & 0xFFFF_FFFF)
+                .unwrap_or(0)
+                .cast_signed(),
+        ),
         Scalar::I64 => Val::I64(answer),
     };
     match results.first_mut() {

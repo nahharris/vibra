@@ -95,6 +95,28 @@ pub(crate) fn apply(
         _ => None,
     };
     Some(match (intrinsic, operands) {
+        (C::TextLength, [value]) => {
+            let value = text(value)?;
+            primitive(Value::U64(vibra_native::length(&Units(&value))))
+        }
+        (C::BytesLength, [value]) => {
+            let value = bytes(value)?;
+            primitive(Value::U64(vibra_native::length(&Units(&value))))
+        }
+        (C::TextEqual, [first, second]) => {
+            let (first, second) = (text(first)?, text(second)?);
+            primitive(Value::Bool(vibra_native::same(
+                &Units(&first),
+                &Units(&second),
+            )))
+        }
+        (C::BytesEqual, [first, second]) => {
+            let (first, second) = (bytes(first)?, bytes(second)?);
+            primitive(Value::Bool(vibra_native::same(
+                &Units(&first),
+                &Units(&second),
+            )))
+        }
         (C::TextCompare, [first, second]) => {
             let (first, second) = (text(first)?, text(second)?);
             ordering(

@@ -41,7 +41,7 @@ use wasm_encoder::Instruction as I;
 
 use crate::layout::header;
 use crate::lower::{FRAME, WA, WB, WR};
-use crate::runtime::{Ins, Routines, ValueClass, c32, c64, get, ld32, ld64, set};
+use crate::runtime::{Ins, ValueClass, c32, c64, get, ld32, ld64, set};
 
 /// How a row's result is built.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -56,8 +56,6 @@ pub(crate) enum Outcome {
     Checked(NumericType),
     /// `(option char)`.
     Option,
-    /// The operand itself, moved to the result: `array.of` and `dict.of`.
-    Moved,
 }
 
 /// A way a checked row fails, which the checked result's error enum names.
@@ -116,15 +114,8 @@ enum Body {
     CharToU32,
     /// `char.from-u32`: whether the value is a Unicode scalar.
     CharFromU32,
-    /// `text.length`, `bytes.length`, and `array.length`: the component count,
-    /// which the operand already is.
+    /// `array.length`: the component count, which the operand already is.
     Length,
-    /// `text.equal` and `bytes.equal`: whether two objects hold the same
-    /// characters or bytes, which the runtime's `equal` routine answers.
-    SameElements,
-    /// `array.of` and `dict.of`: the packed tail they receive, whose meaning is
-    /// the value itself.
-    Identity,
 }
 
 /// What a row reads of an operand into its 64-bit local.
@@ -134,8 +125,6 @@ pub(crate) enum Operand {
     Number(NumericType),
     /// The component count of the object the cell holds.
     Count,
-    /// The offset of the object the cell holds.
-    Object,
 }
 
 fn numbers(types: Vec<NumericType>) -> Vec<Operand> {
@@ -155,6 +144,12 @@ pub(crate) struct Plan {
 /// rows of the collection and text types).
 pub(crate) fn plan(intrinsic: CompilerIntrinsic) -> Option<Plan> {
     use NumericType::U32;
+    // A native implementation is the one Rust function both backends call, and
+    // a module reaches it by its import; only a primitive row with no loop is
+    // written inline. The registry table says which a row is.
+    if intrinsic.is_native() {
+        return None;
+    }
     Some(match intrinsic {
         CompilerIntrinsic::Integer(numeric, op) if numeric.is_integer() => {
             let (operands, outcome, body) = match op {
@@ -216,22 +211,11 @@ pub(crate) fn plan(intrinsic: CompilerIntrinsic) -> Option<Plan> {
             outcome: Outcome::Option,
             body: Body::CharFromU32,
         },
-        CompilerIntrinsic::TextLength
-        | CompilerIntrinsic::BytesLength
-        | CompilerIntrinsic::ArrayLength => Plan {
+        // The one collection row that is a primitive row and does not loop.
+        CompilerIntrinsic::ArrayLength => Plan {
             operands: vec![Operand::Count],
             outcome: Outcome::Scalar(NumericType::U64),
             body: Body::Length,
-        },
-        CompilerIntrinsic::TextEqual | CompilerIntrinsic::BytesEqual => Plan {
-            operands: vec![Operand::Object, Operand::Object],
-            outcome: Outcome::Bool,
-            body: Body::SameElements,
-        },
-        CompilerIntrinsic::ArrayOf | CompilerIntrinsic::DictOf => Plan {
-            operands: vec![Operand::Object],
-            outcome: Outcome::Moved,
-            body: Body::Identity,
         },
         _ => return None,
     })
@@ -274,12 +258,7 @@ impl Plan {
     /// The loads of the operands from the cells at `offsets` into `WA` and
     /// `WB`, then the computation: the value of the row is in `WR`, and the
     /// selector is on the operand stack (nothing is, for a scalar).
-    pub(crate) fn compute(
-        &self,
-        offsets: &[u32],
-        names: &Names,
-        fns: &Routines,
-    ) -> Vec<Ins> {
+    pub(crate) fn compute(&self, offsets: &[u32], names: &Names) -> Vec<Ins> {
         let mut code = Vec::new();
         for ((operand, offset), local) in
             self.operands.iter().zip(offsets).zip([WA, WB])
@@ -325,15 +304,6 @@ impl Plan {
                 }
             }
             Body::CharToU32 | Body::Length => code.extend([get(WA), set(WR)]),
-            Body::SameElements => code.extend([
-                get(WA),
-                I::I32WrapI64,
-                get(WB),
-                I::I32WrapI64,
-                I::Call(fns.equal),
-            ]),
-            // The operand moves to the result; nothing is computed.
-            Body::Identity => {}
             Body::CharFromU32 => {
                 // A scalar below U+110000 outside the surrogate range
                 // U+D800..U+DFFF.
@@ -359,9 +329,7 @@ impl Plan {
     pub(crate) fn value(&self) -> Vec<Ins> {
         let ty = match self.outcome {
             Outcome::Scalar(ty) | Outcome::Checked(ty) => ty,
-            Outcome::Bool | Outcome::Ordering | Outcome::Option | Outcome::Moved => {
-                NumericType::U32
-            }
+            Outcome::Bool | Outcome::Ordering | Outcome::Option => NumericType::U32,
         };
         let mut code = vec![get(WR)];
         if !wide(ty) {
@@ -404,10 +372,6 @@ fn load(operand: Operand, offset: u32, local: u32, code: &mut Vec<Ins>) {
                 I::I64ExtendI32U,
                 set(local),
             ]);
-            return;
-        }
-        Operand::Object => {
-            code.extend([ld32(offset), I::I64ExtendI32U, set(local)]);
             return;
         }
     };

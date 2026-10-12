@@ -409,18 +409,6 @@ fn module_row(
             result,
             char::from_u32(*scalar).map(|value| primitive(Value::Char(value))),
         ),
-        (CompilerIntrinsic::TextLength, [Value::Str(value)]) => {
-            primitive(Value::U64(value.chars().count() as u64))
-        }
-        (CompilerIntrinsic::TextEqual, [Value::Str(left), Value::Str(right)]) => {
-            primitive(Value::Bool(left == right))
-        }
-        (CompilerIntrinsic::BytesLength, [Value::Bytes(value)]) => {
-            primitive(Value::U64(value.len() as u64))
-        }
-        (CompilerIntrinsic::BytesEqual, [Value::Bytes(left), Value::Bytes(right)]) => {
-            primitive(Value::Bool(left == right))
-        }
         _ => return None,
     })
 }

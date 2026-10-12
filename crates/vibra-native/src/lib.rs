@@ -178,6 +178,32 @@ where
     first.len().cmp(&second.len())
 }
 
+/// `text.length`, `bytes.length`: the number of units.
+pub fn length<S: Source>(source: &S) -> u64 {
+    source.len()
+}
+
+/// `text.equal`, `bytes.equal`: the same units in the same order.
+pub fn same<S, T>(first: &S, second: &T) -> bool
+where
+    S: Source,
+    T: Source<Unit = S::Unit>,
+    S::Unit: PartialEq,
+{
+    first.len() == second.len()
+        && first
+            .range(0, first.len())
+            .zip(second.range(0, second.len()))
+            .all(|(left, right)| left == right)
+}
+
+/// `array.of`, `dict.of`: the packed tail the call received, which is already
+/// the collection it builds.
+#[must_use]
+pub const fn identity<T>(packed: T) -> T {
+    packed
+}
+
 /// `-1`, `0`, or `1`: how an `ordering` crosses the native import boundary.
 #[must_use]
 pub const fn order_code(order: Ordering) -> i32 {

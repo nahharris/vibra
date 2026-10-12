@@ -541,7 +541,7 @@ pub fn call(
             let last = scalars.last().copied().ok_or(Fault::Signature)?;
             Some(u32::try_from(last).map_err(|_| Fault::OutOfBounds)?)
         }
-        Answer::Order => None,
+        Answer::Order | Answer::Length | Answer::Same | Answer::Operand => None,
     };
     let object = |position: usize, layout: Layout| -> Result<Object<'_>, Fault> {
         match operands.get(position) {
@@ -559,6 +559,35 @@ pub fn call(
     };
     use CompilerIntrinsic as C;
     let built = match row.intrinsic {
+        C::TextLength => {
+            return i64::try_from(crate::length(&Chars(object(0, Layout::Chars)?)))
+                .map_err(|_| Fault::OutOfBounds);
+        }
+        C::BytesLength => {
+            return i64::try_from(crate::length(&ByteSeq(object(0, Layout::Bytes)?)))
+                .map_err(|_| Fault::OutOfBounds);
+        }
+        C::TextEqual => {
+            let (a, b) = (
+                Chars(object(0, Layout::Chars)?),
+                Chars(object(1, Layout::Chars)?),
+            );
+            return Ok(i64::from(crate::same(&a, &b)));
+        }
+        C::BytesEqual => {
+            let (a, b) = (
+                ByteSeq(object(0, Layout::Bytes)?),
+                ByteSeq(object(1, Layout::Bytes)?),
+            );
+            return Ok(i64::from(crate::same(&a, &b)));
+        }
+        // The packed tail is the collection: the answer is the operand, once
+        // it is known to be an object of the layout.
+        C::ArrayOf | C::DictOf => {
+            let packed = object(0, Layout::Cells)?;
+            return Ok(i64::try_from(crate::identity(packed.at))
+                .map_err(|_| Fault::OutOfBounds)?);
+        }
         C::TextCompare => {
             let (a, b) = (
                 Chars(object(0, Layout::Chars)?),

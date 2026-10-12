@@ -1207,7 +1207,7 @@ impl<'a> Machine<'a> {
             CompilerIntrinsic::ArrayOf | CompilerIntrinsic::DictOf => {
                 let mut values = values;
                 return match (values.pop(), values.is_empty()) {
-                    (Some(tail), true) => Ok(Step::Ret(tail)),
+                    (Some(tail), true) => Ok(Step::Ret(vibra_native::identity(tail))),
                     _ => Err(Halt::Invalid),
                 };
             }
@@ -1215,10 +1215,6 @@ impl<'a> Machine<'a> {
             _ => {}
         }
         let value = match (intrinsic, values.as_slice()) {
-            (
-                CompilerIntrinsic::TextLength,
-                [RuntimeValue::Primitive(Value::Str(value))],
-            ) => RuntimeValue::Primitive(Value::U64(value.chars().count() as u64)),
             (CompilerIntrinsic::ArrayLength, [RuntimeValue::Array { values, .. }]) => {
                 RuntimeValue::Primitive(Value::U64(values.len() as u64))
             }

@@ -3782,6 +3782,49 @@ impl<'l, 'a> Builder<'l, 'a> {
             }
         };
         match row.answer {
+            Answer::Length => {
+                let at = self.cell(dest);
+                self.push(&[get(FRAME)]);
+                self.push_native_operands(&row, slots, classes);
+                self.push(&[I::Call(import), st64(at)]);
+                self.set_byte(dest, CellClass::I64.code());
+                release(self);
+            }
+            Answer::Same => {
+                // `bool` is an enum whose discriminants are `false` and `true`,
+                // which the import answers as `0` and `1`.
+                let selector = self.temp();
+                let at = self.cell(selector);
+                self.push(&[get(FRAME)]);
+                self.push_native_operands(&row, slots, classes);
+                self.push(&[I::Call(import), I::I64ExtendI32U, st64(at)]);
+                self.set_byte(selector, CellClass::I32.code());
+                self.build_with(
+                    Kind::Enum,
+                    Variant::Cell {
+                        slot: selector,
+                        bias: 0,
+                    },
+                    &[],
+                    dest,
+                );
+                release(self);
+            }
+            Answer::Operand => {
+                // The import answers the packed tail it was given, which is the
+                // value the row builds: it moves from the operand's slot to the
+                // destination, and no count changes.
+                let at = self.cell(dest);
+                self.push(&[get(FRAME)]);
+                self.push_native_operands(&row, slots, classes);
+                self.push(&[I::Call(import), I::I64ExtendI32U, st64(at)]);
+                self.own(dest);
+                if consume {
+                    for slot in slots {
+                        self.disown(*slot);
+                    }
+                }
+            }
             Answer::Order => {
                 let mut names = Names::default();
                 for (position, variant) in
@@ -4006,30 +4049,15 @@ impl<'l, 'a> Builder<'l, 'a> {
             }
             primitive::Outcome::Scalar(_)
             | primitive::Outcome::Bool
-            | primitive::Outcome::Option
-            | primitive::Outcome::Moved => {}
+            | primitive::Outcome::Option => {}
         }
 
-        // The operand is the result: the tail a registry row packs is already
-        // the collection it builds.
-        if plan.outcome() == primitive::Outcome::Moved {
-            if let Some(slot) = slots.first() {
-                self.copy_cell(dest, *slot);
-                self.own(dest);
-                self.disown(*slot);
-            }
-            self.release_to(mark);
-            return Ok(());
-        }
-        let code = plan.compute(&offsets, &names, self.lowering.fns);
+        let code = plan.compute(&offsets, &names);
         self.push(&code);
         // A row that reads an object has read it by now; the selector it left
         // stays on the operand stack below the drops.
         for (slot, operand) in slots.iter().zip(plan.operands()) {
-            if matches!(
-                operand,
-                primitive::Operand::Count | primitive::Operand::Object
-            ) {
+            if matches!(operand, primitive::Operand::Count) {
                 self.drop_slot(*slot);
             }
         }
@@ -4139,7 +4167,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 self.build(Kind::Enum, none, &[], dest);
                 self.goto(join, join);
             }
-            primitive::Outcome::Scalar(_) | primitive::Outcome::Moved => {}
+            primitive::Outcome::Scalar(_) => {}
         }
         self.release_to(mark);
         Ok(())
