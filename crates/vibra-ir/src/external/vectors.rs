@@ -111,6 +111,7 @@ fn table() -> &'static BTreeMap<CompilerIntrinsic, Vec<Vector>> {
         integers(&mut all);
         conversions(&mut all);
         characters(&mut all);
+        sequences(&mut all);
         let mut table: BTreeMap<CompilerIntrinsic, Vec<Vector>> = BTreeMap::new();
         for vector in all {
             table.entry(vector.intrinsic).or_default().push(vector);
@@ -540,6 +541,174 @@ fn characters(out: &mut Vec<Vector>) {
     }
 }
 
+/// The strings the text rows are tried on: empty, one scalar of each UTF-8
+/// width, scalars at the edges of their widths and of the surrogate range's
+/// neighbours, and strings that share a prefix.
+const TEXTS: [&str; 11] = [
+    "",
+    "a",
+    "ab",
+    "b",
+    "\u{E9}",
+    "h\u{E9}",
+    "\u{FFFF}",
+    "\u{1D11E}",
+    "h\u{1D11E}llo",
+    "\u{0}\u{7F}",
+    "\u{10FFFF}",
+];
+
+/// The byte strings the byte rows are tried on, and the encodings the UTF-8
+/// decoder is tried on: well-formed sequences of each width, and the ill-formed
+/// ones (a stray continuation byte, an overlong form, a surrogate, a value
+/// above U+10FFFF, and a truncated sequence).
+const BYTE_STRINGS: [&[u8]; 17] = [
+    &[],
+    &[0],
+    &[1, 2],
+    &[2],
+    &[1, 2, 3],
+    &[0x61, 0xC3, 0xA9],
+    &[0xE2, 0x82, 0xAC],
+    &[0xF0, 0x9D, 0x84, 0x9E],
+    &[0xFF],
+    &[0x80],
+    &[0xC0, 0x80],
+    &[0xC3],
+    &[0xE0, 0x80, 0x80],
+    &[0xED, 0xA0, 0x80],
+    &[0xF4, 0x90, 0x80, 0x80],
+    &[0xE2, 0x82],
+    &[0xF0, 0x9D, 0x84],
+];
+
+/// Ranges tried on `slice`: inside, empty at each end, reversed, and past the
+/// end by one and by a lot.
+const RANGES: [(u64, u64); 9] = [
+    (0, 0),
+    (0, 1),
+    (1, 2),
+    (0, 3),
+    (2, 1),
+    (3, 3),
+    (4, 4),
+    (0, 4),
+    (0, u64::MAX),
+];
+
+fn order_of(ordering: Ordering) -> Outcome {
+    Outcome::Order(order(ordering))
+}
+
+/// The text and bytes rows. Each outcome is computed by the standard library's
+/// own `str`, `char`, and slice operations, which neither backend uses.
+fn sequences(out: &mut Vec<Vector>) {
+    use CompilerIntrinsic as C;
+    let text = |value: &str| Value::Str(value.to_owned());
+    let bytes = |value: &[u8]| Value::Bytes(value.to_vec());
+    for first in TEXTS {
+        push(
+            out,
+            C::TextLength,
+            vec![text(first)],
+            Outcome::Value(Value::U64(first.chars().count() as u64)),
+        );
+        push(
+            out,
+            C::TextToUtf8,
+            vec![text(first)],
+            Outcome::Value(bytes(first.as_bytes())),
+        );
+        for (start, end) in RANGES {
+            let scalars = first.chars().collect::<Vec<_>>();
+            let piece = usize::try_from(start)
+                .ok()
+                .zip(usize::try_from(end).ok())
+                .filter(|(start, end)| start <= end && *end <= scalars.len())
+                .and_then(|(start, end)| scalars.get(start..end));
+            push(
+                out,
+                C::TextSlice,
+                vec![text(first), Value::U64(start), Value::U64(end)],
+                piece.map_or(Outcome::None, |piece| {
+                    Outcome::Some(text(&piece.iter().collect::<String>()))
+                }),
+            );
+        }
+        for second in TEXTS {
+            push(
+                out,
+                C::TextConcat,
+                vec![text(first), text(second)],
+                Outcome::Value(text(&format!("{first}{second}"))),
+            );
+            push(
+                out,
+                C::TextEqual,
+                vec![text(first), text(second)],
+                Outcome::Value(Value::Bool(first == second)),
+            );
+            push(
+                out,
+                C::TextCompare,
+                vec![text(first), text(second)],
+                order_of(first.chars().cmp(second.chars())),
+            );
+        }
+    }
+    for first in BYTE_STRINGS {
+        push(
+            out,
+            C::TextFromUtf8,
+            vec![bytes(first)],
+            match std::str::from_utf8(first) {
+                Ok(valid) => Outcome::Ok(text(valid)),
+                Err(_) => Outcome::Err("invalid-format"),
+            },
+        );
+        push(
+            out,
+            C::BytesLength,
+            vec![bytes(first)],
+            Outcome::Value(Value::U64(first.len() as u64)),
+        );
+        for (start, end) in RANGES {
+            let piece = usize::try_from(start)
+                .ok()
+                .zip(usize::try_from(end).ok())
+                .filter(|(start, end)| start <= end && *end <= first.len())
+                .and_then(|(start, end)| first.get(start..end));
+            push(
+                out,
+                C::BytesSlice,
+                vec![bytes(first), Value::U64(start), Value::U64(end)],
+                piece.map_or(Outcome::None, |piece| Outcome::Some(bytes(piece))),
+            );
+        }
+        for second in BYTE_STRINGS {
+            let joined = [first, second].concat();
+            push(
+                out,
+                C::BytesConcat,
+                vec![bytes(first), bytes(second)],
+                Outcome::Value(bytes(&joined)),
+            );
+            push(
+                out,
+                C::BytesEqual,
+                vec![bytes(first), bytes(second)],
+                Outcome::Value(Value::Bool(first == second)),
+            );
+            push(
+                out,
+                C::BytesCompare,
+                vec![bytes(first), bytes(second)],
+                order_of(first.cmp(second)),
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::panic)]
 mod tests {
@@ -771,12 +940,24 @@ mod tests {
     }
 
     #[test]
-    fn a_row_has_vectors_exactly_when_the_integer_and_char_rows_own_it() {
+    fn a_row_has_vectors_exactly_when_the_integer_char_text_and_bytes_rows_own_it() {
         for intrinsic in CompilerIntrinsic::all() {
             let vectored = match intrinsic {
                 CompilerIntrinsic::Convert(..)
                 | CompilerIntrinsic::CharToU32
-                | CompilerIntrinsic::CharFromU32 => true,
+                | CompilerIntrinsic::CharFromU32
+                | CompilerIntrinsic::TextConcat
+                | CompilerIntrinsic::TextLength
+                | CompilerIntrinsic::TextEqual
+                | CompilerIntrinsic::TextCompare
+                | CompilerIntrinsic::TextSlice
+                | CompilerIntrinsic::TextToUtf8
+                | CompilerIntrinsic::TextFromUtf8
+                | CompilerIntrinsic::BytesLength
+                | CompilerIntrinsic::BytesConcat
+                | CompilerIntrinsic::BytesEqual
+                | CompilerIntrinsic::BytesCompare
+                | CompilerIntrinsic::BytesSlice => true,
                 CompilerIntrinsic::Integer(_, op) => {
                     !matches!(op, IntegerOp::ToStr | IntegerOp::Parse)
                 }

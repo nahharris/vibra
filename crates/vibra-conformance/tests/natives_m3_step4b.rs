@@ -427,6 +427,148 @@ fn every_listed_native_matches_its_body() {
     }
 }
 
+/// A string literal of source for `text`, every character but an ASCII letter or
+/// digit spelled as an escape.
+fn quoted(text: &str) -> String {
+    let mut out = String::from("\"");
+    for character in text.chars() {
+        if character.is_ascii_alphanumeric() {
+            out.push(character);
+        } else {
+            out.push_str(&format!("\\u{{{:X}}}", u32::from(character)));
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// A source literal of a vector operand of the text and bytes rows.
+fn operand(value: &vibra_ir::Value) -> String {
+    use vibra_ir::Value;
+    match value {
+        Value::Str(text) => quoted(text),
+        Value::Bytes(bytes) => format!(
+            "(bytes (array.of {}))",
+            bytes
+                .iter()
+                .map(|byte| format!("{byte}u8"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+        Value::U64(value) => format!("{value}u64"),
+        other => panic!("not a vector operand: {other:?}"),
+    }
+}
+
+/// The written type of the result of a text or bytes row.
+fn written_result(intrinsic: vibra_ir::external::CompilerIntrinsic) -> &'static str {
+    use vibra_ir::external::CompilerIntrinsic as C;
+    match intrinsic {
+        C::TextConcat => "str",
+        C::TextLength | C::BytesLength => "u64",
+        C::TextEqual | C::BytesEqual => "bool",
+        C::TextCompare | C::BytesCompare => "core.ordering",
+        C::TextSlice => "(option str)",
+        C::TextToUtf8 | C::BytesConcat => "bytes",
+        C::TextFromUtf8 => "(result str core.conversion-error)",
+        C::BytesSlice => "(option bytes)",
+        other => panic!("no vectors for {}", other.symbol()),
+    }
+}
+
+/// The shared sample vectors of the text and bytes rows hold both backends to
+/// the same outcomes, which the standard library's own `str` and slice
+/// operations computed, so the interpreter calling the native code and the
+/// module calling the import cannot drift apart on a boundary: a scalar of each
+/// width, a prefix, an empty range, a range past the end, and ill-formed UTF-8.
+#[test]
+fn the_text_and_bytes_vectors_hold_the_interpreter_and_the_module_to_one_answer() {
+    use vibra_ir::{ObservedValue, Type};
+    let modules = module_natives();
+    let mut total = 0;
+    for intrinsic in vibra_ir::external::CompilerIntrinsic::all() {
+        let vectors = intrinsic.vectors();
+        let symbol = intrinsic.symbol();
+        if vectors.is_empty() || !(symbol.starts_with("text.") || symbol.starts_with("bytes."))
+        {
+            continue;
+        }
+        let (_, module, name) = modules
+            .iter()
+            .find(|(native, _, _)| native == symbol)
+            .unwrap_or_else(|| panic!("`{symbol}` has no native declaration"));
+        let result = written_result(intrinsic);
+        let calls = vectors
+            .iter()
+            .map(|vector| {
+                let operands = vector
+                    .operands
+                    .iter()
+                    .map(operand)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("({name} {operands})")
+            })
+            .collect::<Vec<_>>()
+            .join("\n    ");
+        let types = vec![result; vectors.len()].join(" ");
+        let main = format!("(defn main () (tuple {types})\n  (tupleof\n    {calls}))");
+        let source_id = format!("stdlib/src/{module}");
+        let stdlib = vibra_types::load_stdlib().expect("standard library");
+        let checked = vibra_types::check_standard_library_source(
+            &stdlib,
+            &source_id,
+            &format!("{main}\n\n{}", module_source(module, false)),
+        );
+        let program = checked
+            .program()
+            .unwrap_or_else(|| panic!("{symbol}\n{:?}", checked.diagnostics()));
+        let Type::Tuple(components) = program.entry().signature().result() else {
+            panic!("the entry is a tuple");
+        };
+        let expected = ObservedValue::Tuple {
+            type_id: None,
+            values: vectors
+                .iter()
+                .zip(&components)
+                .map(|(vector, ty)| vector.outcome.observed(ty))
+                .collect(),
+        }
+        .canonical_vibon();
+        let entry = program.entry().signature().result();
+        let interpreted = vibra_interp::run(program)
+            .expect("execution")
+            .canonical_result();
+        assert!(
+            interpreted.contains(&expected),
+            "the interpreter disagrees with the vectors of `{symbol}`"
+        );
+        let module_bytes = vibra_wasm::emit(program)
+            .unwrap_or_else(|error| panic!("`{symbol}` lowers: {error}"));
+        let runner = vibra_wasm_run::Runner::new(vibra_wasm_run::MemoryLimit::new(
+            256 * 1024 * 1024,
+        ))
+        .expect("the engine configures");
+        let observed = match runner
+            .run_observed(module_bytes.bytes(), &entry, program.types())
+            .expect("the module runs")
+        {
+            vibra_wasm_run::Observed::Completed { value, .. } => {
+                value.canonical_observation(&entry)
+            }
+            vibra_wasm_run::Observed::Stopped(outcome) => {
+                panic!("`{symbol}` stopped: {outcome:?}")
+            }
+        };
+        assert_eq!(
+            observed, interpreted,
+            "the module disagrees with the interpreter on the vectors of `{symbol}`"
+        );
+        total += vectors.len();
+    }
+    assert!(total > 1000, "only {total} vectors ran");
+}
+
 fn intrinsic_of(symbol: &str) -> vibra_ir::external::CompilerIntrinsic {
     vibra_ir::external::CompilerIntrinsic::from_symbol(symbol)
         .unwrap_or_else(|| panic!("`{symbol}` is not a registry symbol"))
