@@ -21,8 +21,10 @@ The rows of Steps 5b, 6, and 7 are lowered to WebAssembly (exercised by the
 matched cases of `conformance/parity.tsv`, by `core_lowering_m4_step5b`,
 `calls_m4_step6`, and `patterns_m4_step7`): the exceptions inside them are the
 forms still named by `NotLowered`, which their notes give to later steps
-(`array`, `dict`, a variadic tail, the array pattern, and a wrapper over `str`
-or `bytes` to Step 8b, interface values and contract calls to Step 9). Step 6
+(interface values and contract calls to Step 9; Step 8b lowered `array`,
+`dict`, a variadic tail, the array pattern, and a wrapper over `str` or `bytes`,
+except that a dict whose key is dispatched from a run-time type is Step 9's).
+Step 6
 lowers function values, `lambda` and its captures, calls through function
 values, a tail call to every kind of callee, omitted labelled operands, and
 generic functions and types, so no form of a call is named by `NotLowered` but a
@@ -56,10 +58,10 @@ names.
 | `PatternKind::Tuple` | Lowered | Step 7 | (landed: `V1-RUNTIME-constructor-patterns`) |
 | `PatternKind::RecordOf` | Lowered | Step 7 | (landed: `V1-RUNTIME-constructor-patterns`) |
 | `PatternKind::EnumOf` | Lowered | Step 7 | (landed: `V1-RUNTIME-constructor-patterns`) |
-| `PatternKind::Array` | Lowered | Step 8b | Exact length over arrays |
+| `PatternKind::Array` | Lowered | Step 8b | Exact length over arrays (landed: `collections_m4_step8b`, `V1-RUNTIME-match-patterns`) |
 | `PatternKind::As` | Lowered | Step 7 | Compares the union discriminant in written member order (landed: `V1-RUNTIME-union-narrowing`, `V1-RUNTIME-union-atom-member`) |
-| `VariadicBinding::Array` | Lowered | Step 8b | — |
-| `VariadicBinding::Dict` | Lowered | Step 8b | — |
+| `VariadicBinding::Array` | Lowered | Step 8b | One more slot, filled with the packed array (landed: `V1-RUNTIME-variadics`) |
+| `VariadicBinding::Dict` | Lowered | Step 8b | One more slot, filled with the built dict (landed) |
 | `Declaration::Import` | Static | — | Resolved before lowering |
 | `Declaration::Def` | Lowered | Step 5b | Lazy, once-only module values |
 | `Declaration::Defn` | Lowered | Step 5b | Generic signatures: Step 6 (landed); a variadic parameter: Step 8b |
@@ -77,20 +79,20 @@ names.
 | `TypeExpr::Record` | Lowered | Step 5b | — |
 | `TypeExpr::Enum` | Lowered | Step 5b | — |
 | `TypeExpr::Union` | Lowered | Step 5b | — |
-| `TypeExpr::Array` | Lowered | Step 8b | — |
-| `TypeExpr::Dict` | Lowered | Step 8b | Canonical key order |
-| `VariadicType::Array` | Lowered | Step 8b | — |
-| `VariadicType::Dict` | Lowered | Step 8b | — |
+| `TypeExpr::Array` | Lowered | Step 8b | An arena value of kind `array` (landed) |
+| `TypeExpr::Dict` | Lowered | Step 8b | Canonical key order, or a declared key's own `compare` (landed; a key dispatched from a run-time type is Step 9) |
+| `VariadicType::Array` | Lowered | Step 8b | (landed) |
+| `VariadicType::Dict` | Lowered | Step 8b | (landed) |
 | `DeftypeBody::Type` | Lowered | Step 5b | — |
 | `DeftypeBody::Intrinsic` | Lowered | Step 8a | Builtin numeric types: Step 8a (landed: the integer rows but `to-str` and `parse`, the integer conversions, and the `char` rows, `primitives_m4_step8a`; the integer `to-str` and `parse` and the float rows: Step 8c); `array` and `dict`: Step 8b |
 | `Attribute::Where` | Lowered | Step 6 | Generic parameters take run-time type arguments; bounds select implementations: Step 9 |
 | `Attribute::Labelled` | Static | — | Resolved into parameter order before lowering |
-| `Attribute::Variadic` | Lowered | Step 8b | — |
+| `Attribute::Variadic` | Lowered | Step 8b | (landed) |
 | `Attribute::Visibility` | Static | — | — |
 | `Attribute::Effects` | Stage 4B | Step 14 | Empty rows stay supported |
-| `Attribute::External` | Lowered | Step 8a | `@compiler` rows: Steps 8a–8c (8a landed: the integer arithmetic, shift, comparison, and conversion rows and the `char` rows, lowered inline); `@host`: Stage 4B Step 16 |
+| `Attribute::External` | Lowered | Step 8a | `@compiler` rows: Steps 8a–8c (8b landed: the text, bytes, array, and dict rows, inline or as the 16 native imports of `NATIVE_ROWS`; 8a landed: the integer arithmetic, shift, comparison, and conversion rows and the `char` rows, lowered inline); `@host`: Stage 4B Step 16 |
 | `Attribute::Symbol` | Static | — | — |
-| `Attribute::Native` | Lowered | Step 10 | The body is lowered; the Wasm backend has no native |
+| `Attribute::Native` | Lowered | Step 10 | 8b: the text, bytes, array, and dict natives are imports of `vibra_native_v1` backed by `vibra-native`, and `array.fold` (no import) is the one native a module runs as its body, still open; Step 10 completes and proves the rule |
 | `Attribute::Role` | Static | — | — |
 | `Attribute::Doc` | Static | — | — |
 
