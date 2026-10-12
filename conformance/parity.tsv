@@ -13,8 +13,8 @@
 # 7, 8a, 8b, 8c, 9, 10, or 11). A step moves rows toward `matched` and never
 # back. The host test crates/vibra-conformance/tests/parity_inventory_m4_step4.rs
 # holds this table to the runner's result for every case.
-V1-RUNTIME-activation-depth	not-lowered	8a
-V1-RUNTIME-activation-exhaustion	not-lowered	8a
+V1-RUNTIME-activation-depth	matched
+V1-RUNTIME-activation-exhaustion	matched
 V1-RUNTIME-anonymous-enum	matched
 V1-RUNTIME-anonymous-record	matched
 V1-RUNTIME-atom-labelled-default	matched
@@ -72,14 +72,14 @@ V1-RUNTIME-return	matched
 V1-RUNTIME-return-tail-call	not-lowered	8b
 V1-RUNTIME-sequence	matched
 V1-RUNTIME-tail-calls-through-flow	not-lowered	9
-V1-RUNTIME-tail-closure-captured-loop	not-lowered	8a
+V1-RUNTIME-tail-closure-captured-loop	matched
 V1-RUNTIME-tail-contract-member-forms	not-lowered	9
 V1-RUNTIME-tail-contract-member-interface-value	not-lowered	9
 V1-RUNTIME-tail-cross-module-mutual	not-lowered	11
-V1-RUNTIME-tail-function-value-parameter	not-lowered	8a
+V1-RUNTIME-tail-function-value-parameter	matched
 V1-RUNTIME-tail-mutual	matched
 V1-RUNTIME-tail-negative	matched
-V1-RUNTIME-tail-unrelated-function-loop	not-lowered	8a
+V1-RUNTIME-tail-unrelated-function-loop	matched
 V1-RUNTIME-try-propagation	not-lowered	8b
 V1-RUNTIME-tuple-user-key	not-lowered	9
 V1-RUNTIME-tuples	matched
@@ -92,7 +92,7 @@ V1-RUNTIME-void	matched
 V1-RUNTIME-void-payload-shapes	not-lowered	8b
 V1-RUNTIME-widened-tail-call	not-lowered	9
 V1-RUNTIME-workspace-run	matched
-V1-RUNTIME-workspace-run-activation-exhaustion	not-lowered	8a
+V1-RUNTIME-workspace-run-activation-exhaustion	matched
 V1-RUNTIME-workspace-run-higher-order-entry	matched
 V1-RUNTIME-workspace-run-tail-module-values	not-lowered	9
 V1-RUNTIME-workspace-run-uninvoked-higher-order-closure	matched

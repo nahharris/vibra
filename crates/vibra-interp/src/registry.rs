@@ -564,6 +564,51 @@ mod tests {
         text.contains("variant: @err") && text.contains(&format!("variant: @{variant}"))
     }
 
+    /// The checked result type of `intrinsic`, with the standard-library roles
+    /// bound to test types.
+    fn checked_result_type(intrinsic: CompilerIntrinsic) -> Type {
+        use vibra_ir::external::RoleTypes;
+        let id = |name: &str| TypeId::new(format!("@test/{name}"), name);
+        let roles = RoleTypes::new(Some(id("option")))
+            .with_result(Some(id("result")))
+            .with_core(
+                Some(id("ordering")),
+                Some(id("arithmetic-error")),
+                Some(id("conversion-error")),
+            );
+        intrinsic.signature(&roles).result()
+    }
+
+    /// The reference implementation answers every sample vector of every row
+    /// as the table specifies, which the WebAssembly lowering is held to as
+    /// well, so the two backends agree on each of them.
+    #[test]
+    fn every_sample_vector_of_every_row_is_answered_as_specified() {
+        let mut checked = 0_usize;
+        for intrinsic in CompilerIntrinsic::all() {
+            let result = checked_result_type(intrinsic);
+            for vector in intrinsic.vectors() {
+                let operands = vector
+                    .operands
+                    .iter()
+                    .cloned()
+                    .map(RuntimeValue::Primitive)
+                    .collect::<Vec<_>>();
+                let value = apply(intrinsic, &operands, &result).unwrap();
+                let observed = crate::observe(value).unwrap();
+                assert_eq!(
+                    observed,
+                    vector.outcome.observed(&result),
+                    "{} {:?}",
+                    intrinsic.symbol(),
+                    vector.operands
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 10_000, "only {checked} vectors");
+    }
+
     #[test]
     fn integer_boundaries() {
         use IntegerOp::{AddChecked, DivChecked, MulChecked, NegChecked, RemChecked};

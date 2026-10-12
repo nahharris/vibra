@@ -82,13 +82,13 @@ names.
 | `VariadicType::Array` | Lowered | Step 8b | — |
 | `VariadicType::Dict` | Lowered | Step 8b | — |
 | `DeftypeBody::Type` | Lowered | Step 5b | — |
-| `DeftypeBody::Intrinsic` | Lowered | Step 8a | Builtin numeric types: Step 8a; `array` and `dict`: Step 8b |
+| `DeftypeBody::Intrinsic` | Lowered | Step 8a | Builtin numeric types: Step 8a (landed: the integer rows but `to-str` and `parse`, the integer conversions, and the `char` rows, `primitives_m4_step8a`; the integer `to-str` and `parse` and the float rows: Step 8c); `array` and `dict`: Step 8b |
 | `Attribute::Where` | Lowered | Step 6 | Generic parameters take run-time type arguments; bounds select implementations: Step 9 |
 | `Attribute::Labelled` | Static | — | Resolved into parameter order before lowering |
 | `Attribute::Variadic` | Lowered | Step 8b | — |
 | `Attribute::Visibility` | Static | — | — |
 | `Attribute::Effects` | Stage 4B | Step 14 | Empty rows stay supported |
-| `Attribute::External` | Lowered | Step 8a | `@compiler` rows: Steps 8a–8c; `@host`: Stage 4B Step 16 |
+| `Attribute::External` | Lowered | Step 8a | `@compiler` rows: Steps 8a–8c (8a landed: the integer arithmetic, shift, comparison, and conversion rows and the `char` rows, lowered inline); `@host`: Stage 4B Step 16 |
 | `Attribute::Symbol` | Static | — | — |
 | `Attribute::Native` | Lowered | Step 10 | The body is lowered; the Wasm backend has no native |
 | `Attribute::Role` | Static | — | — |

@@ -104,15 +104,20 @@ fn walk(env: &TypeEnv<'_>, expr: &Expr, found: &mut Vec<UnloweredForm>) {
         // A sequence evaluates its expressions in order and has the value of
         // the last, so it adds nothing to what its expressions already need.
         Expr::Sequence { expressions, .. } => walk_all(env, expressions, found),
+        // A row of the primitive table is a few instructions the lowering
+        // writes inline; every other row is named with its registry symbol,
+        // for the step that owns it.
         Expr::External {
             intrinsic,
             arguments,
             ..
         } => {
-            found.push(
-                UnloweredForm::new(Form::External, Some(expr.origin().clone()))
-                    .with_detail(intrinsic.symbol()),
-            );
+            if crate::primitive::plan(*intrinsic).is_none() {
+                found.push(
+                    UnloweredForm::new(Form::External, Some(expr.origin().clone()))
+                        .with_detail(intrinsic.symbol()),
+                );
+            }
             walk_all(env, arguments, found);
         }
         // An omitted labelled operand is the callee's default, a constant; a
