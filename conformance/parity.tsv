@@ -29,9 +29,9 @@ V1-RUNTIME-compound-constant-defaults	matched
 V1-RUNTIME-constant-defaults	matched
 V1-RUNTIME-constant-patterns	matched
 V1-RUNTIME-conversion	matched
-V1-RUNTIME-dict-compare-nesting	not-lowered	8b
-V1-RUNTIME-dict-order	not-lowered	8b
-V1-RUNTIME-dict-repeated-key	not-lowered	8b
+V1-RUNTIME-dict-compare-nesting	matched
+V1-RUNTIME-dict-order	matched
+V1-RUNTIME-dict-repeated-key	matched
 V1-RUNTIME-external-std-text-concat	matched
 V1-RUNTIME-external-std-text-length	matched
 V1-RUNTIME-factory-self-tail	matched
@@ -53,10 +53,10 @@ V1-RUNTIME-iter-skip-filter-depth	not-lowered	9
 V1-RUNTIME-key-contracts	not-lowered	9
 V1-RUNTIME-let-else	matched
 V1-RUNTIME-library-composites	not-lowered	11
-V1-RUNTIME-library-dict	not-lowered	8b
+V1-RUNTIME-library-dict	matched
 V1-RUNTIME-library-roles	not-lowered	8b
 V1-RUNTIME-literal	matched
-V1-RUNTIME-lookups	not-lowered	8b
+V1-RUNTIME-lookups	matched
 V1-RUNTIME-match-patterns	matched
 V1-RUNTIME-never-type-encoding	matched
 V1-RUNTIME-never-unreached	matched
