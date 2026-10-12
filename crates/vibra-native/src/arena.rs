@@ -585,8 +585,8 @@ pub fn call(
         // it is known to be an object of the layout.
         C::ArrayOf | C::DictOf => {
             let packed = object(0, Layout::Cells)?;
-            return Ok(i64::try_from(crate::identity(packed.at))
-                .map_err(|_| Fault::OutOfBounds)?);
+            return i64::try_from(crate::identity(packed.at))
+                .map_err(|_| Fault::OutOfBounds);
         }
         C::TextCompare => {
             let (a, b) = (
