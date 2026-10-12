@@ -191,27 +191,58 @@ fn native_members() -> Vec<(String, String, String)> {
     members
 }
 
-fn run(source_id: &str, source: &str) -> String {
+/// What one program answers in the two backends.
+struct Ran {
+    /// The reference interpreter's canonical result.
+    interpreter: String,
+    /// The module's, or `None` when the emitter does not lower the program: a
+    /// program whose meaning applies a function value through a native with no
+    /// import is lowered by running its body, so only a program that still
+    /// names `array.fold` as a native is not lowered.
+    wasm: Option<String>,
+}
+
+fn run(source_id: &str, source: &str) -> Ran {
     let checked = vibra_types::check_source(source_id, source);
     finish(source, &checked)
 }
 
 /// Runs a module source as trusted standard-library code.
-fn run_trusted(source_id: &str, source: &str) -> String {
+fn run_trusted(source_id: &str, source: &str) -> Ran {
     let stdlib = vibra_types::load_stdlib().expect("standard library");
     let checked =
         vibra_types::check_standard_library_source(&stdlib, source_id, source);
     finish(source, &checked)
 }
 
-fn finish(source: &str, checked: &vibra_types::CheckResult) -> String {
+fn finish(source: &str, checked: &vibra_types::CheckResult) -> Ran {
     let program = checked
         .program()
         .unwrap_or_else(|| panic!("{source}\n{:?}", checked.diagnostics()));
-    vibra_interp::run(program)
+    let interpreter = vibra_interp::run(program)
         .expect("execution")
-        .canonical_result()
+        .canonical_result();
+    let wasm = vibra_wasm::emit(program).ok().map(|module| {
+        let ty = program.entry().signature().result();
+        let runner = vibra_wasm_run::Runner::new(vibra_wasm_run::MemoryLimit::new(
+            64 * 1024 * 1024,
+        ))
+        .expect("the engine configures");
+        match runner
+            .run_observed(module.bytes(), &ty, program.types())
+            .expect("the module runs")
+        {
+            vibra_wasm_run::Observed::Completed { value, .. } => {
+                value.canonical_observation(&ty)
+            }
+            vibra_wasm_run::Observed::Stopped(outcome) => {
+                panic!("{source}\nthe module stopped: {outcome:?}")
+            }
+        }
+    });
+    Ran { interpreter, wasm }
 }
+
 
 /// Each native function of a standard-library module as `(symbol, module
 /// path, function name)`.
@@ -368,11 +399,37 @@ fn every_listed_native_matches_its_body() {
                 )
             };
             assert_eq!(
-                native, body,
+                native.interpreter, body.interpreter,
                 "`{symbol}` disagrees with its body on `{operands}`"
+            );
+            // The module reaches the native through its import, and runs the
+            // body as lowered code: both must give the interpreter's answer.
+            // A native with no import has no module path of its own.
+            let imported = intrinsic_of(symbol).native_import().is_some();
+            match &native.wasm {
+                Some(wasm) => assert_eq!(
+                    wasm, &native.interpreter,
+                    "the import of `{symbol}` disagrees on `{operands}`"
+                ),
+                None => assert!(
+                    !imported,
+                    "`{symbol}` has an import but its program is not lowered"
+                ),
+            }
+            let body_wasm = body
+                .wasm
+                .unwrap_or_else(|| panic!("the body of `{symbol}` is not lowered"));
+            assert_eq!(
+                body_wasm, body.interpreter,
+                "the lowered body of `{symbol}` disagrees on `{operands}`"
             );
         }
     }
+}
+
+fn intrinsic_of(symbol: &str) -> vibra_ir::external::CompilerIntrinsic {
+    vibra_ir::external::CompilerIntrinsic::from_symbol(symbol)
+        .unwrap_or_else(|| panic!("`{symbol}` is not a registry symbol"))
 }
 
 #[test]
@@ -387,7 +444,7 @@ fn the_harness_reports_a_body_that_disagrees() {
         "(defn main () (array i32) (reference 1i32 2i32))\n\
          (defn reference () (array t)\n  where: (t any)\n  variadic: (items (array t))\n  (array.of))",
     );
-    assert_ne!(native, wrong);
+    assert_ne!(native.interpreter, wrong.interpreter);
 }
 
 /// Operand pairs for each type whose key contracts the standard library
@@ -474,7 +531,7 @@ fn every_library_key_conformance_matches_the_closed_registry() {
                     .expect("execution")
                     .canonical_result();
                 assert_eq!(
-                    closed, written,
+                    closed.interpreter, written,
                     "`{member}` of {module} disagrees with canonical key order on `{operands}`"
                 );
             }
