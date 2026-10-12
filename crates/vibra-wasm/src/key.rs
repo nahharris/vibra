@@ -52,7 +52,7 @@ pub(crate) enum KeyShape {
 /// The shape of the closed key type `ty`, or `None` when `ty` is not one: a
 /// declared type is ordered by its own `compare`, and an array, a dict, an
 /// option, a float, and a function are not keys at all.
-pub(crate) fn shape(env: &TypeEnv<'_>, ty: &Type) -> Option<KeyShape> {
+pub(crate) fn shape(ty: &Type) -> Option<KeyShape> {
     Some(match ty {
         Type::Bool => KeyShape::Variants(vec![None, None]),
         Type::Char | Type::U8 | Type::U16 | Type::U32 => {
@@ -66,15 +66,12 @@ pub(crate) fn shape(env: &TypeEnv<'_>, ty: &Type) -> Option<KeyShape> {
         // `void` has one value, so it orders nothing.
         Type::Void => KeyShape::Components(Vec::new()),
         Type::Tuple(components) => KeyShape::Components(
-            components
-                .iter()
-                .map(|component| shape(env, component))
-                .collect::<Option<Vec<_>>>()?,
+            components.iter().map(shape).collect::<Option<Vec<_>>>()?,
         ),
         Type::Record(fields) => KeyShape::Components(
             fields
                 .iter()
-                .map(|(_, field)| shape(env, field))
+                .map(|(_, field)| shape(field))
                 .collect::<Option<Vec<_>>>()?,
         ),
         Type::Enum(variants) => KeyShape::Variants(
@@ -82,14 +79,14 @@ pub(crate) fn shape(env: &TypeEnv<'_>, ty: &Type) -> Option<KeyShape> {
                 .iter()
                 .map(|(_, payload)| match payload {
                     Type::Void => Some(None),
-                    other => shape(env, other).map(Some),
+                    other => shape(other).map(Some),
                 })
                 .collect::<Option<Vec<_>>>()?,
         ),
         Type::Union(members) => KeyShape::Variants(
             members
                 .iter()
-                .map(|member| shape(env, member).map(Some))
+                .map(|member| shape(member).map(Some))
                 .collect::<Option<Vec<_>>>()?,
         ),
         _ => return None,
@@ -118,7 +115,7 @@ pub(crate) fn order_of(
     key_order: Option<&vibra_ir::TypeId>,
 ) -> Option<Order> {
     match key_order {
-        None => shape(env, key).map(Order::Closed),
+        None => shape(key).map(Order::Closed),
         Some(interface) => env
             .functions()
             .iter()
@@ -269,33 +266,20 @@ mod tests {
 
     #[test]
     fn a_closed_key_type_has_a_shape_and_a_declared_one_does_not() {
-        let env = TypeEnv::new(&[]);
+        assert_eq!(shape(&Type::I8), Some(KeyShape::Narrow { signed: true }));
+        assert_eq!(shape(&Type::Char), Some(KeyShape::Narrow { signed: false }));
+        assert_eq!(shape(&Type::U64), Some(KeyShape::Wide { signed: false }));
         assert_eq!(
-            shape(&env, &Type::I8),
-            Some(KeyShape::Narrow { signed: true })
-        );
-        assert_eq!(
-            shape(&env, &Type::Char),
-            Some(KeyShape::Narrow { signed: false })
-        );
-        assert_eq!(
-            shape(&env, &Type::U64),
-            Some(KeyShape::Wide { signed: false })
-        );
-        assert_eq!(
-            shape(&env, &Type::Tuple(vec![Type::Str, Type::Bool])),
+            shape(&Type::Tuple(vec![Type::Str, Type::Bool])),
             Some(KeyShape::Components(vec![
                 KeyShape::Text,
                 KeyShape::Variants(vec![None, None])
             ]))
         );
-        assert_eq!(shape(&env, &Type::F64), None);
-        assert_eq!(shape(&env, &Type::Array(Box::new(Type::I32))), None);
+        assert_eq!(shape(&Type::F64), None);
+        assert_eq!(shape(&Type::Array(Box::new(Type::I32))), None);
         assert_eq!(
-            shape(
-                &env,
-                &Type::Declared(vibra_ir::TypeId::new("point", "point"))
-            ),
+            shape(&Type::Declared(vibra_ir::TypeId::new("point", "point"))),
             None
         );
     }

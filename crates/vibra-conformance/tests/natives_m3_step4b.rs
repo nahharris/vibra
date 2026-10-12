@@ -243,7 +243,6 @@ fn finish(source: &str, checked: &vibra_types::CheckResult) -> Ran {
     Ran { interpreter, wasm }
 }
 
-
 /// Each native function of a standard-library module as `(symbol, module
 /// path, function name)`.
 fn module_natives() -> Vec<(String, &'static str, String)> {
@@ -489,7 +488,8 @@ fn the_text_and_bytes_vectors_hold_the_interpreter_and_the_module_to_one_answer(
     for intrinsic in vibra_ir::external::CompilerIntrinsic::all() {
         let vectors = intrinsic.vectors();
         let symbol = intrinsic.symbol();
-        if vectors.is_empty() || !(symbol.starts_with("text.") || symbol.starts_with("bytes."))
+        if vectors.is_empty()
+            || !(symbol.starts_with("text.") || symbol.starts_with("bytes."))
         {
             continue;
         }
