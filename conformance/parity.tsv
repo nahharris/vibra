@@ -10,7 +10,7 @@
 # `matched` means the WebAssembly backend reproduces the case's one expectation.
 # `not-lowered` means the program uses a form the backend does not lower yet, and the owning
 # step is the latest milestone 4 step whose delivery the case needs (5a, 5b, 6,
-# 7, 8a, 8b, 8c, 9, 10, or 11). A step moves rows toward `matched` and never
+# 7, 8a, 8b, 8c, 8d, 9, 10, or 11). A step moves rows toward `matched` and never
 # back. The host test crates/vibra-conformance/tests/parity_inventory_m4_step4.rs
 # holds this table to the runner's result for every case.
 V1-RUNTIME-activation-depth	matched
@@ -54,7 +54,7 @@ V1-RUNTIME-key-contracts	not-lowered	9
 V1-RUNTIME-let-else	matched
 V1-RUNTIME-library-composites	not-lowered	11
 V1-RUNTIME-library-dict	matched
-V1-RUNTIME-library-roles	not-lowered	8b
+V1-RUNTIME-library-roles	not-lowered	8d
 V1-RUNTIME-literal	matched
 V1-RUNTIME-lookups	matched
 V1-RUNTIME-match-patterns	matched

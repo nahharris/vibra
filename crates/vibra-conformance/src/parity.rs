@@ -16,8 +16,9 @@ use std::fmt;
 use crate::runner::WasmStatus;
 
 /// The steps of Stage 4A that can own a not-lowered case, in delivery order.
-pub const OWNING_STEPS: &[&str] =
-    &["5a", "5b", "6", "7", "8a", "8b", "8c", "9", "10", "11"];
+pub const OWNING_STEPS: &[&str] = &[
+    "5a", "5b", "6", "7", "8a", "8b", "8c", "8d", "9", "10", "11",
+];
 
 /// One case's disposition.
 #[derive(Clone, Debug, PartialEq, Eq)]

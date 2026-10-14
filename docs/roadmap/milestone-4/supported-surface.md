@@ -92,7 +92,7 @@ names.
 | `Attribute::Effects` | Stage 4B | Step 14 | Empty rows stay supported |
 | `Attribute::External` | Lowered | Step 8a | `@compiler` rows: Steps 8a–8c (8b landed: the text, bytes, array, and dict rows, inline or as the 16 native imports of `NATIVE_ROWS`; 8a landed: the integer arithmetic, shift, comparison, and conversion rows and the `char` rows, lowered inline); `@host`: Stage 4B Step 16 |
 | `Attribute::Symbol` | Static | — | — |
-| `Attribute::Native` | Lowered | Step 10 | 8b: the text, bytes, array, and dict natives are imports of `vibra_native_v1` backed by `vibra-native`, and `array.fold` (no import) is the one native a module runs as its body, still open; Step 10 completes and proves the rule |
+| `Attribute::Native` | Lowered | Step 10 | 8b: the text, bytes, array, and dict natives are imports of `vibra_native_v1` backed by `vibra-native`, and `array.fold` (no import) is the one native a module runs as its body, Step 8d owns its checked body; Step 10 completes and proves the rule |
 | `Attribute::Role` | Static | — | — |
 | `Attribute::Doc` | Static | — | — |
 

@@ -94,18 +94,21 @@ has a matched case; the natives agree with their bodies on all three paths.
 Landed as `landed`, conditional on its pull request merging, on `m4` at `a450155`.
 
 - **Which rows are inline, which are native imports, and which run their body.**
-  One rule decides. A row whose meaning is a few instructions is lowered inline
-  from the one table of `crates/vibra-wasm/src/primitive.rs` (now also `text.length`,
-  `bytes.length`, `array.length`, `text.equal`, `bytes.equal`, and the identities
-  `array.of` and `dict.of`, which receive the collection the call already packed).
-  A row whose algorithm loops is toolchain Rust in `crates/vibra-native`, reached
-  by an import from `vibra_native_v1`: `text.concat`, `text.compare`, `text.slice`,
-  `text.to-chars`, `text.from-chars`, `text.to-utf8`, `text.from-utf8`, the five
-  matching `bytes.*` rows, `array.append`, `array.concat`, `array.slice`, and
-  `dict.entries` (16 imports, the table `NATIVE_ROWS` in `vibra-ir`). A native
-  whose meaning applies a function value has no import and is run as its body:
-  that is `array.fold`, and it is the same rule that makes a dict ordered by a
-  declared key's own `compare` lowered code, below.
+  The registry table decides, by the property `is_native` and by whether a row
+  loops. A primitive row that does not loop is lowered inline from the one table of
+  `crates/vibra-wasm/src/primitive.rs`: the integer and `char` rows of Step 8a and
+  `array.length`. The table holds no native (it returns nothing for a row where
+  `is_native` is true), and a test fails if one gets a plan. A native
+  implementation, and a primitive row whose algorithm loops, is toolchain Rust in
+  `crates/vibra-native`, reached by an import from `vibra_native_v1`; that is every
+  `text.*` and `bytes.*` row, `array.of`, `dict.of`, `array.append`, `array.concat`,
+  `array.slice`, and `dict.entries` (22 imports, the table `NATIVE_ROWS` in
+  `vibra-ir`; `array.of` and `dict.of` answer their operand, the packed tail). A
+  native whose meaning applies a function value has no import and a module runs its
+  body: that is `array.fold`, Step 8d's. The tests that guard the rule are
+  `a_row_is_inline_exactly_when_it_is_a_primitive_row_that_does_not_loop` and
+  `the_import_table_names_the_natives_and_the_looping_primitive_rows` (against the
+  manifest's `native` list) in `primitives_m4_step8a`.
 - **The native crate.** `vibra-native` is written against `Source` (read a range of
   units) and `Sink` (put a unit). The interpreter implements them over its own
   values (`crates/vibra-interp/src/native.rs`), the runner over the instance memory
@@ -153,9 +156,10 @@ Landed as `landed`, conditional on its pull request merging, on `m4` at `a450155
 - **Test time.** `ConformanceRunner::run_cases` runs cases on every core (the
   parity test uses it), and the dev profile optimizes dependencies, because an
   unoptimized Cranelift dominated every test that runs a module.
-- **Left open.** `array.fold` as a module-run body: a native function is a
-  wrapper in checked IR (`CheckedFunction::new_external`), so the body of the
-  standard library never reaches the emitter. It needs the IR to carry both the
-  wrapper the interpreter runs and the body a module runs. `V1-RUNTIME-library-roles`
-  stays `not-lowered` for it. Step 9's `V1-RUNTIME-tail-calls-through-flow` needs the
-  same.
+- **Not delivered, owned by Step 8d.** `array.fold` as a module-run body: a native
+  function is a wrapper in checked IR (`CheckedFunction::new_external`), so the body
+  of the standard library never reaches the emitter. It needs the IR to carry both
+  the wrapper the interpreter runs and the body a module runs. This step is split
+  ([ledger D10.5](decision-ledger.md), [Step 8d](08d-native-bodies.md));
+  `V1-RUNTIME-library-roles` is `not-lowered` with owner 8d, and Step 9 requires 8d
+  for `V1-RUNTIME-tail-calls-through-flow`.
