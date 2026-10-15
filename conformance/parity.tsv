@@ -65,8 +65,8 @@ V1-RUNTIME-nominal-enum-payload	matched
 V1-RUNTIME-nominal-method	matched
 V1-RUNTIME-nominal-record	matched
 V1-RUNTIME-nominal-wrapper	matched
-V1-RUNTIME-registry-floats	not-lowered	8c
-V1-RUNTIME-registry-integers	not-lowered	8c
+V1-RUNTIME-registry-floats	matched
+V1-RUNTIME-registry-integers	matched
 V1-RUNTIME-registry-modules	not-lowered	11
 V1-RUNTIME-return	matched
 V1-RUNTIME-return-tail-call	matched

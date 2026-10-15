@@ -353,6 +353,23 @@ fn every_vector_of_every_number_row_is_the_same_in_both_backends_and_in_the_tabl
     let started = Instant::now();
     let rows = rows();
     let vectors = run_all(&rows);
+    let count = |keep: &dyn Fn(&CompilerIntrinsic) -> bool| {
+        rows.iter()
+            .filter(|row| keep(row))
+            .map(|row| row.vectors().len())
+            .sum::<usize>()
+    };
+    eprintln!(
+        "integer to-str {}, integer parse {}, float to-str {}, float parse {}, float arithmetic and order {}",
+        count(&|row| matches!(row, CompilerIntrinsic::Integer(_, IntegerOp::ToStr))),
+        count(&|row| matches!(row, CompilerIntrinsic::Integer(_, IntegerOp::Parse))),
+        count(&|row| matches!(row, CompilerIntrinsic::Float(_, FloatOp::ToStr))),
+        count(&|row| matches!(row, CompilerIntrinsic::Float(_, FloatOp::Parse))),
+        count(&|row| matches!(
+            row,
+            CompilerIntrinsic::Float(_, op) if !matches!(op, FloatOp::ToStr | FloatOp::Parse)
+        )),
+    );
     eprintln!(
         "{} rows, {vectors} vectors, {:?}",
         rows.len(),
