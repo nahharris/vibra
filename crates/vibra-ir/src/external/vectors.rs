@@ -23,6 +23,8 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
+mod numbers;
+
 use super::{CompilerIntrinsic, IntegerOp, NumericType};
 use crate::{ObservedValue, Type, Value};
 
@@ -112,6 +114,9 @@ fn table() -> &'static BTreeMap<CompilerIntrinsic, Vec<Vector>> {
         conversions(&mut all);
         characters(&mut all);
         sequences(&mut all);
+        numbers::integer_texts(&mut all);
+        numbers::floats(&mut all);
+        numbers::float_text(&mut all);
         let mut table: BTreeMap<CompilerIntrinsic, Vec<Vector>> = BTreeMap::new();
         for vector in all {
             table.entry(vector.intrinsic).or_default().push(vector);
@@ -940,7 +945,7 @@ mod tests {
     }
 
     #[test]
-    fn a_row_has_vectors_exactly_when_the_integer_char_text_and_bytes_rows_own_it() {
+    fn a_row_has_vectors_exactly_when_the_number_char_text_and_bytes_rows_own_it() {
         for intrinsic in CompilerIntrinsic::all() {
             let vectored = match intrinsic {
                 CompilerIntrinsic::Convert(..)
@@ -958,9 +963,9 @@ mod tests {
                 | CompilerIntrinsic::BytesEqual
                 | CompilerIntrinsic::BytesCompare
                 | CompilerIntrinsic::BytesSlice => true,
-                CompilerIntrinsic::Integer(_, op) => {
-                    !matches!(op, IntegerOp::ToStr | IntegerOp::Parse)
-                }
+                // Every integer and float row, the number-text rows too, now
+                // has vectors.
+                CompilerIntrinsic::Integer(..) | CompilerIntrinsic::Float(..) => true,
                 _ => false,
             };
             assert_eq!(

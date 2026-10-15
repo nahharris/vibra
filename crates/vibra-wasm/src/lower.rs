@@ -3740,7 +3740,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 Wide::Text | Wide::Bytes | Wide::Cells => {
                     self.push(&[get(FRAME), ld32(at)]);
                 }
-                Wide::Index => self.push(&[get(FRAME), ld64(at)]),
+                Wide::Index | Wide::Number(_) => self.push(&[get(FRAME), ld64(at)]),
                 Wide::Element => {
                     self.push(&[get(FRAME), ld64(at)]);
                     match class {
@@ -3808,6 +3808,87 @@ impl<'l, 'a> Builder<'l, 'a> {
                     &[],
                     dest,
                 );
+                release(self);
+            }
+            Answer::Parsed => {
+                // The import reads the text, writes the number into the cell at
+                // the address it is given, and answers a status: `0` for a
+                // number, `1` for `invalid-format`, `2` for `out-of-range`.
+                let numeric = match row.intrinsic {
+                    CompilerIntrinsic::Integer(numeric, _)
+                    | CompilerIntrinsic::Float(numeric, _) => numeric,
+                    _ => return Err(unlowered_row(&row, origin)),
+                };
+                let class = self.class(&numeric.to_type(), origin)?;
+                let held = self.temp();
+                let held_at = self.cell(held);
+                let status = self.temp();
+                let status_at = self.cell(status);
+                self.push(&[get(FRAME)]);
+                self.push_native_operands(&row, slots, classes);
+                self.push(&[
+                    get(FRAME),
+                    c32(index(held_at)),
+                    I::I32Add,
+                    I::Call(import),
+                    I::I64ExtendI32U,
+                    st64(status_at),
+                ]);
+                self.set_byte(status, CellClass::I32.code());
+                self.set_byte(held, cell_class(class).code());
+                // The error is an enum of `void` variants: `invalid-format` for
+                // the status `1`, and `out-of-range` otherwise.
+                let error_type = self.error_type(result, origin)?;
+                let invalid =
+                    self.discriminant(&error_type, "invalid-format", origin)?;
+                let range = self.discriminant(&error_type, "out-of-range", origin)?;
+                let kind = self.temp();
+                let kind_at = self.cell(kind);
+                self.push(&[
+                    get(FRAME),
+                    c32(invalid.cast_signed()),
+                    c32(range.cast_signed()),
+                    get(FRAME),
+                    ld32(status_at),
+                    c32(1),
+                    I::I32Eq,
+                    I::Select,
+                    I::I64ExtendI32U,
+                    st64(kind_at),
+                ]);
+                self.set_byte(kind, CellClass::I32.code());
+                let ok = self.discriminant(result, "ok", origin)?;
+                let err = self.discriminant(result, "err", origin)?;
+                self.push(&[get(FRAME), ld32(status_at), I::I32Eqz]);
+                let (ok_block, err_block, join) =
+                    (self.new_block(), self.new_block(), self.new_block());
+                self.end(Term::Branch {
+                    then_block: ok_block,
+                    else_block: err_block,
+                });
+                self.start(ok_block);
+                self.build(Kind::Enum, ok, &[Part::Slot { slot: held, class }], dest);
+                self.goto(join, err_block);
+                let error = self.temp();
+                self.build_with(
+                    Kind::Enum,
+                    Variant::Cell {
+                        slot: kind,
+                        bias: 0,
+                    },
+                    &[],
+                    error,
+                );
+                self.build(
+                    Kind::Enum,
+                    err,
+                    &[Part::Slot {
+                        slot: error,
+                        class: ValueClass::Ref,
+                    }],
+                    dest,
+                );
+                self.goto(join, join);
                 release(self);
             }
             Answer::Operand => {

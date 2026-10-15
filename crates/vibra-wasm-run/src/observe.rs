@@ -424,8 +424,12 @@ impl Instance {
             Type::U32 => Value::U32(self.read_i32(id, index)?.cast_unsigned()),
             Type::I64 => Value::I64(self.read_i64(id, index)?),
             Type::U64 => Value::U64(self.read_i64(id, index)?.cast_unsigned()),
-            Type::F32 => Value::F32(self.read_f32(id, index)?.to_bits()),
-            Type::F64 => Value::F64(self.read_f64(id, index)?.to_bits()),
+            Type::F32 => Value::F32(vibra_ir::canonical_f32_bits(
+                self.read_f32(id, index)?.to_bits(),
+            )),
+            Type::F64 => Value::F64(vibra_ir::canonical_f64_bits(
+                self.read_f64(id, index)?.to_bits(),
+            )),
             _ => {
                 let child = self.read_id(id, index)?;
                 return Ok(Component::Child(child, ty.clone()));
@@ -557,8 +561,8 @@ fn scalar(slot: ResultSlot, ty: &Type) -> Result<Option<Value>, Outcome> {
         Type::U32 => Value::U32(narrow()?),
         Type::I64 => Value::I64(bits.cast_signed()),
         Type::U64 => Value::U64(bits),
-        Type::F32 => Value::F32(narrow()?),
-        Type::F64 => Value::F64(bits),
+        Type::F32 => Value::F32(vibra_ir::canonical_f32_bits(narrow()?)),
+        Type::F64 => Value::F64(vibra_ir::canonical_f64_bits(bits)),
         _ => return Ok(None),
     }))
 }

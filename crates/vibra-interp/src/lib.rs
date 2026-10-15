@@ -617,8 +617,18 @@ fn observe(value: RuntimeValue) -> Option<ObservedValue> {
         match task {
             // Parts are shared, so the children are visited by handle.
             Task::Visit(value) => match &value {
+                // A float is observed here, so a NaN is the one quiet NaN of
+                // its width and carries no sign or payload.
                 RuntimeValue::Primitive(primitive) => {
-                    done.push(ObservedValue::Primitive(primitive.clone()));
+                    done.push(ObservedValue::Primitive(match primitive {
+                        Value::F32(bits) => {
+                            Value::F32(vibra_ir::canonical_f32_bits(*bits))
+                        }
+                        Value::F64(bits) => {
+                            Value::F64(vibra_ir::canonical_f64_bits(*bits))
+                        }
+                        other => other.clone(),
+                    }));
                 }
                 RuntimeValue::Function(_) => return None,
                 RuntimeValue::Record { value_type, fields } => {

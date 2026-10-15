@@ -227,12 +227,15 @@ fn every_row_of_the_table_is_implemented() {
                 Operand::Text => scalars.push(A as i64),
                 Operand::Bytes => scalars.push(B as i64),
                 Operand::Cells => scalars.push(OUT as i64),
-                Operand::Index => scalars.push(0),
+                Operand::Index | Operand::Number(_) => scalars.push(0),
                 Operand::Element => scalars.extend([0, i64::from(class::I32)]),
             }
         }
         if matches!(row.answer, vibra_ir::external::Answer::Object { .. }) {
             scalars.push(0);
+        }
+        if matches!(row.answer, vibra_ir::external::Answer::Parsed) {
+            scalars.push(2048);
         }
         let answer = call(row, memory(&mut heap.0), &scalars);
         assert!(answer.is_ok(), "{}: {answer:?}", row.name());

@@ -84,13 +84,13 @@ names.
 | `VariadicType::Array` | Lowered | Step 8b | (landed) |
 | `VariadicType::Dict` | Lowered | Step 8b | (landed) |
 | `DeftypeBody::Type` | Lowered | Step 5b | — |
-| `DeftypeBody::Intrinsic` | Lowered | Step 8a | Builtin numeric types: Step 8a (landed: the integer rows but `to-str` and `parse`, the integer conversions, and the `char` rows, `primitives_m4_step8a`; the integer `to-str` and `parse` and the float rows: Step 8c); `array` and `dict`: Step 8b |
+| `DeftypeBody::Intrinsic` | Lowered | Step 8a | Builtin numeric types: Step 8a (landed: the integer rows but `to-str` and `parse`, the integer conversions, and the `char` rows, `primitives_m4_step8a`; Step 8c landed the rest: the float arithmetic, equality, and order rows inline, and `to-str` and `parse` of every integer and float type as imports, `numbers_m4_step8c`); `array` and `dict`: Step 8b |
 | `Attribute::Where` | Lowered | Step 6 | Generic parameters take run-time type arguments; bounds select implementations: Step 9 |
 | `Attribute::Labelled` | Static | — | Resolved into parameter order before lowering |
 | `Attribute::Variadic` | Lowered | Step 8b | (landed) |
 | `Attribute::Visibility` | Static | — | — |
 | `Attribute::Effects` | Stage 4B | Step 14 | Empty rows stay supported |
-| `Attribute::External` | Lowered | Step 8a | `@compiler` rows: Steps 8a–8c (8b landed: the text, bytes, array, and dict rows, inline or as the 16 native imports of `NATIVE_ROWS`; 8a landed: the integer arithmetic, shift, comparison, and conversion rows and the `char` rows, lowered inline); `@host`: Stage 4B Step 16 |
+| `Attribute::External` | Lowered | Step 8a | `@compiler` rows: Steps 8a–8c (8c landed: the float rows, inline, and the 20 `to-str` and `parse` rows as imports, 42 in `NATIVE_ROWS` with 8b's 22, so every `@compiler` row but `array.fold` is lowered; 8b landed: the text, bytes, array, and dict rows, inline or as the 22 native imports of `NATIVE_ROWS`; 8a landed: the integer arithmetic, shift, comparison, and conversion rows and the `char` rows, lowered inline); `@host`: Stage 4B Step 16 |
 | `Attribute::Symbol` | Static | — | — |
 | `Attribute::Native` | Lowered | Step 10 | 8b: the text, bytes, array, and dict natives are imports of `vibra_native_v1` backed by `vibra-native`, and `array.fold` (no import) is the one native a module runs as its body, Step 8d owns its checked body; Step 10 completes and proves the rule |
 | `Attribute::Role` | Static | — | — |
