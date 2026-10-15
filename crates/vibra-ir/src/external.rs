@@ -596,11 +596,12 @@ impl CompilerIntrinsic {
     }
 
     /// The sample vectors of this row: operands, and the outcome the
-    /// specification gives them, computed once from the language's own integer
-    /// types and independent of any backend. Every backend that lowers the row
-    /// is held to them. A row without vectors has none yet: the vectors cover
-    /// the integer rows but `to-str` and `parse`, the integer conversions, and
-    /// the `char` rows.
+    /// specification gives them, computed once from Rust's own integer and
+    /// float types, formatting, and parsing and independent of any backend.
+    /// Every backend that lowers the row is held to them. A row without vectors
+    /// has none: the vectors cover every integer and float row (the number-text
+    /// rows included), the integer conversions, the `char` rows, and the text
+    /// and bytes rows whose operands and results are scalars.
     #[must_use]
     pub fn vectors(self) -> &'static [Vector] {
         vectors::of(self)

@@ -117,7 +117,7 @@ pub(crate) fn ordering(result: &Type, order: Ordering) -> RuntimeValue {
 // Integers
 // ---------------------------------------------------------------------------
 
-fn integer_value(value: &Value) -> Option<i128> {
+pub(crate) fn integer_value(value: &Value) -> Option<i128> {
     Some(match value {
         Value::I8(value) => i128::from(*value),
         Value::I16(value) => i128::from(*value),
@@ -132,7 +132,7 @@ fn integer_value(value: &Value) -> Option<i128> {
 }
 
 /// The `numeric` value of `value`, or `None` when it lies outside the type.
-fn make_integer(numeric: NumericType, value: i128) -> Option<Value> {
+pub(crate) fn make_integer(numeric: NumericType, value: i128) -> Option<Value> {
     Some(match numeric {
         NumericType::I8 => Value::I8(i8::try_from(value).ok()?),
         NumericType::I16 => Value::I16(i16::try_from(value).ok()?),
@@ -165,13 +165,6 @@ fn integer(
         .map(|value| integer_value(value))
         .collect::<Option<Vec<_>>>();
     Some(match (op, operands) {
-        (IntegerOp::Parse, [Value::Str(text)]) => parse_integer(numeric, text, result),
-        (IntegerOp::ToStr, _) => {
-            let [value] = values.as_deref()? else {
-                return None;
-            };
-            primitive(Value::Str(value.to_string()))
-        }
         (IntegerOp::NegChecked, _) => {
             let [value] = values.as_deref()? else {
                 return None;
@@ -233,27 +226,6 @@ fn integer(
     })
 }
 
-/// An optional `-` (signed types only) and one or more ASCII digits.
-fn parse_integer(numeric: NumericType, text: &str, result: &Type) -> RuntimeValue {
-    let (negative, digits) = match text.strip_prefix('-') {
-        Some(digits) if numeric.is_signed() => (true, digits),
-        Some(_) => return err(result, "invalid-format"),
-        None => (false, text),
-    };
-    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-        return err(result, "invalid-format");
-    }
-    // A well-formed value too large even for `i128` is out of range.
-    let value = digits.bytes().try_fold(0_i128, |value, digit| {
-        value.checked_mul(10)?.checked_add(i128::from(digit - b'0'))
-    });
-    let value = value.map(|value| if negative { -value } else { value });
-    match value.and_then(|value| make_integer(numeric, value)) {
-        Some(value) => ok(result, primitive(value)),
-        None => err(result, "out-of-range"),
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Floats
 // ---------------------------------------------------------------------------
@@ -264,12 +236,6 @@ fn float(
     operands: &[&Value],
     result: &Type,
 ) -> Option<RuntimeValue> {
-    if op == FloatOp::Parse {
-        let [Value::Str(text)] = operands else {
-            return None;
-        };
-        return Some(parse_float(numeric, text, result));
-    }
     let values = operands
         .iter()
         .map(|value| match value {
@@ -295,11 +261,6 @@ fn float(
     };
     Some(match (op, values.as_slice()) {
         (FloatOp::Neg, [value]) => make(-value),
-        (FloatOp::ToStr, [value]) => primitive(Value::Str(if wide {
-            vibra_ir::canonical_f64_text(*value)
-        } else {
-            vibra_ir::canonical_f32_text(narrow(*value))
-        })),
         (FloatOp::Equal, [left, right]) => primitive(Value::Bool(left == right)),
         (FloatOp::CompareTotal, [left, right]) => {
             let order = if wide {
@@ -331,65 +292,14 @@ fn float(
     })
 }
 
-/// Every NaN as the one quiet NaN of its width, as serialization and
-/// equality see it.
+/// Every NaN as the one quiet NaN of its width, which has the positive sign and
+/// a zero payload, as `compare-total` sees it.
 fn canonical_nan_f64(value: f64) -> f64 {
-    if value.is_nan() { f64::NAN } else { value }
+    f64::from_bits(vibra_ir::canonical_f64_bits(value.to_bits()))
 }
 
 fn canonical_nan_f32(value: f32) -> f32 {
-    if value.is_nan() { f32::NAN } else { value }
-}
-
-/// The unsuffixed decimal float literal grammar, rounded to the nearest value
-/// of the type; `out-of-range` when that value is infinite.
-fn parse_float(numeric: NumericType, text: &str, result: &Type) -> RuntimeValue {
-    if !is_float_literal(text) {
-        return err(result, "invalid-format");
-    }
-    let value = if numeric == NumericType::F64 {
-        text.parse::<f64>()
-            .ok()
-            .filter(|value| value.is_finite())
-            .map(|value| Value::F64(value.to_bits()))
-    } else {
-        text.parse::<f32>()
-            .ok()
-            .filter(|value| value.is_finite())
-            .map(|value| Value::F32(value.to_bits()))
-    };
-    match value {
-        Some(value) => ok(result, primitive(value)),
-        None => err(result, "out-of-range"),
-    }
-}
-
-/// `[-] digits "." digits [exponent]` or `[-] digits exponent`, where
-/// `exponent = ("e" | "E") ["+" | "-"] digits`.
-fn is_float_literal(text: &str) -> bool {
-    let digits =
-        |text: &str| -> usize { text.bytes().take_while(u8::is_ascii_digit).count() };
-    let body = text.strip_prefix('-').unwrap_or(text);
-    let whole = digits(body);
-    if whole == 0 {
-        return false;
-    }
-    let mut rest = &body[whole..];
-    let mut fraction = false;
-    if let Some(after) = rest.strip_prefix('.') {
-        let count = digits(after);
-        if count == 0 {
-            return false;
-        }
-        fraction = true;
-        rest = &after[count..];
-    }
-    if let Some(after) = rest.strip_prefix(['e', 'E']) {
-        let after = after.strip_prefix(['+', '-']).unwrap_or(after);
-        let count = digits(after);
-        return count > 0 && count == after.len();
-    }
-    fraction && rest.is_empty()
+    f32::from_bits(vibra_ir::canonical_f32_bits(value.to_bits()))
 }
 
 // ---------------------------------------------------------------------------
@@ -649,6 +559,73 @@ mod tests {
                     "invalid-format"
                 ),
                 "{invalid:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_nan_of_any_sign_and_payload_is_the_one_quiet_nan_where_it_is_observed() {
+        use vibra_ir::{CANONICAL_NAN_F32, CANONICAL_NAN_F64};
+        let wide = [
+            0x7FF8_0000_0000_0000_u64,
+            0xFFF8_0000_0000_0000,
+            0x7FF0_0000_0000_0001,
+            0xFFF4_0000_DEAD_BEEF,
+            0xFFFF_FFFF_FFFF_FFFF,
+        ];
+        let narrow = [0x7FC0_0000_u32, 0xFFC0_0000, 0x7F80_0001, 0xFFA0_BEEF];
+        let run64 = |op, operands: &[u64]| {
+            let operands = operands
+                .iter()
+                .map(|bits| Value::F64(*bits))
+                .collect::<Vec<_>>();
+            run(CompilerIntrinsic::Float(NumericType::F64, op), &operands)
+        };
+        let run32 = |op, operands: &[u32]| {
+            let operands = operands
+                .iter()
+                .map(|bits| Value::F32(*bits))
+                .collect::<Vec<_>>();
+            run(CompilerIntrinsic::Float(NumericType::F32, op), &operands)
+        };
+        for &left in &wide {
+            // `to-str`, and the canonical encoding of a NaN that is a result.
+            assert_eq!(run64(FloatOp::ToStr, &[left]), "\"nan\"", "{left:#x}");
+            assert_eq!(run64(FloatOp::Neg, &[left]), "nanf64", "{left:#x}");
+            assert_eq!(run64(FloatOp::Add, &[left, 1.0_f64.to_bits()]), "nanf64");
+            for &right in &wide {
+                assert_eq!(run64(FloatOp::Equal, &[left, right]), "false");
+                assert!(
+                    run64(FloatOp::CompareTotal, &[left, right]).contains("@equal"),
+                    "{left:#x} {right:#x}"
+                );
+            }
+        }
+        for &left in &narrow {
+            assert_eq!(run32(FloatOp::ToStr, &[left]), "\"nan\"", "{left:#x}");
+            assert_eq!(run32(FloatOp::Neg, &[left]), "nanf32", "{left:#x}");
+            for &right in &narrow {
+                assert_eq!(run32(FloatOp::Equal, &[left, right]), "false");
+                assert!(
+                    run32(FloatOp::CompareTotal, &[left, right]).contains("@equal"),
+                    "{left:#x} {right:#x}"
+                );
+            }
+        }
+        // The observed value itself holds the quiet NaN, so two NaNs are one
+        // value to every equality over observations.
+        let observed =
+            |value: Value| crate::observe(RuntimeValue::Primitive(value)).unwrap();
+        for &bits in &wide {
+            assert_eq!(
+                observed(Value::F64(bits)),
+                observed(Value::F64(CANONICAL_NAN_F64))
+            );
+        }
+        for &bits in &narrow {
+            assert_eq!(
+                observed(Value::F32(bits)),
+                observed(Value::F32(CANONICAL_NAN_F32))
             );
         }
     }

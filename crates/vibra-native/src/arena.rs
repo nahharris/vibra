@@ -15,8 +15,12 @@ use std::cell::Cell;
 use std::fmt;
 
 use vibra_ir::arena::{self, class, header, kind};
-use vibra_ir::external::{Answer, CompilerIntrinsic, NativeRow, ObjectKind, Operand};
+use vibra_ir::external::{
+    Answer, CompilerIntrinsic, FloatOp, IntegerOp, NativeRow, NumericType, ObjectKind,
+    Operand,
+};
 
+use crate::number::Parsed;
 use crate::{Count, Element, Sink, Source};
 
 /// A module's linear memory, as bytes that a source and a sink can share.
@@ -494,6 +498,7 @@ enum Argument {
     Object(u32),
     Index(u64),
     Element(Element),
+    Number(u64),
 }
 
 /// Reads each operand of `row` from the scalars of a call.
@@ -508,6 +513,7 @@ fn arguments(row: &NativeRow, scalars: &[i64]) -> Result<Vec<Argument>, Fault> {
                 Argument::Object(narrow(next()?)?)
             }
             Operand::Index => Argument::Index(next()?.cast_unsigned()),
+            Operand::Number(_) => Argument::Number(next()?.cast_unsigned()),
             Operand::Element => {
                 let bits = next()?.cast_unsigned();
                 let class = u8::try_from(next()?).map_err(|_| Fault::Signature)?;
@@ -537,7 +543,7 @@ pub fn call(
 ) -> Result<i64, Fault> {
     let operands = arguments(row, scalars)?;
     let destination = match row.answer {
-        Answer::Object { .. } => {
+        Answer::Object { .. } | Answer::Parsed => {
             let last = scalars.last().copied().ok_or(Fault::Signature)?;
             Some(u32::try_from(last).map_err(|_| Fault::OutOfBounds)?)
         }
@@ -557,8 +563,48 @@ pub fn call(
         Some(Argument::Element(value)) => Ok(*value),
         _ => Err(Fault::Signature),
     };
+    let number = |position: usize| match operands.get(position) {
+        Some(Argument::Number(bits)) => Ok(*bits),
+        _ => Err(Fault::Signature),
+    };
     use CompilerIntrinsic as C;
     let built = match row.intrinsic {
+        C::Integer(numeric, IntegerOp::ToStr) => {
+            let value = decode_integer(numeric, number(0)?);
+            build(
+                destination,
+                |at| Fill::open(memory, at, Layout::Chars).map(CharSink),
+                |out: &mut dyn Sink<Unit = u32>| {
+                    crate::number::integer_to_str(value, out);
+                    true
+                },
+            )?
+        }
+        C::Float(numeric, FloatOp::ToStr) => {
+            let bits = number(0)?;
+            build(
+                destination,
+                |at| Fill::open(memory, at, Layout::Chars).map(CharSink),
+                |out: &mut dyn Sink<Unit = u32>| {
+                    crate::number::float_to_str(numeric, bits, out);
+                    true
+                },
+            )?
+        }
+        C::Integer(numeric, IntegerOp::Parse) => {
+            let text = Chars(object(0, Layout::Chars)?);
+            let parsed = match crate::number::parse_integer(numeric, &text) {
+                Parsed::Value(value) => Parsed::Value(encode_integer(numeric, value)),
+                Parsed::InvalidFormat => Parsed::InvalidFormat,
+                Parsed::OutOfRange => Parsed::OutOfRange,
+            };
+            return answer_parsed(memory, destination, parsed);
+        }
+        C::Float(numeric, FloatOp::Parse) => {
+            let text = Chars(object(0, Layout::Chars)?);
+            let parsed = crate::number::parse_float(numeric, &text);
+            return answer_parsed(memory, destination, parsed);
+        }
         C::TextLength => {
             return i64::try_from(crate::length(&Chars(object(0, Layout::Chars)?)))
                 .map_err(|_| Fault::OutOfBounds);
@@ -772,6 +818,51 @@ pub fn call(
         _ => return Err(Fault::Signature),
     };
     Ok(built)
+}
+
+/// The integer a cell of `numeric` holds: a type of at most 32 bits is its
+/// 32-bit pattern, zero-extended, and a 64-bit type is its 64 bits.
+fn decode_integer(numeric: NumericType, bits: u64) -> i128 {
+    let low = u32::try_from(bits & 0xFFFF_FFFF).unwrap_or(0);
+    match numeric {
+        NumericType::I8 | NumericType::I16 | NumericType::I32 => {
+            i128::from(low.cast_signed())
+        }
+        NumericType::U8 | NumericType::U16 | NumericType::U32 => i128::from(low),
+        NumericType::I64 => i128::from(bits.cast_signed()),
+        NumericType::U64 | NumericType::F32 | NumericType::F64 => i128::from(bits),
+    }
+}
+
+/// The cell of `numeric` that holds `value`, which the type contains.
+fn encode_integer(numeric: NumericType, value: i128) -> u64 {
+    let pattern = u64::try_from(value & i128::from(u64::MAX)).unwrap_or(0);
+    if numeric.bits() == 64 {
+        pattern
+    } else {
+        pattern & 0xFFFF_FFFF
+    }
+}
+
+/// Answers a row that reads a number: writes the cell at the destination when
+/// the text spelled one, and answers the status of the row's protocol.
+fn answer_parsed(
+    memory: Memory<'_>,
+    destination: Option<u32>,
+    parsed: Parsed<u64>,
+) -> Result<i64, Fault> {
+    let at = match destination {
+        Some(at) if at != 0 => offset(at)?,
+        _ => return Err(Fault::Destination),
+    };
+    match parsed {
+        Parsed::Value(bits) => {
+            write(memory, at, &bits.to_le_bytes())?;
+            Ok(0)
+        }
+        Parsed::InvalidFormat => Ok(1),
+        Parsed::OutOfRange => Ok(2),
+    }
 }
 
 /// Measures what a building row makes, or fills the destination with it.

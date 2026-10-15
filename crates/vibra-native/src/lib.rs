@@ -22,6 +22,12 @@
 //!   scalars, `bytes` as its bytes, and an `array` or `dict` as its cells, so a
 //!   function never branches on a value kind.
 //!
+//! [`number`] is the same code for the rows that print and read numbers: it
+//! reads the scalars of a `str` through a [`Source`] and writes them through a
+//! [`Sink`], and takes and answers a number as a value (an integer as an `i128`,
+//! a float as its IEEE bits), so it is the one implementation of integer and
+//! float `to-str` and `parse` that the interpreter and a module share.
+//!
 //! A [`Sink`] can also only count, so a row that builds an object of a size it
 //! does not know in advance runs once to measure and once to fill, which is how
 //! a module's own allocator stays the one allocator. The code never allocates
@@ -32,6 +38,7 @@
 //! does not depend on it.
 
 pub mod arena;
+pub mod number;
 mod utf8;
 
 use std::cmp::Ordering;

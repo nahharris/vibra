@@ -27,7 +27,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
-use vibra_ir::external::{CompilerIntrinsic, IntegerOp, NumericType, Vector};
+use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp, NumericType, Vector};
 use vibra_ir::{CheckedProgram, ObservedValue, Type, Value};
 use vibra_types::check_source;
 use vibra_wasm::layout::{self, header, state};
@@ -267,11 +267,19 @@ fn a_row_is_inline_exactly_when_it_is_a_primitive_row_that_does_not_loop() {
             "{} is a native and has an inline plan",
             intrinsic.symbol()
         );
-        // The inline rows are the integer and `char` rows of Step 8a and
-        // `array.length`, the one collection primitive that does not loop.
+        // The inline rows are the integer and `char` rows of Step 8a, the float
+        // arithmetic, equality, and order rows of Step 8c, and `array.length`,
+        // the one collection primitive that does not loop. The registry table
+        // decides, by whether a row loops, and nothing else.
         assert_eq!(
             inline,
-            owned_by_step_8a(intrinsic) || intrinsic == CompilerIntrinsic::ArrayLength,
+            owned_by_step_8a(intrinsic)
+                || intrinsic == CompilerIntrinsic::ArrayLength
+                || matches!(
+                    intrinsic,
+                    CompilerIntrinsic::Float(_, op)
+                        if !matches!(op, FloatOp::ToStr | FloatOp::Parse)
+                ),
             "{}",
             intrinsic.symbol()
         );
@@ -292,8 +300,9 @@ fn a_row_is_inline_exactly_when_it_is_a_primitive_row_that_does_not_loop() {
         lowered += usize::from(inline);
     }
     // Eight integer types of nine rows, `neg-checked` for the four signed ones,
-    // fifty-six conversions, the two `char` rows, and `array.length`.
-    assert_eq!(lowered, 8 * 9 + 4 + 56 + 2 + 1);
+    // fifty-six conversions, the two `char` rows, `array.length`, and seven float
+    // rows of each of the two float types.
+    assert_eq!(lowered, 8 * 9 + 4 + 56 + 2 + 1 + 2 * 7);
 }
 
 /// The import table names exactly the native symbols that have an import, which
@@ -316,12 +325,23 @@ fn the_import_table_names_the_natives_and_the_looping_primitive_rows() {
         .map(CompilerIntrinsic::symbol)
         .collect::<BTreeSet<_>>();
     assert_eq!(imported_natives, manifest_natives);
-    let looping_primitives = [
+    // The collection primitives that loop, and the 20 rows that read and write
+    // number text: `to-str` and `parse` of the eight integer types and the two
+    // float types.
+    let mut looping_primitives = vec![
         CompilerIntrinsic::DictEntries,
         CompilerIntrinsic::ArrayAppend,
         CompilerIntrinsic::ArrayConcat,
         CompilerIntrinsic::ArraySlice,
     ];
+    looping_primitives.extend(CompilerIntrinsic::all().into_iter().filter(|row| {
+        matches!(
+            row,
+            CompilerIntrinsic::Integer(_, IntegerOp::ToStr | IntegerOp::Parse)
+                | CompilerIntrinsic::Float(_, FloatOp::ToStr | FloatOp::Parse)
+        )
+    }));
+    assert_eq!(looping_primitives.len(), 4 + 20);
     let table = vibra_ir::external::NATIVE_ROWS
         .iter()
         .map(|row| row.intrinsic.symbol())
@@ -449,26 +469,34 @@ fn a_program_of_primitive_rows_is_emitted_to_the_same_bytes_twice() {
 }
 
 #[test]
-fn a_row_that_is_not_lowered_is_still_named_with_its_owning_step() {
-    for (source, symbol) in [
-        (
-            "(defn main () str (i32.to-str 1i32))\n",
-            "external:i32.to-str",
-        ),
-        ("(defn main () f64 (f64.add 1.0 2.0))\n", "external:f64.add"),
+fn the_number_text_and_float_rows_are_lowered_and_the_one_row_left_is_named() {
+    // Step 8c lowers `to-str`, `parse`, and the float rows, so they emit; the
+    // one registry row that is still not lowered is `array.fold`, Step 8d's.
+    for source in [
+        "(defn main () str (i32.to-str 1i32))\n",
+        "(defn main () f64 (f64.add 1.0 2.0))\n",
+        "(defn main () (result f32 core.conversion-error) (f32.parse \"1.5\"))\n",
     ] {
-        let program = checked(source);
-        let error: NotLowered =
-            vibra_wasm::emit(&program).expect_err("not lowered yet");
-        assert!(
-            error
-                .forms()
-                .iter()
-                .any(|form| form.form() == Form::External
-                    && form.detail() == Some(symbol.trim_start_matches("external:"))),
-            "{error}"
-        );
+        let source = if source.contains("core.") {
+            format!("(import core @std.core)\n{source}")
+        } else {
+            source.to_owned()
+        };
+        let program = checked(&source);
+        vibra_wasm::emit(&program).expect("lowered");
     }
+    let program = checked(
+        "(defn main () i32 (array.fold (array.of 1i32) 0i32 (lambda (total i32 item i32) i32 item)))\n",
+    );
+    let error: NotLowered = vibra_wasm::emit(&program).expect_err("not lowered yet");
+    assert!(
+        error
+            .forms()
+            .iter()
+            .any(|form| form.form() == Form::External
+                && form.detail() == Some("array.fold")),
+        "{error}"
+    );
 }
 
 #[test]

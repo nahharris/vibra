@@ -8,12 +8,15 @@
 //! [`Source`] of its units, and builds the result from a [`Sink`]. It holds no
 //! algorithm of its own.
 
-use vibra_ir::external::CompilerIntrinsic;
+use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp, NumericType};
 use vibra_ir::{Type, Value};
+use vibra_native::number::Parsed;
 use vibra_native::{Sink, Source};
 
 use crate::RuntimeValue;
-use crate::registry::{err, ok, option, ordering, primitive};
+use crate::registry::{
+    err, integer_value, make_integer, ok, option, ordering, primitive,
+};
 
 /// A slice of units read as a [`Source`].
 struct Units<'a, U>(&'a [U]);
@@ -248,6 +251,46 @@ pub(crate) fn apply(
                     array_value(value_type, out.0.into_iter().cloned().collect())
                 }),
             )
+        }
+        (C::Integer(_, IntegerOp::ToStr), [Primitive(value)]) => {
+            let mut out = Collect(Vec::new());
+            vibra_native::number::integer_to_str(integer_value(value)?, &mut out);
+            text_value(out.0)?
+        }
+        (C::Float(numeric, FloatOp::ToStr), [Primitive(value)]) => {
+            let bits = match value {
+                Value::F32(bits) => u64::from(*bits),
+                Value::F64(bits) => *bits,
+                _ => return None,
+            };
+            let mut out = Collect(Vec::new());
+            vibra_native::number::float_to_str(numeric, bits, &mut out);
+            text_value(out.0)?
+        }
+        (C::Integer(numeric, IntegerOp::Parse), [value]) => {
+            let value = text(value)?;
+            match vibra_native::number::parse_integer(numeric, &Units(&value)) {
+                Parsed::Value(value) => {
+                    ok(result, primitive(make_integer(numeric, value)?))
+                }
+                Parsed::InvalidFormat => err(result, "invalid-format"),
+                Parsed::OutOfRange => err(result, "out-of-range"),
+            }
+        }
+        (C::Float(numeric, FloatOp::Parse), [value]) => {
+            let value = text(value)?;
+            match vibra_native::number::parse_float(numeric, &Units(&value)) {
+                Parsed::Value(bits) => ok(
+                    result,
+                    primitive(if numeric == NumericType::F32 {
+                        Value::F32(u32::try_from(bits).ok()?)
+                    } else {
+                        Value::F64(bits)
+                    }),
+                ),
+                Parsed::InvalidFormat => err(result, "invalid-format"),
+                Parsed::OutOfRange => err(result, "out-of-range"),
+            }
         }
         (
             C::DictEntries,

@@ -1,7 +1,8 @@
-//! The integer and `char` primitive rows of the compiler registry, as data.
+//! The integer, `char`, and float primitive rows of the compiler registry, as data.
 //!
-//! The registry's integer rows are a table of type by operation (`docs/spec/06-runtime.md`,
-//! "M3 compiler intrinsic registry"), and a row is a few instructions, so the
+//! The registry's integer and float rows are a table of type by operation
+//! (`docs/spec/06-runtime.md`, "M3 compiler intrinsic registry"), and a row is a
+//! few instructions, so the
 //! emitter lowers each inline and no routine of the lowering names a row. A row
 //! is read through one table: [`plan`] maps a [`CompilerIntrinsic`] to the
 //! operands it takes (each an integer type, or `char`, which is a `u32`), the
@@ -11,9 +12,9 @@
 //!
 //! | Outcome | Rows | The arena value built |
 //! | --- | --- | --- |
-//! | scalar | a conversion that cannot fail, `char.to-u32` | none: a cell |
+//! | scalar | a conversion that cannot fail, `char.to-u32`, the float `add`, `sub`, `mul`, `div`, and `neg` | none: a cell |
 //! | `bool` | `equal` | the enum `bool`, discriminant `false` 0 and `true` 1 |
-//! | `ordering` | `compare` | an enum of three `void` variants |
+//! | `ordering` | `compare`, the float `compare-total` | an enum of three `void` variants |
 //! | `(result t e)` | the checked operations, a conversion that can fail | `ok` of a cell, or `err` of an enum of `void` variants |
 //! | `(option char)` | `char.from-u32` | `some` of a cell, or `none` |
 //!
@@ -36,7 +37,8 @@
 //! change, a quotient that does not give the factor back, a shifted-out bit).
 //! Division, remainder, negation, and the conversions need no such distinction.
 
-use vibra_ir::external::{CompilerIntrinsic, IntegerOp, NumericType};
+use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp, NumericType};
+use vibra_ir::{CANONICAL_NAN_F32, CANONICAL_NAN_F64};
 use wasm_encoder::Instruction as I;
 
 use crate::layout::header;
@@ -116,6 +118,8 @@ enum Body {
     CharFromU32,
     /// `array.length`: the component count, which the operand already is.
     Length,
+    /// A float row of this type (`f32` or `f64`).
+    Float(NumericType, FloatOp),
 }
 
 /// What a row reads of an operand into its 64-bit local.
@@ -140,17 +144,35 @@ pub(crate) struct Plan {
 }
 
 /// The table: what the emitter does for `intrinsic`, or `None` for a row it
-/// does not lower inline (the `to-str` and `parse` rows, the float rows, and the
-/// rows of the collection and text types).
+/// does not lower inline: a native implementation, a primitive row that loops (the
+/// `to-str` and `parse` rows, and the collection rows that copy), and the rows of
+/// the text and bytes types. The registry table of native imports decides which,
+/// so no row is named twice.
 pub(crate) fn plan(intrinsic: CompilerIntrinsic) -> Option<Plan> {
     use NumericType::U32;
     // A native implementation is the one Rust function both backends call, and
     // a module reaches it by its import; only a primitive row with no loop is
     // written inline. The registry table says which a row is.
-    if intrinsic.is_native() {
+    if intrinsic.is_native() || intrinsic.native_import().is_some() {
         return None;
     }
     Some(match intrinsic {
+        CompilerIntrinsic::Float(numeric, op) => {
+            let (operands, outcome) = match op {
+                FloatOp::Add | FloatOp::Sub | FloatOp::Mul | FloatOp::Div => {
+                    (vec![numeric, numeric], Outcome::Scalar(numeric))
+                }
+                FloatOp::Neg => (vec![numeric], Outcome::Scalar(numeric)),
+                FloatOp::Equal => (vec![numeric, numeric], Outcome::Bool),
+                FloatOp::CompareTotal => (vec![numeric, numeric], Outcome::Ordering),
+                FloatOp::ToStr | FloatOp::Parse => return None,
+            };
+            Plan {
+                operands: numbers(operands),
+                outcome,
+                body: Body::Float(numeric, op),
+            }
+        }
         CompilerIntrinsic::Integer(numeric, op) if numeric.is_integer() => {
             let (operands, outcome, body) = match op {
                 IntegerOp::AddChecked
@@ -269,20 +291,9 @@ impl Plan {
             Body::Arithmetic(numeric, op) => arithmetic(numeric, op, names, &mut code),
             Body::Equal => code.extend([get(WA), get(WB), I::I64Eq]),
             Body::Compare(numeric) => {
-                let [less, equal, greater] = names.order;
-                code.extend([c32(less), c32(equal), c32(greater)]);
-                code.extend([get(WA), get(WB), I::I64Eq, I::Select]);
-                code.extend([
-                    get(WA),
-                    get(WB),
-                    if numeric.is_signed() {
-                        I::I64LtS
-                    } else {
-                        I::I64LtU
-                    },
-                    I::Select,
-                ]);
+                order(names, numeric.is_signed(), &mut code);
             }
+            Body::Float(numeric, op) => float(numeric, op, names, &mut code),
             Body::Convert(source, target) => {
                 code.extend([get(WA), set(WR)]);
                 if matches!(self.outcome, Outcome::Checked(_)) {
@@ -341,6 +352,8 @@ impl Plan {
     /// The class of the value of the row.
     pub(crate) fn class(&self) -> ValueClass {
         match self.outcome {
+            Outcome::Scalar(NumericType::F32) => ValueClass::F32,
+            Outcome::Scalar(NumericType::F64) => ValueClass::F64,
             Outcome::Scalar(ty) | Outcome::Checked(ty) if wide(ty) => ValueClass::I64,
             _ => ValueClass::I32,
         }
@@ -408,6 +421,126 @@ fn first_of(kind: i32, first: &[Ins], rest: &[Ins], code: &mut Vec<Ins>) {
 /// `local == value`, as an `i32` condition.
 fn equals(local: u32, value: i64) -> [Ins; 3] {
     [get(local), c64(value), I::I64Eq]
+}
+
+/// The discriminant of `ordering` for the values in `WA` and `WB`, left on the
+/// operand stack: `equal` when they are the same integer, otherwise `less` when
+/// the first is below the second.
+fn order(names: &Names, signed: bool, code: &mut Vec<Ins>) {
+    let [less, equal, greater] = names.order;
+    code.extend([c32(less), c32(equal), c32(greater)]);
+    code.extend([get(WA), get(WB), I::I64Eq, I::Select]);
+    code.extend([
+        get(WA),
+        get(WB),
+        if signed { I::I64LtS } else { I::I64LtU },
+        I::Select,
+    ]);
+}
+
+/// A float as the operand stack holds it, from the bits in the local.
+fn float_operand(single: bool, local: u32) -> Vec<Ins> {
+    if single {
+        vec![get(local), I::I32WrapI64, I::F32ReinterpretI32]
+    } else {
+        vec![get(local), I::F64ReinterpretI64]
+    }
+}
+
+/// Replaces the float in `local` by its `totalOrder` key: the bits of the value
+/// with a NaN first replaced by the one quiet NaN of its width, then, for a
+/// negative value, every bit but the sign flipped, so the keys compare as signed
+/// integers in the order IEEE 754 `totalOrder` gives the values.
+fn total_order_key(single: bool, local: u32, code: &mut Vec<Ins>) {
+    if single {
+        code.extend([c32(CANONICAL_NAN_F32.cast_signed())]);
+        code.extend([get(local), I::I32WrapI64]);
+        code.extend(float_operand(true, local));
+        code.extend(float_operand(true, local));
+        code.extend([I::F32Ne, I::Select, I::I64ExtendI32U, set(local)]);
+        code.extend([
+            get(local),
+            I::I32WrapI64,
+            get(local),
+            I::I32WrapI64,
+            c32(31),
+            I::I32ShrS,
+            c32(1),
+            I::I32ShrU,
+            I::I32Xor,
+            I::I64ExtendI32S,
+            set(local),
+        ]);
+    } else {
+        code.extend([c64(CANONICAL_NAN_F64.cast_signed()), get(local)]);
+        code.extend(float_operand(false, local));
+        code.extend(float_operand(false, local));
+        code.extend([I::F64Ne, I::Select, set(local)]);
+        code.extend([
+            get(local),
+            get(local),
+            c64(63),
+            I::I64ShrS,
+            c64(1),
+            I::I64ShrU,
+            I::I64Xor,
+            set(local),
+        ]);
+    }
+}
+
+/// A float row. The operands are the bits of the cells in `WA` and `WB`.
+///
+/// The arithmetic is the engine's, which is IEEE 754 round-to-nearest with ties
+/// to even, and it may return any NaN, which the specification allows: a NaN's
+/// sign and payload are observed nowhere. `equal` is the engine's comparison, so
+/// a NaN is unequal to itself and the zeros are equal. `compare-total` first
+/// replaces a NaN by the canonical quiet NaN, then compares by `totalOrder`.
+fn float(numeric: NumericType, op: FloatOp, names: &Names, code: &mut Vec<Ins>) {
+    let single = numeric == NumericType::F32;
+    // The result on the operand stack as bits in the cell format, into `WR`.
+    let finish = |code: &mut Vec<Ins>| {
+        if single {
+            code.extend([I::I32ReinterpretF32, I::I64ExtendI32U]);
+        } else {
+            code.push(I::I64ReinterpretF64);
+        }
+        code.push(set(WR));
+    };
+    match op {
+        FloatOp::Add | FloatOp::Sub | FloatOp::Mul | FloatOp::Div => {
+            code.extend(float_operand(single, WA));
+            code.extend(float_operand(single, WB));
+            code.push(match (op, single) {
+                (FloatOp::Add, true) => I::F32Add,
+                (FloatOp::Add, false) => I::F64Add,
+                (FloatOp::Sub, true) => I::F32Sub,
+                (FloatOp::Sub, false) => I::F64Sub,
+                (FloatOp::Mul, true) => I::F32Mul,
+                (FloatOp::Mul, false) => I::F64Mul,
+                (_, true) => I::F32Div,
+                (_, false) => I::F64Div,
+            });
+            finish(code);
+        }
+        FloatOp::Neg => {
+            code.extend(float_operand(single, WA));
+            code.push(if single { I::F32Neg } else { I::F64Neg });
+            finish(code);
+        }
+        FloatOp::Equal => {
+            code.extend(float_operand(single, WA));
+            code.extend(float_operand(single, WB));
+            code.push(if single { I::F32Eq } else { I::F64Eq });
+        }
+        FloatOp::CompareTotal => {
+            total_order_key(single, WA, code);
+            total_order_key(single, WB, code);
+            order(names, true, code);
+        }
+        // Not inline rows: `plan` never gives these a body.
+        FloatOp::ToStr | FloatOp::Parse => {}
+    }
 }
 
 /// A checked arithmetic or shift row.

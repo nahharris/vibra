@@ -27,7 +27,15 @@
 //!    one `dup` each, so the counts stay exact, and nothing is dropped.
 //!
 //! A row that answers a scalar returns it directly: an `ordering` as `-1`, `0`,
-//! or `1`.
+//! or `1`. A row that reads a number from text (`parse`) builds no object and
+//! needs no allocation either: it takes the address of an 8-byte cell of the
+//! module's own frame as its last operand, writes the number there in the cell
+//! format of its type when the text spells one, and returns a status (`0` for a
+//! number, `1` for `invalid-format`, `2` for `out-of-range`). A row that takes
+//! a number (`to-str`) receives the 64 bits of its cell as one `i64`, which its
+//! type, fixed by the row, decodes; an `f32` or `f64` is its IEEE bit pattern, so
+//! a NaN crosses the boundary exactly as the module holds it and the native code
+//! decides what it observes.
 //!
 //! A native whose meaning applies a function value, such as `array.fold`, is
 //! not in this table, because a pure import cannot call back into the module:
@@ -39,15 +47,18 @@
 //! standard library declares it with `native:`) and a **looping primitive row**
 //! are imports, and both are rows of this table; a native that applies a function
 //! value is neither, and a module runs its body. Only a primitive row that does
-//! not loop is a few instructions the emitter writes inline (`array.length` and
-//! the integer and `char` rows): [`CompilerIntrinsic::is_native`] says which side a
-//! row is on, and the emitter's inline table holds no native.
+//! not loop is a few instructions the emitter writes inline (`array.length`, the
+//! integer and `char` rows, and the float arithmetic, equality, and order rows):
+//! [`NATIVE_ROWS`] says which rows are imports, and the emitter's inline table
+//! holds none of them. The looping primitive rows are the collection rows that
+//! copy and the 20 rows that print and read numbers: `to-str` and `parse` of the
+//! eight integer types and of `f32` and `f64`.
 //!
 //! `array.of` and `dict.of` are natives whose meaning is the packed tail they
 //! receive, so their import answers its operand; `text.length`, `bytes.length`,
 //! `text.equal`, and `bytes.equal` answer a count and a `bool`.
 
-use super::CompilerIntrinsic;
+use super::{CompilerIntrinsic, FloatOp, IntegerOp, NumericType};
 
 /// A WebAssembly scalar of an import's signature.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -72,6 +83,10 @@ pub enum Operand {
     Index,
     /// One cell: its 64 bits (`i64`) and then its class byte (`i32`).
     Element,
+    /// A number of this type, as the 64 bits of its cell (`i64`): an integer
+    /// of at most 32 bits is its 32-bit two's complement pattern zero-extended,
+    /// and a float is its IEEE bit pattern, zero-extended for `f32`.
+    Number(NumericType),
 }
 
 impl Operand {
@@ -80,7 +95,7 @@ impl Operand {
     pub const fn scalars(self) -> &'static [Scalar] {
         match self {
             Self::Text | Self::Bytes | Self::Cells => &[Scalar::I32],
-            Self::Index => &[Scalar::I64],
+            Self::Index | Self::Number(_) => &[Scalar::I64],
             Self::Element => &[Scalar::I64, Scalar::I32],
         }
     }
@@ -122,6 +137,14 @@ pub enum Answer {
     /// The operand itself, as the offset it was given (`i32`): the native whose
     /// meaning is the packed tail it receives.
     Operand,
+    /// A number the row reads from text, written into the 8-byte cell at the
+    /// destination the last operand (`i32`) names, which is a cell of the
+    /// module's own frame, and its status (`i32`): `0` when the text spells a
+    /// number, which is then in the cell; `1` for `invalid-format`; `2` for
+    /// `out-of-range`. The cell is written only when the status is `0`. The
+    /// cell is the cell format of the row's type, so no object is built and
+    /// nothing is allocated, and a single call answers both.
+    Parsed,
     /// An object, built into the destination the last operand names.
     Object {
         /// The kind of object.
@@ -159,7 +182,7 @@ impl NativeRow {
             .iter()
             .flat_map(|operand| operand.scalars().iter().copied())
             .collect::<Vec<_>>();
-        if matches!(self.answer, Answer::Object { .. }) {
+        if matches!(self.answer, Answer::Object { .. } | Answer::Parsed) {
             params.push(Scalar::I32);
         }
         params
@@ -169,7 +192,9 @@ impl NativeRow {
     #[must_use]
     pub const fn result(&self) -> Scalar {
         match self.answer {
-            Answer::Order | Answer::Same | Answer::Operand => Scalar::I32,
+            Answer::Order | Answer::Same | Answer::Operand | Answer::Parsed => {
+                Scalar::I32
+            }
             Answer::Length | Answer::Object { .. } => Scalar::I64,
         }
     }
@@ -192,13 +217,49 @@ const fn object(kind: ObjectKind, totality: Totality) -> Answer {
 }
 
 use ObjectKind::{Array, Bytes as BytesObject, Str};
-use Operand::{Bytes, Cells, Element, Index, Text};
+use Operand::{Bytes, Cells, Element, Index, Number, Text};
 use Totality::{Conversion, Option as Maybe, Total};
+
+/// The table: for each numeric type, its `to-str` row (which builds a `str` from
+/// the number's cell) and its `parse` row (which reads a `str` and writes the
+/// number's cell), then the rows that follow the numeric ones.
+macro_rules! table {
+    (
+        $(($kind:ident, $op:ident, $numeric:ident)),* $(,)?;
+        $($rest:expr),* $(,)?
+    ) => {
+        [
+            $(
+                row(
+                    CompilerIntrinsic::$kind(NumericType::$numeric, $op::ToStr),
+                    &[Number(NumericType::$numeric)],
+                    object(Str, Total),
+                ),
+                row(
+                    CompilerIntrinsic::$kind(NumericType::$numeric, $op::Parse),
+                    &[Text],
+                    Answer::Parsed,
+                ),
+            )*
+            $($rest,)*
+        ]
+    };
+}
 
 /// Every native import, in canonical registry order. The row's own place in this
 /// list is nothing a module can see: a module imports the rows it uses, in this
 /// order.
-pub const NATIVE_ROWS: [NativeRow; 22] = [
+pub const NATIVE_ROWS: [NativeRow; 42] = table![
+    (Integer, IntegerOp, I8),
+    (Integer, IntegerOp, I16),
+    (Integer, IntegerOp, I32),
+    (Integer, IntegerOp, I64),
+    (Integer, IntegerOp, U8),
+    (Integer, IntegerOp, U16),
+    (Integer, IntegerOp, U32),
+    (Integer, IntegerOp, U64),
+    (Float, FloatOp, F32),
+    (Float, FloatOp, F64);
     row(
         CompilerIntrinsic::TextConcat,
         &[Text, Text],

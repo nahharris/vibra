@@ -5654,6 +5654,34 @@ fn canonical_character(value: char) -> String {
     }
 }
 
+/// The one quiet NaN of binary32: the positive sign and a zero payload.
+pub const CANONICAL_NAN_F32: u32 = 0x7FC0_0000;
+
+/// The one quiet NaN of binary64: the positive sign and a zero payload.
+pub const CANONICAL_NAN_F64: u64 = 0x7FF8_0000_0000_0000;
+
+/// The bits of a binary32 value as an operation that observes a float sees
+/// them (`docs/spec/06-runtime.md`, "Evaluation"): any NaN is the canonical
+/// quiet NaN, and every other value is itself.
+#[must_use]
+pub const fn canonical_f32_bits(bits: u32) -> u32 {
+    if bits & 0x7FFF_FFFF > 0x7F80_0000 {
+        CANONICAL_NAN_F32
+    } else {
+        bits
+    }
+}
+
+/// [`canonical_f32_bits`] for a binary64 value.
+#[must_use]
+pub const fn canonical_f64_bits(bits: u64) -> u64 {
+    if bits & 0x7FFF_FFFF_FFFF_FFFF > 0x7FF0_0000_0000_0000 {
+        CANONICAL_NAN_F64
+    } else {
+        bits
+    }
+}
+
 /// The canonical float serialization of `docs/spec/06-runtime.md` for a
 /// binary32 value, without a suffix: `nan`, `inf`, `-inf`, or the shortest
 /// digits that round-trip, in decimal notation with a fraction when the

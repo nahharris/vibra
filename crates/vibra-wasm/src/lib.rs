@@ -224,10 +224,13 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
     })
 }
 
-/// Whether the emitter lowers the registry row `intrinsic` inline: the integer
-/// rows but `to-str` and `parse`, the integer conversions, and the `char` rows,
-/// which `vibra_ir::external::CompilerIntrinsic::vectors` holds to samples. A
-/// row it does not lower is reported by [`emit`] as [`Form::External`].
+/// Whether the emitter lowers the registry row `intrinsic` inline: a primitive
+/// row that does not loop, which is the integer rows but `to-str` and `parse`,
+/// the integer conversions, the `char` rows, `array.length`, and the float
+/// arithmetic, equality, and order rows. The rows that loop are native imports
+/// (`CompilerIntrinsic::native_import`), and `vibra_ir::external::CompilerIntrinsic::vectors`
+/// holds both kinds to samples. A row it lowers neither way is reported by
+/// [`emit`] as [`Form::External`].
 #[must_use]
 pub fn lowers_primitive(intrinsic: vibra_ir::external::CompilerIntrinsic) -> bool {
     primitive::plan(intrinsic).is_some()
