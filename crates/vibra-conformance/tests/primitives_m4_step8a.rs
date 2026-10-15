@@ -252,27 +252,91 @@ fn owned_by_step_8a(intrinsic: CompilerIntrinsic) -> bool {
     }
 }
 
+/// How a row is lowered is decided by the registry table's own properties and by
+/// nothing written here: a primitive row that does not loop is inline, a native
+/// implementation or a looping primitive row is an import, and a native that
+/// applies a function value has no import and is run as its body.
 #[test]
-fn the_rows_the_emitter_lowers_are_exactly_the_rows_that_have_vectors() {
+fn a_row_is_inline_exactly_when_it_is_a_primitive_row_that_does_not_loop() {
     let mut lowered = 0_usize;
     for intrinsic in CompilerIntrinsic::all() {
+        let inline = vibra_wasm::lowers_primitive(intrinsic);
+        // No native implementation has an inline plan.
+        assert!(
+            !(inline && intrinsic.is_native()),
+            "{} is a native and has an inline plan",
+            intrinsic.symbol()
+        );
+        // The inline rows are the integer and `char` rows of Step 8a and
+        // `array.length`, the one collection primitive that does not loop.
         assert_eq!(
-            vibra_wasm::lowers_primitive(intrinsic),
-            owned_by_step_8a(intrinsic),
+            inline,
+            owned_by_step_8a(intrinsic) || intrinsic == CompilerIntrinsic::ArrayLength,
             "{}",
             intrinsic.symbol()
         );
-        assert_eq!(
-            vibra_wasm::lowers_primitive(intrinsic),
-            !intrinsic.vectors().is_empty(),
-            "{} has vectors exactly when it is lowered",
+        // A row is not both inline and an import.
+        assert!(
+            !(inline && intrinsic.native_import().is_some()),
+            "{}",
             intrinsic.symbol()
         );
-        lowered += usize::from(vibra_wasm::lowers_primitive(intrinsic));
+        // A row with vectors is lowered, inline or as a native import.
+        if !intrinsic.vectors().is_empty() {
+            assert!(
+                inline || intrinsic.native_import().is_some(),
+                "{} has vectors and is not lowered",
+                intrinsic.symbol()
+            );
+        }
+        lowered += usize::from(inline);
     }
-    // Eight integer types of ten rows, `neg-checked` for the four signed ones,
-    // fifty-six conversions, and the two `char` rows.
-    assert_eq!(lowered, 8 * 9 + 4 + 56 + 2);
+    // Eight integer types of nine rows, `neg-checked` for the four signed ones,
+    // fifty-six conversions, the two `char` rows, and `array.length`.
+    assert_eq!(lowered, 8 * 9 + 4 + 56 + 2 + 1);
+}
+
+/// The import table names exactly the native symbols that have an import, which
+/// are the manifest's `native` list but for the natives that apply a function
+/// value, and the looping primitive rows.
+#[test]
+fn the_import_table_names_the_natives_and_the_looping_primitive_rows() {
+    let stdlib = vibra_types::load_stdlib().expect("standard library");
+    // A native whose meaning applies a function value has no import.
+    let function_applying = ["array.fold"];
+    let manifest_natives = stdlib
+        .native_symbols()
+        .iter()
+        .map(String::as_str)
+        .filter(|symbol| !function_applying.contains(symbol))
+        .collect::<BTreeSet<_>>();
+    let imported_natives = CompilerIntrinsic::all()
+        .into_iter()
+        .filter(|row| row.is_native() && row.native_import().is_some())
+        .map(CompilerIntrinsic::symbol)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(imported_natives, manifest_natives);
+    let looping_primitives = [
+        CompilerIntrinsic::DictEntries,
+        CompilerIntrinsic::ArrayAppend,
+        CompilerIntrinsic::ArrayConcat,
+        CompilerIntrinsic::ArraySlice,
+    ];
+    let table = vibra_ir::external::NATIVE_ROWS
+        .iter()
+        .map(|row| row.intrinsic.symbol())
+        .collect::<BTreeSet<_>>();
+    let expected = manifest_natives
+        .iter()
+        .copied()
+        .chain(looping_primitives.iter().map(|row| row.symbol()))
+        .collect::<BTreeSet<_>>();
+    assert_eq!(table, expected);
+    assert_eq!(vibra_ir::external::NATIVE_ROWS.len(), expected.len());
+    for symbol in function_applying {
+        let row = CompilerIntrinsic::from_symbol(symbol).expect("a registry row");
+        assert!(row.native_import().is_none());
+    }
 }
 
 /// The rows, grouped so a few threads share the work, with each thread its own
@@ -338,7 +402,7 @@ fn the_manifest_lists_exactly_the_rows_that_have_vectors_and_more() {
     for intrinsic in CompilerIntrinsic::all() {
         let quoted = format!("\"{}\"", intrinsic.symbol());
         assert!(manifest.contains(&quoted), "{}", intrinsic.symbol());
-        if !intrinsic.vectors().is_empty() {
+        if !intrinsic.vectors().is_empty() && owned_by_step_8a(intrinsic) {
             assert!(
                 !intrinsic.is_native(),
                 "{} is a primitive row",

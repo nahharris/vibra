@@ -17,6 +17,7 @@ vibra-diagnostics = { path = "crates/vibra-diagnostics" }
 vibra-fmt = { path = "crates/vibra-fmt" }
 vibra-interp = { path = "crates/vibra-interp" }
 vibra-ir = { path = "crates/vibra-ir" }
+vibra-native = { path = "crates/vibra-native" }
 vibra-schema = { path = "crates/vibra-schema" }
 vibra-syntax = { path = "crates/vibra-syntax" }
 vibra-resolve = { path = "crates/vibra-resolve" }
@@ -54,6 +55,13 @@ unwrap_used = "warn"
 expect_used = "warn"
 todo = "warn"
 unimplemented = "warn"
+
+# Every test that runs a module compiles it with Cranelift, and an unoptimized
+# Cranelift is an order of magnitude slower than an optimized one. Dependencies
+# are built once and cached, so they are optimized in the test profile, while the
+# workspace's own crates stay unoptimized and debuggable.
+[profile.dev.package."*"]
+opt-level = 2
 
 [profile.release]
 overflow-checks = true

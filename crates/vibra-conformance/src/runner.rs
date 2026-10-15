@@ -548,12 +548,62 @@ impl ConformanceRunner {
     /// Runs all cases in deterministic corpus order.
     #[must_use]
     pub fn run(&self, corpus: &Corpus) -> RunReport {
-        let reports = corpus
-            .cases()
+        let cases = corpus.cases().iter().collect::<Vec<_>>();
+        RunReport::new(self.run_cases(&cases))
+    }
+
+    /// Runs `cases` on as many threads as the machine has, and reports them in
+    /// the order given. Cases share nothing but the engine, which is built to be
+    /// shared, so a report does not depend on how the cases were spread over
+    /// threads. Executing every case in both backends is the cost of a
+    /// conformance run, and it is spread over the cores rather than repeated.
+    #[must_use]
+    pub fn run_cases(&self, cases: &[&Case]) -> Vec<CaseReport> {
+        /// A worker's stack: the checker and the reader recurse on the nesting
+        /// of a source, and some cases nest deeply on purpose.
+        const WORKER_STACK_BYTES: usize = 64 * 1024 * 1024;
+        let workers = std::thread::available_parallelism()
+            .map_or(1, std::num::NonZero::get)
+            .min(cases.len());
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let slots = cases
             .iter()
-            .map(|case| self.run_case(case))
-            .collect();
-        RunReport::new(reports)
+            .map(|_| std::sync::Mutex::new(None))
+            .collect::<Vec<_>>();
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                let work = || {
+                    loop {
+                        let position =
+                            next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let (Some(case), Some(slot)) =
+                            (cases.get(position), slots.get(position))
+                        else {
+                            break;
+                        };
+                        let report = self.run_case(case);
+                        if let Ok(mut slot) = slot.lock() {
+                            *slot = Some(report);
+                        }
+                    }
+                };
+                // A thread that cannot start leaves its cases to the others, or
+                // to the sequential pass below.
+                let _ = std::thread::Builder::new()
+                    .stack_size(WORKER_STACK_BYTES)
+                    .spawn_scoped(scope, work);
+            }
+        });
+        cases
+            .iter()
+            .zip(slots)
+            .map(|(case, slot)| {
+                slot.into_inner()
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| self.run_case(case))
+            })
+            .collect()
     }
 
     /// Runs one loaded case.

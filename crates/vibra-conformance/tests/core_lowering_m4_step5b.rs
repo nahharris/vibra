@@ -552,11 +552,18 @@ fn the_host_holds_exactly_the_result_until_it_releases_it() {
 #[test]
 fn the_forms_of_later_steps_are_named_and_never_approximated() {
     for (source, form) in [
+        // Interface values and contract calls are Step 9's.
         (
-            "(defn main () i32 (match (array.of 1i32) (array -) 2i32 - 3i32))\n",
-            "array",
+            "(defn main () i32 (keep 1i32))\n(defn keep (value any) i32 1i32)\n",
+            "type",
         ),
-        ("(defn main () (array i32) (array.of 1i32))\n", "type"),
+        (
+            "(defn main () str (describe (point x: 1i32)))\n\
+(defn describe (value shape) str (shape.name value))\n\
+(defint shape (defn name (value self) str))\n\
+(deftype point (record x i32) (impl shape (defn name (value self) str \"point\")))\n",
+            "type",
+        ),
     ] {
         let program = checked(source);
         let error = vibra_wasm::emit(&program).expect_err("not lowered");

@@ -40,7 +40,7 @@ pub(crate) fn forms_of_type(ty: &Type, origin: &vibra_ir::SourceOrigin) -> NotLo
 
 /// Every use of a form the emitter does not lower, in program order.
 pub(crate) fn unlowered(program: &CheckedProgram) -> Vec<UnloweredForm> {
-    let env = TypeEnv::new(program.types());
+    let env = TypeEnv::new(program.types()).with_functions(program.functions());
     let mut found = Vec::new();
     for global in program.globals() {
         let origin = Some(global.origin().clone());
@@ -71,12 +71,8 @@ fn function_forms(
 ) {
     let origin = Some(function.origin().clone());
     let signature = function.signature();
-    if signature.variadic().is_some() {
-        found.push(
-            UnloweredForm::new(Form::Parameters, origin.clone())
-                .with_detail("variadic"),
-        );
-    }
+    // A variadic parameter is one more slot, which a call fills with the
+    // collection it already packed, so it needs nothing of its own.
     for slot in signature.slot_types() {
         type_forms(&slot, origin.clone(), found);
     }
@@ -112,7 +108,9 @@ fn walk(env: &TypeEnv<'_>, expr: &Expr, found: &mut Vec<UnloweredForm>) {
             arguments,
             ..
         } => {
-            if crate::primitive::plan(*intrinsic).is_none() {
+            if crate::primitive::plan(*intrinsic).is_none()
+                && intrinsic.native_import().is_none()
+            {
                 found.push(
                     UnloweredForm::new(Form::External, Some(expr.origin().clone()))
                         .with_detail(intrinsic.symbol()),
@@ -125,18 +123,7 @@ fn walk(env: &TypeEnv<'_>, expr: &Expr, found: &mut Vec<UnloweredForm>) {
         // captured are the function values of a call, and a function value is
         // an arena value like any other.
         Expr::Default { .. } | Expr::Function { .. } | Expr::Captured { .. } => {}
-        Expr::Closure {
-            signature,
-            captures,
-            body,
-            ..
-        } => {
-            if signature.variadic().is_some() {
-                found.push(
-                    UnloweredForm::new(Form::Parameters, Some(expr.origin().clone()))
-                        .with_detail("variadic"),
-                );
-            }
+        Expr::Closure { captures, body, .. } => {
             walk_all(env, captures, found);
             walk(env, body, found);
         }
@@ -206,36 +193,56 @@ fn walk(env: &TypeEnv<'_>, expr: &Expr, found: &mut Vec<UnloweredForm>) {
                 walk(env, payload, found);
             }
         }
-        // A wrapper over a builtin text type is written over an array.
-        Expr::Wrap {
-            value, value_type, ..
-        } => {
-            if matches!(value_type, Type::Str | Type::Bytes) {
-                report(Form::Wrap);
-            }
-            walk(env, value, found);
-        }
+        // A wrapper over a builtin text type is written over an array, and
+        // wrapping converts it with a row of the registry.
+        Expr::Wrap { value, .. } => walk(env, value, found),
         Expr::Project { record, .. } => walk(env, record, found),
         Expr::Tuple { components, .. } => walk_all(env, components, found),
         Expr::TupleProject { tuple, .. } => walk(env, tuple, found),
-        Expr::Array { elements, .. } => {
-            report(Form::Array);
-            walk_all(env, elements, found);
-        }
-        Expr::Dict { entries, .. } => {
-            report(Form::Dict);
+        Expr::Array { elements, .. } => walk_all(env, elements, found),
+        Expr::Dict {
+            value_type,
+            entries,
+            key_order,
+            ..
+        } => {
+            if !dict_ordered(env, value_type, key_order.as_ref()) {
+                report(Form::Dict);
+            }
             for (key, value) in entries {
                 walk(env, key, found);
                 walk(env, value, found);
             }
         }
         Expr::Lookup {
-            collection, key, ..
+            collection,
+            key,
+            key_order,
+            ..
         } => {
-            report(Form::Lookup);
+            let collection_type = collection.result_type();
+            if matches!(collection_type, Type::Dict(..))
+                && !dict_ordered(env, &collection_type, key_order.as_ref())
+            {
+                report(Form::Lookup);
+            }
             walk(env, collection, found);
             walk(env, key, found);
         }
+    }
+}
+
+/// Whether the emitter can order the keys of the dict type `dict`: a closed key
+/// type, or a declared one that one implementation of `compare` orders. Any
+/// other key is ordered by dispatch from a run-time type (Step 9).
+fn dict_ordered(
+    env: &TypeEnv<'_>,
+    dict: &Type,
+    key_order: Option<&vibra_ir::TypeId>,
+) -> bool {
+    match dict {
+        Type::Dict(key, _) => crate::key::order_of(env, key, key_order).is_some(),
+        _ => false,
     }
 }
 

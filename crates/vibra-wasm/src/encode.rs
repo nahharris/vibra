@@ -15,11 +15,13 @@
 
 use std::borrow::Cow;
 
-use vibra_ir::boundary::{ENTRY_EXPORT, MEMORY_EXPORT};
+use vibra_ir::boundary::{ENTRY_EXPORT, MEMORY_EXPORT, NATIVE_IMPORT_MODULE};
+use vibra_ir::external::{NativeRow, Scalar};
 use wasm_encoder::{
     CodeSection, ConstExpr, DataCountSection, DataSection, ElementSection, Elements,
-    ExportKind, ExportSection, Function, FunctionSection, MemorySection, MemoryType,
-    Module, RefType, TableSection, TableType, TypeSection, ValType,
+    EntityType, ExportKind, ExportSection, Function, FunctionSection, ImportSection,
+    MemorySection, MemoryType, Module, RefType, TableSection, TableType, TypeSection,
+    ValType,
 };
 
 use crate::runtime::{
@@ -90,6 +92,11 @@ pub(crate) struct Parts {
     pub(crate) entry: Entry,
     pub(crate) segments: Vec<Vec<u8>>,
     pub(crate) include_new: bool,
+    /// The native imports, in the order of their function indices, which come
+    /// before every defined function.
+    pub(crate) imports: Vec<NativeRow>,
+    /// Routines after the object constructor: the comparers of closed key shapes.
+    pub(crate) extra: Vec<Routine>,
 }
 
 /// The routine indices of a module of `function_count` lowered functions.
@@ -100,11 +107,28 @@ pub(crate) const fn routines_for(function_count: u32) -> Routines {
 /// Encodes the module, or `None` when a size does not fit 32 bits.
 pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
     let function_count = u32::try_from(parts.functions.len()).ok()?;
-    let fns = routines_for(function_count);
+    let import_count = u32::try_from(parts.imports.len()).ok()?;
+    // The imports take the first function indices, so every defined function,
+    // the runtime routines included, is numbered after them.
+    let fns = routines_for(import_count.checked_add(function_count)?);
 
     let mut types = Types::default();
     // The type of every function the dispatcher can reach.
     let dispatch_type = types.intern(&[ValType::I32], &[]);
+    let mut imports = ImportSection::new();
+    for row in &parts.imports {
+        let scalar = |scalar: Scalar| match scalar {
+            Scalar::I32 => ValType::I32,
+            Scalar::I64 => ValType::I64,
+        };
+        let params = row.params().into_iter().map(scalar).collect::<Vec<_>>();
+        let result = scalar(row.result());
+        imports.import(
+            NATIVE_IMPORT_MODULE,
+            row.name(),
+            EntityType::Function(types.intern(&params, &[result])),
+        );
+    }
     let mut functions = FunctionSection::new();
     let mut code = CodeSection::new();
     for lowered in &parts.functions {
@@ -129,6 +153,7 @@ pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
     routines.extend(frame_routines(&fns, dispatch_type));
     if parts.include_new {
         routines.push(new_object(&fns));
+        routines.extend(parts.extra.iter().cloned());
     }
     let mut exports = ExportSection::new();
     exports.export(MEMORY_EXPORT, ExportKind::Memory, 0);
@@ -174,6 +199,9 @@ pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
 
     let mut module = Module::new();
     module.section(&type_section);
+    if !parts.imports.is_empty() {
+        module.section(&imports);
+    }
     module.section(&functions);
     module.section(&tables);
     module.section(&memories);

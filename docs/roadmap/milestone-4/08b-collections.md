@@ -88,3 +88,78 @@ copy-avoidance (M7); a Wasm-native reimplementation of any symbol.
 
 Every `Lowered` row owned by Step 8b in the [inventory](supported-surface.md)
 has a matched case; the natives agree with their bodies on all three paths.
+
+## As built
+
+Landed as `landed`, conditional on its pull request merging, on `m4` at `a450155`.
+
+- **Which rows are inline, which are native imports, and which run their body.**
+  The registry table decides, by the property `is_native` and by whether a row
+  loops. A primitive row that does not loop is lowered inline from the one table of
+  `crates/vibra-wasm/src/primitive.rs`: the integer and `char` rows of Step 8a and
+  `array.length`. The table holds no native (it returns nothing for a row where
+  `is_native` is true), and a test fails if one gets a plan. A native
+  implementation, and a primitive row whose algorithm loops, is toolchain Rust in
+  `crates/vibra-native`, reached by an import from `vibra_native_v1`; that is every
+  `text.*` and `bytes.*` row, `array.of`, `dict.of`, `array.append`, `array.concat`,
+  `array.slice`, and `dict.entries` (22 imports, the table `NATIVE_ROWS` in
+  `vibra-ir`; `array.of` and `dict.of` answer their operand, the packed tail). A
+  native whose meaning applies a function value has no import and a module runs its
+  body: that is `array.fold`, Step 8d's. The tests that guard the rule are
+  `a_row_is_inline_exactly_when_it_is_a_primitive_row_that_does_not_loop` and
+  `the_import_table_names_the_natives_and_the_looping_primitive_rows` (against the
+  manifest's `native` list) in `primitives_m4_step8a`.
+- **The native crate.** `vibra-native` is written against `Source` (read a range of
+  units) and `Sink` (put a unit). The interpreter implements them over its own
+  values (`crates/vibra-interp/src/native.rs`), the runner over the instance memory
+  (`vibra_native::arena`, reached by `crates/vibra-wasm-run/src/natives.rs`), and
+  the interpreter's earlier copies of these algorithms were deleted. The shape of an
+  arena object is written once in `vibra_ir::arena`, which the emitter's layout
+  re-exports. The emitter depends on neither crate; the architecture boundary test
+  fixes that the interpreter and the runner are the only dependents.
+- **No allocation in native code.** The module's allocator stays the only allocator,
+  and the export table stays exactly the specification's. A row that builds an object
+  takes the destination as its last operand and is called twice by emitted code:
+  with `0` it measures (the count, or `-1` for `none` or `invalid-format`), and with
+  the object the module then allocated it fills it, taking one `dup` for each
+  reference it copies. An operand that is not an object of the row, an offset
+  outside the memory, or a destination of another size is a `Fault`, which the
+  runner reports as a defect and never as a read outside the arena.
+- **Dict order.** `dict.of` and a dict tail are built in the module: entries are
+  evaluated key then value, inserted by binary search into a scratch array, and an
+  equal key is replaced whole by the later entry. A closed key type is ordered by one
+  routine per shape (`crates/vibra-wasm/src/key.rs`), which calls `text.compare` and
+  `bytes.compare` for text. A declared key is ordered by its own `compare`, which the
+  emitter finds statically (the one implementation whose receiver is the key type)
+  and calls as an ordinary language function on an arena frame, so no native ever
+  calls back into the module and `V1-RUNTIME-dict-compare-nesting` nests three
+  hundred levels. A key that needs dispatch from a run-time type (a declared key
+  inside a tuple, a generic key) stays `NotLowered` with the form `dict:user-key`,
+  Step 9's.
+- **Wrappers over text.** `(str array)` is `text.from-chars` and `(bytes array)` is
+  `bytes.from-array`; the wrapper pattern over `str` or `bytes` meets the array
+  that `text.to-chars` or `bytes.to-array` makes of the subject, dropped when the
+  arm ends or fails.
+- **Shared vectors.** `CompilerIntrinsic::vectors` gained the text and bytes rows
+  (`external/vectors.rs`), with outcomes computed by Rust's `str` and slice
+  operations: scalars of each UTF-8 width, prefixes, empty and past-the-end ranges,
+  and ill-formed UTF-8. The interpreter's registry test and the new
+  `the_text_and_bytes_vectors_hold_the_interpreter_and_the_module_to_one_answer`
+  (in `natives_m3_step4b`) hold both backends to them. Array rows have no shared
+  vector because a vector operand is a scalar `Value`; their expectations are the
+  hand-written encodings of `collections_m4_step8b`.
+- **The native harness on all paths.** `natives_m3_step4b` now runs each sample
+  as the interpreter's native, the interpreter's body, the module's import, and the
+  body lowered to Wasm, and asserts all four agree.
+- **Reclamation.** Every test of `collections_m4_step8b` asserts the live size
+  returns to what the module values keep, and no frame is left.
+- **Test time.** `ConformanceRunner::run_cases` runs cases on every core (the
+  parity test uses it), and the dev profile optimizes dependencies, because an
+  unoptimized Cranelift dominated every test that runs a module.
+- **Not delivered, owned by Step 8d.** `array.fold` as a module-run body: a native
+  function is a wrapper in checked IR (`CheckedFunction::new_external`), so the body
+  of the standard library never reaches the emitter. It needs the IR to carry both
+  the wrapper the interpreter runs and the body a module runs. This step is split
+  ([ledger D10.5](decision-ledger.md), [Step 8d](08d-native-bodies.md));
+  `V1-RUNTIME-library-roles` is `not-lowered` with owner 8d, and Step 9 requires 8d
+  for `V1-RUNTIME-tail-calls-through-flow`.

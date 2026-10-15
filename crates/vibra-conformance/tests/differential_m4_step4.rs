@@ -30,6 +30,11 @@ static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
 const VOID_RESULT: &str = "(record type: @void value: void)\n";
 const NO_EVENTS: &str = "(record format: @audit-trace.v1 events: (array))\n";
 
+/// A program that applies a function value through `array.fold`, whose body a
+/// module will run once the checked IR carries it; until then it is not lowered.
+const UNLOWERED: &str = "(defn answer () i32 (array.fold (array.of 1i32) 0i32 (lambda (total i32 item i32) i32 item)))\n";
+const UNLOWERED_RESULT: &str = "(record type: @i32 value: 1i32)\n";
+
 /// A temporary corpus root that removes itself.
 struct TempCorpus {
     root: PathBuf,
@@ -201,9 +206,9 @@ fn a_program_that_does_not_lower_still_passes_in_the_interpreter() {
     let corpus = TempCorpus::new();
     corpus.interpret(
         "V1-RUNTIME-synthetic-literal",
-        "(defn answer () i32 (match (array.of 1i32) (array -) 7i32 - 8i32))\n",
+        UNLOWERED,
         true,
-        Some("(record type: @i32 value: 7i32)\n"),
+        Some(UNLOWERED_RESULT),
         "",
     );
     let report = run_real(&corpus);
@@ -212,7 +217,10 @@ fn a_program_that_does_not_lower_still_passes_in_the_interpreter() {
     let WasmStatus::NotLowered { forms } = wasm else {
         panic!("expected not lowered, got {wasm:?}");
     };
-    assert!(forms.iter().any(|form| form == "array"), "{forms:?}");
+    assert!(
+        forms.iter().any(|form| form.starts_with("external")),
+        "{forms:?}"
+    );
     assert_eq!(
         report.status,
         CaseStatus::Passed,
@@ -225,9 +233,9 @@ fn a_not_lowered_case_does_not_fail_the_run_and_is_counted() {
     let corpus = TempCorpus::new();
     corpus.interpret(
         "V1-RUNTIME-synthetic-literal",
-        "(defn answer () i32 (match (array.of 1i32) (array -) 7i32 - 8i32))\n",
+        UNLOWERED,
         true,
-        Some("(record type: @i32 value: 7i32)\n"),
+        Some(UNLOWERED_RESULT),
         "",
     );
     let runner = ConformanceRunner::new(standard_dispatcher());
@@ -500,9 +508,9 @@ fn the_report_prints_both_backend_lines() {
     );
     corpus.interpret(
         "V1-RUNTIME-synthetic-literal",
-        "(defn answer () i32 (match (array.of 1i32) (array -) 7i32 - 8i32))\n",
+        UNLOWERED,
         true,
-        Some("(record type: @i32 value: 7i32)\n"),
+        Some(UNLOWERED_RESULT),
         "",
     );
 

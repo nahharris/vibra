@@ -191,26 +191,56 @@ fn native_members() -> Vec<(String, String, String)> {
     members
 }
 
-fn run(source_id: &str, source: &str) -> String {
+/// What one program answers in the two backends.
+struct Ran {
+    /// The reference interpreter's canonical result.
+    interpreter: String,
+    /// The module's, or `None` when the emitter does not lower the program: a
+    /// program whose meaning applies a function value through a native with no
+    /// import is lowered by running its body, so only a program that still
+    /// names `array.fold` as a native is not lowered.
+    wasm: Option<String>,
+}
+
+fn run(source_id: &str, source: &str) -> Ran {
     let checked = vibra_types::check_source(source_id, source);
     finish(source, &checked)
 }
 
 /// Runs a module source as trusted standard-library code.
-fn run_trusted(source_id: &str, source: &str) -> String {
+fn run_trusted(source_id: &str, source: &str) -> Ran {
     let stdlib = vibra_types::load_stdlib().expect("standard library");
     let checked =
         vibra_types::check_standard_library_source(&stdlib, source_id, source);
     finish(source, &checked)
 }
 
-fn finish(source: &str, checked: &vibra_types::CheckResult) -> String {
+fn finish(source: &str, checked: &vibra_types::CheckResult) -> Ran {
     let program = checked
         .program()
         .unwrap_or_else(|| panic!("{source}\n{:?}", checked.diagnostics()));
-    vibra_interp::run(program)
+    let interpreter = vibra_interp::run(program)
         .expect("execution")
-        .canonical_result()
+        .canonical_result();
+    let wasm = vibra_wasm::emit(program).ok().map(|module| {
+        let ty = program.entry().signature().result();
+        let runner = vibra_wasm_run::Runner::new(vibra_wasm_run::MemoryLimit::new(
+            64 * 1024 * 1024,
+        ))
+        .expect("the engine configures");
+        match runner
+            .run_observed(module.bytes(), &ty, program.types())
+            .expect("the module runs")
+        {
+            vibra_wasm_run::Observed::Completed { value, .. } => {
+                value.canonical_observation(&ty)
+            }
+            vibra_wasm_run::Observed::Stopped(outcome) => {
+                panic!("{source}\nthe module stopped: {outcome:?}")
+            }
+        }
+    });
+    Ran { interpreter, wasm }
 }
 
 /// Each native function of a standard-library module as `(symbol, module
@@ -368,11 +398,180 @@ fn every_listed_native_matches_its_body() {
                 )
             };
             assert_eq!(
-                native, body,
+                native.interpreter, body.interpreter,
                 "`{symbol}` disagrees with its body on `{operands}`"
+            );
+            // The module reaches the native through its import, and runs the
+            // body as lowered code: both must give the interpreter's answer.
+            // A native with no import has no module path of its own.
+            let imported = intrinsic_of(symbol).native_import().is_some();
+            match &native.wasm {
+                Some(wasm) => assert_eq!(
+                    wasm, &native.interpreter,
+                    "the import of `{symbol}` disagrees on `{operands}`"
+                ),
+                None => assert!(
+                    !imported,
+                    "`{symbol}` has an import but its program is not lowered"
+                ),
+            }
+            let body_wasm = body
+                .wasm
+                .unwrap_or_else(|| panic!("the body of `{symbol}` is not lowered"));
+            assert_eq!(
+                body_wasm, body.interpreter,
+                "the lowered body of `{symbol}` disagrees on `{operands}`"
             );
         }
     }
+}
+
+/// A string literal of source for `text`, every character but an ASCII letter or
+/// digit spelled as an escape.
+fn quoted(text: &str) -> String {
+    let mut out = String::from("\"");
+    for character in text.chars() {
+        if character.is_ascii_alphanumeric() {
+            out.push(character);
+        } else {
+            out.push_str(&format!("\\u{{{:X}}}", u32::from(character)));
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// A source literal of a vector operand of the text and bytes rows.
+fn operand(value: &vibra_ir::Value) -> String {
+    use vibra_ir::Value;
+    match value {
+        Value::Str(text) => quoted(text),
+        Value::Bytes(bytes) => format!(
+            "(bytes (array.of {}))",
+            bytes
+                .iter()
+                .map(|byte| format!("{byte}u8"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+        Value::U64(value) => format!("{value}u64"),
+        other => panic!("not a vector operand: {other:?}"),
+    }
+}
+
+/// The written type of the result of a text or bytes row.
+fn written_result(intrinsic: vibra_ir::external::CompilerIntrinsic) -> &'static str {
+    use vibra_ir::external::CompilerIntrinsic as C;
+    match intrinsic {
+        C::TextConcat => "str",
+        C::TextLength | C::BytesLength => "u64",
+        C::TextEqual | C::BytesEqual => "bool",
+        C::TextCompare | C::BytesCompare => "core.ordering",
+        C::TextSlice => "(option str)",
+        C::TextToUtf8 | C::BytesConcat => "bytes",
+        C::TextFromUtf8 => "(result str core.conversion-error)",
+        C::BytesSlice => "(option bytes)",
+        other => panic!("no vectors for {}", other.symbol()),
+    }
+}
+
+/// The shared sample vectors of the text and bytes rows hold both backends to
+/// the same outcomes, which the standard library's own `str` and slice
+/// operations computed, so the interpreter calling the native code and the
+/// module calling the import cannot drift apart on a boundary: a scalar of each
+/// width, a prefix, an empty range, a range past the end, and ill-formed UTF-8.
+#[test]
+fn the_text_and_bytes_vectors_hold_the_interpreter_and_the_module_to_one_answer() {
+    use vibra_ir::{ObservedValue, Type};
+    let modules = module_natives();
+    let mut total = 0;
+    for intrinsic in vibra_ir::external::CompilerIntrinsic::all() {
+        let vectors = intrinsic.vectors();
+        let symbol = intrinsic.symbol();
+        if vectors.is_empty()
+            || !(symbol.starts_with("text.") || symbol.starts_with("bytes."))
+        {
+            continue;
+        }
+        let (_, module, name) = modules
+            .iter()
+            .find(|(native, _, _)| native == symbol)
+            .unwrap_or_else(|| panic!("`{symbol}` has no native declaration"));
+        let result = written_result(intrinsic);
+        let calls = vectors
+            .iter()
+            .map(|vector| {
+                let operands = vector
+                    .operands
+                    .iter()
+                    .map(operand)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("({name} {operands})")
+            })
+            .collect::<Vec<_>>()
+            .join("\n    ");
+        let types = vec![result; vectors.len()].join(" ");
+        let main = format!("(defn main () (tuple {types})\n  (tupleof\n    {calls}))");
+        let source_id = format!("stdlib/src/{module}");
+        let stdlib = vibra_types::load_stdlib().expect("standard library");
+        let checked = vibra_types::check_standard_library_source(
+            &stdlib,
+            &source_id,
+            &format!("{main}\n\n{}", module_source(module, false)),
+        );
+        let program = checked
+            .program()
+            .unwrap_or_else(|| panic!("{symbol}\n{:?}", checked.diagnostics()));
+        let Type::Tuple(components) = program.entry().signature().result() else {
+            panic!("the entry is a tuple");
+        };
+        let expected = ObservedValue::Tuple {
+            type_id: None,
+            values: vectors
+                .iter()
+                .zip(&components)
+                .map(|(vector, ty)| vector.outcome.observed(ty))
+                .collect(),
+        }
+        .canonical_vibon();
+        let entry = program.entry().signature().result();
+        let interpreted = vibra_interp::run(program)
+            .expect("execution")
+            .canonical_result();
+        assert!(
+            interpreted.contains(&expected),
+            "the interpreter disagrees with the vectors of `{symbol}`"
+        );
+        let module_bytes = vibra_wasm::emit(program)
+            .unwrap_or_else(|error| panic!("`{symbol}` lowers: {error}"));
+        let runner = vibra_wasm_run::Runner::new(vibra_wasm_run::MemoryLimit::new(
+            256 * 1024 * 1024,
+        ))
+        .expect("the engine configures");
+        let observed = match runner
+            .run_observed(module_bytes.bytes(), &entry, program.types())
+            .expect("the module runs")
+        {
+            vibra_wasm_run::Observed::Completed { value, .. } => {
+                value.canonical_observation(&entry)
+            }
+            vibra_wasm_run::Observed::Stopped(outcome) => {
+                panic!("`{symbol}` stopped: {outcome:?}")
+            }
+        };
+        assert_eq!(
+            observed, interpreted,
+            "the module disagrees with the interpreter on the vectors of `{symbol}`"
+        );
+        total += vectors.len();
+    }
+    assert!(total > 1000, "only {total} vectors ran");
+}
+
+fn intrinsic_of(symbol: &str) -> vibra_ir::external::CompilerIntrinsic {
+    vibra_ir::external::CompilerIntrinsic::from_symbol(symbol)
+        .unwrap_or_else(|| panic!("`{symbol}` is not a registry symbol"))
 }
 
 #[test]
@@ -387,7 +586,7 @@ fn the_harness_reports_a_body_that_disagrees() {
         "(defn main () (array i32) (reference 1i32 2i32))\n\
          (defn reference () (array t)\n  where: (t any)\n  variadic: (items (array t))\n  (array.of))",
     );
-    assert_ne!(native, wrong);
+    assert_ne!(native.interpreter, wrong.interpreter);
 }
 
 /// Operand pairs for each type whose key contracts the standard library
@@ -474,7 +673,7 @@ fn every_library_key_conformance_matches_the_closed_registry() {
                     .expect("execution")
                     .canonical_result();
                 assert_eq!(
-                    closed, written,
+                    closed.interpreter, written,
                     "`{member}` of {module} disagrees with canonical key order on `{operands}`"
                 );
             }

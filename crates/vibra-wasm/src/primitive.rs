@@ -39,6 +39,7 @@
 use vibra_ir::external::{CompilerIntrinsic, IntegerOp, NumericType};
 use wasm_encoder::Instruction as I;
 
+use crate::layout::header;
 use crate::lower::{FRAME, WA, WB, WR};
 use crate::runtime::{Ins, ValueClass, c32, c64, get, ld32, ld64, set};
 
@@ -113,12 +114,27 @@ enum Body {
     CharToU32,
     /// `char.from-u32`: whether the value is a Unicode scalar.
     CharFromU32,
+    /// `array.length`: the component count, which the operand already is.
+    Length,
+}
+
+/// What a row reads of an operand into its 64-bit local.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Operand {
+    /// An integer or `char` of this type, as its exact value.
+    Number(NumericType),
+    /// The component count of the object the cell holds.
+    Count,
+}
+
+fn numbers(types: Vec<NumericType>) -> Vec<Operand> {
+    types.into_iter().map(Operand::Number).collect()
 }
 
 /// One row: its operands, its outcome, and the computation.
 #[derive(Clone, Debug)]
 pub(crate) struct Plan {
-    operands: Vec<NumericType>,
+    operands: Vec<Operand>,
     outcome: Outcome,
     body: Body,
 }
@@ -128,6 +144,12 @@ pub(crate) struct Plan {
 /// rows of the collection and text types).
 pub(crate) fn plan(intrinsic: CompilerIntrinsic) -> Option<Plan> {
     use NumericType::U32;
+    // A native implementation is the one Rust function both backends call, and
+    // a module reaches it by its import; only a primitive row with no loop is
+    // written inline. The registry table says which a row is.
+    if intrinsic.is_native() {
+        return None;
+    }
     Some(match intrinsic {
         CompilerIntrinsic::Integer(numeric, op) if numeric.is_integer() => {
             let (operands, outcome, body) = match op {
@@ -161,7 +183,7 @@ pub(crate) fn plan(intrinsic: CompilerIntrinsic) -> Option<Plan> {
                 IntegerOp::ToStr | IntegerOp::Parse => return None,
             };
             Plan {
-                operands,
+                operands: numbers(operands),
                 outcome,
                 body,
             }
@@ -170,7 +192,7 @@ pub(crate) fn plan(intrinsic: CompilerIntrinsic) -> Option<Plan> {
             if source.is_integer() && target.is_integer() =>
         {
             Plan {
-                operands: vec![source],
+                operands: numbers(vec![source]),
                 outcome: if CompilerIntrinsic::conversion_is_total(source, target) {
                     Outcome::Scalar(target)
                 } else {
@@ -180,14 +202,20 @@ pub(crate) fn plan(intrinsic: CompilerIntrinsic) -> Option<Plan> {
             }
         }
         CompilerIntrinsic::CharToU32 => Plan {
-            operands: vec![U32],
+            operands: numbers(vec![U32]),
             outcome: Outcome::Scalar(U32),
             body: Body::CharToU32,
         },
         CompilerIntrinsic::CharFromU32 => Plan {
-            operands: vec![U32],
+            operands: numbers(vec![U32]),
             outcome: Outcome::Option,
             body: Body::CharFromU32,
+        },
+        // The one collection row that is a primitive row and does not loop.
+        CompilerIntrinsic::ArrayLength => Plan {
+            operands: vec![Operand::Count],
+            outcome: Outcome::Scalar(NumericType::U64),
+            body: Body::Length,
         },
         _ => return None,
     })
@@ -195,7 +223,7 @@ pub(crate) fn plan(intrinsic: CompilerIntrinsic) -> Option<Plan> {
 
 impl Plan {
     /// The type of each operand, in order. A `char` is a `u32`.
-    pub(crate) fn operands(&self) -> &[NumericType] {
+    pub(crate) fn operands(&self) -> &[Operand] {
         &self.operands
     }
 
@@ -275,7 +303,7 @@ impl Plan {
                     ]);
                 }
             }
-            Body::CharToU32 => code.extend([get(WA), set(WR)]),
+            Body::CharToU32 | Body::Length => code.extend([get(WA), set(WR)]),
             Body::CharFromU32 => {
                 // A scalar below U+110000 outside the surrogate range
                 // U+D800..U+DFFF.
@@ -332,8 +360,21 @@ fn pattern(value: i128) -> i64 {
 }
 
 /// Loads the operand in the cell at `offset` into `local`, as its exact integer.
-fn load(numeric: NumericType, offset: u32, local: u32, code: &mut Vec<Ins>) {
+fn load(operand: Operand, offset: u32, local: u32, code: &mut Vec<Ins>) {
     code.push(get(FRAME));
+    let numeric = match operand {
+        Operand::Number(numeric) => numeric,
+        // The count and the offset of an object are 32-bit words.
+        Operand::Count => {
+            code.extend([
+                ld32(offset),
+                ld32(header::LEN),
+                I::I64ExtendI32U,
+                set(local),
+            ]);
+            return;
+        }
+    };
     if wide(numeric) {
         code.push(ld64(offset));
     } else {

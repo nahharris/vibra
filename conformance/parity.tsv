@@ -10,7 +10,7 @@
 # `matched` means the WebAssembly backend reproduces the case's one expectation.
 # `not-lowered` means the program uses a form the backend does not lower yet, and the owning
 # step is the latest milestone 4 step whose delivery the case needs (5a, 5b, 6,
-# 7, 8a, 8b, 8c, 9, 10, or 11). A step moves rows toward `matched` and never
+# 7, 8a, 8b, 8c, 8d, 9, 10, or 11). A step moves rows toward `matched` and never
 # back. The host test crates/vibra-conformance/tests/parity_inventory_m4_step4.rs
 # holds this table to the runner's result for every case.
 V1-RUNTIME-activation-depth	matched
@@ -28,13 +28,13 @@ V1-RUNTIME-contract-member-values	not-lowered	9
 V1-RUNTIME-compound-constant-defaults	matched
 V1-RUNTIME-constant-defaults	matched
 V1-RUNTIME-constant-patterns	matched
-V1-RUNTIME-conversion	not-lowered	8b
-V1-RUNTIME-dict-compare-nesting	not-lowered	8b
-V1-RUNTIME-dict-order	not-lowered	8b
-V1-RUNTIME-dict-repeated-key	not-lowered	8b
-V1-RUNTIME-external-std-text-concat	not-lowered	8b
-V1-RUNTIME-external-std-text-length	not-lowered	8b
-V1-RUNTIME-factory-self-tail	not-lowered	8b
+V1-RUNTIME-conversion	matched
+V1-RUNTIME-dict-compare-nesting	matched
+V1-RUNTIME-dict-order	matched
+V1-RUNTIME-dict-repeated-key	matched
+V1-RUNTIME-external-std-text-concat	matched
+V1-RUNTIME-external-std-text-length	matched
+V1-RUNTIME-factory-self-tail	matched
 V1-RUNTIME-forward-global	matched
 V1-RUNTIME-functions-closures	matched
 V1-RUNTIME-generic-dispatch	not-lowered	9
@@ -43,7 +43,7 @@ V1-RUNTIME-generic-lambda	matched
 V1-RUNTIME-generic-types	matched
 V1-RUNTIME-generic-void-payload	matched
 V1-RUNTIME-if-selected	matched
-V1-RUNTIME-inference-order	not-lowered	8b
+V1-RUNTIME-inference-order	matched
 V1-RUNTIME-interface-dispatch	not-lowered	9
 V1-RUNTIME-interface-values	not-lowered	9
 V1-RUNTIME-interface-widening-positions	not-lowered	9
@@ -53,11 +53,11 @@ V1-RUNTIME-iter-skip-filter-depth	not-lowered	9
 V1-RUNTIME-key-contracts	not-lowered	9
 V1-RUNTIME-let-else	matched
 V1-RUNTIME-library-composites	not-lowered	11
-V1-RUNTIME-library-dict	not-lowered	8b
-V1-RUNTIME-library-roles	not-lowered	8b
+V1-RUNTIME-library-dict	matched
+V1-RUNTIME-library-roles	not-lowered	8d
 V1-RUNTIME-literal	matched
-V1-RUNTIME-lookups	not-lowered	8b
-V1-RUNTIME-match-patterns	not-lowered	8b
+V1-RUNTIME-lookups	matched
+V1-RUNTIME-match-patterns	matched
 V1-RUNTIME-never-type-encoding	matched
 V1-RUNTIME-never-unreached	matched
 V1-RUNTIME-nominal-enum	matched
@@ -69,7 +69,7 @@ V1-RUNTIME-registry-floats	not-lowered	8c
 V1-RUNTIME-registry-integers	not-lowered	8c
 V1-RUNTIME-registry-modules	not-lowered	11
 V1-RUNTIME-return	matched
-V1-RUNTIME-return-tail-call	not-lowered	8b
+V1-RUNTIME-return-tail-call	matched
 V1-RUNTIME-sequence	matched
 V1-RUNTIME-tail-calls-through-flow	not-lowered	9
 V1-RUNTIME-tail-closure-captured-loop	matched
@@ -80,16 +80,16 @@ V1-RUNTIME-tail-function-value-parameter	matched
 V1-RUNTIME-tail-mutual	matched
 V1-RUNTIME-tail-negative	matched
 V1-RUNTIME-tail-unrelated-function-loop	matched
-V1-RUNTIME-try-propagation	not-lowered	8b
+V1-RUNTIME-try-propagation	matched
 V1-RUNTIME-tuple-user-key	not-lowered	9
 V1-RUNTIME-tuples	matched
 V1-RUNTIME-unicode	matched
 V1-RUNTIME-union-keys	not-lowered	9
-V1-RUNTIME-union-values	not-lowered	8b
+V1-RUNTIME-union-values	matched
 V1-RUNTIME-user-dict-keys	not-lowered	9
-V1-RUNTIME-variadics	not-lowered	8b
+V1-RUNTIME-variadics	matched
 V1-RUNTIME-void	matched
-V1-RUNTIME-void-payload-shapes	not-lowered	8b
+V1-RUNTIME-void-payload-shapes	matched
 V1-RUNTIME-widened-tail-call	not-lowered	9
 V1-RUNTIME-workspace-run	matched
 V1-RUNTIME-workspace-run-activation-exhaustion	matched

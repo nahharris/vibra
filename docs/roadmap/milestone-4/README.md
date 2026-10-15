@@ -7,8 +7,9 @@ Status: in progress. Step 1, the Stage 4A contract freeze, has landed
 harness (PR #358), and Step 5a, the value arena and its runtime (PR #359), and
 Step 5b, the data forms and core lowering (PR #360), and Step 6, calls
 (PR #361, merge e86d93e).
-Step 7, patterns and typed failure (PR #362, merge cc73408), has landed. Step 8a,
-the integer and `char` primitive rows, is proposed as `landed` by its pull request
+Step 7, patterns and typed failure (PR #362, merge cc73408), and Step 8a, the
+integer and `char` primitive rows (PR #363, merge a450155), have landed. Step 8b,
+collections, text, bytes, and dict, is proposed as `landed` by its pull request
 and is conditional on that PR merging; no other implementation step has landed
 Decision ledger: [decision-ledger.md](decision-ledger.md)
 Surface inventory: [supported-surface.md](supported-surface.md)
@@ -320,10 +321,11 @@ tail-recursive walk that grows neither stack nor arena.
 | 5b | [Data and core lowering](05b-core-lowering.md): declared and anonymous records, enums, tuples, wrappers, and unions with discriminants in written order, projection, module values, `let`, body sequences, `if`, `return`, and direct calls | 5a | landed, PR #360, merge fb7e1e1 | PR #360 |
 | 6 | [Calls](06-calls.md): generic instantiation, function values, closures, indirect calls, a tail call to every kind of callee, the deep non-tail recursion outcome, and a bounded live arena across a long allocating tail loop | 5b | landed, PR #361, merge e86d93e | PR #361 |
 | 7 | [Patterns and typed failure](07-patterns-failure.md): `match` with every pattern kind, destructuring bindings, `let-else`, `as` narrowing, `try`, and `never` | 6 | landed, PR #362, merge cc7340823bc5d261cabe0d06a384c41a6ea9d169 | PR #362 |
-| 8a | [Integer and `char` primitive rows](08a-integer-primitives.md), lowered before emission and held to shared sample vectors | 7 | landed, conditional on its PR merging | Branch `claude/m4-step-08a-integer-primitives`; PR and merge commit to be recorded when the PR merges |
-| 8b | [Collections, text, bytes, and dict](08b-collections.md): arrays, variadic tails, checked lookups, the `array.*` and `dict.*` rows, and `str`, `bytes`, and `dict` through their standard-library bodies | 8a | not started | — |
+| 8a | [Integer and `char` primitive rows](08a-integer-primitives.md), lowered before emission and held to shared sample vectors | 7 | landed, PR #363, merge a450155 | PR #363 |
+| 8b | [Collections, text, bytes, and dict](08b-collections.md): arrays, variadic tails, checked lookups, the `array.*` and `dict.*` rows, and `str`, `bytes`, and `dict` through their standard-library bodies | 8a | landed, conditional on its PR merging. It does not deliver the module-run body of `array.fold`, so `V1-RUNTIME-library-roles` is not lowered in it; Step 8d owns both (ledger D10.5) | Branch `claude/m4-step-08b-collections`; PR and merge commit to be recorded when the PR merges |
 | 8c | [Number text, floats, and NaN](08c-number-text-floats.md): the integer and float `to-str` and `parse` natives, written once in Rust and called by both backends, the float arithmetic rows, and NaN canonicalization | 8b | not started | — |
-| 9 | [Interfaces](09-interfaces.md): static dispatch, interface values, default members, destination dispatch and conversion, `iter` with its adapters, and the Step 2 forms | 8c | not started | — |
+| 8d | [A native's checked body in typed IR](08d-native-bodies.md), so a module runs the body of a native that applies a function value (`array.fold`), which the typed IR does not carry today (ledger D10.5): the checker checks the body of a builtin member in both paths, and the IR holds it beside the wrapper the interpreter runs | 8b | not started | — |
+| 9 | [Interfaces](09-interfaces.md): static dispatch, interface values, default members, destination dispatch and conversion, `iter` with its adapters, and the Step 2 forms | 8c, 8d | not started | — |
 | 10 | [Natives and the joined differential](10-natives.md): the native import module `vibra_native_v1`, the single Rust source of G7, and the body/native differential joined to the interpreter/Wasm harness | 9 | not started | — |
 | 11 | [Tests and traps in the Wasm backend](11-tests-traps.md): `workspace-test` observations, the `vibra_v1_test` export and the `vibra_v1_failure`, `vibra_v1_failure_expected`, and `vibra_v1_failure_actual` exports, assertion outcomes, and every trap code with its origin | 10 | not started | — |
 | 12 | [Stage 4A demo and corpus sub-gate](12-stage-4a-evidence.md) — evidence step | 11 | not started | — |
@@ -356,7 +358,7 @@ in the ledger. Step 5 became 5a and 5b: the arena, its reference counting, the
 handle table, and the host accessors are one self-contained contract with its own
 proof (bounded live size, bounded-stack release, exhaustion), and carrying every
 compound form with it would give one change that cannot be reviewed against that
-proof. Step 8 became 8a, 8b, and 8c: its primitive registry is about two hundred
+proof. Step 8 became 8a, 8b, 8c, and 8d: its primitive registry is about two hundred
 rows, the collections need the integer rows, and number text and floats are their
 own body of work. The order of 8a-8c follows the dependencies still: collections
 use `u64` arithmetic, and the number-text natives build `str` values, so they
@@ -371,8 +373,8 @@ and the ledger.
 
 | Roadmap obligation | Owning steps |
 | --- | --- |
-| Unoptimized Wasm lowering of the complete pure language: mandatory tail calls, union discriminants in written order, checked lookups, `@compiler` externals lowered before emission | 4–10 (5a–8c); NaN and number text in 8c |
-| Native implementations lowered from the single source; body/native differential joined to the interpreter/Wasm harness | 1, 8a, 8c, 10 |
+| Unoptimized Wasm lowering of the complete pure language: mandatory tail calls, union discriminants in written order, checked lookups, `@compiler` externals lowered before emission | 4–10 (5a–8d); NaN and number text in 8c |
+| Native implementations lowered from the single source; body/native differential joined to the interpreter/Wasm harness | 1, 8a, 8b, 8c, 8d, 10 |
 | Instance-owned value arena and opaque-index discipline; no index or instance identity in typed IR or build output | 1, 5a, 16 |
 | Specified arena reclamation rule; bounded host memory for a long tail-recursive program | 1, 5a, 6 |
 | Interpreter/Wasm differential harness over the entire executable corpus, through the conformance harness | 1, 4, 11, 12 |

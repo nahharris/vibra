@@ -1467,6 +1467,7 @@ version = "0.0.0"
 dependencies = [
  "vibra-diagnostics",
  "vibra-ir",
+ "vibra-native",
 ]
 
 [[package]]
@@ -1474,6 +1475,13 @@ name = "vibra-ir"
 version = "0.0.0"
 dependencies = [
  "vibra-diagnostics",
+]
+
+[[package]]
+name = "vibra-native"
+version = "0.0.0"
+dependencies = [
+ "vibra-ir",
 ]
 
 [[package]]
@@ -1528,6 +1536,7 @@ name = "vibra-wasm-run"
 version = "0.0.0"
 dependencies = [
  "vibra-ir",
+ "vibra-native",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
  "wasmtime",

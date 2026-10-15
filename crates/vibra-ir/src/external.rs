@@ -11,8 +11,12 @@ use std::sync::OnceLock;
 
 use super::{FunctionSignature, Type, TypeId};
 
+mod native;
 mod vectors;
 
+pub use native::{
+    Answer, NATIVE_ROWS, NativeRow, ObjectKind, Operand, Scalar, Totality,
+};
 pub use vectors::{CHARS, Outcome, SCALARS, Vector};
 
 /// The compiler registry identity used by the runtime contract.

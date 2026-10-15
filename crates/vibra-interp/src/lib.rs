@@ -21,6 +21,7 @@
 )]
 
 mod machine;
+mod native;
 mod registry;
 mod value;
 

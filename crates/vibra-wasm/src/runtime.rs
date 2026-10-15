@@ -203,7 +203,7 @@ impl Routines {
 }
 
 /// One routine: its signature, locals, body, and the name it is exported as.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub(crate) struct Routine {
     pub(crate) params: Vec<ValType>,
     pub(crate) results: Vec<ValType>,

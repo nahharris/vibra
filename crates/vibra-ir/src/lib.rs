@@ -28,6 +28,7 @@ use nominal::{
 pub use observed::ObservedValue;
 pub use pattern::{MatchArm, Pattern};
 
+pub mod arena;
 pub mod boundary;
 pub mod external;
 
