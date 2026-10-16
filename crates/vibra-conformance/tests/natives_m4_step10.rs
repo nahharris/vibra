@@ -686,6 +686,70 @@ fn the_looping_rows_and_iteration_agree_across_both_backends_and_the_literal() {
     }
 }
 
+// -- a fault in a native is the toolchain defect, end to end -------------------
+
+/// The module the emitter writes for `text.length` of a literal, with the
+/// constructor call of the literal's object forged: the object is built with the
+/// `kind` and `stride` given, and the import then meets it.
+fn run_forged(kind: u8, stride: u8) -> vibra_wasm_run::Observed {
+    let stdlib = vibra_types::load_stdlib().expect("standard library");
+    let checked = vibra_types::check_bootstrap_text_import(
+        &stdlib,
+        "input.vib",
+        "(import text @std.text)\n(defn main () u64 (text.length \"abc\"))\n",
+    );
+    let program = checked.program().expect("a program");
+    let mut bytes = vibra_wasm::emit(program).expect("lowers").into_bytes();
+    // `i32.const kind`, `i32.const stride`, `i32.const 3`, `call new`: the
+    // literal's object is built with the length of "abc".
+    let find = |bytes: &[u8]| {
+        let pattern = [0x41, 1, 0x41, 4, 0x41, 3, 0x41, 0, 0x10];
+        bytes
+            .windows(pattern.len())
+            .enumerate()
+            .filter(|(_, window)| *window == pattern)
+            .map(|(at, _)| at)
+            .collect::<Vec<_>>()
+    };
+    let sites = find(&bytes);
+    assert_eq!(sites.len(), 1, "the literal's constructor call is unique");
+    let at = sites[0];
+    bytes[at + 1] = kind;
+    bytes[at + 3] = stride;
+    let ty = program.entry().signature().result();
+    vibra_wasm_run::Runner::new(vibra_wasm_run::MemoryLimit::new(64 * 1024 * 1024))
+        .expect("the engine configures")
+        .run_observed(&bytes, &ty, program.types())
+        .expect("the module runs")
+}
+
+#[test]
+fn a_native_that_meets_a_forged_object_ends_as_the_toolchain_defect() {
+    use vibra_wasm_run::{Observed, Outcome};
+    // The unforged module answers 3.
+    let observed = run_forged(1, 4);
+    let Observed::Completed { value, .. } = observed else {
+        panic!("the module with an intact object must complete");
+    };
+    let ty = vibra_ir::Type::U64;
+    assert!(value.canonical_observation(&ty).contains('3'));
+    // The same module with the object built as `bytes`, and with a stride that
+    // is no `str`'s, stops in the native: the defect, with no origin, and
+    // never a result of the program or a trap.
+    for (kind, stride) in [(2, 4), (1, 8), (1, 1), (5, 4)] {
+        match run_forged(kind, stride) {
+            Observed::Stopped(Outcome::Defect { cause }) => {
+                assert!(cause.contains("native `text.length`"), "{cause}");
+            }
+            other => panic!("kind {kind} stride {stride} must be a defect: {other:?}"),
+        }
+    }
+    assert_eq!(
+        Outcome::defect_trap().diagnostic_code().as_atom(),
+        "@runtime.invalid-checked-program"
+    );
+}
+
 // -- a native the toolchain does not implement is a provenance defect ---------
 
 fn rejected(manifest: &str) -> String {
