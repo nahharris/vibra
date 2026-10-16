@@ -21,9 +21,7 @@ The rows of Steps 5b, 6, and 7 are lowered to WebAssembly (exercised by the
 matched cases of `conformance/parity.tsv`, by `core_lowering_m4_step5b`,
 `calls_m4_step6`, and `patterns_m4_step7`): the exceptions inside them are the
 forms still named by `NotLowered`, which their notes give to later steps
-(interface values and contract calls to Step 9; Step 8b lowered `array`,
-`dict`, a variadic tail, the array pattern, and a wrapper over `str` or `bytes`,
-except that a dict whose key is dispatched from a run-time type is Step 9's).
+(Step 9 lowered interface values, contract calls, and a dict whose key is dispatched from a run-time type; Step 8b lowered `array`, `dict`, a variadic tail, the array pattern, and a wrapper over `str` or `bytes`).
 Step 6
 lowers function values, `lambda` and its captures, calls through function
 values, a tail call to every kind of callee, omitted labelled operands, and
@@ -102,17 +100,16 @@ The M4 [deferral inventory](README.md#m3-deferral-inventory) lists nine rows
 that earlier milestones left to M4. Each has one owner here, and the test
 requires all nine. Rows I3–I6 are implemented by Step 2 in the type checker,
 the typed IR, and the reference interpreter, conditional on its pull request
-merging, and report `@tool.unavailable` no longer. Their Wasm lowering stays
-Step 9's.
+merging, and report `@tool.unavailable` no longer. Step 9 lowers them to WebAssembly.
 
 | ID | Inherited row | Owner |
 | --- | --- | --- |
 | I1 | `Declaration::Deffect`; nonempty `Attribute::Effects`, including on a function type and an `iter` default callback | Step 14 |
 | I2 | `Attribute::External` with `@host` | Step 16 |
-| I3 | An abstract contract member with its own generic parameters | Step 2; implemented in Step 2, Wasm in Step 9 |
-| I4 | Labelled operands and written `types:` arguments on a contract member call | Step 2; implemented in Step 2, Wasm in Step 9 |
-| I5 | A dict variadic tail on a contract member | Step 2; implemented in Step 2, Wasm in Step 9 |
-| I6 | A contract member with its own generics or labelled parameters as a function value | Step 2; implemented in Step 2, Wasm in Step 9 |
+| I3 | An abstract contract member with its own generic parameters | Step 2; implemented in Step 2, Wasm in Step 9 (landed) |
+| I4 | Labelled operands and written `types:` arguments on a contract member call | Step 2; implemented in Step 2, Wasm in Step 9 (landed) |
+| I5 | A dict variadic tail on a contract member | Step 2; implemented in Step 2, Wasm in Step 9 (landed) |
+| I6 | A contract member with its own generics or labelled parameters as a function value | Step 2; implemented in Step 2, Wasm in Step 9 (landed) |
 | I7 | M3's G21 (G16 here): the command result for an entry that returns `err` | Step 19 |
 | I8 | Pre-M4 C16: effect rows of a `let` value, a `let-else` fallback, and a `return` operand | Step 14 |
 | I9 | The conformance chapter's effectful walk over `iter.next` | Step 16 |

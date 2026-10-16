@@ -210,7 +210,7 @@ impl Builder<'_, '_> {
         let mark = self.next_temp;
         let slot = self.temp();
         self.expr(value, slot)?;
-        self.to_interface(slot, &from, dest)?;
+        self.widen_to_interface(slot, &from, dest)?;
         self.release_to(mark);
         Ok(())
     }
@@ -219,7 +219,7 @@ impl Builder<'_, '_> {
     /// value. A value that is one already is moved, whatever interface it was
     /// widened to, because the pair names the type it holds and not the
     /// interface it was reached by.
-    pub(super) fn to_interface(
+    pub(super) fn widen_to_interface(
         &mut self,
         slot: u32,
         from: &Type,
