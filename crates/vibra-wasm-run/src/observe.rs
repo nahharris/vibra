@@ -65,6 +65,24 @@ impl Runner {
         result: &Type,
         types: &[TypeDefinition],
     ) -> Result<Observed, RunnerError> {
+        self.run_observed_with(bytes, result, types, &|_| None)
+    }
+
+    /// [`Self::run_observed`] for a module whose result may hold an interface
+    /// value. `heads` names the type a head of the module's descriptors stands
+    /// for, which the toolchain produces beside the module, and the host reads
+    /// an interface value's descriptor by it.
+    ///
+    /// # Errors
+    ///
+    /// A [`RunnerError`] when the module is not a v1 module or lacks an export.
+    pub fn run_observed_with(
+        &self,
+        bytes: &[u8],
+        result: &Type,
+        types: &[TypeDefinition],
+        heads: &dyn Fn(u32) -> Option<Type>,
+    ) -> Result<Observed, RunnerError> {
         let mut instance = match self.start(bytes)? {
             Started::MemoryExhausted => {
                 return Ok(Observed::Stopped(Outcome::MemoryExhausted));
@@ -79,7 +97,7 @@ impl Runner {
             Outcome::Completed { result, live_size } => (result, live_size),
             stopped => return Ok(Observed::Stopped(stopped)),
         };
-        let value = match instance.observe(slot, result, types) {
+        let value = match instance.observe_with(slot, result, types, heads) {
             Ok(value) => value,
             Err(stop) => return Ok(Observed::Stopped(stop)),
         };
@@ -124,6 +142,8 @@ enum Build {
         type_id: Option<TypeId>,
         member: Type,
     },
+    /// An interface value, which is the value it holds.
+    Through,
 }
 
 enum Task {
@@ -149,6 +169,8 @@ enum Shape {
 /// The declared types of a program by identity.
 struct Declared<'a> {
     definitions: BTreeMap<&'a TypeId, &'a TypeDefinition>,
+    /// The type a head of the module's descriptors stands for.
+    heads: &'a dyn Fn(u32) -> Option<Type>,
 }
 
 impl<'a> Declared<'a> {
@@ -203,6 +225,25 @@ impl Instance {
         result: &Type,
         types: &[TypeDefinition],
     ) -> Result<ObservedValue, Outcome> {
+        self.observe_with(slot, result, types, &|_| None)
+    }
+
+    /// [`Self::observe`] for a result that may hold an interface value, which
+    /// the host reads by the type its descriptor names: `heads` maps a head of
+    /// the module's descriptors to the type it stands for.
+    ///
+    /// # Errors
+    ///
+    /// The [`Outcome`] of a stop while reading, or a defect when the slot does
+    /// not fit the type or the host has no reader for the type. A function
+    /// hidden behind an interface is the trap `@runtime.unobservable-function`.
+    pub fn observe_with(
+        &mut self,
+        slot: ResultSlot,
+        result: &Type,
+        types: &[TypeDefinition],
+        heads: &dyn Fn(u32) -> Option<Type>,
+    ) -> Result<ObservedValue, Outcome> {
         if let Some(value) = scalar(slot, result)? {
             return Ok(ObservedValue::Primitive(value));
         }
@@ -211,6 +252,7 @@ impl Instance {
                 .iter()
                 .map(|definition| (definition.id(), definition))
                 .collect(),
+            heads,
         };
         let root = self.result_id(slot);
         self.read_tree(&declared, root, result.clone())
@@ -295,6 +337,29 @@ impl Instance {
         if let Some(value) = leaf {
             self.release(id)?;
             done.push(ObservedValue::Primitive(value));
+            return Ok(());
+        }
+        // An interface value is a pair of the descriptor of the type it holds
+        // and the value, which the host reads as that type.
+        if matches!(ty, Type::Interface(..) | Type::Any) {
+            let descriptor = self.read_id(&id, 0)?;
+            let held = self.decode(declared, descriptor)?;
+            let mut children = Vec::new();
+            let items = match self.component(&id, 1, &held)? {
+                Component::Ready(value) => vec![Some(value)],
+                Component::Child(child, ty) => {
+                    children.push((child, ty));
+                    vec![None]
+                }
+            };
+            self.release(id)?;
+            tasks.push(Task::Build(Build::Through, items));
+            tasks.extend(
+                children
+                    .into_iter()
+                    .rev()
+                    .map(|(child, ty)| Task::Visit(child, ty)),
+            );
             return Ok(());
         }
         let shape = declared.shape(ty).ok_or_else(|| {
@@ -387,6 +452,40 @@ impl Instance {
         Ok(())
     }
 
+    /// Reads the descriptor `id`, which it releases, as the type it stands for:
+    /// the module's table names the type of its head, and the descriptors that
+    /// follow are the types of its arguments. A function hidden behind an
+    /// interface is the trap `@runtime.unobservable-function`.
+    fn decode(
+        &mut self,
+        declared: &Declared<'_>,
+        id: ValueId,
+    ) -> Result<Type, Outcome> {
+        let length = self.length(&id)?;
+        let head = self.read_i32(&id, 0)?.cast_unsigned();
+        let template = (declared.heads)(head).ok_or_else(|| {
+            defect(format!("a descriptor of the unknown head {head:#x}"))
+        })?;
+        let mut arguments = Vec::new();
+        for index in 1..length {
+            let child = self.read_id(&id, index)?;
+            arguments.push(self.decode(declared, child)?);
+        }
+        self.release(id)?;
+        if matches!(template, Type::Function(_)) {
+            return Err(Outcome::Trapped {
+                code: vibra_ir::boundary::TrapCode::UnobservableFunction,
+                origin: None,
+            });
+        }
+        template.with_components(&arguments).ok_or_else(|| {
+            defect(format!(
+                "a descriptor of {template} with {} arguments",
+                arguments.len()
+            ))
+        })
+    }
+
     /// Reads the component at `index` of the value `id`, by the component's
     /// type: a scalar is read at once, and an arena value becomes a new ID.
     fn component(
@@ -460,6 +559,9 @@ fn assemble(
 ) -> Result<ObservedValue, Outcome> {
     let mut values = values.into_iter();
     Ok(match build {
+        Build::Through => values
+            .next()
+            .ok_or_else(|| defect("an interface value lost its value".to_owned()))?,
         Build::Record { type_id, names } => ObservedValue::Record {
             type_id,
             fields: names.into_iter().zip(values).collect(),

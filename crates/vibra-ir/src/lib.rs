@@ -298,6 +298,64 @@ impl Type {
         }
     }
 
+    /// This type's constructor over other components, in the order
+    /// [`Self::components`] lists them, or `None` when the count does not fit
+    /// the constructor or the constructor is a function type, whose parameter
+    /// kinds the components do not carry.
+    #[must_use]
+    pub fn with_components(&self, components: &[Self]) -> Option<Self> {
+        Some(match (self, components) {
+            (Self::Applied(id, values), _) if values.len() == components.len() => {
+                Self::Applied(id.clone(), components.to_vec())
+            }
+            (Self::Interface(id, values), _) if values.len() == components.len() => {
+                Self::Interface(id.clone(), components.to_vec())
+            }
+            (Self::Tuple(values), _) if values.len() == components.len() => {
+                Self::Tuple(components.to_vec())
+            }
+            (Self::Union(values), _) if values.len() == components.len() => {
+                Self::Union(components.to_vec())
+            }
+            (Self::Array(_), [element]) => Self::Array(Box::new(element.clone())),
+            (Self::Dict(..), [key, value]) => {
+                Self::Dict(Box::new(key.clone()), Box::new(value.clone()))
+            }
+            (Self::Record(members), _) if members.len() == components.len() => {
+                Self::Record(
+                    members
+                        .iter()
+                        .zip(components)
+                        .map(|((name, _), value)| (name.clone(), value.clone()))
+                        .collect(),
+                )
+            }
+            (Self::Enum(members), _) if members.len() == components.len() => {
+                Self::Enum(
+                    members
+                        .iter()
+                        .zip(components)
+                        .map(|((name, _), value)| (name.clone(), value.clone()))
+                        .collect(),
+                )
+            }
+            (
+                Self::Function(_)
+                | Self::Applied(..)
+                | Self::Interface(..)
+                | Self::Tuple(_)
+                | Self::Union(_)
+                | Self::Array(_)
+                | Self::Dict(..)
+                | Self::Record(_)
+                | Self::Enum(_),
+                _,
+            ) => return None,
+            (other, []) => other.clone(),
+            _ => return None,
+        })
+    }
+
     /// Whether any generic parameter occurs in this type.
     #[must_use]
     pub fn has_params(&self) -> bool {

@@ -30,10 +30,23 @@ static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
 const VOID_RESULT: &str = "(record type: @void value: void)\n";
 const NO_EVENTS: &str = "(record format: @audit-trace.v1 events: (array))\n";
 
-/// A program that calls a contract member, which selects its implementation
-/// from a run-time type: the emitter does not lower it until Step 9.
-const UNLOWERED: &str = "(defint shape (defn size (value self) u64))\n(deftype square (record side u64)\n  (impl shape (defn size (value self) u64 (value @side))))\n(defn answer () u64 (shape.size (as shape (square side: 3u64))))\n";
-const UNLOWERED_RESULT: &str = "(record type: @u64 value: 3u64)\n";
+/// A case the emitter does not lower: a project whose test calls a verified
+/// assertion, which is Step 11's. Every form of a source program lowers since
+/// Step 9, so the case is copied from the corpus.
+const UNLOWERED_CASE: &str = "V1-RUNTIME-workspace-test-passing";
+
+fn copy_directory(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("directory");
+    for entry in std::fs::read_dir(from).expect("a directory") {
+        let entry = entry.expect("an entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("a type").is_dir() {
+            copy_directory(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).expect("copy");
+        }
+    }
+}
 
 /// A temporary corpus root that removes itself.
 struct TempCorpus {
@@ -80,6 +93,14 @@ impl TempCorpus {
             std::fs::write(directory.join("result.vibon"), result).expect("result");
             std::fs::write(directory.join("audit.vibon"), NO_EVENTS).expect("audit");
         }
+    }
+
+    /// Adds the case `id` of the real corpus.
+    fn copy_case(&self, id: &str) {
+        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../conformance/cases")
+            .join(id);
+        copy_directory(&source, &self.root.join(id));
     }
 
     fn corpus(&self) -> Corpus {
@@ -204,13 +225,7 @@ fn a_checked_source_program_lowers_with_its_module_values() {
 #[test]
 fn a_program_that_does_not_lower_still_passes_in_the_interpreter() {
     let corpus = TempCorpus::new();
-    corpus.interpret(
-        "V1-RUNTIME-synthetic-literal",
-        UNLOWERED,
-        true,
-        Some(UNLOWERED_RESULT),
-        "",
-    );
+    corpus.copy_case(UNLOWERED_CASE);
     let report = run_real(&corpus);
     let (interpreter, wasm) = backends(&report);
     assert_eq!(interpreter, &CaseStatus::Passed, "{report:?}");
@@ -218,7 +233,7 @@ fn a_program_that_does_not_lower_still_passes_in_the_interpreter() {
         panic!("expected not lowered, got {wasm:?}");
     };
     assert!(
-        forms.iter().any(|form| form.starts_with("call")),
+        forms.iter().any(|form| form.starts_with("test-module")),
         "{forms:?}"
     );
     assert_eq!(
@@ -231,13 +246,7 @@ fn a_program_that_does_not_lower_still_passes_in_the_interpreter() {
 #[test]
 fn a_not_lowered_case_does_not_fail_the_run_and_is_counted() {
     let corpus = TempCorpus::new();
-    corpus.interpret(
-        "V1-RUNTIME-synthetic-literal",
-        UNLOWERED,
-        true,
-        Some(UNLOWERED_RESULT),
-        "",
-    );
+    corpus.copy_case(UNLOWERED_CASE);
     let runner = ConformanceRunner::new(standard_dispatcher());
     let report = runner.run(&corpus.corpus());
     assert!(report.is_success());
@@ -506,13 +515,7 @@ fn the_report_prints_both_backend_lines() {
         Some(VOID_RESULT),
         "",
     );
-    corpus.interpret(
-        "V1-RUNTIME-synthetic-literal",
-        UNLOWERED,
-        true,
-        Some(UNLOWERED_RESULT),
-        "",
-    );
+    corpus.copy_case(UNLOWERED_CASE);
 
     let output = Command::new(env!("CARGO_BIN_EXE_vibra-conformance"))
         .arg("--root")

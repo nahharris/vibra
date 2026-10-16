@@ -133,6 +133,7 @@ use vibra_ir::{
 use wasm_encoder::{BlockType, Instruction as I, ValType};
 
 use crate::classify;
+use crate::desc::{self, DescriptorTable};
 use crate::encode::FunctionCode;
 use crate::form::NotLowered;
 use crate::key::{self, Calls, KeyShape, Order};
@@ -144,9 +145,14 @@ use crate::runtime::{
     st8, st32, st64,
 };
 use crate::types::{
-    Shape, TypeEnv, bind, class_of, head_key, signature_params, written_name,
+    Shape, TypeEnv, bind, class_of, function_params, head_key, signature_params,
+    written_name,
 };
 use vibra_ir::boundary::TrapCode;
+
+mod dispatch;
+mod iterate;
+mod keys;
 
 /// The WebAssembly function's parameter: the offset of its frame.
 pub(crate) const FRAME: u32 = 0;
@@ -191,10 +197,8 @@ const FIXED: [ValType; 11] = [
 /// byte, for each operand of a tail call.
 const STAGE: u32 = 12;
 
-/// The head of the descriptor of `void`.
-pub(crate) const HEAD_VOID: u32 = 1;
-/// The next head a type constructor is numbered with.
-const HEAD_FIRST: u32 = 2;
+/// The head of the descriptor of `void`: its class, with the ordinal `0`.
+pub(crate) const HEAD_VOID: u32 = desc::class::VOID;
 
 /// The cells of a function value that come before its captures.
 mod fv {
@@ -304,7 +308,7 @@ fn own_params(signature: &FunctionSignature, visible: &[String]) -> Vec<String> 
 pub(crate) fn collect(program: &CheckedProgram) -> Lambdas<'_> {
     let mut lambdas = Lambdas::default();
     for function in program.functions() {
-        let visible = signature_params(function.signature());
+        let visible = function_params(function);
         visit(function.body(), &visible, &mut lambdas);
     }
     for global in program.globals() {
@@ -425,6 +429,64 @@ fn children(expr: &Expr) -> Vec<&Expr> {
     }
 }
 
+/// Whether the order of the keys of a dict of key type `key` is the key unit's:
+/// neither a closed shape nor the one `compare` of a declared key.
+fn key_dispatched(
+    env: &TypeEnv<'_>,
+    key: &Type,
+    key_order: Option<&vibra_ir::TypeId>,
+) -> bool {
+    key::order_of(env, key, key_order).is_none()
+        && (key_order.is_some() || key::shape(key).is_none())
+}
+
+/// Whether the program needs the key unit (`keys`): a closed `ordered.compare`
+/// or `equatable.equal`, or a dict ordered by dispatch.
+pub(crate) fn needs_key_unit(program: &CheckedProgram) -> bool {
+    use vibra_ir::ClosedContract;
+    let env = TypeEnv::new(program.types()).with_functions(program.functions());
+    fn walk(env: &TypeEnv<'_>, expr: &Expr) -> bool {
+        let here = match expr {
+            Expr::Call {
+                target:
+                    CallTarget::Contract {
+                        closed:
+                            Some(
+                                vibra_ir::ClosedContract::KeyCompare
+                                | vibra_ir::ClosedContract::KeyEqual,
+                            ),
+                        ..
+                    },
+                ..
+            } => true,
+            Expr::Dict {
+                value_type,
+                key_order,
+                ..
+            } => matches!(value_type, Type::Dict(key, _)
+                if key_dispatched(env, key, key_order.as_ref())),
+            Expr::Lookup {
+                collection,
+                key_order,
+                ..
+            } => matches!(collection.result_type(), Type::Dict(key, _)
+                if key_dispatched(env, &key, key_order.as_ref())),
+            _ => false,
+        };
+        here || children(expr).into_iter().any(|child| walk(env, child))
+            || matches!(expr, Expr::Closure { body, .. } if walk(env, body))
+    }
+    let _ = ClosedContract::KeyCompare;
+    program
+        .functions()
+        .iter()
+        .any(|function| walk(&env, function.module_body().0))
+        || program
+            .globals()
+            .iter()
+            .any(|global| walk(&env, global.initializer()))
+}
+
 /// The body of the lambda that stands for module function `function` used as a
 /// value of `signature`: one call of it, in tail position, over the lambda's
 /// own parameters.
@@ -514,6 +576,8 @@ pub(crate) struct Lowering<'a> {
     built_object: bool,
     /// The number each type constructor has in a descriptor.
     heads: BTreeMap<String, u32>,
+    /// The type each head stands for, which the host reads an interface value by.
+    head_types: BTreeMap<u32, Type>,
     /// The native imports of the module, in the order of their function
     /// indices (which come before every defined function). They are what the
     /// first pass found the program calls: during that pass the list is empty.
@@ -525,6 +589,12 @@ pub(crate) struct Lowering<'a> {
     /// comparer is a routine after the constructor, numbered in the order the
     /// lowering first needs one, so emission stays byte-identical.
     comparers: Vec<(KeyShape, Vec<u32>)>,
+    /// Whether the module has the routine that compares two descriptors, which
+    /// comes first among the routines after the constructor. The first pass
+    /// finds whether any function needs it.
+    has_desc_equal: bool,
+    /// Whether a function lowered by this pass called that routine.
+    needs_desc_equal: bool,
 }
 
 impl<'a> Lowering<'a> {
@@ -534,10 +604,14 @@ impl<'a> Lowering<'a> {
         lambdas: &'a Lambdas<'a>,
         sizes: Vec<u32>,
         imports: Vec<CompilerIntrinsic>,
+        has_desc_equal: bool,
     ) -> Self {
         let mut heads = BTreeMap::new();
         heads.insert("void".to_owned(), HEAD_VOID);
+        let mut head_types = BTreeMap::new();
+        head_types.insert(HEAD_VOID, Type::Void);
         Self {
+            head_types,
             fns,
             program,
             lambdas,
@@ -549,7 +623,28 @@ impl<'a> Lowering<'a> {
             imports,
             used: BTreeSet::new(),
             comparers: Vec::new(),
+            has_desc_equal,
+            needs_desc_equal: false,
         }
+    }
+
+    /// The function index of the first routine after the constructor that is a
+    /// comparer of a key shape.
+    fn first_comparer(&self) -> u32 {
+        self.fns.new + 1 + u32::from(self.has_desc_equal)
+    }
+
+    /// The function index of the routine that compares two descriptors, which
+    /// the call records as needed.
+    fn desc_equal(&mut self) -> u32 {
+        self.needs_desc_equal = true;
+        self.built_object = true;
+        self.fns.new + 1
+    }
+
+    /// Whether a function lowered by this pass compares descriptors.
+    pub(crate) const fn needs_desc_equal(&self) -> bool {
+        self.needs_desc_equal
     }
 
     /// The function index of the routine that orders keys of `shape`, which is
@@ -584,7 +679,7 @@ impl<'a> Lowering<'a> {
                 self.comparers.len() - 1
             }
         };
-        self.fns.new + 1 + u32::try_from(position).unwrap_or(0)
+        self.first_comparer() + u32::try_from(position).unwrap_or(0)
     }
 
     /// The function index of the native import of `intrinsic`, without
@@ -604,10 +699,16 @@ impl<'a> Lowering<'a> {
             text: self.import_index(CompilerIntrinsic::TextCompare),
             bytes: self.import_index(CompilerIntrinsic::BytesCompare),
         };
-        self.comparers
-            .iter()
-            .map(|(shape, children)| key::routine(shape, children, calls))
-            .collect()
+        let mut routines = Vec::new();
+        if self.has_desc_equal {
+            routines.push(desc::equal_routine(self.fns.new + 1));
+        }
+        routines.extend(
+            self.comparers
+                .iter()
+                .map(|(shape, children)| key::routine(shape, children, calls)),
+        );
+        routines
     }
 
     /// The function index of the native import of `intrinsic`, which the call
@@ -652,13 +753,64 @@ impl<'a> Lowering<'a> {
         self.function_count() + self.program.globals().len()
     }
 
+    /// The index of the key unit, which follows the lambdas when the module has
+    /// one.
+    fn unit_index(&self) -> usize {
+        self.lambda_base() + self.lambdas.len()
+    }
+
+    /// Whether the module has the key unit (`keys`).
+    fn has_unit(&self) -> bool {
+        self.sizes.len() > self.unit_index()
+    }
+
+    /// The function index and the frame size of the key unit.
+    pub(crate) fn unit_function(&self) -> (u32, u32) {
+        let index = self.unit_index();
+        (
+            u32::try_from(index).unwrap_or(0),
+            self.sizes.get(index).copied().unwrap_or(0),
+        )
+    }
+
+    /// The `ordered` interface of `@std.core`, when the program writes an
+    /// implementation of it, which is how the program says where a declared
+    /// key is ordered by its own `compare`.
+    fn ordered_interface(&self) -> Option<vibra_ir::TypeId> {
+        self.program.functions().iter().find_map(|function| {
+            function
+                .implements()
+                .filter(|implements| {
+                    implements.member == "compare"
+                        && implements.interface.path() == "std.core.ordered"
+                })
+                .map(|implements| implements.interface.clone())
+        })
+    }
+
     /// The number a type constructor has in a descriptor.
     fn head(&mut self, ty: &Type) -> u32 {
         let key = head_key(ty);
-        let next = u32::try_from(self.heads.len())
-            .unwrap_or(u32::MAX)
-            .saturating_add(HEAD_FIRST - 1);
-        *self.heads.entry(key).or_insert(next)
+        if let Some(head) = self.heads.get(&key) {
+            return *head;
+        }
+        // The ordinal numbers the constructors in the order they are met, and
+        // `void` is the first, so its head is its class alone.
+        let ordinal = u32::try_from(self.heads.len()).unwrap_or(u32::MAX);
+        let head = desc::class_of_type(ty) | (ordinal << desc::ORDINAL_SHIFT);
+        self.heads.insert(key, head);
+        self.head_types.insert(head, ty.clone());
+        head
+    }
+
+    /// The types the heads of this lowering stand for, for the host.
+    pub(crate) fn descriptors(&self) -> DescriptorTable {
+        DescriptorTable::new(
+            self.head_types
+                .iter()
+                .map(|(head, ty)| (*head, ty.clone()))
+                .collect(),
+        )
     }
 
     /// Lowers unit `index`: language function `index`, the initializer of
@@ -673,6 +825,17 @@ impl<'a> Lowering<'a> {
         let known = self.sizes.get(index).copied().unwrap_or(0);
         let functions = self.function_count();
         let module_size = || NotLowered::single(crate::Form::ModuleSize);
+        if self.has_unit() && index == self.unit_index() {
+            let shape = Shape1 {
+                arity: 2,
+                ir_slots: 2,
+                own: vec!["type".to_owned()],
+                ..Shape1::default()
+            };
+            let mut builder = Builder::new(self, known, shape);
+            builder.key_unit()?;
+            return Ok(builder.finish());
+        }
         let owned: Expr;
         let (body, shape, result): (&Expr, Shape1, Type) = if let Some(function) =
             program.functions().get(index)
@@ -689,7 +852,7 @@ impl<'a> Lowering<'a> {
                 Shape1 {
                     arity,
                     ir_slots: ir_slots.max(arity),
-                    own: signature_params(signature),
+                    own: function_params(function),
                     ..Shape1::default()
                 },
                 signature.result(),
@@ -850,7 +1013,7 @@ enum Place {
 }
 
 /// How a dict orders its keys, as the lowering uses it.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum KeyOrder {
     /// The routine of a closed key shape: `(a, b) -> -1, 0, 1`.
     Closed { comparer: u32 },
@@ -863,6 +1026,10 @@ enum KeyOrder {
         less: u32,
         greater: u32,
     },
+    /// The order of a key type that is known only at run time, or that holds a
+    /// declared type below its surface: the key unit orders two keys by the
+    /// descriptor of this type (`keys`).
+    Dispatched { key: Type },
 }
 
 /// Where one of the two keys a comparison reads is.
@@ -1924,7 +2091,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                             slots,
                         },
                         callee.signature().clone(),
-                        signature_params(callee.signature()),
+                        function_params(callee),
                     )
                 }
                 CallTarget::Indirect { callee, .. } => {
@@ -1940,21 +2107,19 @@ impl<'l, 'a> Builder<'l, 'a> {
                     (Callee::Value { slot }, (*signature).clone(), free)
                 }
                 CallTarget::Contract { .. } => {
-                    return Err(NotLowered::from_uses(vec![
-                        crate::form::UnloweredForm::new(
-                            crate::Form::Call,
-                            Some(origin.clone()),
-                        )
-                        .with_detail("contract"),
-                    ])
-                    .unwrap_or_else(|| NotLowered::single(crate::Form::Call)));
+                    return self
+                        .contract_call(target, arguments, result, tail, origin, dest);
                 }
             };
 
         // The operands, in order. An omitted labelled operand is the callee's
         // default.
         let positional = signature.parameters().len();
+        let slot_types = signature.slot_types();
         let mut operands = Vec::with_capacity(arguments.len());
+        // The descriptor an interface value held, for an operand the callee
+        // takes as a value of a generic parameter.
+        let mut opened: Vec<Option<u32>> = Vec::with_capacity(arguments.len());
         for (position, argument) in arguments.iter().enumerate() {
             self.class(&argument.result_type(), argument.origin())?;
             let slot = self.temp();
@@ -1966,16 +2131,49 @@ impl<'l, 'a> Builder<'l, 'a> {
             } else {
                 self.expr(argument, slot)?;
             }
-            operands.push(slot);
+            // A generic parameter is instantiated at the type an interface value
+            // holds, not at the interface, and the callee takes the value
+            // itself, as the reference interpreter binds a call.
+            if dispatch::is_interface(&argument.result_type())
+                && matches!(slot_types.get(position), Some(Type::Param(_)))
+            {
+                let (desc, payload) = (self.temp(), self.temp());
+                self.unwrap_pair(slot, desc, payload);
+                operands.push(payload);
+                opened.push(Some(desc));
+            } else {
+                operands.push(slot);
+                opened.push(None);
+            }
         }
 
         // The type arguments: what the callee's generic parameters are at this
-        // call, as types over this activation's own.
-        let mut bound = BTreeMap::new();
-        for (slot, argument) in signature.slot_types().iter().zip(arguments) {
-            bind(slot, &argument.result_type(), &mut bound);
+        // call, as types over this activation's own, or the descriptor of an
+        // interface value's type.
+        let mut bound: BTreeMap<String, dispatch::TypeSource> = BTreeMap::new();
+        for ((slot_type, argument), opened) in
+            slot_types.iter().zip(arguments).zip(&opened)
+        {
+            match (slot_type, opened) {
+                (Type::Param(name), Some(desc)) => {
+                    bound
+                        .entry(name.clone())
+                        .or_insert(dispatch::TypeSource::Slot(*desc));
+                }
+                _ => {
+                    let mut inferred = BTreeMap::new();
+                    bind(slot_type, &argument.result_type(), &mut inferred);
+                    for (name, ty) in inferred {
+                        bound.entry(name).or_insert(dispatch::TypeSource::Type(ty));
+                    }
+                }
+            }
         }
-        bind(&signature.result(), result, &mut bound);
+        let mut inferred = BTreeMap::new();
+        bind(&signature.result(), result, &mut inferred);
+        for (name, ty) in inferred {
+            bound.entry(name).or_insert(dispatch::TypeSource::Type(ty));
+        }
         let mut moves = Vec::with_capacity(arguments.len() + free.len() + 1);
         for (position, slot) in (0_u32..).zip(&operands) {
             moves.push(Move {
@@ -1994,22 +2192,34 @@ impl<'l, 'a> Builder<'l, 'a> {
             });
         }
         for (position, name) in (0_u32..).zip(&free) {
-            let ty = bound
-                .get(name)
-                .cloned()
-                .unwrap_or_else(|| Type::Param(UNRESOLVED.to_owned()));
             let slot = self.temp();
-            self.build_type(&ty, slot)?;
+            match bound.get(name) {
+                Some(dispatch::TypeSource::Type(ty)) => self.build_type(ty, slot)?,
+                Some(dispatch::TypeSource::Slot(from)) => {
+                    self.copy_cell(slot, *from);
+                    self.claim(slot, ValueClass::Dyn, ByteSource::Slot(*from));
+                }
+                None => {
+                    self.build_type(&Type::Param(UNRESOLVED.to_owned()), slot)?;
+                }
+            }
             moves.push(Move {
                 from: slot,
                 to: arity + 1 + position,
                 only_below: matches!(callee, Callee::Value { .. }).then_some(position),
             });
         }
-        self.class(&signature.result(), origin)?;
-        self.release_to(mark);
-        if tail {
+        let result_type = dispatch::with_fixed(&signature.result(), &bound);
+        self.class(&result_type, origin)?;
+        // A result that is widened afterwards is not the last thing the
+        // activation does, whatever position the checker found the call in.
+        let converts = dispatch::conversion_needed(&result_type, result);
+        if tail && !converts {
+            self.release_to(mark);
             self.stage = self.stage.max(moves.len());
+            for desc in opened.iter().flatten() {
+                self.discard(*desc, ValueClass::Dyn);
+            }
             self.end(Term::Tail {
                 callee,
                 moves,
@@ -2018,6 +2228,11 @@ impl<'l, 'a> Builder<'l, 'a> {
             let dead = self.new_block();
             self.start(dead);
             return Ok(());
+        }
+        if !converts {
+            for desc in opened.iter().flatten() {
+                self.discard(*desc, ValueClass::Dyn);
+            }
         }
         let resume = self.new_block();
         self.end(Term::Call {
@@ -2028,6 +2243,13 @@ impl<'l, 'a> Builder<'l, 'a> {
         });
         self.start(resume);
         self.take_return(dest);
+        if converts {
+            self.convert_result(dest, &result_type, result, &bound, origin)?;
+            for desc in opened.iter().flatten() {
+                self.discard(*desc, ValueClass::Dyn);
+            }
+        }
+        self.release_to(mark);
         Ok(())
     }
 
@@ -2794,6 +3016,9 @@ impl<'l, 'a> Builder<'l, 'a> {
         dest: u32,
     ) -> Result<(), NotLowered> {
         let Some(member) = member else {
+            if dispatch::is_interface(value_type) {
+                return self.widen_interface(value, dest);
+            }
             return self.expr(value, dest);
         };
         let shape = self.shape(value_type, origin)?;
@@ -3032,7 +3257,14 @@ impl<'l, 'a> Builder<'l, 'a> {
             ])
             .unwrap_or_else(|| NotLowered::single(crate::Form::Dict))
         };
-        match key::order_of(&self.lowering.env, key, key_order).ok_or_else(unordered)? {
+        let Some(order) = key::order_of(&self.lowering.env, key, key_order) else {
+            // Any other key is ordered by dispatch from its run-time type.
+            if key_order.is_some() || key::shape(key).is_none() {
+                return Ok(KeyOrder::Dispatched { key: key.clone() });
+            }
+            return Err(unordered());
+        };
+        match order {
             Order::Closed(shape) => Ok(KeyOrder::Closed {
                 comparer: self.lowering.comparer(&shape),
             }),
@@ -3107,9 +3339,18 @@ impl<'l, 'a> Builder<'l, 'a> {
     /// `compare` is a language call like any other: it takes a count of each key
     /// and pushes a frame, and the code that follows is the block that the call
     /// returns to.
-    fn compare_keys(&mut self, order: &KeyOrder, a: KeyAt, b: KeyAt, out: u32) {
+    fn compare_keys(
+        &mut self,
+        order: &KeyOrder,
+        a: KeyAt,
+        b: KeyAt,
+        out: u32,
+    ) -> Result<(), NotLowered> {
         let at = self.cell(out);
         match *order {
+            KeyOrder::Dispatched { ref key } => {
+                self.compare_dispatched(key, a, b, out)?;
+            }
             KeyOrder::Closed { comparer } => {
                 self.push(&[get(FRAME)]);
                 self.push_key_bits(a);
@@ -3174,6 +3415,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 self.drop_slot(answer);
             }
         }
+        Ok(())
     }
 
     /// Stores `value` in the scalar slot `slot`.
@@ -3257,7 +3499,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 scratch,
                 capacity,
                 [count, low, high, mid, answer],
-            );
+            )?;
         }
         // The dict has the length that remains, and takes the cells of the
         // scratch array, whose own length then counts none, so dropping it
@@ -3333,7 +3575,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         scratch: u32,
         capacity: u32,
         [count, low, high, mid, answer]: [u32; 5],
-    ) {
+    ) -> Result<(), NotLowered> {
         self.store_word(low, &[c32(0)]);
         let upper = self.word(count);
         self.store_word(high, &upper);
@@ -3377,7 +3619,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 index: mid,
             },
             answer,
-        );
+        )?;
         let (smaller, not_smaller, equal, larger) = (
             self.new_block(),
             self.new_block(),
@@ -3515,6 +3757,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         self.store_word(count, &grown);
         self.end(Term::Goto(after));
         self.start(after);
+        Ok(())
     }
 
     /// A lookup of a key in a dict: a binary search by the dict's order, and
@@ -3602,7 +3845,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 index: mid,
             },
             answer,
-        );
+        )?;
         let (smaller, not_smaller, larger) =
             (self.new_block(), self.new_block(), self.new_block());
         let verdict = self.word(answer);

@@ -232,17 +232,33 @@ fn a_checked_program_carries_the_prelude_values_and_lowers_since_step_5b() {
 
 #[test]
 fn a_program_the_emitter_cannot_lower_has_no_module() {
-    let result = vibra_types::check_source(
+    // Every form of a source program lowers since Step 9; a verified test
+    // assertion is the form left, and Step 11's.
+    let origin = vibra_ir::SourceOrigin::new(
         "input.vib",
-        "(defint shape (defn size (value self) u64))\n(deftype square (record side u64)\n  (impl shape (defn size (value self) u64 (value @side))))\n(defn answer () u64 (shape.size (as shape (square side: 3u64))))\n",
+        vibra_diagnostics::ByteSpan::new(0, 1),
     );
-    let error = vibra_wasm::emit(result.program().expect("accepted"))
-        .expect_err("a contract call is not lowered until Step 9");
+    let entry = vibra_ir::CheckedFunction::new(
+        "main",
+        vibra_ir::FunctionSignature::new(Vec::new(), vibra_ir::Type::Void),
+        vibra_ir::Expr::literal(vibra_ir::Value::Void, origin.clone()),
+        origin.clone(),
+    )
+    .expect("a checked function");
+    let assertion = vibra_ir::CheckedFunction::new_test_assertion(
+        "assert",
+        vibra_ir::TestAssertion::True,
+        origin,
+    )
+    .expect("an assertion function");
+    let program = vibra_ir::CheckedProgram::try_new(vec![entry, assertion], 0)
+        .expect("a program");
+    let error = vibra_wasm::emit(&program).expect_err("an assertion is not lowered");
     let names = error
         .forms()
         .iter()
         .map(|used| used.form().name())
         .collect::<Vec<_>>();
-    assert!(names.contains(&"call"), "{names:?}");
+    assert!(names.contains(&"test-assertion"), "{names:?}");
     assert!(!names.contains(&"module-size"), "{names:?}");
 }

@@ -89,9 +89,6 @@ fn function_forms(
 /// Records a node and every node below it that the emitter does not lower.
 fn walk(env: &TypeEnv<'_>, expr: &Expr, found: &mut Vec<UnloweredForm>) {
     type_forms(&expr.result_type(), Some(expr.origin().clone()), found);
-    let mut report = |form: Form| {
-        found.push(UnloweredForm::new(form, Some(expr.origin().clone())));
-    };
     match expr {
         // Every primitive literal is lowered: a scalar is an immediate, and
         // `bool`, `str`, `bytes`, and an atom are arena objects. A read of a
@@ -163,21 +160,12 @@ fn walk(env: &TypeEnv<'_>, expr: &Expr, found: &mut Vec<UnloweredForm>) {
             walk(env, else_branch, found);
         }
         Expr::Call {
-            target,
-            arguments,
-            tail,
-            ..
+            target, arguments, ..
         } => {
-            // A call of a module function or of a function value, in tail
-            // position or not, is one mechanism of frames. A contract call
-            // selects its implementation from a run-time type, which is the
-            // work of Step 9.
-            if let CallTarget::Contract { .. } = target {
-                found.push(
-                    UnloweredForm::new(Form::Call, Some(expr.origin().clone()))
-                        .with_detail(if *tail { "tail-contract" } else { "contract" }),
-                );
-            }
+            // A call of a module function, of a function value, or of a
+            // contract member, in tail position or not, is one mechanism of
+            // frames: a contract call selects the function it enters from run-time
+            // types (Step 9).
             if let CallTarget::Indirect { callee, .. } = target {
                 walk(env, callee, found);
             }
@@ -200,49 +188,21 @@ fn walk(env: &TypeEnv<'_>, expr: &Expr, found: &mut Vec<UnloweredForm>) {
         Expr::Tuple { components, .. } => walk_all(env, components, found),
         Expr::TupleProject { tuple, .. } => walk(env, tuple, found),
         Expr::Array { elements, .. } => walk_all(env, elements, found),
-        Expr::Dict {
-            value_type,
-            entries,
-            key_order,
-            ..
-        } => {
-            if !dict_ordered(env, value_type, key_order.as_ref()) {
-                report(Form::Dict);
-            }
+        // A dict orders its keys by a closed shape, by the one `compare` of a
+        // declared key, or, for any other key, by dispatch from a run-time type
+        // (Step 9), so every dict is lowered.
+        Expr::Dict { entries, .. } => {
             for (key, value) in entries {
                 walk(env, key, found);
                 walk(env, value, found);
             }
         }
         Expr::Lookup {
-            collection,
-            key,
-            key_order,
-            ..
+            collection, key, ..
         } => {
-            let collection_type = collection.result_type();
-            if matches!(collection_type, Type::Dict(..))
-                && !dict_ordered(env, &collection_type, key_order.as_ref())
-            {
-                report(Form::Lookup);
-            }
             walk(env, collection, found);
             walk(env, key, found);
         }
-    }
-}
-
-/// Whether the emitter can order the keys of the dict type `dict`: a closed key
-/// type, or a declared one that one implementation of `compare` orders. Any
-/// other key is ordered by dispatch from a run-time type (Step 9).
-fn dict_ordered(
-    env: &TypeEnv<'_>,
-    dict: &Type,
-    key_order: Option<&vibra_ir::TypeId>,
-) -> bool {
-    match dict {
-        Type::Dict(key, _) => crate::key::order_of(env, key, key_order).is_some(),
-        _ => false,
     }
 }
 
