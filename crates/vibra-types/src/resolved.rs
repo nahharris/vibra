@@ -724,16 +724,35 @@ pub fn check_resolved(
 
     // Builtin static methods such as `array.of` have no module in the graph;
     // only the members a selected module names join its programs.
-    for member in crate::standard::builtin_members(&types) {
+    // A native with no import runs its checked Vibra body in a module, and that
+    // body names other members, which join the programs with it.
+    let mut builtin_indices: BTreeMap<String, usize> = BTreeMap::new();
+    let mut native_bodies: BTreeMap<usize, &'static vibra_syntax::FunctionDeclaration> =
+        BTreeMap::new();
+    let all_members = crate::standard::builtin_members(&types);
+    let referenced_paths: BTreeSet<String> = all_members
+        .iter()
+        .filter(|member| {
+            let id =
+                vibra_resolve::builtin_member_id(&member.type_name, &member.member);
+            snapshot.references().iter().any(|reference| {
+                selected.contains(reference.source_id())
+                    && reference.target() == Some(&id)
+            })
+        })
+        .map(crate::standard::BuiltinMember::path)
+        .collect();
+    for member in crate::standard::members_with_bodies(all_members, &referenced_paths) {
         let id = vibra_resolve::builtin_member_id(&member.type_name, &member.member);
-        let referenced = snapshot.references().iter().any(|reference| {
-            selected.contains(reference.source_id()) && reference.target() == Some(&id)
-        });
-        if !referenced || function_indices.contains_key(&id) {
+        if function_indices.contains_key(&id) {
             continue;
         }
         let index = functions.len();
         function_indices.insert(id.clone(), index);
+        builtin_indices.insert(member.path(), index);
+        if member.intrinsic.runs_body() {
+            native_bodies.insert(index, member.method);
+        }
         functions.push(FunctionHeader {
             declaration_index: crate::IMPORTED_FUNCTION_DECLARATION,
             module_index: usize::MAX,
@@ -851,6 +870,55 @@ pub fn check_resolved(
         if header.declaration_index == crate::IMPORTED_FUNCTION_DECLARATION
             && let Some(intrinsic) = header.external
         {
+            if let Some(method) = native_bodies.get(&index).copied() {
+                // The body is the embedded module's own text, checked in its
+                // own environment: its names are the builtin members.
+                let mut declared_elsewhere = Vec::new();
+                let mut environment = CheckEnvironment::new(
+                    crate::STDLIB_BUILTIN_SOURCE_ID,
+                    &mut diagnostics,
+                    &empty_indices,
+                    &globals,
+                    &functions,
+                    &builtin_indices,
+                    &empty_names,
+                    &mut declared_elsewhere,
+                    &types,
+                );
+                environment.reports_redeclarations = false;
+                let origin =
+                    SourceOrigin::new(crate::STDLIB_BUILTIN_SOURCE_ID, method.span());
+                let Some(body) = crate::check_function_body(
+                    &mut environment,
+                    method,
+                    &header,
+                    &origin,
+                ) else {
+                    continue;
+                };
+                let slot_count = environment.next_slot;
+                match CheckedFunction::new_external_with_body(
+                    header.name,
+                    header.signature,
+                    intrinsic,
+                    body,
+                    slot_count,
+                    origin,
+                ) {
+                    Ok(checked) => {
+                        if let Some(slot) = checked_functions.get_mut(index) {
+                            *slot = Some(checked);
+                        }
+                    }
+                    Err(error) => unavailable(
+                        &mut diagnostics,
+                        crate::STDLIB_BUILTIN_SOURCE_ID,
+                        method.span(),
+                        format!("checked IR construction failed: {error}"),
+                    ),
+                }
+                continue;
+            }
             let origin =
                 SourceOrigin::new(header.source_id.as_str(), ByteSpan::empty_at(0));
             if let Ok(checked) = CheckedFunction::new_external(
@@ -983,86 +1051,13 @@ pub fn check_resolved(
             &types,
         );
         environment.resolved_targets = Some(&resolved_targets);
-        environment.self_type = header.self_type.clone();
-        environment.generics = header.type_parameters.clone();
-        environment.bounds = header.bounds.clone();
-        environment.exit =
-            Some((header.signature.result(), Some(function.result_span())));
         environment.reports_redeclarations = false;
-        let mut parameters_valid = true;
-        let mut pending = Vec::new();
-        for (parameter_index, parameter) in function.parameters().iter().enumerate() {
-            match parameter.parsed_pattern().kind() {
-                vibra_syntax::PatternKind::Binding(name) if name.is_discard() => {}
-                vibra_syntax::PatternKind::Binding(name)
-                    if crate::pattern::pattern_value_global(
-                        &environment,
-                        name,
-                        parameter.parsed_pattern().span(),
-                    )
-                    .is_none() =>
-                {
-                    if !environment.add_binding(
-                        name.value(),
-                        parameter.value_type(),
-                        parameter.span(),
-                        parameter.parsed_pattern().span(),
-                    ) {
-                        parameters_valid = false;
-                    }
-                }
-                _ => match header.signature.parameters().get(parameter_index) {
-                    Some(value_type) => pending.push((
-                        parameter_index,
-                        parameter.parsed_pattern(),
-                        value_type.clone(),
-                    )),
-                    None => parameters_valid = false,
-                },
-            }
-            environment.next_slot = parameter_index.saturating_add(1);
-        }
-        let mut labelled_index = 0;
-        for attribute in function.attributes().items() {
-            let vibra_syntax::Attribute::Labelled(entries) = attribute else {
-                continue;
-            };
-            for entry in entries {
-                let Some(labelled) = header.signature.labelled().get(labelled_index)
-                else {
-                    continue;
-                };
-                labelled_index = labelled_index.saturating_add(1);
-                if !environment.add_binding_type(
-                    labelled.name(),
-                    labelled.value_type(),
-                    entry.name_span(),
-                ) {
-                    parameters_valid = false;
-                }
-            }
-        }
-        if !environment.bind_variadic(function.attributes().items(), &header.signature)
-        {
-            parameters_valid = false;
-        }
-        let Some(destructured) = environment.bind_parameter_patterns(&pending) else {
-            continue;
-        };
-        if !parameters_valid {
-            continue;
-        }
-        let Some(body) = crate::check_sequence(
-            &mut environment,
-            function.expressions(),
-            Some(header.signature.result()),
-            function.span(),
-            true,
-        ) else {
-            continue;
-        };
         let origin = SourceOrigin::new(header.source_id.as_str(), function.span());
-        let body = crate::wrap_destructured(body, destructured, &origin);
+        let Some(body) =
+            crate::check_function_body(&mut environment, function, &header, &origin)
+        else {
+            continue;
+        };
         let implements = header.implements.clone();
         match CheckedFunction::with_slots(
             header.name,

@@ -7,6 +7,7 @@
 //! embedded modules under the identities the resolver gives them, and a run
 //! that already declared one keeps its own.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -217,6 +218,9 @@ pub(crate) struct BuiltinMember {
     pub(crate) intrinsic: CompilerIntrinsic,
     /// The complete generic parameter list: the type's, then the member's.
     pub(crate) type_parameters: Vec<String>,
+    /// The member as the embedded module writes it, whose Vibra body a native
+    /// with no import runs in a module.
+    pub(crate) method: &'static vibra_syntax::FunctionDeclaration,
 }
 
 impl BuiltinMember {
@@ -321,10 +325,37 @@ pub(crate) fn builtin_members(types: &TypeNames) -> Vec<BuiltinMember> {
                 signature,
                 intrinsic,
                 type_parameters: generics,
+                method,
             });
         }
     }
     members
+}
+
+/// The builtin members a program contains: those `referenced` by path, and
+/// every member the Vibra body of one of them names, transitively. A native
+/// with no import is run in a module as its checked body, which calls the
+/// members it names, so those join the program with it.
+pub(crate) fn members_with_bodies(
+    members: Vec<BuiltinMember>,
+    referenced: &BTreeSet<String>,
+) -> Vec<BuiltinMember> {
+    let mut included = referenced.clone();
+    loop {
+        let before = included.len();
+        for member in &members {
+            if member.intrinsic.runs_body() && included.contains(&member.path()) {
+                included.extend(crate::function_value_paths(member.method));
+            }
+        }
+        if included.len() == before {
+            break;
+        }
+    }
+    members
+        .into_iter()
+        .filter(|member| included.contains(&member.path()))
+        .collect()
 }
 
 /// Every `(role, type name)` the embedded standard library claims with

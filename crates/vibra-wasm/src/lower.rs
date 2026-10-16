@@ -674,93 +674,96 @@ impl<'a> Lowering<'a> {
         let functions = self.function_count();
         let module_size = || NotLowered::single(crate::Form::ModuleSize);
         let owned: Expr;
-        let (body, shape, result): (&Expr, Shape1, Type) =
-            if let Some(function) = program.functions().get(index) {
-                let signature = function.signature();
-                let arity = u32::try_from(signature.slot_types().len())
-                    .map_err(|_| module_size())?;
-                let ir_slots =
-                    u32::try_from(function.slot_count()).map_err(|_| module_size())?;
-                (
-                    function.body(),
-                    Shape1 {
-                        arity,
-                        ir_slots: ir_slots.max(arity),
-                        own: signature_params(signature),
-                        ..Shape1::default()
-                    },
-                    signature.result(),
-                )
-            } else if index < self.lambda_base() {
-                let global = program
-                    .globals()
-                    .get(index.saturating_sub(functions))
-                    .ok_or_else(module_size)?;
-                (
-                    global.initializer(),
-                    Shape1 {
-                        ir_slots: u32::try_from(global.slot_count())
-                            .map_err(|_| module_size())?,
-                        ..Shape1::default()
-                    },
-                    global.value_type(),
-                )
-            } else {
-                let lambda = self
-                    .lambdas
-                    .list
-                    .get(index - self.lambda_base())
-                    .ok_or_else(module_size)?;
-                match &lambda.kind {
-                    LambdaKind::Closure {
-                        signature,
-                        captures,
-                        body,
-                        slot_count,
-                    } => {
-                        let arity = u32::try_from(signature.slot_types().len())
-                            .map_err(|_| module_size())?;
-                        (
-                            &**body,
-                            Shape1 {
-                                arity,
-                                ir_slots: u32::try_from(*slot_count)
-                                    .map_err(|_| module_size())?
-                                    .max(arity),
-                                own: lambda.own.clone(),
-                                outer: lambda.outer.clone(),
-                                labelled: u32::try_from(signature.labelled().len())
-                                    .map_err(|_| module_size())?,
-                                captures: u32::try_from(*captures)
-                                    .map_err(|_| module_size())?,
-                            },
-                            signature.result(),
-                        )
-                    }
-                    LambdaKind::Wrapper {
-                        function,
-                        signature,
-                        origin,
-                    } => {
-                        let arity = u32::try_from(signature.slot_types().len())
-                            .map_err(|_| module_size())?;
-                        owned = wrapper_body(*function, signature, origin);
-                        (
-                            &owned,
-                            Shape1 {
-                                arity,
-                                ir_slots: arity,
-                                own: lambda.own.clone(),
-                                outer: lambda.outer.clone(),
-                                labelled: u32::try_from(signature.labelled().len())
-                                    .map_err(|_| module_size())?,
-                                captures: 0,
-                            },
-                            signature.result(),
-                        )
-                    }
+        let (body, shape, result): (&Expr, Shape1, Type) = if let Some(function) =
+            program.functions().get(index)
+        {
+            let signature = function.signature();
+            let arity = u32::try_from(signature.slot_types().len())
+                .map_err(|_| module_size())?;
+            // A native with no import runs its checked Vibra body; every
+            // other function lowers its own.
+            let (module_body, module_slots) = function.module_body();
+            let ir_slots = u32::try_from(module_slots).map_err(|_| module_size())?;
+            (
+                module_body,
+                Shape1 {
+                    arity,
+                    ir_slots: ir_slots.max(arity),
+                    own: signature_params(signature),
+                    ..Shape1::default()
+                },
+                signature.result(),
+            )
+        } else if index < self.lambda_base() {
+            let global = program
+                .globals()
+                .get(index.saturating_sub(functions))
+                .ok_or_else(module_size)?;
+            (
+                global.initializer(),
+                Shape1 {
+                    ir_slots: u32::try_from(global.slot_count())
+                        .map_err(|_| module_size())?,
+                    ..Shape1::default()
+                },
+                global.value_type(),
+            )
+        } else {
+            let lambda = self
+                .lambdas
+                .list
+                .get(index - self.lambda_base())
+                .ok_or_else(module_size)?;
+            match &lambda.kind {
+                LambdaKind::Closure {
+                    signature,
+                    captures,
+                    body,
+                    slot_count,
+                } => {
+                    let arity = u32::try_from(signature.slot_types().len())
+                        .map_err(|_| module_size())?;
+                    (
+                        &**body,
+                        Shape1 {
+                            arity,
+                            ir_slots: u32::try_from(*slot_count)
+                                .map_err(|_| module_size())?
+                                .max(arity),
+                            own: lambda.own.clone(),
+                            outer: lambda.outer.clone(),
+                            labelled: u32::try_from(signature.labelled().len())
+                                .map_err(|_| module_size())?,
+                            captures: u32::try_from(*captures)
+                                .map_err(|_| module_size())?,
+                        },
+                        signature.result(),
+                    )
                 }
-            };
+                LambdaKind::Wrapper {
+                    function,
+                    signature,
+                    origin,
+                } => {
+                    let arity = u32::try_from(signature.slot_types().len())
+                        .map_err(|_| module_size())?;
+                    owned = wrapper_body(*function, signature, origin);
+                    (
+                        &owned,
+                        Shape1 {
+                            arity,
+                            ir_slots: arity,
+                            own: lambda.own.clone(),
+                            outer: lambda.outer.clone(),
+                            labelled: u32::try_from(signature.labelled().len())
+                                .map_err(|_| module_size())?,
+                            captures: 0,
+                        },
+                        signature.result(),
+                    )
+                }
+            }
+        };
         let mut builder = Builder::new(self, known, shape);
         builder.class(&result, body.origin())?;
         let first = builder.new_block();

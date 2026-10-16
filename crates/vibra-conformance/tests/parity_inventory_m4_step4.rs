@@ -53,8 +53,6 @@ fn suggested_step(form: &str) -> Option<&'static str> {
         "type:interface" => "9",
         "call:contract" | "call:tail-contract" | "contract-implementation" => "9",
         "test-module" => "11",
-        // A native that applies a function value has its checked body in Step 8d.
-        "external:array.fold" => "8d",
         other => {
             let symbol = other.strip_prefix("external:")?;
             if ["array.", "dict.", "text.", "str.", "bytes."]

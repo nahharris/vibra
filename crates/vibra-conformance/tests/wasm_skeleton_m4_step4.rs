@@ -234,15 +234,15 @@ fn a_checked_program_carries_the_prelude_values_and_lowers_since_step_5b() {
 fn a_program_the_emitter_cannot_lower_has_no_module() {
     let result = vibra_types::check_source(
         "input.vib",
-        "(defn answer () i32 (array.fold (array.of 1i32) 0i32 (lambda (total i32 item i32) i32 item)))\n",
+        "(defint shape (defn size (value self) u64))\n(deftype square (record side u64)\n  (impl shape (defn size (value self) u64 (value @side))))\n(defn answer () u64 (shape.size (as shape (square side: 3u64))))\n",
     );
     let error = vibra_wasm::emit(result.program().expect("accepted"))
-        .expect_err("array.fold is not lowered until a module can run its body");
+        .expect_err("a contract call is not lowered until Step 9");
     let names = error
         .forms()
         .iter()
         .map(|used| used.form().name())
         .collect::<Vec<_>>();
-    assert!(names.contains(&"external"), "{names:?}");
+    assert!(names.contains(&"call"), "{names:?}");
     assert!(!names.contains(&"module-size"), "{names:?}");
 }

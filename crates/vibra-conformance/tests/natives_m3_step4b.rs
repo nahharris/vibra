@@ -195,10 +195,7 @@ fn native_members() -> Vec<(String, String, String)> {
 struct Ran {
     /// The reference interpreter's canonical result.
     interpreter: String,
-    /// The module's, or `None` when the emitter does not lower the program: a
-    /// program whose meaning applies a function value through a native with no
-    /// import is lowered by running its body, so only a program that still
-    /// names `array.fold` as a native is not lowered.
+    /// The module's, or `None` when the emitter does not lower the program.
     wasm: Option<String>,
 }
 
@@ -401,20 +398,24 @@ fn every_listed_native_matches_its_body() {
                 native.interpreter, body.interpreter,
                 "`{symbol}` disagrees with its body on `{operands}`"
             );
-            // The module reaches the native through its import, and runs the
-            // body as lowered code: both must give the interpreter's answer.
-            // A native with no import has no module path of its own.
-            let imported = intrinsic_of(symbol).native_import().is_some();
-            match &native.wasm {
-                Some(wasm) => assert_eq!(
-                    wasm, &native.interpreter,
-                    "the import of `{symbol}` disagrees on `{operands}`"
-                ),
-                None => assert!(
-                    !imported,
-                    "`{symbol}` has an import but its program is not lowered"
-                ),
-            }
+            // The program that names the native lowers: a module reaches a
+            // native with an import through it, and runs the checked body of
+            // one with none (a native that applies a function value). Either
+            // must give the interpreter's answer.
+            let row = intrinsic_of(symbol);
+            assert_ne!(
+                row.native_import().is_some(),
+                row.runs_body(),
+                "`{symbol}` has an import or a checked body, never both"
+            );
+            let wasm = native
+                .wasm
+                .as_ref()
+                .unwrap_or_else(|| panic!("the program of `{symbol}` is not lowered"));
+            assert_eq!(
+                wasm, &native.interpreter,
+                "the module's `{symbol}` disagrees on `{operands}`"
+            );
             let body_wasm = body
                 .wasm
                 .unwrap_or_else(|| panic!("the body of `{symbol}` is not lowered"));

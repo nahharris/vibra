@@ -566,6 +566,12 @@ struct Checker<'a> {
     library_indices: BTreeMap<String, usize>,
     no_indices: BTreeMap<String, usize>,
     no_names: BTreeMap<String, ByteSpan>,
+    /// Each builtin member header by path: the names the Vibra body of a
+    /// native sees.
+    builtin_indices: BTreeMap<String, usize>,
+    /// The builtin member whose native has no import, by header index, with
+    /// the body the embedded module writes for it.
+    native_bodies: BTreeMap<usize, &'static vibra_syntax::FunctionDeclaration>,
 }
 
 /// The module index of the library module's function headers.
@@ -598,6 +604,8 @@ impl<'a> Checker<'a> {
             library_indices: BTreeMap::new(),
             no_indices: BTreeMap::new(),
             no_names: BTreeMap::new(),
+            builtin_indices: BTreeMap::new(),
+            native_bodies: BTreeMap::new(),
         }
     }
 
@@ -1100,13 +1108,20 @@ impl<'a> Checker<'a> {
         if let Some((_, library)) = self.library {
             paths.extend(dotted_value_paths(library));
         }
-        for member in standard::builtin_members(&self.types) {
+        for member in standard::members_with_bodies(
+            standard::builtin_members(&self.types),
+            &paths,
+        ) {
             let path = member.path();
-            if !paths.contains(&path) || self.function_indices.contains_key(&path) {
+            if self.function_indices.contains_key(&path) {
                 continue;
             }
             let index = self.functions.len();
             self.function_indices.insert(path.clone(), index);
+            self.builtin_indices.insert(path.clone(), index);
+            if member.intrinsic.runs_body() {
+                self.native_bodies.insert(index, member.method);
+            }
             if self.library.is_some() {
                 self.library_indices.insert(path.clone(), index);
             }
@@ -1213,12 +1228,69 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Checks the Vibra body that the embedded `@std.builtin` writes for a
+    /// native with no import, by the ordinary function checker in that
+    /// module's own environment: its names are the builtin members, and it
+    /// recurses through the wrapper it is carried by.
+    fn check_native_body(
+        &mut self,
+        header: &FunctionHeader,
+        method: &'static vibra_syntax::FunctionDeclaration,
+        intrinsic: CompilerIntrinsic,
+    ) -> Option<CheckedFunction> {
+        // The facts of a body the embedded library declares are not the
+        // checked source's.
+        let mut declared_elsewhere = Vec::new();
+        let mut environment = CheckEnvironment::new(
+            STDLIB_BUILTIN_SOURCE_ID,
+            self.diagnostics,
+            &self.no_indices,
+            &self.globals,
+            &self.functions,
+            &self.builtin_indices,
+            &self.no_names,
+            &mut declared_elsewhere,
+            &self.types,
+        );
+        let origin = SourceOrigin::new(STDLIB_BUILTIN_SOURCE_ID, method.span());
+        let body = check_function_body(&mut environment, method, header, &origin)?;
+        let slot_count = environment.next_slot;
+        match CheckedFunction::new_external_with_body(
+            header.name.clone(),
+            header.signature.clone(),
+            intrinsic,
+            body,
+            slot_count,
+            origin,
+        ) {
+            Ok(function) => Some(function),
+            Err(error) => {
+                unavailable(
+                    self.diagnostics,
+                    STDLIB_BUILTIN_SOURCE_ID,
+                    method.span(),
+                    format!("checked IR construction failed: {error}"),
+                );
+                None
+            }
+        }
+    }
+
     fn check_functions(&mut self) {
         for (index, header) in self.functions.clone().into_iter().enumerate() {
             if header.declaration_index == IMPORTED_FUNCTION_DECLARATION {
                 let Some(intrinsic) = header.external else {
                     continue;
                 };
+                if let Some(method) = self.native_bodies.get(&index).copied() {
+                    if let Some(function) =
+                        self.check_native_body(&header, method, intrinsic)
+                        && let Some(slot) = self.checked_functions.get_mut(index)
+                    {
+                        *slot = Some(function);
+                    }
+                    continue;
+                }
                 let origin = SourceOrigin::new(
                     self.source_id,
                     self.text_import_span.unwrap_or_else(|| self.ast.span()),
@@ -1305,89 +1377,12 @@ impl<'a> Checker<'a> {
                 &mut self.bindings,
                 &self.types,
             );
-            environment.self_type = header.self_type.clone();
-            environment.generics = header.type_parameters.clone();
-            environment.bounds = header.bounds.clone();
-            environment.exit =
-                Some((header.signature.result(), Some(function.result_span())));
-            let mut parameters_valid = true;
-            let mut pending = Vec::new();
-            for (parameter_index, parameter) in function.parameters().iter().enumerate()
-            {
-                match parameter.parsed_pattern().kind() {
-                    PatternKind::Binding(name) if name.is_discard() => {}
-                    PatternKind::Binding(name)
-                        if pattern::pattern_value_global(
-                            &environment,
-                            name,
-                            parameter.parsed_pattern().span(),
-                        )
-                        .is_none() =>
-                    {
-                        if !environment.add_binding(
-                            name.value(),
-                            parameter.value_type(),
-                            parameter.span(),
-                            parameter.parsed_pattern().span(),
-                        ) {
-                            parameters_valid = false;
-                        }
-                    }
-                    _ => match header.signature.parameters().get(parameter_index) {
-                        Some(value_type) => pending.push((
-                            parameter_index,
-                            parameter.parsed_pattern(),
-                            value_type.clone(),
-                        )),
-                        None => parameters_valid = false,
-                    },
-                }
-                environment.next_slot = parameter_index.saturating_add(1);
-            }
-            let mut labelled_index = 0;
-            for attribute in function.attributes().items() {
-                let Attribute::Labelled(entries) = attribute else {
-                    continue;
-                };
-                for entry in entries {
-                    let Some(labelled) =
-                        header.signature.labelled().get(labelled_index)
-                    else {
-                        continue;
-                    };
-                    labelled_index = labelled_index.saturating_add(1);
-                    if !environment.add_binding_type(
-                        labelled.name(),
-                        labelled.value_type(),
-                        entry.name_span(),
-                    ) {
-                        parameters_valid = false;
-                    }
-                }
-            }
-            if !environment
-                .bind_variadic(function.attributes().items(), &header.signature)
-            {
-                parameters_valid = false;
-            }
-            let destructured = environment.bind_parameter_patterns(&pending);
-            let Some(destructured) = destructured else {
-                continue;
-            };
-            if !parameters_valid {
-                continue;
-            }
-            let Some(body) = check_sequence(
-                &mut environment,
-                function.expressions(),
-                Some(header.signature.result()),
-                function.span(),
-                true,
-            ) else {
-                continue;
-            };
             let origin = SourceOrigin::new(source_id, function.span());
-            let body = wrap_destructured(body, destructured, &origin);
+            let Some(body) =
+                check_function_body(&mut environment, function, &header, &origin)
+            else {
+                continue;
+            };
             let implements = header.implements.clone();
             match CheckedFunction::with_slots(
                 header.name,
@@ -1493,6 +1488,89 @@ pub(crate) fn header_function<'a>(
         }
         _ => None,
     }
+}
+
+/// Checks the body of `function` in `environment` under `header`'s signature:
+/// binds its parameters, labelled operands, and variadic tail, then checks the
+/// expressions against the written result. The caller reads
+/// `environment.next_slot` for the slot count of the returned body.
+pub(crate) fn check_function_body(
+    environment: &mut CheckEnvironment<'_>,
+    function: &vibra_syntax::FunctionDeclaration,
+    header: &FunctionHeader,
+    origin: &SourceOrigin,
+) -> Option<Expr> {
+    environment.self_type = header.self_type.clone();
+    environment.generics = header.type_parameters.clone();
+    environment.bounds = header.bounds.clone();
+    environment.exit = Some((header.signature.result(), Some(function.result_span())));
+    let mut parameters_valid = true;
+    let mut pending = Vec::new();
+    for (parameter_index, parameter) in function.parameters().iter().enumerate() {
+        match parameter.parsed_pattern().kind() {
+            PatternKind::Binding(name) if name.is_discard() => {}
+            PatternKind::Binding(name)
+                if pattern::pattern_value_global(
+                    environment,
+                    name,
+                    parameter.parsed_pattern().span(),
+                )
+                .is_none() =>
+            {
+                if !environment.add_binding(
+                    name.value(),
+                    parameter.value_type(),
+                    parameter.span(),
+                    parameter.parsed_pattern().span(),
+                ) {
+                    parameters_valid = false;
+                }
+            }
+            _ => match header.signature.parameters().get(parameter_index) {
+                Some(value_type) => pending.push((
+                    parameter_index,
+                    parameter.parsed_pattern(),
+                    value_type.clone(),
+                )),
+                None => parameters_valid = false,
+            },
+        }
+        environment.next_slot = parameter_index.saturating_add(1);
+    }
+    let mut labelled_index = 0;
+    for attribute in function.attributes().items() {
+        let Attribute::Labelled(entries) = attribute else {
+            continue;
+        };
+        for entry in entries {
+            let Some(labelled) = header.signature.labelled().get(labelled_index) else {
+                continue;
+            };
+            labelled_index = labelled_index.saturating_add(1);
+            if !environment.add_binding_type(
+                labelled.name(),
+                labelled.value_type(),
+                entry.name_span(),
+            ) {
+                parameters_valid = false;
+            }
+        }
+    }
+    if !environment.bind_variadic(function.attributes().items(), &header.signature) {
+        parameters_valid = false;
+    }
+    let destructured = environment.bind_parameter_patterns(&pending)?;
+    if !parameters_valid {
+        return None;
+    }
+    let body = check_sequence(
+        environment,
+        function.expressions(),
+        Some(header.signature.result()),
+        function.span(),
+        true,
+    )?;
+    Some(wrap_destructured(body, destructured, origin))
 }
 
 /// The diagnostic for a checked-IR initializer cycle through the global
@@ -4492,10 +4570,9 @@ fn check_form(
             // callee; only a call that can reach no source code, such as a
             // compiler-intrinsic wrapper, creates no activation to reuse.
             let has_source_target = function_targets.known.iter().any(|index| {
-                environment
-                    .functions
-                    .get(*index)
-                    .is_some_and(|function| function.external.is_none())
+                environment.functions.get(*index).is_some_and(|function| {
+                    function.external.is_none_or(|row| row.runs_body())
+                })
             });
             let tail_transfer = tail_position
                 && (has_source_target
@@ -5076,8 +5153,10 @@ fn check_form(
 }
 
 /// A call to a module function. In tail position it is a tail transfer that
-/// reuses the activation, unless the function is a compiler-intrinsic wrapper,
-/// which creates no activation to reuse.
+/// reuses the activation, unless the function is a compiler-intrinsic wrapper
+/// that a module does not run as a body (an inline row or an import), which
+/// creates no activation to reuse. A native that runs its checked body creates
+/// one, so its call is marked by its position like any other.
 pub(crate) fn direct_call(
     environment: &CheckEnvironment<'_>,
     function: usize,
@@ -5089,7 +5168,7 @@ pub(crate) fn direct_call(
     let runs_source = environment
         .functions
         .get(function)
-        .is_some_and(|header| header.external.is_none());
+        .is_some_and(|header| header.external.is_none_or(|row| row.runs_body()));
     if tail_position && runs_source {
         Expr::tail_call(function, arguments, result, origin)
     } else {
@@ -5888,6 +5967,24 @@ fn dotted_value_paths(ast: &SourceAst) -> BTreeSet<String> {
     }
     let mut paths = BTreeSet::new();
     for body in bodies {
+        walk_expressions(body, &mut |expression| {
+            if let ExpressionKind::Name(name) = expression.kind()
+                && name.kind() == NameKind::Symbol
+                && name.segments().len() > 1
+            {
+                paths.insert(name.value().to_owned());
+            }
+        });
+    }
+    paths
+}
+
+/// Every dotted value path written in the body of `function`.
+pub(crate) fn function_value_paths(
+    function: &vibra_syntax::FunctionDeclaration,
+) -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+    for body in function.expressions() {
         walk_expressions(body, &mut |expression| {
             if let ExpressionKind::Name(name) = expression.kind()
                 && name.kind() == NameKind::Symbol
