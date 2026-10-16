@@ -322,3 +322,88 @@ pub(crate) fn apply(
         _ => return None,
     })
 }
+
+// The rest of the interpreter that reads a sequence. Canonical key order, the
+// `iter.next` of a builtin value, and the array a `str` or `bytes` pattern is
+// written over are the same operations as a native row: ordering text or bytes
+// is `text.compare` and `bytes.compare`, the iterator that remains is `slice`
+// from the second unit, and the array of a text is `text.to-chars`. Each goes
+// through the one function of `vibra-native` that the row is, so the
+// interpreter holds no second copy of an algorithm.
+
+/// A `str`, an atom's spelling, or a variant's name, read as its Unicode
+/// scalars.
+struct Scalars<'a>(&'a str);
+
+impl Source for Scalars<'_> {
+    type Unit = u32;
+    type Iter<'a>
+        = std::iter::Map<
+        std::iter::Take<std::iter::Skip<std::str::Chars<'a>>>,
+        fn(char) -> u32,
+    >
+    where
+        Self: 'a;
+
+    fn len(&self) -> u64 {
+        self.0.chars().count() as u64
+    }
+
+    fn range(&self, from: u64, to: u64) -> Self::Iter<'_> {
+        let skip = usize::try_from(from).unwrap_or(usize::MAX);
+        let take = usize::try_from(to.saturating_sub(from)).unwrap_or(0);
+        self.0
+            .chars()
+            .skip(skip)
+            .take(take)
+            .map(u32::from as fn(char) -> u32)
+    }
+}
+
+/// `text.compare` of two spellings: a `str`, an atom, or the name of a variant.
+pub(crate) fn order_text(first: &str, second: &str) -> std::cmp::Ordering {
+    vibra_native::compare(&Scalars(first), &Scalars(second))
+}
+
+/// `bytes.compare`.
+pub(crate) fn order_bytes(first: &[u8], second: &[u8]) -> std::cmp::Ordering {
+    vibra_native::compare(&Units(first), &Units(second))
+}
+
+/// The units after the first, which is how `iter.next` leaves the iterator that
+/// remains: `array.slice` from `1` to the length.
+pub(crate) fn rest<U: Copy>(units: &[U]) -> Vec<U> {
+    let source = Units(units);
+    let mut out = Collect(Vec::new());
+    vibra_native::slice(&source, 1, source.len(), &mut out);
+    out.0
+}
+
+/// The first scalar of a `str` and the text after it (`text.slice` from `1`),
+/// or `None` for the empty text.
+pub(crate) fn text_rest(text: &str) -> Option<(char, String)> {
+    let head = text.chars().next()?;
+    let source = Scalars(text);
+    let mut out = Collect(Vec::new());
+    vibra_native::slice(&source, 1, source.len(), &mut out);
+    Some((head, text_of(out.0)?))
+}
+
+/// The array of `char` or `u8` a `str` or `bytes` value is written over:
+/// `text.to-chars` and `bytes.to-array`.
+pub(crate) fn items_of(value: &RuntimeValue) -> Option<RuntimeValue> {
+    let (row, element) = match value {
+        RuntimeValue::Primitive(Value::Str(_)) => {
+            (CompilerIntrinsic::TextToChars, Type::Char)
+        }
+        RuntimeValue::Primitive(Value::Bytes(_)) => {
+            (CompilerIntrinsic::BytesToArray, Type::U8)
+        }
+        _ => return None,
+    };
+    apply(
+        row,
+        std::slice::from_ref(value),
+        &Type::Array(Box::new(element)),
+    )
+}

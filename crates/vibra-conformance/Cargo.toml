@@ -29,5 +29,7 @@ name = "vibra-conformance"
 path = "src/bin/conformance.rs"
 
 [dev-dependencies]
+wasmparser.workspace = true
+
 [lints]
 workspace = true

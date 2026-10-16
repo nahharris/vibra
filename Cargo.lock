@@ -1447,6 +1447,7 @@ dependencies = [
  "vibra-wasm",
  "vibra-wasm-run",
  "vibra-workspace",
+ "wasmparser 0.261.0",
 ]
 
 [[package]]

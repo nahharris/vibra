@@ -31,6 +31,9 @@ pub(crate) struct Spec<'a> {
     pub(crate) failure_exports: bool,
     /// Native imports to declare, each as `() -> ()`, before any function.
     pub(crate) imports: Vec<(&'a str, &'a str)>,
+    /// Native imports with a signature, declared after the untyped ones: the
+    /// import's name, its parameters, and its one result.
+    pub(crate) typed: Vec<(&'a str, Vec<ValType>, ValType)>,
 }
 
 impl Default for Spec<'_> {
@@ -40,6 +43,7 @@ impl Default for Spec<'_> {
             pages: 1,
             failure_exports: false,
             imports: Vec::new(),
+            typed: Vec::new(),
         }
     }
 }
@@ -70,7 +74,13 @@ pub(crate) fn module(spec: &Spec<'_>) -> Vec<u8> {
     for (module, name) in &spec.imports {
         imports.import(module, name, EntityType::Function(0));
     }
-    let base = u32::try_from(spec.imports.len()).expect("a few imports");
+    for (index, (name, params, result)) in spec.typed.iter().enumerate() {
+        let ty = 3 + u32::try_from(index).expect("a few imports");
+        types.ty().function(params.iter().copied(), [*result]);
+        imports.import("vibra_native_v1", name, EntityType::Function(ty));
+    }
+    let base =
+        u32::try_from(spec.imports.len() + spec.typed.len()).expect("a few imports");
 
     let mut functions = FunctionSection::new();
     functions.function(0); // entry
@@ -180,7 +190,7 @@ pub(crate) fn module(spec: &Spec<'_>) -> Vec<u8> {
 
     let mut module = Module::new();
     module.section(&types);
-    if !spec.imports.is_empty() {
+    if !spec.imports.is_empty() || !spec.typed.is_empty() {
         module.section(&imports);
     }
     module.section(&functions);
