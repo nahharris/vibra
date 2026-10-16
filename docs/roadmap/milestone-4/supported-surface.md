@@ -90,9 +90,9 @@ names.
 | `Attribute::Variadic` | Lowered | Step 8b | (landed) |
 | `Attribute::Visibility` | Static | — | — |
 | `Attribute::Effects` | Stage 4B | Step 14 | Empty rows stay supported |
-| `Attribute::External` | Lowered | Step 8a | `@compiler` rows: Steps 8a–8c (8c landed: the float rows, inline, and the 20 `to-str` and `parse` rows as imports, 42 in `NATIVE_ROWS` with 8b's 22, so every `@compiler` row but `array.fold` is lowered; 8b landed: the text, bytes, array, and dict rows, inline or as the 22 native imports of `NATIVE_ROWS`; 8a landed: the integer arithmetic, shift, comparison, and conversion rows and the `char` rows, lowered inline); `@host`: Stage 4B Step 16 |
+| `Attribute::External` | Lowered | Step 8a | `@compiler` rows: Steps 8a–8c (8c landed: the float rows, inline, and the 20 `to-str` and `parse` rows as imports, 42 in `NATIVE_ROWS` with 8b's 22, so every `@compiler` row is lowered, `array.fold` by running its checked body (Step 8d landed); 8b landed: the text, bytes, array, and dict rows, inline or as the 22 native imports of `NATIVE_ROWS`; 8a landed: the integer arithmetic, shift, comparison, and conversion rows and the `char` rows, lowered inline); `@host`: Stage 4B Step 16 |
 | `Attribute::Symbol` | Static | — | — |
-| `Attribute::Native` | Lowered | Step 10 | 8b: the text, bytes, array, and dict natives are imports of `vibra_native_v1` backed by `vibra-native`, and `array.fold` (no import) is the one native a module runs as its body, Step 8d owns its checked body; Step 10 completes and proves the rule |
+| `Attribute::Native` | Lowered | Step 10 | 8b: the text, bytes, array, and dict natives are imports of `vibra_native_v1` backed by `vibra-native`, and `array.fold` (no import) is the one native a module runs as its body, the checked body of the embedded standard library that the typed IR carries beside the wrapper the interpreter runs (Step 8d landed); Step 10 completes and proves the rule |
 | `Attribute::Role` | Static | — | — |
 | `Attribute::Doc` | Static | — | — |
 

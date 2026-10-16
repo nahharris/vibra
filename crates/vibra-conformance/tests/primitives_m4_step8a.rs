@@ -31,7 +31,6 @@ use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp, NumericType, Vec
 use vibra_ir::{CheckedProgram, ObservedValue, Type, Value};
 use vibra_types::check_source;
 use vibra_wasm::layout::{self, header, state};
-use vibra_wasm::{Form, NotLowered};
 use vibra_wasm_run::{Instance, MemoryLimit, Observed, Outcome, Runner, Started};
 
 const MIB: usize = 1024 * 1024;
