@@ -247,7 +247,7 @@
 //! are the descriptors of its arguments. A slot that holds none (a parameter
 //! nothing fixed) has a clear class byte. The first cell is a **head**:
 //! `class | ordinal << 8`, where the class names what the type is made of (see
-//! [`crate::desc`]). Code reads a descriptor for what the language needs of a
+//! `desc.rs`). Code reads a descriptor for what the language needs of a
 //! type only the argument knows: an enum payload of generic type, which is
 //! absent when the argument is `void`; the selection of a contract member's
 //! implementation; and the order of keys.
