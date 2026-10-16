@@ -791,30 +791,6 @@ fn representation_of(value_type: &Type, value: &RuntimeValue) -> Option<RuntimeV
     }))
 }
 
-/// The array of scalars or bytes a `str` or `bytes` value is written over.
-fn items_of(value: &RuntimeValue) -> Option<RuntimeValue> {
-    let (element, values): (Type, Vec<RuntimeValue>) = match value {
-        RuntimeValue::Primitive(Value::Str(text)) => (
-            Type::Char,
-            text.chars()
-                .map(|value| RuntimeValue::Primitive(Value::Char(value)))
-                .collect(),
-        ),
-        RuntimeValue::Primitive(Value::Bytes(bytes)) => (
-            Type::U8,
-            bytes
-                .iter()
-                .map(|value| RuntimeValue::Primitive(Value::U8(*value)))
-                .collect(),
-        ),
-        _ => return None,
-    };
-    Some(RuntimeValue::Array {
-        value_type: Type::Array(Box::new(element)),
-        values: values.into(),
-    })
-}
-
 /// The runtime value of a labelled default, which is a constant of any type.
 /// It is built as the construction it came from builds it: a record in the
 /// order of its type, a `void` payload as no payload.
@@ -950,7 +926,9 @@ fn pattern_matches(pattern: &Pattern, value: &RuntimeValue) -> bool {
         (
             Pattern::Wrap(inner),
             RuntimeValue::Primitive(Value::Str(_) | Value::Bytes(_)),
-        ) => items_of(value).is_some_and(|items| pattern_matches(inner, &items)),
+        ) => {
+            native::items_of(value).is_some_and(|items| pattern_matches(inner, &items))
+        }
         (
             Pattern::Member { index, pattern, .. },
             RuntimeValue::Union { member, value, .. },
@@ -1010,7 +988,7 @@ fn bind_pattern(
         (
             Pattern::Wrap(inner),
             value @ RuntimeValue::Primitive(Value::Str(_) | Value::Bytes(_)),
-        ) => bind_pattern(inner, &items_of(value)?, slots),
+        ) => bind_pattern(inner, &native::items_of(value)?, slots),
         (Pattern::Member { pattern, .. }, RuntimeValue::Union { value, .. }) => {
             bind_pattern(pattern, value, slots)
         }
@@ -1056,13 +1034,12 @@ fn key_order_canonical(
                 payload: right_payload,
                 ..
             },
-        ) => left_variant
-            .as_bytes()
-            .cmp(right_variant.as_bytes())
-            .then_with(|| match (left_payload, right_payload) {
+        ) => native::order_text(left_variant, right_variant).then_with(|| {
+            match (left_payload, right_payload) {
                 (Some(left), Some(right)) => key_order_canonical(left, right),
                 _ => Ordering::Equal,
-            }),
+            }
+        }),
         (
             RuntimeValue::Union {
                 member: left_member,
@@ -1113,17 +1090,20 @@ fn closed_contract(
 /// Unicode scalar, and an `option` its payload once.
 fn closed_next(iterator: &RuntimeValue, result: &Type) -> Option<RuntimeValue> {
     let step = match iterator {
-        RuntimeValue::Array { value_type, values } => {
-            values.split_first().map(|(first, rest)| {
-                (
-                    first.clone(),
-                    RuntimeValue::Array {
-                        value_type: value_type.clone(),
-                        values: rest.to_vec().into(),
-                    },
-                )
-            })
-        }
+        RuntimeValue::Array { value_type, values } => values.first().map(|first| {
+            let items = values.iter().collect::<Vec<_>>();
+            (
+                first.clone(),
+                RuntimeValue::Array {
+                    value_type: value_type.clone(),
+                    values: native::rest(&items)
+                        .into_iter()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .into(),
+                },
+            )
+        }),
         RuntimeValue::Dict {
             value_type,
             entries,
@@ -1131,30 +1111,32 @@ fn closed_next(iterator: &RuntimeValue, result: &Type) -> Option<RuntimeValue> {
             let Type::Dict(key, value) = value_type else {
                 return None;
             };
-            entries
-                .split_first()
-                .map(|((first_key, first_value), rest)| {
-                    (
-                        RuntimeValue::Tuple {
-                            value_type: Type::Tuple(vec![
-                                key.as_ref().clone(),
-                                value.as_ref().clone(),
-                            ]),
-                            values: vec![first_key.clone(), first_value.clone()].into(),
-                        },
-                        RuntimeValue::Dict {
-                            value_type: value_type.clone(),
-                            entries: rest.to_vec().into(),
-                        },
-                    )
-                })
+            entries.first().map(|(first_key, first_value)| {
+                let items = entries.iter().collect::<Vec<_>>();
+                (
+                    RuntimeValue::Tuple {
+                        value_type: Type::Tuple(vec![
+                            key.as_ref().clone(),
+                            value.as_ref().clone(),
+                        ]),
+                        values: vec![first_key.clone(), first_value.clone()].into(),
+                    },
+                    RuntimeValue::Dict {
+                        value_type: value_type.clone(),
+                        entries: native::rest(&items)
+                            .into_iter()
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .into(),
+                    },
+                )
+            })
         }
         RuntimeValue::Primitive(Value::Str(text)) => {
-            let mut scalars = text.chars();
-            scalars.next().map(|first| {
+            native::text_rest(text).map(|(first, remaining)| {
                 (
                     RuntimeValue::Primitive(Value::Char(first)),
-                    RuntimeValue::Primitive(Value::Str(scalars.as_str().to_owned())),
+                    RuntimeValue::Primitive(Value::Str(remaining)),
                 )
             })
         }
@@ -1215,12 +1197,11 @@ fn primitive_order(left: &Value, right: &Value) -> std::cmp::Ordering {
     match (left, right) {
         (Value::Bool(left), Value::Bool(right)) => left.cmp(right),
         (Value::Char(left), Value::Char(right)) => left.cmp(right),
-        // UTF-8 byte order is scalar-value order.
-        (Value::Str(left), Value::Str(right)) => left.as_bytes().cmp(right.as_bytes()),
-        (Value::Bytes(left), Value::Bytes(right)) => left.cmp(right),
-        (Value::Atom(left), Value::Atom(right)) => {
-            left.as_bytes().cmp(right.as_bytes())
-        }
+        // Text, bytes, and an atom's spelling order as `text.compare` and
+        // `bytes.compare` do: they are those natives.
+        (Value::Str(left), Value::Str(right))
+        | (Value::Atom(left), Value::Atom(right)) => native::order_text(left, right),
+        (Value::Bytes(left), Value::Bytes(right)) => native::order_bytes(left, right),
         (Value::I8(left), Value::I8(right)) => left.cmp(right),
         (Value::I16(left), Value::I16(right)) => left.cmp(right),
         (Value::I32(left), Value::I32(right)) => left.cmp(right),

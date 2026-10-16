@@ -464,7 +464,7 @@ impl<'a> Machine<'a> {
                         payload: right_payload,
                         ..
                     },
-                ) => match left_variant.as_bytes().cmp(right_variant.as_bytes()) {
+                ) => match crate::native::order_text(left_variant, right_variant) {
                     Ordering::Equal => match (left_payload, right_payload) {
                         (Some(left), Some(right)) => engine.work.push(Work::Pair(
                             RuntimeValue::clone(left),
