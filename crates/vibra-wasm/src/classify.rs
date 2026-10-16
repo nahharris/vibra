@@ -83,7 +83,7 @@ fn function_forms(
     // A function that implements a contract member is an ordinary function
     // here: what dispatches to it is a contract call, which is reported where
     // it is made (Step 9).
-    walk(env, function.body(), found);
+    walk(env, function.module_body().0, found);
 }
 
 /// Records a node and every node below it that the emitter does not lower.

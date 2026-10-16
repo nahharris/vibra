@@ -595,6 +595,16 @@ impl CompilerIntrinsic {
         )
     }
 
+    /// Whether a module runs the checked Vibra body of this row: a native
+    /// implementation with no import, which the table of native imports
+    /// leaves out because its meaning applies a function value and a pure
+    /// import cannot call back into the module. Every other row is an inline
+    /// instruction sequence or an import.
+    #[must_use]
+    pub fn runs_body(self) -> bool {
+        self.is_native() && self.native_import().is_none()
+    }
+
     /// The sample vectors of this row: operands, and the outcome the
     /// specification gives them, computed once from Rust's own integer and
     /// float types, formatting, and parsing and independent of any backend.

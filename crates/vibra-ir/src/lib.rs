@@ -2641,8 +2641,22 @@ pub struct CheckedFunction {
     origin: SourceOrigin,
     slot_count: usize,
     external_wrapper: bool,
+    native_body: Option<NativeBody>,
     test_assertion: Option<TestAssertion>,
     implements: Option<Implements>,
+}
+
+/// The checked Vibra body of a native whose meaning applies a function value.
+///
+/// Such a native has no import, because a pure import cannot call back into
+/// the module, so a module runs this body (`docs/spec/06-runtime.md`, "Native
+/// implementations"). The reference interpreter keeps running its native code,
+/// which the differential holds to the body. The body has the signature of the
+/// wrapper that carries it, and it calls the wrapper itself to recurse.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NativeBody {
+    body: Expr,
+    slot_count: usize,
 }
 
 /// The contract member a function implements for one receiver type, which
@@ -2706,6 +2720,63 @@ impl CheckedFunction {
         Self::with_slots_and_external(
             name, signature, body, origin, slot_count, true, None,
         )
+    }
+
+    /// Creates the wrapper of a native whose meaning runs a Vibra body in a
+    /// module, carrying that checked body beside the wrapper the interpreter
+    /// runs as the native.
+    ///
+    /// The body has the wrapper's signature, `slot_count` immutable activation
+    /// slots, and recurses by calling the wrapper.
+    ///
+    /// # Errors
+    ///
+    /// The intrinsic is not a native without an import, the signature
+    /// disagrees with the registry, or the body is not of the signature's
+    /// result type.
+    pub fn new_external_with_body(
+        name: impl Into<String>,
+        signature: FunctionSignature,
+        intrinsic: external::CompilerIntrinsic,
+        body: Expr,
+        slot_count: usize,
+        origin: SourceOrigin,
+    ) -> Result<Self, IrError> {
+        if !intrinsic.runs_body() {
+            return Err(IrError::InvalidExpression(format!(
+                "external {} has an import or an inline lowering, so it has no body to run",
+                intrinsic.symbol()
+            )));
+        }
+        let mut function = Self::new_external(name, signature, intrinsic, origin)?;
+        function.validate_body(&body, slot_count)?;
+        function.native_body = Some(NativeBody { body, slot_count });
+        Ok(function)
+    }
+
+    /// Checks that `body` is a body of this function's signature.
+    fn validate_body(&self, body: &Expr, slot_count: usize) -> Result<(), IrError> {
+        if slot_count < self.signature.fixed_parameter_count() {
+            return Err(IrError::InvalidSlotCount {
+                function: self.name.clone(),
+                slots: slot_count,
+                parameters: self.signature.fixed_parameter_count(),
+            });
+        }
+        let mut slots = vec![None; slot_count];
+        for (slot, value_type) in self.signature.slot_types().into_iter().enumerate() {
+            if let Some(bound) = slots.get_mut(slot) {
+                *bound = Some(value_type);
+            }
+        }
+        let actual = body.validate_shape(&mut slots)?;
+        if actual != Type::Never && !actual.same_shape(&self.signature.result()) {
+            return Err(IrError::ResultTypeMismatch {
+                expected: Box::new(self.signature.result()),
+                actual: Box::new(actual),
+            });
+        }
+        Ok(())
     }
 
     /// Creates a checked function, rejecting a body whose final type differs
@@ -2796,6 +2867,7 @@ impl CheckedFunction {
             origin,
             slot_count,
             external_wrapper,
+            native_body: None,
             test_assertion,
             implements: None,
         })
@@ -2836,6 +2908,25 @@ impl CheckedFunction {
     #[must_use]
     pub const fn is_external_wrapper(&self) -> bool {
         self.external_wrapper
+    }
+
+    /// The checked Vibra body of a native whose meaning applies a function
+    /// value, which a module runs where the interpreter runs the native. `None`
+    /// for every other function.
+    #[must_use]
+    pub fn native_body(&self) -> Option<&Expr> {
+        self.native_body.as_ref().map(|native| &native.body)
+    }
+
+    /// The body a module lowers for this function, and the number of
+    /// immutable activation slots it needs: the checked Vibra body of a native
+    /// that runs one, and the function's own body otherwise.
+    #[must_use]
+    pub fn module_body(&self) -> (&Expr, usize) {
+        match &self.native_body {
+            Some(native) => (&native.body, native.slot_count),
+            None => (&self.body, self.slot_count),
+        }
     }
 
     /// Whether this is one of the closed verified test assertion functions.
@@ -2899,6 +2990,15 @@ fn static_program_edges(
             Some(DependencyNode::Function(index)),
             &mut dependencies,
         )?;
+        if let Some(body) = function.native_body() {
+            validate_program_expr(
+                body,
+                globals,
+                functions,
+                Some(DependencyNode::Function(index)),
+                &mut dependencies,
+            )?;
+        }
     }
     Ok(dependencies)
 }
@@ -2981,6 +3081,9 @@ impl CheckedModuleSet {
                     actual: Box::new(actual),
                 });
             }
+            if let Some(native) = &function.native_body {
+                function.validate_body(&native.body, native.slot_count)?;
+            }
         }
         for global in &globals {
             if let Err(message) = validate_type_shape(&global.value_type) {
@@ -3001,6 +3104,9 @@ impl CheckedModuleSet {
         for function in &functions {
             validate_declared_signature(function.signature(), &definitions)?;
             validate_declared_expr(function.body(), &definitions)?;
+            if let Some(body) = function.native_body() {
+                validate_declared_expr(body, &definitions)?;
+            }
         }
         for global in &globals {
             validate_declared_type(&global.value_type, &definitions)?;
@@ -3011,6 +3117,9 @@ impl CheckedModuleSet {
         }
         for function in &functions {
             validate_tail_calls(function.body(), true)?;
+            if let Some(body) = function.native_body() {
+                validate_tail_calls(body, true)?;
+            }
         }
         let static_dependencies = static_program_edges(&globals, &functions)?;
         reject_entry_free_initializer_cycles(
@@ -3180,13 +3289,17 @@ impl CheckedProgram {
                 .map(canonical_type)
                 .collect::<Vec<_>>();
             let body = canonical_expr(function.body());
+            let native = function.native_body().map_or_else(String::new, |body| {
+                format!(" native-body: {}", canonical_expr(body))
+            });
             output.push_str(&format!(
-                "    (record name: @{} params: {} result: {}{} body: {})\n",
+                "    (record name: @{} params: {} result: {}{} body: {}{})\n",
                 function.name,
                 canonical_array(&parameters),
                 canonical_type(&function.signature.result()),
                 canonical_labelled_field(&function.signature),
-                body
+                body,
+                native
             ));
         }
         output.push_str("  )\n)\n");
