@@ -54,7 +54,7 @@ V1-RUNTIME-key-contracts	not-lowered	9
 V1-RUNTIME-let-else	matched
 V1-RUNTIME-library-composites	not-lowered	11
 V1-RUNTIME-library-dict	matched
-V1-RUNTIME-library-roles	not-lowered	8d
+V1-RUNTIME-library-roles	matched
 V1-RUNTIME-literal	matched
 V1-RUNTIME-lookups	matched
 V1-RUNTIME-match-patterns	matched

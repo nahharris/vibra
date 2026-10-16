@@ -30,10 +30,10 @@ static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
 const VOID_RESULT: &str = "(record type: @void value: void)\n";
 const NO_EVENTS: &str = "(record format: @audit-trace.v1 events: (array))\n";
 
-/// A program that applies a function value through `array.fold`, whose body a
-/// module will run once the checked IR carries it; until then it is not lowered.
-const UNLOWERED: &str = "(defn answer () i32 (array.fold (array.of 1i32) 0i32 (lambda (total i32 item i32) i32 item)))\n";
-const UNLOWERED_RESULT: &str = "(record type: @i32 value: 1i32)\n";
+/// A program that calls a contract member, which selects its implementation
+/// from a run-time type: the emitter does not lower it until Step 9.
+const UNLOWERED: &str = "(defint shape (defn size (value self) u64))\n(deftype square (record side u64)\n  (impl shape (defn size (value self) u64 (value @side))))\n(defn answer () u64 (shape.size (as shape (square side: 3u64))))\n";
+const UNLOWERED_RESULT: &str = "(record type: @u64 value: 3u64)\n";
 
 /// A temporary corpus root that removes itself.
 struct TempCorpus {
@@ -218,7 +218,7 @@ fn a_program_that_does_not_lower_still_passes_in_the_interpreter() {
         panic!("expected not lowered, got {wasm:?}");
     };
     assert!(
-        forms.iter().any(|form| form.starts_with("external")),
+        forms.iter().any(|form| form.starts_with("call")),
         "{forms:?}"
     );
     assert_eq!(

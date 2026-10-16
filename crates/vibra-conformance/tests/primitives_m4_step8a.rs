@@ -469,13 +469,15 @@ fn a_program_of_primitive_rows_is_emitted_to_the_same_bytes_twice() {
 }
 
 #[test]
-fn the_number_text_and_float_rows_are_lowered_and_the_one_row_left_is_named() {
-    // Step 8c lowers `to-str`, `parse`, and the float rows, so they emit; the
-    // one registry row that is still not lowered is `array.fold`, Step 8d's.
+fn the_number_text_and_float_rows_and_the_function_applying_native_are_lowered() {
+    // Step 8c lowers `to-str`, `parse`, and the float rows, and Step 8d lowers
+    // `array.fold` by running its checked Vibra body, so every registry row
+    // emits.
     for source in [
         "(defn main () str (i32.to-str 1i32))\n",
         "(defn main () f64 (f64.add 1.0 2.0))\n",
         "(defn main () (result f32 core.conversion-error) (f32.parse \"1.5\"))\n",
+        "(defn main () i32 (array.fold (array.of 1i32) 0i32 (lambda (total i32 item i32) i32 item)))\n",
     ] {
         let source = if source.contains("core.") {
             format!("(import core @std.core)\n{source}")
@@ -485,18 +487,6 @@ fn the_number_text_and_float_rows_are_lowered_and_the_one_row_left_is_named() {
         let program = checked(&source);
         vibra_wasm::emit(&program).expect("lowered");
     }
-    let program = checked(
-        "(defn main () i32 (array.fold (array.of 1i32) 0i32 (lambda (total i32 item i32) i32 item)))\n",
-    );
-    let error: NotLowered = vibra_wasm::emit(&program).expect_err("not lowered yet");
-    assert!(
-        error
-            .forms()
-            .iter()
-            .any(|form| form.form() == Form::External
-                && form.detail() == Some("array.fold")),
-        "{error}"
-    );
 }
 
 #[test]
