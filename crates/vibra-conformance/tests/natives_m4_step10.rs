@@ -315,3 +315,120 @@ fn no_native_has_a_second_implementation_in_the_interpreter_the_emitter_or_the_r
         "an implementation of a native outside `vibra-native`: {found:#?}"
     );
 }
+
+// -- the registry, the manifest, and the import table ---------------------------
+
+#[test]
+fn the_manifest_native_list_is_exactly_the_registry_natives() {
+    let stdlib = vibra_types::load_stdlib().expect("standard library");
+    let listed = stdlib
+        .native_symbols()
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let registry = CompilerIntrinsic::all()
+        .into_iter()
+        .filter(|row| row.is_native())
+        .map(CompilerIntrinsic::symbol)
+        .collect::<BTreeSet<_>>();
+    assert_eq!(listed, registry);
+    assert_eq!(listed.len(), stdlib.native_symbols().len(), "listed once");
+    // Each is exactly one of an import and a checked body.
+    let mut bodies = Vec::new();
+    for symbol in &listed {
+        let row = CompilerIntrinsic::from_symbol(symbol).expect("a registry row");
+        assert_ne!(row.native_import().is_some(), row.runs_body(), "{symbol}");
+        if row.runs_body() {
+            bodies.push(*symbol);
+        }
+    }
+    assert_eq!(bodies, ["array.fold"]);
+}
+
+#[test]
+fn the_import_table_names_the_native_imports_and_the_looping_primitive_rows() {
+    let imports = NATIVE_ROWS
+        .iter()
+        .map(|row| row.name())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(imports.len(), NATIVE_ROWS.len(), "a name is imported once");
+    let stdlib = vibra_types::load_stdlib().expect("standard library");
+    let native_imports = stdlib
+        .native_symbols()
+        .iter()
+        .map(String::as_str)
+        .filter(|symbol| imports.contains(symbol))
+        .collect::<BTreeSet<_>>();
+    // The rest of the table is the primitive rows whose algorithm loops.
+    let looping = imports
+        .difference(&native_imports)
+        .map(|symbol| (*symbol).to_owned())
+        .collect::<BTreeSet<_>>();
+    let expected = ["array.append", "array.concat", "array.slice", "dict.entries"]
+        .into_iter()
+        .map(str::to_owned)
+        .chain(
+            ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64"]
+                .into_iter()
+                .flat_map(|numeric| {
+                    [format!("{numeric}.to-str"), format!("{numeric}.parse")]
+                }),
+        )
+        .collect::<BTreeSet<_>>();
+    assert_eq!(looping, expected);
+    for symbol in &looping {
+        let row = CompilerIntrinsic::from_symbol(symbol).expect("a registry row");
+        assert!(!row.is_native(), "{symbol} is a primitive row");
+    }
+    // The imports are the natives but for the ones that apply a function value.
+    assert_eq!(
+        native_imports.len() + 1,
+        stdlib.native_symbols().len(),
+        "only `array.fold` is a native without an import"
+    );
+}
+
+// -- a native the toolchain does not implement is a provenance defect ---------
+
+fn rejected(manifest: &str) -> String {
+    let mut inputs = vibra_types::StdlibInputs::embedded();
+    inputs.manifest = manifest.as_bytes();
+    vibra_types::load_stdlib_bytes(&inputs)
+        .expect_err("the manifest is refused")
+        .to_string()
+}
+
+fn manifest() -> String {
+    String::from_utf8(vibra_types::StdlibInputs::embedded().manifest.to_vec())
+        .expect("manifest text")
+}
+
+#[test]
+fn a_manifest_that_lists_a_native_the_toolchain_does_not_implement_is_a_provenance_defect() {
+    let unknown = manifest().replace(
+        "native: (array \"array.of\"",
+        "native: (array \"text.reverse\" \"array.of\"",
+    );
+    let message = rejected(&unknown);
+    assert!(
+        message.contains("`text.reverse`, which is not in the compiler registry"),
+        "{message}"
+    );
+    // A primitive row listed as a native, and a native listed as a primitive
+    // row, are in the wrong tier: the two tiers are disjoint.
+    let primitive = manifest().replace(
+        "native: (array \"array.of\"",
+        "native: (array \"array.of\" \"array.slice\"",
+    );
+    assert!(rejected(&primitive).contains("`array.slice` in the wrong tier"));
+    let native = manifest().replace(
+        "compiler: (array\n",
+        "compiler: (array\n    \"text.concat\"\n",
+    );
+    assert!(rejected(&native).contains("`text.concat` in the wrong tier"));
+    // A native a module declares and the manifest does not list.
+    let unlisted = manifest().replace(" \"text.slice\"", "");
+    assert!(
+        rejected(&unlisted).contains("binds `text.slice`, which the manifest does not list")
+    );
+}
