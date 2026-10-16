@@ -364,17 +364,22 @@ fn the_import_table_names_the_native_imports_and_the_looping_primitive_rows() {
         .difference(&native_imports)
         .map(|symbol| (*symbol).to_owned())
         .collect::<BTreeSet<_>>();
-    let expected = ["array.append", "array.concat", "array.slice", "dict.entries"]
+    let expected = [
+        "array.append",
+        "array.concat",
+        "array.slice",
+        "dict.entries",
+    ]
+    .into_iter()
+    .map(str::to_owned)
+    .chain(
+        [
+            "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64",
+        ]
         .into_iter()
-        .map(str::to_owned)
-        .chain(
-            ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64"]
-                .into_iter()
-                .flat_map(|numeric| {
-                    [format!("{numeric}.to-str"), format!("{numeric}.parse")]
-                }),
-        )
-        .collect::<BTreeSet<_>>();
+        .flat_map(|numeric| [format!("{numeric}.to-str"), format!("{numeric}.parse")]),
+    )
+    .collect::<BTreeSet<_>>();
     assert_eq!(looping, expected);
     for symbol in &looping {
         let row = CompilerIntrinsic::from_symbol(symbol).expect("a registry row");
@@ -386,6 +391,299 @@ fn the_import_table_names_the_native_imports_and_the_looping_primitive_rows() {
         stdlib.native_symbols().len(),
         "only `array.fold` is a native without an import"
     );
+}
+
+// -- the looping primitive rows and the closed iteration, in both backends ---------
+
+/// What one program answers in the interpreter and in the module, and the
+/// imports the module declares.
+struct Ran {
+    interpreter: String,
+    wasm: String,
+    imports: Vec<(String, String)>,
+}
+
+fn imports_of(bytes: &[u8]) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    for payload in wasmparser::Parser::new(0).parse_all(bytes) {
+        if let wasmparser::Payload::ImportSection(section) = payload.expect("a module")
+        {
+            for import in section.into_imports() {
+                let import = import.expect("an import");
+                found.push((import.module.to_owned(), import.name.to_owned()));
+            }
+        }
+    }
+    found
+}
+
+fn run_both(source: &str) -> Ran {
+    let checked = vibra_types::check_source("input.vib", source);
+    let program = checked
+        .program()
+        .unwrap_or_else(|| panic!("{source}\n{:?}", checked.diagnostics()));
+    let interpreter = vibra_interp::run(program)
+        .expect("execution")
+        .canonical_result();
+    let module = vibra_wasm::emit(program)
+        .unwrap_or_else(|error| panic!("{source}\nnot lowered: {error}"));
+    let ty = program.entry().signature().result();
+    let runner =
+        vibra_wasm_run::Runner::new(vibra_wasm_run::MemoryLimit::new(64 * 1024 * 1024))
+            .expect("the engine configures");
+    let wasm = match runner
+        .run_observed(module.bytes(), &ty, program.types())
+        .expect("the module runs")
+    {
+        vibra_wasm_run::Observed::Completed { value, .. } => {
+            value.canonical_observation(&ty)
+        }
+        vibra_wasm_run::Observed::Stopped(outcome) => {
+            panic!("{source}\nthe module stopped: {outcome:?}")
+        }
+    };
+    Ran {
+        interpreter,
+        wasm,
+        imports: imports_of(module.bytes()),
+    }
+}
+
+/// Samples of the rows with no Vibra body, which the shared vectors do not cover
+/// because their operands are arrays: the written type of the result, the call,
+/// and the value the specification gives it, written out as a literal.
+fn loop_samples() -> Vec<(&'static str, &'static str, &'static str, &'static str)> {
+    vec![
+        (
+            "array.append",
+            "(array i32)",
+            "(array.append (array.of 1i32 2i32) 3i32)",
+            "(array.of 1i32 2i32 3i32)",
+        ),
+        (
+            "array.append",
+            "(array i32)",
+            "(array.append (as (array i32) (array.of)) 7i32)",
+            "(array.of 7i32)",
+        ),
+        (
+            "array.append",
+            "(array str)",
+            "(array.append (array.of \"a\" \"\") \"b\")",
+            "(array.of \"a\" \"\" \"b\")",
+        ),
+        (
+            "array.append",
+            "(array (array u8))",
+            "(array.append (array.of (array.of 1u8)) (array.of))",
+            "(array.of (array.of 1u8) (as (array u8) (array.of)))",
+        ),
+        (
+            "array.concat",
+            "(array i32)",
+            "(array.concat (as (array i32) (array.of)) (as (array i32) (array.of)))",
+            "(as (array i32) (array.of))",
+        ),
+        (
+            "array.concat",
+            "(array i32)",
+            "(array.concat (array.of 1i32) (as (array i32) (array.of)))",
+            "(array.of 1i32)",
+        ),
+        (
+            "array.concat",
+            "(array i32)",
+            "(array.concat (as (array i32) (array.of)) (array.of 1i32 2i32))",
+            "(array.of 1i32 2i32)",
+        ),
+        (
+            "array.concat",
+            "(array str)",
+            "(array.concat (array.of \"a\") (array.of \"b\" \"a\"))",
+            "(array.of \"a\" \"b\" \"a\")",
+        ),
+        (
+            "array.slice",
+            "(option (array i32))",
+            "(array.slice (array.of 1i32 2i32 3i32) 1u64 3u64)",
+            "(option.some (array.of 2i32 3i32))",
+        ),
+        (
+            "array.slice",
+            "(option (array i32))",
+            "(array.slice (array.of 1i32 2i32 3i32) 3u64 3u64)",
+            "(option.some (as (array i32) (array.of)))",
+        ),
+        (
+            "array.slice",
+            "(option (array i32))",
+            "(array.slice (array.of 1i32 2i32 3i32) 2u64 1u64)",
+            "(as (option (array i32)) (option.none))",
+        ),
+        (
+            "array.slice",
+            "(option (array i32))",
+            "(array.slice (array.of 1i32 2i32 3i32) 0u64 4u64)",
+            "(as (option (array i32)) (option.none))",
+        ),
+        (
+            "array.slice",
+            "(option (array i32))",
+            "(array.slice (as (array i32) (array.of)) 0u64 0u64)",
+            "(option.some (as (array i32) (array.of)))",
+        ),
+        (
+            "array.slice",
+            "(option (array str))",
+            "(array.slice (array.of \"a\" \"b\") 1u64 2u64)",
+            "(option.some (array.of \"b\"))",
+        ),
+        // The slice of a dict's entries is how the module leaves the remainder
+        // of `iter.next` over a dict.
+        (
+            "array.slice",
+            "(option (array (tuple str i32)))",
+            "(array.slice (dict.entries (dict.of \"b\" 2i32 \"a\" 1i32 \"c\" 3i32)) 1u64 3u64)",
+            "(option.some (array.of (tupleof \"b\" 2i32) (tupleof \"c\" 3i32)))",
+        ),
+        (
+            "dict.entries",
+            "(array (tuple str i32))",
+            "(dict.entries (dict.of \"b\" 2i32 \"a\" 1i32 \"b\" 3i32))",
+            "(array.of (tupleof \"a\" 1i32) (tupleof \"b\" 3i32))",
+        ),
+        (
+            "dict.entries",
+            "(array (tuple str i32))",
+            "(dict.entries (as (dict str i32) (dict.of)))",
+            "(as (array (tuple str i32)) (array.of))",
+        ),
+        // Atoms are ordered by their spelling through `text.compare`: a prefix
+        // before its extension, and `-` (U+002D) before a letter.
+        (
+            "dict.entries",
+            "(array (tuple atom i32))",
+            "(dict.entries (dict.of @b 1i32 @ab 2i32 @a 3i32 @a-b 4i32))",
+            "(array.of (tupleof @a 3i32) (tupleof @a-b 4i32) (tupleof @ab 2i32) (tupleof @b 1i32))",
+        ),
+        (
+            "dict.entries",
+            "(array (tuple bytes u8))",
+            "(dict.entries (dict.of (bytes (array.of 2u8)) 1u8 (bytes (array.of 1u8 9u8)) 2u8 (bytes (array.of)) 3u8))",
+            "(array.of (tupleof (bytes (array.of)) 3u8) (tupleof (bytes (array.of 1u8 9u8)) 2u8) (tupleof (bytes (array.of 2u8)) 1u8))",
+        ),
+        // `iter.next`: the first item and the iterator that remains.
+        (
+            "array.slice",
+            "(option (tuple i32 (array i32)))",
+            "(iter.next (array.of 1i32 2i32 3i32))",
+            "(option.some (tupleof 1i32 (array.of 2i32 3i32)))",
+        ),
+        (
+            "array.slice",
+            "(option (tuple i32 (array i32)))",
+            "(iter.next (array.of 1i32))",
+            "(option.some (tupleof 1i32 (as (array i32) (array.of))))",
+        ),
+        (
+            "array.slice",
+            "(option (tuple i32 (array i32)))",
+            "(iter.next (as (array i32) (array.of)))",
+            "(as (option (tuple i32 (array i32))) (option.none))",
+        ),
+        (
+            "array.slice",
+            "(option (tuple (tuple str i32) (dict str i32)))",
+            "(iter.next (dict.of \"b\" 2i32 \"a\" 1i32 \"c\" 3i32))",
+            "(option.some (tupleof (tupleof \"a\" 1i32) (dict.of \"b\" 2i32 \"c\" 3i32)))",
+        ),
+        (
+            "array.slice",
+            "(option (tuple (tuple str i32) (dict str i32)))",
+            "(iter.next (dict.of \"a\" 1i32))",
+            "(option.some (tupleof (tupleof \"a\" 1i32) (as (dict str i32) (dict.of))))",
+        ),
+        (
+            "array.slice",
+            "(option (tuple (tuple str i32) (dict str i32)))",
+            "(iter.next (as (dict str i32) (dict.of)))",
+            "(as (option (tuple (tuple str i32) (dict str i32))) (option.none))",
+        ),
+        (
+            "array.slice",
+            "(option (tuple (tuple atom i32) (dict atom i32)))",
+            "(iter.next (dict.of (as atom @b) 1i32 (as atom @a) 2i32))",
+            "(option.some (tupleof (tupleof (as atom @a) 2i32) (dict.of (as atom @b) 1i32)))",
+        ),
+        (
+            "text.slice",
+            "(option (tuple char str))",
+            "(iter.next \"h\u{e9}\u{1d11e}\")",
+            "(option.some (tupleof \\h \"\u{e9}\u{1d11e}\"))",
+        ),
+        (
+            "text.slice",
+            "(option (tuple char str))",
+            "(iter.next \"\")",
+            "(as (option (tuple char str)) (option.none))",
+        ),
+    ]
+}
+
+#[test]
+fn the_looping_rows_and_iteration_agree_across_both_backends_and_the_literal() {
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    let mut declared: BTreeSet<(String, String)> = BTreeSet::new();
+    for (row, ty, call, expected) in loop_samples() {
+        let source =
+            format!("(defn main () {ty} {call})\n(import iter @std.iter.iter)\n");
+        let wanted = format!("(defn main () {ty} {expected})\n");
+        let ran = run_both(&source);
+        let literal = run_both(&wanted);
+        assert_eq!(
+            ran.interpreter, literal.interpreter,
+            "the interpreter's `{row}` differs from the specified value of `{call}`"
+        );
+        assert_eq!(
+            ran.wasm, ran.interpreter,
+            "the module's `{row}` differs from the interpreter on `{call}`"
+        );
+        assert_eq!(literal.wasm, literal.interpreter, "{expected}");
+        *counts.entry(row).or_default() += 1;
+        declared.extend(ran.imports);
+    }
+    eprintln!("looping rows and iteration, both backends: {counts:?}");
+    for row in [
+        "array.append",
+        "array.concat",
+        "array.slice",
+        "dict.entries",
+    ] {
+        assert!(counts.get(row).is_some_and(|count| *count >= 3), "{row}");
+    }
+    // The module imports the rows it uses, by their registry names, from the
+    // native import module alone.
+    let table = NATIVE_ROWS
+        .iter()
+        .map(|row| row.name())
+        .collect::<BTreeSet<_>>();
+    for (module, name) in &declared {
+        assert_eq!(module, "vibra_native_v1", "{name}");
+        assert!(table.contains(name.as_str()), "`{name}` is not on the list");
+    }
+    for name in [
+        "array.append",
+        "array.concat",
+        "array.slice",
+        "dict.entries",
+        "text.slice",
+        "text.compare",
+    ] {
+        assert!(
+            declared.iter().any(|(_, declared)| declared == name),
+            "no program imported `{name}`"
+        );
+    }
 }
 
 // -- a native the toolchain does not implement is a provenance defect ---------
@@ -404,7 +702,8 @@ fn manifest() -> String {
 }
 
 #[test]
-fn a_manifest_that_lists_a_native_the_toolchain_does_not_implement_is_a_provenance_defect() {
+fn a_manifest_that_lists_a_native_the_toolchain_does_not_implement_is_a_provenance_defect()
+ {
     let unknown = manifest().replace(
         "native: (array \"array.of\"",
         "native: (array \"text.reverse\" \"array.of\"",
@@ -429,6 +728,7 @@ fn a_manifest_that_lists_a_native_the_toolchain_does_not_implement_is_a_provenan
     // A native a module declares and the manifest does not list.
     let unlisted = manifest().replace(" \"text.slice\"", "");
     assert!(
-        rejected(&unlisted).contains("binds `text.slice`, which the manifest does not list")
+        rejected(&unlisted)
+            .contains("binds `text.slice`, which the manifest does not list")
     );
 }
