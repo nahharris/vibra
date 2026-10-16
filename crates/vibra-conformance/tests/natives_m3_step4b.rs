@@ -356,10 +356,16 @@ fn every_listed_native_matches_its_body() {
     let modules = module_natives();
     let listed = stdlib.native_symbols();
     assert!(!listed.is_empty());
+    let mut counts = std::collections::BTreeMap::new();
     for symbol in listed {
-        let samples = samples(symbol);
+        let mut samples = samples(symbol)
+            .iter()
+            .map(|(result, operands)| ((*result).to_owned(), (*operands).to_owned()))
+            .collect::<Vec<_>>();
         assert!(!samples.is_empty(), "`{symbol}` has no harness samples");
-        for (result, operands) in samples {
+        samples.extend(extra_samples(symbol));
+        counts.insert(symbol.clone(), samples.len());
+        for (result, operands) in &samples {
             let (native, body) = if let Some((_, path, reference)) =
                 members.iter().find(|(member, _, _)| member == symbol)
             {
@@ -424,6 +430,234 @@ fn every_listed_native_matches_its_body() {
                 "the lowered body of `{symbol}` disagrees on `{operands}`"
             );
         }
+    }
+    // Each sample ran on four paths: the interpreter calling the native code,
+    // the interpreter running the body, the module calling the import (or
+    // running the body of a native with none), and the module running the
+    // lowered body.
+    eprintln!(
+        "{} natives, {} samples on four paths: {counts:?}",
+        counts.len(),
+        counts.values().sum::<usize>()
+    );
+    assert_eq!(counts.len(), listed.len());
+    for (symbol, count) in &counts {
+        assert!(*count >= 3, "`{symbol}` has only {count} samples");
+    }
+}
+
+/// Samples at the edges of the domain, which a literal table would be long to
+/// write: a large input, the widest scalars, a sequence of every width, and the
+/// ill-formed UTF-8 the decoder must refuse.
+fn extra_samples(symbol: &str) -> Vec<(String, String)> {
+    let sample = |result: &str, operands: String| (result.to_owned(), operands);
+    // Scalars of one, two, three, and four UTF-8 bytes, repeated.
+    let text = |times: usize| "a\u{e9}\u{20ac}\u{1d11e}".repeat(times);
+    let array = |ty: &str, items: String| (format!("(array {ty})"), items);
+    let numbers = |count: usize, suffix: &str| {
+        (0..count)
+            .map(|index| format!("{index}{suffix}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let byte_array = |bytes: &[u8]| {
+        format!(
+            "(bytes (array.of {}))",
+            bytes
+                .iter()
+                .map(|byte| format!("{byte}u8"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    };
+    let long = (0..=255_u8).cycle().take(1000).collect::<Vec<_>>();
+    match symbol {
+        "array.of" => vec![
+            array("i32", "0i32".to_owned()),
+            array("i32", numbers(300, "i32")),
+            array("str", "\"\" \"a\" \"\u{1d11e}\"".to_owned()),
+            array("(array u8)", "(array.of) (array.of 1u8)".to_owned()),
+        ],
+        "dict.of" => vec![
+            sample("(dict str i32)", "\"a\" 1i32".to_owned()),
+            // Keys of atoms, which are ordered by their spelling, a prefix
+            // before its extension, and a key written twice, whose last
+            // entry wins.
+            sample(
+                "(dict atom i32)",
+                "@b 1i32 @a 2i32 @ab 3i32 @a-b 4i32 @b 5i32".to_owned(),
+            ),
+            sample("(dict char i32)", r"\b 1i32 \a 2i32 \é 3i32".to_owned()),
+            sample(
+                "(dict bytes i32)",
+                format!(
+                    "{} 1i32 {} 2i32 {} 3i32",
+                    byte_array(&[2]),
+                    byte_array(&[1, 9]),
+                    byte_array(&[])
+                ),
+            ),
+        ],
+        "array.fold" => vec![sample(
+            "i32",
+            format!(
+                "(array.of {}) 0i32 (lambda (total i32 item i32) i32 item)",
+                numbers(150, "i32")
+            ),
+        )],
+        "text.concat" => vec![
+            sample("str", format!("{} {}", quoted(&text(1)), quoted(""))),
+            sample("str", format!("{} {}", quoted(""), quoted(&text(1)))),
+            sample(
+                "str",
+                format!("{} {}", quoted(&text(200)), quoted(&text(200))),
+            ),
+        ],
+        "text.length" => vec![sample("u64", quoted(&text(250)))],
+        "text.equal" => vec![
+            sample(
+                "bool",
+                format!("{} {}", quoted(&text(40)), quoted(&text(40))),
+            ),
+            sample(
+                "bool",
+                format!("{} {}", quoted(&text(40)), quoted(&text(41))),
+            ),
+            sample("bool", format!("{} {}", quoted(""), quoted(""))),
+        ],
+        "text.compare" => vec![
+            sample("core.ordering", format!("{} {}", quoted(""), quoted("a"))),
+            sample("core.ordering", format!("{} {}", quoted("a"), quoted(""))),
+            sample(
+                "core.ordering",
+                format!("{} {}", quoted("\u{10ffff}"), quoted("\u{e000}")),
+            ),
+            sample(
+                "core.ordering",
+                format!("{} {}", quoted(&text(30)), quoted(&text(30))),
+            ),
+            sample(
+                "core.ordering",
+                format!("{} {}", quoted("ab"), quoted("a-b")),
+            ),
+        ],
+        "text.slice" => vec![
+            sample("(option str)", format!("{} 0u64 0u64", quoted(&text(3)))),
+            sample("(option str)", format!("{} 0u64 12u64", quoted(&text(3)))),
+            sample("(option str)", format!("{} 12u64 12u64", quoted(&text(3)))),
+            sample("(option str)", format!("{} 13u64 13u64", quoted(&text(3)))),
+            sample("(option str)", format!("{} 1u64 1u64", quoted(""))),
+            sample("(option str)", format!("{} 1u64 2u64", quoted(&text(3)))),
+            sample(
+                "(option str)",
+                format!("{} 0u64 18446744073709551615u64", quoted("abc")),
+            ),
+        ],
+        "text.to-chars" => vec![
+            array("char", quoted(&text(1))),
+            array("char", quoted(&text(120))),
+        ],
+        "text.from-chars" => vec![
+            sample("str", r"(array.of \a \é \€ \𝄞)".to_owned()),
+            sample("str", r"(array.of \a)".to_owned()),
+        ],
+        "text.to-utf8" => vec![
+            sample(
+                "bytes",
+                quoted("\u{7f}\u{80}\u{7ff}\u{800}\u{ffff}\u{10000}\u{10ffff}"),
+            ),
+            sample("bytes", quoted(&text(150))),
+        ],
+        "text.from-utf8" => {
+            let result = "(result str core.conversion-error)";
+            let mut samples = [
+                &[][..],
+                &[0x7f][..],
+                &[0xc2, 0x80][..],
+                &[0xe0, 0xa0, 0x80][..],
+                &[0xf0, 0x90, 0x80, 0x80][..],
+                &[0xf4, 0x8f, 0xbf, 0xbf][..],
+                // Ill-formed: a stray continuation, an overlong form of every
+                // length, a surrogate, a value past U+10FFFF, a truncated
+                // sequence at the end, and a lead byte that is no lead.
+                &[0x80][..],
+                &[0xc1, 0xbf][..],
+                &[0xe0, 0x9f, 0xbf][..],
+                &[0xf0, 0x8f, 0xbf, 0xbf][..],
+                &[0xed, 0xa0, 0x80][..],
+                &[0xf4, 0x90, 0x80, 0x80][..],
+                &[0x61, 0xf0, 0x9d, 0x84][..],
+                &[0xf8, 0x88, 0x80, 0x80, 0x80][..],
+                &[0xe2, 0x82, 0x41][..],
+            ]
+            .iter()
+            .map(|bytes| sample(result, byte_array(bytes)))
+            .collect::<Vec<_>>();
+            samples.push(sample(result, byte_array(&text(100).into_bytes())));
+            samples.push(sample(result, byte_array(&long)));
+            samples
+        }
+        "bytes.length" => vec![
+            sample("u64", byte_array(&[])),
+            sample("u64", byte_array(&long)),
+        ],
+        "bytes.concat" => vec![
+            sample("bytes", format!("{} {}", byte_array(&[]), byte_array(&[]))),
+            sample("bytes", format!("{} {}", byte_array(&[]), byte_array(&[7]))),
+            sample(
+                "bytes",
+                format!("{} {}", byte_array(&long), byte_array(&long)),
+            ),
+        ],
+        "bytes.equal" => vec![
+            sample("bool", format!("{} {}", byte_array(&[]), byte_array(&[]))),
+            sample(
+                "bool",
+                format!("{} {}", byte_array(&long), byte_array(&long)),
+            ),
+            sample(
+                "bool",
+                format!("{} {}", byte_array(&[1, 2]), byte_array(&[1, 3])),
+            ),
+        ],
+        "bytes.compare" => vec![
+            sample(
+                "core.ordering",
+                format!("{} {}", byte_array(&[]), byte_array(&[])),
+            ),
+            sample(
+                "core.ordering",
+                format!("{} {}", byte_array(&[255]), byte_array(&[0, 0])),
+            ),
+            sample(
+                "core.ordering",
+                format!("{} {}", byte_array(&long), byte_array(&long)),
+            ),
+        ],
+        "bytes.slice" => vec![
+            sample("(option bytes)", format!("{} 0u64 0u64", byte_array(&[]))),
+            sample(
+                "(option bytes)",
+                format!("{} 0u64 1000u64", byte_array(&long)),
+            ),
+            sample(
+                "(option bytes)",
+                format!("{} 1000u64 1000u64", byte_array(&long)),
+            ),
+            sample(
+                "(option bytes)",
+                format!("{} 1u64 1001u64", byte_array(&long)),
+            ),
+            sample("(option bytes)", format!("{} 3u64 2u64", byte_array(&long))),
+        ],
+        "bytes.to-array" => {
+            vec![array("u8", byte_array(&[])), array("u8", byte_array(&long))]
+        }
+        "bytes.from-array" => vec![
+            sample("bytes", "(as (array u8) (array.of))".to_owned()),
+            sample("bytes", format!("(array.of {})", numbers(255, "u8"))),
+        ],
+        _ => Vec::new(),
     }
 }
 
