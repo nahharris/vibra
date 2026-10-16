@@ -40,6 +40,7 @@
 //! only on the checked program.
 
 mod classify;
+mod desc;
 mod encode;
 mod form;
 mod key;
@@ -53,6 +54,7 @@ mod types;
 
 use vibra_ir::{CheckedProgram, SourceOrigin};
 
+pub use desc::DescriptorTable;
 pub use form::{Form, NotLowered, UnloweredForm};
 
 /// The origin table the toolchain produces beside a module.
@@ -95,6 +97,7 @@ impl OriginTable {
 pub struct EmittedModule {
     bytes: Vec<u8>,
     origins: OriginTable,
+    descriptors: DescriptorTable,
 }
 
 impl EmittedModule {
@@ -108,6 +111,13 @@ impl EmittedModule {
     #[must_use]
     pub const fn origins(&self) -> &OriginTable {
         &self.origins
+    }
+
+    /// The table that names the types of the module's descriptors, produced
+    /// beside it for a host that reads an interface value.
+    #[must_use]
+    pub const fn descriptors(&self) -> &DescriptorTable {
+        &self.descriptors
     }
 
     /// The module's binary encoding, by value.
@@ -164,6 +174,15 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
         .ok()
         .and_then(|lambdas| total.checked_add(lambdas))
         .ok_or_else(|| NotLowered::single(Form::ModuleSize))?;
+    // The key unit, the language function that orders keys by the descriptor of
+    // their type, follows the lambdas in a module that calls it.
+    let total = if lower::needs_key_unit(program) {
+        total
+            .checked_add(1)
+            .ok_or_else(|| NotLowered::single(Form::ModuleSize))?
+    } else {
+        total
+    };
     // A call pushes a frame of the callee's size, which is known only once the
     // callee is lowered: the first pass finds every size, and which natives the
     // program calls. The natives are imported, and an import takes a function
@@ -171,13 +190,20 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
     // routines after them.
     let count = total as usize;
     let first_fns = encode::routines_for(total);
-    let mut first =
-        lower::Lowering::new(&first_fns, program, &lambdas, vec![0; count], Vec::new());
+    let mut first = lower::Lowering::new(
+        &first_fns,
+        program,
+        &lambdas,
+        vec![0; count],
+        Vec::new(),
+        false,
+    );
     let mut sizes = Vec::with_capacity(count);
     for index in 0..count {
         sizes.push(first.function(index)?.slots);
     }
     let natives = first.used_natives();
+    let desc_equal = first.needs_desc_equal();
     let imports = natives
         .iter()
         .filter_map(|intrinsic| intrinsic.native_import())
@@ -189,8 +215,14 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
             .checked_add(import_count)
             .ok_or_else(|| NotLowered::single(Form::ModuleSize))?,
     );
-    let mut lowering =
-        lower::Lowering::new(&fns, program, &lambdas, sizes.clone(), natives);
+    let mut lowering = lower::Lowering::new(
+        &fns,
+        program,
+        &lambdas,
+        sizes.clone(),
+        natives,
+        desc_equal,
+    );
     let mut lowered = Vec::with_capacity(count);
     for index in 0..count {
         lowered.push(lowering.function(index)?.code);
@@ -201,6 +233,7 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
         .ok_or_else(|| NotLowered::single(Form::ModuleSize))?;
     let include_new = lowering.built_object() || globals != 0;
     let extra = lowering.comparer_routines();
+    let descriptors = lowering.descriptors();
     let parts = encode::Parts {
         functions: lowered,
         // The table holds function indices, which the imports come before.
@@ -221,6 +254,7 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
     Ok(EmittedModule {
         bytes,
         origins: OriginTable::default(),
+        descriptors,
     })
 }
 

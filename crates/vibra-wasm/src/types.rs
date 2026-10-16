@@ -18,9 +18,9 @@ use vibra_ir::{
 use crate::runtime::ValueClass;
 
 /// The class of a value of `ty`, or the name of the kind of type that no
-/// lowered value represents yet: `interface` for an interface value or `any`
-/// (Step 9). An `array` and a `dict` are arena values of their own kinds
-/// (Step 8b). A generic parameter has no class
+/// lowered value represents. An interface value, `any` included, is an arena
+/// value of its own (Step 9), and so are an `array` and a `dict` (Step 8b). A
+/// generic parameter has no class
 /// of its own: a value of it is whatever its type argument says, so the class
 /// is read from the cell at run time ([`ValueClass::Dyn`]). A compound type
 /// that mentions a parameter is an arena value like any other.
@@ -53,9 +53,10 @@ pub(crate) fn class_of(ty: &Type) -> Result<ValueClass, &'static str> {
         | Type::Union(_)
         | Type::Array(_)
         | Type::Dict(..)
-        | Type::Function(_) => ValueClass::Ref,
+        | Type::Function(_)
+        | Type::Interface(..)
+        | Type::Any => ValueClass::Ref,
         Type::Param(_) => ValueClass::Dyn,
-        Type::Interface(..) | Type::Any => return Err("interface"),
     })
 }
 
@@ -76,6 +77,24 @@ pub(crate) fn signature_params(signature: &FunctionSignature) -> Vec<String> {
         params_of(&slot, &mut names);
     }
     params_of(&signature.result(), &mut names);
+    names.into_iter().collect()
+}
+
+/// The names of every generic parameter a function is passed a type argument
+/// for, in name order: those its signature mentions, and, for a function that
+/// implements a contract member, those its implementation binds (the owner's
+/// parameters, the interface's, and the member's own). A default member's body
+/// may name an interface parameter its signature never does.
+pub(crate) fn function_params(function: &CheckedFunction) -> Vec<String> {
+    let mut names: BTreeSet<String> =
+        signature_params(function.signature()).into_iter().collect();
+    if let Some(implements) = function.implements() {
+        params_of(&implements.receiver, &mut names);
+        for argument in &implements.arguments {
+            params_of(argument, &mut names);
+        }
+        names.extend(implements.member_generics.iter().flatten().cloned());
+    }
     names.into_iter().collect()
 }
 
@@ -320,7 +339,7 @@ mod tests {
             class_of(&Type::Dict(Box::new(Type::Str), Box::new(Type::I32))),
             Ok(ValueClass::Ref)
         );
-        assert_eq!(class_of(&Type::Any), Err("interface"));
+        assert_eq!(class_of(&Type::Any), Ok(ValueClass::Ref));
         assert_eq!(
             class_of(&Type::Tuple(vec![Type::Array(Box::new(Type::I32))])),
             Ok(ValueClass::Ref)

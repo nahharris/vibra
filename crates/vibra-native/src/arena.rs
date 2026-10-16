@@ -92,7 +92,7 @@ fn offset(value: u32) -> Result<usize, Fault> {
 /// The layout of the payload a row expects of an operand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Layout {
-    /// The Unicode scalars of a `str`.
+    /// The Unicode scalars of a `str` or an atom.
     Chars,
     /// The bytes of `bytes`.
     Bytes,
@@ -116,7 +116,7 @@ impl<'m> Object<'m> {
         let len = read_u32(memory, at + offset(header::LEN)?)?;
         let (kinds, want_stride, payload): (&[u8], u32, u64) = match layout {
             Layout::Chars => (
-                &[kind::STR],
+                &[kind::STR, kind::ATOM],
                 arena::STRIDE_CHARS,
                 u64::from(header::SIZE) + 4 * u64::from(len),
             ),

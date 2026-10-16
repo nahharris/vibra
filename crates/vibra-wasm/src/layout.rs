@@ -245,9 +245,17 @@
 //! **Type arguments.** Each is a **descriptor**: an arena `tuple` whose first
 //! cell numbers the constructor of the type (`void` is `1`) and whose other cells
 //! are the descriptors of its arguments. A slot that holds none (a parameter
-//! nothing fixed) has a clear class byte. Nothing in the runtime reads one but
-//! the code that needs a type only the argument knows, as an enum payload of
-//! generic type, which is absent when the argument is `void`.
+//! nothing fixed) has a clear class byte. The first cell is a **head**:
+//! `class | ordinal << 8`, where the class names what the type is made of (see
+//! `desc.rs`). Code reads a descriptor for what the language needs of a
+//! type only the argument knows: an enum payload of generic type, which is
+//! absent when the argument is `void`; the selection of a contract member's
+//! implementation; and the order of keys.
+//!
+//! **Interface value.** An arena `tuple` of two cells: the descriptor of the
+//! type the value holds, and the value. Widening writes it and nothing else
+//! adds run-time information to a value. An argument instantiated at an
+//! interface type holds one, and one instantiated at the held type does not.
 //!
 //! **Module values.** The module-value state is one cells object of two cells
 //! per module value (a flag, then the value), allocated by the entry and held by

@@ -12,7 +12,7 @@
 use vibra_diagnostics::ByteSpan;
 use vibra_ir::{
     CallTarget, CheckedFunction, CheckedGlobal, CheckedProgram, Expr,
-    FunctionSignature, SourceOrigin, Type, Value,
+    FunctionSignature, SourceOrigin, TestAssertion, Type, Value,
 };
 use vibra_wasm::{NotLowered, emit};
 
@@ -103,7 +103,7 @@ fn empty_array() -> Expr {
     }
 }
 
-/// A read of a parameter of interface type, which no step before 9 lowers.
+/// A read of a parameter of interface type, which Step 9 lowers.
 fn interface_read() -> Expr {
     Expr::variable(0, Type::Any, origin())
 }
@@ -125,7 +125,8 @@ fn a_sequence_adds_nothing_to_what_its_expressions_need() {
         origin: origin(),
     };
     let f = function("seq", vec![Type::Any], Type::Void, body);
-    assert_eq!(forms(&not_lowered(&program(vec![f], 0))), ["type"]);
+    // A read of an interface value lowers since Step 9, so the sequence does.
+    assert!(emit(&program(vec![empty_function("entry"), f], 0)).is_ok());
 }
 
 #[test]
@@ -174,14 +175,19 @@ fn variadic_function(name: &str) -> CheckedFunction {
     .expect("a checked function")
 }
 
-/// A function with a parameter of interface type, which no step before 9
-/// lowers.
+/// A function with a parameter of interface type, which Step 9 lowers.
 fn interface_function(name: &str) -> CheckedFunction {
     function(name, vec![Type::Any], Type::Void, void_literal())
 }
 
+/// A verified test assertion, which Step 11 lowers and nothing before does.
+fn assertion_function(name: &str) -> CheckedFunction {
+    CheckedFunction::new_test_assertion(name, TestAssertion::True, origin())
+        .expect("a closed assertion function")
+}
+
 #[test]
-fn a_variadic_parameter_lowers_since_step_8b_and_an_interface_one_is_named() {
+fn a_variadic_and_an_interface_parameter_lower_and_a_test_assertion_is_named() {
     assert!(
         emit(&program(
             vec![empty_function("entry"), variadic_function("f")],
@@ -189,12 +195,18 @@ fn a_variadic_parameter_lowers_since_step_8b_and_an_interface_one_is_named() {
         ))
         .is_ok()
     );
+    assert!(
+        emit(&program(
+            vec![empty_function("entry"), interface_function("f")],
+            0
+        ))
+        .is_ok()
+    );
     let error = not_lowered(&program(
-        vec![empty_function("entry"), interface_function("f")],
+        vec![empty_function("entry"), assertion_function("f")],
         0,
     ));
-    assert_eq!(forms(&error), ["type"]);
-    assert_eq!(error.forms()[0].detail(), Some("interface"));
+    assert_eq!(forms(&error), ["test-assertion"]);
     assert_eq!(
         error.forms()[0].origin().map(SourceOrigin::source_id),
         Some("skeleton.vib")
@@ -265,12 +277,16 @@ fn a_module_value_lowers_since_step_5b() {
 
 #[test]
 fn the_error_lists_each_distinct_form_once_in_form_order() {
-    // A program with two functions of interface parameters names `type` once.
+    // A program with two test assertions names `test-assertion` once.
     let error = not_lowered(&program(
-        vec![interface_function("a"), interface_function("b")],
+        vec![
+            empty_function("entry"),
+            assertion_function("a"),
+            assertion_function("b"),
+        ],
         0,
     ));
-    assert_eq!(forms(&error), ["type"]);
+    assert_eq!(forms(&error), ["test-assertion"]);
 }
 
 #[test]
@@ -278,7 +294,7 @@ fn no_module_is_produced_for_a_program_the_emitter_cannot_lower_completely() {
     // The entry is empty, but another function is not: the emitter reports it
     // rather than emitting a module without it.
     let result = emit(&program(
-        vec![empty_function("entry"), interface_function("helper")],
+        vec![empty_function("entry"), assertion_function("helper")],
         0,
     ));
     assert!(
