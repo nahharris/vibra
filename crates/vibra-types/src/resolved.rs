@@ -886,7 +886,6 @@ pub fn check_resolved(
                     &types,
                 );
                 environment.reports_redeclarations = false;
-                environment.own_body = Some(index);
                 let origin =
                     SourceOrigin::new(crate::STDLIB_BUILTIN_SOURCE_ID, method.span());
                 let Some(body) = crate::check_function_body(

@@ -1234,7 +1234,6 @@ impl<'a> Checker<'a> {
     /// recurses through the wrapper it is carried by.
     fn check_native_body(
         &mut self,
-        index: usize,
         header: &FunctionHeader,
         method: &'static vibra_syntax::FunctionDeclaration,
         intrinsic: CompilerIntrinsic,
@@ -1253,7 +1252,6 @@ impl<'a> Checker<'a> {
             &mut declared_elsewhere,
             &self.types,
         );
-        environment.own_body = Some(index);
         let origin = SourceOrigin::new(STDLIB_BUILTIN_SOURCE_ID, method.span());
         let body = check_function_body(&mut environment, method, header, &origin)?;
         let slot_count = environment.next_slot;
@@ -1286,7 +1284,7 @@ impl<'a> Checker<'a> {
                 };
                 if let Some(method) = self.native_bodies.get(&index).copied() {
                     if let Some(function) =
-                        self.check_native_body(index, &header, method, intrinsic)
+                        self.check_native_body(&header, method, intrinsic)
                         && let Some(slot) = self.checked_functions.get_mut(index)
                     {
                         *slot = Some(function);
@@ -1651,10 +1649,6 @@ struct CheckEnvironment<'a> {
     /// workspace path leaves that to the resolver, which owns name
     /// introduction there, so each introduction is reported exactly once.
     reports_redeclarations: bool,
-    /// The function whose checked body is being checked as a native's own
-    /// Vibra body, which a call of itself reaches as source: the body is the
-    /// native's meaning, so its recursion is a tail transfer like any other.
-    own_body: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1731,7 +1725,6 @@ impl<'a> CheckEnvironment<'a> {
             next_slot: 0,
             resolved_targets: None,
             reports_redeclarations: true,
-            own_body: None,
             exit: None,
         }
     }
@@ -1900,7 +1893,6 @@ impl<'a> CheckEnvironment<'a> {
             next_slot: self.next_slot,
             resolved_targets: self.resolved_targets,
             reports_redeclarations: self.reports_redeclarations,
-            own_body: self.own_body,
             exit: self.exit.clone(),
         }
     }
@@ -4579,7 +4571,7 @@ fn check_form(
             // compiler-intrinsic wrapper, creates no activation to reuse.
             let has_source_target = function_targets.known.iter().any(|index| {
                 environment.functions.get(*index).is_some_and(|function| {
-                    function.external.is_none() || environment.own_body == Some(*index)
+                    function.external.is_none_or(|row| row.runs_body())
                 })
             });
             let tail_transfer = tail_position
@@ -5161,8 +5153,10 @@ fn check_form(
 }
 
 /// A call to a module function. In tail position it is a tail transfer that
-/// reuses the activation, unless the function is a compiler-intrinsic wrapper,
-/// which creates no activation to reuse.
+/// reuses the activation, unless the function is a compiler-intrinsic wrapper
+/// that a module does not run as a body (an inline row or an import), which
+/// creates no activation to reuse. A native that runs its checked body creates
+/// one, so its call is marked by its position like any other.
 pub(crate) fn direct_call(
     environment: &CheckEnvironment<'_>,
     function: usize,
@@ -5174,8 +5168,7 @@ pub(crate) fn direct_call(
     let runs_source = environment
         .functions
         .get(function)
-        .is_some_and(|header| header.external.is_none())
-        || environment.own_body == Some(function);
+        .is_some_and(|header| header.external.is_none_or(|row| row.runs_body()));
     if tail_position && runs_source {
         Expr::tail_call(function, arguments, result, origin)
     } else {

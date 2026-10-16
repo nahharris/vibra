@@ -125,6 +125,34 @@ fn a_fold_inside_a_tail_loop_and_a_fold_nested_in_a_fold_agree() {
     assert_eq!(result, "(record type: @i32 value: 10i32)\n");
 }
 
+#[test]
+fn a_tail_loop_whose_tail_call_is_array_fold_agrees_and_leaves_the_baseline_live_size()
+{
+    // `spin` calls `array.fold` in tail position, and the fold's step calls
+    // `spin` again: the call of a native that runs its body is marked by its
+    // position like any other, in user code and in the body alike.
+    let looped = |count: &str| {
+        with_prelude(&format!(
+            "(defn main () i32 (spin {count}))\n(defn spin (n i32) i32 (if (i32.equal n 0i32) 7i32 (array.fold (array.of n) 0i32 (lambda (total i32 k i32) i32 (spin (lower k))))))"
+        ))
+    };
+    let program = checked(&looped("2000i32"));
+    let spin = program
+        .functions()
+        .iter()
+        .find(|function| function.name() == "spin")
+        .expect("spin");
+    assert!(
+        format!("{:?}", spin.body()).contains("tail: true"),
+        "the call of array.fold in tail position is a tail call"
+    );
+    let (result, live) = agree(&looped("2000i32"));
+    assert_eq!(result, "(record type: @i32 value: 7i32)\n");
+    let (_, base) = agree(&looped("1i32"));
+    assert_eq!(live.start, 0);
+    assert_eq!(live.end, base.end, "live size returns to its baseline");
+}
+
 /// A fold over `count` elements of `1`.
 fn long_fold(count: usize) -> String {
     let items = vec!["1i32"; count].join(" ");
