@@ -4,9 +4,9 @@ Status: normative target
 Implementation status: reader, static, interpreter, and tooling observations
 have conformance coverage for the complete pure language through M3 and the
 pre-M4 binding revision; the current counts are recorded in the milestone
-exit evidence. The host-event expectation is implemented in the interpreter, and
-the differential execution and the parity inventory run since M4 Step 4 over the
-empty void entry, the one form the Wasm backend lowers so far.
+exit evidence. The host-event expectation is implemented in both backends, and
+the differential execution and the parity inventory run over every executable
+case since M4 Step 11, which lowers every form of a checked program.
 
 ## Diagnostics are a language surface
 

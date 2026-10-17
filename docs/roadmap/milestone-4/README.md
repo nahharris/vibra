@@ -1,16 +1,10 @@
 # Milestone 4 step plan
 
-Status: in progress. Step 1, the Stage 4A contract freeze, has landed
-(PR #354), and so have Step 2, the contract-member forms and the binder fix
-(PR #355), Step 2b, the boolean constants (PR #357), and Step 3, deep non-tail recursion in the reference interpreter
-(PR #356), and Step 4, the WebAssembly backend skeleton and the differential
-harness (PR #358), and Step 5a, the value arena and its runtime (PR #359), and
-Step 5b, the data forms and core lowering (PR #360), and Step 6, calls
-(PR #361, merge e86d93e).
-Step 7, patterns and typed failure (PR #362, merge cc73408), and Step 8a, the
-integer and `char` primitive rows (PR #363, merge a450155), have landed. Step 8b,
-collections, text, bytes, and dict, is proposed as `landed` by its pull request
-and is conditional on that PR merging; no other implementation step has landed
+Status: in progress. Stage 4A, the WebAssembly spine, is complete on `m4`: Steps 1
+to 11 have merged, and Step 12 records the [Stage 4A evidence](stage-4a-evidence.md)
+(landed, conditional on its pull request merging). Stage 4B, static effects and
+host operations (Steps 13 to 22), has not started.
+
 Decision ledger: [decision-ledger.md](decision-ledger.md)
 Surface inventory: [supported-surface.md](supported-surface.md)
 Validation: [validation.md](validation.md)
@@ -327,8 +321,8 @@ tail-recursive walk that grows neither stack nor arena.
 | 8d | [A native's checked body in typed IR](08d-native-bodies.md), so a module runs the body of a native that applies a function value (`array.fold`), which the typed IR does not carry today (ledger D10.5): the checker checks the body of a builtin member in both paths, and the IR holds it beside the wrapper the interpreter runs | 8b | landed, PR #366, merge 17fe1ea093ca5edf109a9b82f5e716c65d128415. `array.fold` carries one checked body, which a module runs; `V1-RUNTIME-library-roles` is matched | PR #366 |
 | 9 | [Interfaces](09-interfaces.md): static dispatch, interface values, default members, destination dispatch and conversion, `iter` with its adapters, and the Step 2 forms | 8c, 8d | landed, PR #367, merge c1217c13c46d24f4eb7a6fa4fd708b80bf8224ca. Run-time dispatch from type descriptors, interface values as pairs, the closed conformances, the key unit, and `iter`; all 22 owned rows are matched | PR #367 |
 | 10 | [Natives and the joined differential](10-natives.md): the native import module `vibra_native_v1`, the single Rust source of G7, and the body/native differential joined to the interpreter/Wasm harness | 9 | landed, PR #368, merge 20db8c624032235a94ee88c0b28f149f1d3eb397. The single-source audit as a test (three interpreter copies of native algorithms removed), the manifest and import-table checks, 112 four-path samples of the 19 natives plus the looping rows and `iter.next` in both backends, and the native defect path end to end | PR #368 |
-| 11 | [Tests and traps in the Wasm backend](11-tests-traps.md): `workspace-test` observations, the `vibra_v1_test` export and the `vibra_v1_failure`, `vibra_v1_failure_expected`, and `vibra_v1_failure_actual` exports, assertion outcomes, and every trap code with its origin | 10 | landed, conditional on its PR merging. The test module and `vibra_v1_test`, the three assertions and their failure exports, canonical equality by one iterative walk of the arena, the origin table, trap and origin parity for every registered code, and the three forms Step 9 left unlowered; the Wasm backend reports 0 not-lowered rows (130 of 130 cases matched) | Branch `claude/m4-step-11-tests-traps`; PR to be recorded |
-| 12 | [Stage 4A demo and corpus sub-gate](12-stage-4a-evidence.md) — evidence step | 11 | not started | — |
+| 11 | [Tests and traps in the Wasm backend](11-tests-traps.md): `workspace-test` observations, the `vibra_v1_test` export and the `vibra_v1_failure`, `vibra_v1_failure_expected`, and `vibra_v1_failure_actual` exports, assertion outcomes, and every trap code with its origin | 10 | landed, PR #369, merge 1f55ad6658923f0c63df1af2277c640fdaf3292d. The test module and `vibra_v1_test`, the three assertions and their failure exports, canonical equality by one iterative walk of the arena, the origin table, trap and origin parity for every registered code, and the three forms Step 9 left unlowered; the Wasm backend reports 0 not-lowered rows (130 of 130 cases matched) | PR #369 |
+| 12 | [Stage 4A demo and corpus sub-gate](12-stage-4a-evidence.md) — evidence step | 11 | landed, conditional on its PR merging. The [Stage 4A evidence](stage-4a-evidence.md): the demo in both backends with a deep tail-recursive walk, the corpus sub-gate (131 of 131 executable cases matched, 0 not lowered), and the exit-clause map; two contract fixes (`expect.host_event` on `workspace-test`, the tail-call wording for widened results) | Branch `claude/m4-step-12-stage-4a-evidence`; PR to be recorded |
 
 Stage 4B — static effects and host operations, each in both backends.
 
@@ -373,11 +367,11 @@ and the ledger.
 
 | Roadmap obligation | Owning steps |
 | --- | --- |
-| Unoptimized Wasm lowering of the complete pure language: mandatory tail calls, union discriminants in written order, checked lookups, `@compiler` externals lowered before emission | 4–10 (5a–8d); NaN and number text in 8c |
-| Native implementations lowered from the single source; body/native differential joined to the interpreter/Wasm harness | 1, 8a, 8b, 8c, 8d, 10 |
-| Instance-owned value arena and opaque-index discipline; no index or instance identity in typed IR or build output | 1, 5a, 16 |
-| Specified arena reclamation rule; bounded host memory for a long tail-recursive program | 1, 5a, 6 |
-| Interpreter/Wasm differential harness over the entire executable corpus, through the conformance harness | 1, 4, 11, 12 |
+| Unoptimized Wasm lowering of the complete pure language: mandatory tail calls, union discriminants in written order, checked lookups, `@compiler` externals lowered before emission | 4–10 (5a–8d); NaN and number text in 8c ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
+| Native implementations lowered from the single source; body/native differential joined to the interpreter/Wasm harness | 1, 8a, 8b, 8c, 8d, 10 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
+| Instance-owned value arena and opaque-index discipline; no index or instance identity in typed IR or build output | 1, 5a, 16 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
+| Specified arena reclamation rule; bounded host memory for a long tail-recursive program | 1, 5a, 6 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
+| Interpreter/Wasm differential harness over the entire executable corpus, through the conformance harness | 1, 4, 11, 12 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
 | Native `deffect` operations, default-empty ceilings, transitively closed performed rows, imported-symbol effect references | 14 |
 | Effect metadata in general queries; source-position metadata for performed, enclosing, and target rows | 20 |
 | Required binary-target effect arrays and static admission of the entry | 15 |
@@ -386,18 +380,18 @@ and the ledger.
 | Injected deterministic test providers and ordered audit traces; one versioned audit-event encoding | 13, 16, 18 |
 | Effect rows in typed IR, query schemas, and build metadata that do not assume a closed literal set | 13, 14, 20 |
 | The forms M3 reassigned: the three contract-member forms, and the result of an entry that returns `err` | 2, 9, 19 |
-| A specified outcome for deep non-tail recursion, written before the Wasm backend | 1, 3, 6 |
+| A specified outcome for deep non-tail recursion, written before the Wasm backend | 1, 3, 6 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
 | Effectful iteration examples that walk with `iter.next` and tail recursion | 16 |
 | Recorded interpreter and unoptimized-Wasm performance baseline | 21 |
-| Stage demo: the M3 demo library's tests agree in both backends; a deep tail-recursive walk grows neither stack nor arena | 12 |
+| Stage demo: the M3 demo library's tests agree in both backends; a deep tail-recursive walk grows neither stack nor arena | 12 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
 | Demo gate: a target declaring `@std.fs.read` reads, transforms, and writes; the same source is rejected when a ceiling omits a root; byte-identical stdout and audit traces in both backends | 22 |
 | Exit: an additive root reaches the performed row, the rejection, and the target array of every transitive caller; the witness is named for each missing root | 14, 15 |
 | Exit: every host operation has one registry entry, owner effect, typed signature, and audit-event shape | 13, 16–18 |
 | Exit: no compiler-generated ambient host read exists outside the registry | 16–18; audited by 22 |
 | Exit: success, typed host error, propagation, and trap have interpreter/Wasm parity | 11, 19 |
-| Exit: deep non-tail recursion has the same specified outcome in both backends | 3, 6 |
-| Exit: a tail-recursive loop allocating a fresh compound value per iteration holds a bounded live arena in the Wasm backend | 6 |
-| Exit: interpreter-v1 conformance passes for the full language, and the Wasm backend matches it on every executable case | every behavior step; swept by 12 and 22 |
+| Exit: deep non-tail recursion has the same specified outcome in both backends | 3, 6 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
+| Exit: a tail-recursive loop allocating a fresh compound value per iteration holds a bounded live arena in the Wasm backend | 6 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
+| Exit: interpreter-v1 conformance passes for the full language, and the Wasm backend matches it on every executable case | every behavior step; swept by 12 and 22 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
 
 ## M3 deferral inventory
 
