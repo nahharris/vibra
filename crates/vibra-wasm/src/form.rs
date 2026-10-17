@@ -22,8 +22,6 @@ pub enum Form {
     /// A value of a type that no lowered value kind represents yet: an `array`
     /// or `dict`, or an interface value.
     Type,
-    /// One of the closed verified test assertion functions.
-    TestAssertion,
     /// A call of a compiler registry operation.
     External,
     /// A wrapper constructor, or a wrapper pattern, over a builtin text type.
@@ -47,7 +45,6 @@ impl Form {
             Self::ModuleSize => "module-size",
             Self::Parameters => "parameters",
             Self::Type => "type",
-            Self::TestAssertion => "test-assertion",
             Self::External => "external",
             Self::Wrap => "wrap",
             Self::Call => "call",

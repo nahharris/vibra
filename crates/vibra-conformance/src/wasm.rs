@@ -13,7 +13,11 @@ use std::sync::OnceLock;
 
 use vibra_diagnostics::DiagnosticCode;
 use vibra_ir::CheckedProgram;
-use vibra_wasm_run::{Observed, Outcome, Runner};
+use vibra_ir::boundary::Failure;
+use vibra_wasm_run::{Observed, Outcome, Runner, TestRun};
+use vibra_workspace::semantic::{TestItem, TestItemStatus};
+
+use crate::test_run::{RowFailure, RowOrigin, RowTrap, TestRow};
 
 use crate::runner::{ExecutionObservation, WasmObservation, wasm_memory_limit};
 
@@ -74,6 +78,150 @@ pub fn observe(program: &CheckedProgram) -> WasmObservation {
             reason: error.to_string(),
         },
     }
+}
+
+/// The Wasm backend's rows for the tests of a workspace, or what stopped the
+/// backend instead.
+#[derive(Debug)]
+pub enum TestsObserved {
+    /// Every test ran, or was never run, and has a row.
+    Rows(Vec<TestRow>),
+    /// The module could not be lowered, or the instance ended in a host event,
+    /// or the backend failed.
+    Stopped(WasmObservation),
+}
+
+/// Lowers the tests that ran in the interpreter to one test module and runs each
+/// in a fresh instance through `vibra_v1_test`, at its position in canonical
+/// discovery order. A test the interpreter did not run (`@test.unavailable`) has
+/// the interpreter's row.
+pub fn observe_tests(items: &[TestItem]) -> TestsObserved {
+    let ran = items
+        .iter()
+        .enumerate()
+        .filter_map(|(position, item)| {
+            item.program().map(|program| (position, program))
+        })
+        .collect::<Vec<_>>();
+    let Some((_, first)) = ran.first() else {
+        return TestsObserved::Rows(items.iter().map(TestRow::from_item).collect());
+    };
+    let entries = ran
+        .iter()
+        .map(|(_, program)| program.entry_index())
+        .collect::<Vec<_>>();
+    let module = match vibra_wasm::emit_tests(first, &entries) {
+        Ok(module) => module,
+        Err(not_lowered) => {
+            return TestsObserved::Stopped(WasmObservation::NotLowered {
+                forms: not_lowered
+                    .forms()
+                    .iter()
+                    .map(|used| match used.detail() {
+                        Some(detail) => format!("{}:{detail}", used.form().name()),
+                        None => used.form().name().to_owned(),
+                    })
+                    .collect(),
+            });
+        }
+    };
+    let runner = match runner() {
+        Ok(runner) => runner,
+        Err(reason) => {
+            return TestsObserved::Stopped(WasmObservation::Failed { reason });
+        }
+    };
+    let heads = |head: u32| module.descriptors().type_of(head).cloned();
+    let operand_of = |ordinal: u32| module.origins().operand_type(ordinal).cloned();
+    let origin_of = |ordinal: Option<u32>| {
+        ordinal
+            .and_then(|ordinal| module.origins().origin(ordinal))
+            .map(|origin| RowOrigin {
+                source_id: origin.source_id().to_owned(),
+                start: origin.span().start(),
+                end: origin.span().end(),
+            })
+    };
+    let mut rows = items.iter().map(TestRow::from_item).collect::<Vec<_>>();
+    for (index, (position, program)) in (0_u32..).zip(&ran) {
+        let Some(base) = rows.get(*position).cloned() else {
+            continue;
+        };
+        let run = runner.run_test(
+            module.bytes(),
+            index,
+            program.types(),
+            &heads,
+            &operand_of,
+        );
+        let row = match run {
+            Err(error) => {
+                return TestsObserved::Stopped(WasmObservation::Failed {
+                    reason: error.to_string(),
+                });
+            }
+            Ok(TestRun::MemoryExhausted) => {
+                return TestsObserved::Stopped(WasmObservation::HostEvent(
+                    DiagnosticCode::RuntimeMemoryExhausted.as_atom().to_owned(),
+                ));
+            }
+            Ok(TestRun::Defect { cause }) => {
+                return TestsObserved::Stopped(WasmObservation::Failed {
+                    reason: format!(
+                        "{}: {cause}",
+                        Outcome::defect_trap().diagnostic_code().as_atom()
+                    ),
+                });
+            }
+            Ok(TestRun::Passed { .. }) => TestRow {
+                status: TestItemStatus::Passed.as_atom().to_owned(),
+                failure: None,
+                trap: None,
+                ..base.clone()
+            },
+            Ok(TestRun::Trapped { code, origin }) => TestRow {
+                status: TestItemStatus::Trap.as_atom().to_owned(),
+                failure: None,
+                trap: Some(RowTrap {
+                    code: code.diagnostic_code().as_atom().to_owned(),
+                    origin: origin_of(origin),
+                }),
+                ..base.clone()
+            },
+            Ok(TestRun::AssertionFailed {
+                failure,
+                origin,
+                expected,
+                actual,
+            }) => {
+                let Some(origin) = origin_of(origin) else {
+                    return TestsObserved::Stopped(WasmObservation::Failed {
+                        reason: "a failed assertion has no origin".to_owned(),
+                    });
+                };
+                let member = match failure {
+                    Failure::True => "true",
+                    Failure::False => "false",
+                    Failure::Equal => "equal",
+                };
+                TestRow {
+                    status: TestItemStatus::AssertionFailed.as_atom().to_owned(),
+                    failure: Some(RowFailure {
+                        assertion: format!("@std.assert.{member}"),
+                        expected,
+                        actual,
+                        origin,
+                    }),
+                    trap: None,
+                    ..base.clone()
+                }
+            }
+        };
+        if let Some(slot) = rows.get_mut(*position) {
+            *slot = row;
+        }
+    }
+    TestsObserved::Rows(rows)
 }
 
 /// What a run that did not complete observed.

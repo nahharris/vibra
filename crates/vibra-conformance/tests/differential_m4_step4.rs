@@ -30,10 +30,10 @@ static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
 const VOID_RESULT: &str = "(record type: @void value: void)\n";
 const NO_EVENTS: &str = "(record format: @audit-trace.v1 events: (array))\n";
 
-/// A case the emitter does not lower: a project whose test calls a verified
-/// assertion, which is Step 11's. Every form of a source program lowers since
-/// Step 9, so the case is copied from the corpus.
-const UNLOWERED_CASE: &str = "V1-RUNTIME-workspace-test-passing";
+/// A workspace test case of the corpus: a project whose test calls a verified
+/// assertion, which Step 11 lowers. Every form of a source program lowers since
+/// Step 11, so no real case is left that the emitter names.
+const TEST_CASE: &str = "V1-RUNTIME-workspace-test-passing";
 
 fn copy_directory(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).expect("directory");
@@ -223,35 +223,25 @@ fn a_checked_source_program_lowers_with_its_module_values() {
 }
 
 #[test]
-fn a_program_that_does_not_lower_still_passes_in_the_interpreter() {
+fn a_workspace_test_runs_in_both_backends_and_matches() {
     let corpus = TempCorpus::new();
-    corpus.copy_case(UNLOWERED_CASE);
+    corpus.copy_case(TEST_CASE);
     let report = run_real(&corpus);
     let (interpreter, wasm) = backends(&report);
     assert_eq!(interpreter, &CaseStatus::Passed, "{report:?}");
-    let WasmStatus::NotLowered { forms } = wasm else {
-        panic!("expected not lowered, got {wasm:?}");
-    };
-    assert!(
-        forms.iter().any(|form| form.starts_with("test-module")),
-        "{forms:?}"
-    );
-    assert_eq!(
-        report.status,
-        CaseStatus::Passed,
-        "a not-lowered case does not fail"
-    );
+    assert_eq!(wasm, &WasmStatus::Matched, "{report:?}");
+    assert_eq!(report.status, CaseStatus::Passed);
 }
 
 #[test]
-fn a_not_lowered_case_does_not_fail_the_run_and_is_counted() {
+fn a_workspace_test_case_is_counted_in_both_backend_lines() {
     let corpus = TempCorpus::new();
-    corpus.copy_case(UNLOWERED_CASE);
+    corpus.copy_case(TEST_CASE);
     let runner = ConformanceRunner::new(standard_dispatcher());
     let report = runner.run(&corpus.corpus());
     assert!(report.is_success());
     let wasm = report.wasm_counts();
-    assert_eq!((wasm.matched, wasm.failed, wasm.not_lowered), (0, 0, 1));
+    assert_eq!((wasm.matched, wasm.failed, wasm.not_lowered), (1, 0, 0));
     let interpreter = report.interpreter_counts();
     assert_eq!(
         (
@@ -515,7 +505,7 @@ fn the_report_prints_both_backend_lines() {
         Some(VOID_RESULT),
         "",
     );
-    corpus.copy_case(UNLOWERED_CASE);
+    corpus.copy_case(TEST_CASE);
 
     let output = Command::new(env!("CARGO_BIN_EXE_vibra-conformance"))
         .arg("--root")
@@ -533,7 +523,7 @@ fn the_report_prints_both_backend_lines() {
         "{stdout}"
     );
     assert!(
-        stdout.contains("wasm backend: 1 matched, 0 failed, 1 not lowered\n"),
+        stdout.contains("wasm backend: 2 matched, 0 failed, 0 not lowered\n"),
         "{stdout}"
     );
     assert!(

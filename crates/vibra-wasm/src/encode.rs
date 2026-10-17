@@ -15,7 +15,9 @@
 
 use std::borrow::Cow;
 
-use vibra_ir::boundary::{ENTRY_EXPORT, MEMORY_EXPORT, NATIVE_IMPORT_MODULE};
+use vibra_ir::boundary::{
+    ENTRY_EXPORT, MEMORY_EXPORT, NATIVE_IMPORT_MODULE, TEST_EXPORT,
+};
 use vibra_ir::external::{NativeRow, Scalar};
 use wasm_encoder::{
     CodeSection, ConstExpr, DataCountSection, DataSection, ElementSection, Elements,
@@ -25,8 +27,8 @@ use wasm_encoder::{
 };
 
 use crate::runtime::{
-    Ins, Routine, Routines, ValueClass, accessor_exports, core_routines, entry_export,
-    frame_routines, new_object, raw_entry_export,
+    Ins, Routine, Routines, TestEntry, ValueClass, accessor_exports, core_routines,
+    entry_export, frame_routines, new_object, raw_entry_export, test_export,
 };
 
 /// The pages of linear memory the module defines. The arena grows from here by
@@ -66,8 +68,14 @@ impl Types {
 }
 
 /// How the entry export starts the program.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub(crate) enum Entry {
+    /// A test module: the tests `vibra_v1_test` runs, by position, in a module
+    /// with `module_values` module values.
+    Tests {
+        entries: Vec<TestEntry>,
+        module_values: u32,
+    },
     /// A program: the entry is the language function `function`, run on a
     /// frame of `slots` slots by the dispatcher, in a module with
     /// `module_values` module values.
@@ -141,14 +149,18 @@ pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
         code.function(&function);
     }
     let mut routines = core_routines(&fns);
-    routines.push(match parts.entry {
+    routines.push(match &parts.entry {
+        Entry::Tests {
+            entries,
+            module_values,
+        } => test_export(&fns, entries, *module_values),
         Entry::Program {
             function,
             slots,
             module_values,
             class,
-        } => entry_export(&fns, function, slots, module_values, class),
-        Entry::Raw { function, class } => raw_entry_export(&fns, function, class),
+        } => entry_export(&fns, *function, *slots, *module_values, *class),
+        Entry::Raw { function, class } => raw_entry_export(&fns, *function, *class),
     });
     routines.extend(frame_routines(&fns, dispatch_type));
     if parts.include_new {
@@ -157,7 +169,12 @@ pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
     }
     let mut exports = ExportSection::new();
     exports.export(MEMORY_EXPORT, ExportKind::Memory, 0);
-    exports.export(ENTRY_EXPORT, ExportKind::Func, fns.entry_export);
+    let entry_name = if matches!(parts.entry, Entry::Tests { .. }) {
+        TEST_EXPORT
+    } else {
+        ENTRY_EXPORT
+    };
+    exports.export(entry_name, ExportKind::Func, fns.entry_export);
     for (name, index) in accessor_exports(&fns) {
         exports.export(name, ExportKind::Func, index);
     }

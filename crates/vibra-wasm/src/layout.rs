@@ -46,6 +46,9 @@
 //! | 76 | `frame_depth` (u32) | Activations on the frame stack |
 //! | 80 | `ret` (u64) | The cell a returning activation hands to its caller (see "Activations and the dispatcher") |
 //! | 88 | `ret_class` (u32) | The class byte of that cell: the reference class exactly when the cell is a count the caller now owns |
+//! | 92 | `failure` (u32) | After status `3`: the failed assertion, `1` for `assert.true`, `2` for `assert.false`, `3` for `assert.equal` |
+//! | 96 | `expected` (u64) | After status `3` and `assert.equal`: the expected operand, as the bits of a scalar or a value ID |
+//! | 104 | `actual` (u64) | The same for the actual operand |
 //!
 //! # The arena
 //!
@@ -366,8 +369,14 @@ pub mod state {
     pub const RET: u32 = 80;
     /// `ret_class`.
     pub const RET_CLASS: u32 = 88;
+    /// `failure`.
+    pub const FAILURE: u32 = 92;
+    /// `expected`.
+    pub const EXPECTED: u32 = 96;
+    /// `actual`.
+    pub const ACTUAL: u32 = 104;
     /// The end of the fields.
-    pub const END: u32 = 92;
+    pub const END: u32 = 112;
     /// The free-list heads: one `u32` per size class, indexed by the class.
     pub const FREE_LISTS: u32 = 128;
 }

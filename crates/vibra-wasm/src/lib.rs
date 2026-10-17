@@ -39,6 +39,7 @@
 //! test, and has no custom section. Emission is deterministic: the bytes depend
 //! only on the checked program.
 
+mod canon;
 mod classify;
 mod desc;
 mod encode;
@@ -52,7 +53,7 @@ mod runtime;
 pub mod support;
 mod types;
 
-use vibra_ir::{CheckedProgram, SourceOrigin};
+use vibra_ir::{CheckedProgram, SourceOrigin, Type};
 
 pub use desc::DescriptorTable;
 pub use form::{Form, NotLowered, UnloweredForm};
@@ -66,7 +67,7 @@ pub use form::{Form, NotLowered, UnloweredForm};
 /// of the module's bytes.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OriginTable {
-    origins: Vec<SourceOrigin>,
+    origins: Vec<(SourceOrigin, Option<Type>)>,
 }
 
 impl OriginTable {
@@ -76,8 +77,7 @@ impl OriginTable {
         self.origins.len()
     }
 
-    /// Whether the table maps no origin. No module lowered so far traps or
-    /// asserts, so theirs is always empty.
+    /// Whether the table maps no origin: a module with no assertion call.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.origins.is_empty()
@@ -87,6 +87,18 @@ impl OriginTable {
     /// ordinal outside the table.
     #[must_use]
     pub fn origin(&self, ordinal: u32) -> Option<&SourceOrigin> {
+        self.row(ordinal).map(|(origin, _)| origin)
+    }
+
+    /// The type by which the host reads the operands of a failed `assert.equal`
+    /// at an ordinal: the static type of the operands, or `any` when the type
+    /// names a generic parameter. `None` for every other origin.
+    #[must_use]
+    pub fn operand_type(&self, ordinal: u32) -> Option<&Type> {
+        self.row(ordinal).and_then(|(_, ty)| ty.as_ref())
+    }
+
+    fn row(&self, ordinal: u32) -> Option<&(SourceOrigin, Option<Type>)> {
         let index = usize::try_from(ordinal).ok()?.checked_sub(1)?;
         self.origins.get(index)
     }
@@ -136,6 +148,31 @@ impl EmittedModule {
 /// [`NotLowered`] names every form the program uses that this step does not
 /// lower. No module is produced for such a program.
 pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
+    build(program, None)
+}
+
+/// Lowers the tests of a checked module set to a v1 test module.
+///
+/// `program` is any program of the set, which every test of a workspace shares,
+/// and `entries` are the function indices of the tests, in canonical discovery
+/// order: the module's `vibra_v1_test` runs the test at a position of this
+/// list, each in a fresh instance. The same input always yields the same bytes.
+///
+/// # Errors
+///
+/// [`NotLowered`] as for [`emit`].
+pub fn emit_tests(
+    program: &CheckedProgram,
+    entries: &[usize],
+) -> Result<EmittedModule, NotLowered> {
+    build(program, Some(entries))
+}
+
+#[allow(clippy::too_many_lines)]
+fn build(
+    program: &CheckedProgram,
+    tests: Option<&[usize]>,
+) -> Result<EmittedModule, NotLowered> {
     // A module indexes its functions with 32 bits. A count that does not fit is
     // reported, never wrapped.
     let counts = u32::try_from(program.functions().len())
@@ -151,21 +188,24 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
     if let Some(not_lowered) = NotLowered::from_uses(classify::unlowered(program)) {
         return Err(not_lowered);
     }
-    let entry_function = program.entry();
-    if !entry_function.signature().slot_types().is_empty() {
-        return Err(NotLowered::from_uses(vec![
-            form::UnloweredForm::new(
-                Form::Parameters,
-                Some(entry_function.origin().clone()),
-            )
-            .with_detail("entry"),
-        ])
-        .unwrap_or_else(|| NotLowered::single(Form::Parameters)));
+    let mut class = runtime::ValueClass::Void;
+    if tests.is_none() {
+        let entry_function = program.entry();
+        if !entry_function.signature().slot_types().is_empty() {
+            return Err(NotLowered::from_uses(vec![
+                form::UnloweredForm::new(
+                    Form::Parameters,
+                    Some(entry_function.origin().clone()),
+                )
+                .with_detail("entry"),
+            ])
+            .unwrap_or_else(|| NotLowered::single(Form::Parameters)));
+        }
+        class =
+            types::class_of(&entry_function.signature().result()).map_err(|kind| {
+                NotLowered::type_of(kind, Some(entry_function.origin().clone()))
+            })?;
     }
-    let class =
-        types::class_of(&entry_function.signature().result()).map_err(|kind| {
-            NotLowered::type_of(kind, Some(entry_function.origin().clone()))
-        })?;
 
     // The lambdas of the program follow its functions and module values in the
     // table, in the order a traversal meets them.
@@ -189,6 +229,7 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
     // index before every defined function, so the second pass numbers the
     // routines after them.
     let count = total as usize;
+    let run_tests = tests.is_some();
     let first_fns = encode::routines_for(total);
     let mut first = lower::Lowering::new(
         &first_fns,
@@ -196,14 +237,15 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
         &lambdas,
         vec![0; count],
         Vec::new(),
-        false,
+        lower::Extras::default(),
+        run_tests,
     );
     let mut sizes = Vec::with_capacity(count);
     for index in 0..count {
         sizes.push(first.function(index)?.slots);
     }
     let natives = first.used_natives();
-    let desc_equal = first.needs_desc_equal();
+    let extras = first.needed();
     let imports = natives
         .iter()
         .filter_map(|intrinsic| intrinsic.native_import())
@@ -221,7 +263,8 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
         &lambdas,
         sizes.clone(),
         natives,
-        desc_equal,
+        extras,
+        run_tests,
     );
     let mut lowered = Vec::with_capacity(count);
     for index in 0..count {
@@ -234,16 +277,39 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
     let include_new = lowering.built_object() || globals != 0;
     let extra = lowering.comparer_routines();
     let descriptors = lowering.descriptors();
-    let parts = encode::Parts {
-        functions: lowered,
-        // The table holds function indices, which the imports come before.
-        table: (import_count..import_count + total).collect(),
-        entry: encode::Entry::Program {
+    let origins = OriginTable {
+        origins: lowering.take_origins(),
+    };
+    let entry = match tests {
+        None => encode::Entry::Program {
             function: entry,
             slots: entry_slots,
             module_values: globals,
             class,
         },
+        Some(entries) => encode::Entry::Tests {
+            entries: entries
+                .iter()
+                .map(|index| {
+                    let function = program.functions().get(*index)?;
+                    let signature = function.signature();
+                    if signature.slot_types().is_empty()
+                        && signature.result() == Type::Void
+                    {
+                        Some((u32::try_from(*index).ok()?, sizes.get(*index).copied()?))
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
+            module_values: globals,
+        },
+    };
+    let parts = encode::Parts {
+        functions: lowered,
+        // The table holds function indices, which the imports come before.
+        table: (import_count..import_count + total).collect(),
+        entry,
         segments: lowering.into_segments(),
         include_new,
         imports,
@@ -253,7 +319,7 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
         encode::module(&parts).ok_or_else(|| NotLowered::single(Form::ModuleSize))?;
     Ok(EmittedModule {
         bytes,
-        origins: OriginTable::default(),
+        origins,
         descriptors,
     })
 }

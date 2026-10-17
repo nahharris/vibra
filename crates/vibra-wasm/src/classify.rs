@@ -77,9 +77,6 @@ fn function_forms(
         type_forms(&slot, origin.clone(), found);
     }
     type_forms(&signature.result(), origin.clone(), found);
-    if function.test_assertion().is_some() {
-        found.push(UnloweredForm::new(Form::TestAssertion, origin));
-    }
     // A function that implements a contract member is an ordinary function
     // here: what dispatches to it is a contract call, which is reported where
     // it is made (Step 9).

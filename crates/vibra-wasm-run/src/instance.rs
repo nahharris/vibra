@@ -84,6 +84,11 @@ impl Instance {
         }
     }
 
+    /// The store and the engine instance, for the exports of `test_run`.
+    pub(crate) fn parts(&mut self) -> (&mut Store<Host>, &EngineInstance) {
+        (&mut self.store, &self.instance)
+    }
+
     /// Calls `vibra_v1_entry` and reads what the module recorded.
     ///
     /// # Errors

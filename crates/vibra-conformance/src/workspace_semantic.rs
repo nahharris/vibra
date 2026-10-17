@@ -10,6 +10,7 @@ use crate::runner::{
     CaseObservation, ExecutionObservation, HandlerError, ProfileHandler,
     WasmObservation,
 };
+use crate::test_run::{TestRow, format_test_run};
 
 const BOOTSTRAP_PROVENANCE_FAILURE: &str = "bootstrap provenance verification failed";
 
@@ -190,81 +191,32 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
             accepted,
             diagnostics: result.diagnostics().to_vec(),
             interpreter: Some(ExecutionObservation {
-                result: Some(format_test_run(command_result, result.items())),
+                result: Some(format_test_run(
+                    command_result,
+                    &result
+                        .items()
+                        .iter()
+                        .map(TestRow::from_item)
+                        .collect::<Vec<_>>(),
+                )),
                 audit_trace: Vec::new(),
             }),
-            // A test module, with its `vibra_v1_test` export and the test
-            // observations, is not emitted yet.
-            wasm: accepted.then(|| WasmObservation::NotLowered {
-                forms: vec!["test-module".to_owned()],
+            // Both backends run the tests of the one workspace.
+            wasm: accepted.then(|| match crate::wasm::observe_tests(result.items()) {
+                crate::wasm::TestsObserved::Rows(rows) => {
+                    WasmObservation::Completed(ExecutionObservation {
+                        result: Some(format_test_run(
+                            crate::test_run::command_result(&rows),
+                            &rows,
+                        )),
+                        audit_trace: Vec::new(),
+                    })
+                }
+                crate::wasm::TestsObserved::Stopped(observation) => observation,
             }),
             ..CaseObservation::default()
         })
     }
-}
-
-fn format_test_run(
-    command_result: &str,
-    items: &[vibra_workspace::semantic::TestItem],
-) -> String {
-    use std::fmt::Write as _;
-
-    let mut output = format!(
-        "(record\n  format: @test-run.v1\n  result: {command_result}\n  tests: (array"
-    );
-    if items.is_empty() {
-        output.push_str(")\n)\n");
-        return output;
-    }
-    output.push('\n');
-    for item in items {
-        let _ = write!(
-            output,
-            "    (record name: {} result: {}",
-            vibon_string(item.name()),
-            item.status().as_atom()
-        );
-        if let Some(failure) = item.failure() {
-            let span = failure.primary_span();
-            let _ = write!(
-                output,
-                " failure: (record assertion: {} expected: {} actual: {} primary-span: (record source-id: {} start: {}u64 end: {}u64))",
-                failure.assertion(),
-                vibon_string(failure.expected()),
-                vibon_string(failure.actual()),
-                vibon_string(failure.source_id()),
-                span.start(),
-                span.end()
-            );
-        }
-        if let Some(trap) = item.trap() {
-            let _ = write!(
-                output,
-                " trap: (record trap-code: {}",
-                vibon_string(trap.trap_code())
-            );
-            if let Some(origin) = trap.origin() {
-                let span = origin.span();
-                let _ = write!(
-                    output,
-                    " origin: (record source-id: {} start: {}u64 end: {}u64)",
-                    vibon_string(origin.source_id()),
-                    span.start(),
-                    span.end()
-                );
-            }
-            output.push(')');
-        }
-        output.push_str(
-            " audit-trace: (record format: @audit-trace.v1 events: (array)))\n",
-        );
-    }
-    output.push_str("  )\n)\n");
-    output
-}
-
-fn vibon_string(value: &str) -> String {
-    vibra_ir::Value::Str(value.to_owned()).canonical_vibon()
 }
 
 enum WorkspaceLoad {
