@@ -1,10 +1,9 @@
 //! Canonical equality of values whose types are known only at run time.
 //!
-//! [`crate::canon`] compares two values of one static type from the arena
-//! alone. When a value can hold an interface value, the types of the parts are
-//! not static: an interface value is the value it holds, so two interface values
-//! that hold different types are equal exactly when their canonical encodings
-//! are (`docs/spec/06-runtime.md`, "Canonical value encoding"). Two empty
+//! This is the one comparison of a module. The types of the parts of a value
+//! are not static (an interface value is the value it holds), so two interface
+//! values that hold different types are equal exactly when their canonical
+//! encodings are (`docs/spec/06-runtime.md`, "Canonical value encoding"). Two empty
 //! arrays of different element types are equal, and so are the `none` of two
 //! `option`s of different payloads; two values of different declared types are
 //! not, because the encoding names the type, and neither are two unions whose
@@ -16,7 +15,7 @@
 //! of a constructor is made of, and for a declared type gives the templates of
 //! its components, which the walk instantiates at the arguments of the
 //! descriptor (`inst`) and gives back at the end, with everything else it
-//! allocated. Like the walk of [`crate::canon`], it keeps no state on the
+//! allocated. Like the scan of [`crate::canon`], it keeps no state on the
 //! engine's stack, however deep the values are.
 
 use wasm_encoder::{BlockType, Instruction as I, ValType};

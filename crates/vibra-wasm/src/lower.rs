@@ -228,7 +228,7 @@ pub(crate) struct Extras {
     pub(crate) desc_equal: bool,
     /// The routine that walks the arena to compare values or look for a
     /// function.
-    pub(crate) walk: bool,
+    pub(crate) scan: bool,
     /// The routines that compare values by the descriptors of their types, and
     /// the type table they read.
     pub(crate) typed: bool,
@@ -614,12 +614,12 @@ pub(crate) struct Lowering<'a> {
     /// Whether the module has the routine that walks the arena to compare two
     /// values or to look for a function (`canon`), which follows the routine
     /// that compares descriptors.
-    has_walk: bool,
+    has_scan: bool,
     /// Whether a function lowered by this pass called it.
-    needs_walk: bool,
+    needs_scan: bool,
     /// Whether the module has the typed walk (`canon_typed`): the routine, the
     /// routine that pushes its entries, and the one that instantiates templates,
-    /// which follow the plain walk.
+    /// which follow the scan.
     has_typed: bool,
     /// Whether a function lowered by this pass called it.
     needs_typed: bool,
@@ -662,8 +662,8 @@ impl<'a> Lowering<'a> {
             comparers: Vec::new(),
             has_desc_equal: extras.desc_equal,
             needs_desc_equal: false,
-            has_walk: extras.walk,
-            needs_walk: false,
+            has_scan: extras.scan,
+            needs_scan: false,
             has_typed: extras.typed,
             needs_typed: false,
             tests,
@@ -677,28 +677,28 @@ impl<'a> Lowering<'a> {
         self.fns.new
             + 1
             + u32::from(self.has_desc_equal)
-            + u32::from(self.has_walk)
+            + u32::from(self.has_scan)
             + 3 * u32::from(self.has_typed)
     }
 
     /// The routines of the typed walk, which the call records as needed. It
-    /// also needs the plain walk, which looks for a function first, and the
+    /// also needs the scan, which looks for a function first, and the
     /// routine that compares descriptors.
     pub(crate) fn typed_walk(&mut self) -> u32 {
         self.needs_typed = true;
-        let _ = self.walk();
+        let _ = self.scan();
         let _ = self.desc_equal();
         self.typed_index()
     }
 
     fn typed_index(&self) -> u32 {
-        self.fns.new + 1 + u32::from(self.has_desc_equal) + u32::from(self.has_walk)
+        self.fns.new + 1 + u32::from(self.has_desc_equal) + u32::from(self.has_scan)
     }
 
     /// The function index of the routine that walks the arena (`canon`), which
     /// the call records as needed.
-    pub(crate) fn walk(&mut self) -> u32 {
-        self.needs_walk = true;
+    pub(crate) fn scan(&mut self) -> u32 {
+        self.needs_scan = true;
         self.built_object = true;
         self.fns.new + 1 + u32::from(self.has_desc_equal)
     }
@@ -708,7 +708,7 @@ impl<'a> Lowering<'a> {
     pub(crate) const fn needed(&self) -> Extras {
         Extras {
             desc_equal: self.needs_desc_equal,
-            walk: self.needs_walk,
+            scan: self.needs_scan,
             typed: self.needs_typed,
         }
     }
@@ -802,8 +802,8 @@ impl<'a> Lowering<'a> {
         if self.has_desc_equal {
             routines.push(desc::equal_routine(self.fns.new + 1));
         }
-        if self.has_walk {
-            routines.push(crate::canon::walk_routine(self.fns));
+        if self.has_scan {
+            routines.push(crate::canon::scan_routine(self.fns));
         }
         if self.has_typed {
             let table = self.type_table();

@@ -6,14 +6,14 @@
 //! operands are evaluated first, in order, as every call's are.
 //!
 //! - `assert.true` and `assert.false` read the discriminant of their `bool`.
-//! - `assert.equal` compares canonical encodings. A scalar operand is compared
-//!   in line by its bits, with a NaN replaced by the quiet NaN of its width
-//!   (decision D11.1), so a NaN equals a NaN and a negative zero does not equal
-//!   a positive one. An operand that is an arena value is compared by the walk
-//!   of [`crate::canon`]. A value that can hold a function behind an interface
-//!   is first scanned for one, because a function has no encoding: finding one
-//!   in either operand is the trap `@runtime.unobservable-function`, at the
-//!   assertion call.
+//! - `assert.equal` compares canonical encodings, with the one walk of
+//!   [`crate::canon_typed`] for every type: a NaN is replaced by the quiet NaN
+//!   of its width (decision D11.1), so a NaN equals a NaN and a negative zero
+//!   does not equal a positive one. The walk takes arena values, so an operand
+//!   that is a scalar or of a generic type is compared as the one component of a
+//!   tuple. Each operand is first scanned for a function ([`crate::canon`]),
+//!   because a function has no encoding: finding one in either is the trap
+//!   `@runtime.unobservable-function`, at the assertion call.
 //!
 //! A false assertion records the failure and stops the test: the status `3`,
 //! which assertion it was, the origin ordinal of the call, and, for
@@ -27,77 +27,14 @@
 //! reference interpreter does when it is not running a test: the trap
 //! `@runtime.invalid-checked-program`.
 
-use std::collections::BTreeSet;
-
 use vibra_ir::boundary::{Failure, TrapCode};
 use vibra_ir::{Expr, SourceOrigin, TestAssertion, Type};
 use wasm_encoder::Instruction as I;
 
-use super::{Builder, ByteSource, FRAME, Kind, Part, Term, WA, WB};
-use crate::canon::{WALK_EQUAL, WALK_SCAN, nan_replaced};
+use super::{Builder, ByteSource, FRAME, Kind, Part, Term};
 use crate::form::NotLowered;
 use crate::layout::{header, state};
-use crate::runtime::{ValueClass, c32, get, ld32, ld64, set, st32, st64};
-use crate::types::TypeEnv;
-
-/// Whether a value of `ty` can hold a function. The checker rejects a type that
-/// names a function where an assertion compares, so one can hide only behind an
-/// interface, or in a type a generic parameter stands for.
-fn may_hold_function(env: &TypeEnv<'_>, ty: &Type) -> bool {
-    fn walk(env: &TypeEnv<'_>, ty: &Type, seen: &mut BTreeSet<String>) -> bool {
-        match ty {
-            Type::Interface(..) | Type::Any | Type::Param(_) | Type::Function(_) => {
-                true
-            }
-            Type::Void
-            | Type::Never
-            | Type::Bool
-            | Type::Char
-            | Type::I8
-            | Type::I16
-            | Type::I32
-            | Type::I64
-            | Type::U8
-            | Type::U16
-            | Type::U32
-            | Type::U64
-            | Type::F32
-            | Type::F64
-            | Type::Str
-            | Type::Bytes
-            | Type::Atom
-            | Type::AtomSingleton(_) => false,
-            Type::Array(element) => walk(env, element, seen),
-            Type::Dict(key, value) => walk(env, key, seen) || walk(env, value, seen),
-            Type::Declared(_)
-            | Type::Applied(..)
-            | Type::Record(_)
-            | Type::Enum(_)
-            | Type::Tuple(_)
-            | Type::Union(_) => {
-                // A declared type may hold itself through its own components.
-                if matches!(ty, Type::Declared(_) | Type::Applied(..))
-                    && !seen.insert(ty.to_string())
-                {
-                    return false;
-                }
-                let Some(shape) = env.shape(ty) else {
-                    return true;
-                };
-                let components = match &shape {
-                    crate::types::Shape::Enum(variants) => {
-                        variants.iter().map(|(_, ty)| ty.clone()).collect()
-                    }
-                    other => other.components(),
-                };
-                components
-                    .iter()
-                    .any(|component| walk(env, component, seen))
-            }
-        }
-    }
-    walk(env, ty, &mut BTreeSet::new())
-}
+use crate::runtime::{ValueClass, c32, get, ld32, ld64, st32, st64};
 
 impl Builder<'_, '_> {
     /// Lowers a call of the assertion `assertion`, whose operands are
@@ -206,37 +143,6 @@ impl Builder<'_, '_> {
         self.drop_slot(actual);
     }
 
-    /// Pushes `1` when the scalars in the cells of `a` and `b`, of the class
-    /// `class`, have the same canonical encoding.
-    fn scalars_equal(&mut self, class: ValueClass, a: u32, b: u32) {
-        let (ca, cb) = (self.cell(a), self.cell(b));
-        match class {
-            ValueClass::I32 => {
-                self.push(&[get(FRAME), ld32(ca), get(FRAME), ld32(cb), I::I32Eq]);
-            }
-            ValueClass::I64 => {
-                self.push(&[get(FRAME), ld64(ca), get(FRAME), ld64(cb), I::I64Eq]);
-            }
-            ValueClass::F32 | ValueClass::F64 => {
-                let double = class == ValueClass::F64;
-                for (local, at) in [(WA, ca), (WB, cb)] {
-                    self.push(&[get(FRAME), ld64(at)]);
-                    if !double {
-                        self.push(&[crate::runtime::c64(0xFFFF_FFFF), I::I64And]);
-                    }
-                    self.push(&[set(local)]);
-                    self.push(&nan_replaced(local, double));
-                }
-                self.push(&[get(WA), get(WB), I::I64Eq]);
-            }
-            // `void` has one value, and a reference or a generic value is not a
-            // scalar.
-            ValueClass::Void | ValueClass::Ref | ValueClass::Dyn => {
-                self.push(&[c32(1)]);
-            }
-        }
-    }
-
     /// Stores into the state field `field` what an operand of a failed
     /// `assert.equal` crosses the boundary as: the bits of a scalar, or the ID
     /// of a value. An operand whose type names a generic parameter is first
@@ -287,7 +193,11 @@ impl Builder<'_, '_> {
     }
 
     /// `assert.equal`: the two operands, of the type `ty`, must have the same
-    /// canonical encoding.
+    /// canonical encoding. There is one comparison for every type
+    /// ([`crate::canon_typed`]); it takes arena values, so an operand that is a
+    /// scalar, or of a generic type, is compared as the one component of a
+    /// tuple. Each operand is first scanned for a function, which has no
+    /// encoding.
     fn assert_equal(
         &mut self,
         expected: u32,
@@ -305,103 +215,58 @@ impl Builder<'_, '_> {
         let (pass, fail) = (self.new_block(), self.new_block());
         let mut owned = Vec::new();
 
-        match class {
-            ValueClass::Void
-            | ValueClass::I32
-            | ValueClass::I64
-            | ValueClass::F32
-            | ValueClass::F64 => {
-                self.scalars_equal(class, expected, actual);
+        let objects = if class == ValueClass::Ref {
+            [expected, actual]
+        } else {
+            let mut wrapped = [expected, actual];
+            for slot in &mut wrapped {
+                let source = *slot;
+                let copy = self.temp();
+                self.copy_cell(copy, source);
+                self.claim(copy, class, ByteSource::Slot(source));
+                let tuple = self.temp();
+                self.build(Kind::Tuple, 0, &[Part::Slot { slot: copy, class }], tuple);
+                owned.push(tuple);
+                *slot = tuple;
             }
-            ValueClass::Ref | ValueClass::Dyn => {
-                // The walk takes arena values. A value of a generic type is a
-                // cell of whatever class the type argument says, so it is walked
-                // as the one component of a tuple.
-                let objects = if class == ValueClass::Dyn {
-                    let mut wrapped = [expected, actual];
-                    for slot in &mut wrapped {
-                        let source = *slot;
-                        let copy = self.temp();
-                        self.copy_cell(copy, source);
-                        self.claim(copy, ValueClass::Dyn, ByteSource::Slot(source));
-                        let tuple = self.temp();
-                        self.build(
-                            Kind::Tuple,
-                            0,
-                            &[Part::Slot {
-                                slot: copy,
-                                class: ValueClass::Dyn,
-                            }],
-                            tuple,
-                        );
-                        owned.push(tuple);
-                        *slot = tuple;
-                    }
-                    wrapped
-                } else {
-                    [expected, actual]
-                };
-                if may_hold_function(&self.lowering.env, ty) {
-                    let walk = self.lowering.walk();
-                    for object in objects {
-                        let (visible, hidden) = (self.new_block(), self.new_block());
-                        let at = self.cell(object);
-                        self.push(&[
-                            get(FRAME),
-                            ld32(at),
-                            c32(0),
-                            c32(WALK_SCAN),
-                            I::Call(walk),
-                        ]);
-                        self.end(Term::Branch {
-                            then_block: visible,
-                            else_block: hidden,
-                        });
-                        self.start(hidden);
-                        self.stop_at(TrapCode::UnobservableFunction, ordinal);
-                        self.goto(visible, visible);
-                    }
-                }
-                if may_hold_function(&self.lowering.env, ty) {
-                    // A part of the value may be an interface value, which is
-                    // the value it holds: follow both values with the type.
-                    let typed = self.lowering.typed_walk();
-                    let desc = self.temp();
-                    let described = if class == ValueClass::Dyn {
-                        Type::Tuple(vec![ty.clone()])
-                    } else {
-                        ty.clone()
-                    };
-                    self.build_type(&described, desc)?;
-                    let (left, right, held) = (
-                        self.cell(objects[0]),
-                        self.cell(objects[1]),
-                        self.cell(desc),
-                    );
-                    self.push(&[
-                        get(FRAME),
-                        ld32(left),
-                        get(FRAME),
-                        ld32(right),
-                        get(FRAME),
-                        ld32(held),
-                        I::Call(typed),
-                    ]);
-                    self.drop_slot(desc);
-                } else {
-                    let walk = self.lowering.walk();
-                    let (left, right) = (self.cell(objects[0]), self.cell(objects[1]));
-                    self.push(&[
-                        get(FRAME),
-                        ld32(left),
-                        get(FRAME),
-                        ld32(right),
-                        c32(WALK_EQUAL),
-                        I::Call(walk),
-                    ]);
-                }
-            }
+            wrapped
+        };
+        let scan = self.lowering.scan();
+        for object in objects {
+            let (visible, hidden) = (self.new_block(), self.new_block());
+            let at = self.cell(object);
+            self.push(&[get(FRAME), ld32(at), I::Call(scan)]);
+            self.end(Term::Branch {
+                then_block: visible,
+                else_block: hidden,
+            });
+            self.start(hidden);
+            self.stop_at(TrapCode::UnobservableFunction, ordinal);
+            self.goto(visible, visible);
         }
+        let typed = self.lowering.typed_walk();
+        let desc = self.temp();
+        let described = if class == ValueClass::Ref {
+            ty.clone()
+        } else {
+            Type::Tuple(vec![ty.clone()])
+        };
+        self.build_type(&described, desc)?;
+        let (left, right, held) = (
+            self.cell(objects[0]),
+            self.cell(objects[1]),
+            self.cell(desc),
+        );
+        self.push(&[
+            get(FRAME),
+            ld32(left),
+            get(FRAME),
+            ld32(right),
+            get(FRAME),
+            ld32(held),
+            I::Call(typed),
+        ]);
+        self.drop_slot(desc);
         self.end(Term::Branch {
             then_block: pass,
             else_block: fail,

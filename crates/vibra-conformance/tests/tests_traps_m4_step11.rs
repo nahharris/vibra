@@ -448,8 +448,8 @@ fn a_passing_test_returns_the_live_size_to_its_baseline() {
          (test \"small\" (assert.equal (build 3u64 (chain next: (array.of))) (build 3u64 (chain next: (array.of)))))\n\
          (test \"large\" (assert.equal (build 3000u64 (chain next: (array.of))) (build 3000u64 (chain next: (array.of)))))\n\
          (test \"texts\" (assert.equal (array.of \"a\" \"b\") (array.of \"a\" \"b\")))
-\n         (test \"interface values\" (assert.equal (as any (array.of \"a\")) (as any (array.of \"a\"))))
-",
+\n         (test \"interface values\" (assert.equal (as any (array.of \"a\")) (as any (array.of \"a\"))))\n\
+         (test \"deep\" (assert.equal (build 5000u64 (chain next: (array.of))) (build 5000u64 (chain next: (array.of)))))\n",
     );
     let snapshot = WorkspaceSnapshot::load_confined(&tree.root).expect("a workspace");
     let stdlib = vibra_types::load_stdlib().expect("the standard library");
@@ -466,11 +466,13 @@ fn a_passing_test_returns_the_live_size_to_its_baseline() {
         .map(|item| item.program().expect("a program").entry_index())
         .collect::<Vec<_>>();
     let module = vibra_wasm::emit_tests(first, &entries).expect("a test module");
-    let runner = Runner::new(MemoryLimit::new(64 * 1024 * 1024)).expect("an engine");
+    // The comparison keeps no state on the engine stack, however deep the value.
+    let runner = Runner::with_wasm_stack(MemoryLimit::new(64 * 1024 * 1024), 64 * 1024)
+        .expect("an engine");
     let heads = |head: u32| module.descriptors().type_of(head).cloned();
     let operand = |ordinal: u32| module.origins().operand_type(ordinal).cloned();
     let mut ends = Vec::new();
-    for index in 0..4 {
+    for index in 0..5 {
         let TestRun::Passed { live } = runner
             .run_test(module.bytes(), index, first.types(), &heads, &operand)
             .expect("the module runs")
@@ -486,6 +488,7 @@ fn a_passing_test_returns_the_live_size_to_its_baseline() {
     assert_eq!(ends[0].1, ends[1].1, "{ends:?}");
     assert_eq!(ends[0].1, ends[2].1, "{ends:?}");
     assert_eq!(ends[0].1, ends[3].1, "{ends:?}");
+    assert_eq!(ends[0].1, ends[4].1, "{ends:?}");
 }
 
 #[test]
