@@ -1,0 +1,12 @@
+(deffect write
+  (defn text (target str) void (do)))
+
+(defn bad () void
+  (write.text "a"))
+
+(defn caller () void
+  effects: (write)
+  (bad))
+
+(defn after () void
+  (write.text "b"))

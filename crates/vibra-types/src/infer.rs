@@ -268,7 +268,10 @@ fn unify_signatures(
     right: &FunctionSignature,
     bindings: &mut BTreeMap<String, Type>,
 ) -> bool {
-    left.parameters().len() == right.parameters().len()
+    // A row has no variable in v1, so two function types unify only when
+    // their rows are equal: there is no row subtyping.
+    left.effects() == right.effects()
+        && left.parameters().len() == right.parameters().len()
         && left.labelled().len() == right.labelled().len()
         && left
             .parameters()

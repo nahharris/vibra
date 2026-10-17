@@ -1,0 +1,25 @@
+id = "V1-EFFECT-offending-callee-no-cascade"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "A callee that is over its own ceiling does not cascade: its caller sees its performed row and is within its own ceiling, and the declaration after an error still checks."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [74, 90]
+notes = ["performs @write via @write.text"]
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [165, 181]
+notes = ["performs @write via @write.text"]

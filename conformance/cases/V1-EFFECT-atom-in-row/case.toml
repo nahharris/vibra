@@ -1,0 +1,17 @@
+id = "V1-EFFECT-atom-in-row"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "A source effect row never contains an atom; an atom entry is an invalid reference at that entry."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.invalid-reference"
+level = "@error"
+source = "input.vib"
+span = [82, 88]

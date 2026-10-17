@@ -14,11 +14,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
-    FunctionSignature, LabelledParameter, Type, TypeBody, TypeDefinition, TypeId,
+    EffectRoot, EffectRow, FunctionSignature, LabelledParameter, Type, TypeBody,
+    TypeDefinition, TypeId,
 };
 use vibra_syntax::{
-    Attribute, Declaration, DefintDeclaration, DeftypeBody, DeftypeDeclaration, Name,
-    SourceAst, TypeExpr, TypeMember,
+    Attribute, Declaration, DeffectDeclaration, DefintDeclaration, DeftypeBody,
+    DeftypeDeclaration, Name, SourceAst, TypeExpr, TypeMember,
 };
 
 use crate::unavailable;
@@ -55,6 +56,10 @@ pub(crate) enum LowerError {
     /// A type argument that does not implement its parameter's bound: the
     /// argument and the interface name.
     UnsatisfiedBound(Type, String),
+    /// An effect row entry that resolves to no effect root.
+    InvalidEffect(String),
+    /// An effect row entry that names a private root of another module.
+    PrivateEffect(String),
 }
 
 /// What a type expression may name besides declared types: the receiver type
@@ -115,6 +120,16 @@ pub(crate) struct DeclaredType {
     pub(crate) parameters: Vec<String>,
     /// The interface each bounded parameter needs.
     pub(crate) bounds: BTreeMap<String, usize>,
+}
+
+/// One declared effect root visible to a checking run.
+#[derive(Clone, Debug)]
+pub(crate) struct DeclaredEffect {
+    pub(crate) root: EffectRoot,
+    pub(crate) name: String,
+    pub(crate) source_id: String,
+    pub(crate) span: ByteSpan,
+    pub(crate) public: bool,
 }
 
 /// One declared interface visible to a checking run.
@@ -217,6 +232,17 @@ pub(crate) struct TypeNames {
     /// What each labelled default written as a name denotes, keyed by source
     /// identity and the span of the default.
     default_constants: BTreeMap<(String, usize, usize), DefaultConstant>,
+    /// Every declared effect root of the run.
+    effects: Vec<DeclaredEffect>,
+    /// Declared effect indices keyed by the source ID of their module.
+    effects_by_module: BTreeMap<String, BTreeMap<String, usize>>,
+    /// The roots a written ceiling names, with where each entry is written,
+    /// keyed by source identity and the span of the function, `lambda`, or
+    /// test that writes the row. The row check reads them back to report an
+    /// unused root at its entry.
+    written_effects: std::cell::RefCell<
+        BTreeMap<(String, usize, usize), Vec<(EffectRoot, ByteSpan)>>,
+    >,
 }
 
 /// What a labelled default written as a name denotes.
@@ -372,6 +398,153 @@ impl TypeNames {
             .or_default()
             .insert(name, index);
         index
+    }
+
+    /// Registers an effect root owned by `source_id`, returning its index.
+    pub(crate) fn declare_effect(
+        &mut self,
+        source_id: &str,
+        declaration: &DeffectDeclaration,
+        root: EffectRoot,
+    ) -> usize {
+        let index = self.effects.len();
+        let name = declaration.name().value().to_owned();
+        self.effects.push(DeclaredEffect {
+            root,
+            name: name.clone(),
+            source_id: source_id.to_owned(),
+            span: declaration.span(),
+            public: declaration.attributes().items().iter().any(|attribute| {
+                matches!(attribute, Attribute::Visibility(name) if name.value() == "public")
+            }),
+        });
+        self.effects_by_module
+            .entry(source_id.to_owned())
+            .or_default()
+            .insert(name, index);
+        index
+    }
+
+    /// The effect root declared at `span` in `source_id`, when it is one.
+    pub(crate) fn effect_at(
+        &self,
+        source_id: &str,
+        span: ByteSpan,
+    ) -> Option<&DeclaredEffect> {
+        self.effects
+            .iter()
+            .find(|declared| declared.source_id == source_id && declared.span == span)
+    }
+
+    /// Resolves an effect row entry written in `source_id`: `r` names a root of
+    /// the same module and `alias.r` a public root of an imported module. A
+    /// symbol that resolves to no effect root, including one that names an
+    /// entity of another kind, is [`LowerError::InvalidEffect`].
+    pub(crate) fn resolve_effect(
+        &self,
+        source_id: &str,
+        name: &Name,
+    ) -> Result<&DeclaredEffect, LowerError> {
+        let invalid = || LowerError::InvalidEffect(name.value().to_owned());
+        let scope = self.scopes.get(source_id);
+        let in_module = |target: &str, member: &str| {
+            self.effects_by_module
+                .get(target)
+                .and_then(|effects| effects.get(member))
+                .and_then(|index| self.effects.get(*index))
+        };
+        match name.segments() {
+            [local] => {
+                if let Some(declared) = in_module(source_id, local) {
+                    return Ok(declared);
+                }
+                // A declaration import binds one top-level declaration of
+                // another module under a local name.
+                let (target, declaration) = scope
+                    .and_then(|scope| scope.declarations.get(local))
+                    .ok_or_else(invalid)?;
+                let declared = in_module(target, declaration).ok_or_else(invalid)?;
+                if declared.public {
+                    Ok(declared)
+                } else {
+                    Err(LowerError::PrivateEffect(name.value().to_owned()))
+                }
+            }
+            [alias, member] => {
+                let target = scope
+                    .and_then(|scope| scope.imports.get(alias))
+                    .ok_or_else(invalid)?;
+                let declared = in_module(target, member).ok_or_else(invalid)?;
+                if declared.public {
+                    Ok(declared)
+                } else {
+                    Err(LowerError::PrivateEffect(name.value().to_owned()))
+                }
+            }
+            _ => Err(invalid()),
+        }
+    }
+
+    /// Lowers the row a function type writes. Each entry is reported at its
+    /// own span; a type expression carries no other.
+    pub(crate) fn lower_function_type_row(
+        &self,
+        source_id: &str,
+        function: &vibra_syntax::FunctionType,
+    ) -> Result<EffectRow, LowerError> {
+        let mut roots = Vec::with_capacity(function.effects().len());
+        for (name, span) in function.effects().iter().zip(function.effect_spans()) {
+            match self.resolve_effect(source_id, name) {
+                Ok(declared) => roots.push(declared.root.clone()),
+                Err(error) => {
+                    return Err(LowerError::At(span.span(), Box::new(error)));
+                }
+            }
+        }
+        Ok(EffectRow::new(roots))
+    }
+
+    /// Lowers the row a function, `lambda`, or test writes as `effects:`,
+    /// reporting each entry that resolves to no root at its own span, and
+    /// records the roots the row names against the span of the declaration
+    /// that writes it. `None` when an entry did not resolve.
+    pub(crate) fn lower_written_row(
+        &self,
+        source_id: &str,
+        owner: ByteSpan,
+        row: &vibra_syntax::EffectRow,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Option<EffectRow> {
+        let mut valid = true;
+        let mut written = Vec::with_capacity(row.references().len());
+        for (name, span) in row.references().iter().zip(row.entry_spans()) {
+            match self.resolve_effect(source_id, name) {
+                Ok(declared) => written.push((declared.root.clone(), *span)),
+                Err(error) => {
+                    valid = false;
+                    report_lower_error(diagnostics, source_id, *span, &error);
+                }
+            }
+        }
+        let lowered = EffectRow::new(written.iter().map(|(root, _)| root.clone()));
+        self.written_effects
+            .borrow_mut()
+            .insert((source_id.to_owned(), owner.start(), owner.end()), written);
+        valid.then_some(lowered)
+    }
+
+    /// The roots the ceiling written at `owner` in `source_id` names, with the
+    /// span of each entry.
+    pub(crate) fn written_roots(
+        &self,
+        source_id: &str,
+        owner: ByteSpan,
+    ) -> Vec<(EffectRoot, ByteSpan)> {
+        self.written_effects
+            .borrow()
+            .get(&(source_id.to_owned(), owner.start(), owner.end()))
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Classifies `key` as a dict key (`docs/spec/02-type-system.md`, "Nominal
@@ -1041,11 +1214,7 @@ impl TypeNames {
                 self.applied(source_id, name, Vec::new())
             }
             TypeExpr::Function(function) => {
-                if !function.effects().is_empty() {
-                    return Err(LowerError::Unavailable(
-                        "nonempty function-type effect rows arrive in M4",
-                    ));
-                }
+                let effects = self.lower_function_type_row(source_id, function)?;
                 let variadic = function
                     .variadic()
                     .map(|tail| self.lower_variadic(source_id, scope, tail))
@@ -1068,7 +1237,8 @@ impl TypeNames {
                     .collect::<Result<Vec<_>, _>>()?;
                 let result = self.lower(source_id, scope, function.result())?;
                 let signature =
-                    FunctionSignature::with_labelled(parameters, labelled, result);
+                    FunctionSignature::with_labelled(parameters, labelled, result)
+                        .with_effects(effects);
                 Ok(Type::Function(Box::new(match variadic {
                     Some(tail) => signature.with_variadic(tail),
                     None => signature,
@@ -1821,6 +1991,22 @@ pub(crate) fn report_lower_error(
                 DiagnosticCode::TypeUnsatisfiedBound,
                 span,
                 format!("{argument} does not implement `{interface}`"),
+            )
+            .with_source_id(source_id),
+        ),
+        LowerError::InvalidEffect(name) => diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::EffectInvalidReference,
+                span,
+                format!("`{name}` does not resolve to a nominal effect root"),
+            )
+            .with_source_id(source_id),
+        ),
+        LowerError::PrivateEffect(name) => diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::NamePrivateAccess,
+                span,
+                format!("`{name}` names a private effect root of another module"),
             )
             .with_source_id(source_id),
         ),

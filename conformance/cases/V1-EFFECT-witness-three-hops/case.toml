@@ -1,0 +1,38 @@
+id = "V1-EFFECT-witness-three-hops"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "A witness through several functions names each call in order, from the first call site of the offending body down to the operation that owns the root."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [394, 401]
+notes = ["performs @write via @three"]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [346, 351]
+  message = "performs @write via @two"
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [291, 296]
+  message = "performs @write via @one"
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [221, 243]
+  message = "performs @write via @audit.record"
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [147, 172]
+  message = "performs @write via @write.text"

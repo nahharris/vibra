@@ -1,0 +1,23 @@
+id = "V1-EFFECT-function-value-row-mismatch"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "V1 has no row subtyping: a function of an empty row is not accepted where a row of one root is expected, and a function of one root is not accepted where the empty row is expected."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [326, 334]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [349, 362]

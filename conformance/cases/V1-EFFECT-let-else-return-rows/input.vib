@@ -1,0 +1,19 @@
+(deffect write
+  (defn text (target str) void (do)))
+
+(defn see () (option i32)
+  effects: (write)
+  (write.text "a")
+  (option.some 1i32))
+
+(defn by-let () i32
+  (let seen (see))
+  0i32)
+
+(defn by-fallback (o (option i32)) i32
+  (let-else (option.some v) o (do (see) (return 0i32)))
+  v)
+
+(defn by-return (c bool) i32
+  (let - (if c (return (do (see) 1i32)) 2i32))
+  0i32)

@@ -33,6 +33,7 @@ use vibra_syntax::{
 
 mod construct;
 mod defaults;
+mod effects;
 mod infer;
 mod interfaces;
 mod nominal;
@@ -426,6 +427,7 @@ fn check_ast_with_bindings_authority(
     checker.collect_headers();
     checker.check_globals();
     checker.check_functions();
+    checker.check_effects();
     let program = checker.finish();
     (program, checker.bindings)
 }
@@ -440,6 +442,7 @@ fn check_ast_with_text_import_authority(
     checker.collect_headers();
     checker.check_globals();
     checker.check_functions();
+    checker.check_effects();
     let program = checker.finish();
     (program, checker.bindings)
 }
@@ -528,6 +531,9 @@ struct FunctionHeader {
     /// The contract member this function implements, for a written `impl`
     /// member or an interface default.
     implements: Option<vibra_ir::Implements>,
+    /// For an effect operation, the root that owns it: its complete row is
+    /// the owner together with the additive row its signature carries.
+    effect_owner: Option<vibra_ir::EffectRoot>,
 }
 
 pub(crate) const IMPORTED_FUNCTION_DECLARATION: usize = usize::MAX;
@@ -774,6 +780,26 @@ impl<'a> Checker<'a> {
         self.types.note_other_names(self.source_id, self.ast);
         let mut type_declarations = Vec::new();
         for declaration in self.ast.declarations() {
+            if let Declaration::Deffect(value) = declaration {
+                let name = value.name().value();
+                if let Some(earlier) = self.module_names.get(name).copied() {
+                    redeclaration(
+                        self.diagnostics,
+                        self.source_id,
+                        name,
+                        name,
+                        value.span(),
+                        earlier,
+                    );
+                    continue;
+                }
+                self.module_names.insert(name.to_owned(), value.span());
+                self.types.declare_effect(
+                    self.source_id,
+                    value,
+                    stdlib::source_effect_root(self.source_id, name),
+                );
+            }
             if let Declaration::Defint(value) = declaration {
                 let name = value.name().value();
                 if let Some(earlier) = self.module_names.get(name).copied() {
@@ -898,6 +924,73 @@ impl<'a> Checker<'a> {
                             bounds,
                             impl_member: None,
                             implements: None,
+                            effect_owner: None,
+                        });
+                    }
+                }
+                Declaration::Deffect(value) => {
+                    let Some(owner) = self
+                        .types
+                        .effect_at(self.source_id, value.span())
+                        .map(|declared| declared.root.clone())
+                    else {
+                        continue;
+                    };
+                    for (member_index, member) in value.members().iter().enumerate() {
+                        let Some((generics, bounds)) = nominal::function_generics(
+                            &self.types,
+                            &[],
+                            member,
+                            self.source_id,
+                            self.diagnostics,
+                        ) else {
+                            continue;
+                        };
+                        let Some(signature) = check_signature(
+                            self.source_id,
+                            member,
+                            self.diagnostics,
+                            &self.types,
+                            nominal::Scope::new(None, &generics).with_bounds(&bounds),
+                        ) else {
+                            continue;
+                        };
+                        // An operation performs its owner root together with
+                        // the additive row it writes.
+                        let signature = operation_signature(signature, &owner);
+                        let name = format!(
+                            "{}.{}",
+                            value.name().value(),
+                            member.name().value()
+                        );
+                        let index = self.functions.len();
+                        self.function_indices.insert(name.clone(), index);
+                        self.functions.push(FunctionHeader {
+                            declaration_index,
+                            module_index: 0,
+                            source_id: self.source_id.to_owned(),
+                            name,
+                            external: compiler_intrinsic(
+                                self.source_id,
+                                member,
+                                self.diagnostics,
+                                self.trusted_bootstrap,
+                                &signature,
+                                &standard::role_types(&self.types),
+                            ),
+                            signature,
+                            external_declared: member.attributes().items().iter().any(
+                                |attribute| matches!(attribute, Attribute::External(_)),
+                            ),
+                            test: None,
+                            test_assertion: None,
+                            member_index: Some(member_index),
+                            self_type: None,
+                            type_parameters: generics,
+                            bounds,
+                            impl_member: None,
+                            implements: None,
+                            effect_owner: Some(owner.clone()),
                         });
                     }
                 }
@@ -964,6 +1057,7 @@ impl<'a> Checker<'a> {
                         bounds,
                         impl_member: None,
                         implements: None,
+                        effect_owner: None,
                     });
                 }
                 Declaration::Import(import)
@@ -1039,6 +1133,7 @@ impl<'a> Checker<'a> {
                     bounds,
                     impl_member: None,
                     implements: None,
+                    effect_owner: None,
                 });
             }
         }
@@ -1097,6 +1192,7 @@ impl<'a> Checker<'a> {
                     bounds: BTreeMap::new(),
                     impl_member: None,
                     implements: None,
+                    effect_owner: None,
                 });
             }
             self.text_import_span = Some(import_span);
@@ -1141,6 +1237,7 @@ impl<'a> Checker<'a> {
                 bounds: BTreeMap::new(),
                 impl_member: None,
                 implements: None,
+                effect_owner: None,
             });
         }
         for _ in 0..=self.globals.len() {
@@ -1384,6 +1481,7 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let implements = header.implements.clone();
+            let owner = header.effect_owner.clone();
             match CheckedFunction::with_slots(
                 header.name,
                 header.signature,
@@ -1393,6 +1491,10 @@ impl<'a> Checker<'a> {
             )
             .map(|function| match implements {
                 Some(implements) => function.with_implements(implements),
+                None => function,
+            })
+            .map(|function| match owner {
+                Some(owner) => function.with_effect_owner(owner),
                 None => function,
             }) {
                 Ok(function) => {
@@ -1408,6 +1510,14 @@ impl<'a> Checker<'a> {
                 ),
             }
         }
+    }
+
+    /// Checks every written ceiling against the performed row of its body,
+    /// once the whole function-call graph is checked.
+    fn check_effects(&mut self) {
+        let found =
+            effects::check(&self.checked_functions, &self.checked_globals, &self.types);
+        self.diagnostics.extend(found);
     }
 
     fn finish(&mut self) -> Option<CheckedProgram> {
@@ -1477,6 +1587,10 @@ pub(crate) fn header_function<'a>(
         header.member_index,
     ) {
         (Declaration::Defn(function), None) => return Some(function),
+        // An effect operation is a member of its root.
+        (Declaration::Deffect(value), Some(index)) => {
+            return value.members().get(index);
+        }
         (Declaration::Deftype(value), Some(_)) => value.members(),
         (Declaration::Defint(value), Some(_)) => value.members(),
         _ => return None,
@@ -3358,6 +3472,8 @@ fn check_signature(
     };
     let mut labelled = Vec::new();
     let mut variadic = None;
+    let mut effects = vibra_ir::EffectRow::empty();
+    let owner = function.span();
     for attribute in function.attributes().items() {
         match attribute {
             Attribute::Labelled(entries) => {
@@ -3389,14 +3505,11 @@ fn check_signature(
                     ));
                 }
             }
-            Attribute::Effects(row) if !row.references().is_empty() => {
-                valid = false;
-                unavailable(
-                    diagnostics,
-                    source_id,
-                    row.span(),
-                    "nonempty effect ceilings remain unavailable in M2",
-                );
+            Attribute::Effects(row) => {
+                match types.lower_written_row(source_id, owner, row, diagnostics) {
+                    Some(written) => effects = written,
+                    None => valid = false,
+                }
             }
             Attribute::Variadic(parameter) => {
                 match types.lower_variadic(source_id, scope, parameter.value_type()) {
@@ -3417,7 +3530,8 @@ fn check_signature(
     }
     valid.then(|| {
         with_tail(
-            FunctionSignature::with_labelled(parameters, labelled, result),
+            FunctionSignature::with_labelled(parameters, labelled, result)
+                .with_effects(effects),
             variadic,
         )
     })
@@ -3630,6 +3744,8 @@ fn check_lambda_signature(
     )?;
     let mut labelled = Vec::new();
     let mut variadic = None;
+    let mut effects = vibra_ir::EffectRow::empty();
+    let owner = lambda.span();
     for attribute in lambda.attributes().items() {
         match attribute {
             Attribute::Labelled(entries) => {
@@ -3661,14 +3777,11 @@ fn check_lambda_signature(
                     ));
                 }
             }
-            Attribute::Effects(row) if !row.references().is_empty() => {
-                valid = false;
-                unavailable(
-                    diagnostics,
-                    source_id,
-                    row.span(),
-                    "nonempty effect ceilings remain unavailable in M2",
-                );
+            Attribute::Effects(row) => {
+                match types.lower_written_row(source_id, owner, row, diagnostics) {
+                    Some(written) => effects = written,
+                    None => valid = false,
+                }
             }
             Attribute::Variadic(parameter) => {
                 match types.lower_variadic(source_id, scope, parameter.value_type()) {
@@ -3689,7 +3802,8 @@ fn check_lambda_signature(
     }
     valid.then(|| {
         with_tail(
-            FunctionSignature::with_labelled(parameters, labelled, result),
+            FunctionSignature::with_labelled(parameters, labelled, result)
+                .with_effects(effects),
             variadic,
         )
     })
@@ -3700,8 +3814,10 @@ fn has_deferred_attributes(attributes: &[Attribute]) -> bool {
         // `any`-bounded generics are checked from M3 Step 3; an interface
         // bound was already reported unavailable at the header.
         Attribute::External(_) | Attribute::Symbol(_) => true,
-        Attribute::Where(_) | Attribute::Labelled(_) | Attribute::Variadic(_) => false,
-        Attribute::Effects(row) => !row.references().is_empty(),
+        Attribute::Where(_)
+        | Attribute::Labelled(_)
+        | Attribute::Variadic(_)
+        | Attribute::Effects(_) => false,
         // A native implementation keeps a checked body; `role:` is a type attribute.
         Attribute::Visibility(_)
         | Attribute::Doc(_)
@@ -5941,6 +6057,16 @@ pub(crate) fn unavailable(
 }
 
 /// `signature` with its variadic tail, when it has one.
+/// The signature of an effect operation: the additive row it writes together
+/// with its owner root, which is the complete row applying it performs.
+pub(crate) fn operation_signature(
+    signature: FunctionSignature,
+    owner: &vibra_ir::EffectRoot,
+) -> FunctionSignature {
+    let row = signature.effects().clone().with_root(owner.clone());
+    signature.with_effects(row)
+}
+
 fn with_tail(signature: FunctionSignature, tail: Option<Type>) -> FunctionSignature {
     match tail {
         Some(tail) => signature.with_variadic(tail),

@@ -1,0 +1,23 @@
+(deffect write
+  (defn text (target str event str) void (do)))
+
+(deffect audit
+  (defn record (target str event str) void
+    effects: (write)
+    (write.text target event)))
+
+(defn one () void
+  effects: (audit write)
+  (audit.record "a" "b"))
+
+(defn two () void
+  effects: (audit write)
+  (one))
+
+(defn three () void
+  effects: (audit write)
+  (two))
+
+(defn four () void
+  effects: (audit)
+  (three))
