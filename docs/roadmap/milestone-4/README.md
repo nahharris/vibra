@@ -2,8 +2,10 @@
 
 Status: in progress. Stage 4A, the WebAssembly spine, is complete on `m4`: Steps 1
 to 11 have merged, and Step 12 records the [Stage 4A evidence](stage-4a-evidence.md)
-(landed, conditional on its pull request merging). Stage 4B, static effects and
-host operations (Steps 13 to 22), has not started.
+(landed, PR #370, merge d567003). Stage 4B, static
+effects and host operations (Steps 13 to 22), has its contracts frozen by
+[Step 13](13-stage-4b-contracts.md) (landed, conditional on its pull request
+merging), and its implementation, Steps 14 to 22, has not started.
 
 Decision ledger: [decision-ledger.md](decision-ledger.md)
 Surface inventory: [supported-surface.md](supported-surface.md)
@@ -197,9 +199,60 @@ evidences every exit-gate clause.
   enabled because it is unobservable, while the specification canonicalizes at the
   observation points.
 
+- **One provider trait, two providers, one world (D20, Stage 4B).** A run is
+  given a host provider through one trait. The system provider (proposed crate
+  `vibra-host`) serves `run`, and the in-memory host world serves `test` and the
+  conformance harness. There is no mode switch in the language or in the IR, and
+  the world is a VIBON document (`@host-world.v1`) that a case supplies. The
+  provider crate is the only crate through which a running program reaches the
+  ambient filesystem, environment, clock, or random source. A host test scans the
+  crates that check, lower, or execute a program for those APIs and names the
+  tooling crates that read a project, a command line, or a corpus (D31.1).
+- **Each host operation is written once (D30.2, Stage 4B).** The operation is
+  Rust behind a value-access trait. The interpreter implements the trait over its
+  values, and the Wasm runner through the exported accessors and builders, never
+  through `vibra_v1_memory`. The audit event is built by that one code, so a trace
+  cannot differ between backends. The registry table of 17 rows lives in
+  `vibra-ir` beside the compiler registry (a checked-in snapshot guards it), and
+  the emitter depends on its symbols and signatures only.
+- **Rows are records before they are anything else (D25).** `EffectRow { roots,
+  tail: None }` is the IR shape from Step 14, so a row variable is one more
+  field. Nothing assumes a closed set of roots.
+
 These are implementation constraints, not language rules. Observable decisions
 are closed in the owning specification by Step 1 (Stage 4A) or Step 13
 (Stage 4B) before dependent code.
+
+## Performance baseline
+
+Step 13 fixes the baseline's definition (ledger D29.1, gap G23), and Step 21
+records it. M7 compares against it, so it must be reproducible.
+
+The baseline is a named list of about ten programs, kept in the corpus or in
+`examples/` and named in `milestone-4/performance-baseline.vibon`:
+
+1. the Stage 4A deep tail-recursive walk;
+2. the M3 demo library's tests;
+3. non-tail recursion to depth 10^5;
+4. a tail loop of 10^6 iterations;
+5. `array.fold`;
+6. dict insertion;
+7. text concatenation;
+8. float `to-str`;
+9. the value nested 5,000 levels deep (build, compare, release; this also settles
+   the debug-build cost of ledger D14.2); and
+10. the Stage 4B effectful walk over `iter.next`, in a host world.
+
+For each program and each backend the file records **exact metrics**: module
+bytes (Wasm only), the allocation count, the peak live arena size
+(`vibra_v1_live_size`, Wasm only; the interpreter's own measure beside it), and
+fuel, which is Wasmtime fuel for a module (metering is enabled by the measuring
+runner only) and the reduction count of the interpreter. A CI host test
+regenerates the exact metrics and fails on any difference from the file, so a
+change that moves one is reviewed as a baseline change. **Wall-time medians** over
+a stated number of runs are recorded as information beside them and never fail a
+build. The file is `@perf-baseline.v1` VIBON data, written by a measuring tool and
+never by hand.
 
 ## Dependency evidence
 
@@ -269,8 +322,9 @@ linking it.
 ## Contract gaps found while planning
 
 The following were found while reviewing the specification against the M4
-deliverables. None may be settled in implementation or tests. Step 1 closes
-the Stage 4A items; Step 13 closes the Stage 4B items.
+deliverables. None may be settled in implementation or tests. Step 1 closed
+the Stage 4A items (G1–G11), and Step 13 closed the Stage 4B items (G12–G24),
+each by the ledger rows its last column names.
 
 | ID | Gap | Why it blocks | Owner |
 | --- | --- | --- | --- |
@@ -285,18 +339,19 @@ the Stage 4A items; Step 13 closes the Stage 4B items.
 | G9 | A trap has a stable code and a source origin when its span is known. Nothing says how an engine trap, such as an unreachable instruction or an out-of-bounds access, becomes a stable `@runtime.*` code, or how a Wasm trap recovers its source origin before M7's source maps exist. | The exit gate requires trap parity, and `@test.trap` records an origin. | Closed by [D8.1–D8.3 and D13.2](decision-ledger.md); implemented by Step 11 |
 | G10 | WebAssembly leaves the payload of a NaN produced by an arithmetic instruction nondeterministic. The runtime chapter canonicalizes NaN in serialization and equality only. | A NaN that reaches `f64.to-str`, `compare-total`, a dict key order, or a result encoding must agree across backends. The rule must say where canonicalization happens. | Closed by [D11.1–D11.2](decision-ledger.md); implemented by Step 8c |
 | G11 | The pre-M4 revision pinned, without fixing, that a local binder may be named `if`, `i32`, `let-else`, `return`, or `never`, which the specification forbids. An interpreter test over a value nested 5,000 levels deep took about seven minutes in a debug build, with the cause not investigated. | Neither is an M4 form, but the first would be hardened by a second backend and the second distorts the performance baseline. Each needs an owning step or an explicit reassignment. | Assigned by [D14.1–D14.2](decision-ledger.md): the binder fix to Step 2, the nested-value cost to Step 21 |
-| G12 | The host registry has no rows. The effects chapter reserves ten roots in five modules and shows two example operations; no closed symbol list, signature, or error type exists, and `path` and `fs-error` are named but never declared. "Whole-value" console input is not defined. | Steps 16–18 implement the registry and need every row before code, as M3's library steps did. | Step 13 |
-| G13 | An audit event is an opaque string in `@audit-trace.v1` and in the CLI's `auditTrace`. The roadmap requires one versioned event encoding shared by both backends that tolerates new event kinds, and a deterministic event shape per registry entry. | No host operation can be implemented without its event, and the demo gate compares traces byte for byte. | Step 13 |
-| G14 | There is no rule for whether adding a registry entry is a minor registry version, or how a build records the registry version it requires. `vibra_v1` is the only identity. | It is a named deliverable and a forward-compatibility obligation; the Wasm import module name depends on it. | Step 13 |
-| G15 | Tests "use deterministic providers by default" and may be given "recorded responses", but no source form, project field, or harness input supplies them. The sentence "an unconsumed failure or unrecorded dependency on a nondeterministic provider fails the test" names no result atom. A corpus case has no input kind for host responses, standard input, a filesystem image, an environment, a clock, or random bytes. | Effectful tests and every Stage 4B corpus case depend on it. | Step 13 |
-| G16 | [M3's G21](../milestone-3/README.md#contract-gaps-found-while-planning): an entry that returns `err` ends `run` with `@command.ok`. M4 adds host failures at the entry, which need the same decision: a result atom and an exit code. | Reassigned to M4 by the M3 exit evidence. | Step 13; implemented by Step 19 |
-| G17 | Several effect conditions have no diagnostic: an unknown or repeated root in a target's `effects` array ("project errors"), a binary target with no `effects` field, a `@host` declaration outside a `deffect`, a `@host` operation with an additive row, a registry entry whose owner is not the enclosing root, and `effects:` written on a `deffect`. The call-witness shape that `@effect.outside-ceiling` must report is not defined, and neither is whether `@contract.unused-effect` applies to a target array. | The exit gate names the witness, and each rejection needs a stable code, level, and span before its case is written. | Step 13 |
-| G18 | A performed row is computed over the function-call graph, but a call through a function value or an interface value has no statically known callee. The row such a call contributes, from the function type's row or the contract ceiling, is implied and not stated. | M3 made an unknown call target stand for every escaping function; effects need the stated rule instead, or the performed row is not least. | Step 13 |
-| G19 | Effect rows in typed IR, query schemas, and build metadata must not assume a row is a closed literal set. No representation rule exists. | It is a forward-compatibility obligation that is cheap now and breaking later. | Step 13 |
-| G20 | `never` has no terminating source in v1 other than `return`. The pre-M4 revision left a host `exit` or a pure intrinsic as an M4 decision; the charter excludes processes. | Decide once, so the standard effect inventory is closed. Recommendation: add none. | Step 13 |
-| G21 | `@stdlib-manifest.v1` is a closed record with `compiler`, `native`, and `assertions` lists and no list for `@host` symbols, and the embedded module set has no `io`, `fs`, `env`, `time`, or `random` module. | Host declarations need the same closed authority as `@compiler` ones. | Step 13 |
-| G22 | The position envelope and `@index.v1` have no fields for performed, enclosing, and target effect rows, effect-operation witnesses, or effect roots and operations as indexed entities. `V1-TOOL-index-unavailable` pins their absence. | Steps 14 and 20 emit them. | Step 13 |
-| G23 | The performance baseline has no definition: which programs, which measures, where the numbers are recorded, and whether CI checks them. | M7 compares against it, so it must be reproducible. | Step 13 |
+| G12 | The host registry has no rows. The effects chapter reserves ten roots in five modules and shows two example operations; no closed symbol list, signature, or error type exists, and `path` and `fs-error` are named but never declared. "Whole-value" console input is not defined. | Steps 16–18 implement the registry and need every row before code, as M3's library steps did. | Closed by [D17.1–D17.6](decision-ledger.md#stage-4b-contracts-step-13); implemented by Steps 16–18 |
+| G13 | An audit event is an opaque string in `@audit-trace.v1` and in the CLI's `auditTrace`. The roadmap requires one versioned event encoding shared by both backends that tolerates new event kinds, and a deterministic event shape per registry entry. | No host operation can be implemented without its event, and the demo gate compares traces byte for byte. | Closed by [D18.1–D18.3](decision-ledger.md#stage-4b-contracts-step-13); implemented by Step 16 |
+| G14 | There is no rule for whether adding a registry entry is a minor registry version, or how a build records the registry version it requires. `vibra_v1` is the only identity. | It is a named deliverable and a forward-compatibility obligation; the Wasm import module name depends on it. | Closed by [D19.1–D19.2](decision-ledger.md#stage-4b-contracts-step-13); implemented by Step 16 (the snapshot test) and M7 (the build record) |
+| G15 | Tests "use deterministic providers by default" and may be given "recorded responses", but no source form, project field, or harness input supplies them. The sentence "an unconsumed failure or unrecorded dependency on a nondeterministic provider fails the test" names no result atom. A corpus case has no input kind for host responses, standard input, a filesystem image, an environment, a clock, or random bytes. | Effectful tests and every Stage 4B corpus case depend on it. | Closed by [D20.1–D20.4](decision-ledger.md#stage-4b-contracts-step-13); implemented by Steps 16–18 |
+| G16 | [M3's G21](../milestone-3/README.md#contract-gaps-found-while-planning): an entry that returns `err` ends `run` with `@command.ok`. M4 adds host failures at the entry, which need the same decision: a result atom and an exit code. | Reassigned to M4 by the M3 exit evidence. | Closed by [D21.1](decision-ledger.md#stage-4b-contracts-step-13); implemented by Step 19 |
+| G17 | Several effect conditions have no diagnostic: an unknown or repeated root in a target's `effects` array ("project errors"), a binary target with no `effects` field, a `@host` declaration outside a `deffect`, a `@host` operation with an additive row, a registry entry whose owner is not the enclosing root, and `effects:` written on a `deffect`. The call-witness shape that `@effect.outside-ceiling` must report is not defined, and neither is whether `@contract.unused-effect` applies to a target array. | The exit gate names the witness, and each rejection needs a stable code, level, and span before its case is written. | Closed by [D23.1–D23.2](decision-ledger.md#stage-4b-contracts-step-13); implemented by Steps 14, 15, and 16 |
+| G18 | A performed row is computed over the function-call graph, but a call through a function value or an interface value has no statically known callee. The row such a call contributes, from the function type's row or the contract ceiling, is implied and not stated. | M3 made an unknown call target stand for every escaping function; effects need the stated rule instead, or the performed row is not least. | Closed by [D24.1](decision-ledger.md#stage-4b-contracts-step-13); implemented by Step 14 |
+| G19 | Effect rows in typed IR, query schemas, and build metadata must not assume a row is a closed literal set. No representation rule exists. | It is a forward-compatibility obligation that is cheap now and breaking later. | Closed by [D25.1](decision-ledger.md#stage-4b-contracts-step-13); implemented by Steps 14 and 20 |
+| G20 | `never` has no terminating source in v1 other than `return`. The pre-M4 revision left a host `exit` or a pure intrinsic as an M4 decision; the charter excludes processes. | Decide once, so the standard effect inventory is closed. Recommendation: add none. | Closed by [D26.1](decision-ledger.md#stage-4b-contracts-step-13); no step adds a terminating source |
+| G21 | `@stdlib-manifest.v1` is a closed record with `compiler`, `native`, and `assertions` lists and no list for `@host` symbols, and the embedded module set has no `io`, `fs`, `env`, `time`, or `random` module. | Host declarations need the same closed authority as `@compiler` ones. | Closed by [D27.1](decision-ledger.md#stage-4b-contracts-step-13); implemented by Steps 16–18 |
+| G22 | The position envelope and `@index.v1` have no fields for performed, enclosing, and target effect rows, effect-operation witnesses, or effect roots and operations as indexed entities. `V1-TOOL-index-unavailable` pins their absence in the M3 form, which Step 20 replaces. | Steps 14 and 20 emit them. | Closed by [D28.1](decision-ledger.md#stage-4b-contracts-step-13); implemented by Step 20 |
+| G23 | The performance baseline has no definition: which programs, which measures, where the numbers are recorded, and whether CI checks them. | M7 compares against it, so it must be reproducible. | Closed by [D29.1](decision-ledger.md#stage-4b-contracts-step-13); implemented by Step 21 |
+| G24 | Found while closing G12 and the demo gate: no host operation can receive program arguments and the CLI has no way to pass them, but the demo gate reads "a path chosen at runtime". | The registry's `env.read.args` and the command grammar of the tooling chapter must agree, and a closed grammar cannot grow in an implementation step. | Closed by [D22.1](decision-ledger.md#stage-4b-contracts-step-13); implemented by Step 18 |
 
 ## Steps
 
@@ -322,30 +377,45 @@ tail-recursive walk that grows neither stack nor arena.
 | 9 | [Interfaces](09-interfaces.md): static dispatch, interface values, default members, destination dispatch and conversion, `iter` with its adapters, and the Step 2 forms | 8c, 8d | landed, PR #367, merge c1217c13c46d24f4eb7a6fa4fd708b80bf8224ca. Run-time dispatch from type descriptors, interface values as pairs, the closed conformances, the key unit, and `iter`; all 22 owned rows are matched | PR #367 |
 | 10 | [Natives and the joined differential](10-natives.md): the native import module `vibra_native_v1`, the single Rust source of G7, and the body/native differential joined to the interpreter/Wasm harness | 9 | landed, PR #368, merge 20db8c624032235a94ee88c0b28f149f1d3eb397. The single-source audit as a test (three interpreter copies of native algorithms removed), the manifest and import-table checks, 112 four-path samples of the 19 natives plus the looping rows and `iter.next` in both backends, and the native defect path end to end | PR #368 |
 | 11 | [Tests and traps in the Wasm backend](11-tests-traps.md): `workspace-test` observations, the `vibra_v1_test` export and the `vibra_v1_failure`, `vibra_v1_failure_expected`, and `vibra_v1_failure_actual` exports, assertion outcomes, and every trap code with its origin | 10 | landed, PR #369, merge 1f55ad6658923f0c63df1af2277c640fdaf3292d. The test module and `vibra_v1_test`, the three assertions and their failure exports, canonical equality by one iterative walk of the arena, the origin table, trap and origin parity for every registered code, and the three forms Step 9 left unlowered; the Wasm backend reports 0 not-lowered rows (130 of 130 cases matched) | PR #369 |
-| 12 | [Stage 4A demo and corpus sub-gate](12-stage-4a-evidence.md) — evidence step | 11 | landed, conditional on its PR merging. The [Stage 4A evidence](stage-4a-evidence.md): the demo in both backends with a deep tail-recursive walk, the corpus sub-gate (131 of 131 executable cases matched, 0 not lowered), and the exit-clause map; two contract fixes (`expect.host_event` on `workspace-test`, the tail-call wording for widened results) | Branch `claude/m4-step-12-stage-4a-evidence`; PR to be recorded |
+| 12 | [Stage 4A demo and corpus sub-gate](12-stage-4a-evidence.md) — evidence step | 11 | landed, PR #370, merge d567003e5a0b428812225d60b3c25f2ba64b4a95. The [Stage 4A evidence](stage-4a-evidence.md): the demo in both backends with a deep tail-recursive walk, the corpus sub-gate (131 of 131 executable cases matched, 0 not lowered), and the exit-clause map; two contract fixes (`expect.host_event` on `workspace-test`, the tail-call wording for widened results) | PR #370 |
 
 Stage 4B — static effects and host operations, each in both backends.
 
 | Step | One-PR slice | Requires | Status | PR / merge evidence |
 | --- | --- | --- | --- | --- |
-| 13 | Freeze Stage 4B contracts: the host registry, audit-event encoding, registry versioning, test providers, entry outcomes, effect diagnostics, and effect metadata — specification prerequisite | 12 | not started | — |
-| 14 | Effect declarations and rows: `deffect`, operations with Vibra bodies and additive rows, row resolution, function-type rows, transitively closed performed rows, `@effect.outside-ceiling` with call witnesses, `@effect.invalid-reference`, `@contract.unused-effect`, and interface contract ceilings | 13 | not started | — |
-| 15 | Target consent and effectful tests: the required `effects` array of a binary target, static admission of the resolved entry, effectful test ceilings, and the `project init` template | 14 | not started | — |
-| 16 | The host boundary and console: typed `@host` externals, the closed `vibra_v1` host registry, the scalar-only ABI over the arena, injected providers, the audit-event encoding, the `io` roots, and an effectful walk over `iter.next` | 15 | not started | — |
-| 17 | Filesystem operations under `fs.read`, `fs.write`, and `fs.metadata`, with typed host errors | 16 | not started | — |
-| 18 | Environment reads, clocks, and random bytes, with deterministic test providers | 17 | not started | — |
-| 19 | Entry outcomes: the command result and exit code for an entry that returns `err` and for a host failure at the entry (per G16), and the parity sweep over success, typed host error, propagation, and trap | 18 | not started | — |
-| 20 | Effect metadata: performed, enclosing, and target rows at a source position, effect-operation witnesses, and index records for effect roots and operations | 19 | not started | — |
-| 21 | Interpreter and unoptimized-Wasm performance baseline on the conformance and demo programs — evidence step | 20 | not started | — |
-| 22 | M4 demo and exit gate, including the M3 deferral sweep — evidence step | 21 | not started | — |
+| 13 | [Freeze Stage 4B contracts](13-stage-4b-contracts.md): the host registry, audit-event encoding, registry versioning, the test host world, entry outcomes, effect diagnostics, and effect metadata — specification prerequisite | 12 | landed, conditional on its PR merging. The 17-row `vibra_v1` registry and its closed error enums, the `@audit-trace.v1` event record, registry versioning, the `@host-world.v1` test world, program arguments, `@command.program-failed`, the witness shape, indirect-call and row rules, the manifest `host` list, the effect fields of the envelope and the index, the performance baseline, and the Wasm `@host` ABI; G12–G24 closed by [ledger D17–D32](decision-ledger.md#stage-4b-contracts-step-13); two registry codes, the `@command.program-failed` atom, the event-record and trap-code schema changes; guides for Steps 14–22 | Branch `claude/m4-step-13-stage-4b-contracts`, based on `claude/m4-step-12-stage-4a-evidence`; PR to be recorded |
+| 14 | [Effect declarations and rows](14-effect-rows.md): `deffect`, operations with Vibra bodies and additive rows, row resolution, function-type rows, the row record in typed IR and the canonical `fn` encoding, transitively closed performed rows, indirect-call rows, `@effect.outside-ceiling` with call witnesses, `@effect.invalid-reference`, `@contract.unused-effect`, `effects:` on a `deffect`, and interface contract ceilings | 13 | not started | — |
+| 15 | [Target consent and effectful tests](15-target-consent.md): the required `effects` array of a binary target, its resolution diagnostics, static admission of the resolved entry, effectful test ceilings, and the `project init` template | 14 | not started | — |
+| 16a | [Host provider infrastructure](16a-host-infrastructure.md) — infrastructure step: the provider trait and crate, the system provider, the in-memory host world with its `@host-world.v1` decoder and defaults, the registry table of 17 rows with its checked-in snapshot, the audit-event codec that preserves unknown kinds, the manifest `host` list and the `0.3.0` package, the corpus `host-world` input, and the ambient-read test | 15 | not started | — |
+| 16b | [The host boundary and console](16b-host-console.md): typed `@host` externals and their diagnostics, the scalar-only ABI over the arena (the `vibra_v1` imports and the seven builders), the audit events in both backends, the `io` roots and `@std.io`, `test` standard output going to the trace, and an effectful walk over `iter.next` | 16a | not started | — |
+| 17 | [Filesystem operations](17-filesystem.md) under `fs.read`, `fs.write`, and `fs.metadata`, with `path` and the typed host errors | 16b | not started | — |
+| 18 | [Environment reads, clocks, random bytes, and program arguments](18-env-clock-random.md): `env.read`, `time.now`, `random.generate`, `vibra run TARGET -- ARG...`, and the world's environment, clock, and generator | 17 | not started | — |
+| 19 | [Entry outcomes](19-entry-outcomes.md): `@command.program-failed` and exit code 6 for an entry that returns `err` (per G16), the host failure at the entry, and the parity sweep over success, typed host error, propagation, and trap | 18 | not started | — |
+| 20 | [Effect metadata](20-effect-metadata.md): performed, enclosing, and target rows at a source position, effect-operation witnesses, and index records for effect roots and operations | 19 | not started | — |
+| 21 | [Interpreter and unoptimized-Wasm performance baseline](21-performance-baseline.md) on the named programs — evidence step | 20 | not started | — |
+| 22 | [M4 demo and exit gate](22-m4-exit.md), including the M3 deferral sweep — evidence step | 21 | not started | — |
 
-Steps 1 and 13 are specification prerequisites, Step 4 is an infrastructure
-step, and Steps 12, 21, and 22 are evidence steps; they claim no language
-behavior. Step 3 claims its behavior for the interpreter only; the Wasm
+Steps 1 and 13 are specification prerequisites, Steps 4 and 16a are
+infrastructure steps, and Steps 12, 21, and 22 are evidence steps; they claim no
+language behavior. Step 3 claims its behavior for the interpreter only; the Wasm
 backend meets the same outcome in Step 6. Guides for Steps 2–12 are written in
 Step 1 and guides for Steps 14–22 in Step 13, because their content depends on
 the contracts those steps close. Step 1 also records the decision ledger, the
 M4 surface inventory, and M4 validation. No step starts without its guide.
+
+Step 13 changed the Stage 4B decomposition in two places, and the reasons are
+recorded here and in each guide. Step 16 became 16a and 16b. The decisions of
+2026-10-17 make the host world a schema with a decoder, a corpus input, and two
+providers behind one trait, together with a 17-row registry, a checked-in snapshot,
+and an event codec that survives unknown kinds. That is the harness every operation
+of Steps 16b–18 is tested through, and carrying it with the ABI, the first typed
+`@host` declaration, and the console in one change would give a change whose
+review seam is not a vertical slice. Step 16a lands the harness first and claims
+no language behavior; Step 16b lands the first operations in both backends, as the
+stage rule requires. Step 18 grew by the program arguments: `env.read.args` has no
+value without `vibra run TARGET -- ARG...`, and the closed command grammar now
+carries it (ledger D22.1), so the CLI change, the system provider's arguments, and
+the world's `args` land with the operation that reads them. No other step moved.
 
 Step 1 split two planned steps, and the split is recorded here, in the guides, and
 in the ledger. Step 5 became 5a and 5b: the arena, its reference counting, the
@@ -369,25 +439,25 @@ and the ledger.
 | --- | --- |
 | Unoptimized Wasm lowering of the complete pure language: mandatory tail calls, union discriminants in written order, checked lookups, `@compiler` externals lowered before emission | 4–10 (5a–8d); NaN and number text in 8c ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
 | Native implementations lowered from the single source; body/native differential joined to the interpreter/Wasm harness | 1, 8a, 8b, 8c, 8d, 10 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
-| Instance-owned value arena and opaque-index discipline; no index or instance identity in typed IR or build output | 1, 5a, 16 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
+| Instance-owned value arena and opaque-index discipline; no index or instance identity in typed IR or build output | 1, 5a, 16b ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
 | Specified arena reclamation rule; bounded host memory for a long tail-recursive program | 1, 5a, 6 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
 | Interpreter/Wasm differential harness over the entire executable corpus, through the conformance harness | 1, 4, 11, 12 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
 | Native `deffect` operations, default-empty ceilings, transitively closed performed rows, imported-symbol effect references | 14 |
 | Effect metadata in general queries; source-position metadata for performed, enclosing, and target rows | 20 |
 | Required binary-target effect arrays and static admission of the entry | 15 |
-| Typed `@host` externals and the closed `vibra_v1` registry in both backends; the registry versioning rule | 13, 16 |
-| Whole-value console, filesystem, environment-read, clock, and random operations | 16–18 |
-| Injected deterministic test providers and ordered audit traces; one versioned audit-event encoding | 13, 16, 18 |
+| Typed `@host` externals and the closed `vibra_v1` registry in both backends; the registry versioning rule | 13, 16a, 16b |
+| Whole-value console, filesystem, environment-read, clock, and random operations | 16b–18, and the program arguments of 18 |
+| Injected deterministic test providers and ordered audit traces; one versioned audit-event encoding | 13, 16a, 16b, 18 |
 | Effect rows in typed IR, query schemas, and build metadata that do not assume a closed literal set | 13, 14, 20 |
 | The forms M3 reassigned: the three contract-member forms, and the result of an entry that returns `err` | 2, 9, 19 |
 | A specified outcome for deep non-tail recursion, written before the Wasm backend | 1, 3, 6 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
-| Effectful iteration examples that walk with `iter.next` and tail recursion | 16 |
+| Effectful iteration examples that walk with `iter.next` and tail recursion | 16b |
 | Recorded interpreter and unoptimized-Wasm performance baseline | 21 |
 | Stage demo: the M3 demo library's tests agree in both backends; a deep tail-recursive walk grows neither stack nor arena | 12 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
 | Demo gate: a target declaring `@std.fs.read` reads, transforms, and writes; the same source is rejected when a ceiling omits a root; byte-identical stdout and audit traces in both backends | 22 |
 | Exit: an additive root reaches the performed row, the rejection, and the target array of every transitive caller; the witness is named for each missing root | 14, 15 |
-| Exit: every host operation has one registry entry, owner effect, typed signature, and audit-event shape | 13, 16–18 |
-| Exit: no compiler-generated ambient host read exists outside the registry | 16–18; audited by 22 |
+| Exit: every host operation has one registry entry, owner effect, typed signature, and audit-event shape | 13, 16a–18 |
+| Exit: no compiler-generated ambient host read exists outside the registry | 16a (the ambient-read test), 16b–18; audited by 22 |
 | Exit: success, typed host error, propagation, and trap have interpreter/Wasm parity | 11, 19 |
 | Exit: deep non-tail recursion has the same specified outcome in both backends | 3, 6 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
 | Exit: a tail-recursive loop allocating a fresh compound value per iteration holds a bounded live arena in the Wasm backend | 6 ([Stage 4A evidence](stage-4a-evidence.md#stage-4a-exit-clauses)) |
@@ -412,11 +482,29 @@ M5's and the public `query` command stays M6's.
 | Inherited row | Owner |
 | --- | --- |
 | `Declaration::Deffect`; nonempty `Attribute::Effects`, including on a function type and an `iter` default callback | Step 14 |
-| `Attribute::External` with `@host` | Step 16 |
+| `Attribute::External` with `@host` | Step 16b |
 | An abstract contract member with its own generic parameters | Step 2; Wasm in Step 9 |
 | Labelled operands and written `types:` arguments on a contract member call | Step 2; Wasm in Step 9 |
 | A dict variadic tail on a contract member | Step 2; Wasm in Step 9 |
 | A contract member with its own generics or labelled parameters as a function value | Step 2; Wasm in Step 9 |
 | M3's G21 (G16 here): the command result for an entry that returns `err` | Step 19 |
 | Pre-M4 C16: effect rows of a `let` value, a `let-else` fallback, and a `return` operand | Step 14 |
-| The conformance chapter's effectful walk over `iter.next` | Step 16 |
+| The conformance chapter's effectful walk over `iter.next` | Step 16b |
+
+Step 13 adds the Stage 4B contract rows. They are not forms an earlier milestone
+deferred but contracts that the steps below implement, and the inventory test
+requires an owner for each, so that a closed contract cannot lose its
+implementation:
+
+| Stage 4B contract row | Owner |
+| --- | --- |
+| The `vibra_v1` host registry of 17 rows, its versioning rule, and its checked-in snapshot (ledger D17, D19) | Step 16a (table, snapshot); Steps 16b–18 (rows) |
+| The `@host` ABI: borrowed parameters, an owned result, and the seven builders (D30) | Step 16b |
+| The `@audit-trace.v1` event record and the CLI `AuditEvent` objects (D18) | Step 16a (codec); Step 16b (events) |
+| The `@host-world.v1` test world, the system provider, and the corpus `host-world` input (D20) | Step 16a; fields in Steps 16b–18 |
+| Program arguments, `vibra run TARGET -- ARG...` (D22) | Step 18 |
+| `@command.program-failed` and exit code 6 (D21) | Step 19 |
+| The effect diagnostics, the witness, the indirect-call rule, and the row record (D23–D25) | Step 14; Step 15 for the target array |
+| The manifest `host` list, the `0.3.0` package, and the five effect modules (D27) | Step 16a (shape); Steps 16b–18 (modules) |
+| The `effects` fact of the position envelope and the effect fields of the index (D28) | Step 20 |
+| The performance baseline and its CI check (D29) | Step 21 |

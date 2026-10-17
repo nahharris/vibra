@@ -143,6 +143,34 @@ fn the_not_constant_code_is_an_error_with_no_fix() {
 }
 
 #[test]
+fn the_stage_4b_effect_codes_are_errors_with_no_fix() {
+    // Milestone 4 Step 13 (`docs/spec/07-diagnostics-and-conformance.md`,
+    // "Effect and host diagnostics"): a repeated target effect root and a host
+    // registry entry owned by another root.
+    let validator = registry_entry_validator();
+    for (code, atom, domain) in [
+        (
+            DiagnosticCode::ProjectDuplicateEffectRoot,
+            "@project.duplicate-effect-root",
+            "project",
+        ),
+        (
+            DiagnosticCode::ExternalOwnerMismatch,
+            "@external.owner-mismatch",
+            "external",
+        ),
+    ] {
+        let instance = serde_json::to_value(RegistryEntryDocument::render(code))
+            .expect("the entry serializes");
+        assert_valid(&validator, &instance);
+        assert_eq!(instance["code"], json!(atom));
+        assert_eq!(instance["level"], json!("@error"));
+        assert_eq!(instance["domain"], json!(domain));
+        assert_eq!(instance["fixCapability"], json!("@none"));
+    }
+}
+
+#[test]
 fn a_span_carries_both_bytes_and_derived_positions() {
     // "🌱" is four bytes and one column, so a consumer cannot compute one
     // representation from the other without the document. Both are sent.

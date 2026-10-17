@@ -442,8 +442,11 @@ on a member of the `deffect` that owns the operation's nominal effect root. A
 cannot be external.
 
 The provider and string symbol are checked against closed, versioned toolchain
-registries. External declarations are accepted only in toolchain-signed
-standard-library modules; ordinary packages cannot declare them. Every
+registries. External declarations are accepted only in the embedded
+standard-library modules; ordinary packages cannot declare them. A `@host`
+declaration outside a `deffect`, one with an `effects:` row, and an `effects:`
+row on a `deffect` are each `@syntax.invalid-attribute`, and a `@host` symbol whose
+registry owner is not the enclosing `deffect` is `@external.owner-mismatch`. Every
 external function is applied through its declared Vibra name and ordinary
 function-application syntax—there is no `external`, `primitive`, or `host-op`
 expression. V1 has no WebAssembly external provider and no source-level Wasm
