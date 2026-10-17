@@ -2,7 +2,7 @@ id = "V1-PROJECT-workspace-check-binding-shadow"
 rule = "V1-PROJECT"
 profile = "static-v1"
 operation = "workspace-check"
-description = "Workspace check reports each shadowing binder once, relating its nearest earlier introduction, as the single-source checker does."
+description = "Workspace check reports each name that shadows a non-constant module value once, relating that value, as the single-source checker does."
 
 [inputs]
 project = "tree/project.vibon"
@@ -15,18 +15,18 @@ accepted = false
 code = "@name.redeclaration"
 level = "@error"
 source = "src/app/main.vib"
-span = [32, 37]
+span = [67, 72]
 
   [[expect.diagnostics.related]]
   source = "src/app/main.vib"
-  span = [0, 17]
+  span = [23, 44]
 
 [[expect.diagnostics]]
 code = "@name.redeclaration"
 level = "@error"
 source = "src/app/main.vib"
-span = [52, 57]
+span = [115, 120]
 
   [[expect.diagnostics.related]]
   source = "src/app/main.vib"
-  span = [32, 37]
+  span = [23, 44]

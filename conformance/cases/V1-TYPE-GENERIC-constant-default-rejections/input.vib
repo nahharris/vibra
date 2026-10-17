@@ -1,0 +1,29 @@
+(defn one () i32 1i32)
+(def computed i32 (one))
+(def yes bool true)
+
+(defn call-default () i32
+  labelled: (n i32 computed)
+  n)
+
+(defn function-default () i32
+  labelled: (n i32 one)
+  n)
+
+(defn inline-call-default () i32
+  labelled: (n i32 (one))
+  n)
+
+(defn type-default () i32
+  labelled: (n i32 true)
+  n)
+
+(defint switch
+  (defn read (value self) bool
+    labelled: (strict bool true)))
+
+(deftype flip (record on bool)
+  (impl switch
+    (defn read (value self) bool
+      labelled: (strict bool false)
+      strict)))

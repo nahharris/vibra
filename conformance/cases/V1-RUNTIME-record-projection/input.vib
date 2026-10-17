@@ -1,0 +1,5 @@
+(deftype point (record x i32 y i32))
+
+(defn main () (tuple point (record id u64 name str) i32 i32)
+  (let p (point x: 1i32 y: 2i32))
+  (tupleof (point x: (p @y) y: (p @x)) (recordof name: "Ada" id: 7u64) (p @x) (p @y)))

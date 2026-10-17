@@ -9,7 +9,7 @@
       role: @source)
     @std.bool (record
       path: "std/bool.vib"
-      sha256: "sha256:d17da5007d1c5408b2565e93596fd0459138d71096b58edc6a36d2c9d8b2d3b8"
+      sha256: "sha256:9e3b84009faf0b872f07e9533fc4c8f09bbe1774f37aca9fc0ca840612c7adbf"
       role: @source)
     @std.char (record
       path: "std/char.vib"

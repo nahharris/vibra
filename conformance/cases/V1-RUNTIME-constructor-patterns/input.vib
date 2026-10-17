@@ -1,0 +1,62 @@
+(defn main ()
+  (tuple i32 i32 i32 i32 str i32 atom atom atom atom i32 str str str str str)
+  (tupleof
+      (describe (shape.empty))
+      (describe (shape.circle 0i32))
+      (describe (shape.circle 4i32))
+      (describe (shape.rect (dims w: 6i32 h: 7i32)))
+      (second (pair 1i32 "label"))
+      (unwrap (meters 12i32))
+      (pick (tupleof true true))
+      (pick (tupleof true false))
+      (pick (tupleof false true))
+      (pick (tupleof false false))
+      (a-of (recordof a: 5i32 b: "z"))
+      (label-of (enumof a: 1i32))
+      (label-of (enumof b: "enumof"))
+      (dig (deep a: (tupleof 1i32 (option.some (tupleof "s" (recordof c: 2i32 d: (leaf.y "inner")))))))
+      (dig (deep a: (tupleof 1i32 (option.some (tupleof "s" (recordof c: 2i32 d: (leaf.x 3i32)))))))
+      (dig (deep a: (tupleof 1i32 (option.none))))))
+
+(deftype dims (record w i32 h i32))
+
+(deftype pair (tuple i32 str))
+
+(deftype meters i32)
+
+(deftype shape (enum empty void circle i32 rect dims))
+
+(deftype leaf (enum x i32 y str))
+
+(deftype deep (record a (tuple i32 (option (tuple str (record c i32 d leaf))))))
+
+(defn describe (value shape) i32
+  (match value
+    (shape.empty) 0i32
+    (shape.circle 0i32) 1i32
+    (shape.circle radius) radius
+    (shape.rect (dims w: width)) width))
+
+(defn second ((pair - label) pair) str label)
+
+(defn unwrap ((meters length) meters) i32 length)
+
+(defn pick (flags (tuple bool bool)) atom
+  (match flags
+    (tupleof true true) @both
+    (tupleof true -) @first
+    (tupleof - true) @second
+    (tupleof false false) @neither))
+
+(defn a-of ((recordof a: a) (record a i32 b str)) i32 a)
+
+(defn label-of (value (enum a i32 b str)) str
+  (match value
+    (enumof a: -) "a"
+    (enumof b: text) text))
+
+(defn dig (value deep) str
+  (match value
+    (deep a: (tupleof - (option.some (tupleof - (recordof d: (leaf.y text)))))) text
+    (deep a: (tupleof - (option.some (tupleof tag -)))) tag
+    (deep a: -) "none"))

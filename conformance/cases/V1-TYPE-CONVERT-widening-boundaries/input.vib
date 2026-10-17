@@ -18,7 +18,7 @@
   variadic: (values (array number))
   0i32)
 
-(defn result () number "text")
+(defn produced () number "text")
 
 (defn identity (value t) t
   where: (t any)

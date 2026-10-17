@@ -1,8 +1,9 @@
 # Vibra v1 effects
 
 Status: normative target
-Implementation status: M2 admits empty effect ceilings and pure execution;
-nonempty effect checking and host operations remain unimplemented.
+Implementation status: empty effect ceilings and pure execution are admitted
+through M3; nonempty effect checking, `deffect`, and host operations remain
+unimplemented and are Milestone 4 Stage 4B.
 
 ## Static contract
 

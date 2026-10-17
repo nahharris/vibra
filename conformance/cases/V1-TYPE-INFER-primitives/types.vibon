@@ -1,7 +1,11 @@
 (record
   format: @types.v1
+  globals: (array
+    (record name: @true type: @bool body: (record kind: @variant type: @bool variant: @true))
+    (record name: @false type: @bool body: (record kind: @variant type: @bool variant: @false))
+  )
   functions: (array
-    (record name: @bool-value params: (array) result: @bool body: (record kind: @sequence type: @bool values: (array (record kind: @literal type: @bool value: true))))
+    (record name: @bool-value params: (array) result: @bool body: (record kind: @sequence type: @bool values: (array (record kind: @global index: 0u64 type: @bool))))
     (record name: @void-value params: (array) result: @void body: (record kind: @literal type: @void value: void))
     (record name: @char-value params: (array) result: @char body: (record kind: @sequence type: @char values: (array (record kind: @literal type: @char value: \Ω))))
     (record name: @str-value params: (array) result: @str body: (record kind: @sequence type: @str values: (array (record kind: @literal type: @str value: "hello"))))

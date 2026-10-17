@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-generic-interface-pass-along"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "An element that is an interface value at run time passes through a bare generic parameter of a direct call as the same interface value."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

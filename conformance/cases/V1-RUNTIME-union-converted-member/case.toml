@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-union-converted-member"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A union holding a member converted to an interface encodes the declared member type, not the type of the value built."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

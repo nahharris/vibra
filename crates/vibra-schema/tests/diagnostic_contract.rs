@@ -130,6 +130,19 @@ fn atoms_are_serialized_with_their_exact_spelling() {
 }
 
 #[test]
+fn the_not_constant_code_is_an_error_with_no_fix() {
+    let validator = registry_entry_validator();
+    let entry = RegistryEntryDocument::render(DiagnosticCode::TypeNotConstant);
+    let instance = serde_json::to_value(&entry).expect("the entry serializes");
+
+    assert_valid(&validator, &instance);
+    assert_eq!(instance["code"], json!("@type.not-constant"));
+    assert_eq!(instance["level"], json!("@error"));
+    assert_eq!(instance["domain"], json!("type"));
+    assert_eq!(instance["fixCapability"], json!("@none"));
+}
+
+#[test]
 fn a_span_carries_both_bytes_and_derived_positions() {
     // "🌱" is four bytes and one column, so a consumer cannot compute one
     // representation from the other without the document. Both are sent.

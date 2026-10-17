@@ -292,7 +292,14 @@ fn global_initializer_may_call_a_terminating_recursive_helper() {
         .first()
         .expect("binary target");
 
-    let run = vibra_workspace::semantic::run_target(&snapshot, target);
+    // `false` is a value of the closed import-free vocabulary, which the
+    // verified standard library declares.
+    let stdlib = vibra_types::load_stdlib().expect("embedded standard library");
+    let run = vibra_workspace::semantic::run_target_with_bootstrap(
+        &snapshot,
+        target,
+        Some(&stdlib),
+    );
 
     assert_eq!(
         run.check().status(),

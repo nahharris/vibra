@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-activation-exhaustion"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Non-tail recursion with no base case exhausts the memory of the instance, which ends execution with the host event and records no result and no audit trace."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+host_event = "@runtime.memory-exhausted"

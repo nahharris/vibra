@@ -1,0 +1,15 @@
+(defn labelled-site () i32
+  labelled: (false i32 0i32)
+  0i32)
+
+(defn variadic-site () i32
+  variadic: (true (array i32))
+  0i32)
+
+(defn option-site (found (option i32)) i32
+  (let-else (option.some option) found (return 0i32))
+  0i32)
+
+(defn refutable-site (flag bool) bool
+  (let true flag)
+  flag)

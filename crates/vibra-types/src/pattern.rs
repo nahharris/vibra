@@ -11,7 +11,7 @@
 use std::collections::BTreeSet;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_ir::{Pattern, Type, TypeBody, Value};
+use vibra_ir::{Constant, Pattern, Type, TypeBody, Value};
 use vibra_syntax::{Literal, PatternArgument, PatternKind};
 
 use crate::nominal::{ConstructorTarget, TypeNames, declared_self_type};
@@ -28,6 +28,36 @@ pub(crate) fn check_pattern(
     match pattern.kind() {
         PatternKind::Binding(name) if name.is_discard() => Some(Pattern::Wildcard),
         PatternKind::Binding(name) => {
+            if let Some(index) = pattern_value_global(environment, name, span) {
+                if let Some(constant) = constant_pattern(environment, index, 0) {
+                    return admit_constant_pattern(
+                        environment,
+                        span,
+                        index,
+                        constant,
+                        expected,
+                    );
+                }
+                // Shadowing is forbidden, and a module value that is not a
+                // compile-time constant cannot be matched, so the name would
+                // be a binder shadowing it. It binds nothing: the name keeps
+                // denoting the module value, in the resolver and here alike.
+                let header = environment.globals.get(index)?.clone();
+                environment.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::NameRedeclaration,
+                        span,
+                        "a visible name is introduced more than once",
+                    )
+                    .with_source_id(environment.source_id)
+                    .with_related_source(
+                        header.source_id,
+                        header.span,
+                        "the earlier module-level value is here, and it is not a compile-time constant",
+                    ),
+                );
+                return None;
+            }
             environment.add_binding_type(name.value(), expected.clone(), span);
             Some(Pattern::Bind {
                 slot: environment.next_slot.saturating_sub(1),
@@ -54,6 +84,18 @@ pub(crate) fn check_pattern(
             check_literal_pattern(environment, span, literal, expected)
         }
         PatternKind::Constructor { head, arguments } => {
+            if arguments.is_empty()
+                && let Some(index) = pattern_value_global(environment, head, span)
+                && let Some(constant) = constant_pattern(environment, index, 0)
+            {
+                return admit_constant_pattern(
+                    environment,
+                    span,
+                    index,
+                    constant,
+                    expected,
+                );
+            }
             let Some(target) =
                 environment.types.constructor(environment.source_id, head)
             else {
@@ -216,26 +258,44 @@ pub(crate) fn check_pattern(
     }
 }
 
+/// The one place that excludes literal patterns: no literal of type `f32`,
+/// `f64`, or `void` is a pattern, whether it is written or is part of a
+/// constant's expansion. Reports and returns `true` when `actual` is one.
+fn reject_excluded_literal(
+    environment: &mut CheckEnvironment<'_>,
+    span: ByteSpan,
+    expected: &Type,
+    actual: Type,
+) -> bool {
+    if !matches!(actual, Type::F32 | Type::F64 | Type::Void) {
+        return false;
+    }
+    mismatch(
+        environment.diagnostics,
+        environment.source_id,
+        span,
+        expected.clone(),
+        actual,
+        "float and `void` literals are not patterns",
+    );
+    true
+}
+
 fn check_literal_pattern(
     environment: &mut CheckEnvironment<'_>,
     span: ByteSpan,
     literal: &Literal,
     expected: &Type,
 ) -> Option<Pattern> {
-    if matches!(literal, Literal::Float(_) | Literal::Void(_)) {
-        let actual = match literal {
-            Literal::Float(_) if *expected == Type::F32 => Type::F32,
-            Literal::Float(_) => Type::F64,
-            _ => Type::Void,
-        };
-        mismatch(
-            environment.diagnostics,
-            environment.source_id,
-            span,
-            expected.clone(),
-            actual,
-            "float and `void` literals are not patterns",
-        );
+    let literal_type = match literal {
+        Literal::Float(_) if *expected == Type::F32 => Some(Type::F32),
+        Literal::Float(_) => Some(Type::F64),
+        Literal::Void(_) => Some(Type::Void),
+        _ => None,
+    };
+    if let Some(actual) = literal_type
+        && reject_excluded_literal(environment, span, expected, actual)
+    {
         return None;
     }
     check_literal(
@@ -246,6 +306,192 @@ fn check_literal_pattern(
         environment.diagnostics,
     )
     .map(Pattern::Literal)
+}
+
+/// The module-level value a pattern name denotes, when it denotes one: a
+/// name no lexical binder introduced that resolves to a `def`. A workspace
+/// run reads the resolver's reference; a single source reads its own module
+/// values, which include the closed import-free vocabulary's.
+pub(crate) fn pattern_value_global(
+    environment: &CheckEnvironment<'_>,
+    name: &vibra_syntax::Name,
+    span: ByteSpan,
+) -> Option<usize> {
+    if name.kind() != vibra_syntax::NameKind::Symbol {
+        return None;
+    }
+    let single = name.segments().len() == 1;
+    if single
+        && (environment.locals.contains_key(name.value())
+            || environment.captures.contains_key(name.value())
+            || environment
+                .outer
+                .as_ref()
+                .is_some_and(|outer| outer.values.contains_key(name.value())))
+    {
+        return None;
+    }
+    if let Some(references) = environment.resolved_targets {
+        return match references.get(&(
+            environment.source_id.to_owned(),
+            span.start(),
+            span.end(),
+        ))? {
+            crate::ResolvedReferenceTarget::Global(index) => Some(*index),
+            _ => None,
+        };
+    }
+    if single {
+        return environment.global_indices.get(name.value()).copied();
+    }
+    None
+}
+
+/// The constant a module value denotes, when it is one. A constant expression
+/// is a literal, an atom, or `void`; a construction whose operands are all
+/// constant; or a read of another constant. A call never is one, so the
+/// property is syntactic. The initializer is checked as its own module checks
+/// it, and a read of another module value is replaced by that value's own
+/// constant, so a constant reads nothing at run time.
+pub(crate) fn constant_of_global(
+    environment: &CheckEnvironment<'_>,
+    index: usize,
+    depth: usize,
+) -> Option<Constant> {
+    if depth > environment.globals.len() {
+        return None;
+    }
+    let header = environment.globals.get(index)?.clone();
+    let mut scratch = Vec::new();
+    let mut bindings = Vec::new();
+    let mut module = CheckEnvironment::new(
+        &header.source_id,
+        &mut scratch,
+        environment.global_indices,
+        environment.globals,
+        environment.functions,
+        environment.function_indices,
+        environment.module_names,
+        &mut bindings,
+        environment.types,
+    );
+    module.resolved_targets = environment.resolved_targets;
+    module.reports_redeclarations = false;
+    let value = crate::check_expression(
+        &mut module,
+        &header.expression,
+        Some(header.value_type.clone()),
+    )?;
+    constant_of_expression(environment, &value, depth)
+}
+
+/// The constant a checked expression denotes, when it is a constant
+/// expression.
+pub(crate) fn constant_of_expression(
+    environment: &CheckEnvironment<'_>,
+    expression: &vibra_ir::Expr,
+    depth: usize,
+) -> Option<Constant> {
+    Constant::from_expr_with(expression, &mut |index| {
+        constant_of_global(environment, index, depth + 1)
+    })
+}
+
+/// The pattern of a constant module value: the pattern its initializer's
+/// value would have if it were written there.
+pub(crate) fn constant_pattern(
+    environment: &CheckEnvironment<'_>,
+    index: usize,
+    depth: usize,
+) -> Option<Pattern> {
+    constant_of_global(environment, index, depth).map(|constant| pattern_of(&constant))
+}
+
+/// The pattern a constant's value has.
+fn pattern_of(constant: &Constant) -> Pattern {
+    match constant {
+        Constant::Primitive(value) => Pattern::Literal(value.clone()),
+        Constant::Variant {
+            variant, payload, ..
+        } => Pattern::Variant {
+            variant: variant.clone(),
+            payload: payload
+                .as_ref()
+                .map(|payload| Box::new(pattern_of(payload))),
+        },
+        Constant::Tuple { components, .. } => {
+            Pattern::Tuple(components.iter().map(pattern_of).collect())
+        }
+        Constant::Record { fields, .. } => Pattern::Record(
+            fields
+                .iter()
+                .map(|(name, field)| (name.clone(), pattern_of(field)))
+                .collect(),
+        ),
+        Constant::Wrap { value, .. } => Pattern::Wrap(Box::new(pattern_of(value))),
+        Constant::Member { index, value, .. } => Pattern::Member {
+            index: *index,
+            member: value.value_type(),
+            pattern: Box::new(pattern_of(value)),
+        },
+    }
+}
+
+/// Admits a constant's pattern at the expected type. What the expanded
+/// pattern admits decides: a literal pattern of a float or `void` is
+/// rejected as the written literal is.
+fn admit_constant_pattern(
+    environment: &mut CheckEnvironment<'_>,
+    span: ByteSpan,
+    index: usize,
+    constant: Pattern,
+    expected: &Type,
+) -> Option<Pattern> {
+    let actual = environment.globals.get(index)?.value_type.clone();
+    if !crate::types_match(expected, &actual) {
+        mismatch(
+            environment.diagnostics,
+            environment.source_id,
+            span,
+            expected.clone(),
+            actual,
+            "a constant pattern does not match the expected type",
+        );
+        return None;
+    }
+    let mut literals = Vec::new();
+    literal_types(&constant, &mut literals);
+    for literal in literals {
+        if reject_excluded_literal(environment, span, expected, literal) {
+            return None;
+        }
+    }
+    Some(constant)
+}
+
+/// The type of every literal in `pattern`, which the one literal-pattern rule
+/// then admits or rejects.
+fn literal_types(pattern: &Pattern, types: &mut Vec<Type>) {
+    match pattern {
+        Pattern::Literal(value) => types.push(value.ty()),
+        Pattern::Variant {
+            payload: Some(payload),
+            ..
+        } => literal_types(payload, types),
+        Pattern::Record(fields) => {
+            for (_, field) in fields {
+                literal_types(field, types);
+            }
+        }
+        Pattern::Tuple(items) | Pattern::Array(items) => {
+            for item in items {
+                literal_types(item, types);
+            }
+        }
+        Pattern::Wrap(inner) => literal_types(inner, types),
+        Pattern::Member { pattern, .. } => literal_types(pattern, types),
+        _ => {}
+    }
 }
 
 fn shape_mismatch(

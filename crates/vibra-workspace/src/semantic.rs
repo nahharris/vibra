@@ -15,8 +15,9 @@ use crate::{
 
 pub use crate::test_runner::{
     TestFailure, TestItem, TestItemStatus, TestSelector, TestSuiteStatus, TestTrap,
-    WorkspaceTestResult, run_tests,
+    WorkspaceTestResult, run_tests, run_tests_with_budget,
 };
+pub use vibra_interp::MemoryBudget;
 
 /// Overall result of checking a workspace scope.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,6 +138,18 @@ pub fn run_target_with_bootstrap(
     target: &Target,
     verification: Option<&vibra_types::Stdlib>,
 ) -> WorkspaceRunResult {
+    run_target_with_budget(snapshot, target, verification, MemoryBudget::DEFAULT)
+}
+
+/// Like [`run_target_with_bootstrap`], with the memory budget the runner
+/// supplies for the instance: exhausting it ends the run with the host event
+/// `@runtime.memory-exhausted`.
+pub fn run_target_with_budget(
+    snapshot: &WorkspaceSnapshot,
+    target: &Target,
+    verification: Option<&vibra_types::Stdlib>,
+    budget: MemoryBudget,
+) -> WorkspaceRunResult {
     let check = check_target_with_bootstrap(snapshot, target, verification);
     let outcome = if check.status() != CheckStatus::Accepted
         || target.kind() != TargetKind::Bin
@@ -144,7 +157,7 @@ pub fn run_target_with_bootstrap(
         None
     } else {
         check.program_for_target(target).map(|program| {
-            match vibra_interp::run(program) {
+            match vibra_interp::Interpreter::run_with_budget(program, budget) {
                 Ok(execution) => RunOutcome::Program(execution),
                 Err(error) => RunOutcome::InterpreterFailure(error),
             }

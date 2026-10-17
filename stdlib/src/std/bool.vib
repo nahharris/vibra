@@ -4,6 +4,15 @@
 (import equatable @std.core.equatable)
 (import ordered @std.core.ordered)
 
+; The two values of `bool`. They belong to the closed import-free vocabulary:
+; every program names `true` and `false` without an import, and nothing can
+; shadow them.
+(def true bool (bool.true)
+  visibility: @public)
+
+(def false bool (bool.false)
+  visibility: @public)
+
 ; `false` orders before `true`.
 (deftype bool (enum false void true void)
   role: @bool

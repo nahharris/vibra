@@ -8,7 +8,9 @@ use crate::corpus::Case;
 use crate::manifest::ConformanceOperation;
 use crate::runner::{
     CaseObservation, ExecutionObservation, HandlerError, ProfileHandler,
+    WasmObservation,
 };
+use crate::test_run::{TestRow, format_test_run};
 
 const BOOTSTRAP_PROVENANCE_FAILURE: &str = "bootstrap provenance verification failed";
 
@@ -32,7 +34,7 @@ impl ProfileHandler for StaticV1WorkspaceCheckHandler {
                 });
             }
         };
-        let verification = verified_bootstrap_if_used(&snapshot)?;
+        let verification = verified_bootstrap()?;
         let checked = match verification.as_ref() {
             Some(verification) => vibra_workspace::semantic::check_all_with_bootstrap(
                 &snapshot,
@@ -70,17 +72,25 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             }
         };
         let target = unique_binary_target(&snapshot)?;
-        let verification = verified_bootstrap_if_used(&snapshot)?;
-        let result = match verification.as_ref() {
-            Some(verification) => vibra_workspace::semantic::run_target_with_bootstrap(
-                &snapshot,
-                target,
-                Some(verification),
-            ),
-            None => vibra_workspace::semantic::run_target(&snapshot, target),
-        };
+        let verification = verified_bootstrap()?;
+        let result = vibra_workspace::semantic::run_target_with_budget(
+            &snapshot,
+            target,
+            verification.as_ref(),
+            crate::runner::interpreter_budget(),
+        );
         let accepted =
             result.check().status() == vibra_workspace::semantic::CheckStatus::Accepted;
+        let mut host_event = None;
+        // Both backends run the one checked program of the target.
+        let wasm = if accepted {
+            result
+                .check()
+                .program_for_target(target)
+                .map(crate::wasm::observe)
+        } else {
+            None
+        };
         let interpreter = if accepted {
             match result.outcome() {
                 Some(vibra_workspace::semantic::RunOutcome::Program(execution)) => {
@@ -88,6 +98,13 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
                         result: Some(execution.canonical_result()),
                         audit_trace: execution.audit_trace().to_vec(),
                     })
+                }
+                // A host event ends the run with no result and no trace.
+                Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(
+                    error,
+                )) if error.is_host_event() => {
+                    host_event = crate::types::host_event_atom(error);
+                    None
                 }
                 Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(
                     error,
@@ -109,6 +126,8 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             accepted,
             diagnostics: result.check().diagnostics().to_vec(),
             interpreter,
+            host_event,
+            wasm,
             ..CaseObservation::default()
         })
     }
@@ -138,11 +157,12 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
                 });
             }
         };
-        let verification = verified_bootstrap_if_used(&snapshot)?;
-        let result = vibra_workspace::semantic::run_tests(
+        let verification = verified_bootstrap()?;
+        let result = vibra_workspace::semantic::run_tests_with_budget(
             &snapshot,
             None,
             verification.as_ref(),
+            crate::runner::interpreter_budget(),
         );
         let (command_result, accepted) = match result.status() {
             vibra_workspace::semantic::TestSuiteStatus::Ok => ("@command.ok", true),
@@ -161,87 +181,59 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
                 ("@command.unavailable", false)
             }
             vibra_workspace::semantic::TestSuiteStatus::Trap => ("@command.trap", true),
+            // A host event ends the run with no result and no trace; the
+            // event is the diagnostic's code. The Wasm backend runs the same
+            // tests and must end with the same event.
             vibra_workspace::semantic::TestSuiteStatus::OperationalFailure => {
-                return Err(HandlerError::new(format!(
-                    "workspace-test stopped on a host event: {:?}",
-                    result.diagnostics()
-                )));
+                let Some(event) = result
+                    .diagnostics()
+                    .first()
+                    .map(|diagnostic| diagnostic.code().as_atom().to_owned())
+                else {
+                    return Err(HandlerError::new(
+                        "workspace-test stopped with no host event",
+                    ));
+                };
+                return Ok(CaseObservation {
+                    accepted: true,
+                    host_event: Some(event),
+                    wasm: Some(crate::wasm::observe_stopped_tests(
+                        result.stopped_programs(),
+                    )),
+                    ..CaseObservation::default()
+                });
             }
         };
         Ok(CaseObservation {
             accepted,
             diagnostics: result.diagnostics().to_vec(),
             interpreter: Some(ExecutionObservation {
-                result: Some(format_test_run(command_result, result.items())),
+                result: Some(format_test_run(
+                    command_result,
+                    &result
+                        .items()
+                        .iter()
+                        .map(TestRow::from_item)
+                        .collect::<Vec<_>>(),
+                )),
                 audit_trace: Vec::new(),
+            }),
+            // Both backends run the tests of the one workspace.
+            wasm: accepted.then(|| match crate::wasm::observe_tests(result.items()) {
+                crate::wasm::TestsObserved::Rows(rows) => {
+                    WasmObservation::Completed(ExecutionObservation {
+                        result: Some(format_test_run(
+                            crate::test_run::command_result(&rows),
+                            &rows,
+                        )),
+                        audit_trace: Vec::new(),
+                    })
+                }
+                crate::wasm::TestsObserved::Stopped(observation) => observation,
             }),
             ..CaseObservation::default()
         })
     }
-}
-
-fn format_test_run(
-    command_result: &str,
-    items: &[vibra_workspace::semantic::TestItem],
-) -> String {
-    use std::fmt::Write as _;
-
-    let mut output = format!(
-        "(record\n  format: @test-run.v1\n  result: {command_result}\n  tests: (array"
-    );
-    if items.is_empty() {
-        output.push_str(")\n)\n");
-        return output;
-    }
-    output.push('\n');
-    for item in items {
-        let _ = write!(
-            output,
-            "    (record name: {} result: {}",
-            vibon_string(item.name()),
-            item.status().as_atom()
-        );
-        if let Some(failure) = item.failure() {
-            let span = failure.primary_span();
-            let _ = write!(
-                output,
-                " failure: (record assertion: {} expected: {} actual: {} primary-span: (record source-id: {} start: {}u64 end: {}u64))",
-                failure.assertion(),
-                vibon_string(failure.expected()),
-                vibon_string(failure.actual()),
-                vibon_string(failure.source_id()),
-                span.start(),
-                span.end()
-            );
-        }
-        if let Some(trap) = item.trap() {
-            let _ = write!(
-                output,
-                " trap: (record trap-code: {}",
-                vibon_string(trap.trap_code())
-            );
-            if let Some(origin) = trap.origin() {
-                let span = origin.span();
-                let _ = write!(
-                    output,
-                    " origin: (record source-id: {} start: {}u64 end: {}u64)",
-                    vibon_string(origin.source_id()),
-                    span.start(),
-                    span.end()
-                );
-            }
-            output.push(')');
-        }
-        output.push_str(
-            " audit-trace: (record format: @audit-trace.v1 events: (array)))\n",
-        );
-    }
-    output.push_str("  )\n)\n");
-    output
-}
-
-fn vibon_string(value: &str) -> String {
-    vibra_ir::Value::Str(value.to_owned()).canonical_vibon()
 }
 
 enum WorkspaceLoad {
@@ -266,15 +258,9 @@ fn load_workspace(case: &Case) -> Result<WorkspaceLoad, HandlerError> {
     }
 }
 
-fn verified_bootstrap_if_used(
-    snapshot: &WorkspaceSnapshot,
-) -> Result<Option<Stdlib>, HandlerError> {
-    let requires_verification = snapshot
-        .requires_bootstrap_verification()
-        .map_err(|error| HandlerError::new(error.to_string()))?;
-    if !requires_verification {
-        return Ok(None);
-    }
+/// The standard library every workspace is checked against: its vocabulary
+/// module is in every checked graph.
+fn verified_bootstrap() -> Result<Option<Stdlib>, HandlerError> {
     load_stdlib().map(Some).map_err(|error| {
         HandlerError::new(format!("{BOOTSTRAP_PROVENANCE_FAILURE}: {error}"))
     })

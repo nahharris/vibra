@@ -1,0 +1,7 @@
+(import limits @lib.limits)
+
+(defn capped () i32
+  labelled: (cap i32 limits.max strict bool true)
+  cap)
+
+(defn execute () void void)
