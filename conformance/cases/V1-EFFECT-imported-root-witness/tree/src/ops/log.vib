@@ -1,0 +1,9 @@
+(deffect write
+  visibility: @public
+  (defn text (target str) void (do)))
+
+(deffect audit
+  visibility: @public
+  (defn record (target str) void
+    effects: (write)
+    (write.text target)))

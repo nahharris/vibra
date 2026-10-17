@@ -1,0 +1,24 @@
+id = "V1-EFFECT-imported-root-witness"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "An additive root declared in another module reaches the caller through the import alias: the caller that names only the owner root is outside its ceiling, and the witness crosses modules, each span carrying its own source identity and the canonical module-qualified identities."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "src/app/main.vib"
+span = [79, 104]
+notes = ["performs @ops.log.write via @ops.log.audit.record"]
+
+  [[expect.diagnostics.related]]
+  source = "src/ops/log.vib"
+  span = [171, 190]
+  message = "performs @ops.log.write via @ops.log.write.text"

@@ -1,0 +1,12 @@
+id = "V1-EFFECT-imported-roots-accepted"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "Effect roots resolve through a module import alias (log.write), through a declaration import alias (audit), and in a function type of a parameter, and a caller that lists the owner and the additive root of an imported operation is within its ceiling."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
