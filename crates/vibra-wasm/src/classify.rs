@@ -1,4 +1,14 @@
-//! Decides which parts of a checked program the emitter lowers.
+//! Decides which parts of a checked program the emitter cannot lower.
+//!
+//! Since Step 11 that is nothing a checked program can contain: every node
+//! below has a lowering, a type has a class (`types::class_of` is total), and
+//! every registry row is a few instructions, a native import, or a native that
+//! runs its checked body. The walk remains as the guard that a program the
+//! checker could not have produced, such as a hand-built one with a registry row
+//! the closed tables do not know, produces an error and never a module that
+//! omits part of it.
+//!
+//! The history of the walk, by step:
 //!
 //! Step 5b lowers the literals and sequences of Step 5a and, with them: module
 //! values; functions with fixed and labelled parameters; reads of a local;
@@ -29,7 +39,7 @@ use crate::types::{TypeEnv, class_of};
 pub(crate) fn forms_of(env: &TypeEnv<'_>, expr: &Expr) -> NotLowered {
     let mut found = Vec::new();
     walk(env, expr, &mut found);
-    NotLowered::from_uses(found).unwrap_or_else(|| NotLowered::single(Form::Type))
+    NotLowered::from_uses(found).unwrap_or_else(|| NotLowered::single(Form::Malformed))
 }
 
 /// The form that reports a type whose components the lowering cannot find:
@@ -60,7 +70,7 @@ fn type_forms(
     found: &mut Vec<UnloweredForm>,
 ) {
     if let Err(kind) = class_of(ty) {
-        found.push(UnloweredForm::new(Form::Type, origin).with_detail(kind));
+        found.push(UnloweredForm::new(Form::Malformed, origin).with_detail(kind));
     }
 }
 
@@ -106,7 +116,7 @@ fn walk(env: &TypeEnv<'_>, expr: &Expr, found: &mut Vec<UnloweredForm>) {
                 && intrinsic.native_import().is_none()
             {
                 found.push(
-                    UnloweredForm::new(Form::External, Some(expr.origin().clone()))
+                    UnloweredForm::new(Form::Malformed, Some(expr.origin().clone()))
                         .with_detail(intrinsic.symbol()),
                 );
             }

@@ -458,7 +458,7 @@ impl Builder<'_, '_> {
         binds: &mut Binds,
     ) -> Result<(), NotLowered> {
         let Some(slot) = binds.slots.get(name).copied() else {
-            return Err(NotLowered::single(crate::Form::Call));
+            return Err(NotLowered::single(crate::Form::Malformed));
         };
         if !binds.seen.insert(name.to_owned()) {
             let equal = self.lowering.desc_equal();
@@ -768,10 +768,13 @@ impl Builder<'_, '_> {
     /// The form that reports a call the lowering cannot make.
     fn forms_of_call(&self, origin: &SourceOrigin) -> NotLowered {
         NotLowered::from_uses(vec![
-            crate::form::UnloweredForm::new(crate::Form::Call, Some(origin.clone()))
-                .with_detail("contract"),
+            crate::form::UnloweredForm::new(
+                crate::Form::Malformed,
+                Some(origin.clone()),
+            )
+            .with_detail("contract"),
         ])
-        .unwrap_or_else(|| NotLowered::single(crate::Form::Call))
+        .unwrap_or_else(|| NotLowered::single(crate::Form::Malformed))
     }
 
     /// Calls candidate `candidate`: the type arguments of its parameters, the
@@ -997,12 +1000,12 @@ impl Builder<'_, '_> {
         let unsupported = || {
             NotLowered::from_uses(vec![
                 crate::form::UnloweredForm::new(
-                    crate::Form::Call,
+                    crate::Form::Malformed,
                     Some(ctx.origin.clone()),
                 )
-                .with_detail("interface-result"),
+                .with_detail("conversion"),
             ])
-            .unwrap_or_else(|| NotLowered::single(crate::Form::Call))
+            .unwrap_or_else(|| NotLowered::single(crate::Form::Malformed))
         };
         match (from, to) {
             // An array converts each element, and a dict each value: its keys

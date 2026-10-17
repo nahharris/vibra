@@ -25,10 +25,15 @@
 //! each activation at run time. Step 7 lowers patterns and typed failure:
 //! `match` with every pattern kind, destructuring in `let`, parameters, and
 //! lambdas, `let-else`, `as` narrowing, `try`, and `never`, by one recursive
-//! scheme over a table of what each kind of pattern asks of a value, so the
-//! array pattern is the one pattern form left. Every other form returns
-//! [`NotLowered`], naming each form, and never a module that omits part of the
-//! program. Steps 8 onward move forms out of [`NotLowered`] one step at a time.
+//! scheme over a table of what each kind of pattern asks of a value. Steps 8 to
+//! 10 lower collections, numbers and text, native bodies, interfaces, and the
+//! natives. Step 11 lowers the test assertions and the test module
+//! ([`emit_tests`]: `vibra_v1_test`, the failure exports, and the origin table of
+//! [`OriginTable`]), and the last forms: a result converted through an array, a
+//! dict, a record, or a union, and a `void` item of a builtin `option` iterator.
+//! No form of a checked program is named by [`NotLowered`] since; it reports only
+//! a program the checker cannot have produced, and never a module that omits part
+//! of the program.
 //!
 //! # The module
 //!
@@ -330,7 +335,7 @@ fn build(
 /// arithmetic, equality, and order rows. The rows that loop are native imports
 /// (`CompilerIntrinsic::native_import`), and `vibra_ir::external::CompilerIntrinsic::vectors`
 /// holds both kinds to samples. A row it lowers neither way is reported by
-/// [`emit`] as [`Form::External`].
+/// [`emit`] as [`Form::Malformed`].
 #[must_use]
 pub fn lowers_primitive(intrinsic: vibra_ir::external::CompilerIntrinsic) -> bool {
     primitive::plan(intrinsic).is_some()

@@ -1,40 +1,35 @@
-//! The forms of the checked IR the emitter does not lower yet, and the typed
-//! error that names them.
+//! What the emitter reports when it cannot produce a module, and the typed
+//! error that names it.
+//!
+//! Since Milestone 4 Step 11 the emitter lowers every form of a checked
+//! program, so no valid construct is named here. The error remains for what the
+//! checker cannot have produced: a program larger than the 32-bit indices of a
+//! module, an entry that takes a parameter (a checked entry has none), and a
+//! checked-IR shape that violates an invariant the checker guarantees, such as
+//! a pattern over a type that has no shape, a contract call with no receiver,
+//! or a registry row the closed tables do not know. A hand-built program can
+//! contain those; a program the checker accepts never does, and the tests of
+//! `tests/lowers_every_form_m4_step11.rs` hold the classifier to that.
 
 use std::fmt;
 
 use vibra_ir::SourceOrigin;
 
-/// One construct of a checked program that a module can be asked to contain.
-///
-/// A form is either lowered or named by [`NotLowered`]; the emitter never
-/// approximates one. Each later step of Stage 4A moves forms from the second
-/// kind to the first, and the order of the variants is the order of the checked
-/// program's own structure, not an order of delivery. A form whose lowering
-/// differs by case carries a detail naming the case: see
-/// [`UnloweredForm::detail`].
+/// The kinds of program the emitter refuses to lower. The order of the variants
+/// is the order a report lists them in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Form {
     /// A program with more functions than the 32-bit indices of a module admit.
     ModuleSize,
-    /// A function with a variadic parameter.
+    /// An entry with parameters, which a checked entry never has (detail
+    /// `entry`).
     Parameters,
-    /// A value of a type that no lowered value kind represents yet: an `array`
-    /// or `dict`, or an interface value.
-    Type,
-    /// A call of a compiler registry operation.
-    External,
-    /// A wrapper constructor, or a wrapper pattern, over a builtin text type.
-    Wrap,
-    /// A call of a contract member, which dispatches from a run-time type.
-    Call,
-    /// An array built from element operands, or an array pattern (detail
-    /// `pattern`).
-    Array,
-    /// A dict built from entries.
-    Dict,
-    /// A checked lookup in an array, dict, `str`, or `bytes`.
-    Lookup,
+    /// A checked-IR shape that breaks an invariant the checker guarantees. The
+    /// detail names it: the kind of type or the registry symbol the lowering
+    /// found no row for, `contract` for a contract call with no receiver,
+    /// `conversion` for a result conversion between shapes that cannot differ,
+    /// and `user-key` for a dict key with no order.
+    Malformed,
 }
 
 impl Form {
@@ -44,13 +39,7 @@ impl Form {
         match self {
             Self::ModuleSize => "module-size",
             Self::Parameters => "parameters",
-            Self::Type => "type",
-            Self::External => "external",
-            Self::Wrap => "wrap",
-            Self::Call => "call",
-            Self::Array => "array",
-            Self::Dict => "dict",
-            Self::Lookup => "lookup",
+            Self::Malformed => "malformed",
         }
     }
 }
@@ -90,14 +79,8 @@ impl UnloweredForm {
         self.form
     }
 
-    /// What further distinguishes the use within its form, for the forms whose
-    /// lowering differs by case and is owned by different steps: the registry
-    /// symbol of an [`Form::External`]; the kind of a [`Form::Call`]
-    /// (`contract`, also `tail-contract` when it is an explicit tail
-    /// transfer); the kind of type of a [`Form::Type`] (`array`, `dict`, or
-    /// `interface`); `pattern` for a [`Form::Array`] that is a pattern; and
-    /// `variadic` for a [`Form::Parameters`]. `None` for
-    /// every other form.
+    /// What further distinguishes the use within its form: see the variants of
+    /// [`Form`]. `None` for a [`Form::ModuleSize`].
     #[must_use]
     pub const fn detail(&self) -> Option<&'static str> {
         self.detail
@@ -136,7 +119,7 @@ impl NotLowered {
     /// A value of a type no lowered kind represents, named by its kind.
     pub(crate) fn type_of(kind: &'static str, origin: Option<SourceOrigin>) -> Self {
         Self {
-            forms: vec![UnloweredForm::new(Form::Type, origin).with_detail(kind)],
+            forms: vec![UnloweredForm::new(Form::Malformed, origin).with_detail(kind)],
         }
     }
 

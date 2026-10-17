@@ -1134,10 +1134,10 @@ enum Access {
 /// The form that reports a registry row used where the emitter cannot lower it.
 fn unlowered_row(row: &NativeRow, origin: &SourceOrigin) -> NotLowered {
     NotLowered::from_uses(vec![
-        crate::form::UnloweredForm::new(crate::Form::External, Some(origin.clone()))
+        crate::form::UnloweredForm::new(crate::Form::Malformed, Some(origin.clone()))
             .with_detail(row.name()),
     ])
-    .unwrap_or_else(|| NotLowered::single(crate::Form::External))
+    .unwrap_or_else(|| NotLowered::single(crate::Form::Malformed))
 }
 
 /// The variants of `option` and `result` that `try` continues with, and the ones
@@ -3329,12 +3329,12 @@ impl<'l, 'a> Builder<'l, 'a> {
         let unordered = || {
             NotLowered::from_uses(vec![
                 crate::form::UnloweredForm::new(
-                    crate::Form::Dict,
+                    crate::Form::Malformed,
                     Some(origin.clone()),
                 )
                 .with_detail("user-key"),
             ])
-            .unwrap_or_else(|| NotLowered::single(crate::Form::Dict))
+            .unwrap_or_else(|| NotLowered::single(crate::Form::Malformed))
         };
         let Some(order) = key::order_of(&self.lowering.env, key, key_order) else {
             // Any other key is ordered by dispatch from its run-time type.
