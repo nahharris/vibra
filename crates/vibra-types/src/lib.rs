@@ -27,8 +27,8 @@ use vibra_ir::{
 };
 use vibra_syntax::{
     Application, ApplicationBinding, Attribute, BindingFacts, CallArgument,
-    Declaration, Expression, ExpressionKind, FloatSuffix, IntegerSuffix, Literal,
-    NameKind, PatternKind, SourceAst, TypeExpr, TypeMember,
+    Declaration, EffectRowOrder, Expression, ExpressionKind, FloatSuffix,
+    IntegerSuffix, Literal, NameKind, PatternKind, SourceAst, TypeExpr, TypeMember,
 };
 
 mod construct;
@@ -61,6 +61,14 @@ pub struct CheckResult {
     program: Option<CheckedProgram>,
     diagnostics: Vec<Diagnostic>,
     bindings: Vec<ApplicationBinding>,
+    effect_rows: Vec<EffectRowOrder>,
+}
+
+/// What a checked source hands to the formatter: the authoritative binding of
+/// every application and the canonical order of every written effect row.
+struct Facts {
+    bindings: Vec<ApplicationBinding>,
+    effect_rows: Vec<EffectRowOrder>,
 }
 
 impl CheckResult {
@@ -71,18 +79,20 @@ impl CheckResult {
             program,
             diagnostics,
             bindings: Vec::new(),
+            effect_rows: Vec::new(),
         }
     }
 
-    fn with_bindings(
+    fn with_facts(
         program: Option<CheckedProgram>,
         diagnostics: Vec<Diagnostic>,
-        bindings: Vec<ApplicationBinding>,
+        facts: Facts,
     ) -> Self {
         Self {
             program,
             diagnostics,
-            bindings,
+            bindings: facts.bindings,
+            effect_rows: facts.effect_rows,
         }
     }
 
@@ -110,6 +120,14 @@ impl CheckResult {
     #[must_use]
     pub fn application_bindings(&self) -> &[ApplicationBinding] {
         &self.bindings
+    }
+
+    /// The canonical order of every effect row the source writes, sorted by
+    /// resolved root identity. The formatter reorders a row by it and keeps
+    /// each lexical reference the row's imports require.
+    #[must_use]
+    pub fn effect_row_orders(&self) -> &[EffectRowOrder] {
+        &self.effect_rows
     }
 
     /// Whether checking accepted this source document.
@@ -158,14 +176,15 @@ pub fn check_source(source_id: impl AsRef<str>, source: &str) -> CheckResult {
         }
         return CheckResult::new(None, diagnostics);
     };
-    let (program, bindings) = check_ast_with_bindings(source_id, ast, &mut diagnostics);
+    let (program, facts) =
+        check_ast_with_bindings_authority(source_id, ast, &mut diagnostics, false);
     if !diagnostics
         .iter()
         .all(|diagnostic| diagnostic.level() != vibra_diagnostics::Level::Error)
     {
         return CheckResult::new(None, diagnostics);
     }
-    CheckResult::with_bindings(program, diagnostics, bindings)
+    CheckResult::with_facts(program, diagnostics, facts)
 }
 
 /// Checks one source as trusted standard-library code, where `native:`,
@@ -211,7 +230,7 @@ pub fn check_standard_library_source(
     else {
         return CheckResult::new(None, diagnostics);
     };
-    let (program, bindings) =
+    let (program, facts) =
         check_ast_with_bindings_authority(source_id, ast, &mut diagnostics, true);
     if diagnostics
         .iter()
@@ -219,7 +238,7 @@ pub fn check_standard_library_source(
     {
         CheckResult::new(None, diagnostics)
     } else {
-        CheckResult::with_bindings(program, diagnostics, bindings)
+        CheckResult::with_facts(program, diagnostics, facts)
     }
 }
 
@@ -240,7 +259,9 @@ pub fn check_ast_with_bindings(
     ast: &SourceAst,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> (Option<CheckedProgram>, Vec<ApplicationBinding>) {
-    check_ast_with_bindings_authority(source_id.as_ref(), ast, diagnostics, false)
+    let (program, facts) =
+        check_ast_with_bindings_authority(source_id.as_ref(), ast, diagnostics, false);
+    (program, facts.bindings)
 }
 
 /// Checks one source module with the narrowly supported explicit `@std.text`
@@ -362,7 +383,7 @@ pub fn check_bootstrap_text_import(
         );
     }
 
-    let (program, bindings) =
+    let (program, facts) =
         check_ast_with_text_import_authority(source_id, ast, &mut diagnostics);
     if diagnostics
         .iter()
@@ -370,7 +391,7 @@ pub fn check_bootstrap_text_import(
     {
         CheckResult::new(None, diagnostics)
     } else {
-        CheckResult::with_bindings(program, diagnostics, bindings)
+        CheckResult::with_facts(program, diagnostics, facts)
     }
 }
 
@@ -422,21 +443,28 @@ fn check_ast_with_bindings_authority(
     ast: &SourceAst,
     diagnostics: &mut Vec<Diagnostic>,
     trusted_bootstrap: bool,
-) -> (Option<CheckedProgram>, Vec<ApplicationBinding>) {
+) -> (Option<CheckedProgram>, Facts) {
     let mut checker = Checker::new(source_id, diagnostics, ast, trusted_bootstrap);
     checker.collect_headers();
     checker.check_globals();
     checker.check_functions();
     checker.check_effects();
     let program = checker.finish();
-    (program, checker.bindings)
+    let effect_rows = checker.types.effect_row_orders(source_id);
+    (
+        program,
+        Facts {
+            bindings: checker.bindings,
+            effect_rows,
+        },
+    )
 }
 
 fn check_ast_with_text_import_authority(
     source_id: &str,
     ast: &SourceAst,
     diagnostics: &mut Vec<Diagnostic>,
-) -> (Option<CheckedProgram>, Vec<ApplicationBinding>) {
+) -> (Option<CheckedProgram>, Facts) {
     let mut checker = Checker::new(source_id, diagnostics, ast, true);
     checker.text_import_authorized = true;
     checker.collect_headers();
@@ -444,7 +472,14 @@ fn check_ast_with_text_import_authority(
     checker.check_functions();
     checker.check_effects();
     let program = checker.finish();
-    (program, checker.bindings)
+    let effect_rows = checker.types.effect_row_orders(source_id);
+    (
+        program,
+        Facts {
+            bindings: checker.bindings,
+            effect_rows,
+        },
+    )
 }
 
 #[derive(Clone)]

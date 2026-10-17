@@ -19,7 +19,7 @@ use vibra_ir::{
 };
 use vibra_syntax::{
     Attribute, Declaration, DeffectDeclaration, DefintDeclaration, DeftypeBody,
-    DeftypeDeclaration, Name, SourceAst, TypeExpr, TypeMember,
+    DeftypeDeclaration, EffectRowOrder, Name, SourceAst, TypeExpr, TypeMember,
 };
 
 use crate::unavailable;
@@ -126,7 +126,6 @@ pub(crate) struct DeclaredType {
 #[derive(Clone, Debug)]
 pub(crate) struct DeclaredEffect {
     pub(crate) root: EffectRoot,
-    pub(crate) name: String,
     pub(crate) source_id: String,
     pub(crate) span: ByteSpan,
     pub(crate) public: bool,
@@ -243,6 +242,9 @@ pub(crate) struct TypeNames {
     written_effects: std::cell::RefCell<
         BTreeMap<(String, usize, usize), Vec<(EffectRoot, ByteSpan)>>,
     >,
+    /// The canonical order of each written row, keyed by source identity and
+    /// the span of the row's first entry.
+    row_orders: std::cell::RefCell<BTreeMap<(String, usize, usize), Vec<usize>>>,
 }
 
 /// What a labelled default written as a name denotes.
@@ -411,7 +413,6 @@ impl TypeNames {
         let name = declaration.name().value().to_owned();
         self.effects.push(DeclaredEffect {
             root,
-            name: name.clone(),
             source_id: source_id.to_owned(),
             span: declaration.span(),
             public: declaration.attributes().items().iter().any(|attribute| {
@@ -493,15 +494,40 @@ impl TypeNames {
         function: &vibra_syntax::FunctionType,
     ) -> Result<EffectRow, LowerError> {
         let mut roots = Vec::with_capacity(function.effects().len());
-        for (name, span) in function.effects().iter().zip(function.effect_spans()) {
-            match self.resolve_effect(source_id, name) {
+        for reference in function.effects() {
+            match self.resolve_effect(source_id, reference.name()) {
                 Ok(declared) => roots.push(declared.root.clone()),
                 Err(error) => {
-                    return Err(LowerError::At(span.span(), Box::new(error)));
+                    return Err(LowerError::At(reference.span(), Box::new(error)));
                 }
             }
         }
+        if let Some(first) = function.effects().first() {
+            self.record_row_order(source_id, first.span(), &roots);
+        }
         Ok(EffectRow::new(roots))
+    }
+
+    /// Records the canonical order of a written row of two or more resolved
+    /// entries, named by the span of its first entry as written.
+    fn record_row_order(&self, source_id: &str, first: ByteSpan, roots: &[EffectRoot]) {
+        let mut order = (0..roots.len()).collect::<Vec<_>>();
+        order.sort_by(|left, right| roots.get(*left).cmp(&roots.get(*right)));
+        self.row_orders
+            .borrow_mut()
+            .insert((source_id.to_owned(), first.start(), first.end()), order);
+    }
+
+    /// The canonical order of every effect row written in `source_id`.
+    pub(crate) fn effect_row_orders(&self, source_id: &str) -> Vec<EffectRowOrder> {
+        self.row_orders
+            .borrow()
+            .iter()
+            .filter(|((source, _, _), _)| source == source_id)
+            .map(|((_, start, end), order)| {
+                EffectRowOrder::new(ByteSpan::new(*start, *end), order.clone())
+            })
+            .collect()
     }
 
     /// Lowers the row a function, `lambda`, or test writes as `effects:`,
@@ -527,6 +553,13 @@ impl TypeNames {
             }
         }
         let lowered = EffectRow::new(written.iter().map(|(root, _)| root.clone()));
+        if valid && let Some(first) = row.entry_spans().first() {
+            let roots = written
+                .iter()
+                .map(|(root, _)| root.clone())
+                .collect::<Vec<_>>();
+            self.record_row_order(source_id, *first, &roots);
+        }
         self.written_effects
             .borrow_mut()
             .insert((source_id.to_owned(), owner.start(), owner.end()), written);

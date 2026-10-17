@@ -538,6 +538,39 @@ impl BindingFacts {
     }
 }
 
+/// The canonical order of one written effect row, supplied by the checker.
+///
+/// A row is a set, and the formatter writes it sorted by the canonical
+/// identity of the roots its symbols resolve to. Only the checker resolves a
+/// symbol, so the formatter reorders a row only when it holds this fact, and
+/// keeps each lexical symbol as written.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffectRowOrder {
+    first_entry: ByteSpan,
+    order: Vec<usize>,
+}
+
+impl EffectRowOrder {
+    /// The order of the row whose first written entry is at `first_entry`:
+    /// position `n` of the formatted row is the entry written at `order[n]`.
+    #[must_use]
+    pub const fn new(first_entry: ByteSpan, order: Vec<usize>) -> Self {
+        Self { first_entry, order }
+    }
+
+    /// The span of the first entry as written, which names the row.
+    #[must_use]
+    pub const fn first_entry(&self) -> ByteSpan {
+        self.first_entry
+    }
+
+    /// The written index of the entry at each formatted position.
+    #[must_use]
+    pub fn order(&self) -> &[usize] {
+        &self.order
+    }
+}
+
 /// A structural failure while applying supplied binding facts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BindingError {
@@ -1262,8 +1295,30 @@ pub struct FunctionType {
     result: Box<TypeExpr>,
     labelled: Vec<TypeSlot>,
     variadic: Option<VariadicType>,
-    effects: Vec<Name>,
-    effect_spans: Vec<TypeSpan>,
+    effects: Vec<EffectReference>,
+}
+
+/// One symbol of a function type's effect row, with where it is written.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffectReference {
+    name: Name,
+    span: TypeSpan,
+}
+
+impl EffectReference {
+    /// The effect symbol.
+    #[must_use]
+    pub const fn name(&self) -> &Name {
+        &self.name
+    }
+
+    /// Where the symbol is written. Like every type expression, a function
+    /// type is the same type wherever it is written, so this span takes no
+    /// part in a comparison.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span.span()
+    }
 }
 
 impl FunctionType {
@@ -1293,15 +1348,8 @@ impl FunctionType {
 
     /// Effect references in source order.
     #[must_use]
-    pub fn effects(&self) -> &[Name] {
+    pub fn effects(&self) -> &[EffectReference] {
         &self.effects
-    }
-
-    /// Where each effect reference is written, in the order of
-    /// [`Self::effects`].
-    #[must_use]
-    pub fn effect_spans(&self) -> &[TypeSpan] {
-        &self.effect_spans
     }
 }
 
@@ -3152,7 +3200,6 @@ impl AstParser {
         let mut labelled = Vec::new();
         let mut variadic = None;
         let mut effects = Vec::new();
-        let mut effect_spans = Vec::new();
         let mut seen = BTreeSet::new();
         let mut index = 3;
         while index < forms.len() {
@@ -3184,9 +3231,15 @@ impl AstParser {
                 "variadic" => variadic = Some(self.parse_variadic_type(value)?),
                 "effects" => {
                     let row = self.parse_effect_row(value)?;
-                    effect_spans =
-                        row.entry_spans.iter().copied().map(TypeSpan).collect();
-                    effects = row.references;
+                    effects = row
+                        .references
+                        .into_iter()
+                        .zip(row.entry_spans)
+                        .map(|(name, span)| EffectReference {
+                            name,
+                            span: TypeSpan(span),
+                        })
+                        .collect();
                 }
                 _ => {
                     self.error(
@@ -3212,7 +3265,6 @@ impl AstParser {
             labelled,
             variadic,
             effects,
-            effect_spans,
         }))
     }
 

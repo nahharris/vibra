@@ -1,0 +1,22 @@
+(defn main () void (do))
+
+(deffect write
+  (defn text (target str) void (do)))
+
+(deffect audit
+  (defn record (target str) void
+    effects: (write)
+    (write.text target)))
+
+(deffect zebra
+  (defn stripe () void (do)))
+
+(defn both (target str) void
+  effects: (zebra write
+            audit)
+  (audit.record target)
+  (zebra.stripe))
+
+(defn accept (callback (fn (str) void effects: (write audit)) target str) void
+  effects: (audit write)
+  (callback target))
