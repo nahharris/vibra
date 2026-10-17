@@ -158,10 +158,11 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
             }
         };
         let verification = verified_bootstrap()?;
-        let result = vibra_workspace::semantic::run_tests(
+        let result = vibra_workspace::semantic::run_tests_with_budget(
             &snapshot,
             None,
             verification.as_ref(),
+            crate::runner::interpreter_budget(),
         );
         let (command_result, accepted) = match result.status() {
             vibra_workspace::semantic::TestSuiteStatus::Ok => ("@command.ok", true),
@@ -180,11 +181,27 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
                 ("@command.unavailable", false)
             }
             vibra_workspace::semantic::TestSuiteStatus::Trap => ("@command.trap", true),
+            // A host event ends the run with no result and no trace; the
+            // event is the diagnostic's code. The Wasm backend runs the same
+            // tests and must end with the same event.
             vibra_workspace::semantic::TestSuiteStatus::OperationalFailure => {
-                return Err(HandlerError::new(format!(
-                    "workspace-test stopped on a host event: {:?}",
-                    result.diagnostics()
-                )));
+                let Some(event) = result
+                    .diagnostics()
+                    .first()
+                    .map(|diagnostic| diagnostic.code().as_atom().to_owned())
+                else {
+                    return Err(HandlerError::new(
+                        "workspace-test stopped with no host event",
+                    ));
+                };
+                return Ok(CaseObservation {
+                    accepted: true,
+                    host_event: Some(event),
+                    wasm: Some(crate::wasm::observe_stopped_tests(
+                        result.stopped_programs(),
+                    )),
+                    ..CaseObservation::default()
+                });
             }
         };
         Ok(CaseObservation {

@@ -379,11 +379,13 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
         if expectations.host_event.is_some()
             && !matches!(
                 operation,
-                ConformanceOperation::Interpret | ConformanceOperation::WorkspaceRun
+                ConformanceOperation::Interpret
+                    | ConformanceOperation::WorkspaceRun
+                    | ConformanceOperation::WorkspaceTest
             )
         {
             return Err(ManifestError::Invalid(format!(
-                "host_event is valid only on interpret and workspace-run cases, not {operation}"
+                "host_event is valid only on interpret, workspace-run, and workspace-test cases, not {operation}"
             )));
         }
         if operation == ConformanceOperation::Index && expectations.index.is_none() {
@@ -425,6 +427,7 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             }
         }
         if operation == ConformanceOperation::WorkspaceTest
+            && expectations.host_event.is_none()
             && expectations.interpreter.as_ref().is_none_or(|execution| {
                 execution.result.is_none() || execution.audit_trace.is_some()
             })

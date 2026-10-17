@@ -296,8 +296,8 @@ fn manifest(operation: &str, expect: &str) -> String {
 }
 
 #[test]
-fn host_event_is_valid_on_interpret_and_workspace_run() {
-    for operation in ["interpret", "workspace-run"] {
+fn host_event_is_valid_on_interpret_workspace_run_and_workspace_test() {
+    for operation in ["interpret", "workspace-run", "workspace-test"] {
         let parsed = CaseManifest::from_str(&manifest(
             operation,
             "accepted = true\nhost_event = \"@runtime.memory-exhausted\"",
@@ -313,12 +313,12 @@ fn host_event_is_valid_on_interpret_and_workspace_run() {
 
 #[test]
 fn host_event_is_rejected_where_no_host_event_can_end_the_case() {
-    for operation in ["reader", "type-check", "workspace-check", "workspace-test"] {
+    for operation in ["reader", "type-check", "workspace-check"] {
         let error = CaseManifest::from_str(&manifest(
             operation,
             "accepted = true\nhost_event = \"@runtime.memory-exhausted\"",
         ))
-        .expect_err("host_event is only for interpret and workspace-run");
+        .expect_err("host_event is only for the three executable operations");
         assert!(
             error.to_string().contains("host_event"),
             "{operation}: {error}"

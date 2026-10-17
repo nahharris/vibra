@@ -1,0 +1,13 @@
+id = "V1-RUNTIME-workspace-test-activation-exhaustion"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "A test whose body recurses without a base case ends the suite with the memory host event, so test reports an operational failure with zero counts and no test record, even though an earlier test passed."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+host_event = "@runtime.memory-exhausted"
