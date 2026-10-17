@@ -561,6 +561,21 @@ fn an_implementation_that_writes_another_row_is_not_the_contract_signature() {
 }
 
 #[test]
+fn a_lambda_row_that_is_never_performed_is_a_warning_at_its_entry() {
+    // The lambda wraps a function of the smaller row and so declares the row
+    // it must offer; the unused root is then the warning.
+    let source = "(deffect write (defn text (target str) void (do)))
+(defn make () (fn (str) void effects: (write))
+  (lambda (value str) void effects: (write) (do)))
+";
+    let found = check(source);
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert_eq!(found[0].code(), C::ContractUnusedEffect);
+    assert_eq!(slice(source, found[0].primary_span()), "write");
+    assert!(found[0].primary_span().start() > source.find("lambda").expect("lambda"));
+}
+
+#[test]
 fn a_module_value_initializer_has_the_empty_ceiling() {
     // A `def` takes no `effects:` attribute, so applying an operation in its
     // initializer is outside the default-empty ceiling, as in any body.
