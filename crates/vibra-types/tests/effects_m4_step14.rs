@@ -586,14 +586,19 @@ fn a_witness_ends_at_a_function_value_or_a_contract_member_deep_in_the_chain() {
     assert_eq!(related.len(), 1);
     assert_eq!(related[0].0, "(f value)");
     assert!(
-        related[0].1.starts_with("performs @write via a function value of type"),
+        related[0]
+            .1
+            .starts_with("performs @write via a function value of type"),
         "{related:?}"
     );
     let (primary, related) = witness(source, offenders[1]);
     assert_eq!(primary, "(through-member target)");
     assert_eq!(related.len(), 1);
     assert_eq!(related[0].0, "(logger.log target)");
-    assert_eq!(related[0].1, "performs @write via contract member @logger.log");
+    assert_eq!(
+        related[0].1,
+        "performs @write via contract member @logger.log"
+    );
 }
 
 #[test]
