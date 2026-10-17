@@ -203,9 +203,24 @@ by Step 9. I1, I2, I7, I8, and I9 belong to Stage 4B.
 
 Run from the repository root with the pinned toolchain (Rust 1.96.1),
 `CARGO_INCREMENTAL=0`, `--locked --offline`. Base `m4` at `1f55ad6`; tested
-head TESTED_HEAD.
+head `3488b96`.
 
-COMMANDS
+| Command | Exit | Result |
+| --- | --- | --- |
+| `cargo fmt --all --check` | 0 | clean |
+| `cargo clippy --locked --offline --workspace --all-targets --all-features -- -D warnings` (`RUSTFLAGS=-D warnings`) | 0 | clean |
+| `cargo test --locked --offline --workspace --all-targets --all-features` | 0 | 1,178 passed, 0 failed |
+| `cargo doc --locked --offline --workspace --no-deps --all-features` (`RUSTDOCFLAGS=-D warnings`) | 0 | clean |
+| `cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases` | 0 | 475 passed, 0 failed, 0 unavailable; Wasm 131 matched, 0 failed, 0 not lowered |
+| `cargo test --locked --offline -p vibra-conformance --test evidence_step11 --test m4_contract_inventory --test m3_contract_inventory --test diagnostic_registry --test parity_inventory_m4_step4 --test architecture_boundary` | 0 | all pass |
+| `cargo run --locked --offline -p vibra-conformance --bin m1-fuzz -- --profile ci-smoke` | 0 | 6 targets, 96 cases pass |
+| `git diff --check` | 0 | clean |
+| `cargo test --locked --offline -p vibra-conformance --test stage_4a_demo_m4_step12 -- --nocapture` | 0 | the demo and walk numbers above |
+| `vibra check`, `vibra test` in `examples/m3-catalog` | 0, 0 | `check accepted`; `test suite passed: 8 test(s)` |
+
+The list ran on the code and specification head `3488b96`; the only later
+change is this table, and the cheap checks (format, whitespace, the focused
+tests) ran again on the final head.
 
 ## Verdict
 
