@@ -1263,6 +1263,7 @@ pub struct FunctionType {
     labelled: Vec<TypeSlot>,
     variadic: Option<VariadicType>,
     effects: Vec<Name>,
+    effect_spans: Vec<TypeSpan>,
 }
 
 impl FunctionType {
@@ -1294,6 +1295,13 @@ impl FunctionType {
     #[must_use]
     pub fn effects(&self) -> &[Name] {
         &self.effects
+    }
+
+    /// Where each effect reference is written, in the order of
+    /// [`Self::effects`].
+    #[must_use]
+    pub fn effect_spans(&self) -> &[TypeSpan] {
+        &self.effect_spans
     }
 }
 
@@ -1400,6 +1408,8 @@ impl GenericBinding {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EffectRow {
     references: Vec<Name>,
+    /// The source span of each entry of `references`, in the same order.
+    entry_spans: Vec<ByteSpan>,
     span: ByteSpan,
 }
 
@@ -1408,6 +1418,13 @@ impl EffectRow {
     #[must_use]
     pub fn references(&self) -> &[Name] {
         &self.references
+    }
+
+    /// The source span of each effect symbol, in the order of
+    /// [`Self::references`].
+    #[must_use]
+    pub fn entry_spans(&self) -> &[ByteSpan] {
+        &self.entry_spans
     }
 
     /// The source span.
@@ -1597,6 +1614,7 @@ struct ParsedAttributes {
 enum AttributeContext {
     Type,
     Declaration,
+    Effect,
     Function,
     Lambda,
 }
@@ -1828,8 +1846,7 @@ impl AstParser {
             return None;
         }
         let name = self.declaration_name(forms[1])?;
-        let parsed =
-            self.parse_attributes(&forms[2..], AttributeContext::Declaration, &[]);
+        let parsed = self.parse_attributes(&forms[2..], AttributeContext::Effect, &[]);
         let attributes = DeclarationAttributes {
             items: parsed.items,
         };
@@ -3135,6 +3152,7 @@ impl AstParser {
         let mut labelled = Vec::new();
         let mut variadic = None;
         let mut effects = Vec::new();
+        let mut effect_spans = Vec::new();
         let mut seen = BTreeSet::new();
         let mut index = 3;
         while index < forms.len() {
@@ -3164,7 +3182,12 @@ impl AstParser {
             match label_name.value() {
                 "labelled" => labelled = self.parse_type_slots(value)?,
                 "variadic" => variadic = Some(self.parse_variadic_type(value)?),
-                "effects" => effects = self.parse_effect_row(value)?.references,
+                "effects" => {
+                    let row = self.parse_effect_row(value)?;
+                    effect_spans =
+                        row.entry_spans.iter().copied().map(TypeSpan).collect();
+                    effects = row.references;
+                }
                 _ => {
                     self.error(
                         DiagnosticCode::SyntaxUnknownAttribute,
@@ -3189,6 +3212,7 @@ impl AstParser {
             labelled,
             variadic,
             effects,
+            effect_spans,
         }))
     }
 
@@ -3261,6 +3285,7 @@ impl AstParser {
         let allowed = match context {
             AttributeContext::Type => &["where", "role", "visibility", "doc"][..],
             AttributeContext::Declaration => &["visibility", "doc"][..],
+            AttributeContext::Effect => &["visibility", "doc", "effects"][..],
             AttributeContext::Function => &[
                 "where",
                 "labelled",
@@ -3328,6 +3353,18 @@ impl AstParser {
                 index += 1;
                 continue;
             };
+            // A root is a name and not a row: its operations declare their
+            // additive rows one by one, so `effects:` on the `deffect` itself
+            // is a malformed attribute and not an unknown one.
+            if matches!(context, AttributeContext::Effect) && label == "effects" {
+                self.error(
+                    DiagnosticCode::SyntaxInvalidAttribute,
+                    forms[index].span().join(value.span()),
+                    "a deffect takes no effects: attribute; its operations declare their additive rows",
+                );
+                index += 2;
+                continue;
+            }
             if let Some(attribute) =
                 self.parse_attribute(label, value, inherited_generics)
             {
@@ -3530,12 +3567,14 @@ impl AstParser {
             return None;
         };
         let mut references = Vec::with_capacity(forms.len());
+        let mut entry_spans = Vec::with_capacity(forms.len());
         for form in forms {
             match form.source_name() {
                 Some(NameClassification::Name(name))
                     if name.kind() == NameKind::Symbol =>
                 {
-                    references.push(name)
+                    references.push(name);
+                    entry_spans.push(form.span());
                 }
                 Some(NameClassification::Name(_)) => self.error(
                     DiagnosticCode::EffectInvalidReference,
@@ -3554,6 +3593,7 @@ impl AstParser {
         }
         Some(EffectRow {
             references,
+            entry_spans,
             span: node.span(),
         })
     }

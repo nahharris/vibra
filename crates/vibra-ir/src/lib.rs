@@ -15,11 +15,13 @@ use std::sync::Arc;
 use vibra_diagnostics::ByteSpan;
 
 mod constant;
+mod effect;
 mod nominal;
 mod observed;
 mod pattern;
 
 pub use constant::Constant;
+pub use effect::{EffectRoot, EffectRow, RowTail};
 pub use nominal::{TypeBody, TypeDefinition, TypeId, canonical_members};
 use nominal::{
     type_table, validate_declared_expr, validate_declared_signature,
@@ -472,6 +474,9 @@ impl fmt::Display for Type {
                 if let Some(tail) = signature.variadic() {
                     write!(formatter, " variadic: {tail}")?;
                 }
+                if !signature.effects().is_empty() {
+                    write!(formatter, " effects: {}", signature.effects())?;
+                }
                 formatter.write_str(")")
             }
             _ => formatter.write_str(self.as_str()),
@@ -531,6 +536,10 @@ pub struct FunctionSignature {
     /// the packed tail as one final argument after the labelled slots.
     variadic: Option<Type>,
     result: Type,
+    /// The exact closed effect row of the function type. For a declaration
+    /// it is the written or default-empty ceiling; for an effect operation it
+    /// is the owner root together with the additive row.
+    effects: EffectRow,
 }
 
 impl FunctionSignature {
@@ -542,7 +551,21 @@ impl FunctionSignature {
             labelled: Vec::new(),
             variadic: None,
             result,
+            effects: EffectRow::empty(),
         }
+    }
+
+    /// The same signature with the effect row `effects`.
+    #[must_use]
+    pub fn with_effects(mut self, effects: EffectRow) -> Self {
+        self.effects = effects;
+        self
+    }
+
+    /// The exact closed effect row, which is part of the function type.
+    #[must_use]
+    pub const fn effects(&self) -> &EffectRow {
+        &self.effects
     }
 
     /// Creates a signature with declaration-order labelled slots.
@@ -557,6 +580,7 @@ impl FunctionSignature {
             labelled,
             variadic: None,
             result,
+            effects: EffectRow::empty(),
         }
     }
 
@@ -620,6 +644,7 @@ impl FunctionSignature {
                 .zip(&other.parameters)
                 .all(|(left, right)| left.same_shape(right))
             && self.result.same_shape(&other.result)
+            && self.effects == other.effects
             && self.labelled.len() == other.labelled.len()
             && self
                 .labelled
@@ -659,6 +684,7 @@ impl FunctionSignature {
                 .as_ref()
                 .map(|tail| tail.substitute(arguments)),
             result: self.result.substitute(arguments),
+            effects: self.effects.clone(),
         }
     }
 
@@ -672,6 +698,7 @@ impl FunctionSignature {
                 .zip(&other.parameters)
                 .all(|(left, right)| left.admits(right))
             && self.result.admits(&other.result)
+            && self.effects == other.effects
             && self.labelled.len() == other.labelled.len()
             && self
                 .labelled
@@ -2702,6 +2729,7 @@ pub struct CheckedFunction {
     native_body: Option<NativeBody>,
     test_assertion: Option<TestAssertion>,
     implements: Option<Implements>,
+    effect_owner: Option<EffectRoot>,
 }
 
 /// The checked Vibra body of a native whose meaning applies a function value.
@@ -2928,6 +2956,7 @@ impl CheckedFunction {
             native_body: None,
             test_assertion,
             implements: None,
+            effect_owner: None,
         })
     }
 
@@ -3004,6 +3033,21 @@ impl CheckedFunction {
     #[must_use]
     pub const fn implements(&self) -> Option<&Implements> {
         self.implements.as_ref()
+    }
+
+    /// The same function marked as an operation of the effect root `owner`.
+    /// An operation's signature row is its owner together with its additive
+    /// row, and applying it contributes that complete row.
+    #[must_use]
+    pub fn with_effect_owner(mut self, owner: EffectRoot) -> Self {
+        self.effect_owner = Some(owner);
+        self
+    }
+
+    /// The effect root that owns this function as an operation, if any.
+    #[must_use]
+    pub const fn effect_owner(&self) -> Option<&EffectRoot> {
+        self.effect_owner.as_ref()
     }
 }
 
@@ -5750,9 +5794,10 @@ fn canonical_function_signature(signature: &FunctionSignature) -> String {
         .map(|tail| format!(" variadic: {}", canonical_type(tail)))
         .unwrap_or_default();
     format!(
-        "(record type: @fn parameters: {} labelled: (record{labelled}){variadic} result: {})",
+        "(record type: @fn parameters: {} labelled: (record{labelled}){variadic} result: {} effects: {})",
         canonical_array(&parameters),
-        canonical_type(&signature.result())
+        canonical_type(&signature.result()),
+        signature.effects().canonical_vibon()
     )
 }
 
