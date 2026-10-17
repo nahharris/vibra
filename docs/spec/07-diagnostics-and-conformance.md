@@ -4,9 +4,9 @@ Status: normative target
 Implementation status: reader, static, interpreter, and tooling observations
 have conformance coverage for the complete pure language through M3 and the
 pre-M4 binding revision; the current counts are recorded in the milestone
-exit evidence. The host-event expectation is implemented in the interpreter, and
-the differential execution and the parity inventory run since M4 Step 4 over the
-empty void entry, the one form the Wasm backend lowers so far.
+exit evidence. The host-event expectation is implemented in both backends, and
+the differential execution and the parity inventory run over every executable
+case since M4 Step 11, which lowers every form of a checked program.
 
 ## Diagnostics are a language surface
 
@@ -368,16 +368,20 @@ specification rule, not compiler module. Each case records:
   `(record format: @test-run.v1 result: @command.ok tests: (array ...))`; this
   snapshot embeds one `@audit-trace.v1` per test and replaces the separate
   `interpreter.audit_trace` snapshot;
-- for an `interpret` or `workspace-run` case that ends in a host event, an
-  `expect.host_event` field naming the event atom, `@runtime.memory-exhausted`,
-  in place of the result and audit-trace snapshots, so that a case never
-  records a value for a run that has none; and
+- for an `interpret`, `workspace-run`, or `workspace-test` case that ends in a
+  host event, an `expect.host_event` field naming the event atom,
+  `@runtime.memory-exhausted`, in place of the result and audit-trace
+  snapshots, so that a case never records a value for a run that has none (a
+  `workspace-test` case that ends in a host event is `@command.operational-failure`
+  with zero selected, passed, and failed tests, as the tooling chapter states,
+  and records no `@test-run.v1` snapshot); and
 - deterministic build hashes for artifact cases.
 
 An executable case has no Wasm snapshot of its own: **Differential execution**
 below runs it in a second backend against the same expectation.
 
-Every `workspace-test` case, accepted or rejected, MUST supply exactly one
+Every `workspace-test` case, accepted or rejected, that does not end in a host
+event MUST supply exactly one
 `interpreter.result` snapshot and MUST omit `interpreter.audit_trace`. The
 result is a closed VIBON record with fields `format`, `result`, and `tests`;
 `format` is exactly `@test-run.v1`, `result` is one of
@@ -635,7 +639,8 @@ an interface value, and an unrelated module-level function. Activation-depth
 coverage proves that non-tail recursion a hundred thousand activations deep, with a
 base case, completes with its result in both backends, and that a non-tail
 recursion with no base case ends with `expect.host_event =
-"@runtime.memory-exhausted"` under the runner's memory limit. Arena coverage
+"@runtime.memory-exhausted"` under the runner's memory limit, in the entry of a
+`workspace-run` case and in the body of a test of a `workspace-test` case alike. Arena coverage
 proves, in the Wasm backend, that a tail-recursive loop allocating a fresh
 compound value on each iteration leaves a live arena size that does not grow
 with the iteration count, measured at two iteration counts a factor of ten

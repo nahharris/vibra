@@ -97,6 +97,7 @@ V1-RUNTIME-workspace-run-higher-order-entry	matched
 V1-RUNTIME-workspace-run-tail-module-values	matched
 V1-RUNTIME-workspace-run-uninvoked-higher-order-closure	matched
 V1-RUNTIME-workspace-run-unused-imported-higher-order-helper	matched
+V1-RUNTIME-workspace-test-activation-exhaustion	matched
 V1-RUNTIME-workspace-test-assert-equal	matched
 V1-RUNTIME-workspace-test-contract-laws	matched
 V1-RUNTIME-workspace-test-empty	matched

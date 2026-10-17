@@ -311,6 +311,7 @@ pub struct WorkspaceTestResult {
     status: TestSuiteStatus,
     diagnostics: Vec<Diagnostic>,
     items: Vec<TestItem>,
+    stopped_programs: Vec<vibra_ir::CheckedProgram>,
 }
 
 impl WorkspaceTestResult {
@@ -330,6 +331,16 @@ impl WorkspaceTestResult {
     #[must_use]
     pub fn items(&self) -> &[TestItem] {
         &self.items
+    }
+
+    /// The checked programs of the tests that ran up to and including the one a
+    /// host event stopped, in canonical discovery order. A run that ended in a
+    /// host event reports no item (zero selected, passed, and failed), so this
+    /// is how a second backend runs the same tests. It is empty for any other
+    /// result.
+    #[must_use]
+    pub fn stopped_programs(&self) -> &[vibra_ir::CheckedProgram] {
+        &self.stopped_programs
     }
 
     /// Number of selected records.
@@ -626,6 +637,7 @@ fn select_tests(
             status: TestSuiteStatus::Diagnostics,
             diagnostics: envelope_diagnostics,
             items,
+            stopped_programs: Vec::new(),
         };
     }
 
@@ -705,10 +717,16 @@ fn select_tests(
                         error.to_string(),
                     )
                 });
+                let mut stopped_programs = items
+                    .iter()
+                    .filter_map(|item: &TestItem| item.program.clone())
+                    .collect::<Vec<_>>();
+                stopped_programs.push(program.clone());
                 return WorkspaceTestResult {
                     status: TestSuiteStatus::OperationalFailure,
                     diagnostics: vec![diagnostic],
                     items: Vec::new(),
+                    stopped_programs,
                 };
             }
             Err(error) => {
@@ -747,6 +765,7 @@ fn select_tests(
         status,
         diagnostics: envelope_diagnostics,
         items,
+        stopped_programs: Vec::new(),
     }
 }
 
@@ -1129,6 +1148,7 @@ fn diagnostics_result(mut diagnostics: Vec<Diagnostic>) -> WorkspaceTestResult {
         status: TestSuiteStatus::Diagnostics,
         diagnostics,
         items: Vec::new(),
+        stopped_programs: Vec::new(),
     }
 }
 
@@ -1137,6 +1157,7 @@ fn empty_result(status: TestSuiteStatus) -> WorkspaceTestResult {
         status,
         diagnostics: Vec::new(),
         items: Vec::new(),
+        stopped_programs: Vec::new(),
     }
 }
 

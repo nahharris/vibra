@@ -103,8 +103,39 @@ pub fn observe_tests(items: &[TestItem]) -> TestsObserved {
             item.program().map(|program| (position, program))
         })
         .collect::<Vec<_>>();
+    observe_ran(items.iter().map(TestRow::from_item).collect(), &ran)
+}
+
+/// Runs, in the Wasm backend, the tests of a suite that the interpreter ended
+/// with a host event: the programs it ran up to and including the test that
+/// ended it. The suite has no rows then, so only the backend's end is reported,
+/// and a suite that completes in Wasm is reported as completed.
+pub(crate) fn observe_stopped_tests(programs: &[CheckedProgram]) -> WasmObservation {
+    let ran = programs.iter().enumerate().collect::<Vec<_>>();
+    let rows = programs
+        .iter()
+        .map(|_| TestRow {
+            name: String::new(),
+            status: TestItemStatus::Passed.as_atom().to_owned(),
+            failure: None,
+            trap: None,
+        })
+        .collect();
+    match observe_ran(rows, &ran) {
+        TestsObserved::Rows(_) => {
+            WasmObservation::Completed(ExecutionObservation::default())
+        }
+        TestsObserved::Stopped(observation) => observation,
+    }
+}
+
+/// Runs the tests `ran`, at their positions among `rows`.
+fn observe_ran(
+    mut rows: Vec<TestRow>,
+    ran: &[(usize, &CheckedProgram)],
+) -> TestsObserved {
     let Some((_, first)) = ran.first() else {
-        return TestsObserved::Rows(items.iter().map(TestRow::from_item).collect());
+        return TestsObserved::Rows(rows);
     };
     let entries = ran
         .iter()
@@ -142,8 +173,7 @@ pub fn observe_tests(items: &[TestItem]) -> TestsObserved {
                 end: origin.span().end(),
             })
     };
-    let mut rows = items.iter().map(TestRow::from_item).collect::<Vec<_>>();
-    for (index, (position, program)) in (0_u32..).zip(&ran) {
+    for (index, (position, program)) in (0_u32..).zip(ran) {
         let Some(base) = rows.get(*position).cloned() else {
             continue;
         };

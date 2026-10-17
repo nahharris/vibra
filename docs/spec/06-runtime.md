@@ -206,6 +206,14 @@ they are the final expression inside a `do` that is itself an operand),
 `let` and `let-else` values and patterns, `match` subjects, `if` conditions, and
 `try` operands.
 
+A call whose result is widened to a union or to an interface value is not in
+tail position, because widening attaches a discriminant or a type descriptor to
+the value the callee returns, which is further computation; this follows from
+the definition above and is not an added rule. A cycle of calls in tail
+position cannot widen, because each call in the cycle returns its callee's
+declared result type unchanged, so the types around the cycle are equal and the
+rule never leaves an unbounded loop that grows the stack.
+
 Every call in tail position MUST reuse the current activation, whatever its
 callee is: a module-level `defn` of any module, a method of a declared type, a
 `lambda` or closure, a function value held in a parameter, a binding, a record
