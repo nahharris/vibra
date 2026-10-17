@@ -18,8 +18,12 @@ const ENUMS: [&str; 9] = [
     "Attribute",
 ];
 
-/// The inherited rows of the README's M3 deferral inventory.
-const INHERITED: [&str; 9] = ["I1", "I2", "I3", "I4", "I5", "I6", "I7", "I8", "I9"];
+/// The inherited rows: the README's M3 deferral inventory (I1-I9) and the Stage 4B
+/// contract rows Step 13 added (I10-I19).
+const INHERITED: [&str; 19] = [
+    "I1", "I2", "I3", "I4", "I5", "I6", "I7", "I8", "I9", "I10", "I11", "I12", "I13",
+    "I14", "I15", "I16", "I17", "I18", "I19",
+];
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -116,6 +120,36 @@ fn owning_step(owner: &str) -> Option<u8> {
         .trim_end_matches(|c: char| c.is_ascii_lowercase())
         .parse::<u8>()
         .ok()
+}
+
+/// The guides of the Stage 4B steps (Step 13 wrote Steps 14-22; Step 16 is
+/// split in two). No step starts without its guide.
+const STAGE_4B_GUIDES: [&str; 11] = [
+    "13-stage-4b-contracts.md",
+    "14-effect-rows.md",
+    "15-target-consent.md",
+    "16a-host-infrastructure.md",
+    "16b-host-console.md",
+    "17-filesystem.md",
+    "18-env-clock-random.md",
+    "19-entry-outcomes.md",
+    "20-effect-metadata.md",
+    "21-performance-baseline.md",
+    "22-m4-exit.md",
+];
+
+#[test]
+fn every_stage_4b_step_has_a_guide_that_the_readme_links() {
+    let root = workspace_root().join("docs/roadmap/milestone-4");
+    let readme =
+        std::fs::read_to_string(root.join("README.md")).expect("read the M4 README");
+    for guide in STAGE_4B_GUIDES {
+        assert!(root.join(guide).is_file(), "{guide} is missing");
+        assert!(
+            readme.contains(&format!("]({guide})")),
+            "the README does not link {guide}"
+        );
+    }
 }
 
 #[test]

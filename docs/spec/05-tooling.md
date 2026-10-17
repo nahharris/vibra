@@ -9,7 +9,7 @@ public `query` command, and the remaining v1 tooling commands remain
 unavailable. Milestone 4 Step 13 closes the Stage 4B contracts of this chapter,
 program arguments, the `@command.program-failed` result, the audit-event
 payloads, and the effect fields of the position envelope and the index, and
-implements none of them; Steps 15, 16, 19, and 20 do.
+implements none of them; Steps 16, 18, 19, and 20 do.
 
 ## One workspace engine
 

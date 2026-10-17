@@ -87,8 +87,8 @@ a program the checker cannot have produced (`lowers_every_form_m4_step11`).
 | `Attribute::Labelled` | Static | — | Resolved into parameter order before lowering |
 | `Attribute::Variadic` | Lowered | Step 8b | (landed) |
 | `Attribute::Visibility` | Static | — | — |
-| `Attribute::Effects` | Stage 4B | Step 14 | Empty rows stay supported |
-| `Attribute::External` | Lowered | Step 8a | `@compiler` rows: Steps 8a–8c (8c landed: the float rows, inline, and the 20 `to-str` and `parse` rows as imports, 42 in `NATIVE_ROWS` with 8b's 22, so every `@compiler` row is lowered, `array.fold` by running its checked body (Step 8d landed); 8b landed: the text, bytes, array, and dict rows, inline or as the 22 native imports of `NATIVE_ROWS`; 8a landed: the integer arithmetic, shift, comparison, and conversion rows and the `char` rows, lowered inline); `@host`: Stage 4B Step 16 |
+| `Attribute::Effects` | Stage 4B | Step 14 | Empty rows stay supported; a row is the record of ledger D25.1 from Step 14 |
+| `Attribute::External` | Lowered | Step 8a | `@compiler` rows: Steps 8a–8c (8c landed: the float rows, inline, and the 20 `to-str` and `parse` rows as imports, 42 in `NATIVE_ROWS` with 8b's 22, so every `@compiler` row is lowered, `array.fold` by running its checked body (Step 8d landed); 8b landed: the text, bytes, array, and dict rows, inline or as the 22 native imports of `NATIVE_ROWS`; 8a landed: the integer arithmetic, shift, comparison, and conversion rows and the `char` rows, lowered inline); `@host`: Stage 4B Step 16b (the registry, snapshot, and manifest list arrive in Step 16a) |
 | `Attribute::Symbol` | Static | — | — |
 | `Attribute::Native` | Lowered | Step 10 | 8b: the text, bytes, array, and dict natives are imports of `vibra_native_v1` backed by `vibra-native`, and `array.fold` (no import) is the one native a module runs as its body, the checked body of the embedded standard library that the typed IR carries beside the wrapper the interpreter runs (Step 8d landed); Step 10 completes and proves the rule (landed: `natives_m4_step10` audits that no native or looping row has an algorithm outside `vibra-native` and that the manifest, the registry, and the import table agree, `natives_m3_step4b` runs 112 samples of the 19 natives on four paths, and `native_faults_m4_step10` shows a faulting native ends as `@runtime.invalid-checked-program`) |
 | `Attribute::Role` | Static | — | — |
@@ -97,19 +97,31 @@ a program the checker cannot have produced (`lowers_every_form_m4_step11`).
 ## Inherited rows
 
 The M4 [deferral inventory](README.md#m3-deferral-inventory) lists nine rows
-that earlier milestones left to M4. Each has one owner here, and the test
-requires all nine. Rows I3–I6 are implemented by Step 2 in the type checker,
+that earlier milestones left to M4 (I1–I9), and Step 13 adds ten Stage 4B
+contract rows (I10–I19), so that a closed contract cannot lose its
+implementation. Each has one owner here, and the test requires all nineteen.
+Rows I3–I6 are implemented by Step 2 in the type checker,
 the typed IR, and the reference interpreter, conditional on its pull request
 merging, and report `@tool.unavailable` no longer. Step 9 lowers them to WebAssembly.
 
 | ID | Inherited row | Owner |
 | --- | --- | --- |
 | I1 | `Declaration::Deffect`; nonempty `Attribute::Effects`, including on a function type and an `iter` default callback | Step 14 |
-| I2 | `Attribute::External` with `@host` | Step 16 |
+| I2 | `Attribute::External` with `@host` | Step 16b |
 | I3 | An abstract contract member with its own generic parameters | Step 2; implemented in Step 2, Wasm in Step 9 (landed) |
 | I4 | Labelled operands and written `types:` arguments on a contract member call | Step 2; implemented in Step 2, Wasm in Step 9 (landed) |
 | I5 | A dict variadic tail on a contract member | Step 2; implemented in Step 2, Wasm in Step 9 (landed) |
 | I6 | A contract member with its own generics or labelled parameters as a function value | Step 2; implemented in Step 2, Wasm in Step 9 (landed) |
 | I7 | M3's G21 (G16 here): the command result for an entry that returns `err` | Step 19 |
 | I8 | Pre-M4 C16: effect rows of a `let` value, a `let-else` fallback, and a `return` operand | Step 14 |
-| I9 | The conformance chapter's effectful walk over `iter.next` | Step 16 |
+| I9 | The conformance chapter's effectful walk over `iter.next` | Step 16b |
+| I10 | The `vibra_v1` host registry of 17 rows, its versioning rule, and its checked-in snapshot (ledger D17, D19) | Step 16a; rows in Steps 16b–18 |
+| I11 | The `@host` ABI: borrowed parameters, an owned result, and the seven builders (D30) | Step 16b |
+| I12 | The `@audit-trace.v1` event record and the CLI `AuditEvent` objects (D18) | Step 16a; events in Step 16b |
+| I13 | The `@host-world.v1` test world, the system provider, and the corpus `host-world` input (D20) | Step 16a; fields in Steps 16b–18 |
+| I14 | Program arguments, `vibra run TARGET -- ARG...` (D22) | Step 18 |
+| I15 | `@command.program-failed` and exit code 6 (D21) | Step 19 |
+| I16 | The effect diagnostics, the witness, the indirect-call rule, and the row record (D23–D25) | Step 14; target array in Step 15 |
+| I17 | The manifest `host` list, the `0.3.0` package, and the five effect modules (D27) | Step 16a; modules in Steps 16b–18 |
+| I18 | The `effects` fact of the position envelope and the effect fields of the index (D28) | Step 20 |
+| I19 | The performance baseline and its CI check (D29) | Step 21 |
