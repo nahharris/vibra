@@ -507,3 +507,55 @@ fn a_contract_member_call_contributes_the_ceiling_whatever_the_implementation_pe
         offender.notes()
     );
 }
+
+#[test]
+fn a_caller_of_a_function_that_did_not_check_is_not_told_its_root_is_unused() {
+    // `broken` has a type error, so its performed row is unknown: `caller`
+    // may be performing `write` through it, and no warning is sound.
+    let source = "(deffect write (defn text (target str) void (do)))
+(defn broken () void (write.text 1i32))
+(defn caller () void effects: (write) (broken))
+";
+    let found = codes(source);
+    assert!(!found.contains(&C::ContractUnusedEffect), "{found:?}");
+    assert!(!found.contains(&C::EffectOutsideCeiling), "{found:?}");
+}
+
+#[test]
+fn a_callback_parameter_accepts_only_its_exact_row() {
+    let declarations = "(deffect write (defn text (target str) void (do)))
+(defn call-it (f (fn (str) str) value str) str (f value))
+(defn wrote (value str) str effects: (write) (write.text value) value)
+";
+    assert_eq!(
+        codes(&format!(
+            "{declarations}(defn use-it () str effects: (write) (call-it wrote \"x\"))\n"
+        )),
+        vec![C::TypeArgumentMismatch]
+    );
+}
+
+#[test]
+fn a_generic_callback_unifies_only_at_its_exact_row() {
+    let declarations = "(deffect write (defn text (target str) void (do)))
+(defn call-it (f (fn (t) t) value t) t where: (t any) (f value))
+(defn wrote (value str) str effects: (write) (write.text value) value)
+";
+    assert_eq!(
+        codes(&format!(
+            "{declarations}(defn use-it () str effects: (write) (call-it wrote \"x\"))\n"
+        )),
+        vec![C::TypeArgumentMismatch]
+    );
+}
+
+#[test]
+fn an_implementation_that_writes_another_row_is_not_the_contract_signature() {
+    let source = "(deffect write (defn text (target str) void (do)))
+(defint logger (defn log (value self) void effects: (write)))
+(deftype console (record id i32)
+  (impl logger
+    (defn log (value self) void (do))))
+";
+    assert_eq!(codes(source), vec![C::TypeMismatch]);
+}

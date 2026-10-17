@@ -160,9 +160,15 @@ fn human_test_reports_each_failure_and_a_summary() {
 #[test]
 fn human_test_reports_unavailable_items_and_their_diagnostics() {
     let project = demo_project("human-unavailable", "(defn main () void (do))\n");
+    // A @host operation stays unavailable until the host registry lands, and
+    // a test that applies it is unavailable at that reference.
+    project.write(
+        "tests/helpers.vib",
+        "(deffect host\n  visibility: @public\n  (defn call () i32 external: @host symbol: \"audit.call\"))\n",
+    );
     project.write(
         "tests/t.vib",
-        "(import assert @std.assert)\n(test \"generic\" (let - (lambda () void effects: (audit) void)) (assert.true true))\n",
+        "(import assert @std.assert)\n(import helpers @tests.helpers)\n(test \"generic\" effects: (helpers.host) (let - (helpers.host.call)) (assert.true true))\n",
     );
 
     let output = vibra(project.path(), &["test"]);

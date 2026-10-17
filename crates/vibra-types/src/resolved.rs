@@ -1187,6 +1187,7 @@ pub fn check_resolved(
     diagnostics.extend(crate::effects::check(
         &checked_functions,
         &checked_globals,
+        &functions,
         &types,
     ));
 

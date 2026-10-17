@@ -54,6 +54,9 @@ struct Node<'a> {
     /// The root that owns an operation.
     owner: Option<EffectRoot>,
     sites: Vec<Site>,
+    /// Whether the body of this function did not check, so its performed row
+    /// is not known.
+    unknown: bool,
 }
 
 struct Closure<'a> {
@@ -68,24 +71,31 @@ struct Closure<'a> {
 pub(crate) fn check(
     functions: &[Option<CheckedFunction>],
     globals: &[Option<CheckedGlobal>],
+    headers: &[crate::FunctionHeader],
     types: &TypeNames,
 ) -> Vec<Diagnostic> {
-    let graph = Graph::build(functions, globals);
+    let graph = Graph::build(functions, globals, headers);
     graph.diagnostics(types)
 }
 
 struct Graph<'a> {
     nodes: Vec<Node<'a>>,
     performed: Vec<EffectRow>,
+    /// Whether the performed row of a node is a lower bound only, because
+    /// its body, or the body of a function it reaches, did not check. An
+    /// error can still be reported from a lower bound, but "never
+    /// performed" cannot.
+    partial: Vec<bool>,
 }
 
 impl<'a> Graph<'a> {
     fn build(
         functions: &'a [Option<CheckedFunction>],
         globals: &'a [Option<CheckedGlobal>],
+        headers: &[crate::FunctionHeader],
     ) -> Self {
         let mut nodes = Vec::with_capacity(functions.len() + globals.len());
-        for function in functions {
+        for (index, function) in functions.iter().enumerate() {
             nodes.push(match function {
                 Some(function) if !function.is_external_wrapper() => Node {
                     label: identity(function.name()),
@@ -94,6 +104,7 @@ impl<'a> Graph<'a> {
                     ceiling: function.signature().effects().clone(),
                     owner: function.effect_owner().cloned(),
                     sites: Vec::new(),
+                    unknown: false,
                 },
                 Some(function) => Node {
                     label: identity(function.name()),
@@ -102,15 +113,27 @@ impl<'a> Graph<'a> {
                     ceiling: function.signature().effects().clone(),
                     owner: function.effect_owner().cloned(),
                     sites: Vec::new(),
+                    unknown: false,
                 },
-                None => Node {
-                    label: String::new(),
-                    origin: SourceOrigin::new("", ByteSpan::empty_at(0)),
-                    body: None,
-                    ceiling: EffectRow::empty(),
-                    owner: None,
-                    sites: Vec::new(),
-                },
+                // A function that did not check still has its declared
+                // signature, which is all a caller needs of an operation. An
+                // ordinary function's performed row is then unknown.
+                None => {
+                    let header = headers.get(index);
+                    let owner = header.and_then(|header| header.effect_owner.clone());
+                    Node {
+                        label: header
+                            .map_or_else(String::new, |header| identity(&header.name)),
+                        origin: SourceOrigin::new("", ByteSpan::empty_at(0)),
+                        body: None,
+                        ceiling: header.map_or_else(EffectRow::empty, |header| {
+                            header.signature.effects().clone()
+                        }),
+                        unknown: owner.is_none(),
+                        owner,
+                        sites: Vec::new(),
+                    }
+                }
             });
         }
         for global in globals.iter().flatten() {
@@ -123,6 +146,7 @@ impl<'a> Graph<'a> {
                 ceiling: EffectRow::empty(),
                 owner: None,
                 sites: Vec::new(),
+                unknown: false,
             });
         }
         let function_count = functions.len();
@@ -156,6 +180,7 @@ impl<'a> Graph<'a> {
                         ceiling: closure.ceiling,
                         owner: None,
                         sites: Vec::new(),
+                        unknown: false,
                     });
                 }
             }
@@ -163,10 +188,47 @@ impl<'a> Graph<'a> {
         }
         let mut graph = Self {
             performed: vec![EffectRow::empty(); nodes.len()],
+            partial: vec![false; nodes.len()],
             nodes,
         };
         graph.close();
+        graph.taint();
         graph
+    }
+
+    /// Marks every node whose performed row is a lower bound because it
+    /// reaches a function whose body did not check. An operation is a
+    /// boundary: its callers see its declared ceiling.
+    fn taint(&mut self) {
+        let mut callers = vec![Vec::<usize>::new(); self.nodes.len()];
+        for (caller, node) in self.nodes.iter().enumerate() {
+            for site in &node.sites {
+                if let Callee::Node(callee) = site.callee
+                    && let Some(list) = callers.get_mut(callee)
+                {
+                    list.push(caller);
+                }
+            }
+        }
+        let mut queue = VecDeque::new();
+        for (index, node) in self.nodes.iter().enumerate() {
+            if node.unknown {
+                if let Some(slot) = self.partial.get_mut(index) {
+                    *slot = true;
+                }
+                queue.push_back(index);
+            }
+        }
+        while let Some(index) = queue.pop_front() {
+            for caller in callers.get(index).into_iter().flatten() {
+                if let Some(slot) = self.partial.get_mut(*caller)
+                    && !*slot
+                {
+                    *slot = true;
+                    queue.push_back(*caller);
+                }
+            }
+        }
     }
 
     /// The row an application of `callee` contributes to its body.
@@ -248,7 +310,12 @@ impl<'a> Graph<'a> {
                 }
             }
             // A written root that the body never performs weakens local
-            // reasoning. The owner root of an operation is not written.
+            // reasoning. The owner root of an operation is not written. A
+            // body that reaches a function which did not check may still
+            // perform it there.
+            if self.partial.get(index).copied().unwrap_or(false) {
+                continue;
+            }
             for (root, span) in
                 types.written_roots(node.origin.source_id(), node.origin.span())
             {

@@ -155,11 +155,11 @@ fn unavailable_helper_is_attributed_only_to_tests_that_reference_it() {
             ("src/app/main.vib", "(defn execute () void void)\n"),
             (
                 "tests/helpers.vib",
-                "(defn unavailable () i32 visibility: @public effects: (io.stdout) 1i32)\n",
+                "(deffect host\n  visibility: @public\n  (defn unavailable () i32 external: @host symbol: \"audit.call\"))\n",
             ),
             (
                 "tests/math.vib",
-                "(import assert @std.assert)\n(import helpers @tests.helpers)\n(test \"depends\" (do (helpers.unavailable) void))\n(test \"independent\" (assert.true true))\n",
+                "(import assert @std.assert)\n(import helpers @tests.helpers)\n(test \"depends\" effects: (helpers.host) (do (helpers.host.unavailable) void))\n(test \"independent\" (assert.true true))\n",
             ),
         ],
     );
@@ -175,7 +175,11 @@ fn unavailable_helper_is_attributed_only_to_tests_that_reference_it() {
         diagnostic.code() == vibra_diagnostics::DiagnosticCode::ToolUnavailable
     }));
     assert_eq!(result.items()[1].status(), TestItemStatus::Passed);
-    assert!(result.items()[1].diagnostics().is_empty());
+    assert!(
+        result.items()[1].diagnostics().is_empty(),
+        "{:?}",
+        result.items()[1].diagnostics()
+    );
 }
 
 #[test]
@@ -185,8 +189,12 @@ fn unsupported_test_form_is_unavailable_at_its_reference() {
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),
             (
+                "tests/helpers.vib",
+                "(deffect host\n  visibility: @public\n  (defn call () i32 external: @host symbol: \"audit.call\"))\n",
+            ),
+            (
                 "tests/math.vib",
-                "(import assert @std.assert)\n(test \"generic\" (let - (lambda () void effects: (audit) void)) (assert.true true))\n",
+                "(import assert @std.assert)\n(import helpers @tests.helpers)\n(test \"generic\" effects: (helpers.host) (let - (helpers.host.call)) (assert.true true))\n",
             ),
         ],
     );

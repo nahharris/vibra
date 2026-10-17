@@ -1515,8 +1515,12 @@ impl<'a> Checker<'a> {
     /// Checks every written ceiling against the performed row of its body,
     /// once the whole function-call graph is checked.
     fn check_effects(&mut self) {
-        let found =
-            effects::check(&self.checked_functions, &self.checked_globals, &self.types);
+        let found = effects::check(
+            &self.checked_functions,
+            &self.checked_globals,
+            &self.functions,
+            &self.types,
+        );
         self.diagnostics.extend(found);
     }
 
