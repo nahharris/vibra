@@ -287,7 +287,7 @@ rule and is listed for the maintainer.
   504 passed, 0 failed, 0 unavailable; the interpreter backend passes 135 cases and
   the Wasm backend matches 135, 0 not lowered (131 at the base). The parity inventory
   holds the four new executable cases as `matched`.
-- Host tests: `effects_m4_step14` in `vibra-ir` (7), `vibra-types` (36), `vibra-fmt` (6),
+- Host tests: `effects_m4_step14` in `vibra-ir` (7), `vibra-types` (37), `vibra-fmt` (6),
   and `vibra-conformance` (2).
 
 ### Left for Step 15

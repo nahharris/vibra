@@ -561,6 +561,42 @@ fn an_implementation_that_writes_another_row_is_not_the_contract_signature() {
 }
 
 #[test]
+fn a_witness_ends_at_a_function_value_or_a_contract_member_deep_in_the_chain() {
+    let source = "(deffect write (defn text (target str) void (do)))
+(defint logger (defn log (value self) void effects: (write)))
+(defn through-value (f (fn (str) void effects: (write)) value str) void
+  effects: (write)
+  (f value))
+(defn through-member (target logger) void
+  effects: (write)
+  (logger.log target))
+(defn outer-value (f (fn (str) void effects: (write))) void
+  (through-value f \"x\"))
+(defn outer-member (target logger) void
+  (through-member target))
+";
+    let found = check(source);
+    let offenders = found
+        .iter()
+        .filter(|d| d.code() == C::EffectOutsideCeiling)
+        .collect::<Vec<_>>();
+    assert_eq!(offenders.len(), 2, "{found:#?}");
+    let (primary, related) = witness(source, offenders[0]);
+    assert_eq!(primary, "(through-value f \"x\")");
+    assert_eq!(related.len(), 1);
+    assert_eq!(related[0].0, "(f value)");
+    assert!(
+        related[0].1.starts_with("performs @write via a function value of type"),
+        "{related:?}"
+    );
+    let (primary, related) = witness(source, offenders[1]);
+    assert_eq!(primary, "(through-member target)");
+    assert_eq!(related.len(), 1);
+    assert_eq!(related[0].0, "(logger.log target)");
+    assert_eq!(related[0].1, "performs @write via contract member @logger.log");
+}
+
+#[test]
 fn a_lambda_row_that_is_never_performed_is_a_warning_at_its_entry() {
     // The lambda wraps a function of the smaller row and so declares the row
     // it must offer; the unused root is then the warning.
