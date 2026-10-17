@@ -349,6 +349,8 @@ diagnostic_registry! {
         "an effect row entry is not a lexical symbol resolved through imports";
     ExternalUnknownSymbol => "@external.unknown-symbol", External, Error, None,
         "an external declaration names no symbol in its provider registry";
+    ExternalOwnerMismatch => "@external.owner-mismatch", External, Error, None,
+        "a host registry entry is owned by a root other than the deffect that declares it";
     DataInvalidExtension => "@data.invalid-extension", Data, Error, None,
         "a document was presented to the loader for the other grammar";
     DataInvalidShape => "@data.invalid-shape", Data, Error, None,
@@ -373,6 +375,8 @@ diagnostic_registry! {
         "a target or dependency name collides with the reserved `@tests` unit";
     ProjectOverlappingTargetRoots => "@project.overlapping-target-roots", Project, Error, None,
         "two target roots nest or coincide";
+    ProjectDuplicateEffectRoot => "@project.duplicate-effect-root", Project, Error, None,
+        "a binary target lists the same effect root twice";
     ProjectNotFound => "@project.not-found", Project, Error, None,
         "no exact project.vibon was found in the discovery boundary";
     ProjectInvalidTargetRoot => "@project.invalid-target-root", Project, Error, None,
@@ -407,7 +411,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 91;
+    const REGISTERED_CODES: usize = 93;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {
@@ -492,7 +496,7 @@ mod tests {
 
     #[test]
     fn exactly_two_codes_are_warnings() {
-        // The specification's table fixes 62 errors and 2 warnings. Pinning
+        // The specification's table fixes 91 errors and 2 warnings. Pinning
         // the split catches a level silently flipping in either direction.
         let warnings: Vec<&str> = DiagnosticCode::ALL
             .iter()

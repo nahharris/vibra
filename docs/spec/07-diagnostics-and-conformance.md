@@ -6,7 +6,10 @@ have conformance coverage for the complete pure language through M3 and the
 pre-M4 binding revision; the current counts are recorded in the milestone
 exit evidence. The host-event expectation is implemented in both backends, and
 the differential execution and the parity inventory run over every executable
-case since M4 Step 11, which lowers every form of a checked program.
+case since M4 Step 11, which lowers every form of a checked program. Milestone 4
+Step 13 closes the Stage 4B contracts of this chapter, the effect and host
+diagnostics, the host-world corpus input, the audit-event snapshots, and the
+registry invariants, and implements none of them; Steps 14 to 20 do.
 
 ## Diagnostics are a language surface
 
@@ -90,6 +93,7 @@ table governs.
 | `@effect.outside-ceiling` | `@error` |
 | `@effect.invalid-reference` | `@error` |
 | `@external.unknown-symbol` | `@error` |
+| `@external.owner-mismatch` | `@error` |
 | `@data.invalid-extension` | `@error` |
 | `@data.invalid-shape` | `@error` |
 | `@data.invalid-value` | `@error` |
@@ -102,6 +106,7 @@ table governs.
 | `@project.ambiguous-dependency-target` | `@error` |
 | `@project.reserved-unit-name` | `@error` |
 | `@project.overlapping-target-roots` | `@error` |
+| `@project.duplicate-effect-root` | `@error` |
 | `@project.not-found` | `@error` |
 | `@project.invalid-target-root` | `@error` |
 | `@project.io-error` | `@error` |
@@ -205,8 +210,9 @@ the corresponding CLI `trapCode` and VIBON `trap-code` are the exact string
 and omitted from the closed VIBON trap record). `@runtime.invalid-host-value`
 is the trap of a host operation that receives a value ID or index it does not
 admit, and does not describe checked-program failures; no checked program
-reaches it before a host operation exists, so the CLI and test schemas add it
-with the host registry. `@runtime.unobservable-function` is the trap of a
+reaches it unless the toolchain has a defect, and the CLI `run` and `test`
+schemas and the `@test-run.v1` observation admit it as a `trapCode`, with no
+origin. `@runtime.unobservable-function` is the trap of a
 value holding a function that reaches a test assertion or the entry's result;
 in a test its diagnostic and trap origin are the assertion call.
 `@runtime.memory-exhausted` is the host event that ends execution when the
@@ -280,6 +286,36 @@ One form never receives both `@type.unreachable-code` and
 `@type.redundant-return`; the position error wins. A form emits at most one
 `@type.unreachable-code`.
 
+### Effect and host diagnostics
+
+The effect and host rules add the codes `@project.duplicate-effect-root` and
+`@external.owner-mismatch`, both with fixed level `@error` and fix capability
+`@none`, and otherwise reuse existing codes. Each primary span is a complete
+half-open UTF-8 range with the owning source identity:
+
+| Condition | Code | Primary span | Related span and notes |
+| --- | --- | --- | --- |
+| root in a target `effects` array that resolves to no module or declaration | `@module.unknown-path` or `@name.unknown-symbol`, as for any entity reference | the atom, in `project.vibon` | none |
+| root in a target `effects` array that resolves to an entity that is not an effect root | `@name.wrong-entity-kind` | the atom | none; names the entity found |
+| root listed twice in one target `effects` array | `@project.duplicate-effect-root` | the second atom | the first atom |
+| binary target with no `effects` field | `@data.invalid-shape` | the target record | none |
+| root of a target `effects` array that the entry's performed row does not contain | `@contract.unused-effect` (`@warning`) | the atom | none |
+| root of the entry's performed row that the target `effects` array omits | `@effect.outside-ceiling` | the `entry:` value in `project.vibon` | the witness of the effects chapter |
+| performed root missing from a function, `lambda`, operation, or test ceiling | `@effect.outside-ceiling` | the first call site, one diagnostic for each offending function and missing root | the remaining hops of the witness, each noted `performs <root> via <callee>` |
+| entry in a row that is an atom, or a symbol that resolves to no effect root | `@effect.invalid-reference` | the entry | none |
+| `external: @host` on anything but a member of a `deffect` | `@syntax.invalid-attribute` | the `external:` attribute | none |
+| `effects:` row on a `@host` member | `@syntax.invalid-attribute` | the `effects:` attribute | none; a note says that a `@host` member has no additive row |
+| `effects:` on a `deffect` | `@syntax.invalid-attribute` | the `effects:` attribute | none |
+| `@host` member whose registry entry is owned by a root other than its enclosing `deffect` | `@external.owner-mismatch` | the `symbol:` string | the `deffect` name |
+| `@host` symbol that is not a registry symbol | `@external.unknown-symbol` | the `symbol:` string | none |
+| `@host` member whose signature differs from its registry entry | `@type.type-argument-mismatch` | the declaration | none; a note gives the registry signature |
+
+`@contract.unused-effect` applies to a declared root that is never performed,
+whether it is written in a ceiling or in a target array; a target-array root is
+unused when the entry's performed row, computed over its whole call graph, does
+not contain it. A target-array diagnostic does not stop the target from being
+admitted, since the array already contains the entry's row.
+
 ## Recovery
 
 The parser retains a lossless concrete syntax tree and recovers after malformed
@@ -321,14 +357,21 @@ specification rule, not compiler module. Each case records:
   workspace snapshot through the workspace semantic API;
   `workspace-run` requires the interpreter profile, the same project/tree
   binding and no source input; it requires exactly one binary target and
-  compares its checked pure execution with the required result and VIBON audit
-  trace snapshots;
+  compares its checked execution with the required result and VIBON audit
+  trace snapshots, running it in the host world of the case;
   `workspace-test` requires the interpreter profile, the same project/tree
-  binding and no source input; it runs all tests and compares one canonical
+  binding and no source input; it runs all tests, each in a fresh copy of the
+  host world of the case, and compares one canonical
   `@test-run.v1` observation. The observation contains a separate
-  `@audit-trace.v1` record for each test; M2 test traces are empty;
+  `@audit-trace.v1` record for each test;
+  `interpret` is pure and has no host world, so it takes no `host-world` input;
   non-reader case with multiple input kinds must state its operation;
 - source/project/data inputs and an optional confined tree directory;
+- for `workspace-run` and `workspace-test`, an optional `host-world` input, the
+  path of a `@host-world.v1` document of the runtime chapter, which supplies the
+  case's standard input, files, environment, arguments, clock, and random seed.
+  Without it the case runs in the default world. The document is copied fresh
+  for each test and for each backend, so a case never observes another's writes;
 - an optional `.vibon` `graph` snapshot path for source-graph cases; when present it
   records the canonical `@source-graph.v1` observation, so acceptance alone
   cannot hide a wrong snapshot. Its VIBON shape is one top-level `record`
@@ -362,8 +405,8 @@ specification rule, not compiler module. Each case records:
 - interpreter result and ordered audit trace where the operation exposes a
   separate trace; the expected
   audit trace is a `.vibon` snapshot whose canonical root is
-  `(record format: @audit-trace.v1 events: (array ...))`, with event strings in
-  execution order;
+  `(record format: @audit-trace.v1 events: (array ...))`, with the event
+  records of the runtime chapter in execution order;
 - for `workspace-test`, an interpreter result snapshot whose canonical root is
   `(record format: @test-run.v1 result: @command.ok tests: (array ...))`; this
   snapshot embeds one `@audit-trace.v1` per test and replaces the separate
@@ -405,11 +448,15 @@ Trap-record field order is `trap-code`, then `origin` when present; no other
 fields are permitted. Neither conditional field is represented as null. No
 test record contains diagnostics; the case's ordinary diagnostic expectations
 carry those independently. No other fields are permitted. The
-`audit-trace` record has exactly `format: @audit-trace.v1` and `events: (array)`;
-M2 events are empty for every test result, including invalid, unavailable, and
-trap outcomes. For M2 checked-program execution-boundary traps, `trap-code` is
+`audit-trace` record has exactly `format: @audit-trace.v1` and `events: (array
+event...)`, where each event is the record of the runtime chapter's audit-trace
+section. The events are the host calls the test completed, so they are empty for
+a test that completes none, and always for an invalid or unavailable test, and a
+test that trapped keeps the events completed before the trap. For
+checked-program execution-boundary traps, `trap-code` is
 the exact string `"@runtime.invalid-checked-program"` and `origin` is omitted;
-for `"@runtime.unobservable-function"`, `origin` is the assertion call.
+for `"@runtime.unobservable-function"`, `origin` is the assertion call; and
+`"@runtime.invalid-host-value"` has no origin.
 The test records contain all per-test traces, so a second
 suite-level audit snapshot is forbidden. An empty suite is `tests: (array)`
 with result `@command.ok`.
@@ -422,9 +469,16 @@ MUST preserve the exact source IDs, bytes, spans, and dependency edges above.
 
 Executable audit traces have one representation as well: the structured
 `@audit-trace.v1` VIBON record described above. An empty pure trace is the
-canonical `(record format: @audit-trace.v1 events: (array))` value. Event
-strings remain ordered and are never flattened into a line-oriented text
-snapshot; plain-text audit snapshots are not a supported format.
+canonical `(record format: @audit-trace.v1 events: (array))` value. Events
+remain ordered records and are never flattened into a line-oriented text
+snapshot or an opaque string; plain-text audit snapshots are not a supported
+format. A decoder of the format preserves an event of an unknown `kind` and
+compares it as data.
+
+A `workspace-run` case whose entry returns `err` records the entry's
+`(result void e)` in the canonical result observation, as for any result. Its
+command result, `@command.program-failed`, follows from that observation, so the
+case adds no field for it and expects no trap and no diagnostic.
 
 Cases use the following stable section IDs, followed by a descriptive
 kebab-case suffix such as `V1-SRC-CALLS-labelled-after-variadic`:
@@ -500,9 +554,43 @@ additive row implemented in Vibra, and proves that the additive root appears
 in the performed row of a transitive caller, that a caller naming only the
 owner root is rejected with `@effect.outside-ceiling`, and that the root
 appears in the binary target array even though no source row of the entry
-module writes it. `@effect.outside-ceiling` MUST report, for every root missing
-from the offending ceiling, the call witness path that introduced it whenever
-that root is not written at the reported position.
+module writes it. `@effect.outside-ceiling` MUST report one diagnostic for each
+offending function and root missing from its ceiling, with the witness of the
+effects chapter: the first call site in source order as the primary span, the
+shortest remaining chain by hops, ties by source order, as the related spans, each
+noted `performs <root> via <callee>`, and a hop through a function value or a
+contract member marked as such. The same chain is returned by `--expand
+effect-witnesses`.
+
+Effect coverage also includes the rows themselves: a call through a function
+value contributing its type's row, a call of a contract member contributing the
+contract ceiling whatever the implementation performs, creating a function value
+performing nothing, and the rejection of a function value where a function type
+of another row is expected, in both directions, because v1 has no row
+subtyping; an effect root that is a target `effects` atom resolved through the
+ordinary resolution diagnostics, a duplicate root, and a root in the array that
+the entry does not perform, as the table of **Effect and host diagnostics**
+states; a `@host` declaration outside a `deffect`, with an additive row, and an
+`effects:` on a `deffect`, each `@syntax.invalid-attribute`; a registry entry
+owned by another root, `@external.owner-mismatch`; and a function type, a
+position-query `effects` fact, and an index record each carrying its row as the
+record of the effects chapter and never as a bare set.
+
+Host-operation coverage runs in the host world and proves, for each of the 17
+registry rows, a success and every error variant the row can return, as the
+`result` value and as the audit event, in both backends: whole-value standard
+input read from the current position and returning empty the second time;
+standard output and error reaching the audit trace and never the process in a
+test; every filesystem error variant, `fs.read.entries` sorted by Unicode scalar
+order, a write that creates and a write that replaces, and `invalid-path` for a
+NUL; a present and an absent variable and the program arguments; the default
+clock and the stepped monotonic clock; and the random bytes of a seed as the
+SplitMix64 vectors define them. Event coverage proves one event for each
+completed call in call order, none for a trap or a host event, the event shape
+for a `void` result, and the preservation of an event of an unknown `kind`.
+Entry-outcome coverage proves an entry returning `err`, a host error propagated
+with `try` to the entry, a host error handled by the program, and a trap, each
+with its result and exit code in both backends.
 
 Application coverage includes arbitrary callee expressions, every closed
 applicable category, constructor applications, rejection of atom and numeric
@@ -811,6 +899,11 @@ fails the case, with a failure reason that names the backend. An expectation is
 reviewed against the specification and is never regenerated from either
 backend's output.
 
+The runner gives each instance of either backend its own fresh copy of the host
+world of the case, so the two backends read and write the same values without
+sharing a filesystem, and compares the audit traces event by event: a mismatch
+names the backend and the first event that differs.
+
 The runner runs every instance of either backend under one finite memory limit,
 which is a runner setting and not case data, so that a case that exhausts memory
 ends. A case MUST NOT depend on where in a run exhaustion happens, only on
@@ -855,6 +948,15 @@ nonzero for a failed or unavailable case. No user-facing `vibra` binary is
 introduced by milestone 1. Host-language integration tests use synthetic
 temporary corpora for the runner and handler; checked-in cases are loaded only
 by this dedicated entrypoint in CI (or when invoked directly).
+
+The host-language suite also holds two invariants of the host registry as
+tests. A checked-in snapshot of the registry fails on any change to an existing
+row, so a change that needs `vibra_v2` cannot pass as a minor. And no crate that
+checks, lowers, or executes a program uses the ambient filesystem, environment,
+clock, or random source: the test scans those crates for the APIs, and names the
+few tooling crates that read a project, a command line, or a corpus, so that every
+ambient read of a running program passes through the host provider and a registry
+entry.
 
 Both run from a clean checkout without network access after dependencies are
 synced. Formatter idempotence, JSON-schema validation, `.vibon` data-decoder
