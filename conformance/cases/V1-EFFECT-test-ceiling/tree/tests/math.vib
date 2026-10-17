@@ -1,0 +1,11 @@
+(import assert @std.assert)
+
+(deffect marker
+  (defn mark () i32 1i32))
+
+(test "over its ceiling"
+  (assert.equal 1i32 (marker.mark)))
+
+(test "within its ceiling"
+  effects: (marker)
+  (assert.equal 1i32 (marker.mark)))
