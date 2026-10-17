@@ -110,7 +110,7 @@ pub fn observe_tests(items: &[TestItem]) -> TestsObserved {
 /// with a host event: the programs it ran up to and including the test that
 /// ended it. The suite has no rows then, so only the backend's end is reported,
 /// and a suite that completes in Wasm is reported as completed.
-pub fn observe_stopped_tests(programs: &[CheckedProgram]) -> WasmObservation {
+pub(crate) fn observe_stopped_tests(programs: &[CheckedProgram]) -> WasmObservation {
     let ran = programs.iter().enumerate().collect::<Vec<_>>();
     let rows = programs
         .iter()
