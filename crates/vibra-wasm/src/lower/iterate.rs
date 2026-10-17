@@ -387,7 +387,29 @@ impl Builder<'_, '_> {
 
         let class = self.class(item_type, origin)?;
         let first = self.temp();
-        self.copy_part(first, iterator, 0, 1, class);
+        match item_type {
+            // A `some` of `void` has no payload cell, and yields the item
+            // `void`, which is the scalar `0` wherever a slot exists.
+            Type::Void => self.store_bits(first, 0, ValueClass::Void),
+            // A payload of a generic type is a cell, or none when the type
+            // argument is `void`: the object's length says which.
+            Type::Param(_) => {
+                let (cell, bare, joined) =
+                    (self.new_block(), self.new_block(), self.new_block());
+                let held = self.cell(iterator);
+                self.push(&[get(FRAME), ld32(held), ld32(header::LEN)]);
+                self.end(Term::Branch {
+                    then_block: cell,
+                    else_block: bare,
+                });
+                self.start(bare);
+                self.store_bits(first, 0, ValueClass::Void);
+                self.goto(joined, cell);
+                self.copy_part(first, iterator, 0, 1, class);
+                self.goto(joined, joined);
+            }
+            _ => self.copy_part(first, iterator, 0, 1, class),
+        }
         self.drop_slot(iterator);
         let rest = self.temp();
         self.build(Kind::Enum, absent_variant, &[], rest);

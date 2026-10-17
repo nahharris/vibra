@@ -138,3 +138,6 @@ V1-RUNTIME-constructor-patterns	matched
 V1-RUNTIME-union-narrowing	matched
 V1-RUNTIME-union-atom-member	matched
 V1-RUNTIME-try-and-never	matched
+V1-RUNTIME-interface-result-nesting	matched
+V1-RUNTIME-generic-interface-pass-along	matched
+V1-RUNTIME-iter-option-void-item	matched

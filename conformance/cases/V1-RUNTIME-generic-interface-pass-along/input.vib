@@ -1,0 +1,27 @@
+
+; The array holds interface values, so `kept` is instantiated at an interface
+; type and its element is an interface value that it never opens. It passes the
+; element to `again`, whose parameter is a bare generic parameter, which holds
+; the same interface value, and the result is the interface values again.
+(defn main () (option (tuple named named))
+  (kept (array.of (as named (dog n: 4u32)) (as named (cat n: 5u32)))))
+
+(defint named (defn name (value self) str))
+
+(deftype dog (record n u32) (impl named (defn name (value self) str "dog")))
+
+(deftype cat (record n u32) (impl named (defn name (value self) str "cat")))
+
+(defn keep (value u) (tuple u u)
+  where: (u any)
+  (tupleof value value))
+
+(defn again (value u) (tuple u u)
+  where: (u any)
+  (keep value))
+
+(defn kept (items (array t)) (option (tuple t t))
+  where: (t any)
+  (match (items 0u64)
+    (option.some first) (option.some (again first))
+    (option.none) (option.none)))

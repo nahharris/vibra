@@ -1140,13 +1140,20 @@ fn closed_next(iterator: &RuntimeValue, result: &Type) -> Option<RuntimeValue> {
                 )
             })
         }
+        // `some v` yields `v` once, and a `some` whose payload is `void` has
+        // no payload slot but still yields the item `void`: the step is taken
+        // by the variant, not by the presence of a payload.
         RuntimeValue::Enum {
             value_type,
+            variant,
             payload,
-            ..
-        } => payload.as_ref().map(|payload| {
+        } => (variant == "some").then(|| {
             (
-                RuntimeValue::clone(payload),
+                payload
+                    .as_ref()
+                    .map_or(RuntimeValue::Primitive(Value::Void), |payload| {
+                        RuntimeValue::clone(payload)
+                    }),
                 RuntimeValue::Enum {
                     value_type: value_type.clone(),
                     variant: "none".to_owned(),
