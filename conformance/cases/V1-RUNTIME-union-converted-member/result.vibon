@@ -1,0 +1,1 @@
+(record type: (record type: @either arguments: (array @walker)) value: (record kind: @union type: @either member: (record type: @array arguments: (array @walker)) value: (record kind: @array values: (array (record kind: @record type: @ticker fields: (record n: 4u32))))))

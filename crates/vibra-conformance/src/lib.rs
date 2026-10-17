@@ -38,6 +38,7 @@ mod reader;
 mod resolve;
 mod runner;
 mod standard;
+mod test_run;
 mod types;
 mod wasm;
 mod workspace_index;
@@ -70,8 +71,13 @@ pub use runner::{
     WasmCounts, WasmObservation, WasmStatus,
 };
 pub use standard::standard_dispatcher;
+pub use test_run::{
+    RowFailure, RowOrigin, RowTrap, TestRow, command_result, format_test_run,
+};
 pub use types::{InterpreterV1Handler, StaticV1TypeHandler};
-pub use wasm::observe as observe_wasm;
+pub use wasm::{
+    TestsObserved, observe as observe_wasm, observe_tests as observe_wasm_tests,
+};
 pub use workspace_index::ToolingV1IndexHandler;
 pub use workspace_query::ToolingV1QueryHandler;
 pub use workspace_semantic::{

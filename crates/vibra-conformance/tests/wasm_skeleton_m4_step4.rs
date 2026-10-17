@@ -95,8 +95,8 @@ fn the_module_declares_the_boundary_a_void_entry_needs() {
     // The empty entry uses no native, so the module imports nothing.
     assert!(summary.imports.is_empty(), "{:?}", summary.imports);
     // Every accessor of the boundary table that no test needs, in the order of
-    // the specification's table (Step 5a). Step 11 adds the test and failure
-    // exports.
+    // the specification's table: a program module exports the entry, and a test
+    // module the test export in its place.
     assert_eq!(
         summary.exports,
         [
@@ -105,6 +105,9 @@ fn the_module_declares_the_boundary_a_void_entry_needs() {
             STATUS_EXPORT,
             TRAP_CODE_EXPORT,
             ORIGIN_EXPORT,
+            "vibra_v1_failure",
+            "vibra_v1_failure_expected",
+            "vibra_v1_failure_actual",
             RESULT_EXPORT,
             LIVE_SIZE_EXPORT,
             RELEASE_EXPORT,
@@ -231,34 +234,30 @@ fn a_checked_program_carries_the_prelude_values_and_lowers_since_step_5b() {
 }
 
 #[test]
-fn a_program_the_emitter_cannot_lower_has_no_module() {
-    // Every form of a source program lowers since Step 9; a verified test
-    // assertion is the form left, and Step 11's.
+fn a_program_that_is_not_a_checked_entry_has_no_module() {
+    // No form of a checked source program is named by `NotLowered` since
+    // Step 11. The error remains for a program the checker could not have
+    // produced: here an entry that takes a parameter.
     let origin = vibra_ir::SourceOrigin::new(
         "input.vib",
         vibra_diagnostics::ByteSpan::new(0, 1),
     );
     let entry = vibra_ir::CheckedFunction::new(
         "main",
-        vibra_ir::FunctionSignature::new(Vec::new(), vibra_ir::Type::Void),
+        vibra_ir::FunctionSignature::new(
+            vec![vibra_ir::Type::U64],
+            vibra_ir::Type::Void,
+        ),
         vibra_ir::Expr::literal(vibra_ir::Value::Void, origin.clone()),
-        origin.clone(),
-    )
-    .expect("a checked function");
-    let assertion = vibra_ir::CheckedFunction::new_test_assertion(
-        "assert",
-        vibra_ir::TestAssertion::True,
         origin,
     )
-    .expect("an assertion function");
-    let program = vibra_ir::CheckedProgram::try_new(vec![entry, assertion], 0)
-        .expect("a program");
-    let error = vibra_wasm::emit(&program).expect_err("an assertion is not lowered");
+    .expect("a checked function");
+    let program = vibra_ir::CheckedProgram::try_new(vec![entry], 0).expect("a program");
+    let error = vibra_wasm::emit(&program).expect_err("an entry with a parameter");
     let names = error
         .forms()
         .iter()
         .map(|used| used.form().name())
         .collect::<Vec<_>>();
-    assert!(names.contains(&"test-assertion"), "{names:?}");
-    assert!(!names.contains(&"module-size"), "{names:?}");
+    assert_eq!(names, ["parameters"], "{names:?}");
 }

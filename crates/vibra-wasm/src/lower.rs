@@ -150,9 +150,11 @@ use crate::types::{
 };
 use vibra_ir::boundary::TrapCode;
 
+mod assertion;
 mod dispatch;
 mod iterate;
 mod keys;
+pub(crate) mod typetab;
 
 /// The WebAssembly function's parameter: the offset of its frame.
 pub(crate) const FRAME: u32 = 0;
@@ -217,6 +219,20 @@ mod fv {
 /// The name a type argument the call could not fix is bound to. No parameter
 /// has it, so it resolves to nothing.
 const UNRESOLVED: &str = "?";
+
+/// The optional routines a module carries after the object constructor, in the
+/// order of their function indices. The first pass finds which a program needs.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Extras {
+    /// The routine that compares two descriptors.
+    pub(crate) desc_equal: bool,
+    /// The routine that walks the arena to compare values or look for a
+    /// function.
+    pub(crate) scan: bool,
+    /// The routines that compare values by the descriptors of their types, and
+    /// the type table they read.
+    pub(crate) typed: bool,
+}
 
 /// The passive data segments a module carries, one per distinct literal
 /// content, in the order the program first uses them.
@@ -595,7 +611,27 @@ pub(crate) struct Lowering<'a> {
     has_desc_equal: bool,
     /// Whether a function lowered by this pass called that routine.
     needs_desc_equal: bool,
+    /// Whether the module has the routine that walks the arena to compare two
+    /// values or to look for a function (`canon`), which follows the routine
+    /// that compares descriptors.
+    has_scan: bool,
+    /// Whether a function lowered by this pass called it.
+    needs_scan: bool,
+    /// Whether the module has the typed walk (`canon_typed`): the routine, the
+    /// routine that pushes its entries, and the one that instantiates templates,
+    /// which follow the scan.
+    has_typed: bool,
+    /// Whether a function lowered by this pass called it.
+    needs_typed: bool,
+    /// Whether the module runs tests, so an assertion call is lowered. A module
+    /// that runs a program stops at one, as the reference interpreter does.
+    tests: bool,
+    /// The origins a stop names, in the order the lowering first needs one.
+    origins: Vec<OriginEntry>,
 }
+
+/// One row of the origin table being built.
+pub(crate) type OriginEntry = (SourceOrigin, Option<Type>);
 
 impl<'a> Lowering<'a> {
     pub(crate) fn new(
@@ -604,7 +640,8 @@ impl<'a> Lowering<'a> {
         lambdas: &'a Lambdas<'a>,
         sizes: Vec<u32>,
         imports: Vec<CompilerIntrinsic>,
-        has_desc_equal: bool,
+        extras: Extras,
+        tests: bool,
     ) -> Self {
         let mut heads = BTreeMap::new();
         heads.insert("void".to_owned(), HEAD_VOID);
@@ -623,15 +660,82 @@ impl<'a> Lowering<'a> {
             imports,
             used: BTreeSet::new(),
             comparers: Vec::new(),
-            has_desc_equal,
+            has_desc_equal: extras.desc_equal,
             needs_desc_equal: false,
+            has_scan: extras.scan,
+            needs_scan: false,
+            has_typed: extras.typed,
+            needs_typed: false,
+            tests,
+            origins: Vec::new(),
         }
     }
 
     /// The function index of the first routine after the constructor that is a
     /// comparer of a key shape.
     fn first_comparer(&self) -> u32 {
+        self.fns.new
+            + 1
+            + u32::from(self.has_desc_equal)
+            + u32::from(self.has_scan)
+            + 3 * u32::from(self.has_typed)
+    }
+
+    /// The routines of the typed walk, which the call records as needed. It
+    /// also needs the scan, which looks for a function first, and the
+    /// routine that compares descriptors.
+    pub(crate) fn typed_walk(&mut self) -> u32 {
+        self.needs_typed = true;
+        let _ = self.scan();
+        let _ = self.desc_equal();
+        self.typed_index()
+    }
+
+    fn typed_index(&self) -> u32 {
+        self.fns.new + 1 + u32::from(self.has_desc_equal) + u32::from(self.has_scan)
+    }
+
+    /// The function index of the routine that walks the arena (`canon`), which
+    /// the call records as needed.
+    pub(crate) fn scan(&mut self) -> u32 {
+        self.needs_scan = true;
+        self.built_object = true;
         self.fns.new + 1 + u32::from(self.has_desc_equal)
+    }
+
+    /// Which of the optional routines after the constructor a function lowered
+    /// by this pass called.
+    pub(crate) const fn needed(&self) -> Extras {
+        Extras {
+            desc_equal: self.needs_desc_equal,
+            scan: self.needs_scan,
+            typed: self.needs_typed,
+        }
+    }
+
+    /// The ordinal of the origin table row for `origin`, with the type of the
+    /// operands a failed `assert.equal` there crosses the boundary as, adding
+    /// the row when the lowering first needs it. Ordinal `0` is no origin, so
+    /// the first row is `1`.
+    pub(crate) fn origin_ordinal(
+        &mut self,
+        origin: &SourceOrigin,
+        operand: Option<&Type>,
+    ) -> u32 {
+        let position = self
+            .origins
+            .iter()
+            .position(|(known, ty)| known == origin && ty.as_ref() == operand)
+            .unwrap_or_else(|| {
+                self.origins.push((origin.clone(), operand.cloned()));
+                self.origins.len() - 1
+            });
+        u32::try_from(position + 1).unwrap_or(u32::MAX)
+    }
+
+    /// The rows of the origin table.
+    pub(crate) fn take_origins(&mut self) -> Vec<OriginEntry> {
+        std::mem::take(&mut self.origins)
     }
 
     /// The function index of the routine that compares two descriptors, which
@@ -640,11 +744,6 @@ impl<'a> Lowering<'a> {
         self.needs_desc_equal = true;
         self.built_object = true;
         self.fns.new + 1
-    }
-
-    /// Whether a function lowered by this pass compares descriptors.
-    pub(crate) const fn needs_desc_equal(&self) -> bool {
-        self.needs_desc_equal
     }
 
     /// The function index of the routine that orders keys of `shape`, which is
@@ -694,7 +793,7 @@ impl<'a> Lowering<'a> {
 
     /// The routines of the comparers the lowering registered, in the order of
     /// their function indices.
-    pub(crate) fn comparer_routines(&self) -> Vec<Routine> {
+    pub(crate) fn comparer_routines(&mut self) -> Vec<Routine> {
         let calls = Calls {
             text: self.import_index(CompilerIntrinsic::TextCompare),
             bytes: self.import_index(CompilerIntrinsic::BytesCompare),
@@ -702,6 +801,25 @@ impl<'a> Lowering<'a> {
         let mut routines = Vec::new();
         if self.has_desc_equal {
             routines.push(desc::equal_routine(self.fns.new + 1));
+        }
+        if self.has_scan {
+            routines.push(crate::canon::scan_routine(self.fns));
+        }
+        if self.has_typed {
+            let table = self.type_table();
+            let table_size = u32::try_from(table.len()).unwrap_or(0);
+            let segment = self.segments.intern(table);
+            let first = self.typed_index();
+            let calls = crate::canon_typed::Typed {
+                push: first + 1,
+                inst: first + 2,
+                desc_equal: self.fns.new + 1,
+                segment,
+                table_size,
+            };
+            routines.push(crate::canon_typed::typed_routine(self.fns, calls));
+            routines.push(crate::canon_typed::push_routine(self.fns));
+            routines.push(crate::canon_typed::inst_routine(self.fns, first + 2));
         }
         routines.extend(
             self.comparers
@@ -1063,10 +1181,10 @@ enum Access {
 /// The form that reports a registry row used where the emitter cannot lower it.
 fn unlowered_row(row: &NativeRow, origin: &SourceOrigin) -> NotLowered {
     NotLowered::from_uses(vec![
-        crate::form::UnloweredForm::new(crate::Form::External, Some(origin.clone()))
+        crate::form::UnloweredForm::new(crate::Form::Malformed, Some(origin.clone()))
             .with_detail(row.name()),
     ])
-    .unwrap_or_else(|| NotLowered::single(crate::Form::External))
+    .unwrap_or_else(|| NotLowered::single(crate::Form::Malformed))
 }
 
 /// The variants of `option` and `result` that `try` continues with, and the ones
@@ -2070,8 +2188,16 @@ impl<'l, 'a> Builder<'l, 'a> {
         origin: &SourceOrigin,
         dest: u32,
     ) -> Result<(), NotLowered> {
-        let mark = self.next_temp;
         let program = self.lowering.program;
+        if let CallTarget::Direct(function) = target
+            && let Some(assertion) = program
+                .functions()
+                .get(*function)
+                .and_then(|function| function.test_assertion())
+        {
+            return self.assertion(assertion, arguments, origin, dest);
+        }
+        let mark = self.next_temp;
         // The callee: its signature, as the call matches its operands against
         // it, and the generic parameters the call passes arguments for.
         let (callee, signature, free): (Callee, FunctionSignature, Vec<String>) =
@@ -3250,12 +3376,12 @@ impl<'l, 'a> Builder<'l, 'a> {
         let unordered = || {
             NotLowered::from_uses(vec![
                 crate::form::UnloweredForm::new(
-                    crate::Form::Dict,
+                    crate::Form::Malformed,
                     Some(origin.clone()),
                 )
                 .with_detail("user-key"),
             ])
-            .unwrap_or_else(|| NotLowered::single(crate::Form::Dict))
+            .unwrap_or_else(|| NotLowered::single(crate::Form::Malformed))
         };
         let Some(order) = key::order_of(&self.lowering.env, key, key_order) else {
             // Any other key is ordered by dispatch from its run-time type.

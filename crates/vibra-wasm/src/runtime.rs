@@ -17,9 +17,10 @@ use crate::layout::{
     header, state,
 };
 use vibra_ir::boundary::{
-    LENGTH_EXPORT, LIVE_SIZE_EXPORT, ORIGIN_EXPORT, READ_F32_EXPORT, READ_F64_EXPORT,
-    READ_I32_EXPORT, READ_I64_EXPORT, READ_ID_EXPORT, RELEASE_EXPORT, RESULT_EXPORT,
-    STATUS_EXPORT, TRAP_CODE_EXPORT, TrapCode, VARIANT_EXPORT,
+    FAILURE_ACTUAL_EXPORT, FAILURE_EXPECTED_EXPORT, FAILURE_EXPORT, LENGTH_EXPORT,
+    LIVE_SIZE_EXPORT, ORIGIN_EXPORT, READ_F32_EXPORT, READ_F64_EXPORT, READ_I32_EXPORT,
+    READ_I64_EXPORT, READ_ID_EXPORT, RELEASE_EXPORT, RESULT_EXPORT, STATUS_EXPORT,
+    TRAP_CODE_EXPORT, TrapCode, VARIANT_EXPORT,
 };
 
 /// An instruction with no borrowed data.
@@ -110,10 +111,13 @@ pub struct Routines {
 }
 
 /// The accessors in the order they are emitted and exported.
-const ACCESSORS: [Accessor; 13] = [
+const ACCESSORS: [Accessor; 16] = [
     Accessor::Status,
     Accessor::TrapCode,
     Accessor::Origin,
+    Accessor::Failure,
+    Accessor::FailureExpected,
+    Accessor::FailureActual,
     Accessor::Result,
     Accessor::LiveSize,
     Accessor::Release,
@@ -131,6 +135,9 @@ enum Accessor {
     Status,
     TrapCode,
     Origin,
+    Failure,
+    FailureExpected,
+    FailureActual,
     Result,
     LiveSize,
     Release,
@@ -155,6 +162,9 @@ impl Accessor {
             Self::Status => STATUS_EXPORT,
             Self::TrapCode => TRAP_CODE_EXPORT,
             Self::Origin => ORIGIN_EXPORT,
+            Self::Failure => FAILURE_EXPORT,
+            Self::FailureExpected => FAILURE_EXPECTED_EXPORT,
+            Self::FailureActual => FAILURE_ACTUAL_EXPORT,
             Self::Result => RESULT_EXPORT,
             Self::LiveSize => LIVE_SIZE_EXPORT,
             Self::Release => RELEASE_EXPORT,
@@ -1074,6 +1084,9 @@ fn accessor_routine(fns: &Routines, accessor: Accessor) -> Routine {
         Accessor::Status => word(state::STATUS),
         Accessor::TrapCode => word(state::TRAP_CODE),
         Accessor::Origin => word(state::ORIGIN),
+        Accessor::Failure => word(state::FAILURE),
+        Accessor::FailureExpected => wide(state::EXPECTED),
+        Accessor::FailureActual => wide(state::ACTUAL),
         Accessor::Result => wide(state::RESULT),
         Accessor::LiveSize => wide(state::LIVE_SIZE),
         Accessor::Release => release_id(fns),
@@ -1713,8 +1726,24 @@ pub(crate) fn entry_export(
     // Local 0 is the ID slot (i64), 1 the object.
     let (slot, object) = (0, 1);
     let mut code = vec![I::Call(fns.begin), ZERO, c64(0), st64(state::RESULT)];
+    code.extend(module_value_state(fns, module_values, object));
+    code.extend([
+        c32(index(entry)),
+        c32(index(entry_slots)),
+        I::Call(fns.push_frame),
+        I::Drop,
+        I::Call(fns.run),
+    ]);
+    code.extend(take_ret(fns, class, slot, object));
+    code.push(I::End);
+    make(&[], &[], &[I64, I32], code)
+}
+
+/// The instance's module-value state, two cells for each value, allocated by
+/// the first run of an exported entry; `object` is a scratch local.
+fn module_value_state(fns: &Routines, module_values: u32, object: u32) -> Vec<Ins> {
+    let mut code = Vec::new();
     if module_values != 0 {
-        // The instance's module-value state: two cells for each value.
         code.extend(load_state32(state::MODULE_VALUES));
         code.extend([
             I::I32Eqz,
@@ -1731,16 +1760,54 @@ pub(crate) fn entry_export(
             I::End,
         ]);
     }
+    code
+}
+
+/// One test the `vibra_v1_test` export can run: the function and frame size of
+/// its entry, or `None` for an entry that is not a test (it takes a parameter
+/// or returns a value), which the reference interpreter refuses as an invalid
+/// body.
+pub(crate) type TestEntry = Option<(u32, u32)>;
+
+/// The `vibra_v1_test` export: `(i32) -> ()` runs the test at that position in
+/// a fresh instance, as the entry export runs the entry. A position outside the
+/// list, or of an entry that is not a test, is the trap
+/// `@runtime.invalid-checked-program`.
+pub(crate) fn test_export(
+    fns: &Routines,
+    tests: &[TestEntry],
+    module_values: u32,
+) -> Routine {
+    // Local 0 is the position, 1 the object.
+    let object = 1;
+    let mut code = vec![I::Call(fns.begin), ZERO, c64(0), st64(state::RESULT)];
+    code.extend(module_value_state(fns, module_values, object));
+    code.push(I::Block(EMPTY));
+    for (position, test) in tests.iter().enumerate() {
+        let Some((function, slots)) = test else {
+            continue;
+        };
+        code.extend([
+            get(0),
+            c32(i32::try_from(position).unwrap_or(i32::MAX)),
+            I::I32Eq,
+            I::If(EMPTY),
+            c32(index(*function)),
+            c32(index(*slots)),
+            I::Call(fns.push_frame),
+            I::Drop,
+            I::Call(fns.run),
+            I::Br(1),
+            I::End,
+        ]);
+    }
     code.extend([
-        c32(index(entry)),
-        c32(index(entry_slots)),
-        I::Call(fns.push_frame),
-        I::Drop,
-        I::Call(fns.run),
+        c32(vibra_ir::boundary::TrapCode::InvalidCheckedProgram.code()),
+        I::Call(fns.stop_trap),
+        I::End,
+        I::End,
     ]);
-    code.extend(take_ret(fns, class, slot, object));
-    code.push(I::End);
-    make(&[], &[], &[I64, I32], code)
+    make(&[I32], &[], &[I32], code)
 }
 
 /// What a completed entry does with the cell it was handed: a scalar's bits go

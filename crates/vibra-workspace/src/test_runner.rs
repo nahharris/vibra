@@ -5,7 +5,7 @@ use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Domain, Level};
 use vibra_interp::MemoryBudget;
-use vibra_ir::SourceOrigin;
+use vibra_ir::{CheckedProgram, SourceOrigin};
 use vibra_resolve::{DeclarationId, EntityKind, ResolvedSnapshot};
 use vibra_syntax::{Declaration, Literal};
 
@@ -220,6 +220,7 @@ pub struct TestItem {
     trap: Option<TestTrap>,
     audit_trace: Vec<String>,
     diagnostics: Vec<Diagnostic>,
+    program: Option<CheckedProgram>,
 }
 
 impl TestItem {
@@ -251,6 +252,14 @@ impl TestItem {
     #[must_use]
     pub fn audit_trace(&self) -> &[String] {
         &self.audit_trace
+    }
+
+    /// The checked program this test ran as, for a backend that runs it again.
+    /// Every test of a workspace shares one module set, and the program selects
+    /// the test as its entry. `None` for a test that never ran.
+    #[must_use]
+    pub const fn program(&self) -> Option<&CheckedProgram> {
+        self.program.as_ref()
     }
 
     /// Diagnostics attributed to this test.
@@ -642,6 +651,8 @@ fn select_tests(
                 trap: None,
                 audit_trace: Vec::new(),
                 diagnostics: item_diagnostics,
+
+                program: None,
             });
             continue;
         }
@@ -670,6 +681,8 @@ fn select_tests(
                         trap: None,
                         audit_trace: execution.audit_trace().to_vec(),
                         diagnostics: item_diagnostics.clone(),
+
+                        program: Some(program.clone()),
                     });
                 } else {
                     items.push(TestItem {
@@ -679,6 +692,8 @@ fn select_tests(
                         trap: None,
                         audit_trace: execution.audit_trace().to_vec(),
                         diagnostics: item_diagnostics.clone(),
+
+                        program: Some(program.clone()),
                     });
                 }
             }
@@ -698,6 +713,7 @@ fn select_tests(
             }
             Err(error) => {
                 let mut item = trap_item(test_name(test), error);
+                item.program = Some(program.clone());
                 item.diagnostics.extend(item_diagnostics);
                 sort_and_deduplicate(&mut item.diagnostics);
                 items.push(item);
@@ -1076,6 +1092,8 @@ fn invalid_item(test: &TestRef<'_>, diagnostics: &[Diagnostic]) -> TestItem {
         trap: None,
         audit_trace: Vec::new(),
         diagnostics: diagnostics.to_vec(),
+
+        program: None,
     }
 }
 
@@ -1100,6 +1118,8 @@ fn trap_item(name: String, error: vibra_interp::RuntimeError) -> TestItem {
         }),
         audit_trace: Vec::new(),
         diagnostics: vec![diagnostic],
+
+        program: None,
     }
 }
 

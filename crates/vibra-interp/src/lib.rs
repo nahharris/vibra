@@ -337,7 +337,7 @@ impl Interpreter {
         if !admits_value(&value_type, &value) {
             return Err(invalid());
         }
-        let Some(value) = observe(value) else {
+        let Some(value) = observe_as(value, Some(&value_type), program.types()) else {
             return Err(RuntimeError::UnobservableFunction { origin: None });
         };
         let canonical = value.canonical_observation(&value_type);
@@ -583,7 +583,68 @@ fn values_match_slots(values: &[RuntimeValue], slots: &[Type]) -> bool {
 /// A value may be nested arbitrarily deep, so this walks it with an explicit
 /// worklist: children are visited first and each node is built from its
 /// finished children on the result stack.
+#[cfg(test)]
 fn observe(value: RuntimeValue) -> Option<ObservedValue> {
+    observe_as(value, None, &[])
+}
+
+/// The types of the parts of a value of type `ty`, which a union reads its
+/// declared member from: record fields by name, enum payloads by variant, the
+/// representation of a wrapper, tuple components, union members, the element of
+/// an array, and the key and value of a dict. An interface value has none: it
+/// is the value it holds.
+enum Parts {
+    Fields(Vec<(String, Type)>),
+    Variants(Vec<(String, Type)>),
+    Components(Vec<Type>),
+    Members(Vec<Type>),
+    One(Type),
+    Dict(Type, Type),
+    None,
+}
+
+fn parts_of(defs: &[vibra_ir::TypeDefinition], ty: &Type) -> Parts {
+    use vibra_ir::TypeBody;
+    let body = match ty {
+        Type::Declared(id) => defs
+            .iter()
+            .find(|definition| definition.id() == id)
+            .and_then(|definition| definition.instantiate(&[])),
+        Type::Applied(id, arguments) => defs
+            .iter()
+            .find(|definition| definition.id() == id)
+            .and_then(|definition| definition.instantiate(arguments)),
+        Type::Record(fields) => Some(TypeBody::Record(fields.clone())),
+        Type::Enum(variants) => Some(TypeBody::Enum(variants.clone())),
+        Type::Tuple(components) => Some(TypeBody::Tuple(components.clone())),
+        Type::Union(members) => Some(TypeBody::Union(members.clone())),
+        Type::Array(element) => return Parts::One(element.as_ref().clone()),
+        Type::Dict(key, value) => {
+            return Parts::Dict(key.as_ref().clone(), value.as_ref().clone());
+        }
+        _ => None,
+    };
+    match body {
+        Some(TypeBody::Record(fields)) => Parts::Fields(fields),
+        Some(TypeBody::Enum(variants)) => Parts::Variants(variants),
+        Some(TypeBody::Wrapper(representation)) => Parts::One(representation),
+        Some(TypeBody::Tuple(components)) => Parts::Components(components),
+        Some(TypeBody::Union(members)) => Parts::Members(members),
+        None => Parts::None,
+    }
+}
+
+/// [`observe`] of a value that has the type `expected`, when it is known. A
+/// union encodes the member its discriminant selects as its type declares it
+/// (`docs/spec/06-runtime.md`, "Canonical value encoding"), which is the
+/// static type and not the type of the value that was widened into it, so the
+/// type is followed down the value. A part with no type known, such as the
+/// value an interface holds, is read as the type it carries.
+fn observe_as(
+    value: RuntimeValue,
+    expected: Option<&Type>,
+    defs: &[vibra_ir::TypeDefinition],
+) -> Option<ObservedValue> {
     enum Shape {
         Record {
             type_id: Option<TypeId>,
@@ -607,16 +668,16 @@ fn observe(value: RuntimeValue) -> Option<ObservedValue> {
         },
     }
     enum Task {
-        Visit(RuntimeValue),
+        Visit(RuntimeValue, Option<Type>),
         Build(Shape),
     }
 
-    let mut tasks = vec![Task::Visit(value)];
+    let mut tasks = vec![Task::Visit(value, expected.cloned())];
     let mut done: Vec<ObservedValue> = Vec::new();
     while let Some(task) = tasks.pop() {
         match task {
             // Parts are shared, so the children are visited by handle.
-            Task::Visit(value) => match &value {
+            Task::Visit(value, expected) => match &value {
                 // A float is observed here, so a NaN is the one quiet NaN of
                 // its width and carries no sign or payload.
                 RuntimeValue::Primitive(primitive) => {
@@ -632,71 +693,130 @@ fn observe(value: RuntimeValue) -> Option<ObservedValue> {
                 }
                 RuntimeValue::Function(_) => return None,
                 RuntimeValue::Record { value_type, fields } => {
+                    let types = match expected.as_ref().map(|ty| parts_of(defs, ty)) {
+                        Some(Parts::Fields(types)) => types,
+                        _ => Vec::new(),
+                    };
                     tasks.push(Task::Build(Shape::Record {
                         type_id: declared_id(value_type),
                         names: fields.iter().map(|(name, _)| name.clone()).collect(),
                     }));
-                    tasks.extend(
-                        fields
-                            .iter()
-                            .rev()
-                            .map(|(_, field)| Task::Visit(field.clone())),
-                    );
+                    tasks.extend(fields.iter().rev().map(|(name, field)| {
+                        Task::Visit(
+                            field.clone(),
+                            types
+                                .iter()
+                                .find(|(known, _)| known == name)
+                                .map(|(_, ty)| ty.clone()),
+                        )
+                    }));
                 }
                 RuntimeValue::Enum {
                     value_type,
                     variant,
                     payload,
                 } => {
+                    let payload_type =
+                        match expected.as_ref().map(|ty| parts_of(defs, ty)) {
+                            Some(Parts::Variants(variants)) => variants
+                                .into_iter()
+                                .find(|(known, _)| known == variant)
+                                .map(|(_, ty)| ty),
+                            _ => None,
+                        };
                     tasks.push(Task::Build(Shape::Enum {
                         type_id: declared_id(value_type),
                         variant: variant.clone(),
                         payload: payload.is_some(),
                     }));
                     if let Some(payload) = payload {
-                        tasks.push(Task::Visit(RuntimeValue::clone(payload)));
+                        tasks.push(Task::Visit(
+                            RuntimeValue::clone(payload),
+                            payload_type,
+                        ));
                     }
                 }
                 RuntimeValue::Wrapper {
                     value_type,
                     value: inner,
                 } => {
+                    let representation =
+                        match expected.as_ref().map(|ty| parts_of(defs, ty)) {
+                            Some(Parts::One(ty)) => Some(ty),
+                            _ => None,
+                        };
                     tasks.push(Task::Build(Shape::Wrapper(declared_id(value_type)?)));
-                    tasks.push(Task::Visit(RuntimeValue::clone(inner)));
+                    tasks.push(Task::Visit(RuntimeValue::clone(inner), representation));
                 }
                 RuntimeValue::Tuple { value_type, values } => {
+                    let types = match expected.as_ref().map(|ty| parts_of(defs, ty)) {
+                        Some(Parts::Components(types)) => types,
+                        _ => Vec::new(),
+                    };
                     tasks.push(Task::Build(Shape::Tuple {
                         type_id: declared_id(value_type),
                         count: values.len(),
                     }));
                     tasks.extend(
-                        values.iter().rev().map(|value| Task::Visit(value.clone())),
+                        values
+                            .iter()
+                            .zip(0..)
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .rev()
+                            .map(|(value, position): (&RuntimeValue, usize)| {
+                                Task::Visit(value.clone(), types.get(position).cloned())
+                            }),
                     );
                 }
                 RuntimeValue::Array { values, .. } => {
+                    let element = match expected.as_ref().map(|ty| parts_of(defs, ty)) {
+                        Some(Parts::One(ty)) => Some(ty),
+                        _ => None,
+                    };
                     tasks.push(Task::Build(Shape::Array(values.len())));
                     tasks.extend(
-                        values.iter().rev().map(|value| Task::Visit(value.clone())),
+                        values
+                            .iter()
+                            .rev()
+                            .map(|value| Task::Visit(value.clone(), element.clone())),
                     );
                 }
                 RuntimeValue::Dict { entries, .. } => {
+                    let (key_type, value_type) =
+                        match expected.as_ref().map(|ty| parts_of(defs, ty)) {
+                            Some(Parts::Dict(key, value)) => (Some(key), Some(value)),
+                            _ => (None, None),
+                        };
                     tasks.push(Task::Build(Shape::Dict(entries.len())));
                     for (key, entry) in entries.iter().rev() {
-                        tasks.push(Task::Visit(entry.clone()));
-                        tasks.push(Task::Visit(key.clone()));
+                        tasks.push(Task::Visit(entry.clone(), value_type.clone()));
+                        tasks.push(Task::Visit(key.clone(), key_type.clone()));
                     }
                 }
                 RuntimeValue::Union {
                     value_type,
+                    member,
                     member_type,
                     value: inner,
-                    ..
                 } => {
+                    // The member the discriminant selects, as the static type
+                    // declares it; the type the union was built at otherwise.
+                    let declared = |ty: &Type| match parts_of(defs, ty) {
+                        Parts::Members(members) => members.get(*member).cloned(),
+                        _ => None,
+                    };
+                    let member_ty = expected
+                        .as_ref()
+                        .and_then(declared)
+                        .or_else(|| declared(value_type))
+                        .unwrap_or_else(|| Type::clone(member_type));
                     tasks.push(Task::Build(Shape::Union {
                         type_id: declared_id(value_type),
-                        member: Type::clone(member_type),
+                        member: member_ty.clone(),
                     }));
-                    tasks.push(Task::Visit(RuntimeValue::clone(inner)));
+                    tasks
+                        .push(Task::Visit(RuntimeValue::clone(inner), Some(member_ty)));
                 }
             },
             Task::Build(shape) => {
@@ -1140,13 +1260,20 @@ fn closed_next(iterator: &RuntimeValue, result: &Type) -> Option<RuntimeValue> {
                 )
             })
         }
+        // `some v` yields `v` once, and a `some` whose payload is `void` has
+        // no payload slot but still yields the item `void`: the step is taken
+        // by the variant, not by the presence of a payload.
         RuntimeValue::Enum {
             value_type,
+            variant,
             payload,
-            ..
-        } => payload.as_ref().map(|payload| {
+        } => (variant == "some").then(|| {
             (
-                RuntimeValue::clone(payload),
+                payload
+                    .as_ref()
+                    .map_or(RuntimeValue::Primitive(Value::Void), |payload| {
+                        RuntimeValue::clone(payload)
+                    }),
                 RuntimeValue::Enum {
                     value_type: value_type.clone(),
                     variant: "none".to_owned(),

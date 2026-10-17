@@ -27,6 +27,7 @@
 mod instance;
 mod natives;
 mod observe;
+mod test_run;
 mod validate;
 
 use std::fmt;
@@ -43,6 +44,7 @@ use wasmtime::{
 
 pub use instance::{Instance, Started, ValueId};
 pub use observe::{LiveSizes, Observed};
+pub use test_run::TestRun;
 pub use validate::{ModuleSummary, ValidationError, baseline_features, validate};
 
 /// The most memory an instance may hold, in bytes of linear memory.

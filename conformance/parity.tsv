@@ -52,7 +52,7 @@ V1-RUNTIME-iter-next	matched
 V1-RUNTIME-iter-skip-filter-depth	matched
 V1-RUNTIME-key-contracts	matched
 V1-RUNTIME-let-else	matched
-V1-RUNTIME-library-composites	not-lowered	11
+V1-RUNTIME-library-composites	matched
 V1-RUNTIME-library-dict	matched
 V1-RUNTIME-library-roles	matched
 V1-RUNTIME-literal	matched
@@ -67,7 +67,7 @@ V1-RUNTIME-nominal-record	matched
 V1-RUNTIME-nominal-wrapper	matched
 V1-RUNTIME-registry-floats	matched
 V1-RUNTIME-registry-integers	matched
-V1-RUNTIME-registry-modules	not-lowered	11
+V1-RUNTIME-registry-modules	matched
 V1-RUNTIME-return	matched
 V1-RUNTIME-return-tail-call	matched
 V1-RUNTIME-sequence	matched
@@ -75,7 +75,7 @@ V1-RUNTIME-tail-calls-through-flow	matched
 V1-RUNTIME-tail-closure-captured-loop	matched
 V1-RUNTIME-tail-contract-member-forms	matched
 V1-RUNTIME-tail-contract-member-interface-value	matched
-V1-RUNTIME-tail-cross-module-mutual	not-lowered	11
+V1-RUNTIME-tail-cross-module-mutual	matched
 V1-RUNTIME-tail-function-value-parameter	matched
 V1-RUNTIME-tail-mutual	matched
 V1-RUNTIME-tail-negative	matched
@@ -97,22 +97,22 @@ V1-RUNTIME-workspace-run-higher-order-entry	matched
 V1-RUNTIME-workspace-run-tail-module-values	matched
 V1-RUNTIME-workspace-run-uninvoked-higher-order-closure	matched
 V1-RUNTIME-workspace-run-unused-imported-higher-order-helper	matched
-V1-RUNTIME-workspace-test-assert-equal	not-lowered	11
-V1-RUNTIME-workspace-test-contract-laws	not-lowered	11
-V1-RUNTIME-workspace-test-empty	not-lowered	11
-V1-RUNTIME-workspace-test-failure	not-lowered	11
-V1-RUNTIME-workspace-test-hidden-function	not-lowered	11
-V1-RUNTIME-workspace-test-interfaces	not-lowered	11
-V1-RUNTIME-workspace-test-iter	not-lowered	11
-V1-RUNTIME-workspace-test-iter-defaults	not-lowered	11
-V1-RUNTIME-workspace-test-key-contracts	not-lowered	11
-V1-RUNTIME-workspace-test-nominal-imports	not-lowered	11
-V1-RUNTIME-workspace-test-passing	not-lowered	11
-V1-RUNTIME-workspace-test-patterns	not-lowered	11
-V1-RUNTIME-workspace-test-selected-member-values	not-lowered	11
-V1-RUNTIME-workspace-test-structural-key-equal	not-lowered	11
+V1-RUNTIME-workspace-test-assert-equal	matched
+V1-RUNTIME-workspace-test-contract-laws	matched
+V1-RUNTIME-workspace-test-empty	matched
+V1-RUNTIME-workspace-test-failure	matched
+V1-RUNTIME-workspace-test-hidden-function	matched
+V1-RUNTIME-workspace-test-interfaces	matched
+V1-RUNTIME-workspace-test-iter	matched
+V1-RUNTIME-workspace-test-iter-defaults	matched
+V1-RUNTIME-workspace-test-key-contracts	matched
+V1-RUNTIME-workspace-test-nominal-imports	matched
+V1-RUNTIME-workspace-test-passing	matched
+V1-RUNTIME-workspace-test-patterns	matched
+V1-RUNTIME-workspace-test-selected-member-values	matched
+V1-RUNTIME-workspace-test-structural-key-equal	matched
 V1-RUNTIME-wrong-trace	matched
-V1-TYPE-CONTROL-return-in-test-lambda	not-lowered	11
+V1-TYPE-CONTROL-return-in-test-lambda	matched
 V1-RUNTIME-direct-calls	matched
 V1-RUNTIME-enum-payload-classes	matched
 V1-RUNTIME-module-value-once	matched
@@ -138,3 +138,8 @@ V1-RUNTIME-constructor-patterns	matched
 V1-RUNTIME-union-narrowing	matched
 V1-RUNTIME-union-atom-member	matched
 V1-RUNTIME-try-and-never	matched
+V1-RUNTIME-interface-result-nesting	matched
+V1-RUNTIME-generic-interface-pass-along	matched
+V1-RUNTIME-iter-option-void-item	matched
+V1-RUNTIME-union-converted-member	matched
+V1-RUNTIME-workspace-test-interface-encoding	matched

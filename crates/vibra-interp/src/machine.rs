@@ -41,7 +41,7 @@ use vibra_ir::{
 use crate::value::{Callable, Elements, Inner, LambdaId, RuntimeValue, TypeMap};
 use crate::{
     TestAssertionFailure, activation_slots, admits_value, bind_pattern, bind_type,
-    closed_next, lookup, mentions_param, observe, pattern_matches, present_payload,
+    closed_next, lookup, mentions_param, observe_as, pattern_matches, present_payload,
     registry, representation_of, runtime_type, slots_match_signature,
     values_match_slots,
 };
@@ -285,6 +285,35 @@ impl<'a> Machine<'a> {
             .last()
             .map(|frame| Arc::clone(&frame.types))
             .unwrap_or_default()
+    }
+
+    /// The member of the union type `union` at `index`, as the type declares it.
+    fn declared_member(&self, union: &Type, index: usize) -> Option<Type> {
+        let members = match union {
+            Type::Union(members) => members.clone(),
+            Type::Declared(id) => match self
+                .program
+                .types()
+                .iter()
+                .find(|definition| definition.id() == id)?
+                .instantiate(&[])?
+            {
+                vibra_ir::TypeBody::Union(members) => members,
+                _ => return None,
+            },
+            Type::Applied(id, arguments) => match self
+                .program
+                .types()
+                .iter()
+                .find(|definition| definition.id() == id)?
+                .instantiate(arguments)?
+            {
+                vibra_ir::TypeBody::Union(members) => members,
+                _ => return None,
+            },
+            _ => return None,
+        };
+        members.get(index).cloned()
     }
 
     /// `value` at the running activation's type arguments.
@@ -821,7 +850,14 @@ impl<'a> Machine<'a> {
                 member,
                 ..
             } => {
-                let member_type = self.concrete(&operand.result_type());
+                let union_type = self.concrete(value_type);
+                // The canonical encoding names the member the discriminant
+                // selects (`06-runtime.md`, "Canonical value encoding"), which
+                // is the union's declared member and not the type of the value
+                // widened into it.
+                let member_type = member
+                    .and_then(|index| self.declared_member(&union_type, index))
+                    .unwrap_or_else(|| self.concrete(&operand.result_type()));
                 match member {
                     // Atom and interface widening are erased: a value keeps
                     // its own type, which selects its implementations.
@@ -1354,8 +1390,17 @@ impl<'a> Machine<'a> {
             if !self.test_mode {
                 return Err(Halt::Invalid);
             }
+            let operand_types = arguments
+                .iter()
+                .map(|argument| self.concrete(&argument.result_type()))
+                .collect::<Vec<_>>();
             let value = self
-                .invoke_test_assertion(assertion, values, origin.clone())
+                .invoke_test_assertion(
+                    assertion,
+                    values,
+                    origin.clone(),
+                    &operand_types,
+                )
                 .ok_or(Halt::Invalid)?;
             return if self.assertion_failure.is_some() {
                 Err(Halt::Assertion)
@@ -1651,13 +1696,18 @@ impl<'a> Machine<'a> {
         assertion: TestAssertion,
         values: Vec<RuntimeValue>,
         origin: SourceOrigin,
+        operand_types: &[Type],
     ) -> Option<RuntimeValue> {
         // Every operand is compared and reported by its canonical encoding.
         // The checker rejects an operand whose type names a function; one
         // hidden behind `any` or an interface stops the test here.
         let Some(encodings) = values
             .into_iter()
-            .map(|value| observe(value).map(|value| value.canonical_vibon()))
+            .enumerate()
+            .map(|(position, value)| {
+                observe_as(value, operand_types.get(position), self.program.types())
+                    .map(|value| value.canonical_vibon())
+            })
             .collect::<Option<Vec<_>>>()
         else {
             self.unobservable = Some(origin);

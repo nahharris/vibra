@@ -39,7 +39,8 @@ use super::{
 use crate::desc::{CLASS_MASK, class};
 use crate::form::NotLowered;
 use crate::layout::{CellClass, Kind, frame, header};
-use crate::runtime::{ValueClass, c32, get, ld8, ld32, set, st8};
+use crate::runtime::{ValueClass, c32, get, ld8, ld32, ld64, set, st8, st64};
+use crate::types::Shape;
 use crate::types::{bind, function_params, head_key, params_of};
 
 /// Where the argument of one of a callee's generic parameters comes from.
@@ -457,7 +458,7 @@ impl Builder<'_, '_> {
         binds: &mut Binds,
     ) -> Result<(), NotLowered> {
         let Some(slot) = binds.slots.get(name).copied() else {
-            return Err(NotLowered::single(crate::Form::Call));
+            return Err(NotLowered::single(crate::Form::Malformed));
         };
         if !binds.seen.insert(name.to_owned()) {
             let equal = self.lowering.desc_equal();
@@ -767,10 +768,13 @@ impl Builder<'_, '_> {
     /// The form that reports a call the lowering cannot make.
     fn forms_of_call(&self, origin: &SourceOrigin) -> NotLowered {
         NotLowered::from_uses(vec![
-            crate::form::UnloweredForm::new(crate::Form::Call, Some(origin.clone()))
-                .with_detail("contract"),
+            crate::form::UnloweredForm::new(
+                crate::Form::Malformed,
+                Some(origin.clone()),
+            )
+            .with_detail("contract"),
         ])
-        .unwrap_or_else(|| NotLowered::single(crate::Form::Call))
+        .unwrap_or_else(|| NotLowered::single(crate::Form::Malformed))
     }
 
     /// Calls candidate `candidate`: the type arguments of its parameters, the
@@ -996,93 +1000,258 @@ impl Builder<'_, '_> {
         let unsupported = || {
             NotLowered::from_uses(vec![
                 crate::form::UnloweredForm::new(
-                    crate::Form::Call,
+                    crate::Form::Malformed,
                     Some(ctx.origin.clone()),
                 )
-                .with_detail("interface-result"),
+                .with_detail("conversion"),
             ])
-            .unwrap_or_else(|| NotLowered::single(crate::Form::Call))
+            .unwrap_or_else(|| NotLowered::single(crate::Form::Malformed))
         };
         match (from, to) {
-            (Type::Tuple(from_parts), Type::Tuple(to_parts)) => {
-                let mark = self.next_temp;
-                let mut parts = Vec::with_capacity(from_parts.len());
-                let len = u32::try_from(from_parts.len()).unwrap_or(u32::MAX);
-                for (position, (from_part, to_part)) in
-                    (0_u32..).zip(from_parts.iter().zip(to_parts))
-                {
-                    let from_class = self.class(from_part, ctx.origin)?;
-                    let to_class = self.class(to_part, ctx.origin)?;
-                    let part = self.temp();
-                    self.copy_part(part, slot, position, len, from_class);
-                    self.convert(part, from_part, to_part, ctx)?;
-                    parts.push(Part::Slot {
-                        slot: part,
-                        class: to_class,
-                    });
-                }
-                self.drop_slot(slot);
-                self.build(Kind::Tuple, 0, &parts, slot);
-                self.release_to(mark);
-                Ok(())
+            // An array converts each element, and a dict each value: its keys
+            // are admissible keys, and an interface type is not one, so a key
+            // never converts. A dict's entries are tuples of the key and the
+            // value, so a dict is an array of entries.
+            (Type::Array(from_element), Type::Array(to_element)) => {
+                self.convert_elements(slot, Kind::Array, from_element, to_element, ctx)
             }
-            (Type::Applied(..) | Type::Enum(_), Type::Applied(..) | Type::Enum(_)) => {
-                let (
-                    crate::types::Shape::Enum(from_variants),
-                    crate::types::Shape::Enum(to_variants),
-                ) = (self.shape(from, ctx.origin)?, self.shape(to, ctx.origin)?)
-                else {
+            (Type::Dict(from_key, from_value), Type::Dict(to_key, to_value)) => {
+                if conversion_needed(from_key, to_key) {
                     return Err(unsupported());
-                };
-                let join = self.new_block();
-                for (discriminant, ((_, from_payload), (_, to_payload))) in
-                    (0_u32..).zip(from_variants.iter().zip(&to_variants))
-                {
-                    if *from_payload == Type::Void
-                        || !conversion_needed(from_payload, to_payload)
-                    {
-                        continue;
-                    }
-                    let (convert, next) = (self.new_block(), self.new_block());
-                    let at = self.cell(slot);
-                    self.push(&[
-                        get(FRAME),
-                        ld32(at),
-                        ld32(header::VARIANT),
-                        c32(discriminant.cast_signed()),
-                        I::I32Eq,
-                    ]);
-                    self.end(Term::Branch {
-                        then_block: convert,
-                        else_block: next,
-                    });
-                    self.start(convert);
-                    let mark = self.next_temp;
-                    let from_class = self.class(from_payload, ctx.origin)?;
-                    let to_class = self.class(to_payload, ctx.origin)?;
-                    let part = self.temp();
-                    self.copy_part(part, slot, 0, 1, from_class);
-                    self.convert(part, from_payload, to_payload, ctx)?;
-                    let rebuilt = self.temp();
-                    self.build(
-                        Kind::Enum,
-                        discriminant,
-                        &[Part::Slot {
-                            slot: part,
-                            class: to_class,
-                        }],
-                        rebuilt,
-                    );
-                    self.drop_slot(slot);
-                    self.move_slot(slot, rebuilt);
-                    self.release_to(mark);
-                    self.goto(join, next);
                 }
-                self.goto(join, join);
-                Ok(())
+                let entry = |key: &Type, value: &Type| {
+                    Type::Tuple(vec![key.clone(), value.clone()])
+                };
+                self.convert_elements(
+                    slot,
+                    Kind::Dict,
+                    &entry(from_key, from_value),
+                    &entry(to_key, to_value),
+                    ctx,
+                )
             }
-            _ => Err(unsupported()),
+            _ => {
+                let (from_shape, to_shape) =
+                    (self.shape(from, ctx.origin)?, self.shape(to, ctx.origin)?);
+                match (from_shape, to_shape) {
+                    (Shape::Tuple(from_parts), Shape::Tuple(to_parts)) => self
+                        .convert_fields(slot, Kind::Tuple, &from_parts, &to_parts, ctx),
+                    (Shape::Record(from_fields), Shape::Record(to_fields)) => {
+                        let types = |fields: Vec<(String, Type)>| {
+                            fields.into_iter().map(|(_, ty)| ty).collect::<Vec<_>>()
+                        };
+                        self.convert_fields(
+                            slot,
+                            Kind::Record,
+                            &types(from_fields),
+                            &types(to_fields),
+                            ctx,
+                        )
+                    }
+                    (Shape::Wrapper(from_part), Shape::Wrapper(to_part)) => self
+                        .convert_fields(
+                            slot,
+                            Kind::Wrapper,
+                            &[from_part],
+                            &[to_part],
+                            ctx,
+                        ),
+                    (Shape::Enum(from_variants), Shape::Enum(to_variants)) => self
+                        .convert_variants(
+                            slot,
+                            Kind::Enum,
+                            &from_variants
+                                .into_iter()
+                                .map(|(_, ty)| ty)
+                                .collect::<Vec<_>>(),
+                            &to_variants
+                                .into_iter()
+                                .map(|(_, ty)| ty)
+                                .collect::<Vec<_>>(),
+                            true,
+                            ctx,
+                        ),
+                    (Shape::Union(from_members), Shape::Union(to_members)) => self
+                        .convert_variants(
+                            slot,
+                            Kind::Union,
+                            &from_members,
+                            &to_members,
+                            false,
+                            ctx,
+                        ),
+                    _ => Err(unsupported()),
+                }
+            }
         }
+    }
+
+    /// Converts each component of the tuple, record, or wrapper in `slot` and
+    /// builds it again of the converted components.
+    fn convert_fields(
+        &mut self,
+        slot: u32,
+        kind: Kind,
+        from_parts: &[Type],
+        to_parts: &[Type],
+        ctx: &Convert<'_>,
+    ) -> Result<(), NotLowered> {
+        let mark = self.next_temp;
+        let mut parts = Vec::with_capacity(from_parts.len());
+        let len = u32::try_from(from_parts.len()).unwrap_or(u32::MAX);
+        for (position, (from_part, to_part)) in
+            (0_u32..).zip(from_parts.iter().zip(to_parts))
+        {
+            let from_class = self.class(from_part, ctx.origin)?;
+            let to_class = self.class(to_part, ctx.origin)?;
+            let part = self.temp();
+            self.copy_part(part, slot, position, len, from_class);
+            self.convert(part, from_part, to_part, ctx)?;
+            parts.push(Part::Slot {
+                slot: part,
+                class: to_class,
+            });
+        }
+        self.drop_slot(slot);
+        self.build(kind, 0, &parts, slot);
+        self.release_to(mark);
+        Ok(())
+    }
+
+    /// Converts the payload of the enum or union in `slot`, whichever variant
+    /// or member it holds, and builds it again with the same discriminant. An
+    /// enum variant of `void` has no payload cell.
+    fn convert_variants(
+        &mut self,
+        slot: u32,
+        kind: Kind,
+        from_payloads: &[Type],
+        to_payloads: &[Type],
+        payload_may_be_void: bool,
+        ctx: &Convert<'_>,
+    ) -> Result<(), NotLowered> {
+        let join = self.new_block();
+        for (discriminant, (from_payload, to_payload)) in
+            (0_u32..).zip(from_payloads.iter().zip(to_payloads))
+        {
+            if (payload_may_be_void && *from_payload == Type::Void)
+                || !conversion_needed(from_payload, to_payload)
+            {
+                continue;
+            }
+            let (convert, next) = (self.new_block(), self.new_block());
+            let at = self.cell(slot);
+            self.push(&[
+                get(FRAME),
+                ld32(at),
+                ld32(header::VARIANT),
+                c32(discriminant.cast_signed()),
+                I::I32Eq,
+            ]);
+            self.end(Term::Branch {
+                then_block: convert,
+                else_block: next,
+            });
+            self.start(convert);
+            let mark = self.next_temp;
+            let from_class = self.class(from_payload, ctx.origin)?;
+            let to_class = self.class(to_payload, ctx.origin)?;
+            let part = self.temp();
+            self.copy_part(part, slot, 0, 1, from_class);
+            self.convert(part, from_payload, to_payload, ctx)?;
+            let rebuilt = self.temp();
+            self.build(
+                kind,
+                discriminant,
+                &[Part::Slot {
+                    slot: part,
+                    class: to_class,
+                }],
+                rebuilt,
+            );
+            self.drop_slot(slot);
+            self.move_slot(slot, rebuilt);
+            self.release_to(mark);
+            self.goto(join, next);
+        }
+        self.goto(join, join);
+        Ok(())
+    }
+
+    /// Converts each element of the array in `slot`, or each entry of the dict,
+    /// into an object of the same kind and length: a loop over the elements, which
+    /// keeps its index and its count in slots, since the converted element may
+    /// call.
+    fn convert_elements(
+        &mut self,
+        slot: u32,
+        kind: Kind,
+        from_element: &Type,
+        to_element: &Type,
+        ctx: &Convert<'_>,
+    ) -> Result<(), NotLowered> {
+        let mark = self.next_temp;
+        let (index, count, out) = (self.temp(), self.temp(), self.temp());
+        self.store_word(index, &[c32(0)]);
+        let held = self.cell(slot);
+        self.store_word(count, &[get(FRAME), ld32(held), ld32(header::LEN)]);
+        self.lowering.built_object = true;
+        let new = self.lowering.fns.new;
+        self.push(&[
+            c32(kind.code().cast_signed()),
+            c32(crate::layout::STRIDE_CELLS.cast_signed()),
+            get(FRAME),
+            ld32(held),
+            ld32(header::LEN),
+            c32(0),
+            I::Call(new),
+            set(super::OBJECT),
+        ]);
+        self.store_object(out);
+        let (head, body, done) = (self.new_block(), self.new_block(), self.new_block());
+        self.goto(head, head);
+        let (at, bound) = (self.word(index), self.word(count));
+        self.push(&[
+            at[0].clone(),
+            at[1].clone(),
+            bound[0].clone(),
+            bound[1].clone(),
+            I::I32LtU,
+        ]);
+        self.end(Term::Branch {
+            then_block: body,
+            else_block: done,
+        });
+        self.start(body);
+        let element = self.temp();
+        self.load_indexed(element, slot, index);
+        self.convert(element, from_element, to_element, ctx)?;
+        // The converted element moves into the same position of the new object.
+        self.push_element_address(out, index);
+        let converted = self.cell(element);
+        self.push(&[get(FRAME), ld64(converted), st64(header::SIZE)]);
+        let (object, position) = (self.cell(out), self.cell(index));
+        self.push(&[
+            get(FRAME),
+            ld32(object),
+            get(FRAME),
+            ld32(position),
+            I::I32Add,
+            get(FRAME),
+            ld8(frame::class_offset(element)),
+            st8(header::SIZE),
+        ]);
+        self.disown(element);
+        let next = self.word(index);
+        self.store_word(
+            index,
+            &[next[0].clone(), next[1].clone(), c32(1), I::I32Add],
+        );
+        self.goto(head, done);
+        self.drop_slot(slot);
+        self.move_slot(slot, out);
+        self.release_to(mark);
+        Ok(())
     }
 
     /// Widens the value in `slot`, of the type `from`, which the call expects

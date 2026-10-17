@@ -29,8 +29,8 @@ generic functions and types, so no form of a call is named by `NotLowered` but a
 contract call. Step 7 lowers `match` with every pattern kind, which also serves
 a destructuring `let`, parameter, and `lambda` parameter and `let-else`, since
 typed IR writes each of them as a `match`; `as` narrowing; `try`; and `never`.
-The array pattern is the one form of control flow or failure `NotLowered` still
-names.
+Since Step 11 no form of a checked program is named by `NotLowered`; it reports only
+a program the checker cannot have produced (`lowers_every_form_m4_step11`).
 
 | AST variant | Disposition | Owner | Notes |
 | --- | --- | --- | --- |
@@ -63,7 +63,7 @@ names.
 | `Declaration::Import` | Static | — | Resolved before lowering |
 | `Declaration::Def` | Lowered | Step 5b | Lazy, once-only module values |
 | `Declaration::Defn` | Lowered | Step 5b | Generic signatures: Step 6 (landed); a variadic parameter: Step 8b |
-| `Declaration::Test` | Lowered | Step 11 | `workspace-test` observations and assertion outcomes |
+| `Declaration::Test` | Lowered | Step 11 | `workspace-test` observations and assertion outcomes (landed: a test module with `vibra_v1_test`, the three assertions, canonical equality, and the failure exports, `tests_traps_m4_step11`) |
 | `Declaration::Deftype` | Lowered | Step 5b | Generic: Step 6 (landed); union discriminants in written order: Step 5b |
 | `Declaration::Defint` | Lowered | Step 9 | — |
 | `Declaration::Deffect` | Stage 4B | Step 14 | Reports `@tool.unavailable` through Stage 4A |

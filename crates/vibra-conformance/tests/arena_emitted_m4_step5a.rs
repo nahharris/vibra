@@ -112,9 +112,16 @@ fn every_literal_module_validates_under_the_baseline_and_exports_the_full_table(
         assert!(summary.imports.is_empty(), "{value:?}");
         assert_eq!(
             summary.exports.len(),
-            15,
-            "the memory and fourteen functions"
+            18,
+            "the memory, the entry, and the sixteen accessors"
         );
+        for name in [
+            "vibra_v1_failure",
+            "vibra_v1_failure_expected",
+            "vibra_v1_failure_actual",
+        ] {
+            assert!(summary.exports.contains(&name.to_owned()), "{name}");
+        }
         assert_eq!(summary.exports[0], MEMORY_EXPORT);
         assert!(summary.exports.contains(&"vibra_v1_release".to_owned()));
         assert!(summary.exports.contains(&"vibra_v1_read_id".to_owned()));
