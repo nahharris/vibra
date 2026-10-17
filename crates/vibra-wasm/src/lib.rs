@@ -45,6 +45,7 @@
 //! only on the checked program.
 
 mod canon;
+mod canon_typed;
 mod classify;
 mod desc;
 mod encode;

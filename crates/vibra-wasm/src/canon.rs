@@ -66,34 +66,34 @@ const BY: u32 = 19;
 
 /// Instructions, with the labels of the structured control flow they open, so
 /// a branch names its target and never counts it.
-struct Code {
-    ins: Vec<Ins>,
-    labels: Vec<&'static str>,
+pub(crate) struct Code {
+    pub(crate) ins: Vec<Ins>,
+    pub(crate) labels: Vec<&'static str>,
 }
 
 impl Code {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             ins: Vec::new(),
             labels: Vec::new(),
         }
     }
 
-    fn emit(&mut self, instructions: &[Ins]) {
+    pub(crate) fn emit(&mut self, instructions: &[Ins]) {
         self.ins.extend_from_slice(instructions);
     }
 
-    fn open(&mut self, label: &'static str, instruction: Ins) {
+    pub(crate) fn open(&mut self, label: &'static str, instruction: Ins) {
         self.labels.push(label);
         self.ins.push(instruction);
     }
 
-    fn close(&mut self) {
+    pub(crate) fn close(&mut self) {
         self.labels.pop();
         self.ins.push(I::End);
     }
 
-    fn otherwise(&mut self) {
+    pub(crate) fn otherwise(&mut self) {
         self.ins.push(I::Else);
     }
 
@@ -108,19 +108,24 @@ impl Code {
         u32::try_from(position).unwrap_or(0)
     }
 
-    fn br(&mut self, label: &'static str) {
+    pub(crate) fn br(&mut self, label: &'static str) {
         let depth = self.depth(label);
         self.ins.push(I::Br(depth));
     }
 
-    fn br_if(&mut self, label: &'static str) {
+    pub(crate) fn br_if(&mut self, label: &'static str) {
         let depth = self.depth(label);
         self.ins.push(I::BrIf(depth));
     }
 
     /// Answers `0` and leaves the walk.
     fn differ(&mut self) {
-        self.emit(&[c32(0), set(RESULT)]);
+        self.differ_at(RESULT);
+    }
+
+    /// Sets the local `result` to `0` and leaves the walk.
+    pub(crate) fn differ_at(&mut self, result: u32) {
+        self.emit(&[c32(0), set(result)]);
         self.br("done");
     }
 }

@@ -251,6 +251,66 @@ fn values_nested_five_thousand_deep_compare_and_differ() {
 }
 
 #[test]
+fn interface_values_compare_by_encoding_at_every_depth_and_position() {
+    let rows = agree(
+        "(deftype holder (record item any))\n\
+         (deftype maybe (enum some t none void) where: (t any))\n\
+         (deftype pair (record left a right b) where: (a any b any))\n\
+         (deftype num (union i32 str))\n\
+         (defn no-ints () (array i32) (array.of))\n\
+         (defn no-texts () (array str) (array.of))\n\
+         (defn some-ints () (maybe (array i32)) (maybe.some (no-ints)))\n\
+         (defn some-texts () (maybe (array str)) (maybe.some (no-texts)))\n\
+         (defn same (left t right t) void where: (t any) (assert.equal left right))\n\
+         (test \"a record field\" (assert.equal (holder item: (as any (no-ints))) (holder item: (as any (no-texts)))))\n\
+         (test \"a record field that differs\" (assert.equal (holder item: (as any 1i32)) (holder item: (as any 1u32))))\n\
+         (test \"a tuple of interface values\" (assert.equal (tupleof (as any 1i32) (as any (no-ints))) (tupleof (as any 1i32) (as any (no-texts)))))\n\
+         (test \"a dict of interface values\" (assert.equal (dict.of \"a\" (as any (no-ints))) (dict.of \"a\" (as any (no-texts)))))\n\
+         (test \"a dict whose values differ\" (assert.equal (dict.of \"a\" (as any 1i32)) (dict.of \"a\" (as any 2i32))))\n\
+         (test \"a generic payload that is an empty array\" (assert.equal (as any (some-ints)) (as any (some-texts))))\n\
+         (test \"a generic record over interface values\" (assert.equal (pair left: (as any 1i32) right: (as any \"r\")) (pair left: (as any 1i32) right: (as any \"r\"))))\n\
+         (test \"a union member\" (assert.equal (as any (as num 1i32)) (as any (as num 1i32))))\n\
+         (test \"a union member that differs\" (assert.equal (as any (as num 1i32)) (as any (as num \"1\"))))\n\
+         (test \"a generic operand of interface values\" (same (array.of (as any 1i32) (as any \"a\")) (array.of (as any 1i32) (as any \"a\"))))\n\
+         (test \"a generic operand of interface values that differ\" (same (array.of (as any 1i32)) (array.of (as any 1u32))))\n\
+         (test \"deeper\" (assert.equal (as any (as any (no-ints))) (as any (as any (no-texts)))))\n",
+    );
+    let outcomes = rows.iter().map(status).collect::<Vec<_>>();
+    assert_eq!(
+        outcomes,
+        [
+            "@test.passed",
+            "@test.assertion-failed",
+            "@test.passed",
+            "@test.passed",
+            "@test.assertion-failed",
+            "@test.passed",
+            "@test.passed",
+            "@test.passed",
+            "@test.assertion-failed",
+            "@test.passed",
+            "@test.assertion-failed",
+            "@test.passed",
+        ]
+    );
+}
+
+#[test]
+fn values_nested_five_thousand_deep_inside_an_interface_value_compare() {
+    let rows = agree(
+        "(deftype chain (record next (array chain)))\n\
+         (defn build (count u64 tip chain) chain\n\
+           (if (u64.equal count 0u64) tip (build (lower count) (chain next: (array.of tip)))))\n\
+         (defn lower (count u64) u64\n\
+           (match (u64.sub-checked count 1u64) (result.ok value) value (result.err -) 0u64))\n\
+         (test \"equal\" (assert.equal (as any (build 5000u64 (chain next: (array.of)))) (as any (build 5000u64 (chain next: (array.of))))))\n\
+         (test \"differ\" (assert.equal (as any (build 5000u64 (chain next: (array.of)))) (as any (build 4999u64 (chain next: (array.of))))))\n",
+    );
+    assert_eq!(status(&rows[0]), "@test.passed");
+    assert_eq!(status(&rows[1]), "@test.assertion-failed");
+}
+
+#[test]
 fn a_union_and_a_dict_compare_by_member_and_by_entries() {
     let rows = agree(
         "(deftype either (union i32 str))\n\
@@ -387,7 +447,9 @@ fn a_passing_test_returns_the_live_size_to_its_baseline() {
            (match (u64.sub-checked count 1u64) (result.ok value) value (result.err -) 0u64))\n\
          (test \"small\" (assert.equal (build 3u64 (chain next: (array.of))) (build 3u64 (chain next: (array.of)))))\n\
          (test \"large\" (assert.equal (build 3000u64 (chain next: (array.of))) (build 3000u64 (chain next: (array.of)))))\n\
-         (test \"texts\" (assert.equal (array.of \"a\" \"b\") (array.of \"a\" \"b\")))\n",
+         (test \"texts\" (assert.equal (array.of \"a\" \"b\") (array.of \"a\" \"b\")))
+\n         (test \"interface values\" (assert.equal (as any (array.of \"a\")) (as any (array.of \"a\"))))
+",
     );
     let snapshot = WorkspaceSnapshot::load_confined(&tree.root).expect("a workspace");
     let stdlib = vibra_types::load_stdlib().expect("the standard library");
@@ -408,7 +470,7 @@ fn a_passing_test_returns_the_live_size_to_its_baseline() {
     let heads = |head: u32| module.descriptors().type_of(head).cloned();
     let operand = |ordinal: u32| module.origins().operand_type(ordinal).cloned();
     let mut ends = Vec::new();
-    for index in 0..3 {
+    for index in 0..4 {
         let TestRun::Passed { live } = runner
             .run_test(module.bytes(), index, first.types(), &heads, &operand)
             .expect("the module runs")
@@ -423,6 +485,7 @@ fn a_passing_test_returns_the_live_size_to_its_baseline() {
     assert_eq!(ends[0].0, ends[1].0);
     assert_eq!(ends[0].1, ends[1].1, "{ends:?}");
     assert_eq!(ends[0].1, ends[2].1, "{ends:?}");
+    assert_eq!(ends[0].1, ends[3].1, "{ends:?}");
 }
 
 #[test]

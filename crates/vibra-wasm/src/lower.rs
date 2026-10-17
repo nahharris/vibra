@@ -154,6 +154,7 @@ mod assertion;
 mod dispatch;
 mod iterate;
 mod keys;
+pub(crate) mod typetab;
 
 /// The WebAssembly function's parameter: the offset of its frame.
 pub(crate) const FRAME: u32 = 0;
@@ -228,6 +229,9 @@ pub(crate) struct Extras {
     /// The routine that walks the arena to compare values or look for a
     /// function.
     pub(crate) walk: bool,
+    /// The routines that compare values by the descriptors of their types, and
+    /// the type table they read.
+    pub(crate) typed: bool,
 }
 
 /// The passive data segments a module carries, one per distinct literal
@@ -613,6 +617,12 @@ pub(crate) struct Lowering<'a> {
     has_walk: bool,
     /// Whether a function lowered by this pass called it.
     needs_walk: bool,
+    /// Whether the module has the typed walk (`canon_typed`): the routine, the
+    /// routine that pushes its entries, and the one that instantiates templates,
+    /// which follow the plain walk.
+    has_typed: bool,
+    /// Whether a function lowered by this pass called it.
+    needs_typed: bool,
     /// Whether the module runs tests, so an assertion call is lowered. A module
     /// that runs a program stops at one, as the reference interpreter does.
     tests: bool,
@@ -654,6 +664,8 @@ impl<'a> Lowering<'a> {
             needs_desc_equal: false,
             has_walk: extras.walk,
             needs_walk: false,
+            has_typed: extras.typed,
+            needs_typed: false,
             tests,
             origins: Vec::new(),
         }
@@ -662,6 +674,24 @@ impl<'a> Lowering<'a> {
     /// The function index of the first routine after the constructor that is a
     /// comparer of a key shape.
     fn first_comparer(&self) -> u32 {
+        self.fns.new
+            + 1
+            + u32::from(self.has_desc_equal)
+            + u32::from(self.has_walk)
+            + 3 * u32::from(self.has_typed)
+    }
+
+    /// The routines of the typed walk, which the call records as needed. It
+    /// also needs the plain walk, which looks for a function first, and the
+    /// routine that compares descriptors.
+    pub(crate) fn typed_walk(&mut self) -> u32 {
+        self.needs_typed = true;
+        let _ = self.walk();
+        let _ = self.desc_equal();
+        self.typed_index()
+    }
+
+    fn typed_index(&self) -> u32 {
         self.fns.new + 1 + u32::from(self.has_desc_equal) + u32::from(self.has_walk)
     }
 
@@ -679,6 +709,7 @@ impl<'a> Lowering<'a> {
         Extras {
             desc_equal: self.needs_desc_equal,
             walk: self.needs_walk,
+            typed: self.needs_typed,
         }
     }
 
@@ -762,7 +793,7 @@ impl<'a> Lowering<'a> {
 
     /// The routines of the comparers the lowering registered, in the order of
     /// their function indices.
-    pub(crate) fn comparer_routines(&self) -> Vec<Routine> {
+    pub(crate) fn comparer_routines(&mut self) -> Vec<Routine> {
         let calls = Calls {
             text: self.import_index(CompilerIntrinsic::TextCompare),
             bytes: self.import_index(CompilerIntrinsic::BytesCompare),
@@ -773,6 +804,22 @@ impl<'a> Lowering<'a> {
         }
         if self.has_walk {
             routines.push(crate::canon::walk_routine(self.fns));
+        }
+        if self.has_typed {
+            let table = self.type_table();
+            let table_size = u32::try_from(table.len()).unwrap_or(0);
+            let segment = self.segments.intern(table);
+            let first = self.typed_index();
+            let calls = crate::canon_typed::Typed {
+                push: first + 1,
+                inst: first + 2,
+                desc_equal: self.fns.new + 1,
+                segment,
+                table_size,
+            };
+            routines.push(crate::canon_typed::typed_routine(self.fns, calls));
+            routines.push(crate::canon_typed::push_routine(self.fns));
+            routines.push(crate::canon_typed::inst_routine(self.fns, first + 2));
         }
         routines.extend(
             self.comparers

@@ -362,16 +362,44 @@ impl Builder<'_, '_> {
                         self.goto(visible, visible);
                     }
                 }
-                let walk = self.lowering.walk();
-                let (left, right) = (self.cell(objects[0]), self.cell(objects[1]));
-                self.push(&[
-                    get(FRAME),
-                    ld32(left),
-                    get(FRAME),
-                    ld32(right),
-                    c32(WALK_EQUAL),
-                    I::Call(walk),
-                ]);
+                if may_hold_function(&self.lowering.env, ty) {
+                    // A part of the value may be an interface value, which is
+                    // the value it holds: follow both values with the type.
+                    let typed = self.lowering.typed_walk();
+                    let desc = self.temp();
+                    let described = if class == ValueClass::Dyn {
+                        Type::Tuple(vec![ty.clone()])
+                    } else {
+                        ty.clone()
+                    };
+                    self.build_type(&described, desc)?;
+                    let (left, right, held) = (
+                        self.cell(objects[0]),
+                        self.cell(objects[1]),
+                        self.cell(desc),
+                    );
+                    self.push(&[
+                        get(FRAME),
+                        ld32(left),
+                        get(FRAME),
+                        ld32(right),
+                        get(FRAME),
+                        ld32(held),
+                        I::Call(typed),
+                    ]);
+                    self.drop_slot(desc);
+                } else {
+                    let walk = self.lowering.walk();
+                    let (left, right) = (self.cell(objects[0]), self.cell(objects[1]));
+                    self.push(&[
+                        get(FRAME),
+                        ld32(left),
+                        get(FRAME),
+                        ld32(right),
+                        c32(WALK_EQUAL),
+                        I::Call(walk),
+                    ]);
+                }
             }
         }
         self.end(Term::Branch {

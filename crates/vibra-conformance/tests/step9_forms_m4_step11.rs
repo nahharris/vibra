@@ -111,17 +111,14 @@ fn an_interface_result_in_a_union_converts_the_member() {
          (defint walker (defn either (value self) (either self)))\n\
          (deftype ticker (record n u32)\n\
            (impl walker (defn either (value self) (either self) (as (either self) (array.of value)))))\n\
-         (defn main () u64\n\
-           (match (walker.either (as walker (ticker n: 4u32)))\n\
-             (as (array walker) items) (array.length items)\n\
-             (as str -) 0u64))\n",
+         (defn main () (either walker) (walker.either (as walker (ticker n: 4u32))))\n",
     );
-    // The union value itself is not compared across the backends: the member
-    // type of a union the interpreter builds is the run-time type of what it
-    // holds, which the conversion does not change, so the interpreter's
-    // encoding says `(array ticker)` where the static type says `(array
-    // walker)`. The narrowing sees the member either way.
-    assert_eq!(observed, "(record type: @u64 value: 1u64)\n");
+    // The union value itself is observed: its member is the declared
+    // `(array walker)` in both backends (`V1-RUNTIME-union-converted-member`).
+    assert!(
+        observed.contains("member: (record type: @array arguments: (array @walker))"),
+        "{observed}"
+    );
 }
 
 /// A generic function reaches an element whose type is its own parameter. The
