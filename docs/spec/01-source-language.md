@@ -5,10 +5,10 @@ Implementation status: M1 supplies the lossless source structure and position
 metadata; M2 and M3 resolve and check every source form of the pure language,
 including binding sequences, `let-else`, `return`, and `never`, and Milestone 4
 Step 2b removes the source boolean literal for the prelude values `true` and
-`false`. The effect
-forms, `deffect`, nonempty effect rows, and `@host` externals remain
-`@tool.unavailable` until Milestone 4 Stage 4B, as its surface inventory
-records.
+`false`. Milestone 4 Step 14
+implements `deffect` with Vibra-bodied operations and nonempty effect rows;
+`@host` externals remain `@tool.unavailable` until Milestone 4 Step 16, as the
+surface inventory records.
 
 ## Reader
 

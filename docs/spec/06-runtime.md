@@ -9,8 +9,9 @@ the interpreter holds activations on the heap, so depth is bounded only by the
 memory budget its runner supplies. Milestone 4 Step 13 closes the Stage 4B
 contracts of this chapter, the host registry, its versioning, the audit-event
 encoding, the host world, the entry outcome, and the host ABI, and implements
-none of them: host operations and effect checking remain specified and
-unimplemented until Milestone 4 Steps 14 to 19.
+none of them. Milestone 4 Step 14 implements the effect row of the canonical
+`fn` type encoding and effect checking; host operations remain specified and
+unimplemented until Milestone 4 Steps 16 to 19.
 
 ## Semantic reference
 

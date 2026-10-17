@@ -2,6 +2,8 @@
 //! (`docs/spec/03-effects.md`, "Function effect rows"; `docs/spec/06-runtime.md`,
 //! "Canonical value encoding").
 
+#![allow(clippy::expect_used, clippy::indexing_slicing)]
+
 use vibra_ir::{EffectRoot, EffectRow, FunctionSignature, Type, canonical_type};
 
 fn root(path: &str) -> EffectRoot {

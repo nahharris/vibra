@@ -165,9 +165,8 @@ node that the checker rejects. A rejected declaration uses its complete
 declaration form. If unsupported semantics occur in a nested type or another
 child not represented by a separately spanned node used by the checker, the
 diagnostic uses the complete source form of its owning parameter or
-declaration. A rejected expression uses its complete expression form; a
-nonempty effect ceiling uses the complete effect-row form; and a reference
-that is unavailable because of its resolved entity uses the complete
+declaration. A rejected expression uses its complete expression form; and a
+reference that is unavailable because of its resolved entity uses the complete
 reference. List forms include their opening and closing delimiters. The
 diagnostic retains the owning source ID, and a source-form diagnostic never
 uses an invented or empty `0..0` span. A command-level availability diagnostic

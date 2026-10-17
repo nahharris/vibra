@@ -122,6 +122,9 @@ pub(crate) struct DeclaredType {
     pub(crate) bounds: BTreeMap<String, usize>,
 }
 
+/// A source identity with the start and end of a span in it.
+type SpanKey = (String, usize, usize);
+
 /// One declared effect root visible to a checking run.
 #[derive(Clone, Debug)]
 pub(crate) struct DeclaredEffect {
@@ -239,12 +242,10 @@ pub(crate) struct TypeNames {
     /// keyed by source identity and the span of the function, `lambda`, or
     /// test that writes the row. The row check reads them back to report an
     /// unused root at its entry.
-    written_effects: std::cell::RefCell<
-        BTreeMap<(String, usize, usize), Vec<(EffectRoot, ByteSpan)>>,
-    >,
+    written_effects: std::cell::RefCell<BTreeMap<SpanKey, Vec<(EffectRoot, ByteSpan)>>>,
     /// The canonical order of each written row, keyed by source identity and
     /// the span of the row's first entry.
-    row_orders: std::cell::RefCell<BTreeMap<(String, usize, usize), Vec<usize>>>,
+    row_orders: std::cell::RefCell<BTreeMap<SpanKey, Vec<usize>>>,
 }
 
 /// What a labelled default written as a name denotes.

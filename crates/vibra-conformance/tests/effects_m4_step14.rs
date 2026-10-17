@@ -82,7 +82,10 @@ fn every_effect_corpus_program_formats_to_a_fixed_point() {
             "{name}: formatting changed the verdict"
         );
         let (bindings, rows) = if rechecked.accepted() {
-            (rechecked.application_bindings(), rechecked.effect_row_orders())
+            (
+                rechecked.application_bindings(),
+                rechecked.effect_row_orders(),
+            )
         } else {
             (&[][..], &[][..])
         };

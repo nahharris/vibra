@@ -19,7 +19,7 @@ fn codes(source: &str) -> Vec<C> {
     check(source).iter().map(Diagnostic::code).collect()
 }
 
-fn slice<'a>(source: &'a str, span: vibra_diagnostics::ByteSpan) -> &'a str {
+fn slice(source: &str, span: vibra_diagnostics::ByteSpan) -> &str {
     &source[span.start()..span.end()]
 }
 
@@ -558,4 +558,54 @@ fn an_implementation_that_writes_another_row_is_not_the_contract_signature() {
     (defn log (value self) void (do))))
 ";
     assert_eq!(codes(source), vec![C::TypeMismatch]);
+}
+
+#[test]
+fn a_module_value_initializer_has_the_empty_ceiling() {
+    // A `def` takes no `effects:` attribute, so applying an operation in its
+    // initializer is outside the default-empty ceiling, as in any body.
+    let source =
+        "(deffect marker (defn mark () i32 1i32))\n(def value i32 (marker.mark))\n";
+    let found = check(source);
+    assert_eq!(
+        found.iter().map(Diagnostic::code).collect::<Vec<_>>(),
+        vec![C::EffectOutsideCeiling],
+        "{found:#?}"
+    );
+    assert_eq!(slice(source, found[0].primary_span()), "(marker.mark)");
+    // A lambda in the initializer performs nothing until it is applied.
+    ok(
+        "(deffect marker (defn mark () i32 1i32))\n(def maker (fn () i32 effects: (marker)) (lambda () i32 effects: (marker) (marker.mark)))\n",
+    );
+}
+
+#[test]
+fn an_effect_root_is_not_a_value_and_not_a_type() {
+    let found =
+        codes("(deffect marker (defn mark () i32 1i32))\n(defn f () void (marker))");
+    assert!(!found.is_empty());
+    assert!(
+        found.contains(&C::NameWrongEntityKind)
+            || found.contains(&C::NameUnknownSymbol),
+        "{found:?}"
+    );
+    assert_eq!(
+        codes(
+            "(deffect marker (defn mark () i32 1i32))\n(defn f (value marker) void (do))"
+        ),
+        vec![C::NameWrongEntityKind]
+    );
+}
+
+#[test]
+fn a_generic_function_may_write_a_row_and_accept_a_callback_of_it() {
+    ok("(deffect marker (defn mark () i32 1i32))
+(defn apply (f (fn (t) t effects: (marker)) value t) t
+  where: (t any)
+  effects: (marker)
+  (f value))
+(defn use-it () i32
+  effects: (marker)
+  (apply (lambda (x i32) i32 effects: (marker) (marker.mark)) 3i32))
+");
 }

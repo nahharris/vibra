@@ -2,10 +2,17 @@
 
 Status: normative target
 Implementation status: empty effect ceilings and pure execution are admitted
-through M3. Milestone 4 Step 13 closes the Stage 4B contracts of this chapter,
-of the host registry, and of the host world in the runtime chapter, and
-implements none of them: nonempty effect checking, `deffect`, and host
-operations remain unimplemented until Milestone 4 Steps 14 to 20.
+through M3. Milestone 4 Step 13 closed the Stage 4B contracts of this chapter,
+of the host registry, and of the host world in the runtime chapter. Milestone 4
+Step 14 implements the static half of this chapter in both checkers, the typed
+IR, and both backends: `deffect` roots and operations with Vibra bodies, effect
+rows on every function, `lambda`, function type, interface contract member, and
+test, performed rows over the function-call graph, `@effect.outside-ceiling`
+with its witness, `@effect.invalid-reference`, `@contract.unused-effect` for a
+written root, and the row in the canonical `fn` type encoding. `@host`
+externals, the target `effects` array and its admission, effectful-test consent,
+the query and index metadata, and the host standard-library modules remain
+unimplemented until Milestone 4 Steps 15 to 20.
 
 ## Static contract
 
@@ -24,16 +31,16 @@ a user runs a target that declares `fs.read`, that run consents to `fs.read`
 operations for every path the program supplies. Operating-system access rules
 and failures still apply, but they are not Vibra effect grants.
 
-### M2 executable effects
+### Executable effects before the host
 
-M2 checking and execution admit only declarations and call graphs with empty
-written effect ceilings and empty computed performed rows. This rule applies
-to function types, `defn`, `lambda`, tests, and external declarations; an
-omitted row is empty as specified below. A valid nonempty ceiling or a body
-whose performed row is nonempty is outside M2 and emits `@tool.unavailable`
-before lowering or execution. M2 does not execute `@host` operations. A
-project target's effect-consent array cannot make an effectful source program
-available in M2.
+Since Milestone 4 Step 14, checking and execution admit nonempty written
+ceilings and nonempty performed rows on function types, `defn`, `lambda`,
+tests, and effect operations. Rows are erased: neither backend consults one, and
+an effect operation with a Vibra body is an ordinary function that both run as
+such. An omitted row is empty as specified below. A `@host` external is not yet
+executable and emits `@tool.unavailable` at its member until the host registry
+lands in Milestone 4 Step 16, and a project target's effect-consent array does
+not yet gate an effectful entry.
 
 ## Nominal effects
 

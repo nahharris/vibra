@@ -53,7 +53,10 @@ fn a_row_without_a_fact_keeps_its_written_order() {
         format_with(source, &[]),
         "(defn f () void effects: (zebra apple) (do))\n"
     );
-    assert_eq!(format_source("rows.vib", source).expect("source"), format_with(source, &[]));
+    assert_eq!(
+        format_source("rows.vib", source).expect("source"),
+        format_with(source, &[])
+    );
 }
 
 #[test]
@@ -73,7 +76,8 @@ fn a_fact_that_does_not_fit_its_row_is_ignored() {
 
 #[test]
 fn a_row_with_a_comment_is_left_as_written() {
-    let source = "(defn f () void\n  effects: (zebra ; first\n            apple)\n  (do))";
+    let source =
+        "(defn f () void\n  effects: (zebra ; first\n            apple)\n  (do))";
     let rows = [EffectRowOrder::new(at(source, "zebra"), vec![1, 0])];
     let formatted = format_with(source, &rows);
     let zebra = formatted.find("zebra").expect("zebra");
