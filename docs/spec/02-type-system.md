@@ -13,8 +13,9 @@ and such a member used as a function value, are implemented by Milestone 4
 Step 2 in the type checker, the typed IR, and the reference interpreter, and
 Step 9 lowers them. Milestone 4 Step 2b implements the prelude values `true` and
 `false` and constant patterns in the same components. Effects and `@host`
-externals remain deferred to Stage 4B.
-The WebAssembly backend executes none of this chapter yet.
+externals remain deferred to Stage 4B, whose contracts Milestone 4 Step 13
+closes in the effects chapter and implements from Step 14. The WebAssembly
+backend executes this chapter's pure forms since Stage 4A.
 
 ## Model
 
@@ -248,7 +249,10 @@ function. A function type records its required positional types, labelled
 names and types, optional array or dict variadic type, result, and exact closed
 effect row. Effect-row entries are lexical symbols resolved in the effect
 namespace to nominal roots. Defaults belong to the function value and are not
-repeated in its type. An omitted function-type `effects:` row is empty.
+repeated in its type. An omitted function-type `effects:` row is empty. Two
+function types are equal only when their rows are equal as well: v1 has no row
+subtyping, so a function value is never accepted where a function type with
+another row is expected, as the effects chapter states.
 
 `tuple`, `record`, `enum`, and `union` take a variable number of arguments, so
 they are type constructor forms rather than generic types. Each is an ordinary

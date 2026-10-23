@@ -63,6 +63,11 @@ pub enum CommandResult {
     /// A future execution command trapped while running a program.
     #[serde(rename = "@command.trap")]
     Trap,
+    /// The entry returned `err`: a value the program returned, which is
+    /// neither a trap nor a diagnostic. Milestone 4 Step 19 produces it from
+    /// `run`; Step 13 only fixes the atom and its exit code.
+    #[serde(rename = "@command.program-failed")]
+    ProgramFailed,
 }
 
 impl CommandResult {
@@ -74,6 +79,7 @@ impl CommandResult {
             Self::OperationalFailure => 3,
             Self::Unavailable => 4,
             Self::Trap => 5,
+            Self::ProgramFailed => 6,
         }
     }
 }
@@ -88,6 +94,7 @@ impl fmt::Display for CommandResult {
             Self::OperationalFailure => "@command.operational-failure",
             Self::Unavailable => "@command.unavailable",
             Self::Trap => "@command.trap",
+            Self::ProgramFailed => "@command.program-failed",
         })
     }
 }
@@ -1644,6 +1651,33 @@ mod tests {
     use std::path::PathBuf;
     use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
     use vibra_workspace::WorkspaceError;
+
+    #[test]
+    fn every_command_result_has_one_atom_and_one_exit_code() {
+        // The exit mapping of `docs/spec/05-tooling.md`, "M2 command contract".
+        let table = [
+            (CommandResult::Ok, "@command.ok", 0),
+            (CommandResult::Diagnostics, "@command.diagnostics", 1),
+            (CommandResult::TestFailed, "@command.test-failed", 1),
+            (CommandResult::InvalidInput, "@command.invalid-input", 2),
+            (
+                CommandResult::OperationalFailure,
+                "@command.operational-failure",
+                3,
+            ),
+            (CommandResult::Unavailable, "@command.unavailable", 4),
+            (CommandResult::Trap, "@command.trap", 5),
+            (CommandResult::ProgramFailed, "@command.program-failed", 6),
+        ];
+        for (result, atom, exit) in table {
+            assert_eq!(result.to_string(), atom);
+            assert_eq!(result.exit_code(), exit, "{atom}");
+            assert_eq!(
+                serde_json::to_string(&result).expect("a result serializes"),
+                format!("\"{atom}\"")
+            );
+        }
+    }
 
     #[test]
     fn deferred_arguments_are_confined_workspace_paths() {
