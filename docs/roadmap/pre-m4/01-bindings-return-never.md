@@ -131,7 +131,7 @@ calls"), and [`07-diagnostics-and-conformance.md`](../../spec/07-diagnostics-and
 | C13 | Fallback of another type | `(let-else p v 0i32)`, `(let-else p v (try (attempt)))` | rejected | `@type.mismatch`, `@error`, the fallback; no related span | n/a (rejected) | `typ::fallback_not_never` | `V1-TYPE-CONTROL-let-else-fallbacks` |
 | C14 | `let-else` as the final element | `(defn f (o (option i32)) void (let-else (option.some v) o (return void)))` | accepted; sequence `void` | none | unchanged | `typ::final_let_else_is_void` | `V1-TYPE-CONTROL-let-else-fallbacks` |
 | C15 | `let-else` with a value of `(option never)` | `(let-else (option.some v) (no-values) (return 0i32))` where the `some` variant is uninhabited | accepted: the pattern is refutable (it matches no value), so the fallback is the only path | none | unchanged | `typ::let_else_over_uninhabited_payload` | `V1-TYPE-CONTROL-let-else-patterns` |
-| C16 | Effect rows of a `let` value and a `let-else` fallback count toward the ceiling | a value performing an effect outside its ceiling | deferred to the M4 effect step; no case before M4 | none now | n/a | none | none (deferred, listed under Deferred) |
+| C16 | Effect rows of a `let` value, a `let-else` value and fallback, and a `return` operand count toward the ceiling | a value performing an effect outside its ceiling | rejected since M4 Step 14 | `@effect.outside-ceiling`, `@error`, the call site, with the witness | n/a (rejected) | `effects_m4_step14::a_let_value_a_let_else_value_and_fallback_and_a_return_operand_join_the_row` | `V1-EFFECT-let-else-return-rows` |
 
 ## D. `return` (`V1-TYPE-CONTROL`)
 
@@ -307,7 +307,7 @@ Crate prefixes `syn`, `res`, `typ`, `fmt`, `int`, and `schema` are the test file
 - **A24** has no dedicated case; the reserved heads are exercised by the arity
   and misplacement cases.
 - **B18** is a known gap, pinned by no case (below).
-- **C16** is deferred to the M4 effect step.
+- **C16** landed with M4 Step 14.
 - **G09** is not applicable: the CLI has no `query` command until M6.
 - **G10** has no dedicated test: the query snapshots are produced by the real
   handler and the schema enum change is checked by `schema::*`.
@@ -452,8 +452,8 @@ the ones the Stage B rows depend on:
 
 ## Deferred
 
-- Effect-ceiling checks of a `let` value, a `let-else` fallback, and a `return`
-  operand land with the M4 effect step (row C16).
+- Landed in M4 Step 14 (row C16): effect-ceiling checks of a `let` value, a
+  `let-else` value and fallback, and a `return` operand.
 - A terminating source of `never` (a host `exit`, or a pure intrinsic) is an M4
   decision (question 8).
 - Wasm lowering of `return`, `let-else`, and sequences is M4 work; the

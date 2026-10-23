@@ -110,6 +110,14 @@ pub(crate) fn source_type_id(source_id: &str, name: &str) -> vibra_ir::TypeId {
     }
 }
 
+/// The identity a single source gives its effect root `name`, as
+/// [`source_type_id`] gives a type: a single source has no package, so a
+/// root's path is its name.
+pub(crate) fn source_effect_root(source_id: &str, name: &str) -> vibra_ir::EffectRoot {
+    let id = source_type_id(source_id, name);
+    vibra_ir::EffectRoot::new(id.id(), id.path())
+}
+
 /// The identity of the declared type `name` in the standard-library module
 /// `@std.<module…>`: the identity the resolver gives every declaration of the
 /// embedded package.

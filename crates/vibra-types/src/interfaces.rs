@@ -1425,6 +1425,7 @@ pub(crate) fn materialize(
                             .map(Some)
                             .collect(),
                     }),
+                    effect_owner: None,
                 });
             }
         }
@@ -1528,6 +1529,7 @@ pub(crate) fn materialize(
                     arguments: plan.arguments.clone(),
                     member_generics,
                 }),
+                effect_owner: None,
             });
         }
         register(types, plan, &written, &defaults);

@@ -1,0 +1,14 @@
+id = "V1-TOOL-format-effect-row-order"
+rule = "V1-TOOL"
+profile = "tooling-v1"
+operation = "format"
+description = "A row is a set and is written sorted by the canonical identity of its roots: a row written across lines is one line in that order, in a function ceiling and in a function type, and a row already in order is untouched."
+
+[inputs]
+source = "tree/src/hello/main.vib"
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

@@ -1,0 +1,8 @@
+(record
+  format: @test-run.v1
+  result: @command.diagnostics
+  tests: (array
+    (record name: "@tests.math::\"over its ceiling\"" result: @test.invalid audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.math::\"within its ceiling\"" result: @test.invalid audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)

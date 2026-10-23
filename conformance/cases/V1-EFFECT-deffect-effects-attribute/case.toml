@@ -1,0 +1,17 @@
+id = "V1-EFFECT-deffect-effects-attribute"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "A deffect takes no effects attribute: a root is a name, not a row, and each operation declares its own additive row."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-attribute"
+level = "@error"
+source = "input.vib"
+span = [17, 33]

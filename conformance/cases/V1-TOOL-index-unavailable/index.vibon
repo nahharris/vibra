@@ -37,7 +37,7 @@
       owner: void
       visibility: @private
       source: (record source-id: "src/app/main.vib" start: 140u64 end: 167u64)
-      signature: (record type: @fn parameters: (array) labelled: (record) result: @void)
+      signature: (record type: @fn parameters: (array) labelled: (record) result: @void effects: (record roots: (array)))
       effects: (array)
       errors: (array)
       applications: (array)

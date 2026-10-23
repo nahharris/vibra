@@ -25,14 +25,8 @@ use vibra_types::{check_bootstrap_text_import, check_source, load_stdlib};
 ///
 /// All are profile scope, not rule disagreements: the single-source adapter
 /// admits only one exact `@std.text` import and requires an executable
-/// declaration, reports anything else as `@tool.unavailable`, and reports an
-/// unavailable effect declaration once where the workspace path's resolver
-/// and checker each report their own unavailable stage.
+/// declaration, and reports anything else as `@tool.unavailable`.
 const EXPECTED_DIFFERENCES: &[(&str, &str)] = &[
-    (
-        "V1-EFFECT-availability-host-member",
-        "the workspace path reports one @tool.unavailable per unavailable stage; check_source reports one",
-    ),
     (
         "V1-TYPE-INFER-bootstrap-extra-import",
         "the single-source adapter admits only the exact (import text @std.text)",

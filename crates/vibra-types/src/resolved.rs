@@ -292,6 +292,23 @@ pub fn check_resolved(
     for module in &modules {
         types.note_other_names(module.record.source_id(), module.ast);
         for declaration in module.ast.declarations() {
+            if let Declaration::Deffect(value) = declaration
+                && let Some(id) = module
+                    .declarations
+                    .get(&(module.record.source_id().to_owned(), value.span()))
+            {
+                let path = std::iter::once(id.unit())
+                    .chain(id.module().iter().map(String::as_str))
+                    .chain(id.path().iter().map(String::as_str))
+                    .collect::<Vec<_>>()
+                    .join(".");
+                types.declare_effect(
+                    module.record.source_id(),
+                    value,
+                    vibra_ir::EffectRoot::new(id.canonical(), path),
+                );
+                continue;
+            }
             if let Declaration::Defint(value) = declaration
                 && let Some(id) = module
                     .declarations
@@ -513,6 +530,7 @@ pub fn check_resolved(
                         bounds,
                         impl_member: None,
                         implements: None,
+                        effect_owner: None,
                     });
                 }
                 Declaration::Test(test) => {
@@ -532,15 +550,18 @@ pub fn check_resolved(
                     else {
                         continue;
                     };
-                    if let Some(effects) = test.effects()
-                        && !effects.references().is_empty()
-                    {
-                        unavailable(
-                            &mut diagnostics,
+                    // A test writes its complete ceiling like a function does.
+                    let mut signature = FunctionSignature::new(Vec::new(), Type::Void);
+                    if let Some(row) = test.effects() {
+                        let Some(effects) = types.lower_written_row(
                             module.record.source_id(),
-                            effects.span(),
-                            "nonempty test effect ceilings are unavailable in M2",
-                        );
+                            test.span(),
+                            row,
+                            &mut diagnostics,
+                        ) else {
+                            continue;
+                        };
+                        signature = signature.with_effects(effects);
                     }
                     let index = functions.len();
                     function_indices.insert(id.clone(), index);
@@ -549,7 +570,7 @@ pub fn check_resolved(
                         module_index,
                         source_id: module.record.source_id().to_owned(),
                         name: id.canonical(),
-                        signature: FunctionSignature::new(Vec::new(), Type::Void),
+                        signature,
                         external: None,
                         external_declared: false,
                         test: Some(test.clone()),
@@ -560,6 +581,7 @@ pub fn check_resolved(
                         bounds: BTreeMap::new(),
                         impl_member: None,
                         implements: None,
+                        effect_owner: None,
                     });
                 }
                 Declaration::Deftype(value) => {
@@ -638,18 +660,88 @@ pub fn check_resolved(
                             bounds,
                             impl_member: None,
                             implements: None,
+                            effect_owner: None,
+                        });
+                    }
+                }
+                Declaration::Deffect(value) => {
+                    let Some(owner) = types
+                        .effect_at(module.record.source_id(), value.span())
+                        .map(|declared| declared.root.clone())
+                    else {
+                        continue;
+                    };
+                    for (member_index, member) in value.members().iter().enumerate() {
+                        let Some(id) = module
+                            .declarations
+                            .get(&(module.record.source_id().to_owned(), member.span()))
+                            .cloned()
+                        else {
+                            continue;
+                        };
+                        let Some((generics, bounds)) =
+                            crate::nominal::function_generics(
+                                &types,
+                                &[],
+                                member,
+                                module.record.source_id(),
+                                &mut diagnostics,
+                            )
+                        else {
+                            continue;
+                        };
+                        let Some(signature) = check_signature(
+                            module.record.source_id(),
+                            member,
+                            &mut diagnostics,
+                            &types,
+                            crate::nominal::Scope::new(None, &generics)
+                                .with_bounds(&bounds),
+                        ) else {
+                            continue;
+                        };
+                        // An operation performs its owner root together with
+                        // the additive row it writes.
+                        let signature = crate::operation_signature(signature, &owner);
+                        let index = functions.len();
+                        function_indices.insert(id.clone(), index);
+                        functions.push(FunctionHeader {
+                            declaration_index,
+                            module_index,
+                            source_id: module.record.source_id().to_owned(),
+                            name: id.canonical(),
+                            external: compiler_intrinsic(
+                                module.record.source_id(),
+                                member,
+                                &mut diagnostics,
+                                module.trusted_bootstrap,
+                                &signature,
+                                &crate::standard::role_types(&types),
+                            ),
+                            signature,
+                            external_declared: member.attributes().items().iter().any(
+                                |attribute| {
+                                    matches!(
+                                        attribute,
+                                        vibra_syntax::Attribute::External(_)
+                                    )
+                                },
+                            ),
+                            test: None,
+                            test_assertion: None,
+                            member_index: Some(member_index),
+                            self_type: None,
+                            type_parameters: generics,
+                            bounds,
+                            impl_member: None,
+                            implements: None,
+                            effect_owner: Some(owner.clone()),
                         });
                     }
                 }
                 // Declared with the types above; contracts lower below.
                 Declaration::Defint(_) => {}
                 Declaration::Import(_) => {}
-                _ => unavailable(
-                    &mut diagnostics,
-                    module.record.source_id(),
-                    declaration.span(),
-                    "this declaration family is outside the Step 12 monomorphic profile",
-                ),
             }
         }
     }
@@ -719,6 +811,7 @@ pub fn check_resolved(
             bounds: BTreeMap::new(),
             impl_member: None,
             implements: None,
+            effect_owner: None,
         });
     }
 
@@ -769,6 +862,7 @@ pub fn check_resolved(
             bounds: BTreeMap::new(),
             impl_member: None,
             implements: None,
+            effect_owner: None,
         });
     }
 
@@ -1059,6 +1153,7 @@ pub fn check_resolved(
             continue;
         };
         let implements = header.implements.clone();
+        let owner = header.effect_owner.clone();
         match CheckedFunction::with_slots(
             header.name,
             header.signature,
@@ -1068,6 +1163,10 @@ pub fn check_resolved(
         )
         .map(|checked| match implements {
             Some(implements) => checked.with_implements(implements),
+            None => checked,
+        })
+        .map(|checked| match owner {
+            Some(owner) => checked.with_effect_owner(owner),
             None => checked,
         }) {
             Ok(checked) => {
@@ -1083,6 +1182,14 @@ pub fn check_resolved(
             ),
         }
     }
+
+    // Performed rows close over the whole graph of the selected modules.
+    diagnostics.extend(crate::effects::check(
+        &checked_functions,
+        &checked_globals,
+        &functions,
+        &types,
+    ));
 
     let can_build_unavailable_stubs = diagnostics.iter().all(|diagnostic| {
         diagnostic.level() != Level::Error

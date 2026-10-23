@@ -140,3 +140,169 @@ case `matched`.
 The witness cases of the effects chapter and the exit-gate clause "an additive root
 reaches the performed row and the rejection of every transitive caller" pass at the
 checker; the unavailable cases are replaced, not deleted.
+
+## As built
+
+Landed as `landed`, conditional on its pull request merging; the base is Step 13
+(PR #371, merge `437e928` on `m4`), on which the branch is rebased. The step is
+one pull request over the crates below.
+
+- **The row** (`vibra-ir`, `effect.rs`). `EffectRoot { path, id }` is the canonical
+  atom path (`unit.module.root`, rendered with `@` in VIBON) with the canonical
+  declaration identity, which includes the package, so textually equal roots of two
+  packages differ and the derived order is the UTF-8 order of the path, then the
+  identity. `EffectRow { roots, tail }` keeps `roots` sorted and duplicate-free and
+  `tail` as `Option<RowTail>` with `RowTail` an empty enum, so v1 has no row
+  variable and a later one is one more variant. `FunctionSignature` carries the row;
+  equality, `same_shape`, `admits`, the inference unifier, `Display`, and
+  `canonical_type` all include it, and the encoding writes `effects: (record roots:
+  (array @root...))` after `result`, empty included. `CheckedFunction` gains
+  `effect_owner`, the root an operation belongs to; an operation's signature row is
+  the owner with its additive row, which is the complete row a caller sees.
+- **Resolution** (`vibra-types`, `nominal.rs`). An effect root is declared in
+  `TypeNames` beside the types, so both checkers share it. A row symbol resolves
+  in the current module, through a module alias (`log.write`), or through a
+  declaration alias (`audit` after `(import audit @ops.log.audit)`); anything else,
+  including a function or a type of that spelling, is `@effect.invalid-reference` at
+  the entry. A private root of another module is `@name.private-access` at the
+  entry. Entries carry their own spans (`EffectRow::entry_spans`,
+  `FunctionType::effects` as `EffectReference`s whose `TypeSpan` takes no part in
+  equality). `vibra-resolve` only gives roots and operations their identities
+  (`EntityKind::Effect` and `Operation`), makes an operation as visible as its root,
+  and reports a root used as a value as `@name.wrong-entity-kind`. An atom in a row
+  is still reported by the parser, and `effects:` on a `deffect` is
+  `@syntax.invalid-attribute` at the attribute (a new `AttributeContext::Effect`).
+- **The graph** (`vibra-types`, `effects.rs`). One pass over the checked functions
+  and module-value initializers of the typed IR, run by both checkers after every
+  body is checked. Nodes are functions, operations, tests, initializers, and each
+  `lambda` (its body is its own node, so creating it performs nothing); an
+  application is a site classified by its target: a `Direct` call (the callee's
+  performed row, or the owner with the additive row for an operation), an `Indirect`
+  call (the row of the callee expression's type), or a `Contract` call (the member
+  signature's row, which is the ceiling). Performed rows close by a worklist, so
+  recursion and mutual recursion converge, and an operation does not propagate its
+  body. A function that did not check keeps its declared signature, which is all a
+  caller needs of an operation, and marks every node that reaches it as partial, so
+  no "never performed" warning is given where the row is only a lower bound.
+- **The witness.** For each pair of an offending node and a root missing from its
+  ceiling, in canonical root order, one diagnostic: the primary span is the first
+  application, in source order, whose callee's complete row holds the root (noted
+  `performs <root> via <callee>`), and each related span is a further hop, noted the
+  same way, from the shortest chain by hops to the declaration that introduces the
+  root, the earliest application first among equal chains. The chain stops at a
+  function value, a contract member, or an operation with no application in its
+  body that carries the root. The hop counts come from a breadth-first search over
+  the reverse call edges, one per missing root, so a chain of 3,000 functions is
+  searched without host recursion (`a_deep_call_chain_is_searched_without_host_recursion`).
+  A callee is named by its canonical atom path without the package. The diagnostics
+  of the pass are sorted by source position and are stable, so those of one function
+  with one primary span keep the canonical order of their roots. The workspace
+  checkers sort the whole list by primary span, as they always did.
+- **Unused roots.** `@contract.unused-effect` at each written entry the body never
+  performs, with the same node granularity (a `lambda` has its own warning).
+- **The formatter.** A row is written in the canonical order of its roots. The
+  checker keeps the order of each written row (`CheckResult::effect_row_orders`,
+  `EffectRowOrder`), and `format_source_with_facts` permutes the entry texts within
+  their slots before the usual passes, as the structural pass does for anonymous
+  types, so every lexical symbol is kept and no outside span moves; a row with a
+  comment, or whose fact does not fit, is left as written. `plan_format` supplies the
+  facts under the same authorization as binding facts, which is a standalone
+  `check_source` of the document, so a row in a module that imports another module
+  is not reordered by `vibra fmt`.
+- **Both backends.** Nothing changed in the interpreter or the emitter. An
+  operation with a Vibra body is an ordinary function of the module, a row is part
+  of a type that neither consults, and every executable case matched in Wasm the
+  first time it ran.
+
+### Rulings on text the specification was silent about
+
+The maintainer ruled on four readings, and each is now canonical prose in
+[the effects chapter](../../spec/03-effects.md):
+
+- A root named twice in one written row is `@effect.duplicate-root` at the second
+  entry, relating the first, in a `defn`, `lambda`, function type, test, and
+  operation row; the code replaced `@project.duplicate-effect-root` outright and
+  also serves a target `effects` array (`V1-EFFECT-duplicate-root-in-row`,
+  `a_root_named_twice_in_a_row_is_a_duplicate_at_the_second_entry`,
+  `a_duplicate_is_reported_in_every_kind_of_written_row`).
+- An implementation member writes exactly its contract member's row, because
+  `check_member_signature` compares `same_shape`; another row is `@type.mismatch`,
+  and "within the contract ceiling" is the ordinary check of the body against that
+  row (`V1-EFFECT-impl-member-row-mismatch`).
+- A `def` initializer has the empty ceiling, so applying an operation in it is
+  `@effect.outside-ceiling` (`V1-EFFECT-def-initializer-ceiling`).
+- An operation is a declaration with its own visibility: private unless it writes
+  `visibility: @public`, whatever its root's (`V1-EFFECT-private-operation-import`,
+  `V1-EFFECT-public-operation-import`). Every cross-module operation of the corpus
+  and of the host tests writes it.
+
+Two readings remain implementation facts:
+- The formatter reorders a row only for a file that checks standalone, which is
+  the limit binding facts already have; a module that imports another, and a test
+  module, keep the written order.
+- An unresolved row entry makes the function's signature unavailable, so its body
+  is not checked and no ceiling diagnostic follows it.
+
+### Cases
+
+- **Added, static (30):** `V1-EFFECT-function-type-row`, `-function-type-unresolved`,
+  `-witness-chapter-example`, `-additive-root-accepted`, `-missing-two-roots`,
+  `-witness-three-hops`, `-witness-function-value`, `-witness-contract-member`,
+  `-witness-shortest-chain`, `-witness-equal-chains`, `-function-value-row-mismatch`,
+  `-atom-in-row`, `-unknown-symbol-in-row`, `-deffect-effects-attribute`,
+  `-contract-ceiling-within`, `-contract-ceiling-over`, `-unused-ceiling-root`,
+  `-offending-callee-no-cascade`, `-recursion-closes`, `-let-else-return-rows` (single
+  source), and `-imported-root-witness`, `-imported-roots-accepted`,
+  `-private-root-import`, `-equal-names-different-modules`, `-private-operation-import`, `-public-operation-import` (workspace), and `-duplicate-root-in-row`, `-impl-member-row-mismatch`, `-def-initializer-ceiling` (single source).
+- **Added, executable (4, all `matched`):** `V1-RUNTIME-effect-operations`,
+  `V1-RUNTIME-effect-function-values`, `V1-RUNTIME-workspace-run-effect-operations`,
+  `V1-RUNTIME-workspace-test-effect-operation`. **Added, rejected:** `V1-EFFECT-test-ceiling`.
+  **Added, tooling:** `V1-TOOL-format-effect-row-order`.
+- **Replaced:** `V1-EFFECT-availability-function-type` (a valid function-type row was
+  `@tool.unavailable`) by `V1-EFFECT-function-type-row` and
+  `V1-EFFECT-function-type-unresolved`. `V1-EFFECT-availability-empty-row` stays.
+- **Re-expected:** `V1-EFFECT-availability-host-member` (the span is the member and not the
+  `deffect`, and the two checkers now agree, so it left the expected differences of
+  `check_paths_agree`), `V1-PROJECT-workspace-check-nominal-availability` and
+  `V1-TOOL-index-unavailable` (the diagnostics at the `deffect` and its resolver stage
+  are gone; the member's remains), `V1-SRC-CALLS-functions-effects` (the unresolved
+  `io.stdout` is an invalid reference, not unavailable), and
+  `V1-TYPE-INTERFACE-iter-default-rejections` (the effectful lambda now names a declared root,
+  and the rejection is the argument mismatch against the callback's empty row, which
+  also required the unifier to compare rows).
+- **Re-expected snapshots (6, 21 function types):** the `fn` type encodings of
+  `V1-SRC-CALLS-functions-labelled/types.vibon` (2),
+  `V1-TYPE-INTERFACE-contract-member-types-ir/types.vibon` (3),
+  `V1-TOOL-index-member-order/index.vibon` (4), `V1-TOOL-index-records/index.vibon` (9),
+  `V1-TOOL-index-test-references/index.vibon` (2), and
+  `V1-TOOL-index-unavailable/index.vibon` (1). Each type gained ` effects: (record roots:
+  (array))` before its closing parenthesis, by a script that matched the parentheses
+  of each `(record type: @fn ...)`, and the corpus run, which compares the real
+  encodings, accepted every result.
+- **Tests re-expressed:** the tests that used `effects: (io.stdout)` or a lambda with
+  `effects: (audit)` as their example of an unavailable form (`functions_step7`,
+  `process_review`, `process_step13`, `test_runner_step13`, and `resolution_step4`)
+  now use a `@host` operation, the one construct that remains unavailable.
+  `docs/roadmap/milestone-1/syntax-examples.tsv` follows the line shifts of the
+  edited chapters: 51 rows changed, only in their line numbers, digests, and, for
+  the five sections whose text changed, their inline counts.
+
+### Evidence
+
+- Corpus at the head: 83 reader, 267 static, 143 interpreter, and 16 tooling cases,
+  509 passed, 0 failed, 0 unavailable; the interpreter backend passes 135 cases and
+  the Wasm backend matches 135, 0 not lowered (131 at the base). The parity inventory
+  holds the four new executable cases as `matched`.
+- Host tests: `effects_m4_step14` in `vibra-ir` (7), `vibra-types` (38), `vibra-fmt` (6),
+  and `vibra-conformance` (2).
+
+### Left for Step 15
+
+The target `effects` array is not checked: an entry whose written ceiling is nonempty
+is admitted whatever the array holds, and `V1-RUNTIME-workspace-run-effect-operations`
+lists the canonical atoms its entry needs so that the array is already the
+closure of the entry graph when Step 15 starts to check it. The array's atoms are
+not resolved, effectful tests have no consent rule beyond their own ceiling, the
+entry's witness at the `entry:` value is not written, and `@host` externals,
+the position-query and index effect facts, and the standard effect modules wait for
+Steps 16 to 20.

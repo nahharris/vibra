@@ -1312,13 +1312,6 @@ impl Resolution {
         }
     }
 
-    fn unavailable(&mut self, source_id: &str, span: ByteSpan, message: &'static str) {
-        self.diagnostics.push(
-            Diagnostic::new(DiagnosticCode::ToolUnavailable, span, message)
-                .with_source_id(source_id),
-        );
-    }
-
     fn collect_declaration(
         &mut self,
         module: &ModuleKey,
@@ -1393,20 +1386,6 @@ impl Resolution {
             Declaration::Import(_) => return,
             Declaration::Test(_) => return,
         };
-        let unavailable_message = match declaration {
-            // Declared types resolve from M3 Step 2 and interfaces from Step 11.
-            Declaration::Deftype(_) | Declaration::Defint(_) => None,
-            Declaration::Deffect(_) => {
-                Some("effect resolution is unavailable in Step 4")
-            }
-            Declaration::Import(_)
-            | Declaration::Def(_)
-            | Declaration::Defn(_)
-            | Declaration::Test(_) => None,
-        };
-        if let Some(message) = unavailable_message {
-            self.unavailable(source_id, span, message);
-        }
         let mut path = owner;
         path.push(name.to_owned());
         if path.len() == 1 {
@@ -1493,11 +1472,6 @@ impl Resolution {
             }
             Declaration::Deffect(value) => {
                 for member in value.members() {
-                    self.unavailable(
-                        source_id,
-                        member.span(),
-                        "effect operations are unavailable in Step 4",
-                    );
                     self.collect_member(
                         module,
                         member,
@@ -2898,6 +2872,22 @@ impl Resolution {
                     "a module is not a body value",
                 )
                 .with_source_id(source_id),
+            );
+        }
+        // A root names a row, never a value: its operations are applied.
+        if target.id.kind() == EntityKind::Effect {
+            self.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::NameWrongEntityKind,
+                    span,
+                    "an effect root is not a body value; its operations are",
+                )
+                .with_source_id(source_id)
+                .with_related_source(
+                    target.source_id.clone(),
+                    target.span,
+                    "the effect root is declared here",
+                ),
             );
         }
         self.references.push(ResolvedReference {

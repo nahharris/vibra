@@ -1,0 +1,5 @@
+(deffect write
+  (defn text (target str) void (do)))
+
+(defn apply (f (fn (str) void effects: (write)) value str) void
+  (f value))

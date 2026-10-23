@@ -20,7 +20,7 @@ test ceilings, and the `project init` template. No host operation runs yet.
 
 1. Resolution of each target `effects` atom to a canonical effect root through the
    ordinary resolution diagnostics (`@module.unknown-path`, `@name.unknown-symbol`,
-   `@name.wrong-entity-kind`), `@project.duplicate-effect-root`, and the existing
+   `@name.wrong-entity-kind`), `@effect.duplicate-root`, and the existing
    `@data.invalid-shape` for a missing field.
 2. Static admission: the entry's performed row against the array
    (`@effect.outside-ceiling` at the `entry:` value, witness as related spans) and
@@ -77,7 +77,7 @@ target declares no array; library roots are not consent.
 
 ## Diagnostic and schema changes
 
-No new registry code (Step 13 added `@project.duplicate-effect-root`). No schema
+No new registry code (Step 13 added it as `@project.duplicate-effect-root`; Step 14 renamed it `@effect.duplicate-root` and made it the code of a repeated entry in every written row). No schema
 change.
 
 ## Validation

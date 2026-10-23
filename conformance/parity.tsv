@@ -144,3 +144,7 @@ V1-RUNTIME-generic-interface-pass-along	matched
 V1-RUNTIME-iter-option-void-item	matched
 V1-RUNTIME-union-converted-member	matched
 V1-RUNTIME-workspace-test-interface-encoding	matched
+V1-RUNTIME-effect-operations	matched
+V1-RUNTIME-effect-function-values	matched
+V1-RUNTIME-workspace-run-effect-operations	matched
+V1-RUNTIME-workspace-test-effect-operation	matched

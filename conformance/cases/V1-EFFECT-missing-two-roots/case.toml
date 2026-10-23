@@ -1,0 +1,30 @@
+id = "V1-EFFECT-missing-two-roots"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "A function with an omitted ceiling that applies an operation with an additive row is missing two roots, so it emits two diagnostics, one for each missing root, in the canonical order of the roots; the owner root has a one-hop witness."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [198, 220]
+notes = ["performs @audit via @audit.record"]
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [198, 220]
+notes = ["performs @write via @audit.record"]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [147, 172]
+  message = "performs @write via @write.text"

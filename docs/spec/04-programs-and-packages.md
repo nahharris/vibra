@@ -545,11 +545,12 @@ tests runnable. A module that declares a test MUST explicitly import
 imports use ordinary unit aliases and ordinary public-visibility rules; no
 test-only prelude or private-access exception exists.
 
-The full v1 test language permits declared effect ceilings, but M2 admits only
-tests whose computed effects are empty. An omitted `effects:` is empty; an
-explicit nonempty row or a test that performs an effect is unavailable in M2
-and emits `@tool.unavailable` before execution. M2 test selection grants no
-effect consent and cannot add effects to a test declaration.
+The full v1 test language permits declared effect ceilings. Since Milestone 4
+Step 14 a test is checked against its written ceiling like a function, an
+omitted `effects:` is empty, and a test whose ceiling holds only operations with
+Vibra bodies runs. Test selection does not yet grant effect consent for a host
+root, which Milestone 4 Step 15 implements, and a test cannot add
+effects to a test declaration.
 
 ### M2 assertion contract
 

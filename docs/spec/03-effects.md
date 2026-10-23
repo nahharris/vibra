@@ -2,10 +2,17 @@
 
 Status: normative target
 Implementation status: empty effect ceilings and pure execution are admitted
-through M3. Milestone 4 Step 13 closes the Stage 4B contracts of this chapter,
-of the host registry, and of the host world in the runtime chapter, and
-implements none of them: nonempty effect checking, `deffect`, and host
-operations remain unimplemented until Milestone 4 Steps 14 to 20.
+through M3. Milestone 4 Step 13 closed the Stage 4B contracts of this chapter,
+of the host registry, and of the host world in the runtime chapter. Milestone 4
+Step 14 implements the static half of this chapter in both checkers, the typed
+IR, and both backends: `deffect` roots and operations with Vibra bodies, effect
+rows on every function, `lambda`, function type, interface contract member, and
+test, performed rows over the function-call graph, `@effect.outside-ceiling`
+with its witness, `@effect.invalid-reference`, `@contract.unused-effect` for a
+written root, and the row in the canonical `fn` type encoding. `@host`
+externals, the target `effects` array and its admission, effectful-test consent,
+the query and index metadata, and the host standard-library modules remain
+unimplemented until Milestone 4 Steps 15 to 20.
 
 ## Static contract
 
@@ -24,16 +31,16 @@ a user runs a target that declares `fs.read`, that run consents to `fs.read`
 operations for every path the program supplies. Operating-system access rules
 and failures still apply, but they are not Vibra effect grants.
 
-### M2 executable effects
+### Executable effects before the host
 
-M2 checking and execution admit only declarations and call graphs with empty
-written effect ceilings and empty computed performed rows. This rule applies
-to function types, `defn`, `lambda`, tests, and external declarations; an
-omitted row is empty as specified below. A valid nonempty ceiling or a body
-whose performed row is nonempty is outside M2 and emits `@tool.unavailable`
-before lowering or execution. M2 does not execute `@host` operations. A
-project target's effect-consent array cannot make an effectful source program
-available in M2.
+Since Milestone 4 Step 14, checking and execution admit nonempty written
+ceilings and nonempty performed rows on function types, `defn`, `lambda`,
+tests, and effect operations. Rows are erased: neither backend consults one, and
+an effect operation with a Vibra body is an ordinary function that both run as
+such. An omitted row is empty as specified below. A `@host` external is not yet
+executable and emits `@tool.unavailable` at its member until the host registry
+lands in Milestone 4 Step 16, and a project target's effect-consent array does
+not yet gate an effectful entry.
 
 ## Nominal effects
 
@@ -45,16 +52,22 @@ root that owns it:
 (deffect read
   visibility: @public
   (defn file (at path) (result bytes fs-error)
+    visibility: @public
     external: @host
     symbol: "fs.read-file")
   (defn text (at path) (result str fs-error)
+    visibility: @public
     external: @host
     symbol: "fs.read-text"))
 ```
 
 When this declaration belongs to module `fs`, its source root is `fs.read` and
 its operations are `fs.read.file` and `fs.read.text`. The defining package and
-module, not an import alias, form the canonical identity.
+module, not an import alias, form the canonical identity. An operation is a
+declaration with its own visibility: as for a `deftype` method, it is private
+unless it writes `visibility: @public`, whatever the visibility of its root.
+Another module applies an operation only when the operation is public, and names
+a root in a row only when the root is public.
 
 The parameter is spelled `at` and not `path` because a lexical binder may not
 repeat a name the module declares (`@name.redeclaration`), and the module `fs`
@@ -101,10 +114,14 @@ in the effect namespace to nominal roots. An unqualified symbol resolves in
 the current module. A dotted symbol begins with an explicit import alias, so
 `io.stdout` resolves through `(import io @std.io)`. Source effect rows never
 contain atoms. An atom entry or a symbol that does not resolve to one nominal
-effect root emits `@effect.invalid-reference`.
+effect root emits `@effect.invalid-reference`. A root named twice in one row,
+by one spelling or two, emits `@effect.duplicate-root` at the second entry and
+relates the first.
 
 - Omitted `effects:` is the empty row on every `defn`, `lambda`, function type,
   and test. There is no visibility or nesting exception.
+- A `def` initializer cannot write `effects:`, so its ceiling is empty and its
+  performed row must be empty. Effectful work belongs in a function.
 - Every ordinary effectful `defn`, `lambda`, or test MUST write its complete
   ceiling.
 - Every interface contract has a written or default-empty ceiling.
@@ -117,7 +134,9 @@ effect root emits `@effect.invalid-reference`.
   performed row. For an effect operation, its owner root plus its additive
   written or default-empty ceiling MUST contain the performed row.
 - An unused declared effect is a warning because it weakens local reasoning.
-- An interface method MUST remain within its contract ceiling.
+- An interface method MUST remain within its contract ceiling. An
+  implementation member writes exactly its contract member's row, since v1 has
+  no row subtyping, and its performed row MUST be within that row.
 
 Rows are order-insensitive semantically and sorted by canonical identity in
 formatter and machine output. Source formatting preserves each lexical symbol
@@ -195,6 +214,7 @@ discharges an additive root. Given module `app` with `(import fs @std.fs)`:
 (deffect audit
   visibility: @public
   (defn record (target fs.path event str) (result void fs.fs-error)
+    visibility: @public
     effects: (fs.write)
     (fs.write.text target event)))
 
@@ -286,7 +306,8 @@ ordinary resolution diagnostics at the atom's span, not by a project code of its
 own: `@module.unknown-path` or `@name.unknown-symbol` when the path resolves to
 no module or declaration, and `@name.wrong-entity-kind`, naming the entity found,
 when it resolves to something that is not an effect root. A root listed twice is
-`@project.duplicate-effect-root` at the second atom, relating the first. A
+`@effect.duplicate-root` at the second atom, relating the first, as in any
+written row. A
 binary target with no `effects` field is `@data.invalid-shape`, as the
 projects chapter states for every missing required field.
 

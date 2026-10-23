@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use sha2::{Digest, Sha256};
 use vibra_diagnostics::{Diagnostic, DiagnosticCode, DocumentRevision};
-use vibra_fmt::format_source_with_bindings;
+use vibra_fmt::format_source_with_facts;
 use vibra_syntax::{DocumentMode, parse_data, parse_source};
 use vibra_types::check_source;
 
@@ -215,8 +215,13 @@ pub fn plan_format(
         .as_ref()
         .filter(|checked| checked.accepted() && snapshot_bindings_authorized)
         .map_or(&[][..], |checked| checked.application_bindings());
-    let formatted = format_source_with_bindings(&relative_path, text, bindings)
-        .map_err(|error| FormatPlanError::Format(error.to_string()))?;
+    let effect_rows = source_check
+        .as_ref()
+        .filter(|checked| checked.accepted() && snapshot_bindings_authorized)
+        .map_or(&[][..], |checked| checked.effect_row_orders());
+    let formatted =
+        format_source_with_facts(&relative_path, text, bindings, effect_rows)
+            .map_err(|error| FormatPlanError::Format(error.to_string()))?;
     for diagnostic in formatted.diagnostics() {
         let checker_reported_order = diagnostic.code()
             == DiagnosticCode::StyleArgumentOrder
@@ -522,8 +527,13 @@ fn validate_postcondition(
         .as_ref()
         .filter(|value| value.accepted() && snapshot_bindings_authorized)
         .map_or(&[][..], |value| value.application_bindings());
-    let idempotent = format_source_with_bindings(path, formatted, bindings)
-        .map_err(|error| FormatPlanError::Postcondition(error.to_string()))?;
+    let effect_rows = checked
+        .as_ref()
+        .filter(|value| value.accepted() && snapshot_bindings_authorized)
+        .map_or(&[][..], |value| value.effect_row_orders());
+    let idempotent =
+        format_source_with_facts(path, formatted, bindings, effect_rows)
+            .map_err(|error| FormatPlanError::Postcondition(error.to_string()))?;
     if idempotent.text() != formatted {
         return Err(FormatPlanError::Postcondition(
             "formatted document is not idempotent".to_owned(),

@@ -1,0 +1,1 @@
+(record type: (record type: @tuple arguments: (array @str @str @str @str)) value: (record kind: @tuple values: (array "named" "lambda" "contract" "hello")))

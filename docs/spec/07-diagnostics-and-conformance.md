@@ -92,6 +92,7 @@ table governs.
 | `@pattern.unreachable-arm` | `@error` |
 | `@effect.outside-ceiling` | `@error` |
 | `@effect.invalid-reference` | `@error` |
+| `@effect.duplicate-root` | `@error` |
 | `@external.unknown-symbol` | `@error` |
 | `@external.owner-mismatch` | `@error` |
 | `@data.invalid-extension` | `@error` |
@@ -106,7 +107,6 @@ table governs.
 | `@project.ambiguous-dependency-target` | `@error` |
 | `@project.reserved-unit-name` | `@error` |
 | `@project.overlapping-target-roots` | `@error` |
-| `@project.duplicate-effect-root` | `@error` |
 | `@project.not-found` | `@error` |
 | `@project.invalid-target-root` | `@error` |
 | `@project.io-error` | `@error` |
@@ -165,9 +165,8 @@ node that the checker rejects. A rejected declaration uses its complete
 declaration form. If unsupported semantics occur in a nested type or another
 child not represented by a separately spanned node used by the checker, the
 diagnostic uses the complete source form of its owning parameter or
-declaration. A rejected expression uses its complete expression form; a
-nonempty effect ceiling uses the complete effect-row form; and a reference
-that is unavailable because of its resolved entity uses the complete
+declaration. A rejected expression uses its complete expression form; and a
+reference that is unavailable because of its resolved entity uses the complete
 reference. List forms include their opening and closing delimiters. The
 diagnostic retains the owning source ID, and a source-form diagnostic never
 uses an invented or empty `0..0` span. A command-level availability diagnostic
@@ -288,7 +287,7 @@ One form never receives both `@type.unreachable-code` and
 
 ### Effect and host diagnostics
 
-The effect and host rules add the codes `@project.duplicate-effect-root` and
+The effect and host rules add the codes `@effect.duplicate-root` and
 `@external.owner-mismatch`, both with fixed level `@error` and fix capability
 `@none`, and otherwise reuse existing codes. Each primary span is a complete
 half-open UTF-8 range with the owning source identity:
@@ -297,7 +296,8 @@ half-open UTF-8 range with the owning source identity:
 | --- | --- | --- | --- |
 | root in a target `effects` array that resolves to no module or declaration | `@module.unknown-path` or `@name.unknown-symbol`, as for any entity reference | the atom, in `project.vibon` | none |
 | root in a target `effects` array that resolves to an entity that is not an effect root | `@name.wrong-entity-kind` | the atom | none; names the entity found |
-| root listed twice in one target `effects` array | `@project.duplicate-effect-root` | the second atom | the first atom |
+| root listed twice in one target `effects` array | `@effect.duplicate-root` | the second atom | the first atom |
+| root listed twice in one written row of a `defn`, `lambda`, function type, test, or operation | `@effect.duplicate-root` | the second entry | the first entry |
 | binary target with no `effects` field | `@data.invalid-shape` | the target record | none |
 | root of a target `effects` array that the entry's performed row does not contain | `@contract.unused-effect` (`@warning`) | the atom | none |
 | root of the entry's performed row that the target `effects` array omits | `@effect.outside-ceiling` | the `entry:` value in `project.vibon` | the witness of the effects chapter |
