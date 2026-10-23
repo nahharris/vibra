@@ -11,6 +11,7 @@ use std::sync::OnceLock;
 
 use super::{FunctionSignature, Type, TypeId};
 
+pub mod host;
 mod native;
 mod vectors;
 
