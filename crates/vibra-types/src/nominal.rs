@@ -60,6 +60,9 @@ pub(crate) enum LowerError {
     InvalidEffect(String),
     /// An effect row entry that names a private root of another module.
     PrivateEffect(String),
+    /// An effect row entry naming a root the row already names, and where the
+    /// first entry is written.
+    DuplicateEffect(String, ByteSpan),
 }
 
 /// What a type expression may name besides declared types: the receiver type
@@ -495,9 +498,22 @@ impl TypeNames {
         function: &vibra_syntax::FunctionType,
     ) -> Result<EffectRow, LowerError> {
         let mut roots = Vec::with_capacity(function.effects().len());
+        let mut firsts = BTreeMap::<EffectRoot, ByteSpan>::new();
         for reference in function.effects() {
             match self.resolve_effect(source_id, reference.name()) {
-                Ok(declared) => roots.push(declared.root.clone()),
+                Ok(declared) => {
+                    if let Some(first) = firsts.get(&declared.root) {
+                        return Err(LowerError::At(
+                            reference.span(),
+                            Box::new(LowerError::DuplicateEffect(
+                                reference.name().value().to_owned(),
+                                *first,
+                            )),
+                        ));
+                    }
+                    firsts.insert(declared.root.clone(), reference.span());
+                    roots.push(declared.root.clone());
+                }
                 Err(error) => {
                     return Err(LowerError::At(reference.span(), Box::new(error)));
                 }
@@ -546,7 +562,24 @@ impl TypeNames {
         let mut written = Vec::with_capacity(row.references().len());
         for (name, span) in row.references().iter().zip(row.entry_spans()) {
             match self.resolve_effect(source_id, name) {
-                Ok(declared) => written.push((declared.root.clone(), *span)),
+                Ok(declared) => {
+                    if let Some((_, first)) =
+                        written.iter().find(|(root, _)| *root == declared.root)
+                    {
+                        valid = false;
+                        report_lower_error(
+                            diagnostics,
+                            source_id,
+                            *span,
+                            &LowerError::DuplicateEffect(
+                                name.value().to_owned(),
+                                *first,
+                            ),
+                        );
+                    } else {
+                        written.push((declared.root.clone(), *span));
+                    }
+                }
                 Err(error) => {
                     valid = false;
                     report_lower_error(diagnostics, source_id, *span, &error);
@@ -2035,6 +2068,19 @@ pub(crate) fn report_lower_error(
                 format!("`{name}` does not resolve to a nominal effect root"),
             )
             .with_source_id(source_id),
+        ),
+        LowerError::DuplicateEffect(name, first) => diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::EffectDuplicateRoot,
+                span,
+                format!("`{name}` names a root this row already names"),
+            )
+            .with_source_id(source_id)
+            .with_related_source(
+                source_id,
+                *first,
+                "the root is first named here",
+            ),
         ),
         LowerError::PrivateEffect(name) => diagnostics.push(
             Diagnostic::new(

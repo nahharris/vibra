@@ -114,10 +114,14 @@ in the effect namespace to nominal roots. An unqualified symbol resolves in
 the current module. A dotted symbol begins with an explicit import alias, so
 `io.stdout` resolves through `(import io @std.io)`. Source effect rows never
 contain atoms. An atom entry or a symbol that does not resolve to one nominal
-effect root emits `@effect.invalid-reference`.
+effect root emits `@effect.invalid-reference`. A root named twice in one row,
+by one spelling or two, emits `@effect.duplicate-root` at the second entry and
+relates the first.
 
 - Omitted `effects:` is the empty row on every `defn`, `lambda`, function type,
   and test. There is no visibility or nesting exception.
+- A `def` initializer cannot write `effects:`, so its ceiling is empty and its
+  performed row must be empty. Effectful work belongs in a function.
 - Every ordinary effectful `defn`, `lambda`, or test MUST write its complete
   ceiling.
 - Every interface contract has a written or default-empty ceiling.
@@ -130,7 +134,9 @@ effect root emits `@effect.invalid-reference`.
   performed row. For an effect operation, its owner root plus its additive
   written or default-empty ceiling MUST contain the performed row.
 - An unused declared effect is a warning because it weakens local reasoning.
-- An interface method MUST remain within its contract ceiling.
+- An interface method MUST remain within its contract ceiling. An
+  implementation member writes exactly its contract member's row, since v1 has
+  no row subtyping, and its performed row MUST be within that row.
 
 Rows are order-insensitive semantically and sorted by canonical identity in
 formatter and machine output. Source formatting preserves each lexical symbol
@@ -300,7 +306,8 @@ ordinary resolution diagnostics at the atom's span, not by a project code of its
 own: `@module.unknown-path` or `@name.unknown-symbol` when the path resolves to
 no module or declaration, and `@name.wrong-entity-kind`, naming the entity found,
 when it resolves to something that is not an effect root. A root listed twice is
-`@project.duplicate-effect-root` at the second atom, relating the first. A
+`@effect.duplicate-root` at the second atom, relating the first, as in any
+written row. A
 binary target with no `effects` field is `@data.invalid-shape`, as the
 projects chapter states for every missing required field.
 

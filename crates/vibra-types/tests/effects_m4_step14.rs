@@ -396,12 +396,36 @@ fn effects_on_a_deffect_is_an_invalid_attribute_at_that_attribute() {
 }
 
 #[test]
-fn a_duplicate_entry_names_one_root() {
-    // The specification calls a row duplicate-free and gives a repeated
-    // entry no diagnostic code; the row is a set, so it keeps one root.
-    ok(&format!(
+fn a_root_named_twice_in_a_row_is_a_duplicate_at_the_second_entry() {
+    let source = format!(
         "{AUDIT}(defn twice () void effects: (write write) (write.text \"a\" \"b\"))\n"
-    ));
+    );
+    let found = check(&source);
+    assert_eq!(
+        found.iter().map(Diagnostic::code).collect::<Vec<_>>(),
+        vec![C::EffectDuplicateRoot],
+        "{found:#?}"
+    );
+    let second = source.rfind("write write").expect("row") + "write ".len();
+    assert_eq!(found[0].primary_span().start(), second);
+    assert_eq!(slice(&source, found[0].primary_span()), "write");
+    assert_eq!(found[0].related().len(), 1);
+    assert_eq!(found[0].related()[0].span.start(), second - "write ".len());
+}
+
+#[test]
+fn a_duplicate_is_reported_in_every_kind_of_written_row() {
+    let decl = "(deffect write (defn text (target str) void (do)))\n";
+    for body in [
+        "(defn f () void effects: (write write) (write.text \"a\"))",
+        "(defn f () (fn () void effects: (write write)) (lambda () void effects: (write) (write.text \"a\")))",
+        "(defn f (g (fn () void effects: (write write))) void (do))",
+        "(deffect more (defn g () void effects: (write write) (write.text \"a\")))",
+        "(defn f () void effects: (write) (let - (lambda () void effects: (write write) (write.text \"a\"))) (write.text \"a\"))",
+    ] {
+        let found = codes(&format!("{decl}{body}\n"));
+        assert!(found.contains(&C::EffectDuplicateRoot), "{body}: {found:?}");
+    }
 }
 
 #[test]

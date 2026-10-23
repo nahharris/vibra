@@ -347,6 +347,8 @@ diagnostic_registry! {
         "a performed effect root lies outside the written or default ceiling";
     EffectInvalidReference => "@effect.invalid-reference", Effect, Error, None,
         "an effect row entry is not a lexical symbol resolved through imports";
+    EffectDuplicateRoot => "@effect.duplicate-root", Effect, Error, None,
+        "an effect row, or a target effects array, names the same root twice";
     ExternalUnknownSymbol => "@external.unknown-symbol", External, Error, None,
         "an external declaration names no symbol in its provider registry";
     ExternalOwnerMismatch => "@external.owner-mismatch", External, Error, None,
@@ -375,8 +377,6 @@ diagnostic_registry! {
         "a target or dependency name collides with the reserved `@tests` unit";
     ProjectOverlappingTargetRoots => "@project.overlapping-target-roots", Project, Error, None,
         "two target roots nest or coincide";
-    ProjectDuplicateEffectRoot => "@project.duplicate-effect-root", Project, Error, None,
-        "a binary target lists the same effect root twice";
     ProjectNotFound => "@project.not-found", Project, Error, None,
         "no exact project.vibon was found in the discovery boundary";
     ProjectInvalidTargetRoot => "@project.invalid-target-root", Project, Error, None,

@@ -91,7 +91,7 @@ This is a specification step; its evidence is the registry and schema tests.
 
 ## Diagnostic and schema changes
 
-`@project.duplicate-effect-root` and `@external.owner-mismatch` (both `@error`, no
+`@effect.duplicate-root` and `@external.owner-mismatch` (both `@error`, no
 fix); `@command.program-failed` (exit 6); `@runtime.invalid-host-value` listed in the
 `run` and `test` trap enumerations; `auditTrace` becomes an array of event objects.
 The index, position-envelope, and `fn`-type schemas change with the steps that own

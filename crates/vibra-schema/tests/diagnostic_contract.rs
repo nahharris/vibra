@@ -150,9 +150,9 @@ fn the_stage_4b_effect_codes_are_errors_with_no_fix() {
     let validator = registry_entry_validator();
     for (code, atom, domain) in [
         (
-            DiagnosticCode::ProjectDuplicateEffectRoot,
-            "@project.duplicate-effect-root",
-            "project",
+            DiagnosticCode::EffectDuplicateRoot,
+            "@effect.duplicate-root",
+            "effect",
         ),
         (
             DiagnosticCode::ExternalOwnerMismatch,
