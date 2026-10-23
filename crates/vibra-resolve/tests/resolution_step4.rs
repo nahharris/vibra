@@ -87,7 +87,7 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
     )
     .with_verified_overlay(
         "vibra-stdlib",
-        "0.2.0",
+        "0.3.0",
         vec![
             vibra_resolve::SourceModule::new(
                 "std",
@@ -124,7 +124,7 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
         .find(|module| module.source_id() == "stdlib/src/std/text.vib")
         .expect("bootstrap module in overlay");
     assert_eq!(module.package().name(), "vibra-stdlib");
-    assert_eq!(module.package().version(), "0.2.0");
+    assert_eq!(module.package().version(), "0.3.0");
     assert_eq!(
         snapshot.imports()[0]
             .module()
@@ -140,7 +140,7 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
         .and_then(|reference| reference.target())
         .expect("resolved bootstrap declaration");
     assert_eq!(target.package().name(), "vibra-stdlib");
-    assert_eq!(target.package().version(), "0.2.0");
+    assert_eq!(target.package().version(), "0.3.0");
 }
 
 #[test]
@@ -176,7 +176,7 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
     )
     .with_verified_overlay(
         "vibra-stdlib",
-        "0.2.0",
+        "0.3.0",
         vec![
             vibra_resolve::SourceModule::new(
                 "std",

@@ -1438,6 +1438,7 @@ dependencies = [
  "toml",
  "vibra-diagnostics",
  "vibra-fmt",
+ "vibra-host",
  "vibra-interp",
  "vibra-ir",
  "vibra-resolve",
@@ -1459,6 +1460,17 @@ name = "vibra-fmt"
 version = "0.0.0"
 dependencies = [
  "vibra-diagnostics",
+ "vibra-syntax",
+]
+
+[[package]]
+name = "vibra-host"
+version = "0.0.0"
+dependencies = [
+ "getrandom",
+ "serde_json",
+ "vibra-diagnostics",
+ "vibra-ir",
  "vibra-syntax",
 ]
 

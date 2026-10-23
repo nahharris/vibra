@@ -767,7 +767,12 @@ default world:
 | `clock` | `(record wall: i64 monotonic: u64 step: u64)` | `wall: 0i64 monotonic: 0u64 step: 1u64` |
 | `random` | `(record seed: u64)` | `seed: 0u64` |
 
-The default world has the root directory and nothing else.
+The default world has the root directory and nothing else. A missing field of
+`clock` or `random` takes its own default as well, so
+`(record format: @host-world.v1 clock: (record step: 3u64))` keeps `wall: 0i64` and
+`monotonic: 0u64`. Every integer carries exactly the suffix of its type (`i64` for
+`wall`, `u64` for `monotonic`, `step`, and `seed`, and `u8` for a byte), and a
+literal outside the range of that type is `@data.invalid-value`.
 
 - **Filesystem.** A path is resolved from the root as the system provider would
   from a working directory at the root: components are separated by `/`, empty
@@ -776,7 +781,10 @@ The default world has the root directory and nothing else.
   world lists exists, so `files` need not list its directories. A write changes
   the world's copy only, with no permission failures, so `permission-denied` and
   `other` do not arise from it, and a read of a name the world does not hold is
-  `not-found`.
+  `not-found`. A path is one entry: a world that lists a path as a file and also
+  needs it as a directory (under `directories`, or as an ancestor of another listed
+  path), that lists the root as a file, or that lists two spellings of one resolved
+  path, is `@data.invalid-value` at the key of the file.
 - **Standard input** is read as `io.stdin-*` defines, from the position the
   copy holds.
 - **Standard output and error** append to the audit trace only.

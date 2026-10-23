@@ -574,7 +574,7 @@ fn verified_bootstrap_imports_keep_package_identity_and_execute_through_checked_
         .find(|module| module.source_id() == vibra_types::STDLIB_TEXT_SOURCE_ID)
         .expect("verified text module");
     assert_eq!(module.package().name(), "vibra-stdlib");
-    assert_eq!(module.package().version(), "0.2.0");
+    assert_eq!(module.package().version(), "0.3.0");
 }
 
 #[test]

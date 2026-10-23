@@ -1,10 +1,11 @@
 //! Static and interpreter handlers for immutable Step 12 workspace snapshots.
 
 use vibra_diagnostics::Diagnostic;
+use vibra_host::HostWorld;
 use vibra_types::{Stdlib, load_stdlib};
 use vibra_workspace::{WorkspaceSnapshot, project::TargetKind};
 
-use crate::corpus::Case;
+use crate::corpus::{Case, HostWorldError};
 use crate::manifest::ConformanceOperation;
 use crate::runner::{
     CaseObservation, ExecutionObservation, HandlerError, ProfileHandler,
@@ -61,6 +62,17 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
     }
 
     fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
+        // The case's host world is validated before anything runs: a malformed
+        // document fails this case with its data diagnostics. The providers that
+        // consume a fresh copy for each backend arrive with the first host
+        // operation.
+        if let Err(diagnostics) = load_host_world(case)? {
+            return Ok(CaseObservation {
+                accepted: false,
+                diagnostics,
+                ..CaseObservation::default()
+            });
+        }
         let snapshot = match load_workspace(case)? {
             WorkspaceLoad::Snapshot(snapshot) => snapshot,
             WorkspaceLoad::Diagnostics(diagnostics) => {
@@ -143,6 +155,17 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
     }
 
     fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
+        if let Err(diagnostics) = load_host_world(case)? {
+            return Ok(CaseObservation {
+                accepted: false,
+                diagnostics,
+                interpreter: Some(ExecutionObservation {
+                    result: Some(format_test_run("@command.diagnostics", &[])),
+                    audit_trace: Vec::new(),
+                }),
+                ..CaseObservation::default()
+            });
+        }
         let snapshot = match load_workspace(case)? {
             WorkspaceLoad::Snapshot(snapshot) => snapshot,
             WorkspaceLoad::Diagnostics(diagnostics) => {
@@ -233,6 +256,19 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
             }),
             ..CaseObservation::default()
         })
+    }
+}
+
+/// Decodes the case's host world. A world that does not decode is the data
+/// diagnostics of its violation, which fail the case; a world that cannot be
+/// read is a harness failure.
+fn load_host_world(
+    case: &Case,
+) -> Result<Result<HostWorld, Vec<Diagnostic>>, HandlerError> {
+    match case.host_world() {
+        Ok(world) => Ok(Ok(world)),
+        Err(HostWorldError::Invalid(diagnostics)) => Ok(Err(diagnostics)),
+        Err(HostWorldError::Corpus(error)) => Err(HandlerError::new(error.to_string())),
     }
 }
 

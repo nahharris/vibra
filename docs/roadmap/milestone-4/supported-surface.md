@@ -115,13 +115,13 @@ merging, and report `@tool.unavailable` no longer. Step 9 lowers them to WebAsse
 | I7 | M3's G21 (G16 here): the command result for an entry that returns `err` | Step 19 |
 | I8 | Pre-M4 C16: effect rows of a `let` value, a `let-else` fallback, and a `return` operand | Step 14; landed: `V1-EFFECT-let-else-return-rows` |
 | I9 | The conformance chapter's effectful walk over `iter.next` | Step 16b |
-| I10 | The `vibra_v1` host registry of 17 rows, its versioning rule, and its checked-in snapshot (ledger D17, D19) | Step 16a; rows in Steps 16b–18 |
+| I10 | The `vibra_v1` host registry of 17 rows, its versioning rule, and its checked-in snapshot (ledger D17, D19) | Step 16a; landed, conditional on its pull request merging (the table in `vibra-ir`, the snapshot and `host_registry_snapshot_m4_step16`); rows in Steps 16b–18 |
 | I11 | The `@host` ABI: borrowed parameters, an owned result, and the seven builders (D30) | Step 16b |
-| I12 | The `@audit-trace.v1` event record and the CLI `AuditEvent` objects (D18) | Step 16a; events in Step 16b |
-| I13 | The `@host-world.v1` test world, the system provider, and the corpus `host-world` input (D20) | Step 16a; fields in Steps 16b–18 |
+| I12 | The `@audit-trace.v1` event record and the CLI `AuditEvent` objects (D18) | Step 16a; landed, conditional on its pull request merging (the event type and its VIBON and JSON codecs, `audit_events_m4_step16`); events in Step 16b |
+| I13 | The `@host-world.v1` test world, the system provider, and the corpus `host-world` input (D20) | Step 16a; landed, conditional on its pull request merging (the decoder, `WorldProvider`, `SystemProvider`, and the corpus input); fields in Steps 16b–18 |
 | I14 | Program arguments, `vibra run TARGET -- ARG...` (D22) | Step 18 |
 | I15 | `@command.program-failed` and exit code 6 (D21) | Step 19 |
 | I16 | The effect diagnostics, the witness, the indirect-call rule, and the row record (D23–D25) | Step 14; landed; target array in Step 15, landed |
-| I17 | The manifest `host` list, the `0.3.0` package, and the five effect modules (D27) | Step 16a; modules in Steps 16b–18 |
+| I17 | The manifest `host` list, the `0.3.0` package, and the five effect modules (D27) | Step 16a; landed, conditional on its pull request merging (the list, the load-time check, and `0.3.0`); modules in Steps 16b–18 |
 | I18 | The `effects` fact of the position envelope and the effect fields of the index (D28) | Step 20 |
 | I19 | The performance baseline and its CI check (D29) | Step 21 |
