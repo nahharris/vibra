@@ -116,3 +116,118 @@ arguments, user-supplied worlds for `vibra test`, replay.
 The snapshot, world, codec, manifest, and ambient-read tests pass; the architecture
 table names the new crate; the world's defaults match the runtime chapter field for
 field.
+
+## As built
+
+Landed as `landed`, conditional on its pull request merging; the base is `m4` at
+`f14aa66`, where Step 15 (PR #373) merged. Nothing here changes what a source
+program does: `@host` is still `@tool.unavailable`, no operation is reachable from
+source, and the corpus has the same 525 cases.
+
+- **Crate layout.** The 17 rows are data in `vibra-ir`
+  (`external::host`: `HOST_ROWS`, `HostRow`, `HostType`, `HostErrorType`,
+  `host_row`, `derived_registry_minor`, `registry_snapshot`, `snapshot_violations`),
+  beside the `@compiler` registry, so the emitter can read symbols and signatures
+  without the provider. The new crate `vibra-host` depends on `vibra-diagnostics`,
+  `vibra-ir`, and `vibra-syntax` (the reader's VIBON data, for the two documents it
+  owns), plus `serde_json` for the JSON form and `getrandom` for the operating
+  system's random source. Its modules are `provider`, `operation`, `world`,
+  `random`, `system`, and `event`.
+- **The traits.** `HostProvider` has one method for each row, and each answers
+  `Done<T, E>`, an `Err(Failure::Error(e))` of the row's closed enum or
+  `Err(Failure::MemoryExhausted)`, which is the host event of "Activations and
+  memory" and never a registry error. `HostValues` is the value-access trait:
+  `read_text`, `read_bytes`, `read_path`, and `read_u64` borrow a backend value, and
+  `build_void`, `build_text`, `build_bytes`, `build_i64`, `build_u64`,
+  `build_array`, `build_enum`, and `build_record` take sealed children, so a
+  backend builds bottom-up as the seven builders of the Wasm boundary require.
+  `HostCall::read` turns a symbol and its arguments into one typed call (rejecting
+  an unknown symbol, a wrong arity, and an unreadable value), `perform` runs it on a
+  provider, `build_reply` builds the `(result t e)` value, and
+  `AuditEvent::completed` builds the event from the call and the reply, so both
+  backends build the event with this one function. A reference implementation of
+  `HostValues` over a plain tree is in the host tests.
+- **The providers.** `WorldProvider::new(&HostWorld)` makes a fresh copy of a
+  decoded world: a path-resolving filesystem (`/` separators, empty and `.`
+  skipped, `..` to the parent, the root its own parent, no links), standard input
+  with a position that ends after any call, the stepped monotonic clock (`None`
+  once the `u64` range is spent), a constant wall clock, and SplitMix64.
+  `SystemProvider` is the one module of the execution crates that reads ambient
+  state; it takes the program arguments at construction and counts its monotonic
+  clock from the instant it was made.
+- **The decoder.** `HostWorld::decode(source_id, text)` reports every violation once
+  as `@data.invalid-shape` or `@data.invalid-value` at the document: a non-record,
+  an unknown or repeated field, a wrong value kind, an odd or repeated dict key (the
+  generic data reader), a wrong format atom, a mis-suffixed or out-of-range integer,
+  a NUL in a path, and a path that is both a file and a directory. The vectors for
+  seeds `0` and `1234567` are pinned.
+- **The event codec.** `AuditEvent` is `Host(HostEvent)` or `Opaque(OpaqueEvent)`.
+  `to_vibon` writes the canonical one-line record, `decode` and `from_data` read
+  one (an unknown kind keeps its fields as text; an unknown or repeated field of
+  `@host` is `@data.invalid-shape`), `to_json` and `from_json` are the CLI object
+  `{kind, op, args, result}` with `kind` as `@host`, and `trace_to_vibon` and
+  `decode_trace` are the `@audit-trace.v1` record.
+- **The manifest.** `stdlib/manifest.vibon` and `vibra-types` gain the `host` list
+  between `compiler` and `native` and the package `0.3.0` (every consumer of the
+  string was updated in place). At load, each listed symbol is a registry row, listed
+  once, and bound by a module; each `external: @host` member of a `deffect` names a
+  listed row, whose owner is `@<module>.<deffect>` and whose signature, in the
+  registry's spelling, is the one written. The reader already rejects `@host` outside
+  a `deffect` and a missing `symbol:`, so the loader keeps no second rule for them.
+  The list is empty until Step 16b adds `@std.io`.
+- **The corpus input.** `host-world` is an input of `workspace-run` and
+  `workspace-test` cases only. `Case::host_world` decodes it each time it is called
+  (a fresh copy), and both handlers decode it before anything else runs: a malformed
+  document is its data diagnostics at the document and fails its case. The decoded
+  world is not yet given to a backend; Step 16b threads a copy to each.
+- **The ambient-read test.** `ambient_reads_m4_step16` scans the source of every
+  crate except `vibra-host`, `vibra-cli`, `vibra-workspace`, and `vibra-conformance`
+  for the filesystem, environment, clock, random, and process-stream APIs, outside
+  comments and unit-test modules.
+- **The architecture table** names `vibra-host`. Its own row is `vibra-diagnostics`,
+  `vibra-ir`, and `vibra-syntax`. `vibra-interp` and `vibra-wasm-run` may depend on
+  it, and so does the harness `vibra-conformance`, which decodes a case's world and
+  will hand each backend a provider; a test holds the dependents to those three.
+  The emitter and the language phases do not.
+
+### Rulings on text the specification was silent about
+
+Written into the runtime and conformance chapters and recorded as ledger D32.2.
+
+- A path a world lists as a file and also needs as a directory (under
+  `directories`, or as an ancestor of another listed path), the root as a file, and
+  two spellings of one resolved path are `@data.invalid-value`, because every
+  ancestor of a listed path exists and a path is one entry.
+- An integer of a world carries exactly its suffix and fits its type; a missing
+  field of `clock` or `random` takes its own default.
+- A `host-world` input is a relative `.vibon` file of the case directory, outside
+  the confined tree.
+
+### Cases
+
+None added, re-expected, deleted, or downgraded. The host tests are synthetic.
+
+### Evidence
+
+- Corpus at the head: 83 reader, 283 static, 143 interpreter, and 16 tooling cases,
+  525 passed, 0 failed, 0 unavailable; the interpreter backend passes 135 and the
+  Wasm backend matches 135, 0 not lowered (the same as the base).
+- Host tests: `host_registry_snapshot_m4_step16` in `vibra-ir` (10);
+  `host_world_m4_step16` (31), `audit_events_m4_step16` (14), and
+  `system_provider_m4_step16` (8) in `vibra-host`; eight unit tests of the `host`
+  list in `vibra-types`; `host_world_corpus_m4_step16` (6),
+  `host_documents_fmt_m4_step16` (3), `ambient_reads_m4_step16` (4), and the new
+  dependent test of `architecture_boundary` in `vibra-conformance`.
+- Re-expected: the inventory of specification examples
+  (`docs/roadmap/milestone-1/syntax-examples.tsv`) follows the line shifts of the
+  edited chapters, 14 rows, only in their line numbers and the span of the two
+  sections that grew.
+
+### Left for Step 16b
+
+Everything that makes an operation reachable: `external: @host` accepted in the
+checker, the typed IR call target, `@std.io` and the manifest's first symbols, the
+`vibra_v1` imports and the seven builders in the emitter, the interpreter's and the
+runner's `HostValues`, the world and the system provider given to `run`, `test`, and
+the workspace handlers (a fresh copy for each test and each backend), the event
+appended after a completed call, and the `auditTrace` objects of the CLI.

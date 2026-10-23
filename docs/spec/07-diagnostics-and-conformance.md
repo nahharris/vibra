@@ -371,7 +371,11 @@ specification rule, not compiler module. Each case records:
   path of a `@host-world.v1` document of the runtime chapter, which supplies the
   case's standard input, files, environment, arguments, clock, and random seed.
   Without it the case runs in the default world. The document is copied fresh
-  for each test and for each backend, so a case never observes another's writes;
+  for each test and for each backend, so a case never observes another's writes.
+  The path is a relative `.vibon` file of the case directory and lies outside the
+  confined tree, which is the workspace; a document that fails to decode fails its
+  case, and only its case, with the data diagnostics at the document, each
+  reported once;
 - an optional `.vibon` `graph` snapshot path for source-graph cases; when present it
   records the canonical `@source-graph.v1` observation, so acceptance alone
   cannot hide a wrong snapshot. Its VIBON shape is one top-level `record`

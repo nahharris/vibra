@@ -107,7 +107,7 @@ the anchors of headings it renames.
 | 13 | `cargo test --locked --offline -p vibra-diagnostics -p vibra-schema -p vibra-cli`<br>`cargo test --locked --offline -p vibra-conformance --test m4_contract_inventory --test diagnostic_registry --test evidence_step11` |
 | 14 | `cargo test --locked --offline -p vibra-resolve -p vibra-types -p vibra-ir -p vibra-interp -p vibra-fmt`, then `-p vibra-workspace -p vibra-conformance`; every new executable case `matched` in `conformance/parity.tsv` |
 | 15 | `cargo test --locked --offline -p vibra-workspace -p vibra-cli -p vibra-conformance` |
-| 16a | `cargo test --locked --offline -p vibra-host -p vibra-ir -p vibra-types` and `-p vibra-conformance --test architecture_boundary`; the corpus count does not move |
+| 16a | `cargo test --locked --offline -p vibra-host -p vibra-ir -p vibra-types` and `-p vibra-conformance --test architecture_boundary --test ambient_reads_m4_step16 --test host_world_corpus_m4_step16 --test host_documents_fmt_m4_step16`; the corpus count does not move |
 | 16b–18 | `cargo test --locked --offline -p vibra-host -p vibra-ir -p vibra-interp -p vibra-wasm -p vibra-wasm-run -p vibra-cli -p vibra-schema`, the Step 4–12 row, and the registry snapshot and ambient-read tests; the Wasm backend has no `not lowered` row |
 | 19 | `cargo test --locked --offline -p vibra-cli -p vibra-workspace -p vibra-conformance`, with the process tests for exit codes 0, 3, 5, and 6 |
 | 20 | `cargo test --locked --offline -p vibra-schema -p vibra-workspace -p vibra-conformance` |
