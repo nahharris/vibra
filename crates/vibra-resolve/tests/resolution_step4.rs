@@ -714,7 +714,7 @@ fn lexical_and_lambda_label_bindings_cannot_shadow_visible_names() {
 }
 
 #[test]
-fn effect_roots_and_their_operations_resolve_with_the_visibility_of_the_root() {
+fn effect_roots_and_their_operations_resolve_with_their_own_visibility() {
     let input = ResolveInput::single_module(
         "demo",
         "1.0.0",
@@ -724,8 +724,9 @@ fn effect_roots_and_their_operations_resolve_with_the_visibility_of_the_root() {
 (defint iface (defn call () void))
 (deffect audit
   visibility: @public
-  (defn record (message str) void (do)))
+  (defn record (message str) void visibility: @public (do)))
 (deffect hidden
+  visibility: @public
   (defn record (message str) void (do)))
 (defn caller () void effects: (audit) (audit.record "x"))"#,
     );
@@ -748,7 +749,7 @@ fn effect_roots_and_their_operations_resolve_with_the_visibility_of_the_root() {
         visibility(&["audit", "record"], EntityKind::Operation),
         Public
     );
-    assert_eq!(visibility(&["hidden"], EntityKind::Effect), Private);
+    assert_eq!(visibility(&["hidden"], EntityKind::Effect), Public);
     assert_eq!(
         visibility(&["hidden", "record"], EntityKind::Operation),
         Private

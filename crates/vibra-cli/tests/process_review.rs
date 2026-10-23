@@ -164,7 +164,7 @@ fn human_test_reports_unavailable_items_and_their_diagnostics() {
     // a test that applies it is unavailable at that reference.
     project.write(
         "tests/helpers.vib",
-        "(deffect host\n  visibility: @public\n  (defn call () i32 external: @host symbol: \"audit.call\"))\n",
+        "(deffect host\n  visibility: @public\n  (defn call () i32 visibility: @public external: @host symbol: \"audit.call\"))\n",
     );
     project.write(
         "tests/t.vib",

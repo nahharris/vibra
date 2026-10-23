@@ -1,0 +1,12 @@
+id = "V1-EFFECT-public-operation-import"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "An operation is a declaration and is public only when it writes visibility: @public: a public operation of a public root is applied from another module."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true

@@ -20,5 +20,5 @@ notes = ["performs @ops.log.write via @ops.log.audit.record"]
 
   [[expect.diagnostics.related]]
   source = "src/ops/log.vib"
-  span = [171, 190]
+  span = [223, 242]
   message = "performs @ops.log.write via @ops.log.write.text"

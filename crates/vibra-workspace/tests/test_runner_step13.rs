@@ -155,7 +155,7 @@ fn unavailable_helper_is_attributed_only_to_tests_that_reference_it() {
             ("src/app/main.vib", "(defn execute () void void)\n"),
             (
                 "tests/helpers.vib",
-                "(deffect host\n  visibility: @public\n  (defn unavailable () i32 external: @host symbol: \"audit.call\"))\n",
+                "(deffect host\n  visibility: @public\n  (defn unavailable () i32 visibility: @public external: @host symbol: \"audit.call\"))\n",
             ),
             (
                 "tests/math.vib",
@@ -190,7 +190,7 @@ fn unsupported_test_form_is_unavailable_at_its_reference() {
             ("src/app/main.vib", "(defn execute () void void)\n"),
             (
                 "tests/helpers.vib",
-                "(deffect host\n  visibility: @public\n  (defn call () i32 external: @host symbol: \"audit.call\"))\n",
+                "(deffect host\n  visibility: @public\n  (defn call () i32 visibility: @public external: @host symbol: \"audit.call\"))\n",
             ),
             (
                 "tests/math.vib",

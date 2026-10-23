@@ -1479,11 +1479,6 @@ impl Resolution {
                         EntityKind::Operation,
                         source_id,
                     );
-                    // An operation is exactly as visible as the root that
-                    // owns it, as a contract member is as its interface.
-                    if let Some(work) = self.declarations.last_mut() {
-                        work.declaration.visibility = visibility;
-                    }
                 }
             }
             Declaration::Def(_) | Declaration::Defn(_) | Declaration::Test(_) => {}

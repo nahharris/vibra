@@ -52,16 +52,22 @@ root that owns it:
 (deffect read
   visibility: @public
   (defn file (at path) (result bytes fs-error)
+    visibility: @public
     external: @host
     symbol: "fs.read-file")
   (defn text (at path) (result str fs-error)
+    visibility: @public
     external: @host
     symbol: "fs.read-text"))
 ```
 
 When this declaration belongs to module `fs`, its source root is `fs.read` and
 its operations are `fs.read.file` and `fs.read.text`. The defining package and
-module, not an import alias, form the canonical identity.
+module, not an import alias, form the canonical identity. An operation is a
+declaration with its own visibility: as for a `deftype` method, it is private
+unless it writes `visibility: @public`, whatever the visibility of its root.
+Another module applies an operation only when the operation is public, and names
+a root in a row only when the root is public.
 
 The parameter is spelled `at` and not `path` because a lexical binder may not
 repeat a name the module declares (`@name.redeclaration`), and the module `fs`
@@ -202,6 +208,7 @@ discharges an additive root. Given module `app` with `(import fs @std.fs)`:
 (deffect audit
   visibility: @public
   (defn record (target fs.path event str) (result void fs.fs-error)
+    visibility: @public
     effects: (fs.write)
     (fs.write.text target event)))
 
