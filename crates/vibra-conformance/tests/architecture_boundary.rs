@@ -45,7 +45,12 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // It calls the toolchain-owned native code directly, over its own values.
     (
         "vibra-interp",
-        &["vibra-diagnostics", "vibra-ir", "vibra-native"],
+        &[
+            "vibra-diagnostics",
+            "vibra-host",
+            "vibra-ir",
+            "vibra-native",
+        ],
     ),
     // Consumes the reader's tree; nothing in the language depends on it.
     ("vibra-fmt", &["vibra-diagnostics", "vibra-syntax"]),
@@ -95,11 +100,26 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // no engine and no emitter: it reads the closed table of native imports and
     // the shape of an arena object recorded in `vibra-ir`.
     ("vibra-native", &["vibra-ir"]),
+    // The host provider: the provider trait, the system provider, the in-memory
+    // host world, and the audit event (Milestone 4, Step 16a). It reads the
+    // closed host registry of `vibra-ir`, and the reader's VIBON data for the
+    // two documents it owns, the world and the event. It reaches no engine, no
+    // emitter, and no checker. The reference interpreter and the runner call it;
+    // the harness decodes a case's world and hands each backend a fresh provider.
+    // The emitter never depends on it: a module names a host operation only by
+    // the symbol and signature recorded in `vibra-ir`.
+    (
+        "vibra-host",
+        &["vibra-diagnostics", "vibra-ir", "vibra-syntax"],
+    ),
     // The runner is the only crate that depends on the engine. It reads the
     // boundary names and codes recorded in `vibra-ir`, and it supplies the
     // imports of the native-code crate over the instance memory. It
     // does not depend on the emitter: the harness joins them.
-    ("vibra-wasm-run", &["vibra-ir", "vibra-native"]),
+    (
+        "vibra-wasm-run",
+        &["vibra-host", "vibra-ir", "vibra-native"],
+    ),
     // The harness. Legitimately sits above every node.
     (
         "vibra-conformance",
@@ -112,6 +132,7 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-wasm",
             "vibra-wasm-run",
             "vibra-workspace",
+            "vibra-host",
             "vibra-interp",
             "vibra-ir",
             "vibra-types",
@@ -467,6 +488,52 @@ fn only_the_two_backends_run_the_native_code_and_it_reaches_neither_the_engine_n
             assert!(
                 !all_dependencies(&manifest).contains(ENGINE),
                 "the native code has no engine dependency"
+            );
+        }
+    }
+}
+
+/// The host provider crate. The reference interpreter and the runner may call it,
+/// and the harness depends on it to decode a case's host world and hand each
+/// backend a fresh provider. The emitter and the language phases never do: a
+/// module names a host operation only by the registry symbol and signature that
+/// `vibra-ir` records.
+const HOST_CRATE: &str = "vibra-host";
+
+#[test]
+fn only_the_backends_and_the_harness_depend_on_the_host_provider() {
+    let graph = workspace_graph(&workspace_root());
+    let dependents = graph
+        .iter()
+        .filter(|(_, edges)| edges.contains(HOST_CRATE))
+        .map(|(name, _)| name.as_str())
+        .collect::<BTreeSet<_>>();
+    let permitted =
+        BTreeSet::from(["vibra-conformance", "vibra-interp", "vibra-wasm-run"]);
+    assert!(
+        dependents.is_subset(&permitted),
+        "{dependents:?} depend on `{HOST_CRATE}`; only {permitted:?} may"
+    );
+    let own = graph.get(HOST_CRATE).expect("the host crate exists");
+    assert_eq!(
+        own,
+        &BTreeSet::from([
+            "vibra-diagnostics".to_owned(),
+            "vibra-ir".to_owned(),
+            "vibra-syntax".to_owned()
+        ]),
+        "the host provider reads the registry and the reader's data and nothing above them"
+    );
+    for (_, manifest) in crate_manifests(&workspace_root()) {
+        let is_host = manifest
+            .get("package")
+            .and_then(|package| package.get("name"))
+            .and_then(toml::Value::as_str)
+            == Some(HOST_CRATE);
+        if is_host {
+            assert!(
+                !all_dependencies(&manifest).contains(ENGINE),
+                "the host provider has no engine dependency"
             );
         }
     }

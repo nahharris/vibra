@@ -207,7 +207,10 @@ fn an_added_row_passes_only_with_a_greater_since() {
     assert_eq!(violations.len(), 1, "{violations:?}");
     assert!(violations[0].contains("fs.append-file"), "{violations:?}");
 
-    let head = same_minor.trim_end().strip_suffix("since 0").expect("last row");
+    let head = same_minor
+        .trim_end()
+        .strip_suffix("since 0")
+        .expect("last row");
     let next_minor = format!("{head}since 1\n");
     assert_eq!(
         snapshot_violations(SNAPSHOT, &next_minor),

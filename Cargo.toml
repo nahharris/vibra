@@ -15,6 +15,7 @@ publish = false
 vibra-conformance = { path = "crates/vibra-conformance" }
 vibra-diagnostics = { path = "crates/vibra-diagnostics" }
 vibra-fmt = { path = "crates/vibra-fmt" }
+vibra-host = { path = "crates/vibra-host" }
 vibra-interp = { path = "crates/vibra-interp" }
 vibra-ir = { path = "crates/vibra-ir" }
 vibra-native = { path = "crates/vibra-native" }
@@ -32,6 +33,10 @@ serde_json = "1"
 jsonschema = { version = "0.35", default-features = false }
 sha2 = "0.10"
 rustix = { version = "1.1.4", features = ["fs"] }
+# The operating system's random source, read only by the system provider of
+# `vibra-host` (milestone 4, Step 16a). It is already in the lock file through
+# the engine's dependencies.
+getrandom = "0.3"
 
 # The WebAssembly backend (milestone 4, Step 4). The engine is Wasmtime with
 # Cranelift only, and only `vibra-wasm-run` may depend on it. `wasm-encoder`
