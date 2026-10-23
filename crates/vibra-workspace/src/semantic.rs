@@ -253,6 +253,8 @@ fn check_resolved_scope(
     mut diagnostics: Vec<Diagnostic>,
 ) -> WorkspaceCheckResult {
     let (units, source_ids) = import_closure(resolved, initial_units, verification);
+    // The atoms of the target slots of `project.vibon` that the selected
+    // units own: the entry and each atom of the `effects` array.
     let entry_spans = resolved
         .entries()
         .iter()
@@ -264,6 +266,19 @@ fn check_resolved_scope(
                 entry.span().end(),
             )
         })
+        .chain(
+            resolved
+                .target_effects()
+                .iter()
+                .filter(|effect| units.contains(effect.unit()))
+                .map(|effect| {
+                    (
+                        effect.source_id().to_owned(),
+                        effect.span().start(),
+                        effect.span().end(),
+                    )
+                }),
+        )
         .collect::<BTreeSet<_>>();
     let missing_bootstrap_spans = if verification.is_none() {
         resolved

@@ -301,6 +301,17 @@ because the typed `project.vibon` schema declares that role for this field;
 other atoms in VIBON remain data values. An empty array permits only an
 effect-free entry graph.
 
+An atom is resolved exactly as the atom of an `entry:` value is: its first
+component names a unit, the longest module prefix is taken, and the rest names
+a declaration. The project document is a privileged referrer, so it creates no
+import edge and may name a root that is not `@public`, and the reserved
+`@tests` and `@std.builtin` paths are not nameable from it, as from any module
+that is not a test. The atom is written in its canonical form, never through an
+import alias, because `project.vibon` has no imports. The roots of a target
+array are a set: the formatter writes them in the canonical order of their
+identities, as it does for a written row, and the order in which an author lists
+them has no meaning.
+
 An atom that names nothing, or an entity of another kind, is rejected by the
 ordinary resolution diagnostics at the atom's span, not by a project code of its
 own: `@module.unknown-path` or `@name.unknown-symbol` when the path resolves to
@@ -333,13 +344,27 @@ local reasoning exactly as an unused root of a ceiling does, so it is the warnin
 `@contract.unused-effect` at that atom. A root of the performed row that the
 array omits is `@effect.outside-ceiling`, whose primary span is the entry's
 `entry:` reference in `project.vibon` and whose related spans are the witness of
-that root from the entry declaration.
+that root from the entry declaration. The `entry:` value is not a call site, so
+it is not itself a hop: every hop of the witness, the first included, is a
+related span with the source identity of its own module, in the order of the
+chain and noted `performs <root> via <callee>`, and the primary span carries no
+note. One diagnostic is emitted for each omitted root, in the canonical order of
+the roots. An array atom that failed to resolve names no root, so a root that
+only that atom meant to name is omitted from the array and reported here as
+well.
+
+Admission and the ceiling of the entry are independent facts of one computed
+row. An entry whose performed row exceeds its own written ceiling is reported at
+its call sites by the rule of the witness section, and a root that is also
+absent from the array is reported again at the `entry:` value, since the two
+sets of consent are separate.
 
 An effectful test writes its complete `effects:` row. Selecting and running
-that test is consent to those roots under the same blanket semantics. A pure
-test may omit the row. Library targets are not execution entries and do not
-declare a target effect array; their public function ceilings report their
-requirements to consumers.
+that test is consent to those roots under the same blanket semantics: the test
+is checked against its own row like any ceiling and no target array takes part,
+since a test is not the entry of a target. A pure test may omit the row. Library
+targets are not execution entries and do not declare a target effect array;
+their public function ceilings report their requirements to consumers.
 
 ## V1 standard effect inventory
 

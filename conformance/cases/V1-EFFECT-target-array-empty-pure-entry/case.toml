@@ -1,0 +1,12 @@
+id = "V1-EFFECT-target-array-empty-pure-entry"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "An empty array and a pure entry that calls an effect-free function of another module: nothing is performed, so the target is admitted without a diagnostic."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true

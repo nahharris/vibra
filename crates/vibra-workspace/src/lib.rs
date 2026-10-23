@@ -199,7 +199,20 @@ impl WorkspaceSnapshot {
                         )
                     })
                     .collect();
+                let effects = target
+                    .and_then(|target| target.effects())
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|atom| {
+                        vibra_resolve::ReferencePath::new(
+                            atom.atom().segments().iter().cloned(),
+                            atom.origin().source_id().to_owned(),
+                            atom.span(),
+                        )
+                    })
+                    .collect();
                 vibra_resolve::SourceUnit::new(unit.name(), kind, entry, modules)
+                    .with_effects(effects)
             })
             .collect();
         let input = vibra_resolve::ResolveInput::new(

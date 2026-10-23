@@ -73,9 +73,22 @@ pub(crate) fn check(
     globals: &[Option<CheckedGlobal>],
     headers: &[crate::FunctionHeader],
     types: &TypeNames,
+    entries: &[EntryConsent],
 ) -> Vec<Diagnostic> {
     let graph = Graph::build(functions, globals, headers);
-    graph.diagnostics(types)
+    graph.diagnostics(types, entries)
+}
+
+/// The consent of one binary target, to be admitted against the performed
+/// row of its entry (`docs/spec/03-effects.md`, "Target consent").
+pub(crate) struct EntryConsent {
+    /// The index of the entry declaration in the checked functions.
+    pub(crate) function: usize,
+    /// The project document and span of the `entry:` value.
+    pub(crate) source_id: String,
+    pub(crate) span: ByteSpan,
+    /// The roots of the target `effects` array and the span of each atom.
+    pub(crate) array: Vec<(EffectRoot, ByteSpan)>,
 }
 
 struct Graph<'a> {
@@ -289,7 +302,11 @@ impl<'a> Graph<'a> {
         }
     }
 
-    fn diagnostics(&self, types: &TypeNames) -> Vec<Diagnostic> {
+    fn diagnostics(
+        &self,
+        types: &TypeNames,
+        entries: &[EntryConsent],
+    ) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
         let mut seen = BTreeSet::new();
         let mut distances = BTreeMap::<EffectRoot, Distances>::new();
@@ -333,6 +350,7 @@ impl<'a> Graph<'a> {
                 }
             }
         }
+        self.admit(entries, &mut diagnostics, &mut distances);
         // Source order, as every other checker diagnostic is reported. The
         // sort is stable, so the diagnostics of one function that share a
         // primary span keep the canonical order of their roots.
@@ -351,6 +369,69 @@ impl<'a> Graph<'a> {
                 ))
         });
         diagnostics
+    }
+
+    /// Admits each binary target: the performed row of its entry must be
+    /// contained in the target array, one `@effect.outside-ceiling` for each
+    /// root the array omits, at the `entry:` value with the witness of the
+    /// root as related spans; and a root of the array that the entry never
+    /// performs is the warning `@contract.unused-effect` at its atom.
+    fn admit(
+        &self,
+        entries: &[EntryConsent],
+        diagnostics: &mut Vec<Diagnostic>,
+        distances: &mut BTreeMap<EffectRoot, Distances>,
+    ) {
+        for entry in entries {
+            let Some(performed) = self.performed.get(entry.function) else {
+                continue;
+            };
+            let array =
+                EffectRow::new(entry.array.iter().map(|(root, _)| root.clone()));
+            for root in performed.difference(&array) {
+                let distance = distances
+                    .entry(root.clone())
+                    .or_insert_with(|| self.distances(&root));
+                let hops = self.witness(entry.function, &root, distance);
+                let atom = root.atom();
+                let mut diagnostic = Diagnostic::new(
+                    DiagnosticCode::EffectOutsideCeiling,
+                    entry.span,
+                    format!(
+                        "the entry performs {atom}, which the target `effects` array does not contain"
+                    ),
+                )
+                .with_source_id(entry.source_id.clone());
+                for site in hops {
+                    diagnostic = diagnostic.with_related_source(
+                        site.origin.source_id(),
+                        site.origin.span(),
+                        format!("performs {atom} via {}", self.describe(&site.callee)),
+                    );
+                }
+                diagnostics.push(diagnostic);
+            }
+            // A body that reaches a function which did not check may still
+            // perform the root there.
+            if self.partial.get(entry.function).copied().unwrap_or(false) {
+                continue;
+            }
+            for (root, span) in &entry.array {
+                if !performed.contains(root) {
+                    diagnostics.push(
+                        Diagnostic::new(
+                            DiagnosticCode::ContractUnusedEffect,
+                            *span,
+                            format!(
+                                "{} is in the target `effects` array but the entry never performs it",
+                                root.atom()
+                            ),
+                        )
+                        .with_source_id(entry.source_id.clone()),
+                    );
+                }
+            }
+        }
     }
 
     /// The sites of `node` whose callee's complete row contains `root`, in
@@ -481,6 +562,18 @@ impl<'a> Graph<'a> {
         distances: &Distances,
     ) -> Diagnostic {
         let atom = root.atom();
+        let hops = self.witness(node, root, distances);
+        self.outside_ceiling_with(node, &atom, &hops)
+    }
+
+    /// The chain of call sites that carries `root` from the body of `node`
+    /// down to the declaration that introduces it.
+    fn witness<'g>(
+        &'g self,
+        node: usize,
+        root: &'g EffectRoot,
+        distances: &Distances,
+    ) -> Vec<&'g Site> {
         let mut hops = Vec::<&Site>::new();
         let mut current = node;
         let mut first = true;
@@ -506,6 +599,15 @@ impl<'a> Graph<'a> {
             };
             current = callee;
         }
+        hops
+    }
+
+    fn outside_ceiling_with(
+        &self,
+        node: usize,
+        atom: &str,
+        hops: &[&Site],
+    ) -> Diagnostic {
         let owner = self.nodes.get(node);
         let source_id = owner.map_or("", |owner| owner.origin.source_id());
         let span = hops.first().map_or_else(

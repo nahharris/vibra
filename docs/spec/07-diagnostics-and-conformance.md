@@ -300,7 +300,7 @@ half-open UTF-8 range with the owning source identity:
 | root listed twice in one written row of a `defn`, `lambda`, function type, test, or operation | `@effect.duplicate-root` | the second entry | the first entry |
 | binary target with no `effects` field | `@data.invalid-shape` | the target record | none |
 | root of a target `effects` array that the entry's performed row does not contain | `@contract.unused-effect` (`@warning`) | the atom | none |
-| root of the entry's performed row that the target `effects` array omits | `@effect.outside-ceiling` | the `entry:` value in `project.vibon` | the witness of the effects chapter |
+| root of the entry's performed row that the target `effects` array omits | `@effect.outside-ceiling` | the `entry:` value in `project.vibon`, one diagnostic for each omitted root | every hop of the witness, the first included, each noted `performs <root> via <callee>` |
 | performed root missing from a function, `lambda`, operation, or test ceiling | `@effect.outside-ceiling` | the first call site, one diagnostic for each offending function and missing root | the remaining hops of the witness, each noted `performs <root> via <callee>` |
 | entry in a row that is an atom, or a symbol that resolves to no effect root | `@effect.invalid-reference` | the entry | none |
 | `external: @host` on anything but a member of a `deffect` | `@syntax.invalid-attribute` | the `external:` attribute | none |

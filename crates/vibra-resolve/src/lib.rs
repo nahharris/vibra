@@ -179,6 +179,7 @@ pub struct SourceUnit {
     name: String,
     kind: TargetKind,
     entry: Option<ReferencePath>,
+    effects: Vec<ReferencePath>,
     modules: Vec<SourceModule>,
 }
 
@@ -195,8 +196,16 @@ impl SourceUnit {
             name: name.into(),
             kind,
             entry,
+            effects: Vec::new(),
             modules,
         }
+    }
+
+    /// Sets the effect roots a binary target's `effects` array names.
+    #[must_use]
+    pub fn with_effects(mut self, effects: Vec<ReferencePath>) -> Self {
+        self.effects = effects;
+        self
     }
 
     /// Creates a binary unit from a dotted entry spelling.
@@ -234,6 +243,12 @@ impl SourceUnit {
     #[must_use]
     pub const fn entry(&self) -> Option<&ReferencePath> {
         self.entry.as_ref()
+    }
+
+    /// Effect roots of the target `effects` array, in written order.
+    #[must_use]
+    pub fn effects(&self) -> &[ReferencePath] {
+        &self.effects
     }
 
     /// Modules in this unit.
@@ -729,6 +744,7 @@ pub struct ResolvedSnapshot {
     modules: Vec<ModuleRecord>,
     declarations: Vec<ResolvedDeclaration>,
     entries: Vec<ResolvedEntry>,
+    target_effects: Vec<ResolvedTargetEffect>,
     imports: Vec<ResolvedImport>,
     references: Vec<ResolvedReference>,
     diagnostics: Vec<Diagnostic>,
@@ -765,6 +781,12 @@ impl ResolvedSnapshot {
     #[must_use]
     pub fn entries(&self) -> &[ResolvedEntry] {
         &self.entries
+    }
+
+    /// The atoms of each binary target's `effects` array, in written order.
+    #[must_use]
+    pub fn target_effects(&self) -> &[ResolvedTargetEffect] {
+        &self.target_effects
     }
 
     /// Import edges in deterministic source order.
@@ -945,6 +967,43 @@ impl ResolvedEntry {
     }
 }
 
+/// One atom of a binary target's `effects` array after atom-path resolution.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedTargetEffect {
+    unit: String,
+    source_id: String,
+    span: ByteSpan,
+    root: Option<DeclarationId>,
+}
+
+impl ResolvedTargetEffect {
+    /// Binary target unit whose array holds this atom.
+    #[must_use]
+    pub fn unit(&self) -> &str {
+        &self.unit
+    }
+
+    /// Project document that contains the atom.
+    #[must_use]
+    pub fn source_id(&self) -> &str {
+        &self.source_id
+    }
+
+    /// Half-open span of the atom.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+
+    /// The canonical identity of the effect root the atom names, or `None`
+    /// when the atom was reported as a diagnostic: it resolves to no effect
+    /// root, or repeats a root listed before it.
+    #[must_use]
+    pub const fn root(&self) -> Option<&DeclarationId> {
+        self.root.as_ref()
+    }
+}
+
 /// Stateless resolver over one explicit input snapshot.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Resolver;
@@ -1003,6 +1062,7 @@ struct Resolution {
     declarations: Vec<DeclarationWork>,
     declaration_indexes: BTreeMap<(ModuleKey, Vec<String>), usize>,
     entries: Vec<ResolvedEntry>,
+    target_effects: Vec<ResolvedTargetEffect>,
     imports: Vec<(ModuleKey, ImportWork)>,
     imports_by_module: BTreeMap<ModuleKey, Vec<usize>>,
     references: Vec<ResolvedReference>,
@@ -1019,6 +1079,7 @@ impl Resolution {
             declarations: Vec::new(),
             declaration_indexes: BTreeMap::new(),
             entries: Vec::new(),
+            target_effects: Vec::new(),
             imports: Vec::new(),
             imports_by_module: BTreeMap::new(),
             references: Vec::new(),
@@ -1032,6 +1093,7 @@ impl Resolution {
         self.resolve_imports();
         self.check_import_cycles();
         self.resolve_entries();
+        self.resolve_target_effects();
         self.resolve_bodies();
 
         self.diagnostics.sort_by_key(diagnostic_key);
@@ -1098,11 +1160,13 @@ impl Resolution {
             })
             .collect::<Vec<_>>();
         let entries = self.entries;
+        let target_effects = self.target_effects;
         ResolvedSnapshot {
             package: self.input.package,
             modules,
             declarations,
             entries,
+            target_effects,
             imports,
             references: self.references,
             diagnostics: self.diagnostics,
@@ -2115,6 +2179,173 @@ impl Resolution {
                 );
             }
         }
+    }
+
+    /// Resolves each atom of every target `effects` array to one canonical
+    /// effect root. The project document is a privileged referrer, like the
+    /// entry, so a private root may be named. A bad atom is reported at its
+    /// span and does not stop the other atoms or the other targets.
+    fn resolve_target_effects(&mut self) {
+        for unit_index in 0..self.input.units.len() {
+            let Some(unit) = self.input.units.get(unit_index) else {
+                continue;
+            };
+            let name = unit.name.clone();
+            let atoms = unit.effects.clone();
+            let mut seen = Vec::<(DeclarationId, String, ByteSpan)>::new();
+            for atom in atoms {
+                let id = match self.resolve_effect_atom(&atom) {
+                    Ok(id) => id,
+                    Err(diagnostic) => {
+                        self.diagnostics.push(*diagnostic);
+                        self.target_effects.push(ResolvedTargetEffect {
+                            unit: name.clone(),
+                            source_id: atom.source_id,
+                            span: atom.span,
+                            root: None,
+                        });
+                        continue;
+                    }
+                };
+                if let Some((_, first_source, first_span)) =
+                    seen.iter().find(|(existing, ..)| *existing == id)
+                {
+                    self.diagnostics.push(
+                        Diagnostic::new(
+                            DiagnosticCode::EffectDuplicateRoot,
+                            atom.span,
+                            "this effect root is already listed in the target `effects` array",
+                        )
+                        .with_source_id(atom.source_id.clone())
+                        .with_related_source(
+                            first_source.clone(),
+                            *first_span,
+                            "the root is first listed here",
+                        ),
+                    );
+                    self.target_effects.push(ResolvedTargetEffect {
+                        unit: name.clone(),
+                        source_id: atom.source_id,
+                        span: atom.span,
+                        root: None,
+                    });
+                    continue;
+                }
+                seen.push((id.clone(), atom.source_id.clone(), atom.span));
+                self.target_effects.push(ResolvedTargetEffect {
+                    unit: name.clone(),
+                    source_id: atom.source_id,
+                    span: atom.span,
+                    root: Some(id),
+                });
+            }
+        }
+    }
+
+    fn resolve_effect_atom(
+        &self,
+        atom: &ReferencePath,
+    ) -> Result<DeclarationId, Box<Diagnostic>> {
+        let fail = |code: DiagnosticCode, message: &str| {
+            Box::new(
+                Diagnostic::new(code, atom.span, message)
+                    .with_source_id(atom.source_id.clone()),
+            )
+        };
+        let Some(unit) = atom.segments.first() else {
+            return Err(fail(
+                DiagnosticCode::ModuleUnknownPath,
+                "effect root does not resolve to a source module",
+            ));
+        };
+        let path = atom.segments.iter().skip(1).cloned().collect::<Vec<_>>();
+        let builtin =
+            unit == "std" && path.first().is_some_and(|name| name == "builtin");
+        if unit == "tests" || builtin {
+            return Err(fail(
+                DiagnosticCode::ModuleUnknownPath,
+                if builtin {
+                    "`@std.builtin` declares no effect root"
+                } else {
+                    "the reserved `@tests` unit is importable only from test modules"
+                },
+            ));
+        }
+        let overlay_package = self
+            .input
+            .overlay
+            .as_ref()
+            .filter(|overlay| {
+                overlay.modules.iter().any(|module| {
+                    module.unit == *unit && path.starts_with(&module.segments)
+                })
+            })
+            .map(|overlay| overlay.package.clone());
+        let reserved = self.input.reserved_import_paths.iter().any(
+            |(reserved_unit, reserved_segments)| {
+                reserved_unit == unit && path.starts_with(reserved_segments)
+            },
+        );
+        let package = match overlay_package {
+            Some(package) => package,
+            None if reserved => {
+                return Err(fail(
+                    DiagnosticCode::ModuleUnknownPath,
+                    "reserved path requires its verified package overlay",
+                ));
+            }
+            None => self.input.package.clone(),
+        };
+        let Some(module_len) = self.longest_module_prefix(&package, unit, &path) else {
+            return Err(fail(
+                DiagnosticCode::ModuleUnknownPath,
+                "effect root does not resolve to a source module",
+            ));
+        };
+        let (Some(module_segments), Some(declaration_segments)) =
+            (path.get(..module_len), path.get(module_len..))
+        else {
+            return Err(fail(
+                DiagnosticCode::ModuleUnknownPath,
+                "effect root does not resolve to a source module",
+            ));
+        };
+        let module = ModuleKey {
+            package,
+            unit: unit.clone(),
+            segments: module_segments.to_vec(),
+        };
+        if declaration_segments.is_empty() {
+            return Err(fail(
+                DiagnosticCode::NameWrongEntityKind,
+                "the target `effects` array names a module, not an effect root",
+            ));
+        }
+        let Some(work) = self
+            .declaration_indexes
+            .get(&(module, declaration_segments.to_vec()))
+            .and_then(|index| self.declarations.get(*index))
+        else {
+            return Err(fail(
+                DiagnosticCode::NameUnknownSymbol,
+                "effect root does not resolve to a declaration",
+            ));
+        };
+        let id = &work.declaration.id;
+        if id.kind() != EntityKind::Effect || id.path().len() != 1 {
+            return Err(Box::new(
+                Diagnostic::new(
+                    DiagnosticCode::NameWrongEntityKind,
+                    atom.span,
+                    format!(
+                        "the target `effects` array names a {}, not an effect root",
+                        id.kind().as_str()
+                    ),
+                )
+                .with_source_id(atom.source_id.clone()),
+            ));
+        }
+        Ok(id.clone())
     }
 
     fn resolve_bodies(&mut self) {

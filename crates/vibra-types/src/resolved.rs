@@ -1184,11 +1184,45 @@ pub fn check_resolved(
     }
 
     // Performed rows close over the whole graph of the selected modules.
+    // Each binary target whose entry is checked here is admitted against its
+    // `effects` array.
+    let mut consents = Vec::new();
+    for entry in snapshot.entries() {
+        let Some(declaration) = entry.declaration() else {
+            continue;
+        };
+        let Some(function) = function_indices.get(declaration).copied() else {
+            continue;
+        };
+        consents.push(crate::effects::EntryConsent {
+            function,
+            source_id: entry.source_id().to_owned(),
+            span: entry.span(),
+            array: snapshot
+                .target_effects()
+                .iter()
+                .filter(|effect| effect.unit() == entry.unit())
+                .filter_map(|effect| {
+                    let id = effect.root()?;
+                    let path = std::iter::once(id.unit())
+                        .chain(id.module().iter().map(String::as_str))
+                        .chain(id.path().iter().map(String::as_str))
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    Some((
+                        vibra_ir::EffectRoot::new(id.canonical(), path),
+                        effect.span(),
+                    ))
+                })
+                .collect(),
+        });
+    }
     diagnostics.extend(crate::effects::check(
         &checked_functions,
         &checked_globals,
         &functions,
         &types,
+        &consents,
     ));
 
     let can_build_unavailable_stubs = diagnostics.iter().all(|diagnostic| {

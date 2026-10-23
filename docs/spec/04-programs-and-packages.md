@@ -548,9 +548,10 @@ test-only prelude or private-access exception exists.
 The full v1 test language permits declared effect ceilings. Since Milestone 4
 Step 14 a test is checked against its written ceiling like a function, an
 omitted `effects:` is empty, and a test whose ceiling holds only operations with
-Vibra bodies runs. Test selection does not yet grant effect consent for a host
-root, which Milestone 4 Step 15 implements, and a test cannot add
-effects to a test declaration.
+Vibra bodies runs. Selecting and running a test is consent to the roots of its written row, with no
+target array involved, and a test cannot add effects to a test declaration. An
+effectful test runs in the default host world of the runtime chapter, which
+provides no host operation to call until the standard effect modules exist.
 
 ### M2 assertion contract
 
