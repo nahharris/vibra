@@ -93,6 +93,11 @@ pub struct CaseInputs {
     pub data: Vec<String>,
     /// Optional confined directory tree acquired by source-graph cases.
     pub tree: Option<String>,
+    /// For `workspace-run` and `workspace-test`, the path of a
+    /// `@host-world.v1` document that supplies the case's host world. It is
+    /// copied fresh for each test and each backend; without it a case runs in
+    /// the default world.
+    pub host_world: Option<String>,
 }
 
 /// The closed operation selected by a conformance case.
@@ -372,6 +377,7 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             project: raw.inputs.project,
             data: raw.inputs.data,
             tree: raw.inputs.tree,
+            host_world: raw.inputs.host_world,
         };
         let operation = decode_operation(raw.operation.as_deref(), profile, &inputs)?;
 
@@ -691,7 +697,52 @@ fn decode_operation(
             )));
         }
     }
+    if let Some(world) = inputs.host_world.as_deref() {
+        validate_host_world_input(operation, world, inputs.tree.as_deref())?;
+    }
     Ok(operation)
+}
+
+/// A `host-world` input belongs to `workspace-run` and `workspace-test`, which
+/// run a program; `interpret` is pure and has no host world. It is a relative
+/// `.vibon` file of the case directory, outside the confined tree, which is the
+/// workspace and holds no world.
+fn validate_host_world_input(
+    operation: ConformanceOperation,
+    world: &str,
+    tree: Option<&str>,
+) -> Result<(), ManifestError> {
+    if !matches!(
+        operation,
+        ConformanceOperation::WorkspaceRun | ConformanceOperation::WorkspaceTest
+    ) {
+        return Err(ManifestError::Invalid(format!(
+            "{operation} cases take no host-world input: only workspace-run and \
+             workspace-test run in a host world"
+        )));
+    }
+    let path = Path::new(world);
+    if world.is_empty()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+        || path.extension().and_then(|extension| extension.to_str()) != Some("vibon")
+    {
+        return Err(ManifestError::Invalid(format!(
+            "host-world input `{world}` must be a relative `.vibon` file of the case"
+        )));
+    }
+    if tree.is_some_and(|tree| world.starts_with(&format!("{tree}/"))) {
+        return Err(ManifestError::Invalid(format!(
+            "host-world input `{world}` must not be inside the confined tree"
+        )));
+    }
+    Ok(())
 }
 
 fn is_declared_input(inputs: &CaseInputs, source_id: &str) -> bool {
@@ -704,6 +755,10 @@ fn is_declared_input(inputs: &CaseInputs, source_id: &str) -> bool {
             .as_deref()
             .is_some_and(|input| input == source_id)
         || inputs.data.iter().any(|input| input == source_id)
+        || inputs
+            .host_world
+            .as_deref()
+            .is_some_and(|input| input == source_id)
         || inputs.tree.as_deref().is_some_and(|tree| {
             source_id == tree
                 || source_id
@@ -1011,6 +1066,8 @@ pub(crate) struct RawInputs {
     pub(crate) data: Vec<String>,
     #[serde(default)]
     pub(crate) tree: Option<String>,
+    #[serde(default, rename = "host-world")]
+    pub(crate) host_world: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]

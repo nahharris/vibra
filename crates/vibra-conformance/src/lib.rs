@@ -46,7 +46,7 @@ mod workspace_query;
 mod workspace_semantic;
 
 pub use corpus::{
-    Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError,
+    Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError, HostWorldError,
     PARITY_INVENTORY_FILE_NAME,
 };
 pub use format::ToolingV1FormatHandler;

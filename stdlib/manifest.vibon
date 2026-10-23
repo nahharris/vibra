@@ -1,7 +1,7 @@
 (record
   format: @stdlib-manifest.v1
   package-name: "vibra-stdlib"
-  package-version: "0.2.0"
+  package-version: "0.3.0"
   modules: (dict
     @std.core (record
       path: "std/core.vib"
@@ -217,6 +217,7 @@
     "f64.parse"
     "char.to-u32"
     "char.from-u32")
+  host: (array)
   native: (array "array.of" "array.fold" "dict.of" "bytes.length" "bytes.concat" "bytes.equal" "bytes.compare" "bytes.slice" "bytes.to-array" "bytes.from-array" "text.concat" "text.length" "text.equal" "text.compare" "text.slice" "text.to-chars" "text.from-chars" "text.to-utf8" "text.from-utf8")
   assertions: (array
     "assert.true"

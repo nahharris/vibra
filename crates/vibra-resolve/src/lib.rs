@@ -3334,11 +3334,11 @@ fn parse_module(
 }
 
 /// The identity of a builtin type's static method, declared by the embedded
-/// `@std.builtin` module of `vibra-stdlib@0.2.0`.
+/// `@std.builtin` module of `vibra-stdlib@0.3.0`.
 #[must_use]
 pub fn builtin_member_id(type_name: &str, member: &str) -> DeclarationId {
     DeclarationId::with_package(
-        &PackageId::new("vibra-stdlib", "0.2.0"),
+        &PackageId::new("vibra-stdlib", "0.3.0"),
         "std",
         ["builtin"],
         [type_name.to_owned(), member.to_owned()],

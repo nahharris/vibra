@@ -162,18 +162,15 @@ impl Decoder<'_> {
             return None;
         };
         let mut found = Fields::new();
-        let mut valid = true;
         for field in fields {
             let label = field.label().value();
             if !allowed.contains(&label) {
                 self.shape(field.value(), &format!("unknown {what} field `{label}`"));
-                valid = false;
             } else if found.insert(label, field.value()).is_some() {
                 self.shape(field.value(), &format!("repeated {what} field `{label}`"));
-                valid = false;
             }
         }
-        valid.then_some(found)
+        Some(found)
     }
 
     fn world(&mut self, root: &DataNode) -> Option<HostWorld> {
