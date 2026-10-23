@@ -144,9 +144,8 @@ checker; the unavailable cases are replaced, not deleted.
 ## As built
 
 Landed as `landed`, conditional on its pull request merging; the base is Step 13
-(PR #371, branch `claude/m4-step-13-stage-4b-contracts`, head `d145504`), which had
-not merged when this step was written. The step is one pull request over the
-crates below.
+(PR #371, merge `437e928` on `m4`), on which the branch is rebased. The step is
+one pull request over the crates below.
 
 - **The row** (`vibra-ir`, `effect.rs`). `EffectRoot { path, id }` is the canonical
   atom path (`unit.module.root`, rendered with `@` in VIBON) with the canonical
@@ -215,31 +214,38 @@ crates below.
   of a type that neither consults, and every executable case matched in Wasm the
   first time it ran.
 
-### Readings of silent text
+### Rulings on text the specification was silent about
 
-The specification is silent in these places; each was decided by the general
-rule and is listed for the maintainer.
+The maintainer ruled on four readings, and each is now canonical prose in
+[the effects chapter](../../spec/03-effects.md):
 
-- A repeated entry in one row has no diagnostic code. The row is a set, so it keeps
-  one root and no diagnostic is given (`a_duplicate_entry_names_one_root`). No
-  corpus case pins it.
-- An implementation member must have its contract's exact signature, row included
-  (`check_member_signature` compares `same_shape`), so there is no row subtyping
-  at an `impl` either; a member with another row is `@type.mismatch`. "Within the
-  contract ceiling" is then the ordinary check of the body against that row.
-- A module value's initializer has the default-empty ceiling, as a `def` takes no
-  `effects:` attribute, so applying an operation in one is
-  `@effect.outside-ceiling` (`a_module_value_initializer_has_the_empty_ceiling`).
-- An operation is as visible as its root; a `visibility:` written on the member is
-  ignored, as it is on a contract member.
-- A `@host` member keeps its M2 diagnostic: `@tool.unavailable` at the member
-  (not at the whole `deffect`), until Step 16b.
+- A root named twice in one written row is `@effect.duplicate-root` at the second
+  entry, relating the first, in a `defn`, `lambda`, function type, test, and
+  operation row; the code replaced `@project.duplicate-effect-root` outright and
+  also serves a target `effects` array (`V1-EFFECT-duplicate-root-in-row`,
+  `a_root_named_twice_in_a_row_is_a_duplicate_at_the_second_entry`,
+  `a_duplicate_is_reported_in_every_kind_of_written_row`).
+- An implementation member writes exactly its contract member's row, because
+  `check_member_signature` compares `same_shape`; another row is `@type.mismatch`,
+  and "within the contract ceiling" is the ordinary check of the body against that
+  row (`V1-EFFECT-impl-member-row-mismatch`).
+- A `def` initializer has the empty ceiling, so applying an operation in it is
+  `@effect.outside-ceiling` (`V1-EFFECT-def-initializer-ceiling`).
+- An operation is a declaration with its own visibility: private unless it writes
+  `visibility: @public`, whatever its root's (`V1-EFFECT-private-operation-import`,
+  `V1-EFFECT-public-operation-import`). Every cross-module operation of the corpus
+  and of the host tests writes it.
+
+Two readings remain implementation facts:
+- The formatter reorders a row only for a file that checks standalone, which is
+  the limit binding facts already have; a module that imports another, and a test
+  module, keep the written order.
 - An unresolved row entry makes the function's signature unavailable, so its body
   is not checked and no ceiling diagnostic follows it.
 
 ### Cases
 
-- **Added, static (24):** `V1-EFFECT-function-type-row`, `-function-type-unresolved`,
+- **Added, static (30):** `V1-EFFECT-function-type-row`, `-function-type-unresolved`,
   `-witness-chapter-example`, `-additive-root-accepted`, `-missing-two-roots`,
   `-witness-three-hops`, `-witness-function-value`, `-witness-contract-member`,
   `-witness-shortest-chain`, `-witness-equal-chains`, `-function-value-row-mismatch`,
@@ -247,7 +253,7 @@ rule and is listed for the maintainer.
   `-contract-ceiling-within`, `-contract-ceiling-over`, `-unused-ceiling-root`,
   `-offending-callee-no-cascade`, `-recursion-closes`, `-let-else-return-rows` (single
   source), and `-imported-root-witness`, `-imported-roots-accepted`,
-  `-private-root-import`, `-equal-names-different-modules` (workspace).
+  `-private-root-import`, `-equal-names-different-modules`, `-private-operation-import`, `-public-operation-import` (workspace), and `-duplicate-root-in-row`, `-impl-member-row-mismatch`, `-def-initializer-ceiling` (single source).
 - **Added, executable (4, all `matched`):** `V1-RUNTIME-effect-operations`,
   `V1-RUNTIME-effect-function-values`, `V1-RUNTIME-workspace-run-effect-operations`,
   `V1-RUNTIME-workspace-test-effect-operation`. **Added, rejected:** `V1-EFFECT-test-ceiling`.
@@ -283,11 +289,11 @@ rule and is listed for the maintainer.
 
 ### Evidence
 
-- Corpus at the head: 83 reader, 262 static, 143 interpreter, and 16 tooling cases,
-  504 passed, 0 failed, 0 unavailable; the interpreter backend passes 135 cases and
+- Corpus at the head: 83 reader, 267 static, 143 interpreter, and 16 tooling cases,
+  509 passed, 0 failed, 0 unavailable; the interpreter backend passes 135 cases and
   the Wasm backend matches 135, 0 not lowered (131 at the base). The parity inventory
   holds the four new executable cases as `matched`.
-- Host tests: `effects_m4_step14` in `vibra-ir` (7), `vibra-types` (37), `vibra-fmt` (6),
+- Host tests: `effects_m4_step14` in `vibra-ir` (7), `vibra-types` (38), `vibra-fmt` (6),
   and `vibra-conformance` (2).
 
 ### Left for Step 15
