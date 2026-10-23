@@ -170,7 +170,8 @@ hyphen, and trim edge hyphens. Use `hello` when no ASCII letter or digit
 remains, and prefix `project-` when the result starts with a digit.
 
 The initialized package is version `0.1.0` with no dependencies, one binary
-target rooted at `src/<name>` with entry `@<name>.main.main`, and source
+target rooted at `src/<name>` with entry `@<name>.main.main` and the empty
+target effect array `effects: (array)`, and source
 `src/<name>/main.vib` containing a pure `void` `main`. It also creates `src/`
 and `tests/`. The generated entry imports no standard-library module. Init rejects a
 nonempty destination and any path that escapes the canonical workspace. Its

@@ -121,7 +121,7 @@ merging, and report `@tool.unavailable` no longer. Step 9 lowers them to WebAsse
 | I13 | The `@host-world.v1` test world, the system provider, and the corpus `host-world` input (D20) | Step 16a; fields in Steps 16b–18 |
 | I14 | Program arguments, `vibra run TARGET -- ARG...` (D22) | Step 18 |
 | I15 | `@command.program-failed` and exit code 6 (D21) | Step 19 |
-| I16 | The effect diagnostics, the witness, the indirect-call rule, and the row record (D23–D25) | Step 14; landed; target array in Step 15 |
+| I16 | The effect diagnostics, the witness, the indirect-call rule, and the row record (D23–D25) | Step 14; landed; target array in Step 15, landed |
 | I17 | The manifest `host` list, the `0.3.0` package, and the five effect modules (D27) | Step 16a; modules in Steps 16b–18 |
 | I18 | The `effects` fact of the position envelope and the effect fields of the index (D28) | Step 20 |
 | I19 | The performance baseline and its CI check (D29) | Step 21 |
