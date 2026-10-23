@@ -1555,6 +1555,7 @@ impl<'a> Checker<'a> {
             &self.checked_globals,
             &self.functions,
             &self.types,
+            &[],
         );
         self.diagnostics.extend(found);
     }

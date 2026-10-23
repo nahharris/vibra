@@ -1,0 +1,12 @@
+id = "V1-EFFECT-target-array-additive-accepted"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "A target whose array is exactly the entry's performed row is admitted, including the root that the entry reaches only through the additive row of an operation; the array lists the canonical atoms of the entry's ceiling."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
