@@ -55,6 +55,8 @@ pub struct TestRow {
     pub failure: Option<RowFailure>,
     /// The trap, for `@test.trap`.
     pub trap: Option<RowTrap>,
+    /// The events of the host calls the test completed, in call order.
+    pub audit_trace: Vec<vibra_host::AuditEvent>,
 }
 
 impl TestRow {
@@ -82,6 +84,7 @@ impl TestRow {
                 code: trap.trap_code().to_owned(),
                 origin: trap.origin().map(origin),
             }),
+            audit_trace: item.audit_trace().to_vec(),
         }
     }
 }
@@ -102,8 +105,8 @@ pub fn command_result(rows: &[TestRow]) -> &'static str {
     }
 }
 
-/// Writes the `@test-run.v1` snapshot. Every test has an empty audit trace in
-/// Stage 4A, since no host operation exists.
+/// Writes the `@test-run.v1` snapshot. A test's audit trace is the events of the
+/// host calls it completed.
 pub fn format_test_run(command_result: &str, rows: &[TestRow]) -> String {
     let mut output = format!(
         "(record\n  format: @test-run.v1\n  result: {command_result}\n  tests: (array"
@@ -149,8 +152,10 @@ pub fn format_test_run(command_result: &str, rows: &[TestRow]) -> String {
             }
             output.push(')');
         }
-        output.push_str(
-            " audit-trace: (record format: @audit-trace.v1 events: (array)))\n",
+        let _ = writeln!(
+            output,
+            " audit-trace: {})",
+            vibra_host::trace_to_vibon(&row.audit_trace)
         );
     }
     output.push_str("  )\n)\n");

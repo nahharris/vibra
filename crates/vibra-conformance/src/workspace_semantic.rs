@@ -1,7 +1,7 @@
 //! Static and interpreter handlers for immutable Step 12 workspace snapshots.
 
 use vibra_diagnostics::Diagnostic;
-use vibra_host::HostWorld;
+use vibra_host::{HostWorld, WorldProvider};
 use vibra_types::{Stdlib, load_stdlib};
 use vibra_workspace::{WorkspaceSnapshot, project::TargetKind};
 
@@ -62,17 +62,19 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
     }
 
     fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
-        // The case's host world is validated before anything runs: a malformed
-        // document fails this case with its data diagnostics. The providers that
-        // consume a fresh copy for each backend arrive with the first host
-        // operation.
-        if let Err(diagnostics) = load_host_world(case)? {
-            return Ok(CaseObservation {
-                accepted: false,
-                diagnostics,
-                ..CaseObservation::default()
-            });
-        }
+        // The case's host world is decoded before anything runs: a malformed
+        // document fails this case with its data diagnostics. Each backend runs
+        // over a fresh copy.
+        let world = match load_host_world(case)? {
+            Ok(world) => world,
+            Err(diagnostics) => {
+                return Ok(CaseObservation {
+                    accepted: false,
+                    diagnostics,
+                    ..CaseObservation::default()
+                });
+            }
+        };
         let snapshot = match load_workspace(case)? {
             WorkspaceLoad::Snapshot(snapshot) => snapshot,
             WorkspaceLoad::Diagnostics(diagnostics) => {
@@ -85,11 +87,12 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
         };
         let target = unique_binary_target(&snapshot)?;
         let verification = verified_bootstrap()?;
-        let result = vibra_workspace::semantic::run_target_with_budget(
+        let result = vibra_workspace::semantic::run_target_with_host(
             &snapshot,
             target,
             verification.as_ref(),
             crate::runner::interpreter_budget(),
+            &mut WorldProvider::new(&world),
         );
         let accepted =
             result.check().status() == vibra_workspace::semantic::CheckStatus::Accepted;
@@ -99,7 +102,7 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             result
                 .check()
                 .program_for_target(target)
-                .map(crate::wasm::observe)
+                .map(|program| crate::wasm::observe(program, &world))
         } else {
             None
         };
@@ -155,17 +158,20 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
     }
 
     fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
-        if let Err(diagnostics) = load_host_world(case)? {
-            return Ok(CaseObservation {
-                accepted: false,
-                diagnostics,
-                interpreter: Some(ExecutionObservation {
-                    result: Some(format_test_run("@command.diagnostics", &[])),
-                    audit_trace: Vec::new(),
-                }),
-                ..CaseObservation::default()
-            });
-        }
+        let world = match load_host_world(case)? {
+            Ok(world) => world,
+            Err(diagnostics) => {
+                return Ok(CaseObservation {
+                    accepted: false,
+                    diagnostics,
+                    interpreter: Some(ExecutionObservation {
+                        result: Some(format_test_run("@command.diagnostics", &[])),
+                        audit_trace: Vec::new(),
+                    }),
+                    ..CaseObservation::default()
+                });
+            }
+        };
         let snapshot = match load_workspace(case)? {
             WorkspaceLoad::Snapshot(snapshot) => snapshot,
             WorkspaceLoad::Diagnostics(diagnostics) => {
@@ -181,11 +187,12 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
             }
         };
         let verification = verified_bootstrap()?;
-        let result = vibra_workspace::semantic::run_tests_with_budget(
+        let result = vibra_workspace::semantic::run_tests_in_world(
             &snapshot,
             None,
             verification.as_ref(),
             crate::runner::interpreter_budget(),
+            &world,
         );
         let (command_result, accepted) = match result.status() {
             vibra_workspace::semantic::TestSuiteStatus::Ok => ("@command.ok", true),
@@ -222,6 +229,7 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
                     host_event: Some(event),
                     wasm: Some(crate::wasm::observe_stopped_tests(
                         result.stopped_programs(),
+                        &world,
                     )),
                     ..CaseObservation::default()
                 });
@@ -242,17 +250,19 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
                 audit_trace: Vec::new(),
             }),
             // Both backends run the tests of the one workspace.
-            wasm: accepted.then(|| match crate::wasm::observe_tests(result.items()) {
-                crate::wasm::TestsObserved::Rows(rows) => {
-                    WasmObservation::Completed(ExecutionObservation {
-                        result: Some(format_test_run(
-                            crate::test_run::command_result(&rows),
-                            &rows,
-                        )),
-                        audit_trace: Vec::new(),
-                    })
+            wasm: accepted.then(|| {
+                match crate::wasm::observe_tests(result.items(), &world) {
+                    crate::wasm::TestsObserved::Rows(rows) => {
+                        WasmObservation::Completed(ExecutionObservation {
+                            result: Some(format_test_run(
+                                crate::test_run::command_result(&rows),
+                                &rows,
+                            )),
+                            audit_trace: Vec::new(),
+                        })
+                    }
+                    crate::wasm::TestsObserved::Stopped(observation) => observation,
                 }
-                crate::wasm::TestsObserved::Stopped(observation) => observation,
             }),
             ..CaseObservation::default()
         })

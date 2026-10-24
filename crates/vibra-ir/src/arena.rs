@@ -28,6 +28,10 @@ pub mod header {
     /// `variant` (u32): the variant index of an enum or the member index of a
     /// union.
     pub const VARIANT: u32 = 16;
+    /// `unsealed` (u32): `1` while a host is building the value with the
+    /// builders of the boundary, and `0` for every other value, which is
+    /// complete and read-only. A value a module builds never sets it.
+    pub const UNSEALED: u32 = 20;
 }
 
 /// The stride of the cells layout: `len` class bytes, padded to 8, and then

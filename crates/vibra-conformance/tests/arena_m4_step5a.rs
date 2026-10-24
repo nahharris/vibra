@@ -51,7 +51,7 @@ fn interpreter_result(program: &CheckedProgram) -> String {
 
 /// The canonical result the Wasm backend reports through its accessors.
 fn wasm_result(program: &CheckedProgram) -> String {
-    match observe_wasm(program) {
+    match observe_wasm(program, &vibra_host::HostWorld::default()) {
         WasmObservation::Completed(ExecutionObservation {
             result: Some(result),
             ..

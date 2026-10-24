@@ -980,6 +980,19 @@ pub enum Expr {
         /// The source origin of the intrinsic call.
         origin: SourceOrigin,
     },
+    /// A call to one host operation of the closed `vibra_v1` registry
+    /// (`docs/spec/06-runtime.md`, "The host registry"). It names its row and
+    /// no ID, offset, or instance.
+    Host {
+        /// The registry row.
+        row: &'static external::host::HostRow,
+        /// Checked operands in the row's parameter order.
+        arguments: Vec<Self>,
+        /// The checked `(result t e)` type.
+        result: Type,
+        /// The source origin of the call.
+        origin: SourceOrigin,
+    },
     /// A labelled argument whose default is resolved from the runtime callee.
     Default {
         /// The statically checked labelled slot type.
@@ -1371,6 +1384,22 @@ impl Expr {
         }
     }
 
+    /// Creates a checked host operation call.
+    #[must_use]
+    pub fn host(
+        row: &'static external::host::HostRow,
+        arguments: Vec<Self>,
+        result: Type,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::Host {
+            row,
+            arguments,
+            result,
+            origin,
+        }
+    }
+
     /// Creates an omitted labelled argument resolved by the selected callable.
     #[must_use]
     pub fn default_value(value_type: Type, origin: SourceOrigin) -> Self {
@@ -1613,6 +1642,7 @@ impl Expr {
         match self {
             Self::Literal { origin, .. }
             | Self::External { origin, .. }
+            | Self::Host { origin, .. }
             | Self::Default { origin, .. }
             | Self::Sequence { origin, .. }
             | Self::Variable { origin, .. }
@@ -1644,7 +1674,7 @@ impl Expr {
     pub fn result_type(&self) -> Type {
         match self {
             Self::Literal { value, .. } => value.ty(),
-            Self::External { result, .. } => result.clone(),
+            Self::External { result, .. } | Self::Host { result, .. } => result.clone(),
             Self::Default { value_type, .. } => value_type.clone(),
             Self::Sequence { expressions, .. } => {
                 expressions.last().map_or(Type::Void, Self::result_type)
@@ -1718,6 +1748,7 @@ impl Expr {
         match self {
             Self::Literal { .. }
             | Self::External { .. }
+            | Self::Host { .. }
             | Self::Default { .. }
             | Self::Variable { .. }
             | Self::Global { .. }
@@ -1751,6 +1782,7 @@ impl Expr {
             Self::Literal { value, .. } => Some(value),
             Self::Default { .. }
             | Self::External { .. }
+            | Self::Host { .. }
             | Self::Sequence { .. }
             | Self::Variable { .. }
             | Self::Global { .. }
@@ -1785,7 +1817,7 @@ impl Expr {
             | Self::Global { .. }
             | Self::Function { .. }
             | Self::Captured { .. } => 0,
-            Self::External { arguments, .. } => {
+            Self::External { arguments, .. } | Self::Host { arguments, .. } => {
                 arguments.iter().map(Self::slot_count).max().unwrap_or(0)
             }
             Self::Sequence { expressions, .. } => {
@@ -1886,6 +1918,37 @@ impl Expr {
                         return Err(IrError::InvalidExpression(format!(
                             "{} argument has type {actual}, expected {expected}",
                             intrinsic.symbol()
+                        )));
+                    }
+                }
+                Ok(result.clone())
+            }
+            Self::Host {
+                row,
+                arguments,
+                result,
+                ..
+            } => {
+                if arguments.len() != row.parameters.len() {
+                    return Err(IrError::InvalidExpression(format!(
+                        "host operation {} expects {} arguments, got {}",
+                        row.symbol,
+                        row.parameters.len(),
+                        arguments.len()
+                    )));
+                }
+                for (argument, parameter) in arguments.iter().zip(row.parameters) {
+                    let actual =
+                        argument.validate_shape_with_captures(slots, capture_types)?;
+                    // A declared parameter type (`path`) is bound by the
+                    // checker against the registry; the primitive ones are
+                    // held here.
+                    if let Some(expected) = parameter.ty.primitive()
+                        && !expected.admits(&actual)
+                    {
+                        return Err(IrError::InvalidExpression(format!(
+                            "host operation {} argument has type {actual}, expected {expected}",
+                            row.symbol
                         )));
                     }
                 }
@@ -2808,6 +2871,40 @@ impl CheckedFunction {
         )
     }
 
+    /// Creates a checked function backed by one host operation of the closed
+    /// registry. Its operands are its parameters in order, and its result is
+    /// the declared `(result t e)`; the owner root is the caller's to set with
+    /// [`Self::with_effect_owner`].
+    ///
+    /// # Errors
+    ///
+    /// The signature's parameter count disagrees with the row, or the body does
+    /// not fit the signature.
+    pub fn new_host(
+        name: impl Into<String>,
+        signature: FunctionSignature,
+        row: &'static external::host::HostRow,
+        origin: SourceOrigin,
+    ) -> Result<Self, IrError> {
+        if signature.fixed_parameter_count() != row.parameters.len() {
+            return Err(IrError::InvalidExpression(format!(
+                "host operation {} has a mismatched declaration signature",
+                row.symbol
+            )));
+        }
+        let arguments = signature
+            .slot_types()
+            .into_iter()
+            .enumerate()
+            .map(|(slot, value_type)| Expr::variable(slot, value_type, origin.clone()))
+            .collect();
+        let body = Expr::host(row, arguments, signature.result(), origin.clone());
+        let slot_count = row.parameters.len();
+        Self::with_slots_and_external(
+            name, signature, body, origin, slot_count, true, None,
+        )
+    }
+
     /// Creates the wrapper of a native whose meaning runs a Vibra body in a
     /// module, carrying that checked body beside the wrapper the interpreter
     /// runs as the native.
@@ -3550,6 +3647,17 @@ fn validate_program_expr(
         | Expr::Default { .. }
         | Expr::Variable { .. }
         | Expr::Captured { .. } => {}
+        Expr::Host { arguments, .. } => {
+            for argument in arguments {
+                validate_program_expr(
+                    argument,
+                    globals,
+                    functions,
+                    owner,
+                    dependencies,
+                )?;
+            }
+        }
         Expr::External {
             intrinsic,
             arguments,
@@ -4180,9 +4288,10 @@ fn possible_function_targets(
         Expr::External { result, .. } if holds_function(result) => {
             FunctionTargetSummary::unknown()
         }
-        Expr::Literal { .. } | Expr::External { .. } | Expr::Default { .. } => {
-            FunctionTargetSummary::default()
-        }
+        Expr::Literal { .. }
+        | Expr::External { .. }
+        | Expr::Host { .. }
+        | Expr::Default { .. } => FunctionTargetSummary::default(),
     }
 }
 
@@ -4872,9 +4981,10 @@ impl<'a> CallFlow<'a> {
             Expr::External { result, .. } if holds_function(result) => {
                 FlowTargetSummary::unknown_function()
             }
-            Expr::Literal { .. } | Expr::External { .. } | Expr::Default { .. } => {
-                FlowTargetSummary::default()
-            }
+            Expr::Literal { .. }
+            | Expr::External { .. }
+            | Expr::Host { .. }
+            | Expr::Default { .. } => FlowTargetSummary::default(),
         }
     }
 
@@ -4906,6 +5016,11 @@ impl<'a> CallFlow<'a> {
                         )));
                     };
                     dependencies.insert(DependencyNode::Global(*index));
+                }
+            }
+            Expr::Host { arguments, .. } => {
+                for argument in arguments {
+                    self.collect_expr(argument, owner, environment, captures)?;
                 }
             }
             Expr::External {
@@ -5250,7 +5365,7 @@ fn validate_tail_calls(expression: &Expr, tail_position: bool) -> Result<(), IrE
         // The operand of `return` hands its value to the caller of the
         // activation it exits, so it is in tail position there.
         Expr::Return { value, .. } => validate_tail_calls(value, true)?,
-        Expr::External { arguments, .. } => {
+        Expr::External { arguments, .. } | Expr::Host { arguments, .. } => {
             for argument in arguments {
                 validate_tail_calls(argument, false)?;
             }
@@ -5524,6 +5639,17 @@ fn canonical_expr(expression: &Expr) -> String {
         } => format!(
             "(record kind: @external symbol: \"{}\" result: {} arguments: {})",
             intrinsic.symbol(),
+            canonical_type(result),
+            canonical_array(&arguments.iter().map(canonical_expr).collect::<Vec<_>>())
+        ),
+        Expr::Host {
+            row,
+            arguments,
+            result,
+            ..
+        } => format!(
+            "(record kind: @host symbol: \"{}\" result: {} arguments: {})",
+            row.symbol,
             canonical_type(result),
             canonical_array(&arguments.iter().map(canonical_expr).collect::<Vec<_>>())
         ),

@@ -42,6 +42,21 @@ pub enum HostType {
 }
 
 impl HostType {
+    /// The language type, for a type the language names without a declaration;
+    /// `None` for `path`, `fs-metadata`, and `(array T)`, which a module
+    /// declares or builds from other types.
+    #[must_use]
+    pub fn primitive(self) -> Option<crate::Type> {
+        match self {
+            Self::Void => Some(crate::Type::Void),
+            Self::Str => Some(crate::Type::Str),
+            Self::Bytes => Some(crate::Type::Bytes),
+            Self::I64 => Some(crate::Type::I64),
+            Self::U64 => Some(crate::Type::U64),
+            Self::Path | Self::FsMetadata | Self::Array(_) => None,
+        }
+    }
+
     /// The type as the standard library writes it in the declaring module.
     #[must_use]
     pub fn spelling(self) -> String {

@@ -20,6 +20,7 @@
 
 use std::collections::BTreeMap;
 
+use vibra_host::{AuditEvent, HostProvider, HostWorld, WorldProvider};
 use vibra_ir::{ObservedValue, Type, TypeBody, TypeDefinition, TypeId, Value};
 
 use crate::{Instance, Outcome, ResultSlot, Runner, RunnerError, Started, ValueId};
@@ -44,6 +45,8 @@ pub enum Observed {
         value: ObservedValue,
         /// The live sizes around the run.
         live: LiveSizes,
+        /// The events of the host calls the run completed, in call order.
+        audit_trace: Vec<AuditEvent>,
     },
     /// The run did not complete, or the result could not be read: the trap,
     /// host event, failed assertion, or defect, as [`Outcome`] reports it.
@@ -83,7 +86,31 @@ impl Runner {
         types: &[TypeDefinition],
         heads: &dyn Fn(u32) -> Option<Type>,
     ) -> Result<Observed, RunnerError> {
-        let mut instance = match self.start(bytes)? {
+        self.run_observed_with_host(
+            bytes,
+            result,
+            types,
+            heads,
+            Box::new(WorldProvider::new(&HostWorld::default())),
+        )
+    }
+
+    /// [`Self::run_observed_with`] for a module whose host operations are
+    /// operations of `provider`. The audit trace of the run is part of what is
+    /// observed.
+    ///
+    /// # Errors
+    ///
+    /// A [`RunnerError`] when the module is not a v1 module or lacks an export.
+    pub fn run_observed_with_host(
+        &self,
+        bytes: &[u8],
+        result: &Type,
+        types: &[TypeDefinition],
+        heads: &dyn Fn(u32) -> Option<Type>,
+        provider: Box<dyn HostProvider>,
+    ) -> Result<Observed, RunnerError> {
+        let mut instance = match self.start_with_host(bytes, provider)? {
             Started::MemoryExhausted => {
                 return Ok(Observed::Stopped(Outcome::MemoryExhausted));
             }
@@ -112,6 +139,7 @@ impl Runner {
                 with_result,
                 end,
             },
+            audit_trace: instance.audit_trace().to_vec(),
         })
     }
 }

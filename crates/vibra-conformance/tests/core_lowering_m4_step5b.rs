@@ -73,7 +73,9 @@ fn wasm(program: &CheckedProgram) -> (String, LiveSizes) {
         .run_observed(&emitted(program), &ty, program.types())
         .expect("the module runs")
     {
-        Observed::Completed { value, live } => (value.canonical_observation(&ty), live),
+        Observed::Completed { value, live, .. } => {
+            (value.canonical_observation(&ty), live)
+        }
         Observed::Stopped(outcome) => panic!("the entry did not complete: {outcome:?}"),
     }
 }
@@ -663,7 +665,7 @@ fn non_tail_recursion_five_thousand_deep_runs_on_a_small_engine_stack() {
     let small = Runner::with_wasm_stack(MemoryLimit::new(64 * MIB), 64 * 1024)
         .expect("a runner with a small engine stack");
     let ty = entry_type(&program);
-    let Observed::Completed { value, live } = small
+    let Observed::Completed { value, live, .. } = small
         .run_observed(&bytes, &ty, program.types())
         .expect("the module runs")
     else {

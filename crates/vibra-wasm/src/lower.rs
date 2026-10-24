@@ -122,6 +122,7 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
+use vibra_ir::external::host::{HOST_ROWS, HostRow};
 use vibra_ir::external::{
     Answer, CompilerIntrinsic, NATIVE_ROWS, NativeRow, ObjectKind, Operand as Wide,
     Totality,
@@ -136,6 +137,7 @@ use crate::classify;
 use crate::desc::{self, DescriptorTable};
 use crate::encode::FunctionCode;
 use crate::form::NotLowered;
+use crate::host::{HOST_ADOPT, HOST_ROUTINES};
 use crate::key::{self, Calls, KeyShape, Order};
 use crate::layout::{self, CellClass, Kind, frame, header, state};
 use crate::pattern::{Literal, Node, Presence, Test, decompose, literal};
@@ -396,7 +398,9 @@ fn children(expr: &Expr) -> Vec<&Expr> {
         | Expr::Global { .. }
         | Expr::Function { .. }
         | Expr::Captured { .. } => Vec::new(),
-        Expr::External { arguments, .. } => arguments.iter().collect(),
+        Expr::External { arguments, .. } | Expr::Host { arguments, .. } => {
+            arguments.iter().collect()
+        }
         Expr::Sequence { expressions, .. } => expressions.iter().collect(),
         Expr::Closure { captures, .. } => captures.iter().collect(),
         Expr::Let { value, body, .. } => vec![value, body],
@@ -600,6 +604,12 @@ pub(crate) struct Lowering<'a> {
     imports: Vec<CompilerIntrinsic>,
     /// The natives this lowering called.
     used: BTreeSet<CompilerIntrinsic>,
+    /// The host imports of the module, in the order of their function indices,
+    /// which follow the native imports. They are what the first pass found the
+    /// program calls: during that pass the list is empty.
+    host: Vec<&'static HostRow>,
+    /// The host operations this lowering called.
+    used_host: BTreeSet<&'static str>,
     /// The comparers of closed key shapes the dicts of the program order by,
     /// each with the function indices of the comparers of its components. A
     /// comparer is a routine after the constructor, numbered in the order the
@@ -634,12 +644,14 @@ pub(crate) struct Lowering<'a> {
 pub(crate) type OriginEntry = (SourceOrigin, Option<Type>);
 
 impl<'a> Lowering<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         fns: &'a Routines,
         program: &'a CheckedProgram,
         lambdas: &'a Lambdas<'a>,
         sizes: Vec<u32>,
         imports: Vec<CompilerIntrinsic>,
+        host: Vec<&'static HostRow>,
         extras: Extras,
         tests: bool,
     ) -> Self {
@@ -658,6 +670,8 @@ impl<'a> Lowering<'a> {
             built_object: false,
             heads,
             imports,
+            host,
+            used_host: BTreeSet::new(),
             used: BTreeSet::new(),
             comparers: Vec::new(),
             has_desc_equal: extras.desc_equal,
@@ -674,8 +688,7 @@ impl<'a> Lowering<'a> {
     /// The function index of the first routine after the constructor that is a
     /// comparer of a key shape.
     fn first_comparer(&self) -> u32 {
-        self.fns.new
-            + 1
+        self.extras_base()
             + u32::from(self.has_desc_equal)
             + u32::from(self.has_scan)
             + 3 * u32::from(self.has_typed)
@@ -692,7 +705,7 @@ impl<'a> Lowering<'a> {
     }
 
     fn typed_index(&self) -> u32 {
-        self.fns.new + 1 + u32::from(self.has_desc_equal) + u32::from(self.has_scan)
+        self.extras_base() + u32::from(self.has_desc_equal) + u32::from(self.has_scan)
     }
 
     /// The function index of the routine that walks the arena (`canon`), which
@@ -700,7 +713,7 @@ impl<'a> Lowering<'a> {
     pub(crate) fn scan(&mut self) -> u32 {
         self.needs_scan = true;
         self.built_object = true;
-        self.fns.new + 1 + u32::from(self.has_desc_equal)
+        self.extras_base() + u32::from(self.has_desc_equal)
     }
 
     /// Which of the optional routines after the constructor a function lowered
@@ -743,7 +756,7 @@ impl<'a> Lowering<'a> {
     fn desc_equal(&mut self) -> u32 {
         self.needs_desc_equal = true;
         self.built_object = true;
-        self.fns.new + 1
+        self.extras_base()
     }
 
     /// The function index of the routine that orders keys of `shape`, which is
@@ -800,7 +813,7 @@ impl<'a> Lowering<'a> {
         };
         let mut routines = Vec::new();
         if self.has_desc_equal {
-            routines.push(desc::equal_routine(self.fns.new + 1));
+            routines.push(desc::equal_routine(self.extras_base()));
         }
         if self.has_scan {
             routines.push(crate::canon::scan_routine(self.fns));
@@ -813,7 +826,7 @@ impl<'a> Lowering<'a> {
             let calls = crate::canon_typed::Typed {
                 push: first + 1,
                 inst: first + 2,
-                desc_equal: self.fns.new + 1,
+                desc_equal: self.extras_base(),
                 segment,
                 table_size,
             };
@@ -839,6 +852,46 @@ impl<'a> Lowering<'a> {
             .position(|known| *known == intrinsic)
             .and_then(|position| u32::try_from(position).ok())
             .unwrap_or(0)
+    }
+
+    /// The function index of the first routine after the constructor and the
+    /// host routines, which a module has only when it imports a host operation.
+    fn extras_base(&self) -> u32 {
+        self.fns.new
+            + 1
+            + if self.host.is_empty() {
+                0
+            } else {
+                HOST_ROUTINES
+            }
+    }
+
+    /// The function index of the import of the host operation `row`, which the
+    /// call records as used. During the first pass no import is known and the
+    /// index is `0`, because that pass only finds frame sizes.
+    fn host_import(&mut self, row: &'static HostRow) -> u32 {
+        self.used_host.insert(row.symbol);
+        let position = self
+            .host
+            .iter()
+            .position(|known| known.symbol == row.symbol);
+        let native = u32::try_from(self.imports.len()).unwrap_or(0);
+        position
+            .and_then(|position| u32::try_from(position).ok())
+            .map_or(0, |position| native + position)
+    }
+
+    /// The function index of the routine that adopts the ID of a result.
+    fn adopt_routine(&self) -> u32 {
+        self.fns.new + 1 + HOST_ADOPT
+    }
+
+    /// The host operations this lowering called, in the order of the registry.
+    pub(crate) fn used_host_rows(&self) -> Vec<&'static HostRow> {
+        HOST_ROWS
+            .iter()
+            .filter(|row| self.used_host.contains(row.symbol))
+            .collect()
     }
 
     /// The natives this lowering called, in the order of the closed table.
@@ -1546,6 +1599,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 ..
             } => self.call(target, arguments, result, *tail, expr.origin(), dest),
             Expr::External { .. } => self.primitive(expr, dest),
+            Expr::Host { .. } => self.host(expr, dest),
             Expr::Closure { .. } | Expr::Function { .. } => {
                 self.function_value(expr, dest)
             }
@@ -4037,6 +4091,80 @@ impl<'l, 'a> Builder<'l, 'a> {
         self.build(Kind::Enum, none, &[], dest);
         self.end(Term::Goto(join));
         self.start(join);
+        self.release_to(mark);
+        Ok(())
+    }
+
+    // -- host imports -----------------------------------------------------------
+
+    /// A call of a host operation (`docs/spec/06-runtime.md`, "Host calls and
+    /// the builders"). The operands are evaluated left to right. Each reference
+    /// operand is issued an ID for the call, which the host borrows and the
+    /// module releases afterwards, and each scalar crosses as itself. The import
+    /// answers one ID of the owned `(result t e)` value, which the module adopts
+    /// as the value of the call.
+    fn host(&mut self, expr: &Expr, dest: u32) -> Result<(), NotLowered> {
+        let Expr::Host { row, arguments, .. } = expr else {
+            return Err(self.forms_of(expr));
+        };
+        if arguments.len() != row.parameters.len() {
+            return Err(self.forms_of(expr));
+        }
+        let import = self.lowering.host_import(row);
+        let adopt = self.lowering.adopt_routine();
+        let (new_id, release_id) =
+            (self.lowering.fns.new_id, self.lowering.fns.release_id);
+        let mark = self.next_temp;
+        let mut slots = Vec::with_capacity(arguments.len());
+        let mut classes = Vec::with_capacity(arguments.len());
+        for argument in arguments {
+            classes.push(self.class(&argument.result_type(), argument.origin())?);
+            let slot = self.temp();
+            self.expr(argument, slot)?;
+            slots.push(slot);
+        }
+        // An ID for each operand that is an arena value, held in a scalar slot.
+        let mut ids = Vec::with_capacity(slots.len());
+        for (slot, class) in slots.iter().zip(&classes) {
+            if *class == ValueClass::Ref {
+                let id = self.temp();
+                let (at, from) = (self.cell(id), self.cell(*slot));
+                self.push(&[
+                    get(FRAME),
+                    get(FRAME),
+                    ld32(from),
+                    I::Call(new_id),
+                    st64(at),
+                ]);
+                self.set_byte(id, CellClass::I64.code());
+                ids.push(Some(id));
+            } else {
+                ids.push(None);
+            }
+        }
+        let at = self.cell(dest);
+        self.push(&[get(FRAME)]);
+        for ((slot, class), id) in slots.iter().zip(&classes).zip(&ids) {
+            let cell = match id {
+                Some(id) => self.cell(*id),
+                None => self.cell(*slot),
+            };
+            match (id, class) {
+                (Some(_) | None, ValueClass::Ref | ValueClass::I64) => {
+                    self.push(&[get(FRAME), ld64(cell)]);
+                }
+                _ => return Err(self.forms_of(expr)),
+            }
+        }
+        self.push(&[I::Call(import), I::Call(adopt), I::I64ExtendI32U, st64(at)]);
+        self.own(dest);
+        for id in ids.iter().flatten() {
+            let cell = self.cell(*id);
+            self.push(&[get(FRAME), ld64(cell), I::Call(release_id)]);
+        }
+        for (slot, class) in slots.iter().zip(&classes) {
+            self.discard(*slot, *class);
+        }
         self.release_to(mark);
         Ok(())
     }

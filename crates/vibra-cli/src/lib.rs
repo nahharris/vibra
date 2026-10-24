@@ -169,7 +169,7 @@ struct RunPayload {
     program_result: Option<String>,
     stdout: String,
     stderr: String,
-    audit_trace: Vec<String>,
+    audit_trace: Vec<serde_json::Value>,
     trap: Option<serde_json::Value>,
 }
 
@@ -568,11 +568,19 @@ fn execute_run<E: Write>(
             return operational_run_envelope(invocation, &target_root, message, stderr);
         }
     };
-    let outcome = vibra_workspace::semantic::run_target_with_budget(
+    // The command chooses where the program's output goes: JSON mode keeps one
+    // machine document on the process's standard output, so the provider
+    // captures the bytes for the envelope; human mode lets the program write them.
+    let mut host = vibra_host::SystemProvider::new();
+    if invocation.output_format == OutputFormat::Json {
+        host = host.capturing();
+    }
+    let outcome = vibra_workspace::semantic::run_target_with_host(
         &snapshot,
         target,
         verification.as_ref(),
         MEMORY_BUDGET,
+        &mut host,
     );
     let diagnostics = match render_workspace_diagnostics(
         &snapshot,
@@ -629,9 +637,13 @@ fn execute_run<E: Write>(
     {
         Some(vibra_workspace::semantic::RunOutcome::Program(execution)) => (
             Some(execution.canonical_result()),
-            String::new(),
-            String::new(),
-            execution.audit_trace().to_vec(),
+            String::from_utf8_lossy(host.captured_stdout()).into_owned(),
+            String::from_utf8_lossy(host.captured_stderr()).into_owned(),
+            execution
+                .audit_trace()
+                .iter()
+                .map(vibra_host::AuditEvent::to_json)
+                .collect(),
         ),
         Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(error)) => {
             if error.host_diagnostic().is_none() && error.program_trap().is_none() {
@@ -772,7 +784,11 @@ fn execute_test<W: Write, E: Write>(
             "result": item.status().as_atom(),
             "failure": failure,
             "trap": trap,
-            "auditTrace": item.audit_trace(),
+            "auditTrace": item
+                .audit_trace()
+                .iter()
+                .map(vibra_host::AuditEvent::to_json)
+                .collect::<Vec<_>>(),
             "diagnostics": item_diagnostics,
         }));
     }

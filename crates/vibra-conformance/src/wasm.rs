@@ -12,6 +12,7 @@
 use std::sync::OnceLock;
 
 use vibra_diagnostics::DiagnosticCode;
+use vibra_host::{HostWorld, WorldProvider};
 use vibra_ir::CheckedProgram;
 use vibra_ir::boundary::Failure;
 use vibra_wasm_run::{Observed, Outcome, Runner, TestRun};
@@ -37,7 +38,7 @@ fn runner() -> Result<&'static Runner, String> {
 /// memory limit, and reports the observation. The interpreter handlers call it
 /// on each program they run; it is public so that a host test can run a
 /// hand-built program through the same path.
-pub fn observe(program: &CheckedProgram) -> WasmObservation {
+pub fn observe(program: &CheckedProgram, world: &HostWorld) -> WasmObservation {
     let module = match vibra_wasm::emit(program) {
         Ok(module) => module,
         Err(not_lowered) => {
@@ -65,14 +66,19 @@ pub fn observe(program: &CheckedProgram) -> WasmObservation {
     };
     let result = entry.signature().result();
     let heads = |head: u32| module.descriptors().type_of(head).cloned();
-    match runner.run_observed_with(module.bytes(), &result, program.types(), &heads) {
-        Ok(Observed::Completed { value, .. }) => {
-            WasmObservation::Completed(ExecutionObservation {
-                result: Some(value.canonical_observation(&result)),
-                // Stage 4A has no host operation, so a run has no audit event.
-                audit_trace: Vec::new(),
-            })
-        }
+    match runner.run_observed_with_host(
+        module.bytes(),
+        &result,
+        program.types(),
+        &heads,
+        Box::new(WorldProvider::new(world)),
+    ) {
+        Ok(Observed::Completed {
+            value, audit_trace, ..
+        }) => WasmObservation::Completed(ExecutionObservation {
+            result: Some(value.canonical_observation(&result)),
+            audit_trace,
+        }),
         Ok(Observed::Stopped(outcome)) => stopped(&outcome),
         Err(error) => WasmObservation::Failed {
             reason: error.to_string(),
@@ -95,7 +101,7 @@ pub enum TestsObserved {
 /// in a fresh instance through `vibra_v1_test`, at its position in canonical
 /// discovery order. A test the interpreter did not run (`@test.unavailable`) has
 /// the interpreter's row.
-pub fn observe_tests(items: &[TestItem]) -> TestsObserved {
+pub fn observe_tests(items: &[TestItem], world: &HostWorld) -> TestsObserved {
     let ran = items
         .iter()
         .enumerate()
@@ -103,14 +109,17 @@ pub fn observe_tests(items: &[TestItem]) -> TestsObserved {
             item.program().map(|program| (position, program))
         })
         .collect::<Vec<_>>();
-    observe_ran(items.iter().map(TestRow::from_item).collect(), &ran)
+    observe_ran(items.iter().map(TestRow::from_item).collect(), &ran, world)
 }
 
 /// Runs, in the Wasm backend, the tests of a suite that the interpreter ended
 /// with a host event: the programs it ran up to and including the test that
 /// ended it. The suite has no rows then, so only the backend's end is reported,
 /// and a suite that completes in Wasm is reported as completed.
-pub(crate) fn observe_stopped_tests(programs: &[CheckedProgram]) -> WasmObservation {
+pub(crate) fn observe_stopped_tests(
+    programs: &[CheckedProgram],
+    world: &HostWorld,
+) -> WasmObservation {
     let ran = programs.iter().enumerate().collect::<Vec<_>>();
     let rows = programs
         .iter()
@@ -119,9 +128,10 @@ pub(crate) fn observe_stopped_tests(programs: &[CheckedProgram]) -> WasmObservat
             status: TestItemStatus::Passed.as_atom().to_owned(),
             failure: None,
             trap: None,
+            audit_trace: Vec::new(),
         })
         .collect();
-    match observe_ran(rows, &ran) {
+    match observe_ran(rows, &ran, world) {
         TestsObserved::Rows(_) => {
             WasmObservation::Completed(ExecutionObservation::default())
         }
@@ -133,6 +143,7 @@ pub(crate) fn observe_stopped_tests(programs: &[CheckedProgram]) -> WasmObservat
 fn observe_ran(
     mut rows: Vec<TestRow>,
     ran: &[(usize, &CheckedProgram)],
+    world: &HostWorld,
 ) -> TestsObserved {
     let Some((_, first)) = ran.first() else {
         return TestsObserved::Rows(rows);
@@ -177,12 +188,13 @@ fn observe_ran(
         let Some(base) = rows.get(*position).cloned() else {
             continue;
         };
-        let run = runner.run_test(
+        let run = runner.run_test_with_host(
             module.bytes(),
             index,
             program.types(),
             &heads,
             &operand_of,
+            Box::new(WorldProvider::new(world)),
         );
         let row = match run {
             Err(error) => {
@@ -203,10 +215,11 @@ fn observe_ran(
                     ),
                 });
             }
-            Ok(TestRun::Passed { .. }) => TestRow {
+            Ok(TestRun::Passed { audit_trace, .. }) => TestRow {
                 status: TestItemStatus::Passed.as_atom().to_owned(),
                 failure: None,
                 trap: None,
+                audit_trace,
                 ..base.clone()
             },
             Ok(TestRun::Trapped { code, origin }) => TestRow {
@@ -216,6 +229,7 @@ fn observe_ran(
                     code: code.diagnostic_code().as_atom().to_owned(),
                     origin: origin_of(origin),
                 }),
+                audit_trace: Vec::new(),
                 ..base.clone()
             },
             Ok(TestRun::AssertionFailed {
@@ -223,6 +237,7 @@ fn observe_ran(
                 origin,
                 expected,
                 actual,
+                audit_trace,
             }) => {
                 let Some(origin) = origin_of(origin) else {
                     return TestsObserved::Stopped(WasmObservation::Failed {
@@ -243,6 +258,7 @@ fn observe_ran(
                         origin,
                     }),
                     trap: None,
+                    audit_trace,
                     ..base.clone()
                 }
             }

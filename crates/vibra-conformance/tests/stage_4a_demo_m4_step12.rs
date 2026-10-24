@@ -104,7 +104,9 @@ fn the_demo_tests_produce_identical_results_in_both_backends() {
         .iter()
         .map(TestRow::from_item)
         .collect::<Vec<_>>();
-    let TestsObserved::Rows(wasm) = observe_wasm_tests(result.items()) else {
+    let TestsObserved::Rows(wasm) =
+        observe_wasm_tests(result.items(), &vibra_host::HostWorld::default())
+    else {
         panic!("the Wasm backend did not run the demo's tests");
     };
     assert_eq!(wasm, interpreter);

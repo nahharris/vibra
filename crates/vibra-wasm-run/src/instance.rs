@@ -89,6 +89,13 @@ impl Instance {
         (&mut self.store, &self.instance)
     }
 
+    /// The events of the host calls that completed in this instance, in call
+    /// order. A call that ended in a trap or a host event appended none.
+    #[must_use]
+    pub fn audit_trace(&self) -> &[vibra_host::AuditEvent] {
+        &self.store.data().audit
+    }
+
     /// Calls `vibra_v1_entry` and reads what the module recorded.
     ///
     /// # Errors

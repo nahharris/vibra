@@ -46,7 +46,9 @@ fn run_with(runner: &Runner, program: &CheckedProgram) -> (String, LiveSizes) {
         .run_observed_with(module.bytes(), &ty, program.types(), &heads)
         .expect("the module runs")
     {
-        Observed::Completed { value, live } => (value.canonical_observation(&ty), live),
+        Observed::Completed { value, live, .. } => {
+            (value.canonical_observation(&ty), live)
+        }
         Observed::Stopped(outcome) => panic!("the entry did not complete: {outcome:?}"),
     }
 }

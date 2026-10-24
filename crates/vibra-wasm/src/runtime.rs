@@ -13,8 +13,8 @@
 use wasm_encoder::{BlockType, Instruction as I, MemArg, ValType};
 
 use crate::layout::{
-    self, CellClass, MAX_CLASS, MIN_CLASS, TABLE_ENTRY_SIZE, TABLE_FIRST_CAPACITY,
-    header, state,
+    self, CellClass, Kind, MAX_CLASS, MIN_CLASS, TABLE_ENTRY_SIZE,
+    TABLE_FIRST_CAPACITY, header, state,
 };
 use vibra_ir::boundary::{
     FAILURE_ACTUAL_EXPORT, FAILURE_EXPECTED_EXPORT, FAILURE_EXPORT, LENGTH_EXPORT,
@@ -91,6 +91,9 @@ pub struct Routines {
     pub equal: u32,
     /// The first of the exported accessors, in the order they are exported.
     pub first_accessor: u32,
+    /// `(id) -> ()`: the `vibra_v1_release` accessor, which the module also
+    /// calls to drop the ID it issued for a borrowed argument of a host call.
+    pub release_id: u32,
     /// `() -> ()`: the `vibra_v1_entry` export.
     pub entry_export: u32,
     /// `(function, slots) -> frame`: pushes an activation's frame on the frame
@@ -182,6 +185,9 @@ impl Accessor {
 /// The routines before the accessors.
 const CORE: u32 = 11;
 
+/// The position of `vibra_v1_release` among the accessors.
+const RELEASE_POSITION: u32 = 8;
+
 impl Routines {
     /// Assigns indices from `base`: the core routines, the accessors, the entry
     /// export, the frame routines, and last the object constructor, which a
@@ -202,6 +208,7 @@ impl Routines {
             entry_of: base + 9,
             equal: base + 10,
             first_accessor,
+            release_id: first_accessor + RELEASE_POSITION,
             entry_export: first_accessor + accessors,
             push_frame: first_accessor + accessors + 1,
             leave: first_accessor + accessors + 2,
@@ -312,10 +319,10 @@ pub(crate) const fn index(value: u32) -> i32 {
     value.cast_signed()
 }
 
-const EMPTY: BlockType = BlockType::Empty;
+pub(crate) const EMPTY: BlockType = BlockType::Empty;
 
 /// `[0]` as the base address of a state field.
-const ZERO: Ins = c32(0);
+pub(crate) const ZERO: Ins = c32(0);
 
 /// Instructions that push the value of a 32-bit state field.
 fn load_state32(address: u32) -> [Ins; 2] {
@@ -327,7 +334,7 @@ fn load_state64(address: u32) -> [Ins; 2] {
     [ZERO, ld64(address)]
 }
 
-fn make(
+pub(crate) fn make(
     params: &[ValType],
     results: &[ValType],
     locals: &[ValType],
@@ -342,16 +349,16 @@ fn make(
     }
 }
 
-const I32: ValType = ValType::I32;
-const I64: ValType = ValType::I64;
+pub(crate) const I32: ValType = ValType::I32;
+pub(crate) const I64: ValType = ValType::I64;
 
 /// Appends `parts` to `code`.
-fn push(code: &mut Vec<Ins>, parts: &[Ins]) {
+pub(crate) fn push(code: &mut Vec<Ins>, parts: &[Ins]) {
     code.extend_from_slice(parts);
 }
 
 /// The trap `@runtime.invalid-host-value`, as the instructions that raise it.
-fn invalid_host_value(fns: &Routines) -> [Ins; 2] {
+pub(crate) fn invalid_host_value(fns: &Routines) -> [Ins; 2] {
     [
         c32(TrapCode::InvalidHostValue.code()),
         I::Call(fns.stop_trap),
@@ -1116,6 +1123,20 @@ fn wide(address: u32) -> Routine {
 
 /// `(id) -> ()`: the host drops its hold on an ID.
 fn release_id(fns: &Routines) -> Routine {
+    id_release(fns, false)
+}
+
+/// `(id) -> i32`: the module takes the reference an ID's entry held and frees
+/// the entry. The value must be a sealed `(result t e)` value: an enum with a
+/// variant of `ok` or `err`. The offset is the module's, with the count the
+/// entry held, so the host must not release the ID.
+pub(crate) fn adopt(fns: &Routines) -> Routine {
+    id_release(fns, true)
+}
+
+/// The entry of an ID freed, and then, for a release, the value dropped or,
+/// for an adoption, the value checked first and answered.
+fn id_release(fns: &Routines, adopting: bool) -> Routine {
     // Locals: 1 entry, 2 object, 3 slot, 4 live IDs.
     let (entry, object, slot, live) = (1, 2, 3, 4);
     let mut code = vec![
@@ -1126,6 +1147,24 @@ fn release_id(fns: &Routines) -> Routine {
         get(entry),
         ld32(8),
         set(object),
+    ];
+    if adopting {
+        // A result is a sealed enum of two variants.
+        code.extend(require_kind(fns, object, 1 << Kind::Enum.code()));
+        code.extend([get(object), ld32(header::UNSEALED), I::If(EMPTY)]);
+        code.extend(invalid_host_value(fns));
+        code.extend([
+            I::End,
+            get(object),
+            ld32(header::VARIANT),
+            c32(1),
+            I::I32GtU,
+            I::If(EMPTY),
+        ]);
+        code.extend(invalid_host_value(fns));
+        code.push(I::End);
+    }
+    code.extend([
         get(0),
         I::I32WrapI64,
         set(slot),
@@ -1134,7 +1173,7 @@ fn release_id(fns: &Routines) -> Routine {
         c64(0),
         st64(0),
         get(entry),
-    ];
+    ]);
     code.extend(load_state32(state::TABLE_FREE));
     code.extend([
         st32(12),
@@ -1166,6 +1205,10 @@ fn release_id(fns: &Routines) -> Routine {
         state::TABLE_FREE,
     ] {
         code.extend([ZERO, c32(0), st32(address)]);
+    }
+    if adopting {
+        code.extend([I::End, get(object), I::End]);
+        return make(&[I64], &[I32], &[I32, I32, I32, I32], code);
     }
     code.extend([I::End, get(object), I::Call(fns.drop), I::End]);
     make(&[I64], &[], &[I32, I32, I32, I32], code)

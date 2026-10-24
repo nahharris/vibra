@@ -13,6 +13,11 @@ use vibra_diagnostics::DiagnosticCode;
 /// The one export of linear memory, reserved for toolchain-owned native code.
 pub const MEMORY_EXPORT: &str = "vibra_v1_memory";
 
+/// The host import module: one import for each host registry symbol a program
+/// requires, named by the symbol (`docs/spec/06-runtime.md`, "Host calls and the
+/// builders").
+pub const HOST_IMPORT_MODULE: &str = "vibra_v1";
+
 /// The pure, versioned module of native imports. It is the only import module
 /// of a Stage 4A module, and no source can name it.
 pub const NATIVE_IMPORT_MODULE: &str = "vibra_native_v1";
@@ -53,6 +58,34 @@ pub const READ_F32_EXPORT: &str = "vibra_v1_read_f32";
 pub const READ_F64_EXPORT: &str = "vibra_v1_read_f64";
 /// `(i64, i64) -> i64`: a compound component as a new ID the host releases.
 pub const READ_ID_EXPORT: &str = "vibra_v1_read_id";
+
+/// `(i32, i64, i32) -> i64`: a new unsealed value of a kind, its component
+/// count, and its variant or member index.
+pub const NEW_EXPORT: &str = "vibra_v1_new";
+/// `(i64, i64, i32) -> ()`: writes an `i32`-slot scalar, a character, or a byte.
+pub const WRITE_I32_EXPORT: &str = "vibra_v1_write_i32";
+/// `(i64, i64, i64) -> ()`: writes an `i64` scalar.
+pub const WRITE_I64_EXPORT: &str = "vibra_v1_write_i64";
+/// `(i64, i64, f32) -> ()`: writes an `f32` scalar.
+pub const WRITE_F32_EXPORT: &str = "vibra_v1_write_f32";
+/// `(i64, i64, f64) -> ()`: writes an `f64` scalar.
+pub const WRITE_F64_EXPORT: &str = "vibra_v1_write_f64";
+/// `(i64, i64, i64) -> ()`: writes the value of a sealed ID.
+pub const WRITE_ID_EXPORT: &str = "vibra_v1_write_id";
+/// `(i64) -> ()`: seals a value.
+pub const SEAL_EXPORT: &str = "vibra_v1_seal";
+
+/// The seven builders, which a module exports exactly when it imports a host
+/// operation.
+pub const BUILDER_EXPORTS: &[&str] = &[
+    NEW_EXPORT,
+    WRITE_I32_EXPORT,
+    WRITE_I64_EXPORT,
+    WRITE_F32_EXPORT,
+    WRITE_F64_EXPORT,
+    WRITE_ID_EXPORT,
+    SEAL_EXPORT,
+];
 
 /// Every function export a Stage 4A module may carry, in the order of the
 /// specification's table. A module exports exactly [`MEMORY_EXPORT`] and a
@@ -229,6 +262,10 @@ mod tests {
         for name in FUNCTION_EXPORTS {
             assert!(name.starts_with("vibra_v1_"), "{name}");
             assert!(seen.insert(*name), "{name} is repeated");
+        }
+        for name in BUILDER_EXPORTS {
+            assert!(name.starts_with("vibra_v1_"), "{name}");
+            assert!(!FUNCTION_EXPORTS.contains(name), "{name}");
         }
         assert!(MEMORY_EXPORT.starts_with("vibra_v1_"));
         assert!(!FUNCTION_EXPORTS.contains(&MEMORY_EXPORT));

@@ -43,7 +43,7 @@ fn agree(source: &str) -> (String, LiveSizes) {
         .run_observed_with(module.bytes(), &ty, program.types(), &heads)
         .expect("the module runs")
     {
-        Observed::Completed { value, live } => {
+        Observed::Completed { value, live, .. } => {
             let observed = value.canonical_observation(&ty);
             assert_eq!(observed, expected, "the backends disagree on:\n{source}");
             (observed, live)

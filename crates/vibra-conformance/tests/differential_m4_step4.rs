@@ -194,7 +194,10 @@ fn empty_entry_wasm_observation() -> WasmObservation {
         origin(),
     )
     .expect("a checked function");
-    observe_wasm(&CheckedProgram::try_new(vec![done], 0).expect("a program"))
+    observe_wasm(
+        &CheckedProgram::try_new(vec![done], 0).expect("a program"),
+        &vibra_host::HostWorld::default(),
+    )
 }
 
 #[test]
@@ -300,7 +303,10 @@ fn a_forced_wasm_disagreement_fails_the_case_and_names_the_backend() {
 fn a_forced_wasm_audit_trace_disagreement_fails_the_case() {
     let noisy = ExecutionObservation {
         result: Some(VOID_RESULT.to_owned()),
-        audit_trace: vec!["an event".to_owned()],
+        audit_trace: vec![vibra_host::AuditEvent::completed(
+            &vibra_host::HostCall::StdinText,
+            &Ok(vibra_host::HostOk::Text(String::new())),
+        )],
     };
     let report = run_with(
         &void_case(),

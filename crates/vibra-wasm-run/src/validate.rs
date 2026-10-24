@@ -11,7 +11,10 @@
 
 use std::fmt;
 
-use vibra_ir::boundary::{FUNCTION_EXPORTS, MEMORY_EXPORT, NATIVE_IMPORT_MODULE};
+use vibra_ir::boundary::{
+    BUILDER_EXPORTS, FUNCTION_EXPORTS, HOST_IMPORT_MODULE, MEMORY_EXPORT,
+    NATIVE_IMPORT_MODULE,
+};
 use wasmparser::{
     ExternalKind, FuncValidatorAllocations, Parser, Payload, TypeRef, ValidPayload,
     Validator, WasmFeatures,
@@ -74,7 +77,7 @@ impl fmt::Display for ValidationError {
             }
             Self::ForeignImport { module, name } => write!(
                 formatter,
-                "import `{module}`.`{name}` is outside the `{NATIVE_IMPORT_MODULE}` functions"
+                "import `{module}`.`{name}` is outside the `{NATIVE_IMPORT_MODULE}` and `{HOST_IMPORT_MODULE}` functions"
             ),
             Self::ForeignExport { name } => {
                 write!(formatter, "export `{name}` is outside the versioned table")
@@ -133,7 +136,8 @@ pub fn validate(bytes: &[u8]) -> Result<ModuleSummary, ValidationError> {
             Payload::ImportSection(reader) => {
                 for import in reader.into_imports() {
                     let import = import.map_err(invalid)?;
-                    if import.module != NATIVE_IMPORT_MODULE
+                    if (import.module != NATIVE_IMPORT_MODULE
+                        && import.module != HOST_IMPORT_MODULE)
                         || !matches!(
                             import.ty,
                             TypeRef::Func(_) | TypeRef::FuncExact(_)
@@ -169,7 +173,10 @@ pub fn validate(bytes: &[u8]) -> Result<ModuleSummary, ValidationError> {
                     let export = export.map_err(invalid)?;
                     let allowed = match export.kind {
                         ExternalKind::Memory => export.name == MEMORY_EXPORT,
-                        ExternalKind::Func => FUNCTION_EXPORTS.contains(&export.name),
+                        ExternalKind::Func => {
+                            FUNCTION_EXPORTS.contains(&export.name)
+                                || BUILDER_EXPORTS.contains(&export.name)
+                        }
                         _ => false,
                     };
                     if !allowed {
@@ -185,6 +192,18 @@ pub fn validate(bytes: &[u8]) -> Result<ModuleSummary, ValidationError> {
             }
             _ => {}
         }
+    }
+    // A module exports the builders exactly when it imports a host operation.
+    let imports_host = summary
+        .imports
+        .iter()
+        .any(|(module, _)| module == HOST_IMPORT_MODULE);
+    if let Some(name) = summary
+        .exports
+        .iter()
+        .find(|name| BUILDER_EXPORTS.contains(&name.as_str()) && !imports_host)
+    {
+        return Err(ValidationError::ForeignExport { name: name.clone() });
     }
     if defined_memories != 1 {
         return Err(ValidationError::Memory(format!(

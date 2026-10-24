@@ -9,6 +9,7 @@
 //! type the origin table records and renders with the one canonical encoder the
 //! results use. A trap is status `1`, and the memory host event status `2`.
 
+use vibra_host::{AuditEvent, HostProvider, HostWorld, WorldProvider};
 use vibra_ir::boundary::{Failure, TEST_EXPORT, TrapCode};
 use vibra_ir::{Type, TypeDefinition, Value};
 
@@ -25,6 +26,8 @@ pub enum TestRun {
     Passed {
         /// The live sizes around the run.
         live: LiveSizes,
+        /// The events of the host calls the test completed, in call order.
+        audit_trace: Vec<AuditEvent>,
     },
     /// An assertion was false, and stopped only this test.
     AssertionFailed {
@@ -37,6 +40,8 @@ pub enum TestRun {
         expected: String,
         /// The canonical encoding of the actual operand.
         actual: String,
+        /// The events of the host calls the test completed before it failed.
+        audit_trace: Vec<AuditEvent>,
     },
     /// The test stopped with a registered trap.
     Trapped {
@@ -91,7 +96,32 @@ impl Runner {
         heads: &dyn Fn(u32) -> Option<Type>,
         operand_of: &dyn Fn(u32) -> Option<Type>,
     ) -> Result<TestRun, RunnerError> {
-        let mut instance = match self.start(bytes)? {
+        self.run_test_with_host(
+            bytes,
+            index,
+            types,
+            heads,
+            operand_of,
+            Box::new(WorldProvider::new(&HostWorld::default())),
+        )
+    }
+
+    /// [`Self::run_test`] with `provider` as the test's host, a fresh one for
+    /// each test.
+    ///
+    /// # Errors
+    ///
+    /// A [`RunnerError`] when the module is not a v1 module or lacks an export.
+    pub fn run_test_with_host(
+        &self,
+        bytes: &[u8],
+        index: u32,
+        types: &[TypeDefinition],
+        heads: &dyn Fn(u32) -> Option<Type>,
+        operand_of: &dyn Fn(u32) -> Option<Type>,
+        provider: Box<dyn HostProvider>,
+    ) -> Result<TestRun, RunnerError> {
+        let mut instance = match self.start_with_host(bytes, provider)? {
             Started::MemoryExhausted => return Ok(TestRun::MemoryExhausted),
             Started::Ready(instance) => instance,
         };
@@ -106,20 +136,27 @@ impl Runner {
                     with_result: live_size,
                     end: live_size,
                 },
+                audit_trace: instance.audit_trace().to_vec(),
             }),
             Outcome::AssertionFailed {
                 failure,
                 origin,
                 operands,
-            } => Ok(read_failure(
-                &mut instance,
-                failure,
-                origin,
-                operands,
-                types,
-                heads,
-                operand_of,
-            )),
+            } => {
+                let mut run = read_failure(
+                    &mut instance,
+                    failure,
+                    origin,
+                    operands,
+                    types,
+                    heads,
+                    operand_of,
+                );
+                if let TestRun::AssertionFailed { audit_trace, .. } = &mut run {
+                    *audit_trace = instance.audit_trace().to_vec();
+                }
+                Ok(run)
+            }
             other => Ok(stopped(other)),
         }
     }
@@ -157,12 +194,14 @@ fn read_failure(
             origin,
             expected: bool_text(true),
             actual: bool_text(false),
+            audit_trace: Vec::new(),
         },
         Failure::False => TestRun::AssertionFailed {
             failure,
             origin,
             expected: bool_text(false),
             actual: bool_text(true),
+            audit_trace: Vec::new(),
         },
         Failure::Equal => {
             let (Some((expected, actual)), Some(ordinal)) = (operands, origin) else {
@@ -193,6 +232,7 @@ fn read_failure(
                 origin,
                 expected,
                 actual,
+                audit_trace: Vec::new(),
             }
         }
     }

@@ -122,6 +122,9 @@ fn walk(env: &TypeEnv<'_>, expr: &Expr, found: &mut Vec<UnloweredForm>) {
             }
             walk_all(env, arguments, found);
         }
+        // A host operation is one import of the closed registry; its operands
+        // are the only expressions it adds.
+        Expr::Host { arguments, .. } => walk_all(env, arguments, found),
         // An omitted labelled operand is the callee's default, a constant; a
         // module function used as a value, a `lambda`, and a read of what it
         // captured are the function values of a call, and a function value is
