@@ -182,7 +182,7 @@ and the ambient-read test still pass; `@host` is no longer reported unavailable.
 
 ## As built: 16b-1
 
-Landed on its branch, conditional on its pull request merging; the base is `m4` at
+Landed (PR #375, merge 0fa74b0); the base is `m4` at
 `746e3d3`, where Step 16a (PR #374) merged. Nothing a source program does changed:
 `@host` is still `@tool.unavailable`, the corpus has the same 525 cases, and the
 parity inventory is unchanged (135 of 135 matched).
