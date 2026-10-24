@@ -531,6 +531,7 @@ pub fn check_resolved(
                         impl_member: None,
                         implements: None,
                         effect_owner: None,
+                        host: None,
                     });
                 }
                 Declaration::Test(test) => {
@@ -582,6 +583,7 @@ pub fn check_resolved(
                         impl_member: None,
                         implements: None,
                         effect_owner: None,
+                        host: None,
                     });
                 }
                 Declaration::Deftype(value) => {
@@ -661,6 +663,7 @@ pub fn check_resolved(
                             impl_member: None,
                             implements: None,
                             effect_owner: None,
+                            host: None,
                         });
                     }
                 }
@@ -702,6 +705,15 @@ pub fn check_resolved(
                         };
                         // An operation performs its owner root together with
                         // the additive row it writes.
+                        let host = crate::host_operation(
+                            module.record.source_id(),
+                            member,
+                            value,
+                            &owner,
+                            &signature,
+                            &crate::standard::role_types(&types),
+                            &mut diagnostics,
+                        );
                         let signature = crate::operation_signature(signature, &owner);
                         let index = functions.len();
                         function_indices.insert(id.clone(), index);
@@ -736,6 +748,7 @@ pub fn check_resolved(
                             impl_member: None,
                             implements: None,
                             effect_owner: Some(owner.clone()),
+                            host,
                         });
                     }
                 }
@@ -812,6 +825,7 @@ pub fn check_resolved(
             impl_member: None,
             implements: None,
             effect_owner: None,
+            host: None,
         });
     }
 
@@ -863,6 +877,7 @@ pub fn check_resolved(
             impl_member: None,
             implements: None,
             effect_owner: None,
+            host: None,
         });
     }
 
@@ -1106,6 +1121,29 @@ pub fn check_resolved(
                 function.span(),
                 "variadic, generic, external, and nonempty-effect attributes are unavailable in Step 12",
             );
+            continue;
+        }
+        if let Some(row) = header.host {
+            let origin = SourceOrigin::new(header.source_id.as_str(), function.span());
+            let owner = header.effect_owner.clone();
+            match CheckedFunction::new_host(header.name, header.signature, row, origin)
+            {
+                Ok(checked) => {
+                    let checked = match owner {
+                        Some(owner) => checked.with_effect_owner(owner),
+                        None => checked,
+                    };
+                    if let Some(slot) = checked_functions.get_mut(index) {
+                        *slot = Some(checked);
+                    }
+                }
+                Err(error) => unavailable(
+                    &mut diagnostics,
+                    &header.source_id,
+                    function.span(),
+                    format!("checked IR construction failed: {error}"),
+                ),
+            }
             continue;
         }
         if let Some(intrinsic) = header.external {

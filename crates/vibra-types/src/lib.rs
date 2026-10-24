@@ -569,6 +569,8 @@ struct FunctionHeader {
     /// For an effect operation, the root that owns it: its complete row is
     /// the owner together with the additive row its signature carries.
     effect_owner: Option<vibra_ir::EffectRoot>,
+    /// For an effect operation bound to the host registry, its row.
+    host: Option<&'static vibra_ir::external::host::HostRow>,
 }
 
 pub(crate) const IMPORTED_FUNCTION_DECLARATION: usize = usize::MAX;
@@ -960,6 +962,7 @@ impl<'a> Checker<'a> {
                             impl_member: None,
                             implements: None,
                             effect_owner: None,
+                            host: None,
                         });
                     }
                 }
@@ -992,6 +995,15 @@ impl<'a> Checker<'a> {
                         };
                         // An operation performs its owner root together with
                         // the additive row it writes.
+                        let host = host_operation(
+                            self.source_id,
+                            member,
+                            value,
+                            &owner,
+                            &signature,
+                            &standard::role_types(&self.types),
+                            self.diagnostics,
+                        );
                         let signature = operation_signature(signature, &owner);
                         let name = format!(
                             "{}.{}",
@@ -1026,6 +1038,7 @@ impl<'a> Checker<'a> {
                             impl_member: None,
                             implements: None,
                             effect_owner: Some(owner.clone()),
+                            host,
                         });
                     }
                 }
@@ -1093,6 +1106,7 @@ impl<'a> Checker<'a> {
                         impl_member: None,
                         implements: None,
                         effect_owner: None,
+                        host: None,
                     });
                 }
                 Declaration::Import(import)
@@ -1169,6 +1183,7 @@ impl<'a> Checker<'a> {
                     impl_member: None,
                     implements: None,
                     effect_owner: None,
+                    host: None,
                 });
             }
         }
@@ -1228,6 +1243,7 @@ impl<'a> Checker<'a> {
                     impl_member: None,
                     implements: None,
                     effect_owner: None,
+                    host: None,
                 });
             }
             self.text_import_span = Some(import_span);
@@ -1273,6 +1289,7 @@ impl<'a> Checker<'a> {
                 impl_member: None,
                 implements: None,
                 effect_owner: None,
+                host: None,
             });
         }
         for _ in 0..=self.globals.len() {
@@ -1459,6 +1476,33 @@ impl<'a> Checker<'a> {
                     function.span(),
                     "variadic, generic, external, and nonempty-effect attributes are unavailable in Step 7",
                 );
+                continue;
+            }
+            if let Some(row) = header.host {
+                let origin = SourceOrigin::new(source_id, function.span());
+                let owner = header.effect_owner.clone();
+                match CheckedFunction::new_host(
+                    header.name,
+                    header.signature,
+                    row,
+                    origin,
+                ) {
+                    Ok(checked) => {
+                        let checked = match owner {
+                            Some(owner) => checked.with_effect_owner(owner),
+                            None => checked,
+                        };
+                        if let Some(slot) = self.checked_functions.get_mut(index) {
+                            *slot = Some(checked);
+                        }
+                    }
+                    Err(error) => unavailable(
+                        self.diagnostics,
+                        source_id,
+                        function.span(),
+                        format!("checked IR construction failed: {error}"),
+                    ),
+                }
                 continue;
             }
             if let Some(intrinsic) = header.external {
@@ -3578,6 +3622,115 @@ fn check_signature(
     })
 }
 
+/// The language type of a type that appears in a host signature.
+fn host_signature_type(ty: vibra_ir::external::host::HostType) -> Type {
+    use vibra_ir::external::host::HostType;
+    match ty {
+        HostType::Path => Type::Declared(stdlib::stdlib_type_id(&["fs"], "path")),
+        HostType::FsMetadata => {
+            Type::Declared(stdlib::stdlib_type_id(&["fs"], "fs-metadata"))
+        }
+        HostType::Array(element) => {
+            Type::Array(Box::new(host_signature_type(*element)))
+        }
+        primitive => primitive.primitive().unwrap_or(Type::Void),
+    }
+}
+
+/// Checks the `external: @host` member of a `deffect` against the closed host
+/// registry (`docs/spec/03-effects.md`, "Nominal effects"). Three facts are
+/// checked independently, so a member that is wrong in two ways is reported
+/// for both: the symbol names a row (`@external.unknown-symbol` at the symbol
+/// string); the row's owner is the enclosing root (`@external.owner-mismatch` at
+/// the symbol string, relating the `deffect` name); and the written signature is
+/// the row's, every type exactly (`@type.type-argument-mismatch` at the
+/// declaration, with the registry signature as a note). Answers the row only
+/// when all three hold.
+pub(crate) fn host_operation(
+    source_id: &str,
+    member: &vibra_syntax::FunctionDeclaration,
+    effect: &vibra_syntax::DeffectDeclaration,
+    owner: &vibra_ir::EffectRoot,
+    written: &FunctionSignature,
+    roles: &vibra_ir::external::RoleTypes,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<&'static vibra_ir::external::host::HostRow> {
+    let items = member.attributes().items();
+    if !items.iter().any(
+        |attribute| matches!(attribute, Attribute::External(name) if name.value() == "host"),
+    ) {
+        return None;
+    }
+    // A member with an additive row is already `@syntax.invalid-attribute`; it
+    // is not checked against the registry as well, so one fault is one report.
+    if items.iter().any(
+        |attribute| matches!(attribute, Attribute::Effects(row) if !row.references().is_empty()),
+    ) {
+        return None;
+    }
+    let symbol = items.iter().find_map(|attribute| match attribute {
+        Attribute::Symbol(Literal::String(value)) => Some(value.value()),
+        _ => None,
+    })?;
+    let at_symbol = member
+        .attributes()
+        .value_span("symbol")
+        .unwrap_or(member.span());
+    let Some(row) = vibra_ir::external::host::host_row(symbol) else {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::ExternalUnknownSymbol,
+                at_symbol,
+                format!("`{symbol}` is not a symbol of the closed host registry"),
+            )
+            .with_source_id(source_id),
+        );
+        return None;
+    };
+    let mut accepted = true;
+    if format!("@{}", owner.path()) != row.owner {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::ExternalOwnerMismatch,
+                at_symbol,
+                format!(
+                    "host symbol `{symbol}` is owned by `{}`, not by the enclosing `{}`",
+                    row.owner,
+                    effect.name().value()
+                ),
+            )
+            .with_source_id(source_id)
+            .with_related(effect.name_span(), "the enclosing deffect"),
+        );
+        accepted = false;
+    }
+    let error_module = row.error.module().strip_prefix("std.").unwrap_or_default();
+    let modules = error_module.split('.').collect::<Vec<_>>();
+    let expected = FunctionSignature::new(
+        row.parameters
+            .iter()
+            .map(|parameter| host_signature_type(parameter.ty))
+            .collect(),
+        roles.result_of(
+            host_signature_type(row.ok),
+            Type::Declared(stdlib::stdlib_type_id(&modules, row.error.name())),
+        ),
+    );
+    if !written.same_shape(&expected) {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeTypeArgumentMismatch,
+                member.span(),
+                format!("host symbol `{symbol}` has a different signature"),
+            )
+            .with_source_id(source_id)
+            .with_note(format!("the registry signature is {}", row.signature())),
+        );
+        accepted = false;
+    }
+    accepted.then_some(row)
+}
+
 fn compiler_intrinsic(
     source_id: &str,
     function: &vibra_syntax::FunctionDeclaration,
@@ -3610,13 +3763,9 @@ fn compiler_intrinsic(
         }
     });
     let provider = provider?;
+    // A `@host` member is checked against the host registry where its owner is
+    // known (`host_operation`); it is no `@compiler` row.
     if provider == "host" {
-        unavailable(
-            diagnostics,
-            source_id,
-            function.span(),
-            "the recognized @host provider remains unavailable until M4",
-        );
         return None;
     }
     if provider != "compiler" {
@@ -6513,7 +6662,7 @@ mod tests {
                 true,
             );
             let expected = if source.contains("@host") {
-                DiagnosticCode::ToolUnavailable
+                DiagnosticCode::SyntaxInvalidAttribute
             } else if source.contains("text.unknown")
                 || source.contains("u8.neg-checked")
             {

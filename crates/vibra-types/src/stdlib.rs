@@ -88,6 +88,10 @@ const EMBEDDED_MODULES: &[(&str, &[u8])] = &[
         include_bytes!("../../../stdlib/src/std/iter.vib"),
     ),
     (
+        "std/io.vib",
+        include_bytes!("../../../stdlib/src/std/io.vib"),
+    ),
+    (
         "std/builtin.vib",
         include_bytes!("../../../stdlib/src/std/builtin.vib"),
     ),
@@ -1046,6 +1050,25 @@ mod tests {
 
     use sha2::{Digest, Sha256};
 
+    /// The embedded manifest without `@std.io` and without its `host` list, so a
+    /// synthetic module can stand in for it.
+    fn bare_manifest() -> String {
+        let text = manifest();
+        let start = text.find("    @std.io (record").expect("io entry");
+        let tail = "role: @source)
+";
+        let end = start + text[start..].find(tail).expect("entry end") + tail.len();
+        let mut bare = format!("{}{}", &text[..start], &text[end..]);
+        let host = bare.find("  host: (array").expect("host");
+        let native = bare.find("  native:").expect("native");
+        bare.replace_range(
+            host..native,
+            "  host: (array)
+",
+        );
+        bare
+    }
+
     /// A manifest and a synthetic `@std.io` module that binds `body`, with the
     /// manifest's `host` list set to `listed`.
     fn host_inputs(body: &str, listed: &[&str]) -> (String, String) {
@@ -1062,7 +1085,7 @@ mod tests {
                     .join(" ")
             )
         };
-        let manifest = manifest()
+        let manifest = bare_manifest()
             .replace("  host: (array)\n", &format!("  host: {list}\n"))
             .replace(
                 "    @std.core (record",
@@ -1084,10 +1107,21 @@ mod tests {
     const STDOUT_TEXT: &str = "(deffect stdout\n  (defn text (value str) (result void io-error)\n    external: @host\n    symbol: \"io.stdout-text\"))\n";
 
     #[test]
-    fn the_package_is_0_3_0_and_the_embedded_host_list_is_empty() {
+    fn the_package_is_0_3_0_and_the_embedded_host_list_is_the_six_io_symbols() {
         let stdlib = load_stdlib().expect("embedded standard library");
         assert_eq!(stdlib.package().version(), "0.3.0");
-        assert!(stdlib.host_symbols().is_empty());
+        assert_eq!(
+            stdlib.host_symbols(),
+            [
+                "io.stdin-text",
+                "io.stdin-bytes",
+                "io.stdout-text",
+                "io.stdout-bytes",
+                "io.stderr-text",
+                "io.stderr-bytes",
+            ]
+            .map(str::to_owned)
+        );
     }
 
     #[test]
@@ -1098,11 +1132,16 @@ mod tests {
         let native = embedded.find("  native:").expect("native");
         assert!(compiler < host && host < native);
         // A manifest without the field, or with it out of order, is rejected.
+        let without = {
+            let mut text = embedded.to_owned();
+            let start = text.find("  host:").expect("host");
+            let end = text.find("  native:").expect("native");
+            text.replace_range(start..end, "");
+            text
+        };
         for text in [
-            embedded.replace("  host: (array)\n", ""),
-            embedded
-                .replace("  host: (array)\n", "")
-                .replace("  assertions:", "  host: (array)\n  assertions:"),
+            without.clone(),
+            without.replace("  assertions:", "  host: (array)\n  assertions:"),
         ] {
             let mut inputs = StdlibInputs::embedded();
             inputs.manifest = text.as_bytes();

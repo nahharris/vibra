@@ -854,12 +854,19 @@ impl DefintDeclaration {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeffectDeclaration {
     name: Name,
+    name_span: ByteSpan,
     attributes: DeclarationAttributes,
     members: Vec<FunctionDeclaration>,
     span: ByteSpan,
 }
 
 impl DeffectDeclaration {
+    /// The span of the effect root's name.
+    #[must_use]
+    pub const fn name_span(&self) -> ByteSpan {
+        self.name_span
+    }
+
     /// The unqualified effect root name.
     #[must_use]
     pub const fn name(&self) -> &Name {
@@ -1575,9 +1582,29 @@ impl DeclarationAttributes {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FunctionAttributes {
     items: Vec<Attribute>,
+    spans: Box<[(String, ByteSpan, ByteSpan)]>,
 }
 
 impl FunctionAttributes {
+    /// The span of the attribute written with `label` (without the colon), from
+    /// its label to the end of its value.
+    #[must_use]
+    pub fn attribute_span(&self, label: &str) -> Option<ByteSpan> {
+        self.spans
+            .iter()
+            .find(|(known, _, _)| known == label)
+            .map(|(_, attribute, _)| *attribute)
+    }
+
+    /// The span of the value of the attribute written with `label`.
+    #[must_use]
+    pub fn value_span(&self, label: &str) -> Option<ByteSpan> {
+        self.spans
+            .iter()
+            .find(|(known, _, _)| known == label)
+            .map(|(_, _, value)| *value)
+    }
+
     /// Attributes in source order.
     #[must_use]
     pub fn items(&self) -> &[Attribute] {
@@ -1655,6 +1682,7 @@ enum FunctionOwner {
 
 struct ParsedAttributes {
     items: Vec<Attribute>,
+    spans: Vec<(String, ByteSpan, ByteSpan)>,
     next: usize,
 }
 
@@ -1919,6 +1947,7 @@ impl AstParser {
             }
         }
         Some(Declaration::Deffect(DeffectDeclaration {
+            name_span: forms[1].span(),
             name,
             attributes,
             members,
@@ -2075,6 +2104,13 @@ impl AstParser {
             .collect::<Option<Vec<_>>>();
         self.generic_scope = enclosing;
         let expressions = expressions?;
+        let attribute_span = |label: &str| {
+            parsed
+                .spans
+                .iter()
+                .find(|(known, _, _)| known == label)
+                .map(|(_, span, _)| *span)
+        };
         let has_external = parsed
             .items
             .iter()
@@ -2111,7 +2147,7 @@ impl AstParser {
             if !provider_is_host {
                 self.error(
                     DiagnosticCode::SyntaxInvalidAttribute,
-                    node.span(),
+                    attribute_span("external").unwrap_or_else(|| node.span()),
                     "an effect member external must use the host provider",
                 );
             }
@@ -2129,7 +2165,7 @@ impl AstParser {
             {
                 self.error(
                     DiagnosticCode::SyntaxInvalidAttribute,
-                    node.span(),
+                    attribute_span("external").unwrap_or_else(|| node.span()),
                     "the host provider is restricted to effect members",
                 );
             }
@@ -2140,8 +2176,8 @@ impl AstParser {
                 if has_additive_effects {
                     self.error(
                         DiagnosticCode::SyntaxInvalidAttribute,
-                        node.span(),
-                        "external declarations cannot add effects",
+                        attribute_span("effects").unwrap_or_else(|| node.span()),
+                        "an external declaration has no additive row: a @host member performs exactly its owner root",
                     );
                 }
             }
@@ -2153,6 +2189,7 @@ impl AstParser {
             result_span,
             attributes: FunctionAttributes {
                 items: parsed.items,
+                spans: parsed.spans.into(),
             },
             body,
             expressions,
@@ -2424,6 +2461,7 @@ impl AstParser {
                 result_span,
                 attributes: FunctionAttributes {
                     items: parsed.items,
+                    spans: parsed.spans.into(),
                 },
                 body,
                 span: node.span(),
@@ -3354,6 +3392,7 @@ impl AstParser {
             }
         };
         let mut items = Vec::new();
+        let mut spans = Vec::new();
         let mut seen = BTreeSet::new();
         let mut index = 0;
         while index < forms.len() {
@@ -3424,11 +3463,20 @@ impl AstParser {
                     // The next nested method may inherit these names. The
                     // containing declaration collects them from the result.
                 }
+                spans.push((
+                    label.to_owned(),
+                    forms[index].span().join(value.span()),
+                    value.span(),
+                ));
                 items.push(attribute);
             }
             index += 2;
         }
-        ParsedAttributes { items, next: index }
+        ParsedAttributes {
+            items,
+            spans,
+            next: index,
+        }
     }
 
     fn parse_attribute(

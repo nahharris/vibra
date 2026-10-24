@@ -63,6 +63,25 @@ fn an_audit_trace_is_canonical() {
     );
 }
 
+/// The `deffect` forms with `external:` and `symbol:` are written in the
+/// canonical attribute order, so `@std.io` is a canonical source.
+#[test]
+fn the_io_module_is_canonical_source() {
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/src/std/io.vib");
+    let text = std::fs::read_to_string(&path).expect("a source file");
+    let text = text.replace("\r\n", "\n");
+    let once = vibra_fmt::format(&path, &text).expect("formats");
+    assert_eq!(once, text, "io.vib is not canonical");
+    // Attributes written out of order are put in the canonical one.
+    let shuffled = "(deffect stdout\n  (defn text (value str) (result void io-error)\n    symbol: \"io.stdout-text\"\n    external: @host\n    visibility: @public))\n";
+    let once = vibra_fmt::format(Path::new("shuffled.vib"), shuffled).expect("formats");
+    let visibility = once.find("visibility:").expect("visibility");
+    let external = once.find("external:").expect("external");
+    let symbol = once.find("symbol:").expect("symbol");
+    assert!(visibility < external && external < symbol, "{once}");
+}
+
 #[test]
 fn the_standard_library_manifest_is_canonical_and_the_formatter_is_idempotent_over_it()
 {
@@ -71,5 +90,5 @@ fn the_standard_library_manifest_is_canonical_and_the_formatter_is_idempotent_ov
     let text = std::fs::read_to_string(path).expect("the manifest");
     let once = formatted("manifest.vibon", &text);
     assert_eq!(formatted("manifest.vibon", &once), once);
-    assert!(text.contains("  host: (array)\n"));
+    assert!(text.contains("  host: (array\n    \"io.stdin-text\""));
 }

@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-io-error-propagates-with-try"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "A host error reaches the program only as the err of its own operation: try returns it from the entry, so the write after it never runs and the trace has the one completed call."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

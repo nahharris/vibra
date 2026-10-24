@@ -9,10 +9,10 @@ IR, and both backends: `deffect` roots and operations with Vibra bodies, effect
 rows on every function, `lambda`, function type, interface contract member, and
 test, performed rows over the function-call graph, `@effect.outside-ceiling`
 with its witness, `@effect.invalid-reference`, `@contract.unused-effect` for a
-written root, and the row in the canonical `fn` type encoding. `@host`
-externals, the target `effects` array and its admission, effectful-test consent,
-the query and index metadata, and the host standard-library modules remain
-unimplemented until Milestone 4 Steps 15 to 20.
+written root, and the row in the canonical `fn` type encoding. Step 15 adds the
+target `effects` array and effectful-test consent, and Step 16 the `@host`
+externals and `@std.io`; the query and index metadata and the other host
+modules remain unimplemented until Milestone 4 Steps 17 to 20.
 
 ## Static contract
 
@@ -37,10 +37,9 @@ Since Milestone 4 Step 14, checking and execution admit nonempty written
 ceilings and nonempty performed rows on function types, `defn`, `lambda`,
 tests, and effect operations. Rows are erased: neither backend consults one, and
 an effect operation with a Vibra body is an ordinary function that both run as
-such. An omitted row is empty as specified below. A `@host` external is not yet
-executable and emits `@tool.unavailable` at its member until the host registry
-lands in Milestone 4 Step 16, and a project target's effect-consent array does
-not yet gate an effectful entry.
+such. An omitted row is empty as specified below. Since Step 16 a `@host`
+external is executable in both backends, and since Step 15 a project target's
+effect-consent array gates an effectful entry.
 
 ## Nominal effects
 
@@ -105,7 +104,11 @@ by a different root than its enclosing `deffect` is `@external.owner-mismatch`
 at its `symbol:` string, relating the `deffect` name. A `@host` symbol that is
 not in the registry is `@external.unknown-symbol`, and a declared signature that
 differs from the entry's is `@type.type-argument-mismatch`, as for an
-`@compiler` declaration.
+`@compiler` declaration. The three checks are
+independent, so a member that is wrong in two ways is reported for both. Every
+row's owner is a root of an embedded standard-library module, so a `@host` member
+written in any other module is `@external.owner-mismatch`, which is how ordinary
+packages cannot declare one.
 
 ## Function effect rows
 

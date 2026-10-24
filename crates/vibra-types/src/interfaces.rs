@@ -1426,6 +1426,7 @@ pub(crate) fn materialize(
                             .collect(),
                     }),
                     effect_owner: None,
+                    host: None,
                 });
             }
         }
@@ -1530,6 +1531,7 @@ pub(crate) fn materialize(
                     member_generics,
                 }),
                 effect_owner: None,
+                host: None,
             });
         }
         register(types, plan, &written, &defaults);

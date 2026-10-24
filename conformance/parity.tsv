@@ -47,6 +47,13 @@ V1-RUNTIME-inference-order	matched
 V1-RUNTIME-interface-dispatch	matched
 V1-RUNTIME-interface-values	matched
 V1-RUNTIME-interface-widening-positions	matched
+V1-RUNTIME-io-effectful-iter-walk	matched
+V1-RUNTIME-io-error-propagates-with-try	matched
+V1-RUNTIME-io-invalid-text	matched
+V1-RUNTIME-io-stdin-bytes-twice	matched
+V1-RUNTIME-io-stdin-text-twice	matched
+V1-RUNTIME-io-write-text-and-bytes	matched
+V1-RUNTIME-io-test-world-stdin	matched
 V1-RUNTIME-iter-defaults	matched
 V1-RUNTIME-iter-next	matched
 V1-RUNTIME-iter-skip-filter-depth	matched

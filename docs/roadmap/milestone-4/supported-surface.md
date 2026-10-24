@@ -66,7 +66,7 @@ a program the checker cannot have produced (`lowers_every_form_m4_step11`).
 | `Declaration::Test` | Lowered | Step 11 | `workspace-test` observations and assertion outcomes (landed: a test module with `vibra_v1_test`, the three assertions, canonical equality, and the failure exports, `tests_traps_m4_step11`) |
 | `Declaration::Deftype` | Lowered | Step 5b | Generic: Step 6 (landed); union discriminants in written order: Step 5b |
 | `Declaration::Defint` | Lowered | Step 9 | — |
-| `Declaration::Deffect` | Stage 4B | Step 14 | Landed with Step 14, conditional on its pull request merging: a root and its operations with Vibra bodies in both checkers, the typed IR, and both backends, where an operation lowers as an ordinary function and applying it is a call (landed: `effects_m4_step14`, `V1-RUNTIME-effect-operations`, `V1-RUNTIME-workspace-run-effect-operations`). An operation with `external: @host` stays `@tool.unavailable` at the member until Step 16b-2 |
+| `Declaration::Deffect` | Stage 4B | Step 14 | Landed with Step 14, conditional on its pull request merging: a root and its operations with Vibra bodies in both checkers, the typed IR, and both backends, where an operation lowers as an ordinary function and applying it is a call (landed: `effects_m4_step14`, `V1-RUNTIME-effect-operations`, `V1-RUNTIME-workspace-run-effect-operations`). An operation with `external: @host` is checked against the host registry since Step 16b-2 (landed: `@std.io`) |
 | `TypeMember::Method` | Lowered | Step 5b | Contract members: Step 9 |
 | `TypeMember::Implementation` | Lowered | Step 9 | Static dispatch, interface values, defaults, and destination dispatch |
 | `TypeExpr::Name` | Lowered | Step 5b | Interfaces and `any` as types: Step 9 |
@@ -88,7 +88,7 @@ a program the checker cannot have produced (`lowers_every_form_m4_step11`).
 | `Attribute::Variadic` | Lowered | Step 8b | (landed) |
 | `Attribute::Visibility` | Static | — | — |
 | `Attribute::Effects` | Stage 4B | Step 14 | Landed with Step 14, conditional on its pull request merging: a row on a `defn`, an operation, a `lambda`, a test, a function type, and an interface contract member is the record of ledger D25.1, resolved in the effect namespace, sorted by canonical identity, and part of the function type; rows are erased by both backends (landed: `V1-EFFECT-*`, `V1-RUNTIME-effect-function-values`). `effects:` on a `deffect` is `@syntax.invalid-attribute` |
-| `Attribute::External` | Lowered | Step 8a | `@compiler` rows: Steps 8a–8c (8c landed: the float rows, inline, and the 20 `to-str` and `parse` rows as imports, 42 in `NATIVE_ROWS` with 8b's 22, so every `@compiler` row is lowered, `array.fold` by running its checked body (Step 8d landed); 8b landed: the text, bytes, array, and dict rows, inline or as the 22 native imports of `NATIVE_ROWS`; 8a landed: the integer arithmetic, shift, comparison, and conversion rows and the `char` rows, lowered inline); `@host`: Stage 4B Step 16b (the registry, snapshot, and manifest list arrive in Step 16a) |
+| `Attribute::External` | Lowered | Step 8a | `@compiler` rows: Steps 8a–8c (8c landed: the float rows, inline, and the 20 `to-str` and `parse` rows as imports, 42 in `NATIVE_ROWS` with 8b's 22, so every `@compiler` row is lowered, `array.fold` by running its checked body (Step 8d landed); 8b landed: the text, bytes, array, and dict rows, inline or as the 22 native imports of `NATIVE_ROWS`; 8a landed: the integer arithmetic, shift, comparison, and conversion rows and the `char` rows, lowered inline); `@host`: Stage 4B Step 16b-2 (landed, conditional on its pull request merging: the six `io` rows are lowered; the registry, snapshot, and manifest list arrived in Step 16a) |
 | `Attribute::Symbol` | Static | — | — |
 | `Attribute::Native` | Lowered | Step 10 | 8b: the text, bytes, array, and dict natives are imports of `vibra_native_v1` backed by `vibra-native`, and `array.fold` (no import) is the one native a module runs as its body, the checked body of the embedded standard library that the typed IR carries beside the wrapper the interpreter runs (Step 8d landed); Step 10 completes and proves the rule (landed: `natives_m4_step10` audits that no native or looping row has an algorithm outside `vibra-native` and that the manifest, the registry, and the import table agree, `natives_m3_step4b` runs 112 samples of the 19 natives on four paths, and `native_faults_m4_step10` shows a faulting native ends as `@runtime.invalid-checked-program`) |
 | `Attribute::Role` | Static | — | — |
@@ -107,14 +107,14 @@ merging, and report `@tool.unavailable` no longer. Step 9 lowers them to WebAsse
 | ID | Inherited row | Owner |
 | --- | --- | --- |
 | I1 | `Declaration::Deffect`; nonempty `Attribute::Effects`, including on a function type and an `iter` default callback | Step 14; landed, conditional on its pull request merging |
-| I2 | `Attribute::External` with `@host` | Step 16b-2 |
+| I2 | `Attribute::External` with `@host` | Step 16b-2; landed, conditional on its pull request merging (the registry check and `@std.io`) |
 | I3 | An abstract contract member with its own generic parameters | Step 2; implemented in Step 2, Wasm in Step 9 (landed) |
 | I4 | Labelled operands and written `types:` arguments on a contract member call | Step 2; implemented in Step 2, Wasm in Step 9 (landed) |
 | I5 | A dict variadic tail on a contract member | Step 2; implemented in Step 2, Wasm in Step 9 (landed) |
 | I6 | A contract member with its own generics or labelled parameters as a function value | Step 2; implemented in Step 2, Wasm in Step 9 (landed) |
 | I7 | M3's G21 (G16 here): the command result for an entry that returns `err` | Step 19 |
 | I8 | Pre-M4 C16: effect rows of a `let` value, a `let-else` fallback, and a `return` operand | Step 14; landed: `V1-EFFECT-let-else-return-rows` |
-| I9 | The conformance chapter's effectful walk over `iter.next` | Step 16b-2 |
+| I9 | The conformance chapter's effectful walk over `iter.next` | Step 16b-2; landed, conditional on its pull request merging (`V1-RUNTIME-io-effectful-iter-walk`, `examples/m4-console`) |
 | I10 | The `vibra_v1` host registry of 17 rows, its versioning rule, and its checked-in snapshot (ledger D17, D19) | Step 16a; landed, PR #374 (the table in `vibra-ir`, the snapshot and `host_registry_snapshot_m4_step16`); rows in Steps 16b–18 |
 | I11 | The `@host` ABI: borrowed parameters, an owned result, and the seven builders (D30) | Step 16b-1; landed, conditional on its pull request merging (the imports, the builders, and the adoption in `vibra-wasm`; `host_builders_m4_step16b`) |
 | I12 | The `@audit-trace.v1` event record and the CLI `AuditEvent` objects (D18) | Step 16a; landed, PR #374 (the event type and its VIBON and JSON codecs, `audit_events_m4_step16`); events: Step 16b-1, landed conditional on its pull request merging (both backends append `AuditEvent::completed`; `host_boundary_m4_step16b`) |

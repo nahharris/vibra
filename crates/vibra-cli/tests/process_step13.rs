@@ -183,7 +183,7 @@ fn unavailable_test_form_stays_distinct_from_failure() {
         &[
             (
                 "tests/helpers.vib",
-                "(deffect host\n  visibility: @public\n  (defn call () i32 visibility: @public external: @host symbol: \"audit.call\"))\n",
+                "(deffect host\n  visibility: @public\n  (defn call () i32 visibility: @public native: \"audit.call\" 1i32))\n",
             ),
             (
                 "tests/math.vib",
@@ -382,7 +382,7 @@ fn unavailability_takes_precedence_over_assertion_failure() {
         &[
             (
                 "tests/helpers.vib",
-                "(deffect host\n  visibility: @public\n  (defn call () i32 visibility: @public external: @host symbol: \"audit.call\"))\n",
+                "(deffect host\n  visibility: @public\n  (defn call () i32 visibility: @public native: \"audit.call\" 1i32))\n",
             ),
             (
                 "tests/math.vib",
