@@ -92,6 +92,10 @@ const EMBEDDED_MODULES: &[(&str, &[u8])] = &[
         include_bytes!("../../../stdlib/src/std/io.vib"),
     ),
     (
+        "std/fs.vib",
+        include_bytes!("../../../stdlib/src/std/fs.vib"),
+    ),
+    (
         "std/builtin.vib",
         include_bytes!("../../../stdlib/src/std/builtin.vib"),
     ),
@@ -1050,15 +1054,25 @@ mod tests {
 
     use sha2::{Digest, Sha256};
 
+    /// The `host` symbols the embedded `@std.fs` binds, which every manifest of
+    /// these tests lists beside the symbols under test.
+    const FS_SYMBOLS: [&str; 6] = [
+        "fs.read-file",
+        "fs.read-text",
+        "fs.read-entries",
+        "fs.write-file",
+        "fs.write-text",
+        "fs.metadata-stat",
+    ];
+
     /// The embedded manifest without `@std.io` and without its `host` list, so a
     /// synthetic module can stand in for it.
     fn bare_manifest() -> String {
-        let text = manifest();
-        let start = text.find("    @std.io (record").expect("io entry");
-        let tail = "role: @source)
-";
-        let end = start + text[start..].find(tail).expect("entry end") + tail.len();
-        let mut bare = format!("{}{}", &text[..start], &text[end..]);
+        let mut bare = manifest().to_owned();
+        let start = bare.find("    @std.io (record").expect("io entry");
+        let tail = "role: @source)\n";
+        let end = start + bare[start..].find(tail).expect("entry end") + tail.len();
+        bare.replace_range(start..end, "");
         let host = bare.find("  host: (array").expect("host");
         let native = bare.find("  native:").expect("native");
         bare.replace_range(
@@ -1073,18 +1087,15 @@ mod tests {
     /// manifest's `host` list set to `listed`.
     fn host_inputs(body: &str, listed: &[&str]) -> (String, String) {
         let digest = format!("{:x}", Sha256::digest(body.as_bytes()));
-        let list = if listed.is_empty() {
-            "(array)".to_owned()
-        } else {
-            format!(
-                "(array {})",
-                listed
-                    .iter()
-                    .map(|symbol| format!("\"{symbol}\""))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            )
-        };
+        let list = format!(
+            "(array {})",
+            listed
+                .iter()
+                .chain(FS_SYMBOLS.iter())
+                .map(|symbol| format!("\"{symbol}\""))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
         let manifest = bare_manifest()
             .replace("  host: (array)\n", &format!("  host: {list}\n"))
             .replace(
@@ -1107,7 +1118,7 @@ mod tests {
     const STDOUT_TEXT: &str = "(deffect stdout\n  (defn text (value str) (result void io-error)\n    external: @host\n    symbol: \"io.stdout-text\"))\n";
 
     #[test]
-    fn the_package_is_0_3_0_and_the_embedded_host_list_is_the_six_io_symbols() {
+    fn the_package_is_0_3_0_and_the_embedded_host_list_is_the_io_and_fs_symbols() {
         let stdlib = load_stdlib().expect("embedded standard library");
         assert_eq!(stdlib.package().version(), "0.3.0");
         assert_eq!(
@@ -1119,6 +1130,12 @@ mod tests {
                 "io.stdout-bytes",
                 "io.stderr-text",
                 "io.stderr-bytes",
+                "fs.read-file",
+                "fs.read-text",
+                "fs.read-entries",
+                "fs.write-file",
+                "fs.write-text",
+                "fs.metadata-stat",
             ]
             .map(str::to_owned)
         );
@@ -1158,7 +1175,14 @@ mod tests {
     #[test]
     fn a_module_binding_a_listed_host_operation_of_its_owner_loads() {
         let stdlib = loads_with(STDOUT_TEXT, &["io.stdout-text"]).expect("loads");
-        assert_eq!(stdlib.host_symbols(), ["io.stdout-text".to_owned()]);
+        assert_eq!(
+            stdlib.host_symbols(),
+            ["io.stdout-text"]
+                .iter()
+                .chain(FS_SYMBOLS.iter())
+                .map(|symbol| (*symbol).to_owned())
+                .collect::<Vec<_>>()
+        );
         assert!(stdlib.module("std.io").is_some());
     }
 
@@ -1245,18 +1269,14 @@ mod tests {
 
     #[test]
     fn an_array_result_and_a_path_parameter_have_their_registry_spelling() {
-        let entries = "(deffect read\n  (defn entries (at path) (result (array str) fs-error)\n    external: @host\n    symbol: \"fs.read-entries\"))\n";
-        let (manifest, module) = host_inputs(entries, &["fs.read-entries"]);
-        let manifest = manifest.replace(
-            "@std.io (record\n      path: \"std/io.vib\"",
-            "@std.fs (record\n      path: \"std/io.vib\"",
-        );
-        let mut inputs =
-            StdlibInputs::embedded().with_module("std/io.vib", module.as_bytes());
-        inputs.manifest = manifest.as_bytes();
-        let stdlib = load_stdlib_bytes(&inputs).expect("loads");
-        assert_eq!(stdlib.host_symbols(), ["fs.read-entries".to_owned()]);
-        // The owner of `fs.read-entries` is `@std.fs.read`.
+        // `fs.read-entries` is `(at path) -> (result (array str) fs-error)`, owned
+        // by `@std.fs.read`; the embedded module binds it and loads.
+        let stdlib = load_stdlib().expect("embedded standard library");
         assert!(stdlib.module("std.fs").is_some());
+        assert!(
+            stdlib
+                .host_symbols()
+                .contains(&"fs.read-entries".to_owned())
+        );
     }
 }

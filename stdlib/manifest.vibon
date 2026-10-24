@@ -39,6 +39,10 @@
       path: "std/io.vib"
       sha256: "sha256:2a917177905f87fd97775777fb035c9f5a7b75bb542c6786420a7ecb56b7fbf4"
       role: @source)
+    @std.fs (record
+      path: "std/fs.vib"
+      sha256: "sha256:f871676dd119bb8ae7e90adc79b2c2ae921629565766d377dce271c406b4f341"
+      role: @source)
     @std.builtin (record
       path: "std/builtin.vib"
       sha256: "sha256:974e5c71afc4162b7ba325c045a30b4cb489ebd2c9847cce281be3f14d907242"
@@ -227,7 +231,13 @@
     "io.stdout-text"
     "io.stdout-bytes"
     "io.stderr-text"
-    "io.stderr-bytes")
+    "io.stderr-bytes"
+    "fs.read-file"
+    "fs.read-text"
+    "fs.read-entries"
+    "fs.write-file"
+    "fs.write-text"
+    "fs.metadata-stat")
   native: (array "array.of" "array.fold" "dict.of" "bytes.length" "bytes.concat" "bytes.equal" "bytes.compare" "bytes.slice" "bytes.to-array" "bytes.from-array" "text.concat" "text.length" "text.equal" "text.compare" "text.slice" "text.to-chars" "text.from-chars" "text.to-utf8" "text.from-utf8")
   assertions: (array
     "assert.true"

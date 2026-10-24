@@ -1,0 +1,1 @@
+(record format: @host-world.v1 files: (dict "/data/note.txt" "héllo 😀\n" "/data/raw.bin" (record kind: @bytes values: (array 0u8 255u8 104u8))))

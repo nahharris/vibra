@@ -1,0 +1,54 @@
+; Filesystem operations (`docs/spec/06-runtime.md`, "The host registry").
+; Each operation reads or writes a whole value for one path in one call and is
+; bound to its row of the closed host registry. The language does not normalize
+; paths: the host interprets the text. The parameter is `at` because `path` is
+; the spelling of the wrapper below.
+(deftype path str visibility: @public)
+
+(deftype fs-error
+  (enum
+    not-found void
+    permission-denied void
+    not-a-file void
+    not-a-directory void
+    invalid-path void
+    invalid-text void
+    other void)
+  visibility: @public)
+
+(deftype fs-kind (enum file void directory void other void) visibility: @public)
+
+(deftype fs-metadata (record kind fs-kind size u64) visibility: @public)
+
+(deffect read
+  visibility: @public
+  (defn file (at path) (result bytes fs-error)
+    visibility: @public
+    external: @host
+    symbol: "fs.read-file")
+  (defn text (at path) (result str fs-error)
+    visibility: @public
+    external: @host
+    symbol: "fs.read-text")
+  (defn entries (at path) (result (array str) fs-error)
+    visibility: @public
+    external: @host
+    symbol: "fs.read-entries"))
+
+(deffect write
+  visibility: @public
+  (defn file (at path contents bytes) (result void fs-error)
+    visibility: @public
+    external: @host
+    symbol: "fs.write-file")
+  (defn text (at path contents str) (result void fs-error)
+    visibility: @public
+    external: @host
+    symbol: "fs.write-text"))
+
+(deffect metadata
+  visibility: @public
+  (defn stat (at path) (result fs-metadata fs-error)
+    visibility: @public
+    external: @host
+    symbol: "fs.metadata-stat"))
