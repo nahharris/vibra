@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-time-monotonic-unavailable-at-the-top"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "A monotonic value that would exceed the u64 range is the typed error unavailable: the read at the top of the range succeeds, and every read after it is unavailable and does not trap."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

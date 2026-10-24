@@ -164,3 +164,14 @@ V1-RUNTIME-fs-metadata-stat	matched
 V1-RUNTIME-fs-error-propagates-with-try	matched
 V1-RUNTIME-fs-demo-path-from-stdin	matched
 V1-RUNTIME-fs-test-world-writes-are-fresh	matched
+V1-RUNTIME-env-read-var	matched
+V1-RUNTIME-env-read-args-from-the-world	matched
+V1-RUNTIME-env-read-args-default-empty	matched
+V1-RUNTIME-time-wall-from-the-world	matched
+V1-RUNTIME-time-monotonic-steps	matched
+V1-RUNTIME-time-monotonic-unavailable-at-the-top	matched
+V1-RUNTIME-random-seeded-bytes	matched
+V1-RUNTIME-random-state-continues	matched
+V1-RUNTIME-env-error-propagates-with-try	matched
+V1-RUNTIME-env-demo-args-name-a-file	matched
+V1-RUNTIME-world-sets-env-args-clock-random	matched

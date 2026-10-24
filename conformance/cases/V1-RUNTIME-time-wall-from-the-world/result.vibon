@@ -1,0 +1,1 @@
+(record type: (record type: @std.result.result arguments: (array @void @std.time.time-error)) value: (record kind: @enum type: @std.result.result variant: @ok))

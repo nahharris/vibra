@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-env-read-var"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "A variable the world holds is read whole, including the empty value; a variable it does not hold, and a name no environment can hold (empty, or with an equals sign), are the typed error not-present, returned as the err of the call and discarded by the program."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }
