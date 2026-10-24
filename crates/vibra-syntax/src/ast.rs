@@ -1582,7 +1582,7 @@ impl DeclarationAttributes {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FunctionAttributes {
     items: Vec<Attribute>,
-    spans: Vec<(String, ByteSpan, ByteSpan)>,
+    spans: Box<[(String, ByteSpan, ByteSpan)]>,
 }
 
 impl FunctionAttributes {
@@ -2189,7 +2189,7 @@ impl AstParser {
             result_span,
             attributes: FunctionAttributes {
                 items: parsed.items,
-                spans: parsed.spans,
+                spans: parsed.spans.into(),
             },
             body,
             expressions,
@@ -2461,7 +2461,7 @@ impl AstParser {
                 result_span,
                 attributes: FunctionAttributes {
                     items: parsed.items,
-                    spans: parsed.spans,
+                    spans: parsed.spans.into(),
                 },
                 body,
                 span: node.span(),

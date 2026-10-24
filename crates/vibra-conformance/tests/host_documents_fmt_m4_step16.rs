@@ -67,13 +67,12 @@ fn an_audit_trace_is_canonical() {
 /// canonical attribute order, so `@std.io` is a canonical source.
 #[test]
 fn the_io_module_is_canonical_source() {
-    for relative in ["../../stdlib/src/std/io.vib"] {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(relative);
-        let text = std::fs::read_to_string(&path).expect("a source file");
-        let text = text.replace("\r\n", "\n");
-        let once = vibra_fmt::format(&path, &text).expect("formats");
-        assert_eq!(once, text, "{relative} is not canonical");
-    }
+    let path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/src/std/io.vib");
+    let text = std::fs::read_to_string(&path).expect("a source file");
+    let text = text.replace("\r\n", "\n");
+    let once = vibra_fmt::format(&path, &text).expect("formats");
+    assert_eq!(once, text, "io.vib is not canonical");
     // Attributes written out of order are put in the canonical one.
     let shuffled = "(deffect stdout\n  (defn text (value str) (result void io-error)\n    symbol: \"io.stdout-text\"\n    external: @host\n    visibility: @public))\n";
     let once = vibra_fmt::format(Path::new("shuffled.vib"), shuffled).expect("formats");
