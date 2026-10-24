@@ -10,7 +10,7 @@ memory budget its runner supplies. Milestone 4 Step 13 closes the Stage 4B
 contracts of this chapter, the host registry, its versioning, the audit-event
 encoding, the host world, the entry outcome, and the host ABI, and implements
 none of them. Milestone 4 Step 14 implements the effect row of the canonical
-function type encoding and effect checking, and Steps 16 and 17 the `io` and `fs` host operations in both backends; the others remain specified and
+function type encoding and effect checking, and Steps 16 and 17 the console and filesystem host operations in both backends; the others remain specified and
 unimplemented until Milestone 4 Steps 18 and 19.
 
 ## Semantic reference
