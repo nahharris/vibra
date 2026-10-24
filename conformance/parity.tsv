@@ -47,6 +47,7 @@ V1-RUNTIME-inference-order	matched
 V1-RUNTIME-interface-dispatch	matched
 V1-RUNTIME-interface-values	matched
 V1-RUNTIME-interface-widening-positions	matched
+V1-RUNTIME-io-write-text-and-bytes	matched
 V1-RUNTIME-iter-defaults	matched
 V1-RUNTIME-iter-next	matched
 V1-RUNTIME-iter-skip-filter-depth	matched

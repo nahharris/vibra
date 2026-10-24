@@ -906,9 +906,13 @@ fn retired_syntax_and_unsupported_valid_declarations_keep_distinct_diagnostics()
 }
 
 #[test]
-fn recognized_host_provider_is_unavailable_and_unknown_provider_is_rejected() {
+fn host_provider_outside_a_deffect_and_unknown_provider_are_rejected() {
     for (label, provider, expected) in [
-        ("host-provider", "host", DiagnosticCode::ToolUnavailable),
+        (
+            "host-provider",
+            "host",
+            DiagnosticCode::SyntaxInvalidAttribute,
+        ),
         (
             "unknown-provider",
             "wasm",

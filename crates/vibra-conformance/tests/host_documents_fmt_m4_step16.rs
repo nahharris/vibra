@@ -71,5 +71,5 @@ fn the_standard_library_manifest_is_canonical_and_the_formatter_is_idempotent_ov
     let text = std::fs::read_to_string(path).expect("the manifest");
     let once = formatted("manifest.vibon", &text);
     assert_eq!(formatted("manifest.vibon", &once), once);
-    assert!(text.contains("  host: (array)\n"));
+    assert!(text.contains("  host: (array\n    \"io.stdin-text\""));
 }

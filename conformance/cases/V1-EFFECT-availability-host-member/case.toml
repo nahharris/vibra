@@ -2,7 +2,7 @@ id = "V1-EFFECT-availability-host-member"
 rule = "V1-EFFECT"
 profile = "static-v1"
 operation = "type-check"
-description = "A valid effect member using the @host provider stays unavailable at the member until the host registry lands; the deffect that owns it is declared."
+description = "A @host member whose symbol is not a row of the host registry is rejected at its symbol string."
 
 [inputs]
 source = "input.vib"
@@ -11,7 +11,7 @@ source = "input.vib"
 accepted = false
 
 [[expect.diagnostics]]
-code = "@tool.unavailable"
+code = "@external.unknown-symbol"
 level = "@error"
 source = "input.vib"
-span = [17, 96]
+span = [81, 95]
