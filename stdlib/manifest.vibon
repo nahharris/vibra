@@ -37,7 +37,7 @@
       role: @source)
     @std.io (record
       path: "std/io.vib"
-      sha256: "sha256:d84f79b4e8df7e8b71015ab9b1642f5926791e126633cd174d0d71ae8a510fdd"
+      sha256: "sha256:2a917177905f87fd97775777fb035c9f5a7b75bb542c6786420a7ecb56b7fbf4"
       role: @source)
     @std.builtin (record
       path: "std/builtin.vib"

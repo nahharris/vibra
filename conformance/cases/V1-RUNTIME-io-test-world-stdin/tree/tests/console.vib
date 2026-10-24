@@ -1,0 +1,19 @@
+(import assert @std.assert)
+(import io @std.io)
+
+(test "reads the world's standard input"
+  effects: (io.stdin io.stdout)
+  (match (io.stdin.text)
+    (result.ok text)
+      (do
+        (assert.equal "from the world" text)
+        (match (io.stdout.text text)
+          (result.ok) (do)
+          (result.err -) (assert.true false)))
+    (result.err -) (assert.true false)))
+
+(test "each test starts from a fresh world"
+  effects: (io.stdin)
+  (match (io.stdin.text)
+    (result.ok text) (assert.equal "from the world" text)
+    (result.err -) (assert.true false)))

@@ -1,0 +1,11 @@
+(import io @std.io)
+
+(import walk @console.walk)
+
+; Echoes standard input, then walks three lines onto standard output. An `err`
+; from either host operation is returned through `try`.
+(defn main () (result void io.io-error)
+  effects: (io.stdin io.stdout)
+  (let input (try (io.stdin.text)))
+  (let - (try (io.stdout.text input)))
+  (walk.write-all (array.of "one\n" "two\n" "three\n")))

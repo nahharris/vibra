@@ -3712,7 +3712,7 @@ pub(crate) fn host_operation(
     if !written.same_shape(&expected) {
         diagnostics.push(
             Diagnostic::new(
-                DiagnosticCode::TypeArgumentMismatch,
+                DiagnosticCode::TypeTypeArgumentMismatch,
                 member.span(),
                 format!("host symbol `{symbol}` has a different signature"),
             )

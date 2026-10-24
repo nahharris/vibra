@@ -2,8 +2,7 @@
 ; Each operation reads or writes a whole value in one call and is bound to its
 ; row of the closed host registry. The error is a closed enum whose variants all
 ; have `void` payloads.
-(deftype io-error (enum invalid-text void closed void other void)
-  visibility: @public)
+(deftype io-error (enum invalid-text void closed void other void) visibility: @public)
 
 (deffect stdin
   visibility: @public
