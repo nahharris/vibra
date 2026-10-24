@@ -1,0 +1,11 @@
+(import fs @std.fs)
+
+(defn main () (result void fs.fs-error)
+  effects: (fs.read)
+  (let - (fs.read.file (fs.path "/missing.txt")))
+  (let - (fs.read.file (fs.path "/missing/inner.txt")))
+  (let - (fs.read.file (fs.path "/dir")))
+  (let - (fs.read.entries (fs.path "/dir/file.txt")))
+  (let - (fs.read.file (fs.path "/dir/file.txt/below")))
+  (let - (fs.read.text (fs.path "bad\u{0}name")))
+  (result.ok))

@@ -1,0 +1,1 @@
+(record type: (record type: @std.result.result arguments: (array @void @std.fs.fs-error)) value: (record kind: @enum type: @std.result.result variant: @err payload: (record kind: @enum type: @std.fs.fs-error variant: @not-found)))

@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-fs-metadata-stat"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "stat answers the kind and the byte length of a file (six bytes for five scalars, one of them two bytes), and kind directory with size zero for a directory; a missing path is not-found."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

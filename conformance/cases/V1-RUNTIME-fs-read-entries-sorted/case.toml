@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-fs-read-entries-sorted"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "The names of a directory come back sorted by Unicode scalar order whatever the world lists them in (digits, then capitals, then lower case, then the non-ASCII scalars by code point), with no . or .. and no directory prefix; an empty directory is the empty array."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

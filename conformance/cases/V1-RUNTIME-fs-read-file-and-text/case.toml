@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-fs-read-file-and-text"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "A file is read whole as bytes and as text: the text is its UTF-8 decoding, the bytes are exactly the stored bytes, and the host resolves the path text, so a path with a dot component names the same file. Each completed call is one event."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

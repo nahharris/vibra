@@ -1,0 +1,8 @@
+(record
+  format: @test-run.v1
+  result: @command.ok
+  tests: (array
+    (record name: "@tests.files::\"a write is visible to a later read in the same test\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array (record kind: @host op: "fs.write-text" args: (array (record kind: @wrapper type: @std.fs.path value: "/data/seed.txt") "changed") result: (record kind: @enum type: @std.result.result variant: @ok)) (record kind: @host op: "fs.read-text" args: (array (record kind: @wrapper type: @std.fs.path value: "/data/seed.txt")) result: (record kind: @enum type: @std.result.result variant: @ok payload: "changed")))))
+    (record name: "@tests.files::\"each test starts from a fresh copy of the world\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array (record kind: @host op: "fs.read-text" args: (array (record kind: @wrapper type: @std.fs.path value: "/data/seed.txt")) result: (record kind: @enum type: @std.result.result variant: @ok payload: "original")))))
+  )
+)

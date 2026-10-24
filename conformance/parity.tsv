@@ -155,3 +155,12 @@ V1-RUNTIME-effect-operations	matched
 V1-RUNTIME-effect-function-values	matched
 V1-RUNTIME-workspace-run-effect-operations	matched
 V1-RUNTIME-workspace-test-effect-operation	matched
+V1-RUNTIME-fs-read-file-and-text	matched
+V1-RUNTIME-fs-invalid-text	matched
+V1-RUNTIME-fs-errors-are-values	matched
+V1-RUNTIME-fs-read-entries-sorted	matched
+V1-RUNTIME-fs-write-then-read	matched
+V1-RUNTIME-fs-metadata-stat	matched
+V1-RUNTIME-fs-error-propagates-with-try	matched
+V1-RUNTIME-fs-demo-path-from-stdin	matched
+V1-RUNTIME-fs-test-world-writes-are-fresh	matched
