@@ -44,6 +44,7 @@ use wasmtime::{
     Strategy,
 };
 
+pub use host::{Builders, Forged, Stop};
 pub use instance::{Instance, Started, ValueId};
 pub use observe::{LiveSizes, Observed};
 pub use test_run::TestRun;
@@ -344,6 +345,36 @@ impl Runner {
         bytes: &[u8],
         provider: Box<dyn HostProvider>,
     ) -> Result<Started, RunnerError> {
+        self.instantiate(bytes, provider, None)
+    }
+
+    /// [`Runner::start`] for a host test of the boundary, with `forged` answering
+    /// the operation `symbol` in place of the runner's own host, so that the test
+    /// can misuse the builders the way a faulty host would.
+    ///
+    /// # Errors
+    ///
+    /// The same [`RunnerError`]s as [`Runner::start`].
+    #[doc(hidden)]
+    pub fn start_forged(
+        &self,
+        bytes: &[u8],
+        symbol: &'static str,
+        forged: Forged,
+    ) -> Result<Started, RunnerError> {
+        self.instantiate(
+            bytes,
+            Box::new(WorldProvider::new(&HostWorld::default())),
+            Some((symbol, forged)),
+        )
+    }
+
+    fn instantiate(
+        &self,
+        bytes: &[u8],
+        provider: Box<dyn HostProvider>,
+        forged: Option<(&'static str, Forged)>,
+    ) -> Result<Started, RunnerError> {
         validate(bytes)?;
         let module = Module::new(&self.engine, bytes)
             .map_err(|error| RunnerError::Compile(format!("{error:#}")))?;
@@ -352,6 +383,10 @@ impl Runner {
             .map_err(|error| RunnerError::Engine(format!("{error:#}")))?;
         host::define(&mut linker)
             .map_err(|error| RunnerError::Engine(format!("{error:#}")))?;
+        if let Some((symbol, forged)) = forged {
+            host::define_forged(&mut linker, symbol, forged)
+                .map_err(|error| RunnerError::Engine(format!("{error:#}")))?;
+        }
         let mut store = Store::new(
             &self.engine,
             Host {

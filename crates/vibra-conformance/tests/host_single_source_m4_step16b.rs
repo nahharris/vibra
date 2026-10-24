@@ -53,7 +53,10 @@ fn production(path: &Path) -> String {
 
 fn crate_sources(name: &str) -> Vec<(String, String)> {
     let mut paths = Vec::new();
-    rust_sources(&workspace_root().join("crates").join(name).join("src"), &mut paths);
+    rust_sources(
+        &workspace_root().join("crates").join(name).join("src"),
+        &mut paths,
+    );
     paths
         .into_iter()
         .map(|path| {
@@ -117,9 +120,15 @@ fn no_backend_calls_a_provider_method_or_implements_an_operation() {
 
 #[test]
 fn every_event_is_built_by_the_one_function() {
-    for krate in ["vibra-interp", "vibra-wasm-run", "vibra-workspace", "vibra-cli"] {
+    for krate in [
+        "vibra-interp",
+        "vibra-wasm-run",
+        "vibra-workspace",
+        "vibra-cli",
+    ] {
         for (path, code) in crate_sources(krate) {
-            for forbidden in ["HostEvent {", "AuditEvent::Host(", "AuditEvent::Opaque("] {
+            for forbidden in ["HostEvent {", "AuditEvent::Host(", "AuditEvent::Opaque("]
+            {
                 assert!(
                     !code.contains(forbidden),
                     "{path} builds an event with `{forbidden}`; only `AuditEvent::completed` does"
@@ -139,7 +148,10 @@ fn every_event_is_built_by_the_one_function() {
 #[test]
 fn the_emitter_does_not_know_the_provider() {
     for (path, code) in crate_sources("vibra-wasm") {
-        assert!(!code.contains("vibra_host"), "{path} names the provider crate");
+        assert!(
+            !code.contains("vibra_host"),
+            "{path} names the provider crate"
+        );
     }
 }
 
@@ -173,6 +185,9 @@ fn the_runners_host_path_never_reads_the_instances_memory() {
         "WRITE_ID_EXPORT",
         "SEAL_EXPORT",
     ] {
-        assert!(code.contains(required), "{required} is how the runner reads and builds");
+        assert!(
+            code.contains(required),
+            "{required} is how the runner reads and builds"
+        );
     }
 }

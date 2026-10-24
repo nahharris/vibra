@@ -23,7 +23,8 @@ use vibra_host::{
 };
 use vibra_ir::boundary::{
     HOST_IMPORT_MODULE, LENGTH_EXPORT, NEW_EXPORT, READ_I32_EXPORT, READ_ID_EXPORT,
-    RELEASE_EXPORT, SEAL_EXPORT, WRITE_I32_EXPORT, WRITE_I64_EXPORT, WRITE_ID_EXPORT,
+    RELEASE_EXPORT, SEAL_EXPORT, WRITE_F32_EXPORT, WRITE_F64_EXPORT, WRITE_I32_EXPORT,
+    WRITE_I64_EXPORT, WRITE_ID_EXPORT,
 };
 use vibra_ir::external::host::{HOST_ROWS, HostType};
 use wasmtime::{Caller, Extern, FuncType, Linker, TypedFunc, Val, ValType};
@@ -400,5 +401,173 @@ pub(crate) fn define(linker: &mut Linker<Host>) -> wasmtime::Result<()> {
             },
         )?;
     }
+    Ok(())
+}
+
+// -- a forged host, for the host tests of the boundary ----------------------------
+
+/// A stop of the engine met by a forged host: the module recorded it before it
+/// stopped, and the call returns it so the stop reaches the entry.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct Stop(wasmtime::Error);
+
+/// The accessors and the seven builders as a host calls them, handed to a
+/// forged import. A host test uses it to misuse the boundary the way a faulty
+/// host would; the runner's own host never does.
+#[doc(hidden)]
+pub struct Builders<'c, 'd>(Access<'c, 'd>);
+
+/// A forged answer to one host operation: it receives the IDs of the call's
+/// arguments and answers the ID of its result.
+#[doc(hidden)]
+pub type Forged = std::sync::Arc<
+    dyn Fn(&mut Builders<'_, '_>, &[i64]) -> Result<i64, Stop> + Send + Sync,
+>;
+
+impl std::fmt::Debug for Builders<'_, '_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.debug_struct("Builders").finish_non_exhaustive()
+    }
+}
+
+impl Builders<'_, '_> {
+    /// `vibra_v1_new`.
+    pub fn new_value(
+        &mut self,
+        kind: i32,
+        length: i64,
+        variant: i32,
+    ) -> Result<i64, Stop> {
+        let access = &mut self.0;
+        access
+            .exports
+            .new
+            .call(&mut *access.caller, (kind, length, variant))
+            .map_err(Stop)
+    }
+
+    /// `vibra_v1_write_i32`.
+    pub fn write_i32(&mut self, id: i64, index: i64, value: i32) -> Result<(), Stop> {
+        let access = &mut self.0;
+        access
+            .exports
+            .write_i32
+            .call(&mut *access.caller, (id, index, value))
+            .map_err(Stop)
+    }
+
+    /// `vibra_v1_write_i64`.
+    pub fn write_i64(&mut self, id: i64, index: i64, value: i64) -> Result<(), Stop> {
+        let access = &mut self.0;
+        access
+            .exports
+            .write_i64
+            .call(&mut *access.caller, (id, index, value))
+            .map_err(Stop)
+    }
+
+    /// `vibra_v1_write_f32`.
+    pub fn write_f32(&mut self, id: i64, index: i64, value: f32) -> Result<(), Stop> {
+        let access = &mut self.0;
+        let write: TypedFunc<(i64, i64, f32), ()> =
+            typed(&mut *access.caller, WRITE_F32_EXPORT).map_err(Stop)?;
+        write
+            .call(&mut *access.caller, (id, index, value))
+            .map_err(Stop)
+    }
+
+    /// `vibra_v1_write_f64`.
+    pub fn write_f64(&mut self, id: i64, index: i64, value: f64) -> Result<(), Stop> {
+        let access = &mut self.0;
+        let write: TypedFunc<(i64, i64, f64), ()> =
+            typed(&mut *access.caller, WRITE_F64_EXPORT).map_err(Stop)?;
+        write
+            .call(&mut *access.caller, (id, index, value))
+            .map_err(Stop)
+    }
+
+    /// `vibra_v1_write_id`.
+    pub fn write_id(&mut self, id: i64, index: i64, child: i64) -> Result<(), Stop> {
+        let access = &mut self.0;
+        access
+            .exports
+            .write_id
+            .call(&mut *access.caller, (id, index, child))
+            .map_err(Stop)
+    }
+
+    /// `vibra_v1_seal`.
+    pub fn seal(&mut self, id: i64) -> Result<(), Stop> {
+        let access = &mut self.0;
+        access
+            .exports
+            .seal
+            .call(&mut *access.caller, id)
+            .map_err(Stop)
+    }
+
+    /// `vibra_v1_release`.
+    pub fn release(&mut self, id: i64) -> Result<(), Stop> {
+        let access = &mut self.0;
+        access
+            .exports
+            .release
+            .call(&mut *access.caller, id)
+            .map_err(Stop)
+    }
+
+    /// `vibra_v1_length`.
+    pub fn length(&mut self, id: i64) -> Result<i64, Stop> {
+        let access = &mut self.0;
+        access
+            .exports
+            .length
+            .call(&mut *access.caller, id)
+            .map_err(Stop)
+    }
+}
+
+/// Defines `forged` as the import of `symbol`, over the runner's own.
+///
+/// # Errors
+///
+/// The engine's error when the definition conflicts with another.
+pub(crate) fn define_forged(
+    linker: &mut Linker<Host>,
+    symbol: &'static str,
+    forged: Forged,
+) -> wasmtime::Result<()> {
+    let row = HOST_ROWS
+        .iter()
+        .find(|row| row.symbol == symbol)
+        .ok_or_else(|| wasmtime::Error::msg(format!("`{symbol}` is not a row")))?;
+    let ty = FuncType::new(
+        linker.engine(),
+        row.parameters.iter().map(|_| ValType::I64),
+        [ValType::I64],
+    );
+    linker.allow_shadowing(true);
+    linker.func_new(
+        HOST_IMPORT_MODULE,
+        symbol,
+        ty,
+        move |mut caller, params, results| {
+            let ids = params
+                .iter()
+                .map(|param| match param {
+                    Val::I64(id) => Ok(*id),
+                    _ => Err(wasmtime::Error::msg("a host import takes `i64` slots")),
+                })
+                .collect::<wasmtime::Result<Vec<_>>>()?;
+            let mut builders = Builders(Access::new(&mut caller)?);
+            let id = forged(&mut builders, &ids).map_err(|Stop(error)| error)?;
+            if let Some(slot) = results.first_mut() {
+                *slot = Val::I64(id);
+            }
+            Ok(())
+        },
+    )?;
+    linker.allow_shadowing(false);
     Ok(())
 }

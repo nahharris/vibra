@@ -17,13 +17,16 @@
     missing_docs
 )]
 
+use std::sync::Arc;
 use vibra_diagnostics::ByteSpan;
 use vibra_ir::external::host::host_row;
 use vibra_ir::{
     CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Type,
     TypeBody, TypeDefinition, TypeId, Value,
 };
-use wasmtime::{Caller, Engine, Linker, Module, Store, TypedFunc};
+
+use vibra_ir::boundary::TrapCode;
+use vibra_wasm_run::{Builders, Forged, MemoryLimit, Outcome, Runner, Started, Stop};
 
 fn origin() -> SourceOrigin {
     SourceOrigin::new("input.vib", ByteSpan::new(0, 1))
@@ -33,7 +36,8 @@ fn origin() -> SourceOrigin {
 fn module() -> Vec<u8> {
     let result_id =
         TypeId::new("@vibra-stdlib@0.3.0/std.result.result", "std.result.result");
-    let error_id = TypeId::new("@vibra-stdlib@0.3.0/std.io.io-error", "std.io.io-error");
+    let error_id =
+        TypeId::new("@vibra-stdlib@0.3.0/std.io.io-error", "std.io.io-error");
     let result = Type::Applied(
         result_id.clone(),
         vec![Type::Void, Type::Declared(error_id.clone())],
@@ -89,76 +93,11 @@ fn module() -> Vec<u8> {
 
 // -- the forged host -----------------------------------------------------------
 
-/// The builders and accessors of a module, as a host calls them.
-struct Host<'c, 'd> {
-    caller: &'c mut Caller<'d, ()>,
-}
-
-impl Host<'_, '_> {
-    fn func<P, R>(&mut self, name: &str) -> wasmtime::Result<TypedFunc<P, R>>
-    where
-        P: wasmtime::WasmParams,
-        R: wasmtime::WasmResults,
-    {
-        let export = self
-            .caller
-            .get_export(name)
-            .and_then(wasmtime::Extern::into_func)
-            .ok_or_else(|| wasmtime::Error::msg(format!("no export {name}")))?;
-        export.typed(&*self.caller)
-    }
-
-    fn new_value(&mut self, kind: i32, length: i64, variant: i32) -> wasmtime::Result<i64> {
-        let f = self.func::<(i32, i64, i32), i64>("vibra_v1_new")?;
-        f.call(&mut *self.caller, (kind, length, variant))
-    }
-
-    fn write_i32(&mut self, id: i64, index: i64, value: i32) -> wasmtime::Result<()> {
-        let f = self.func::<(i64, i64, i32), ()>("vibra_v1_write_i32")?;
-        f.call(&mut *self.caller, (id, index, value))
-    }
-
-    fn write_i64(&mut self, id: i64, index: i64, value: i64) -> wasmtime::Result<()> {
-        let f = self.func::<(i64, i64, i64), ()>("vibra_v1_write_i64")?;
-        f.call(&mut *self.caller, (id, index, value))
-    }
-
-    fn write_f32(&mut self, id: i64, index: i64, value: f32) -> wasmtime::Result<()> {
-        let f = self.func::<(i64, i64, f32), ()>("vibra_v1_write_f32")?;
-        f.call(&mut *self.caller, (id, index, value))
-    }
-
-    fn write_f64(&mut self, id: i64, index: i64, value: f64) -> wasmtime::Result<()> {
-        let f = self.func::<(i64, i64, f64), ()>("vibra_v1_write_f64")?;
-        f.call(&mut *self.caller, (id, index, value))
-    }
-
-    fn write_id(&mut self, id: i64, index: i64, child: i64) -> wasmtime::Result<()> {
-        let f = self.func::<(i64, i64, i64), ()>("vibra_v1_write_id")?;
-        f.call(&mut *self.caller, (id, index, child))
-    }
-
-    fn seal(&mut self, id: i64) -> wasmtime::Result<()> {
-        let f = self.func::<i64, ()>("vibra_v1_seal")?;
-        f.call(&mut *self.caller, id)
-    }
-
-    fn release(&mut self, id: i64) -> wasmtime::Result<()> {
-        let f = self.func::<i64, ()>("vibra_v1_release")?;
-        f.call(&mut *self.caller, id)
-    }
-
-    fn length(&mut self, id: i64) -> wasmtime::Result<i64> {
-        let f = self.func::<i64, i64>("vibra_v1_length")?;
-        f.call(&mut *self.caller, id)
-    }
-
-    /// A sealed `ok(void)`: the result a faithful host answers.
-    fn ok_void(&mut self) -> wasmtime::Result<i64> {
-        let id = self.new_value(7, 0, 0)?;
-        self.seal(id)?;
-        Ok(id)
-    }
+/// A sealed `ok(void)`: the result a faithful host answers.
+fn ok_void(host: &mut Builders<'_, '_>) -> Result<i64, Stop> {
+    let id = host.new_value(KIND_ENUM, 0, 0)?;
+    host.seal(id)?;
+    Ok(id)
 }
 
 const KIND_STR: i32 = 1;
@@ -169,67 +108,41 @@ const KIND_ENUM: i32 = 7;
 #[derive(Debug, PartialEq, Eq)]
 enum Ended {
     /// The entry returned; the live arena size before and after.
-    Completed { start: i64, end: i64 },
-    /// The module recorded this trap code.
-    Trapped(i32),
-    /// The module recorded another status.
-    Other(i32),
+    Completed { start: u64, end: u64 },
+    /// The module recorded this trap.
+    Trapped(TrapCode),
+    /// The run ended some other way.
+    Other(String),
 }
 
 /// Runs the module with `import` as the host's `io.stdout-text`, which receives
 /// the ID of the borrowed argument.
 fn run(
-    import: impl Fn(&mut Host<'_, '_>, i64) -> wasmtime::Result<i64> + Send + Sync + 'static,
+    import: impl Fn(&mut Builders<'_, '_>, i64) -> Result<i64, Stop> + Send + Sync + 'static,
 ) -> Ended {
-    let engine = Engine::default();
-    let module = Module::new(&engine, module()).expect("a module");
-    let mut linker = Linker::new(&engine);
-    linker
-        .func_wrap(
-            "vibra_v1",
-            "io.stdout-text",
-            move |mut caller: Caller<'_, ()>, argument: i64| -> wasmtime::Result<i64> {
-                import(&mut Host { caller: &mut caller }, argument)
-            },
-        )
-        .expect("an import");
-    let mut store = Store::new(&engine, ());
-    let instance = linker.instantiate(&mut store, &module).expect("instantiates");
-    let live = instance
-        .get_typed_func::<(), i64>(&mut store, "vibra_v1_live_size")
-        .expect("live size");
-    let start = live.call(&mut store, ()).expect("live size");
-    let entry = instance
-        .get_typed_func::<(), ()>(&mut store, "vibra_v1_entry")
-        .expect("entry");
-    let call = entry.call(&mut store, ());
-    let status = instance
-        .get_typed_func::<(), i32>(&mut store, "vibra_v1_status")
-        .expect("status")
-        .call(&mut store, ())
-        .expect("status");
-    match (call, status) {
-        (Ok(()), 0) => Ended::Completed {
+    let runner = Runner::new(MemoryLimit::new(64 * 1024 * 1024)).expect("an engine");
+    let forged: Forged = Arc::new(move |host, ids| import(host, ids[0]));
+    let Started::Ready(mut instance) = runner
+        .start_forged(&module(), "io.stdout-text", forged)
+        .expect("a v1 module")
+    else {
+        panic!("the module's own memory exceeds the limit");
+    };
+    let start = instance.live_size().expect("live size");
+    match instance.call_entry().expect("the protocol holds") {
+        Outcome::Completed { .. } => Ended::Completed {
             start,
-            end: live.call(&mut store, ()).expect("live size"),
+            end: instance.live_size().expect("live size"),
         },
-        (Err(_), 1) => Ended::Trapped(
-            instance
-                .get_typed_func::<(), i32>(&mut store, "vibra_v1_trap_code")
-                .expect("trap code")
-                .call(&mut store, ())
-                .expect("trap code"),
-        ),
-        (_, other) => Ended::Other(other),
+        Outcome::Trapped { code, .. } => Ended::Trapped(code),
+        other => Ended::Other(format!("{other:?}")),
     }
 }
-
-const INVALID_HOST_VALUE: i32 = 3;
 
 fn trapped(ended: &Ended) {
     assert_eq!(
         *ended,
-        Ended::Trapped(INVALID_HOST_VALUE),
+        Ended::Trapped(TrapCode::InvalidHostValue),
         "a builder misuse is @runtime.invalid-host-value"
     );
 }
@@ -237,11 +150,11 @@ fn trapped(ended: &Ended) {
 /// A misuse made by `misuse` inside the import: the builder call fails, and the
 /// failure is the call's, so the import returns it.
 fn misused(
-    misuse: impl Fn(&mut Host<'_, '_>) -> wasmtime::Result<()> + Send + Sync + 'static,
+    misuse: impl Fn(&mut Builders<'_, '_>) -> Result<(), Stop> + Send + Sync + 'static,
 ) -> Ended {
     run(move |host, _argument| {
         misuse(host)?;
-        host.ok_void()
+        ok_void(host)
     })
 }
 
@@ -249,11 +162,14 @@ fn misused(
 
 #[test]
 fn a_faithful_host_completes_and_the_arena_returns_to_where_it_started() {
-    let ended = run(|host, _| host.ok_void());
+    let ended = run(|host, _| ok_void(host));
     let Ended::Completed { start, end } = ended else {
         panic!("{ended:?}");
     };
-    assert_eq!(end, start, "the borrowed argument and the adopted result balance");
+    assert_eq!(
+        end, start,
+        "the borrowed argument and the adopted result balance"
+    );
 }
 
 #[test]
@@ -290,7 +206,7 @@ fn a_slot_written_twice_keeps_its_last_write_and_releases_what_it_replaced() {
         // The last write is the one the array holds.
         assert_eq!(host.length(array)?, 1);
         host.release(array)?;
-        host.ok_void()
+        ok_void(host)
     });
     let Ended::Completed { start, end } = ended else {
         panic!("{ended:?}");
@@ -311,7 +227,7 @@ fn a_value_nested_five_thousand_deep_is_built_adopted_and_released() {
             inner = outer;
         }
         host.release(inner)?;
-        host.ok_void()
+        ok_void(host)
     });
     let Ended::Completed { start, end } = ended else {
         panic!("{ended:?}");
@@ -427,10 +343,19 @@ fn a_child_that_is_not_sealed_traps() {
 
 #[test]
 fn a_kind_the_builders_do_not_build_traps() {
-    for (kind, length, variant) in
-        [(5, 0, 0), (10, 0, 0), (11, 0, 0), (-1, 0, 0), (KIND_ENUM, 2, 0), (8, 0, 0), (9, 2, 0), (KIND_STR, 0, 1)]
-    {
-        trapped(&misused(move |host| host.new_value(kind, length, variant).map(drop)));
+    for (kind, length, variant) in [
+        (5, 0, 0),
+        (10, 0, 0),
+        (11, 0, 0),
+        (-1, 0, 0),
+        (KIND_ENUM, 2, 0),
+        (8, 0, 0),
+        (9, 2, 0),
+        (KIND_STR, 0, 1),
+    ] {
+        trapped(&misused(move |host| {
+            host.new_value(kind, length, variant).map(drop)
+        }));
     }
 }
 
@@ -467,7 +392,7 @@ fn a_result_id_that_was_never_issued_or_was_released_traps() {
     trapped(&run(|_, _| Ok(0)));
     trapped(&run(|_, _| Ok(0x7_0000_0001)));
     trapped(&run(|host, _| {
-        let id = host.ok_void()?;
+        let id = ok_void(host)?;
         host.release(id)?;
         Ok(id)
     }));
@@ -481,7 +406,7 @@ fn a_parameter_is_borrowed_and_a_host_that_releases_it_breaks_the_module() {
     // a host that released it first leaves the module with an invalid ID.
     trapped(&run(|host, argument| {
         host.release(argument)?;
-        host.ok_void()
+        ok_void(host)
     }));
 }
 
@@ -489,8 +414,7 @@ fn a_parameter_is_borrowed_and_a_host_that_releases_it_breaks_the_module() {
 fn a_parameter_is_readable_through_the_accessors_during_the_call() {
     let ended = run(|host, argument| {
         assert_eq!(host.length(argument)?, 2, "\"hi\" has two scalars");
-        host.ok_void()
+        ok_void(host)
     });
     assert!(matches!(ended, Ended::Completed { .. }), "{ended:?}");
 }
-

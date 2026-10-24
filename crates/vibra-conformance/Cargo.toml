@@ -31,7 +31,6 @@ path = "src/bin/conformance.rs"
 
 [dev-dependencies]
 wasmparser.workspace = true
-wasmtime.workspace = true
 
 [lints]
 workspace = true

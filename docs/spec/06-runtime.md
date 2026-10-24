@@ -743,7 +743,11 @@ that provider. The language has no mode switch: the program is the same, and the
 provider is chosen by the command.
 
 - `run` uses the **system provider**: the real standard streams, filesystem,
-  environment, clocks, and the operating system's random source.
+  environment, clocks, and the operating system's random source. Where the
+  system provider delivers standard output and error is chosen by the command,
+  not by the program: human `run` lets the program write the process's streams,
+  and `run --format json` captures the same bytes for the envelope's `stdout` and
+  `stderr`, as the tooling chapter states.
 - `test` always uses a deterministic in-memory **host world** for every root,
   standard output and error included: what a test writes goes to its audit trace
   and never to the process. Each test starts from a fresh copy of the world, so
