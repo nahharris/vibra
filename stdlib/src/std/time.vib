@@ -1,0 +1,15 @@
+; Clock reads (`docs/spec/06-runtime.md`, "The host registry"). The wall clock is
+; nanoseconds since the Unix epoch in UTC; the monotonic clock never decreases
+; within an instance.
+(deftype time-error (enum unavailable void) visibility: @public)
+
+(deffect now
+  visibility: @public
+  (defn wall () (result i64 time-error)
+    visibility: @public
+    external: @host
+    symbol: "time.now-wall")
+  (defn monotonic () (result u64 time-error)
+    visibility: @public
+    external: @host
+    symbol: "time.now-monotonic"))

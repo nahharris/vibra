@@ -96,6 +96,18 @@ const EMBEDDED_MODULES: &[(&str, &[u8])] = &[
         include_bytes!("../../../stdlib/src/std/fs.vib"),
     ),
     (
+        "std/env.vib",
+        include_bytes!("../../../stdlib/src/std/env.vib"),
+    ),
+    (
+        "std/time.vib",
+        include_bytes!("../../../stdlib/src/std/time.vib"),
+    ),
+    (
+        "std/random.vib",
+        include_bytes!("../../../stdlib/src/std/random.vib"),
+    ),
+    (
         "std/builtin.vib",
         include_bytes!("../../../stdlib/src/std/builtin.vib"),
     ),
@@ -1056,13 +1068,18 @@ mod tests {
 
     /// The `host` symbols the embedded `@std.fs` binds, which every manifest of
     /// these tests lists beside the symbols under test.
-    const FS_SYMBOLS: [&str; 6] = [
+    const FS_SYMBOLS: [&str; 11] = [
         "fs.read-file",
         "fs.read-text",
         "fs.read-entries",
         "fs.write-file",
         "fs.write-text",
         "fs.metadata-stat",
+        "env.read-var",
+        "env.read-args",
+        "time.now-wall",
+        "time.now-monotonic",
+        "random.generate-bytes",
     ];
 
     /// The embedded manifest without `@std.io` and without its `host` list, so a
@@ -1118,7 +1135,7 @@ mod tests {
     const STDOUT_TEXT: &str = "(deffect stdout\n  (defn text (value str) (result void io-error)\n    external: @host\n    symbol: \"io.stdout-text\"))\n";
 
     #[test]
-    fn the_package_is_0_3_0_and_the_embedded_host_list_is_the_io_and_fs_symbols() {
+    fn the_package_is_0_3_0_and_the_embedded_host_list_is_the_registry_symbols() {
         let stdlib = load_stdlib().expect("embedded standard library");
         assert_eq!(stdlib.package().version(), "0.3.0");
         assert_eq!(
@@ -1136,6 +1153,11 @@ mod tests {
                 "fs.write-file",
                 "fs.write-text",
                 "fs.metadata-stat",
+                "env.read-var",
+                "env.read-args",
+                "time.now-wall",
+                "time.now-monotonic",
+                "random.generate-bytes",
             ]
             .map(str::to_owned)
         );
