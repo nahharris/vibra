@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Domain, Level};
+use vibra_host::{AuditEvent, HostWorld, WorldProvider};
 use vibra_interp::MemoryBudget;
 use vibra_ir::{CheckedProgram, SourceOrigin};
 use vibra_resolve::{DeclarationId, EntityKind, ResolvedSnapshot};
@@ -218,7 +219,7 @@ pub struct TestItem {
     status: TestItemStatus,
     failure: Option<TestFailure>,
     trap: Option<TestTrap>,
-    audit_trace: Vec<String>,
+    audit_trace: Vec<AuditEvent>,
     diagnostics: Vec<Diagnostic>,
     program: Option<CheckedProgram>,
 }
@@ -250,7 +251,7 @@ impl TestItem {
 
     /// Isolated ordered host trace, empty for M2.
     #[must_use]
-    pub fn audit_trace(&self) -> &[String] {
+    pub fn audit_trace(&self) -> &[AuditEvent] {
         &self.audit_trace
     }
 
@@ -389,6 +390,26 @@ pub fn run_tests_with_budget(
     verification: Option<&vibra_types::Stdlib>,
     budget: MemoryBudget,
 ) -> WorkspaceTestResult {
+    run_tests_in_world(
+        workspace,
+        selector,
+        verification,
+        budget,
+        &HostWorld::default(),
+    )
+}
+
+/// Like [`run_tests_with_budget`], with the host world each test starts in. A
+/// test runs over a fresh copy of `world`, so nothing a test writes or reads
+/// reaches another test or the process: standard output and error go to the
+/// test's audit trace and nowhere else.
+pub fn run_tests_in_world(
+    workspace: &WorkspaceSnapshot,
+    selector: Option<&TestSelector>,
+    verification: Option<&vibra_types::Stdlib>,
+    budget: MemoryBudget,
+    world: &HostWorld,
+) -> WorkspaceTestResult {
     let graph = match workspace.source_graph() {
         Ok(graph) => graph,
         Err(error) => return diagnostics_result(error.diagnostics().to_vec()),
@@ -400,7 +421,7 @@ pub fn run_tests_with_budget(
         Ok(resolved) => resolved,
         Err(error) => return diagnostics_result(error.diagnostics().to_vec()),
     };
-    select_tests(&resolved, selector, verification, budget)
+    select_tests(&resolved, selector, verification, budget, world)
 }
 
 fn select_tests(
@@ -408,6 +429,7 @@ fn select_tests(
     selector: Option<&TestSelector>,
     verification: Option<&vibra_types::Stdlib>,
     budget: MemoryBudget,
+    world: &HostWorld,
 ) -> WorkspaceTestResult {
     let local = resolved.package();
     let modules = resolved
@@ -677,7 +699,9 @@ fn select_tests(
             items.push(item);
             continue;
         };
-        match vibra_interp::Interpreter::run_test_with_budget(program, budget) {
+        let mut host = WorldProvider::new(world);
+        match vibra_interp::Interpreter::run_test_with_host(program, budget, &mut host)
+        {
             Ok(execution) => {
                 if let Some(failure) = execution.assertion_failure() {
                     items.push(TestItem {
@@ -1024,6 +1048,7 @@ mod provenance_tests {
             None,
             Some(&verification),
             vibra_interp::MemoryBudget::DEFAULT,
+            &vibra_host::HostWorld::default(),
         );
 
         assert_eq!(

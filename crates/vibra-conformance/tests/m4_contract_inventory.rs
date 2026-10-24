@@ -115,11 +115,13 @@ fn inherited_rows() -> Vec<(String, String)> {
 /// `Step 2; Wasm in Step 9`.
 fn owning_step(owner: &str) -> Option<u8> {
     let first = owner.split(';').next()?.trim();
-    first
-        .strip_prefix("Step ")?
-        .trim_end_matches(|c: char| c.is_ascii_lowercase())
-        .parse::<u8>()
-        .ok()
+    // A step number, then an optional part: `16a`, `16b-2`.
+    let rest = first.strip_prefix("Step ")?;
+    let digits = rest
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>();
+    digits.parse::<u8>().ok()
 }
 
 /// The guides of the Stage 4B steps (Step 13 wrote Steps 14-22; Step 16 is

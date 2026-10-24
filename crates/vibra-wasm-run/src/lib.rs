@@ -24,6 +24,7 @@
 //! limit to every memory. The engine's own call stack is not part of the
 //! language: activations of a later step live in the module's arena.
 
+mod host;
 mod instance;
 mod natives;
 mod observe;
@@ -32,6 +33,7 @@ mod validate;
 
 use std::fmt;
 
+use vibra_host::{AuditEvent, HostProvider, HostWorld, WorldProvider};
 use vibra_ir::boundary::{
     FAILURE_ACTUAL_EXPORT, FAILURE_EXPECTED_EXPORT, FAILURE_EXPORT, Failure,
     LIVE_SIZE_EXPORT, ORIGIN_EXPORT, RESULT_EXPORT, STATUS_EXPORT, Status,
@@ -42,6 +44,7 @@ use wasmtime::{
     Strategy,
 };
 
+pub use host::{Builders, Forged, Stop};
 pub use instance::{Instance, Started, ValueId};
 pub use observe::{LiveSizes, Observed};
 pub use test_run::TestRun;
@@ -75,6 +78,12 @@ impl MemoryLimit {
 /// The state the store carries for the host functions and the limiter.
 pub(crate) struct Host {
     pub(crate) limiter: Limiter,
+    /// The provider of every host operation the instance applies.
+    pub(crate) provider: Box<dyn HostProvider>,
+    /// The events of the host calls that completed, in call order.
+    pub(crate) audit: Vec<AuditEvent>,
+    /// Whether the provider could not allocate an answer: the host event.
+    pub(crate) memory_event: bool,
 }
 
 /// Applies the memory limit and remembers that it refused a request.
@@ -322,12 +331,62 @@ impl Runner {
     /// runs. A module whose own memory exceeds the limit is
     /// [`Started::MemoryExhausted`].
     pub fn start(&self, bytes: &[u8]) -> Result<Started, RunnerError> {
+        self.start_with_host(bytes, Box::new(WorldProvider::new(&HostWorld::default())))
+    }
+
+    /// [`Runner::start`] for a module whose host operations are operations of
+    /// `provider`, a fresh one for each instance.
+    ///
+    /// # Errors
+    ///
+    /// The same [`RunnerError`]s as [`Runner::start`].
+    pub fn start_with_host(
+        &self,
+        bytes: &[u8],
+        provider: Box<dyn HostProvider>,
+    ) -> Result<Started, RunnerError> {
+        self.instantiate(bytes, provider, None)
+    }
+
+    /// [`Runner::start`] for a host test of the boundary, with `forged` answering
+    /// the operation `symbol` in place of the runner's own host, so that the test
+    /// can misuse the builders the way a faulty host would.
+    ///
+    /// # Errors
+    ///
+    /// The same [`RunnerError`]s as [`Runner::start`].
+    #[doc(hidden)]
+    pub fn start_forged(
+        &self,
+        bytes: &[u8],
+        symbol: &'static str,
+        forged: Forged,
+    ) -> Result<Started, RunnerError> {
+        self.instantiate(
+            bytes,
+            Box::new(WorldProvider::new(&HostWorld::default())),
+            Some((symbol, forged)),
+        )
+    }
+
+    fn instantiate(
+        &self,
+        bytes: &[u8],
+        provider: Box<dyn HostProvider>,
+        forged: Option<(&'static str, Forged)>,
+    ) -> Result<Started, RunnerError> {
         validate(bytes)?;
         let module = Module::new(&self.engine, bytes)
             .map_err(|error| RunnerError::Compile(format!("{error:#}")))?;
         let mut linker = Linker::new(&self.engine);
         natives::define(&mut linker)
             .map_err(|error| RunnerError::Engine(format!("{error:#}")))?;
+        host::define(&mut linker)
+            .map_err(|error| RunnerError::Engine(format!("{error:#}")))?;
+        if let Some((symbol, forged)) = forged {
+            host::define_forged(&mut linker, symbol, forged)
+                .map_err(|error| RunnerError::Engine(format!("{error:#}")))?;
+        }
         let mut store = Store::new(
             &self.engine,
             Host {
@@ -335,6 +394,9 @@ impl Runner {
                     limit: self.limit,
                     refused: false,
                 },
+                provider,
+                audit: Vec::new(),
+                memory_event: false,
             },
         );
         store.limiter(|host| &mut host.limiter);
@@ -439,7 +501,7 @@ pub(crate) fn interpret(
     stop: Option<String>,
 ) -> Result<Outcome, RunnerError> {
     // A refused growth is the host event, whatever the module did next.
-    if store.data().limiter.refused {
+    if store.data().limiter.refused || store.data().memory_event {
         return Ok(Outcome::MemoryExhausted);
     }
     let recorded = call_i32(store, instance, STATUS_EXPORT)?;

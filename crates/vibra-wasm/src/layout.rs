@@ -76,7 +76,7 @@
 //! | 9 | `stride` (u8) | The byte width of one component: `8` for cells, `4` for scalars of `str` and `atom`, `1` for the bytes of `bytes` |
 //! | 12 | `len` (u32) | The component count |
 //! | 16 | `variant` (u32) | The variant index of an enum or the member index of a union, `0` for every other kind |
-//! | 20 | reserved (u32) | Zero |
+//! | 20 | `unsealed` (u32) | `1` while a host builds the value with the builders of the boundary, and `0` for every other value. An unsealed value also carries a written map after its payload, one bit for each component |
 //!
 //! # Payloads
 //!

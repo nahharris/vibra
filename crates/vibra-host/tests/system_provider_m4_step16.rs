@@ -229,3 +229,22 @@ fn an_allocation_the_host_cannot_make_is_memory_exhaustion_not_an_error() {
         Err(Failure::MemoryExhausted)
     ));
 }
+
+// -- the output sink (Step 16b-1) ------------------------------------------------
+
+#[test]
+fn a_capturing_provider_keeps_standard_output_and_error_apart_in_call_order() {
+    let mut provider = SystemProvider::new().capturing();
+    assert_eq!(done(provider.stdout_text("h\u{e9}")), Ok(()));
+    assert_eq!(done(provider.stderr_bytes(&[0, 255])), Ok(()));
+    assert_eq!(done(provider.stdout_bytes(&[33])), Ok(()));
+    assert_eq!(provider.captured_stdout(), "h\u{e9}!".as_bytes());
+    assert_eq!(provider.captured_stderr(), &[0, 255]);
+}
+
+#[test]
+fn an_inheriting_provider_captures_nothing() {
+    let provider = SystemProvider::new();
+    assert!(provider.captured_stdout().is_empty());
+    assert!(provider.captured_stderr().is_empty());
+}

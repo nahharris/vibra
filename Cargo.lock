@@ -1423,6 +1423,7 @@ dependencies = [
  "sha2",
  "vibra-diagnostics",
  "vibra-fmt",
+ "vibra-host",
  "vibra-schema",
  "vibra-syntax",
  "vibra-types",
@@ -1479,6 +1480,7 @@ name = "vibra-interp"
 version = "0.0.0"
 dependencies = [
  "vibra-diagnostics",
+ "vibra-host",
  "vibra-ir",
  "vibra-native",
 ]
@@ -1548,6 +1550,7 @@ dependencies = [
 name = "vibra-wasm-run"
 version = "0.0.0"
 dependencies = [
+ "vibra-host",
  "vibra-ir",
  "vibra-native",
  "wasm-encoder 0.261.0",
@@ -1563,6 +1566,7 @@ dependencies = [
  "sha2",
  "vibra-diagnostics",
  "vibra-fmt",
+ "vibra-host",
  "vibra-interp",
  "vibra-ir",
  "vibra-resolve",

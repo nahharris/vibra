@@ -50,6 +50,7 @@ mod classify;
 mod desc;
 mod encode;
 mod form;
+mod host;
 mod key;
 pub mod layout;
 mod lower;
@@ -243,6 +244,7 @@ fn build(
         &lambdas,
         vec![0; count],
         Vec::new(),
+        Vec::new(),
         lower::Extras::default(),
         run_tests,
     );
@@ -256,7 +258,8 @@ fn build(
         .iter()
         .filter_map(|intrinsic| intrinsic.native_import())
         .collect::<Vec<_>>();
-    let import_count = u32::try_from(imports.len())
+    let host_imports = first.used_host_rows();
+    let import_count = u32::try_from(imports.len() + host_imports.len())
         .map_err(|_| NotLowered::single(Form::ModuleSize))?;
     let fns = encode::routines_for(
         total
@@ -269,6 +272,7 @@ fn build(
         &lambdas,
         sizes.clone(),
         natives,
+        host_imports.clone(),
         extras,
         run_tests,
     );
@@ -280,7 +284,8 @@ fn build(
         .get(entry as usize)
         .copied()
         .ok_or_else(|| NotLowered::single(Form::ModuleSize))?;
-    let include_new = lowering.built_object() || globals != 0;
+    let include_new =
+        lowering.built_object() || globals != 0 || !host_imports.is_empty();
     let extra = lowering.comparer_routines();
     let descriptors = lowering.descriptors();
     let origins = OriginTable {
@@ -319,6 +324,7 @@ fn build(
         segments: lowering.into_segments(),
         include_new,
         imports,
+        host_imports,
         extra,
     };
     let bytes =

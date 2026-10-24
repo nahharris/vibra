@@ -20,6 +20,7 @@
     )
 )]
 
+mod host;
 mod machine;
 mod native;
 mod registry;
@@ -34,6 +35,7 @@ use vibra_ir::{
 
 use machine::{Halt, Machine};
 use value::{RuntimeValue, TypeMap};
+use vibra_host::{AuditEvent, HostProvider, HostWorld, WorldProvider};
 
 /// The memory an instance may hold, in bytes of live frames, continuations,
 /// and values, as the interpreter counts them.
@@ -83,7 +85,7 @@ pub struct Execution {
     value: Option<Value>,
     /// The canonical observation of the entry's value.
     canonical: String,
-    audit_trace: Vec<String>,
+    audit_trace: Vec<AuditEvent>,
     max_activation_depth: usize,
     tail_transfer_count: usize,
     peak_memory_bytes: usize,
@@ -99,7 +101,7 @@ impl Execution {
 
     /// Ordered audit events.  Pure M2 literals always return an empty trace.
     #[must_use]
-    pub fn audit_trace(&self) -> &[String] {
+    pub fn audit_trace(&self) -> &[AuditEvent] {
         &self.audit_trace
     }
 
@@ -138,7 +140,7 @@ impl Execution {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TestExecution {
     assertion_failure: Option<TestAssertionFailure>,
-    audit_trace: Vec<String>,
+    audit_trace: Vec<AuditEvent>,
     max_activation_depth: usize,
     tail_transfer_count: usize,
 }
@@ -152,7 +154,7 @@ impl TestExecution {
 
     /// Ordered audit events. Pure M2 test execution has an empty trace.
     #[must_use]
-    pub fn audit_trace(&self) -> &[String] {
+    pub fn audit_trace(&self) -> &[AuditEvent] {
         &self.audit_trace
     }
 
@@ -319,6 +321,18 @@ impl Interpreter {
         program: &CheckedProgram,
         budget: MemoryBudget,
     ) -> Result<Execution, RuntimeError> {
+        let mut host = WorldProvider::new(&HostWorld::default());
+        Self::run_with_host(program, budget, &mut host)
+    }
+
+    /// Executes the checked program's validated entry function with `host` as
+    /// the provider of every host operation it performs. Each completed call
+    /// is an event of the execution's audit trace.
+    pub fn run_with_host(
+        program: &CheckedProgram,
+        budget: MemoryBudget,
+        host: &mut dyn HostProvider,
+    ) -> Result<Execution, RuntimeError> {
         let function = program.entry();
         let invalid = || RuntimeError::InvalidBody {
             function: function.name().to_owned(),
@@ -326,7 +340,7 @@ impl Interpreter {
         if function.test_assertion().is_some() {
             return Err(invalid());
         }
-        let mut machine = Machine::new(program, false, budget.bytes());
+        let mut machine = Machine::new(program, false, budget.bytes(), host);
         let value = match machine.run_entry(program.entry_index(), entry_frame(program))
         {
             Ok(value) => value,
@@ -341,13 +355,14 @@ impl Interpreter {
             return Err(RuntimeError::UnobservableFunction { origin: None });
         };
         let canonical = value.canonical_observation(&value_type);
+        let peak_memory_bytes = machine.peak_memory_bytes();
         Ok(Execution {
             value: value.as_primitive().cloned(),
             canonical,
-            audit_trace: Vec::new(),
             max_activation_depth: machine.max_depth,
             tail_transfer_count: machine.tail_transfers,
-            peak_memory_bytes: machine.peak_memory_bytes(),
+            peak_memory_bytes,
+            audit_trace: machine.audit,
         })
     }
 
@@ -366,6 +381,17 @@ impl Interpreter {
         program: &CheckedProgram,
         budget: MemoryBudget,
     ) -> Result<TestExecution, RuntimeError> {
+        let mut host = WorldProvider::new(&HostWorld::default());
+        Self::run_test_with_host(program, budget, &mut host)
+    }
+
+    /// Executes one checked void test entry with `host` as its provider, a
+    /// fresh one for each test.
+    pub fn run_test_with_host(
+        program: &CheckedProgram,
+        budget: MemoryBudget,
+        host: &mut dyn HostProvider,
+    ) -> Result<TestExecution, RuntimeError> {
         let function = program.entry();
         let invalid = || RuntimeError::InvalidBody {
             function: function.name().to_owned(),
@@ -373,7 +399,7 @@ impl Interpreter {
         if function.signature().result() != Type::Void {
             return Err(invalid());
         }
-        let mut machine = Machine::new(program, true, budget.bytes());
+        let mut machine = Machine::new(program, true, budget.bytes(), host);
         let outcome = machine.run_entry(program.entry_index(), entry_frame(program));
         if outcome == Err(Halt::Memory) {
             return Err(RuntimeError::MemoryExhausted { budget });
@@ -390,7 +416,7 @@ impl Interpreter {
         }
         Ok(TestExecution {
             assertion_failure: machine.assertion_failure,
-            audit_trace: Vec::new(),
+            audit_trace: machine.audit,
             max_activation_depth: machine.max_depth,
             tail_transfer_count: machine.tail_transfers,
         })
@@ -1481,8 +1507,14 @@ mod tests {
         )
         .expect("valid checked program");
 
-        let mut machine =
-            super::Machine::new(&program, false, MemoryBudget::DEFAULT.bytes());
+        let mut host =
+            vibra_host::WorldProvider::new(&vibra_host::HostWorld::default());
+        let mut machine = super::Machine::new(
+            &program,
+            false,
+            MemoryBudget::DEFAULT.bytes(),
+            &mut host,
+        );
         let result = machine
             .run_entry(0, vec![None; program.entry().slot_count()])
             .expect("untaken branch must not execute");

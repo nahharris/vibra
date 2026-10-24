@@ -32,6 +32,7 @@ use std::sync::Arc;
 
 mod compare;
 
+use vibra_host::{AuditEvent, HostCall, HostProvider, build_reply, perform};
 use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::{
     CallTarget, CheckedProgram, ClosedContract, Expr, FunctionSignature, MatchArm,
@@ -186,6 +187,10 @@ pub(crate) struct Machine<'a> {
     pub(crate) assertion_failure: Option<TestAssertionFailure>,
     /// The assertion whose operand held a function, which stops the test.
     pub(crate) unobservable: Option<SourceOrigin>,
+    /// The provider of the run: every host operation is an operation of it.
+    host: &'a mut dyn HostProvider,
+    /// The events of the host calls that completed, in call order.
+    pub(crate) audit: Vec<AuditEvent>,
 }
 
 impl<'a> Machine<'a> {
@@ -193,8 +198,11 @@ impl<'a> Machine<'a> {
         program: &'a CheckedProgram,
         test_mode: bool,
         budget_bytes: usize,
+        host: &'a mut dyn HostProvider,
     ) -> Self {
         Self {
+            host,
+            audit: Vec::new(),
             program,
             globals: vec![GlobalState::Uninitialized; program.globals().len()],
             frames: Vec::new(),
@@ -604,6 +612,7 @@ impl<'a> Machine<'a> {
                 self.then(tuple, Kont::Unary { node: expression })
             }
             Expr::External { .. }
+            | Expr::Host { .. }
             | Expr::Tuple { .. }
             | Expr::Array { .. }
             | Expr::Record { .. }
@@ -800,6 +809,10 @@ impl<'a> Machine<'a> {
             } => {
                 let result = self.concrete(result);
                 self.external(*intrinsic, values, &result)
+            }
+            Expr::Host { row, result, .. } => {
+                let result = self.concrete(result);
+                self.host_call(row.symbol, &values, &result)
             }
             Expr::Tuple { value_type, .. } => {
                 let value = RuntimeValue::Tuple {
@@ -1229,6 +1242,26 @@ impl<'a> Machine<'a> {
             *callable.types_mut() = Arc::new(bound);
         }
         Some(callable)
+    }
+
+    /// A host operation on evaluated operands: read by `vibra-host`, performed
+    /// by the run's provider, recorded as an audit event once it completed, and
+    /// built into the `(result t e)` value. Memory exhaustion of the provider is
+    /// the host event and records nothing.
+    fn host_call(
+        &mut self,
+        symbol: &str,
+        values: &[RuntimeValue],
+        result: &Type,
+    ) -> Result<Step<'a>, Halt> {
+        let program = self.program;
+        let mut access = crate::host::Values::new(result, program.types());
+        let call =
+            HostCall::read(symbol, values, &mut access).map_err(|_| Halt::Invalid)?;
+        let reply = perform(&call, &mut *self.host).map_err(|_| Halt::Memory)?;
+        self.audit.push(AuditEvent::completed(&call, &reply));
+        let value = build_reply(&reply, &mut access);
+        self.fresh(value)
     }
 
     /// A call of a compiler intrinsic on evaluated operands.
@@ -1739,7 +1772,9 @@ impl<'a> Machine<'a> {
 /// How many operands `node` evaluates before it is built.
 fn operand_count(node: &Expr) -> usize {
     match node {
-        Expr::External { arguments, .. } => arguments.len(),
+        Expr::External { arguments, .. } | Expr::Host { arguments, .. } => {
+            arguments.len()
+        }
         Expr::Tuple { components, .. } => components.len(),
         Expr::Array { elements, .. } => elements.len(),
         Expr::Record { fields, .. } => fields.len(),
@@ -1760,7 +1795,9 @@ fn operand_count(node: &Expr) -> usize {
 /// The operand of `node` at `index`, in evaluation order.
 fn operand_at(node: &Expr, index: usize) -> Option<&Expr> {
     match node {
-        Expr::External { arguments, .. } => arguments.get(index),
+        Expr::External { arguments, .. } | Expr::Host { arguments, .. } => {
+            arguments.get(index)
+        }
         Expr::Tuple { components, .. } => components.get(index),
         Expr::Array { elements, .. } => elements.get(index),
         Expr::Record { fields, .. } => fields.get(index).map(|(_, field)| field),

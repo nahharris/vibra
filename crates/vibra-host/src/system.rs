@@ -21,6 +21,17 @@ use crate::provider::{
 pub struct SystemProvider {
     arguments: Vec<OsString>,
     origin: Instant,
+    /// Where standard output and error go, chosen by the command.
+    sink: Sink,
+}
+
+/// Where the system provider delivers standard output and error: the command
+/// chooses, and the language has no such switch. `run` in human mode inherits
+/// the process's streams; in JSON mode it captures the bytes for the envelope.
+#[derive(Debug)]
+enum Sink {
+    Inherit,
+    Capture { stdout: Vec<u8>, stderr: Vec<u8> },
 }
 
 impl Default for SystemProvider {
@@ -44,6 +55,36 @@ impl SystemProvider {
         Self {
             arguments,
             origin: Instant::now(),
+            sink: Sink::Inherit,
+        }
+    }
+
+    /// The same provider with standard output and error captured instead of
+    /// delivered to the process, for a command that reports them itself.
+    #[must_use]
+    pub fn capturing(mut self) -> Self {
+        self.sink = Sink::Capture {
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        };
+        self
+    }
+
+    /// The bytes written to standard output so far, when it is captured.
+    #[must_use]
+    pub fn captured_stdout(&self) -> &[u8] {
+        match &self.sink {
+            Sink::Capture { stdout, .. } => stdout,
+            Sink::Inherit => &[],
+        }
+    }
+
+    /// The bytes written to standard error so far, when it is captured.
+    #[must_use]
+    pub fn captured_stderr(&self) -> &[u8] {
+        match &self.sink {
+            Sink::Capture { stderr, .. } => stderr,
+            Sink::Inherit => &[],
         }
     }
 }
@@ -99,6 +140,26 @@ enum ReadFailure {
 }
 
 impl SystemProvider {
+    /// Delivers `value` to standard output, or to standard error when `error`.
+    fn deliver(&mut self, error: bool, value: &[u8]) -> Done<(), IoError> {
+        match &mut self.sink {
+            Sink::Inherit if error => {
+                Self::write_stream(&mut std::io::stderr().lock(), value)
+            }
+            Sink::Inherit => Self::write_stream(&mut std::io::stdout().lock(), value),
+            Sink::Capture { stdout, stderr } => {
+                let buffer = if error { stderr } else { stdout };
+                buffer
+                    .try_reserve(value.len())
+                    .map_err(|_| Failure::MemoryExhausted)?;
+                buffer.extend_from_slice(value);
+                Ok(())
+            }
+        }
+    }
+}
+
+impl SystemProvider {
     fn file_bytes(at: &str) -> Done<Vec<u8>, FsError> {
         let path = path_text(at)?;
         let metadata = std::fs::metadata(path).map_err(|error| fs_error(&error))?;
@@ -146,19 +207,19 @@ impl HostProvider for SystemProvider {
     }
 
     fn stdout_text(&mut self, value: &str) -> Done<(), IoError> {
-        Self::write_stream(&mut std::io::stdout().lock(), value.as_bytes())
+        self.deliver(false, value.as_bytes())
     }
 
     fn stdout_bytes(&mut self, value: &[u8]) -> Done<(), IoError> {
-        Self::write_stream(&mut std::io::stdout().lock(), value)
+        self.deliver(false, value)
     }
 
     fn stderr_text(&mut self, value: &str) -> Done<(), IoError> {
-        Self::write_stream(&mut std::io::stderr().lock(), value.as_bytes())
+        self.deliver(true, value.as_bytes())
     }
 
     fn stderr_bytes(&mut self, value: &[u8]) -> Done<(), IoError> {
-        Self::write_stream(&mut std::io::stderr().lock(), value)
+        self.deliver(true, value)
     }
 
     fn read_file(&mut self, at: &str) -> Done<Vec<u8>, FsError> {

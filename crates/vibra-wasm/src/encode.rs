@@ -16,8 +16,9 @@
 use std::borrow::Cow;
 
 use vibra_ir::boundary::{
-    ENTRY_EXPORT, MEMORY_EXPORT, NATIVE_IMPORT_MODULE, TEST_EXPORT,
+    ENTRY_EXPORT, HOST_IMPORT_MODULE, MEMORY_EXPORT, NATIVE_IMPORT_MODULE, TEST_EXPORT,
 };
+use vibra_ir::external::host::{HostRow, HostType};
 use vibra_ir::external::{NativeRow, Scalar};
 use wasm_encoder::{
     CodeSection, ConstExpr, DataCountSection, DataSection, ElementSection, Elements,
@@ -26,6 +27,7 @@ use wasm_encoder::{
     ValType,
 };
 
+use crate::host::host_routines;
 use crate::runtime::{
     Ins, Routine, Routines, TestEntry, ValueClass, accessor_exports, core_routines,
     entry_export, frame_routines, new_object, raw_entry_export, test_export,
@@ -103,6 +105,9 @@ pub(crate) struct Parts {
     /// The native imports, in the order of their function indices, which come
     /// before every defined function.
     pub(crate) imports: Vec<NativeRow>,
+    /// The host imports, which follow the native imports in the function index
+    /// space. A module that has any also has the builders.
+    pub(crate) host_imports: Vec<&'static HostRow>,
     /// Routines after the object constructor: the comparers of closed key shapes.
     pub(crate) extra: Vec<Routine>,
 }
@@ -115,7 +120,9 @@ pub(crate) const fn routines_for(function_count: u32) -> Routines {
 /// Encodes the module, or `None` when a size does not fit 32 bits.
 pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
     let function_count = u32::try_from(parts.functions.len()).ok()?;
-    let import_count = u32::try_from(parts.imports.len()).ok()?;
+    let import_count = u32::try_from(parts.imports.len())
+        .ok()?
+        .checked_add(u32::try_from(parts.host_imports.len()).ok()?)?;
     // The imports take the first function indices, so every defined function,
     // the runtime routines included, is numbered after them.
     let fns = routines_for(import_count.checked_add(function_count)?);
@@ -135,6 +142,18 @@ pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
             NATIVE_IMPORT_MODULE,
             row.name(),
             EntityType::Function(types.intern(&params, &[result])),
+        );
+    }
+    for row in &parts.host_imports {
+        let params = row
+            .parameters
+            .iter()
+            .map(|parameter| host_param(parameter.ty))
+            .collect::<Vec<_>>();
+        imports.import(
+            HOST_IMPORT_MODULE,
+            row.symbol,
+            EntityType::Function(types.intern(&params, &[ValType::I64])),
         );
     }
     let mut functions = FunctionSection::new();
@@ -165,6 +184,9 @@ pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
     routines.extend(frame_routines(&fns, dispatch_type));
     if parts.include_new {
         routines.push(new_object(&fns));
+        if !parts.host_imports.is_empty() {
+            routines.extend(host_routines(&fns));
+        }
         routines.extend(parts.extra.iter().cloned());
     }
     let mut exports = ExportSection::new();
@@ -177,6 +199,17 @@ pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
     exports.export(entry_name, ExportKind::Func, fns.entry_export);
     for (name, index) in accessor_exports(&fns) {
         exports.export(name, ExportKind::Func, index);
+    }
+    if !parts.host_imports.is_empty() {
+        for (offset, routine) in host_routines(&fns).iter().enumerate() {
+            if let Some(name) = routine.export {
+                exports.export(
+                    name,
+                    ExportKind::Func,
+                    fns.new + 1 + u32::try_from(offset).ok()?,
+                );
+            }
+        }
     }
     for routine in &routines {
         add_routine(&mut types, &mut functions, &mut code, routine);
@@ -216,7 +249,7 @@ pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
 
     let mut module = Module::new();
     module.section(&type_section);
-    if !parts.imports.is_empty() {
+    if import_count != 0 {
         module.section(&imports);
     }
     module.section(&functions);
@@ -252,4 +285,19 @@ fn add_routine(
         function.instruction(instruction);
     }
     code.function(&function);
+}
+
+/// The WebAssembly type of a parameter of a host import: a scalar crosses as
+/// itself, and every other parameter as the `i64` ID of an arena value.
+fn host_param(ty: HostType) -> ValType {
+    match ty {
+        HostType::I64
+        | HostType::U64
+        | HostType::Void
+        | HostType::Str
+        | HostType::Bytes
+        | HostType::Path
+        | HostType::FsMetadata
+        | HostType::Array(_) => ValType::I64,
+    }
 }

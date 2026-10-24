@@ -2440,6 +2440,7 @@ fn function_targets_from_expr(
         Expr::Call { .. }
         | Expr::Literal { .. }
         | Expr::External { .. }
+        | Expr::Host { .. }
         | Expr::Default { .. } => FunctionTargetSet::default(),
     }
 }

@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use vibra_diagnostics::Diagnostic;
-use vibra_ir::Value;
 
 use crate::corpus::{Case, Corpus};
 use crate::manifest::{CaseExpectations, ExpectedExecution};
@@ -38,7 +37,7 @@ pub struct ExecutionObservation {
     /// The serialized result, when execution produced one.
     pub result: Option<String>,
     /// Audit events in execution order.
-    pub audit_trace: Vec<String>,
+    pub audit_trace: Vec<vibra_host::AuditEvent>,
 }
 
 /// What the WebAssembly backend did with an accepted executable case.
@@ -1028,17 +1027,6 @@ fn compare_execution(
     Ok(())
 }
 
-fn canonical_audit_snapshot(events: &[String]) -> String {
-    let values = events
-        .iter()
-        .map(|event| Value::Str(event.clone()).canonical_vibon())
-        .collect::<Vec<_>>();
-    if values.is_empty() {
-        "(record format: @audit-trace.v1 events: (array))\n".to_owned()
-    } else {
-        format!(
-            "(record format: @audit-trace.v1 events: (array {}))\n",
-            values.join(" ")
-        )
-    }
+fn canonical_audit_snapshot(events: &[vibra_host::AuditEvent]) -> String {
+    format!("{}\n", vibra_host::trace_to_vibon(events))
 }

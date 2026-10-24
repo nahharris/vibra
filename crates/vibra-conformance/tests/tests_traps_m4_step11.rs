@@ -78,7 +78,9 @@ fn run(tests: &str) -> Both {
     );
     let items = result.items().to_vec();
     let interpreter = items.iter().map(TestRow::from_item).collect::<Vec<_>>();
-    let TestsObserved::Rows(wasm) = observe_wasm_tests(&items) else {
+    let TestsObserved::Rows(wasm) =
+        observe_wasm_tests(&items, &vibra_host::HostWorld::default())
+    else {
         panic!("the Wasm backend did not run the tests");
     };
     Both { interpreter, wasm }
@@ -473,7 +475,7 @@ fn a_passing_test_returns_the_live_size_to_its_baseline() {
     let operand = |ordinal: u32| module.origins().operand_type(ordinal).cloned();
     let mut ends = Vec::new();
     for index in 0..5 {
-        let TestRun::Passed { live } = runner
+        let TestRun::Passed { live, .. } = runner
             .run_test(module.bytes(), index, first.types(), &heads, &operand)
             .expect("the module runs")
         else {

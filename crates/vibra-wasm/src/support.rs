@@ -40,6 +40,7 @@ pub fn module_with_entry(
         segments: Vec::new(),
         include_new: true,
         imports: Vec::new(),
+        host_imports: Vec::new(),
         extra: Vec::new(),
     };
     // The one function is the entry, so the module always encodes.

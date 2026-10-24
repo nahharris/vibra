@@ -45,7 +45,7 @@ fn agree(source: &str) -> (String, LiveSizes) {
         .canonical_result();
     let ty = entry_type(&program);
     match run_limited(source, 64 * MIB) {
-        Observed::Completed { value, live } => {
+        Observed::Completed { value, live, .. } => {
             let observed = value.canonical_observation(&ty);
             assert_eq!(observed, expected, "the backends disagree on:\n{source}");
             (observed, live)

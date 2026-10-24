@@ -60,6 +60,9 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         "vibra-schema",
         &["vibra-diagnostics", "vibra-syntax", "vibra-workspace"],
     ),
+    // The workspace hands the reference interpreter a provider: a world for a
+    // test and a conformance case, and the system provider for `run`, which the
+    // command line builds (Milestone 4, Step 16b).
     // Project schema decoding sits above syntax and diagnostics. Later
     // workspace phases may widen this row when their inputs exist.
     (
@@ -67,6 +70,7 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         &[
             "vibra-diagnostics",
             "vibra-fmt",
+            "vibra-host",
             "vibra-interp",
             "vibra-ir",
             "vibra-resolve",
@@ -81,6 +85,7 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         &[
             "vibra-diagnostics",
             "vibra-fmt",
+            "vibra-host",
             "vibra-schema",
             "vibra-syntax",
             "vibra-types",
@@ -508,8 +513,13 @@ fn only_the_backends_and_the_harness_depend_on_the_host_provider() {
         .filter(|(_, edges)| edges.contains(HOST_CRATE))
         .map(|(name, _)| name.as_str())
         .collect::<BTreeSet<_>>();
-    let permitted =
-        BTreeSet::from(["vibra-conformance", "vibra-interp", "vibra-wasm-run"]);
+    let permitted = BTreeSet::from([
+        "vibra-cli",
+        "vibra-conformance",
+        "vibra-interp",
+        "vibra-wasm-run",
+        "vibra-workspace",
+    ]);
     assert!(
         dependents.is_subset(&permitted),
         "{dependents:?} depend on `{HOST_CRATE}`; only {permitted:?} may"

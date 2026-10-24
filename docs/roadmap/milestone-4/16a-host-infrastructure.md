@@ -119,7 +119,7 @@ field.
 
 ## As built
 
-Landed as `landed`, conditional on its pull request merging; the base is `m4` at
+Landed (PR #374, merge 746e3d3); the base is `m4` at
 `f14aa66`, where Step 15 (PR #373) merged. Nothing here changes what a source
 program does: `@host` is still `@tool.unavailable`, no operation is reachable from
 source, and the corpus has the same 525 cases.

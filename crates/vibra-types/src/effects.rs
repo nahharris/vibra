@@ -695,7 +695,9 @@ fn collect(body: &Expr, function_count: usize) -> (Vec<Site>, Vec<Closure<'_>>) 
             | Expr::Global { .. }
             | Expr::Function { .. }
             | Expr::Captured { .. } => {}
-            Expr::External { arguments, .. } => stack.extend(arguments),
+            Expr::External { arguments, .. } | Expr::Host { arguments, .. } => {
+                stack.extend(arguments);
+            }
             Expr::Sequence { expressions, .. } => stack.extend(expressions),
             Expr::Closure {
                 signature,
