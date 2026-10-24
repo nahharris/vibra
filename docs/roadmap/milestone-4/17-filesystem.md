@@ -127,7 +127,7 @@ and a parent, not-a-file, not-a-directory as a target and as a parent, invalid-p
 `V1-RUNTIME-fs-metadata-stat`, `V1-RUNTIME-fs-error-propagates-with-try`,
 `V1-RUNTIME-fs-demo-path-from-stdin`, and `V1-RUNTIME-fs-test-world-writes-are-fresh`
 (`workspace-test`). Negatives: `V1-EFFECT-host-target-array-omits-fs-read` and
-`V1-EFFECT-host-function-ceiling-omits-fs-read`. No case was re-expected, deleted, or
+`V1-EFFECT-host-function-ceiling-omits-fs-read`, and `V1-TYPE-NAMES-fs-parameter-named-path` (a parameter named `path` beside the `path` type is `@name.redeclaration`). No case was re-expected, deleted, or
 downgraded. Parity: 9 rows added, 151 of 151 `matched`.
 
 ### Evidence
