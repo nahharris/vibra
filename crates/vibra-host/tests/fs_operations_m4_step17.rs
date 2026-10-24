@@ -484,11 +484,19 @@ fn a_four_mebibyte_file_and_a_path_of_a_thousand_components() {
     let big = vec![0x5a_u8; 4 * 1024 * 1024];
     // Components of `.` are skipped by the host, so a path of a thousand
     // components names the same file as the plain one.
-    let dots = "/.".repeat(1000);
-    for (provider, base) in [
-        (&mut system as &mut dyn HostProvider, root.as_str()),
-        (&mut world as &mut dyn HostProvider, ""),
+    // The world has no limit, so it takes a thousand. The system provider hands
+    // the text to the operating system, whose path limit is a host condition
+    // (1,024 bytes on macOS, 4,096 on Linux), so its path stays under 1,000 bytes.
+    let system_components = 990_usize.saturating_sub(root.len()) / 2;
+    for (provider, base, components) in [
+        (
+            &mut system as &mut dyn HostProvider,
+            root.as_str(),
+            system_components,
+        ),
+        (&mut world as &mut dyn HostProvider, "", 1000),
     ] {
+        let dots = "/.".repeat(components);
         let file = format!("{base}/big.bin");
         assert_eq!(
             call(
@@ -506,6 +514,17 @@ fn a_four_mebibyte_file_and_a_path_of_a_thousand_components() {
         let long = format!("{base}{dots}/big.bin");
         assert_eq!(call(provider, "fs.read-file", &[path(&long)]), bytes(&big));
     }
+    // A path past every operating system's limit is an `err`, never a trap. Unix
+    // answers `ENAMETOOLONG`, which is `invalid-path`; Windows reports the path
+    // as not found, so only the closed `err` is common to the hosts.
+    let too_long = format!("{root}{}", "/x".repeat(5000));
+    let reply = call(&mut system, "fs.read-file", &[path(&too_long)]);
+    #[cfg(unix)]
+    assert_eq!(reply, fs_err("invalid-path"));
+    assert!(
+        reply == fs_err("invalid-path") || reply == fs_err("not-found"),
+        "{reply:?}"
+    );
 }
 
 #[test]
@@ -549,7 +568,13 @@ fn a_name_that_is_not_unicode_is_invalid_text() {
     use std::os::unix::ffi::OsStrExt;
     let scratch = Scratch::new("names");
     let name = std::ffi::OsStr::from_bytes(&[b'f', 0xff, b'g']);
-    std::fs::write(scratch.0.join(name), b"x").expect("a file with a bad name");
+    // Whether a name that is not Unicode can exist is a property of the volume:
+    // macOS APFS refuses it, and so may a Linux filesystem. When the volume
+    // cannot hold the name the condition cannot arise, so there is nothing to
+    // assert; gating on the operating system would skip volumes that accept it.
+    if std::fs::write(scratch.0.join(name), b"x").is_err() {
+        return;
+    }
     let mut system = SystemProvider::new();
     assert_eq!(
         call(&mut system, "fs.read-entries", &[path(&scratch.root())]),
