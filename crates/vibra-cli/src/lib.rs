@@ -133,7 +133,7 @@ usage:
   vibra [--format human|json] [--workspace PATH] project init [DEST]
   vibra [--format human|json] [--workspace PATH] fmt PATH [--write]
   vibra [--format human|json] [--workspace PATH] check [TARGET]
-  vibra [--format human|json] [--workspace PATH] run TARGET
+  vibra [--format human|json] [--workspace PATH] run TARGET [-- ARG...]
   vibra [--format human|json] [--workspace PATH] test [TEST]
   vibra [--format human|json] help
 
@@ -207,6 +207,8 @@ enum Action {
     },
     Run {
         target: PathBuf,
+        /// The program arguments after the literal `--`, verbatim.
+        arguments: Vec<OsString>,
     },
     Test {
         selector: Option<TestSelector>,
@@ -288,7 +290,9 @@ fn execute<W: Write, E: Write>(
         Action::Check { target } => {
             execute_check(&invocation, target.as_deref(), stdout, stderr)
         }
-        Action::Run { target } => execute_run(&invocation, &target, stderr),
+        Action::Run { target, arguments } => {
+            execute_run(&invocation, &target, arguments, stderr)
+        }
         Action::Test { selector } => {
             execute_test(&invocation, selector.as_ref(), stdout, stderr)
         }
@@ -536,6 +540,7 @@ fn execute_check<W: Write, E: Write>(
 fn execute_run<E: Write>(
     invocation: &Invocation,
     target_path: &Path,
+    arguments: Vec<OsString>,
     stderr: &mut E,
 ) -> CommandEnvelope {
     let snapshot = match vibra_workspace::WorkspaceSnapshot::load(&invocation.workspace)
@@ -571,7 +576,7 @@ fn execute_run<E: Write>(
     // The command chooses where the program's output goes: JSON mode keeps one
     // machine document on the process's standard output, so the provider
     // captures the bytes for the envelope; human mode lets the program write them.
-    let mut host = vibra_host::SystemProvider::new();
+    let mut host = vibra_host::SystemProvider::with_arguments(arguments);
     if invocation.output_format == OutputFormat::Json {
         host = host.capturing();
     }
@@ -1279,6 +1284,21 @@ fn parse_run_command(
     workspace: PathBuf,
     arguments: &[OsString],
 ) -> Invocation {
+    // The first literal `--` after the target separates the program arguments;
+    // every token after it is one argument, verbatim, including another `--`.
+    let (arguments, program_arguments) = match arguments
+        .iter()
+        .position(|argument| argument == OsStr::new("--"))
+    {
+        Some(separator) => (
+            arguments.get(..separator).unwrap_or_default(),
+            arguments
+                .get(separator.saturating_add(1)..)
+                .unwrap_or_default()
+                .to_vec(),
+        ),
+        None => (arguments, Vec::new()),
+    };
     let Some(target) = arguments.first() else {
         return invalid_invocation(
             output_format,
@@ -1303,6 +1323,7 @@ fn parse_run_command(
         command: "run".to_owned(),
         action: Action::Run {
             target: PathBuf::from(target),
+            arguments: program_arguments,
         },
     }
 }
