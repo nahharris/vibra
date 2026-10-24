@@ -3661,6 +3661,13 @@ pub(crate) fn host_operation(
     ) {
         return None;
     }
+    // A member with an additive row is already `@syntax.invalid-attribute`; it
+    // is not checked against the registry as well, so one fault is one report.
+    if items.iter().any(
+        |attribute| matches!(attribute, Attribute::Effects(row) if !row.references().is_empty()),
+    ) {
+        return None;
+    }
     let symbol = items.iter().find_map(|attribute| match attribute {
         Attribute::Symbol(Literal::String(value)) => Some(value.value()),
         _ => None,
