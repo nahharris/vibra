@@ -1,0 +1,1 @@
+(record type: (record type: @std.option.option arguments: (array (record type: @tuple arguments: (array @named @named)))) value: (record kind: @enum type: @std.option.option variant: @some payload: (record kind: @tuple values: (array (record kind: @record type: @dog fields: (record n: 4u32)) (record kind: @record type: @dog fields: (record n: 4u32))))))

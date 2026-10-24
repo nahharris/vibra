@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-constructor-patterns"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A constructor pattern matches a declared record, tuple, enum, and wrapper, tupleof, recordof, and enumof match anonymous values, and a pattern nested five deep binds its innermost part."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

@@ -1,0 +1,12 @@
+id = "V1-TYPE-INTERFACE-contract-member-types-ir"
+rule = "V1-TYPE-INTERFACE"
+profile = "static-v1"
+operation = "type-check"
+description = "The typed program records a contract member call's own type arguments in where: order beside the interface and member, here the one argument a written types: list fixed, and the implementation keeps its own generic parameter in its signature."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+types = "types.vibon"

@@ -1,0 +1,8 @@
+(record
+  format: @test-run.v1
+  result: @command.ok
+  tests: (array
+    (record name: "@tests.console::\"reads the world's standard input\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array (record kind: @host op: "io.stdin-text" args: (array) result: (record kind: @enum type: @std.result.result variant: @ok payload: "from the world")) (record kind: @host op: "io.stdout-text" args: (array "from the world") result: (record kind: @enum type: @std.result.result variant: @ok)))))
+    (record name: "@tests.console::\"each test starts from a fresh world\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array (record kind: @host op: "io.stdin-text" args: (array) result: (record kind: @enum type: @std.result.result variant: @ok payload: "from the world")))))
+  )
+)

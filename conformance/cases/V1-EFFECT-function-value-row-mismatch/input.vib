@@ -1,0 +1,16 @@
+(deffect write
+  (defn text (value str) void (do)))
+
+(defn pure-one (value str) void (do))
+
+(defn effectful-one (value str) void
+  effects: (write)
+  (write.text value))
+
+(defn take-effectful (f (fn (str) void effects: (write))) void (do))
+
+(defn take-pure (f (fn (str) void)) void (do))
+
+(defn give () void
+  (take-effectful pure-one)
+  (take-pure effectful-one))

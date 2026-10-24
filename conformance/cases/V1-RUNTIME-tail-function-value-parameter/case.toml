@@ -2,7 +2,7 @@ id = "V1-RUNTIME-tail-function-value-parameter"
 rule = "V1-RUNTIME"
 profile = "interpreter-v1"
 operation = "interpret"
-description = "A call through a function-value parameter in tail position reuses the activation, so a mutual loop between that call and the function it receives runs a hundred thousand times past the activation bound."
+description = "A call through a function-value parameter in tail position reuses the activation, so a mutual loop between that call and the function it receives runs a hundred thousand times in one activation."
 
 [inputs]
 source = "input.vib"

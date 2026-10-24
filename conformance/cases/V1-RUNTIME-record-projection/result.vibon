@@ -1,0 +1,1 @@
+(record type: (record type: @tuple arguments: (array @point (record type: @record fields: (record id: @u64 name: @str)) @i32 @i32)) value: (record kind: @tuple values: (array (record kind: @record type: @point fields: (record x: 2i32 y: 1i32)) (record kind: @record fields: (record id: 7u64 name: "Ada")) 1i32 2i32)))

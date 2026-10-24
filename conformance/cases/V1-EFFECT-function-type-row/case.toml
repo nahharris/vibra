@@ -1,0 +1,11 @@
+id = "V1-EFFECT-function-type-row"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "A function type writes its exact closed effect row, and a call through a parameter of that type performs the row of the type."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

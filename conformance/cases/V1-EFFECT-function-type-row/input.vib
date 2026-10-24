@@ -1,0 +1,6 @@
+(deffect console
+  (defn out (message str) void (do)))
+
+(defn run (callback (fn (str) void effects: (console)) message str) void
+  effects: (console)
+  (callback message))

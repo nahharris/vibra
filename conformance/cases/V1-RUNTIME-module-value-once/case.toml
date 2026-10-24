@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-module-value-once"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Module values are evaluated lazily on first read, in the order the reads need, once: a value read through another declared before it, a value read twice, and a value never read."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

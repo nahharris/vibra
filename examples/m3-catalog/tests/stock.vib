@@ -65,3 +65,8 @@
         (stock.part name: "gear" unit-cents: 1200u64 count: 2u64))
       500u64)
     (array.of "gear" "bolt")))
+
+(test "a deep walk over a line of stock"
+  (assert.equal
+    (stock.walk (stock.part name: "bolt" unit-cents: 25u64 count: 7u64) 100000u64)
+    100007u64))

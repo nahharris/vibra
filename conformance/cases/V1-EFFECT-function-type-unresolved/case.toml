@@ -1,0 +1,17 @@
+id = "V1-EFFECT-function-type-unresolved"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "A function type row entry that resolves to no effect root is an invalid reference at that entry."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.invalid-reference"
+level = "@error"
+source = "input.vib"
+span = [67, 76]

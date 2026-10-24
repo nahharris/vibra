@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-union-narrowing"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "An as pattern tests only the union discriminant, in written member order, and binds the payload at the member type, for a union of two members and one of seven."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

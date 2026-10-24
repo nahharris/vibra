@@ -1,0 +1,15 @@
+(import iter @std.iter)
+
+; An `option` iterates its payload once, and the payload of `(option void)` is
+; the item `void`: a `some` yields one item although it has no payload cell.
+(defn main () (tuple (array void) (array void) (array i32))
+  (tupleof
+    (drain (option.some) (array.of))
+    (drain (as (option void) (option.none)) (array.of))
+    (drain (option.some 3i32) (array.of))))
+
+(defn drain (values (iter.iter item) seen (array item)) (array item)
+  where: (item any)
+  (match (iter.iter.next values)
+    (option.some (tupleof item rest)) (drain rest (array.append seen item))
+    (option.none) seen))

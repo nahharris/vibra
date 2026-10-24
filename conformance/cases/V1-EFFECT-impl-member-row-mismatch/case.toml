@@ -1,0 +1,17 @@
+id = "V1-EFFECT-impl-member-row-mismatch"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "An implementation member writes exactly its contract member's row, since v1 has no row subtyping: a pure member of a contract that writes a ceiling has another signature."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [175, 208]

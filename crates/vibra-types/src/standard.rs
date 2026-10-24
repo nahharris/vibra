@@ -7,6 +7,7 @@
 //! embedded modules under the identities the resolver gives them, and a run
 //! that already declared one keeps its own.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -70,6 +71,28 @@ pub(crate) fn library_module(
         .iter()
         .find(|(source_id, _, _)| *source_id == STDLIB_ITER_SOURCE_ID)
         .map(|(source_id, _, ast)| (*source_id, ast))
+}
+
+/// The values of the closed import-free vocabulary, declared by `@std.bool`:
+/// its `def`s that the vocabulary names. Every run sees them, so a run that
+/// does not hold the module declares them from the embedded one, as
+/// [`declare_standard_types`] does for the vocabulary's types.
+pub(crate) fn prelude_definitions() -> Vec<&'static vibra_syntax::DefDeclaration> {
+    type_modules()
+        .iter()
+        .filter(|(source_id, _, _)| *source_id == STDLIB_BOOL_SOURCE_ID)
+        .flat_map(|(_, _, ast)| ast.declarations())
+        .filter_map(|declaration| match declaration {
+            Declaration::Def(definition)
+                if vibra_syntax::is_prelude_value_spelling(
+                    definition.name().value(),
+                ) =>
+            {
+                Some(definition)
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// Declares every type of `@std.option`, `@std.result`, and `@std.core` that
@@ -195,6 +218,9 @@ pub(crate) struct BuiltinMember {
     pub(crate) intrinsic: CompilerIntrinsic,
     /// The complete generic parameter list: the type's, then the member's.
     pub(crate) type_parameters: Vec<String>,
+    /// The member as the embedded module writes it, whose Vibra body a native
+    /// with no import runs in a module.
+    pub(crate) method: &'static vibra_syntax::FunctionDeclaration,
 }
 
 impl BuiltinMember {
@@ -299,10 +325,37 @@ pub(crate) fn builtin_members(types: &TypeNames) -> Vec<BuiltinMember> {
                 signature,
                 intrinsic,
                 type_parameters: generics,
+                method,
             });
         }
     }
     members
+}
+
+/// The builtin members a program contains: those `referenced` by path, and
+/// every member the Vibra body of one of them names, transitively. A native
+/// with no import is run in a module as its checked body, which calls the
+/// members it names, so those join the program with it.
+pub(crate) fn members_with_bodies(
+    members: Vec<BuiltinMember>,
+    referenced: &BTreeSet<String>,
+) -> Vec<BuiltinMember> {
+    let mut included = referenced.clone();
+    loop {
+        let before = included.len();
+        for member in &members {
+            if member.intrinsic.runs_body() && included.contains(&member.path()) {
+                included.extend(crate::function_value_paths(member.method));
+            }
+        }
+        if included.len() == before {
+            break;
+        }
+    }
+    members
+        .into_iter()
+        .filter(|member| included.contains(&member.path()))
+        .collect()
 }
 
 /// Every `(role, type name)` the embedded standard library claims with

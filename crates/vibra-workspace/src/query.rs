@@ -1616,6 +1616,7 @@ impl<'a> SemanticCollector<'a> {
             | Expr::Function { .. }
             | Expr::Captured { .. } => {}
             Expr::External { arguments, .. }
+            | Expr::Host { arguments, .. }
             | Expr::Sequence {
                 expressions: arguments,
                 ..

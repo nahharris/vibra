@@ -1,0 +1,14 @@
+(defn main () (tuple i32 bool)
+  (scaler.scale (gauge base: 1i32) true offset: 7i32 types: (bool) by: 3i32))
+
+(defint scaler
+  (defn scale (value self other u) (tuple i32 u)
+    where: (u any)
+    labelled: (by i32 2i32 offset i32 0i32)))
+
+(deftype gauge (record base i32)
+  (impl scaler
+    (defn scale (value self other u) (tuple i32 u)
+      where: (u any)
+      labelled: (by i32 2i32 offset i32 0i32)
+      (tupleof by other))))

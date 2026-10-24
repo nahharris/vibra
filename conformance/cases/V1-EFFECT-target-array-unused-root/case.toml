@@ -1,0 +1,18 @@
+id = "V1-EFFECT-target-array-unused-root"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "A root in the target array that the entry's performed row does not contain weakens local reasoning exactly as an unused root of a ceiling does: it is a warning at that atom, and the target is still admitted."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+
+[[expect.diagnostics]]
+code = "@contract.unused-effect"
+level = "@warning"
+source = "project.vibon"
+span = [209, 223]

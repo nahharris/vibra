@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-function-value-kinds"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A function value is called through a parameter, a binding, and a record field, and the function value of a module function carries that function's labelled default, which a call may leave out or give."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

@@ -1,0 +1,9 @@
+(defn main () (tuple (maybe void) (maybe i32) (maybe str))
+  (tupleof (wrap void) (wrap 5i32) (wrap "x")))
+
+(defn wrap (value t) (maybe t)
+  where: (t any)
+  (maybe.some value))
+
+(deftype maybe (enum some t none void)
+  where: (t any))

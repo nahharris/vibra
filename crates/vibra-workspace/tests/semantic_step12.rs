@@ -292,7 +292,14 @@ fn global_initializer_may_call_a_terminating_recursive_helper() {
         .first()
         .expect("binary target");
 
-    let run = vibra_workspace::semantic::run_target(&snapshot, target);
+    // `false` is a value of the closed import-free vocabulary, which the
+    // verified standard library declares.
+    let stdlib = vibra_types::load_stdlib().expect("embedded standard library");
+    let run = vibra_workspace::semantic::run_target_with_bootstrap(
+        &snapshot,
+        target,
+        Some(&stdlib),
+    );
 
     assert_eq!(
         run.check().status(),
@@ -567,7 +574,7 @@ fn verified_bootstrap_imports_keep_package_identity_and_execute_through_checked_
         .find(|module| module.source_id() == vibra_types::STDLIB_TEXT_SOURCE_ID)
         .expect("verified text module");
     assert_eq!(module.package().name(), "vibra-stdlib");
-    assert_eq!(module.package().version(), "0.2.0");
+    assert_eq!(module.package().version(), "0.3.0");
 }
 
 #[test]
@@ -899,9 +906,13 @@ fn retired_syntax_and_unsupported_valid_declarations_keep_distinct_diagnostics()
 }
 
 #[test]
-fn recognized_host_provider_is_unavailable_and_unknown_provider_is_rejected() {
+fn host_provider_outside_a_deffect_and_unknown_provider_are_rejected() {
     for (label, provider, expected) in [
-        ("host-provider", "host", DiagnosticCode::ToolUnavailable),
+        (
+            "host-provider",
+            "host",
+            DiagnosticCode::SyntaxInvalidAttribute,
+        ),
         (
             "unknown-provider",
             "wasm",

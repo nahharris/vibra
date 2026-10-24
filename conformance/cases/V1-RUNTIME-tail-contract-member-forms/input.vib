@@ -1,0 +1,49 @@
+(defn main () (tuple u64 u64 u64 u64)
+  (tupleof
+    (stepper.step (counter left: 0u64) 10000u64 "tag")
+    (stepper.step-labelled (counter left: 0u64) 10000u64)
+    (stepper.step-tail (counter left: 0u64) 10000u64)
+    (stepper.step-hopped (counter left: 0u64) 10000u64)))
+
+; Each implementation calls the member again in tail position, ten thousand
+; times. That is far beyond what non-tail activations could reach, so the
+; run ends only because every one of those calls reuses its activation: a
+; generic member, a labelled member, a dict-tail member, and a member named
+; as a value in a module value and called through it.
+(defint stepper
+  (defn step (value self n u64 tag u) u64
+    where: (u any))
+  (defn step-labelled (value self n u64) u64
+    labelled: (hop u64 1u64))
+  (defn step-tail (value self n u64) u64
+    variadic: (rest (dict str u64)))
+  (defn step-hopped (value self n u64) u64))
+
+(deftype counter (record left u64)
+  (impl stepper
+    (defn step (value self n u64 tag u) u64
+      where: (u any)
+      (if (u64.equal n 0u64)
+        17u64
+        (stepper.step value (lower n) tag)))
+    (defn step-labelled (value self n u64) u64
+      labelled: (hop u64 1u64)
+      (if (u64.equal n 0u64)
+        18u64
+        (stepper.step-labelled value (lower n) hop: hop)))
+    (defn step-tail (value self n u64) u64
+      variadic: (rest (dict str u64))
+      (if (u64.equal n 0u64)
+        19u64
+        (stepper.step-tail value (lower n) "k" 1u64)))
+    (defn step-hopped (value self n u64) u64
+      (if (u64.equal n 0u64)
+        20u64
+        (hopper value (lower n))))))
+
+(def hopper (fn (counter u64) u64) stepper.step-hopped)
+
+(defn lower (count u64) u64
+  (match (u64.sub-checked count 1u64)
+    (result.ok value) value
+    (result.err -) 0u64))

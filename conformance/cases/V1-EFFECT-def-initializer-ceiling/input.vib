@@ -1,0 +1,7 @@
+(deffect marker
+  (defn mark () i32 1i32))
+
+(def value i32 (marker.mark))
+
+(def maker (fn () i32 effects: (marker))
+  (lambda () i32 effects: (marker) (marker.mark)))

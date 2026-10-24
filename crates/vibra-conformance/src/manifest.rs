@@ -93,6 +93,11 @@ pub struct CaseInputs {
     pub data: Vec<String>,
     /// Optional confined directory tree acquired by source-graph cases.
     pub tree: Option<String>,
+    /// For `workspace-run` and `workspace-test`, the path of a
+    /// `@host-world.v1` document that supplies the case's host world. It is
+    /// copied fresh for each test and each backend; without it a case runs in
+    /// the default world.
+    pub host_world: Option<String>,
 }
 
 /// The closed operation selected by a conformance case.
@@ -145,6 +150,16 @@ impl ConformanceOperation {
             Self::WorkspaceRun => "workspace-run",
             Self::WorkspaceTest => "workspace-test",
         }
+    }
+
+    /// Whether this operation executes a program, which is the operation half
+    /// of an **executable case** (`CaseManifest::is_executable` adds the other).
+    #[must_use]
+    pub const fn executes_programs(self) -> bool {
+        matches!(
+            self,
+            Self::Interpret | Self::WorkspaceRun | Self::WorkspaceTest
+        )
     }
 }
 
@@ -241,8 +256,10 @@ pub struct CaseExpectations {
     pub queries: Vec<ExpectedQuery>,
     /// Expected reference-interpreter output.
     pub interpreter: Option<ExpectedExecution>,
-    /// Expected Wasm output.
-    pub wasm: Option<ExpectedExecution>,
+    /// The host event an `interpret` or `workspace-run` case ends in, which
+    /// replaces the result and audit-trace snapshots because such a run has
+    /// neither.
+    pub host_event: Option<String>,
     /// Expected deterministic artifact hashes, when the case covers an
     /// artifact-producing backend.
     pub artifact_hashes: Option<Vec<String>>,
@@ -268,6 +285,17 @@ pub struct CaseManifest {
 }
 
 impl CaseManifest {
+    /// Whether this is an **executable case** of
+    /// `docs/spec/07-diagnostics-and-conformance.md`, "Differential
+    /// execution": its operation executes a program and its expectation is
+    /// accepted, because a rejected program reaches no backend. Both backends
+    /// run such a case against its one expectation, and only such a case has a
+    /// parity row.
+    #[must_use]
+    pub fn is_executable(&self) -> bool {
+        self.operation.executes_programs() && self.expectations.accepted
+    }
+
     /// Decodes and validates a TOML manifest.
     #[allow(clippy::should_implement_trait)]
     pub fn from_str(text: &str) -> Result<Self, ManifestError> {
@@ -349,10 +377,23 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             project: raw.inputs.project,
             data: raw.inputs.data,
             tree: raw.inputs.tree,
+            host_world: raw.inputs.host_world,
         };
         let operation = decode_operation(raw.operation.as_deref(), profile, &inputs)?;
 
         let expectations = decode_expectations(raw.expect)?;
+        if expectations.host_event.is_some()
+            && !matches!(
+                operation,
+                ConformanceOperation::Interpret
+                    | ConformanceOperation::WorkspaceRun
+                    | ConformanceOperation::WorkspaceTest
+            )
+        {
+            return Err(ManifestError::Invalid(format!(
+                "host_event is valid only on interpret, workspace-run, and workspace-test cases, not {operation}"
+            )));
+        }
         if operation == ConformanceOperation::Index && expectations.index.is_none() {
             return Err(ManifestError::Invalid(
                 "index cases must declare the expected index document".to_owned(),
@@ -369,7 +410,9 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
                 "format cases must declare a formatted snapshot".to_owned(),
             ));
         }
-        if operation == ConformanceOperation::WorkspaceRun {
+        if operation == ConformanceOperation::WorkspaceRun
+            && expectations.host_event.is_none()
+        {
             if expectations.accepted
                 && expectations.interpreter.as_ref().is_none_or(|execution| {
                     execution.result.is_none() || execution.audit_trace.is_none()
@@ -390,6 +433,7 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             }
         }
         if operation == ConformanceOperation::WorkspaceTest
+            && expectations.host_event.is_none()
             && expectations.interpreter.as_ref().is_none_or(|execution| {
                 execution.result.is_none() || execution.audit_trace.is_some()
             })
@@ -653,7 +697,52 @@ fn decode_operation(
             )));
         }
     }
+    if let Some(world) = inputs.host_world.as_deref() {
+        validate_host_world_input(operation, world, inputs.tree.as_deref())?;
+    }
     Ok(operation)
+}
+
+/// A `host-world` input belongs to `workspace-run` and `workspace-test`, which
+/// run a program; `interpret` is pure and has no host world. It is a relative
+/// `.vibon` file of the case directory, outside the confined tree, which is the
+/// workspace and holds no world.
+fn validate_host_world_input(
+    operation: ConformanceOperation,
+    world: &str,
+    tree: Option<&str>,
+) -> Result<(), ManifestError> {
+    if !matches!(
+        operation,
+        ConformanceOperation::WorkspaceRun | ConformanceOperation::WorkspaceTest
+    ) {
+        return Err(ManifestError::Invalid(format!(
+            "{operation} cases take no host-world input: only workspace-run and \
+             workspace-test run in a host world"
+        )));
+    }
+    let path = Path::new(world);
+    if world.is_empty()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::RootDir
+                    | std::path::Component::Prefix(_)
+            )
+        })
+        || path.extension().and_then(|extension| extension.to_str()) != Some("vibon")
+    {
+        return Err(ManifestError::Invalid(format!(
+            "host-world input `{world}` must be a relative `.vibon` file of the case"
+        )));
+    }
+    if tree.is_some_and(|tree| world.starts_with(&format!("{tree}/"))) {
+        return Err(ManifestError::Invalid(format!(
+            "host-world input `{world}` must not be inside the confined tree"
+        )));
+    }
+    Ok(())
 }
 
 fn is_declared_input(inputs: &CaseInputs, source_id: &str) -> bool {
@@ -666,6 +755,10 @@ fn is_declared_input(inputs: &CaseInputs, source_id: &str) -> bool {
             .as_deref()
             .is_some_and(|input| input == source_id)
         || inputs.data.iter().any(|input| input == source_id)
+        || inputs
+            .host_world
+            .as_deref()
+            .is_some_and(|input| input == source_id)
         || inputs.tree.as_deref().is_some_and(|tree| {
             source_id == tree
                 || source_id
@@ -748,6 +841,11 @@ pub(crate) fn section_for(value: &str) -> Option<&str> {
         .max_by_key(|section| section.len())
 }
 
+/// The closed host events a case may end in. A host event is an unlocated
+/// error diagnostic that is never a trap (`docs/spec/06-runtime.md`,
+/// "Activations and memory"); memory exhaustion is the only one.
+const HOST_EVENTS: [&str; 1] = ["@runtime.memory-exhausted"];
+
 fn decode_expectations(
     raw: RawExpectations,
 ) -> Result<CaseExpectations, ManifestError> {
@@ -793,7 +891,26 @@ fn decode_expectations(
         ));
     }
     let interpreter = raw.interpreter.map(decode_execution).transpose()?;
-    let wasm = raw.wasm.map(decode_execution).transpose()?;
+    let host_event = raw.host_event;
+    if let Some(event) = &host_event {
+        if !HOST_EVENTS.contains(&event.as_str()) {
+            return Err(ManifestError::Invalid(format!(
+                "host_event `{event}` is not a registered host event; expected one of {HOST_EVENTS:?}"
+            )));
+        }
+        if interpreter.is_some() {
+            return Err(ManifestError::Invalid(
+                "host_event replaces the result and audit-trace snapshots; a case cannot declare both"
+                    .to_owned(),
+            ));
+        }
+        if !accepted {
+            return Err(ManifestError::Invalid(
+                "host_event requires an accepted case: a program the checker rejects never runs"
+                    .to_owned(),
+            ));
+        }
+    }
     let artifact_hashes = raw.artifact.map(|artifact| artifact.hashes);
 
     Ok(CaseExpectations {
@@ -815,7 +932,7 @@ fn decode_expectations(
             })
             .collect(),
         interpreter,
-        wasm,
+        host_event,
         artifact_hashes,
     })
 }
@@ -949,6 +1066,8 @@ pub(crate) struct RawInputs {
     pub(crate) data: Vec<String>,
     #[serde(default)]
     pub(crate) tree: Option<String>,
+    #[serde(default, rename = "host-world")]
+    pub(crate) host_world: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -974,7 +1093,7 @@ pub(crate) struct RawExpectations {
     #[serde(default)]
     pub(crate) interpreter: Option<RawExecution>,
     #[serde(default)]
-    pub(crate) wasm: Option<RawExecution>,
+    pub(crate) host_event: Option<String>,
     #[serde(default)]
     pub(crate) artifact: Option<RawArtifact>,
 }

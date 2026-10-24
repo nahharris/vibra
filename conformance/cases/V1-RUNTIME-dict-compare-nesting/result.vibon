@@ -1,0 +1,1 @@
+(record type: (record type: @tuple arguments: (array @std.core.ordering @std.core.ordering)) value: (record kind: @tuple values: (array (record kind: @enum type: @std.core.ordering variant: @equal) (record kind: @enum type: @std.core.ordering variant: @less))))

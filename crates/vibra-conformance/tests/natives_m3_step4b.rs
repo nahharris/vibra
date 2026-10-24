@@ -191,26 +191,53 @@ fn native_members() -> Vec<(String, String, String)> {
     members
 }
 
-fn run(source_id: &str, source: &str) -> String {
+/// What one program answers in the two backends.
+struct Ran {
+    /// The reference interpreter's canonical result.
+    interpreter: String,
+    /// The module's, or `None` when the emitter does not lower the program.
+    wasm: Option<String>,
+}
+
+fn run(source_id: &str, source: &str) -> Ran {
     let checked = vibra_types::check_source(source_id, source);
     finish(source, &checked)
 }
 
 /// Runs a module source as trusted standard-library code.
-fn run_trusted(source_id: &str, source: &str) -> String {
+fn run_trusted(source_id: &str, source: &str) -> Ran {
     let stdlib = vibra_types::load_stdlib().expect("standard library");
     let checked =
         vibra_types::check_standard_library_source(&stdlib, source_id, source);
     finish(source, &checked)
 }
 
-fn finish(source: &str, checked: &vibra_types::CheckResult) -> String {
+fn finish(source: &str, checked: &vibra_types::CheckResult) -> Ran {
     let program = checked
         .program()
         .unwrap_or_else(|| panic!("{source}\n{:?}", checked.diagnostics()));
-    vibra_interp::run(program)
+    let interpreter = vibra_interp::run(program)
         .expect("execution")
-        .canonical_result()
+        .canonical_result();
+    let wasm = vibra_wasm::emit(program).ok().map(|module| {
+        let ty = program.entry().signature().result();
+        let runner = vibra_wasm_run::Runner::new(vibra_wasm_run::MemoryLimit::new(
+            64 * 1024 * 1024,
+        ))
+        .expect("the engine configures");
+        match runner
+            .run_observed(module.bytes(), &ty, program.types())
+            .expect("the module runs")
+        {
+            vibra_wasm_run::Observed::Completed { value, .. } => {
+                value.canonical_observation(&ty)
+            }
+            vibra_wasm_run::Observed::Stopped(outcome) => {
+                panic!("{source}\nthe module stopped: {outcome:?}")
+            }
+        }
+    });
+    Ran { interpreter, wasm }
 }
 
 /// Each native function of a standard-library module as `(symbol, module
@@ -329,10 +356,16 @@ fn every_listed_native_matches_its_body() {
     let modules = module_natives();
     let listed = stdlib.native_symbols();
     assert!(!listed.is_empty());
+    let mut counts = std::collections::BTreeMap::new();
     for symbol in listed {
-        let samples = samples(symbol);
+        let mut samples = samples(symbol)
+            .iter()
+            .map(|(result, operands)| ((*result).to_owned(), (*operands).to_owned()))
+            .collect::<Vec<_>>();
         assert!(!samples.is_empty(), "`{symbol}` has no harness samples");
-        for (result, operands) in samples {
+        samples.extend(extra_samples(symbol));
+        counts.insert(symbol.clone(), samples.len());
+        for (result, operands) in &samples {
             let (native, body) = if let Some((_, path, reference)) =
                 members.iter().find(|(member, _, _)| member == symbol)
             {
@@ -368,11 +401,412 @@ fn every_listed_native_matches_its_body() {
                 )
             };
             assert_eq!(
-                native, body,
+                native.interpreter, body.interpreter,
                 "`{symbol}` disagrees with its body on `{operands}`"
+            );
+            // The program that names the native lowers: a module reaches a
+            // native with an import through it, and runs the checked body of
+            // one with none (a native that applies a function value). Either
+            // must give the interpreter's answer.
+            let row = intrinsic_of(symbol);
+            assert_ne!(
+                row.native_import().is_some(),
+                row.runs_body(),
+                "`{symbol}` has an import or a checked body, never both"
+            );
+            let wasm = native
+                .wasm
+                .as_ref()
+                .unwrap_or_else(|| panic!("the program of `{symbol}` is not lowered"));
+            assert_eq!(
+                wasm, &native.interpreter,
+                "the module's `{symbol}` disagrees on `{operands}`"
+            );
+            let body_wasm = body
+                .wasm
+                .unwrap_or_else(|| panic!("the body of `{symbol}` is not lowered"));
+            assert_eq!(
+                body_wasm, body.interpreter,
+                "the lowered body of `{symbol}` disagrees on `{operands}`"
             );
         }
     }
+    // Each sample ran on four paths: the interpreter calling the native code,
+    // the interpreter running the body, the module calling the import (or
+    // running the body of a native with none), and the module running the
+    // lowered body.
+    eprintln!(
+        "{} natives, {} samples on four paths: {counts:?}",
+        counts.len(),
+        counts.values().sum::<usize>()
+    );
+    assert_eq!(counts.len(), listed.len());
+    for (symbol, count) in &counts {
+        assert!(*count >= 3, "`{symbol}` has only {count} samples");
+    }
+}
+
+/// Samples at the edges of the domain, which a literal table would be long to
+/// write: a large input, the widest scalars, a sequence of every width, and the
+/// ill-formed UTF-8 the decoder must refuse.
+fn extra_samples(symbol: &str) -> Vec<(String, String)> {
+    let sample = |result: &str, operands: String| (result.to_owned(), operands);
+    // Scalars of one, two, three, and four UTF-8 bytes, repeated.
+    let text = |times: usize| "a\u{e9}\u{20ac}\u{1d11e}".repeat(times);
+    let array = |ty: &str, items: String| (format!("(array {ty})"), items);
+    let numbers = |count: usize, suffix: &str| {
+        (0..count)
+            .map(|index| format!("{index}{suffix}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let byte_array = |bytes: &[u8]| {
+        format!(
+            "(bytes (array.of {}))",
+            bytes
+                .iter()
+                .map(|byte| format!("{byte}u8"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    };
+    let long = (0..=255_u8).cycle().take(1000).collect::<Vec<_>>();
+    match symbol {
+        "array.of" => vec![
+            array("i32", "0i32".to_owned()),
+            array("i32", numbers(300, "i32")),
+            array("str", "\"\" \"a\" \"\u{1d11e}\"".to_owned()),
+            array("(array u8)", "(array.of) (array.of 1u8)".to_owned()),
+        ],
+        "dict.of" => vec![
+            sample("(dict str i32)", "\"a\" 1i32".to_owned()),
+            // Keys of atoms, which are ordered by their spelling, a prefix
+            // before its extension, and a key written twice, whose last
+            // entry wins.
+            sample(
+                "(dict atom i32)",
+                "@b 1i32 @a 2i32 @ab 3i32 @a-b 4i32 @b 5i32".to_owned(),
+            ),
+            sample("(dict char i32)", r"\b 1i32 \a 2i32 \é 3i32".to_owned()),
+            sample(
+                "(dict bytes i32)",
+                format!(
+                    "{} 1i32 {} 2i32 {} 3i32",
+                    byte_array(&[2]),
+                    byte_array(&[1, 9]),
+                    byte_array(&[])
+                ),
+            ),
+        ],
+        "array.fold" => vec![sample(
+            "i32",
+            format!(
+                "(array.of {}) 0i32 (lambda (total i32 item i32) i32 item)",
+                numbers(150, "i32")
+            ),
+        )],
+        "text.concat" => vec![
+            sample("str", format!("{} {}", quoted(&text(1)), quoted(""))),
+            sample("str", format!("{} {}", quoted(""), quoted(&text(1)))),
+            sample(
+                "str",
+                format!("{} {}", quoted(&text(200)), quoted(&text(200))),
+            ),
+        ],
+        "text.length" => vec![sample("u64", quoted(&text(250)))],
+        "text.equal" => vec![
+            sample(
+                "bool",
+                format!("{} {}", quoted(&text(40)), quoted(&text(40))),
+            ),
+            sample(
+                "bool",
+                format!("{} {}", quoted(&text(40)), quoted(&text(41))),
+            ),
+            sample("bool", format!("{} {}", quoted(""), quoted(""))),
+        ],
+        "text.compare" => vec![
+            sample("core.ordering", format!("{} {}", quoted(""), quoted("a"))),
+            sample("core.ordering", format!("{} {}", quoted("a"), quoted(""))),
+            sample(
+                "core.ordering",
+                format!("{} {}", quoted("\u{10ffff}"), quoted("\u{e000}")),
+            ),
+            sample(
+                "core.ordering",
+                format!("{} {}", quoted(&text(30)), quoted(&text(30))),
+            ),
+            sample(
+                "core.ordering",
+                format!("{} {}", quoted("ab"), quoted("a-b")),
+            ),
+        ],
+        "text.slice" => vec![
+            sample("(option str)", format!("{} 0u64 0u64", quoted(&text(3)))),
+            sample("(option str)", format!("{} 0u64 12u64", quoted(&text(3)))),
+            sample("(option str)", format!("{} 12u64 12u64", quoted(&text(3)))),
+            sample("(option str)", format!("{} 13u64 13u64", quoted(&text(3)))),
+            sample("(option str)", format!("{} 1u64 1u64", quoted(""))),
+            sample("(option str)", format!("{} 1u64 2u64", quoted(&text(3)))),
+            sample(
+                "(option str)",
+                format!("{} 0u64 18446744073709551615u64", quoted("abc")),
+            ),
+        ],
+        "text.to-chars" => vec![
+            array("char", quoted(&text(1))),
+            array("char", quoted(&text(120))),
+        ],
+        "text.from-chars" => vec![
+            sample("str", r"(array.of \a \é \€ \𝄞)".to_owned()),
+            sample("str", r"(array.of \a)".to_owned()),
+        ],
+        "text.to-utf8" => vec![
+            sample(
+                "bytes",
+                quoted("\u{7f}\u{80}\u{7ff}\u{800}\u{ffff}\u{10000}\u{10ffff}"),
+            ),
+            sample("bytes", quoted(&text(150))),
+        ],
+        "text.from-utf8" => {
+            let result = "(result str core.conversion-error)";
+            let mut samples = [
+                &[][..],
+                &[0x7f][..],
+                &[0xc2, 0x80][..],
+                &[0xe0, 0xa0, 0x80][..],
+                &[0xf0, 0x90, 0x80, 0x80][..],
+                &[0xf4, 0x8f, 0xbf, 0xbf][..],
+                // Ill-formed: a stray continuation, an overlong form of every
+                // length, a surrogate, a value past U+10FFFF, a truncated
+                // sequence at the end, and a lead byte that is no lead.
+                &[0x80][..],
+                &[0xc1, 0xbf][..],
+                &[0xe0, 0x9f, 0xbf][..],
+                &[0xf0, 0x8f, 0xbf, 0xbf][..],
+                &[0xed, 0xa0, 0x80][..],
+                &[0xf4, 0x90, 0x80, 0x80][..],
+                &[0x61, 0xf0, 0x9d, 0x84][..],
+                &[0xf8, 0x88, 0x80, 0x80, 0x80][..],
+                &[0xe2, 0x82, 0x41][..],
+            ]
+            .iter()
+            .map(|bytes| sample(result, byte_array(bytes)))
+            .collect::<Vec<_>>();
+            samples.push(sample(result, byte_array(&text(100).into_bytes())));
+            samples.push(sample(result, byte_array(&long)));
+            samples
+        }
+        "bytes.length" => vec![
+            sample("u64", byte_array(&[])),
+            sample("u64", byte_array(&long)),
+        ],
+        "bytes.concat" => vec![
+            sample("bytes", format!("{} {}", byte_array(&[]), byte_array(&[]))),
+            sample("bytes", format!("{} {}", byte_array(&[]), byte_array(&[7]))),
+            sample(
+                "bytes",
+                format!("{} {}", byte_array(&long), byte_array(&long)),
+            ),
+        ],
+        "bytes.equal" => vec![
+            sample("bool", format!("{} {}", byte_array(&[]), byte_array(&[]))),
+            sample(
+                "bool",
+                format!("{} {}", byte_array(&long), byte_array(&long)),
+            ),
+            sample(
+                "bool",
+                format!("{} {}", byte_array(&[1, 2]), byte_array(&[1, 3])),
+            ),
+        ],
+        "bytes.compare" => vec![
+            sample(
+                "core.ordering",
+                format!("{} {}", byte_array(&[]), byte_array(&[])),
+            ),
+            sample(
+                "core.ordering",
+                format!("{} {}", byte_array(&[255]), byte_array(&[0, 0])),
+            ),
+            sample(
+                "core.ordering",
+                format!("{} {}", byte_array(&long), byte_array(&long)),
+            ),
+        ],
+        "bytes.slice" => vec![
+            sample("(option bytes)", format!("{} 0u64 0u64", byte_array(&[]))),
+            sample(
+                "(option bytes)",
+                format!("{} 0u64 1000u64", byte_array(&long)),
+            ),
+            sample(
+                "(option bytes)",
+                format!("{} 1000u64 1000u64", byte_array(&long)),
+            ),
+            sample(
+                "(option bytes)",
+                format!("{} 1u64 1001u64", byte_array(&long)),
+            ),
+            sample("(option bytes)", format!("{} 3u64 2u64", byte_array(&long))),
+        ],
+        "bytes.to-array" => {
+            vec![array("u8", byte_array(&[])), array("u8", byte_array(&long))]
+        }
+        "bytes.from-array" => vec![
+            sample("bytes", "(as (array u8) (array.of))".to_owned()),
+            sample("bytes", format!("(array.of {})", numbers(255, "u8"))),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+/// A string literal of source for `text`, every character but an ASCII letter or
+/// digit spelled as an escape.
+fn quoted(text: &str) -> String {
+    let mut out = String::from("\"");
+    for character in text.chars() {
+        if character.is_ascii_alphanumeric() {
+            out.push(character);
+        } else {
+            out.push_str(&format!("\\u{{{:X}}}", u32::from(character)));
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// A source literal of a vector operand of the text and bytes rows.
+fn operand(value: &vibra_ir::Value) -> String {
+    use vibra_ir::Value;
+    match value {
+        Value::Str(text) => quoted(text),
+        Value::Bytes(bytes) => format!(
+            "(bytes (array.of {}))",
+            bytes
+                .iter()
+                .map(|byte| format!("{byte}u8"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ),
+        Value::U64(value) => format!("{value}u64"),
+        other => panic!("not a vector operand: {other:?}"),
+    }
+}
+
+/// The written type of the result of a text or bytes row.
+fn written_result(intrinsic: vibra_ir::external::CompilerIntrinsic) -> &'static str {
+    use vibra_ir::external::CompilerIntrinsic as C;
+    match intrinsic {
+        C::TextConcat => "str",
+        C::TextLength | C::BytesLength => "u64",
+        C::TextEqual | C::BytesEqual => "bool",
+        C::TextCompare | C::BytesCompare => "core.ordering",
+        C::TextSlice => "(option str)",
+        C::TextToUtf8 | C::BytesConcat => "bytes",
+        C::TextFromUtf8 => "(result str core.conversion-error)",
+        C::BytesSlice => "(option bytes)",
+        other => panic!("no vectors for {}", other.symbol()),
+    }
+}
+
+/// The shared sample vectors of the text and bytes rows hold both backends to
+/// the same outcomes, which the standard library's own `str` and slice
+/// operations computed, so the interpreter calling the native code and the
+/// module calling the import cannot drift apart on a boundary: a scalar of each
+/// width, a prefix, an empty range, a range past the end, and ill-formed UTF-8.
+#[test]
+fn the_text_and_bytes_vectors_hold_the_interpreter_and_the_module_to_one_answer() {
+    use vibra_ir::{ObservedValue, Type};
+    let modules = module_natives();
+    let mut total = 0;
+    for intrinsic in vibra_ir::external::CompilerIntrinsic::all() {
+        let vectors = intrinsic.vectors();
+        let symbol = intrinsic.symbol();
+        if vectors.is_empty()
+            || !(symbol.starts_with("text.") || symbol.starts_with("bytes."))
+        {
+            continue;
+        }
+        let (_, module, name) = modules
+            .iter()
+            .find(|(native, _, _)| native == symbol)
+            .unwrap_or_else(|| panic!("`{symbol}` has no native declaration"));
+        let result = written_result(intrinsic);
+        let calls = vectors
+            .iter()
+            .map(|vector| {
+                let operands = vector
+                    .operands
+                    .iter()
+                    .map(operand)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                format!("({name} {operands})")
+            })
+            .collect::<Vec<_>>()
+            .join("\n    ");
+        let types = vec![result; vectors.len()].join(" ");
+        let main = format!("(defn main () (tuple {types})\n  (tupleof\n    {calls}))");
+        let source_id = format!("stdlib/src/{module}");
+        let stdlib = vibra_types::load_stdlib().expect("standard library");
+        let checked = vibra_types::check_standard_library_source(
+            &stdlib,
+            &source_id,
+            &format!("{main}\n\n{}", module_source(module, false)),
+        );
+        let program = checked
+            .program()
+            .unwrap_or_else(|| panic!("{symbol}\n{:?}", checked.diagnostics()));
+        let Type::Tuple(components) = program.entry().signature().result() else {
+            panic!("the entry is a tuple");
+        };
+        let expected = ObservedValue::Tuple {
+            type_id: None,
+            values: vectors
+                .iter()
+                .zip(&components)
+                .map(|(vector, ty)| vector.outcome.observed(ty))
+                .collect(),
+        }
+        .canonical_vibon();
+        let entry = program.entry().signature().result();
+        let interpreted = vibra_interp::run(program)
+            .expect("execution")
+            .canonical_result();
+        assert!(
+            interpreted.contains(&expected),
+            "the interpreter disagrees with the vectors of `{symbol}`"
+        );
+        let module_bytes = vibra_wasm::emit(program)
+            .unwrap_or_else(|error| panic!("`{symbol}` lowers: {error}"));
+        let runner = vibra_wasm_run::Runner::new(vibra_wasm_run::MemoryLimit::new(
+            256 * 1024 * 1024,
+        ))
+        .expect("the engine configures");
+        let observed = match runner
+            .run_observed(module_bytes.bytes(), &entry, program.types())
+            .expect("the module runs")
+        {
+            vibra_wasm_run::Observed::Completed { value, .. } => {
+                value.canonical_observation(&entry)
+            }
+            vibra_wasm_run::Observed::Stopped(outcome) => {
+                panic!("`{symbol}` stopped: {outcome:?}")
+            }
+        };
+        assert_eq!(
+            observed, interpreted,
+            "the module disagrees with the interpreter on the vectors of `{symbol}`"
+        );
+        total += vectors.len();
+    }
+    assert!(total > 1000, "only {total} vectors ran");
+}
+
+fn intrinsic_of(symbol: &str) -> vibra_ir::external::CompilerIntrinsic {
+    vibra_ir::external::CompilerIntrinsic::from_symbol(symbol)
+        .unwrap_or_else(|| panic!("`{symbol}` is not a registry symbol"))
 }
 
 #[test]
@@ -387,7 +821,7 @@ fn the_harness_reports_a_body_that_disagrees() {
         "(defn main () (array i32) (reference 1i32 2i32))\n\
          (defn reference () (array t)\n  where: (t any)\n  variadic: (items (array t))\n  (array.of))",
     );
-    assert_ne!(native, wrong);
+    assert_ne!(native.interpreter, wrong.interpreter);
 }
 
 /// Operand pairs for each type whose key contracts the standard library
@@ -474,7 +908,7 @@ fn every_library_key_conformance_matches_the_closed_registry() {
                     .expect("execution")
                     .canonical_result();
                 assert_eq!(
-                    closed, written,
+                    closed.interpreter, written,
                     "`{member}` of {module} disagrees with canonical key order on `{operands}`"
                 );
             }

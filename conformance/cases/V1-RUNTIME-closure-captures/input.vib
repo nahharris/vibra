@@ -1,0 +1,13 @@
+(defn main () (tuple i32 i32 str str)
+  (let base 40i32)
+  (let word "kept")
+  (let none (lambda () i32 9i32))
+  (let inner (lambda () i32 base))
+  (let outer (lambda () i32
+    (let again (lambda () i32 (inner)))
+    (again)))
+  (let text (lambda () str word))
+  (tupleof (none) (outer) (text) ((chain text))))
+
+(defn chain (f (fn () str)) (fn () str)
+  (lambda () str (f)))

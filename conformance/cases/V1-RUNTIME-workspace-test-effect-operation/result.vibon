@@ -1,0 +1,9 @@
+(record
+  format: @test-run.v1
+  result: @command.ok
+  tests: (array
+    (record name: "@tests.math::\"an operation runs\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.math::\"an additive row runs\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.math::\"a pure test needs no row\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)

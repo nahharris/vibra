@@ -1,0 +1,12 @@
+id = "V1-PROJECT-workspace-check-constant-pattern-import"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "A dotted name through a module alias, and a bare name through a single-declaration alias, that resolve to a public constant of another module are value patterns, as true and false are, which a module names without an import."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true

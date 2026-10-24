@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-io-stdin-bytes-twice"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "Standard input read as bytes is the UTF-8 encoding of the world's text, whole and from the current position; the second read returns no bytes."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

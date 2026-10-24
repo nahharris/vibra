@@ -1,0 +1,18 @@
+(import iter @std.iter.iter)
+
+(import io @std.io)
+
+; Writes each item of `items` to standard output, in order, and stops at the
+; first failure. The walk is a tail-recursive function over `iter.next` that
+; declares its host ceiling, so it runs in constant depth however long `items`
+; is.
+(defn write-all (items (iter str)) (result void io.io-error)
+  visibility: @public
+  effects: (io.stdout)
+  (match
+    (iter.next items)
+    (option.some (tupleof first rest)) (match
+      (io.stdout.text first)
+      (result.ok) (write-all rest)
+      (result.err failure) (result.err failure))
+    (option.none) (result.ok)))

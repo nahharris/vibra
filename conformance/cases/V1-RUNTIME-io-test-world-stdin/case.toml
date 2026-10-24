@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-io-test-world-stdin"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "A test runs in the case's host world: it reads the world's standard input and writes to standard output, which goes to the test's audit trace and nowhere else. Each test starts from a fresh copy, so the second test reads the whole input again."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon" }

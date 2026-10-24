@@ -1,0 +1,25 @@
+registry vibra_v1 1.0
+enum io-error: invalid-text closed other
+enum fs-error: not-found permission-denied not-a-file not-a-directory invalid-path invalid-text other
+enum fs-kind: file directory other
+record fs-metadata: kind fs-kind, size u64
+enum env-error: not-present not-unicode
+enum time-error: unavailable
+enum random-error: unavailable
+row io.stdin-text | io.stdin.text | @std.io.stdin | () -> (result str io-error) | since 0
+row io.stdin-bytes | io.stdin.bytes | @std.io.stdin | () -> (result bytes io-error) | since 0
+row io.stdout-text | io.stdout.text | @std.io.stdout | (value str) -> (result void io-error) | since 0
+row io.stdout-bytes | io.stdout.bytes | @std.io.stdout | (value bytes) -> (result void io-error) | since 0
+row io.stderr-text | io.stderr.text | @std.io.stderr | (value str) -> (result void io-error) | since 0
+row io.stderr-bytes | io.stderr.bytes | @std.io.stderr | (value bytes) -> (result void io-error) | since 0
+row fs.read-file | fs.read.file | @std.fs.read | (at path) -> (result bytes fs-error) | since 0
+row fs.read-text | fs.read.text | @std.fs.read | (at path) -> (result str fs-error) | since 0
+row fs.read-entries | fs.read.entries | @std.fs.read | (at path) -> (result (array str) fs-error) | since 0
+row fs.write-file | fs.write.file | @std.fs.write | (at path contents bytes) -> (result void fs-error) | since 0
+row fs.write-text | fs.write.text | @std.fs.write | (at path contents str) -> (result void fs-error) | since 0
+row fs.metadata-stat | fs.metadata.stat | @std.fs.metadata | (at path) -> (result fs-metadata fs-error) | since 0
+row env.read-var | env.read.var | @std.env.read | (name str) -> (result str env-error) | since 0
+row env.read-args | env.read.args | @std.env.read | () -> (result (array str) env-error) | since 0
+row time.now-wall | time.now.wall | @std.time.now | () -> (result i64 time-error) | since 0
+row time.now-monotonic | time.now.monotonic | @std.time.now | () -> (result u64 time-error) | since 0
+row random.generate-bytes | random.generate.bytes | @std.random.generate | (count u64) -> (result bytes random-error) | since 0

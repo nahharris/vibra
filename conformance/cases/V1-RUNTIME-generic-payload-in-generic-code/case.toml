@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-generic-payload-in-generic-code"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "An enum built in generic code has the payload of its instantiation: the variant `some` of `(maybe t)` has no payload where `t` is `void` and one where it is any other type, so one function builds all three."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

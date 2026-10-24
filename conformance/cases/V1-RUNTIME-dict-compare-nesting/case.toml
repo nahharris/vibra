@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-dict-compare-nesting"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A key type whose own compare orders trees by building a dict keyed by the same type nests three hundred comparisons deep, and the nesting is bounded only by memory like any other recursion."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

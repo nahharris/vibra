@@ -13,9 +13,22 @@ use vibra_schema::{DiagnosticDocument, SCHEMA_VERSION};
 use vibra_workspace::format_plan::{
     FormatPlan, FormatPlanError, apply_format, plan_format,
 };
-use vibra_workspace::semantic::{TestSelector, TestSuiteStatus};
+use vibra_workspace::semantic::{MemoryBudget, TestSelector, TestSuiteStatus};
 
 pub use init::{InitError, InitPlan, apply_init, plan_init};
+
+/// The memory every instance `run` and `test` execute may hold, in the
+/// interpreter's accounting of live activations and values.
+///
+/// The runtime chapter defines no portable limit: the limit that ends a
+/// program with `@runtime.memory-exhausted` belongs to the host, and this is
+/// the CLI's choice. 256 MiB admits non-tail recursion several hundred
+/// thousand activations deep (a small function holds about 400 bytes per
+/// activation in the interpreter's accounting, so about 670,000) and any
+/// program whose live data fits a few hundred megabytes, and it stops a
+/// program that recurses without a base case within seconds, instead of after
+/// it has exhausted the machine. There is deliberately no option to change it.
+pub const MEMORY_BUDGET: MemoryBudget = MemoryBudget::new(256 * 1024 * 1024);
 
 /// The global output mode accepted before a command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +63,11 @@ pub enum CommandResult {
     /// A future execution command trapped while running a program.
     #[serde(rename = "@command.trap")]
     Trap,
+    /// The entry returned `err`: a value the program returned, which is
+    /// neither a trap nor a diagnostic. Milestone 4 Step 19 produces it from
+    /// `run`; Step 13 only fixes the atom and its exit code.
+    #[serde(rename = "@command.program-failed")]
+    ProgramFailed,
 }
 
 impl CommandResult {
@@ -61,6 +79,7 @@ impl CommandResult {
             Self::OperationalFailure => 3,
             Self::Unavailable => 4,
             Self::Trap => 5,
+            Self::ProgramFailed => 6,
         }
     }
 }
@@ -75,6 +94,7 @@ impl fmt::Display for CommandResult {
             Self::OperationalFailure => "@command.operational-failure",
             Self::Unavailable => "@command.unavailable",
             Self::Trap => "@command.trap",
+            Self::ProgramFailed => "@command.program-failed",
         })
     }
 }
@@ -149,7 +169,7 @@ struct RunPayload {
     program_result: Option<String>,
     stdout: String,
     stderr: String,
-    audit_trace: Vec<String>,
+    audit_trace: Vec<serde_json::Value>,
     trap: Option<serde_json::Value>,
 }
 
@@ -455,7 +475,7 @@ fn execute_check<W: Write, E: Write>(
         },
         None => None,
     };
-    let verification = match verify_workspace_bootstrap(&snapshot) {
+    let verification = match verify_toolchain_bootstrap().map(Some) {
         Ok(verification) => verification,
         Err(message) => {
             return operational_check_envelope(invocation, target_path, message);
@@ -542,20 +562,26 @@ fn execute_run<E: Write>(
         return invalid_envelope(invocation, Some(target_path.to_path_buf()));
     }
     let target_root = canonical_target_root(&snapshot, target);
-    let verification = match verify_workspace_bootstrap(&snapshot) {
+    let verification = match verify_toolchain_bootstrap().map(Some) {
         Ok(verification) => verification,
         Err(message) => {
             return operational_run_envelope(invocation, &target_root, message, stderr);
         }
     };
-    let outcome = match verification.as_ref() {
-        Some(verification) => vibra_workspace::semantic::run_target_with_bootstrap(
-            &snapshot,
-            target,
-            Some(verification),
-        ),
-        None => vibra_workspace::semantic::run_target(&snapshot, target),
-    };
+    // The command chooses where the program's output goes: JSON mode keeps one
+    // machine document on the process's standard output, so the provider
+    // captures the bytes for the envelope; human mode lets the program write them.
+    let mut host = vibra_host::SystemProvider::new();
+    if invocation.output_format == OutputFormat::Json {
+        host = host.capturing();
+    }
+    let outcome = vibra_workspace::semantic::run_target_with_host(
+        &snapshot,
+        target,
+        verification.as_ref(),
+        MEMORY_BUDGET,
+        &mut host,
+    );
     let diagnostics = match render_workspace_diagnostics(
         &snapshot,
         verification.as_ref(),
@@ -611,9 +637,13 @@ fn execute_run<E: Write>(
     {
         Some(vibra_workspace::semantic::RunOutcome::Program(execution)) => (
             Some(execution.canonical_result()),
-            String::new(),
-            String::new(),
-            execution.audit_trace().to_vec(),
+            String::from_utf8_lossy(host.captured_stdout()).into_owned(),
+            String::from_utf8_lossy(host.captured_stderr()).into_owned(),
+            execution
+                .audit_trace()
+                .iter()
+                .map(vibra_host::AuditEvent::to_json)
+                .collect(),
         ),
         Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(error)) => {
             if error.host_diagnostic().is_none() && error.program_trap().is_none() {
@@ -666,23 +696,16 @@ fn execute_test<W: Write, E: Write>(
         Ok(snapshot) => snapshot,
         Err(error) => return workspace_load_error_envelope(invocation, error, stderr),
     };
-    let verification = match snapshot
-        .requires_test_bootstrap_verification(selector)
-        .map_err(|error| error.to_string())
-    {
-        Ok(true) => match verify_toolchain_bootstrap() {
-            Ok(verification) => Some(verification),
-            Err(message) => {
-                return operational_test_envelope(invocation, message, stderr);
-            }
-        },
-        Ok(false) => None,
+    // The standard library's vocabulary module is in every checked graph.
+    let verification = match verify_toolchain_bootstrap() {
+        Ok(verification) => Some(verification),
         Err(message) => return operational_test_envelope(invocation, message, stderr),
     };
-    let result = vibra_workspace::semantic::run_tests(
+    let result = vibra_workspace::semantic::run_tests_with_budget(
         &snapshot,
         selector,
         verification.as_ref(),
+        MEMORY_BUDGET,
     );
     let diagnostics = match render_workspace_diagnostics(
         &snapshot,
@@ -761,7 +784,11 @@ fn execute_test<W: Write, E: Write>(
             "result": item.status().as_atom(),
             "failure": failure,
             "trap": trap,
-            "auditTrace": item.audit_trace(),
+            "auditTrace": item
+                .audit_trace()
+                .iter()
+                .map(vibra_host::AuditEvent::to_json)
+                .collect::<Vec<_>>(),
             "diagnostics": item_diagnostics,
         }));
     }
@@ -875,19 +902,6 @@ fn canonical_target_root(
 
 fn verify_toolchain_bootstrap() -> Result<vibra_types::Stdlib, String> {
     vibra_types::load_stdlib().map_err(|error| error.to_string())
-}
-
-fn verify_workspace_bootstrap(
-    snapshot: &vibra_workspace::WorkspaceSnapshot,
-) -> Result<Option<vibra_types::Stdlib>, String> {
-    let requires_verification = snapshot
-        .requires_bootstrap_verification()
-        .map_err(|error| error.to_string())?;
-    if requires_verification {
-        verify_toolchain_bootstrap().map(Some)
-    } else {
-        Ok(None)
-    }
 }
 
 fn render_workspace_diagnostics(
@@ -1653,6 +1667,33 @@ mod tests {
     use std::path::PathBuf;
     use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
     use vibra_workspace::WorkspaceError;
+
+    #[test]
+    fn every_command_result_has_one_atom_and_one_exit_code() {
+        // The exit mapping of `docs/spec/05-tooling.md`, "M2 command contract".
+        let table = [
+            (CommandResult::Ok, "@command.ok", 0),
+            (CommandResult::Diagnostics, "@command.diagnostics", 1),
+            (CommandResult::TestFailed, "@command.test-failed", 1),
+            (CommandResult::InvalidInput, "@command.invalid-input", 2),
+            (
+                CommandResult::OperationalFailure,
+                "@command.operational-failure",
+                3,
+            ),
+            (CommandResult::Unavailable, "@command.unavailable", 4),
+            (CommandResult::Trap, "@command.trap", 5),
+            (CommandResult::ProgramFailed, "@command.program-failed", 6),
+        ];
+        for (result, atom, exit) in table {
+            assert_eq!(result.to_string(), atom);
+            assert_eq!(result.exit_code(), exit, "{atom}");
+            assert_eq!(
+                serde_json::to_string(&result).expect("a result serializes"),
+                format!("\"{atom}\"")
+            );
+        }
+    }
 
     #[test]
     fn deferred_arguments_are_confined_workspace_paths() {

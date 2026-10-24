@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-contract-member-generics"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "An abstract contract member with its own generic parameter runs at the type arguments the call fixes: by inference from a lambda, from a written types: list that agrees with it, for an owner with no generics and for one with a generic of its own. A generic that no signature slot mentions reaches the implementation from types: alone and selects a destination-dispatched member. A generic interface takes its argument and then the member's in types:, and a destination-dispatched member takes its own generic from an operand."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

@@ -1,5 +1,9 @@
 (record
   format: @types.v1
+  globals: (array
+    (record name: @true type: @bool body: (record kind: @variant type: @bool variant: @true))
+    (record name: @false type: @bool body: (record kind: @variant type: @bool variant: @false))
+  )
   functions: (array
     (record name: @i8-min params: (array) result: @i8 body: (record kind: @sequence type: @i8 values: (array (record kind: @literal type: @i8 value: -128i8))))
     (record name: @i8-max params: (array) result: @i8 body: (record kind: @sequence type: @i8 values: (array (record kind: @literal type: @i8 value: 127i8))))

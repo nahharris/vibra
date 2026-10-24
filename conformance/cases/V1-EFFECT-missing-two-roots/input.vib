@@ -1,0 +1,10 @@
+(deffect write
+  (defn text (target str event str) void (do)))
+
+(deffect audit
+  (defn record (target str event str) void
+    effects: (write)
+    (write.text target event)))
+
+(defn quiet () void
+  (audit.record "a" "b"))

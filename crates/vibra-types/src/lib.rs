@@ -21,17 +21,19 @@ use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
-    CheckedFunction, CheckedGlobal, CheckedProgram, Expr, FunctionSignature, IrError,
-    LabelledParameter as IrLabelledParameter, SourceOrigin, TestAssertion, Type, Value,
-    external::CompilerIntrinsic,
+    CheckedFunction, CheckedGlobal, CheckedProgram, Constant, Expr, FunctionSignature,
+    IrError, LabelledParameter as IrLabelledParameter, SourceOrigin, TestAssertion,
+    Type, Value, external::CompilerIntrinsic,
 };
 use vibra_syntax::{
     Application, ApplicationBinding, Attribute, BindingFacts, CallArgument,
-    Declaration, Expression, ExpressionKind, FloatSuffix, IntegerSuffix, Literal,
-    NameKind, PatternKind, SourceAst, TypeExpr, TypeMember,
+    Declaration, EffectRowOrder, Expression, ExpressionKind, FloatSuffix,
+    IntegerSuffix, Literal, NameKind, PatternKind, SourceAst, TypeExpr, TypeMember,
 };
 
 mod construct;
+mod defaults;
+mod effects;
 mod infer;
 mod interfaces;
 mod nominal;
@@ -59,6 +61,14 @@ pub struct CheckResult {
     program: Option<CheckedProgram>,
     diagnostics: Vec<Diagnostic>,
     bindings: Vec<ApplicationBinding>,
+    effect_rows: Vec<EffectRowOrder>,
+}
+
+/// What a checked source hands to the formatter: the authoritative binding of
+/// every application and the canonical order of every written effect row.
+struct Facts {
+    bindings: Vec<ApplicationBinding>,
+    effect_rows: Vec<EffectRowOrder>,
 }
 
 impl CheckResult {
@@ -69,18 +79,20 @@ impl CheckResult {
             program,
             diagnostics,
             bindings: Vec::new(),
+            effect_rows: Vec::new(),
         }
     }
 
-    fn with_bindings(
+    fn with_facts(
         program: Option<CheckedProgram>,
         diagnostics: Vec<Diagnostic>,
-        bindings: Vec<ApplicationBinding>,
+        facts: Facts,
     ) -> Self {
         Self {
             program,
             diagnostics,
-            bindings,
+            bindings: facts.bindings,
+            effect_rows: facts.effect_rows,
         }
     }
 
@@ -108,6 +120,14 @@ impl CheckResult {
     #[must_use]
     pub fn application_bindings(&self) -> &[ApplicationBinding] {
         &self.bindings
+    }
+
+    /// The canonical order of every effect row the source writes, sorted by
+    /// resolved root identity. The formatter reorders a row by it and keeps
+    /// each lexical reference the row's imports require.
+    #[must_use]
+    pub fn effect_row_orders(&self) -> &[EffectRowOrder] {
+        &self.effect_rows
     }
 
     /// Whether checking accepted this source document.
@@ -156,14 +176,15 @@ pub fn check_source(source_id: impl AsRef<str>, source: &str) -> CheckResult {
         }
         return CheckResult::new(None, diagnostics);
     };
-    let (program, bindings) = check_ast_with_bindings(source_id, ast, &mut diagnostics);
+    let (program, facts) =
+        check_ast_with_bindings_authority(source_id, ast, &mut diagnostics, false);
     if !diagnostics
         .iter()
         .all(|diagnostic| diagnostic.level() != vibra_diagnostics::Level::Error)
     {
         return CheckResult::new(None, diagnostics);
     }
-    CheckResult::with_bindings(program, diagnostics, bindings)
+    CheckResult::with_facts(program, diagnostics, facts)
 }
 
 /// Checks one source as trusted standard-library code, where `native:`,
@@ -209,7 +230,7 @@ pub fn check_standard_library_source(
     else {
         return CheckResult::new(None, diagnostics);
     };
-    let (program, bindings) =
+    let (program, facts) =
         check_ast_with_bindings_authority(source_id, ast, &mut diagnostics, true);
     if diagnostics
         .iter()
@@ -217,7 +238,7 @@ pub fn check_standard_library_source(
     {
         CheckResult::new(None, diagnostics)
     } else {
-        CheckResult::with_bindings(program, diagnostics, bindings)
+        CheckResult::with_facts(program, diagnostics, facts)
     }
 }
 
@@ -238,7 +259,9 @@ pub fn check_ast_with_bindings(
     ast: &SourceAst,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> (Option<CheckedProgram>, Vec<ApplicationBinding>) {
-    check_ast_with_bindings_authority(source_id.as_ref(), ast, diagnostics, false)
+    let (program, facts) =
+        check_ast_with_bindings_authority(source_id.as_ref(), ast, diagnostics, false);
+    (program, facts.bindings)
 }
 
 /// Checks one source module with the narrowly supported explicit `@std.text`
@@ -360,7 +383,7 @@ pub fn check_bootstrap_text_import(
         );
     }
 
-    let (program, bindings) =
+    let (program, facts) =
         check_ast_with_text_import_authority(source_id, ast, &mut diagnostics);
     if diagnostics
         .iter()
@@ -368,7 +391,7 @@ pub fn check_bootstrap_text_import(
     {
         CheckResult::new(None, diagnostics)
     } else {
-        CheckResult::with_bindings(program, diagnostics, bindings)
+        CheckResult::with_facts(program, diagnostics, facts)
     }
 }
 
@@ -420,27 +443,43 @@ fn check_ast_with_bindings_authority(
     ast: &SourceAst,
     diagnostics: &mut Vec<Diagnostic>,
     trusted_bootstrap: bool,
-) -> (Option<CheckedProgram>, Vec<ApplicationBinding>) {
+) -> (Option<CheckedProgram>, Facts) {
     let mut checker = Checker::new(source_id, diagnostics, ast, trusted_bootstrap);
     checker.collect_headers();
     checker.check_globals();
     checker.check_functions();
+    checker.check_effects();
     let program = checker.finish();
-    (program, checker.bindings)
+    let effect_rows = checker.types.effect_row_orders(source_id);
+    (
+        program,
+        Facts {
+            bindings: checker.bindings,
+            effect_rows,
+        },
+    )
 }
 
 fn check_ast_with_text_import_authority(
     source_id: &str,
     ast: &SourceAst,
     diagnostics: &mut Vec<Diagnostic>,
-) -> (Option<CheckedProgram>, Vec<ApplicationBinding>) {
+) -> (Option<CheckedProgram>, Facts) {
     let mut checker = Checker::new(source_id, diagnostics, ast, true);
     checker.text_import_authorized = true;
     checker.collect_headers();
     checker.check_globals();
     checker.check_functions();
+    checker.check_effects();
     let program = checker.finish();
-    (program, checker.bindings)
+    let effect_rows = checker.types.effect_row_orders(source_id);
+    (
+        program,
+        Facts {
+            bindings: checker.bindings,
+            effect_rows,
+        },
+    )
 }
 
 #[derive(Clone)]
@@ -527,6 +566,11 @@ struct FunctionHeader {
     /// The contract member this function implements, for a written `impl`
     /// member or an interface default.
     implements: Option<vibra_ir::Implements>,
+    /// For an effect operation, the root that owns it: its complete row is
+    /// the owner together with the additive row its signature carries.
+    effect_owner: Option<vibra_ir::EffectRoot>,
+    /// For an effect operation bound to the host registry, its row.
+    host: Option<&'static vibra_ir::external::host::HostRow>,
 }
 
 pub(crate) const IMPORTED_FUNCTION_DECLARATION: usize = usize::MAX;
@@ -565,6 +609,12 @@ struct Checker<'a> {
     library_indices: BTreeMap<String, usize>,
     no_indices: BTreeMap<String, usize>,
     no_names: BTreeMap<String, ByteSpan>,
+    /// Each builtin member header by path: the names the Vibra body of a
+    /// native sees.
+    builtin_indices: BTreeMap<String, usize>,
+    /// The builtin member whose native has no import, by header index, with
+    /// the body the embedded module writes for it.
+    native_bodies: BTreeMap<usize, &'static vibra_syntax::FunctionDeclaration>,
 }
 
 /// The module index of the library module's function headers.
@@ -597,7 +647,135 @@ impl<'a> Checker<'a> {
             library_indices: BTreeMap::new(),
             no_indices: BTreeMap::new(),
             no_names: BTreeMap::new(),
+            builtin_indices: BTreeMap::new(),
+            native_bodies: BTreeMap::new(),
         }
+    }
+
+    /// A module-level value spelled as a vocabulary value is rejected: only
+    /// the embedded standard library declares one.
+    fn reserve_vocabulary_spelling(&mut self, name: &str, span: ByteSpan) {
+        if vibra_syntax::is_prelude_value_spelling(name) && !self.trusted_bootstrap {
+            self.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::NameReservedValueSpelling,
+                    span,
+                    "a module-level value uses a reserved value spelling",
+                )
+                .with_source_id(self.source_id),
+            );
+        }
+    }
+
+    /// Declares the module's values, then the closed import-free vocabulary's,
+    /// and decides what every labelled default written as a name denotes, all
+    /// before any signature is checked.
+    fn declare_module_values(&mut self) {
+        // The bootstrap `text` alias is introduced first, so a module value of
+        // the same name is the later introduction.
+        for declaration in self.ast.declarations() {
+            if let Declaration::Import(import) = declaration
+                && self.text_import_authorized
+                && import.alias().kind() == NameKind::Symbol
+                && import.alias().value() == "text"
+                && import.target().kind() == NameKind::Atom
+                && import.target().value() == "std.text"
+            {
+                if let Some(earlier) = self.module_names.get("text").copied() {
+                    redeclaration(
+                        self.diagnostics,
+                        self.source_id,
+                        "text",
+                        "text",
+                        import.span(),
+                        earlier,
+                    );
+                } else {
+                    self.module_names.insert("text".to_owned(), import.span());
+                }
+                self.text_import_span = Some(import.span());
+            }
+        }
+        for declaration in self.ast.declarations() {
+            let Declaration::Def(definition) = declaration else {
+                continue;
+            };
+            let Some(value_type) = self.types.lower_or_report(
+                self.source_id,
+                nominal::Scope::NONE,
+                definition.value_type(),
+                definition.span(),
+                self.diagnostics,
+            ) else {
+                continue;
+            };
+            let name = definition.name().value().to_owned();
+            self.reserve_vocabulary_spelling(&name, definition.span());
+            if let Some(earlier) = self.module_names.get(&name).copied() {
+                redeclaration(
+                    self.diagnostics,
+                    self.source_id,
+                    definition.name().value(),
+                    definition.name().value(),
+                    definition.span(),
+                    earlier,
+                );
+                continue;
+            }
+            self.module_names.insert(name.clone(), definition.span());
+            let index = self.globals.len();
+            self.global_indices.insert(name.clone(), index);
+            self.globals.push(GlobalHeader {
+                name,
+                value_type,
+                expression: definition.expression().clone(),
+                span: definition.span(),
+                source_id: self.source_id.to_owned(),
+                module_index: 0,
+                function_index: None,
+                function_targets: FunctionTargetSet::default(),
+            });
+        }
+        // The closed import-free vocabulary: the values `@std.bool` declares are
+        // visible to every module. A run that does not hold that module
+        // declares them from the embedded one, as it does the vocabulary's
+        // types, and a name the run declared itself is already reported.
+        for definition in standard::prelude_definitions() {
+            let name = definition.name().value();
+            if self.global_indices.contains_key(name) {
+                continue;
+            }
+            let Some(value_type) = self.types.lower_or_report(
+                STDLIB_BOOL_SOURCE_ID,
+                nominal::Scope::NONE,
+                definition.value_type(),
+                definition.span(),
+                self.diagnostics,
+            ) else {
+                continue;
+            };
+            let index = self.globals.len();
+            self.global_indices.insert(name.to_owned(), index);
+            self.globals.push(GlobalHeader {
+                name: name.to_owned(),
+                value_type,
+                expression: definition.expression().clone(),
+                span: definition.span(),
+                source_id: STDLIB_BOOL_SOURCE_ID.to_owned(),
+                module_index: 0,
+                function_index: None,
+                function_targets: FunctionTargetSet::default(),
+            });
+        }
+        let constants = defaults::decide(
+            &self.types,
+            &[(self.source_id, self.ast)],
+            &self.globals,
+            &defaults::DefaultNames::Source(&self.global_indices),
+            &self.module_names,
+            self.diagnostics,
+        );
+        self.types.add_default_constants(constants);
     }
 
     fn collect_headers(&mut self) {
@@ -639,6 +817,26 @@ impl<'a> Checker<'a> {
         self.types.note_other_names(self.source_id, self.ast);
         let mut type_declarations = Vec::new();
         for declaration in self.ast.declarations() {
+            if let Declaration::Deffect(value) = declaration {
+                let name = value.name().value();
+                if let Some(earlier) = self.module_names.get(name).copied() {
+                    redeclaration(
+                        self.diagnostics,
+                        self.source_id,
+                        name,
+                        name,
+                        value.span(),
+                        earlier,
+                    );
+                    continue;
+                }
+                self.module_names.insert(name.to_owned(), value.span());
+                self.types.declare_effect(
+                    self.source_id,
+                    value,
+                    stdlib::source_effect_root(self.source_id, name),
+                );
+            }
             if let Declaration::Defint(value) = declaration {
                 let name = value.name().value();
                 if let Some(earlier) = self.module_names.get(name).copied() {
@@ -684,6 +882,7 @@ impl<'a> Checker<'a> {
         standard::declare_standard_types(&mut self.types, &mut type_declarations);
         self.types
             .lower_bodies(&type_declarations, self.diagnostics);
+        self.declare_module_values();
         for (declaration_index, declaration) in
             self.ast.declarations().iter().enumerate()
         {
@@ -762,45 +961,90 @@ impl<'a> Checker<'a> {
                             bounds,
                             impl_member: None,
                             implements: None,
+                            effect_owner: None,
+                            host: None,
                         });
                     }
                 }
-                Declaration::Def(definition) => {
-                    let Some(value_type) = self.types.lower_or_report(
-                        self.source_id,
-                        nominal::Scope::NONE,
-                        definition.value_type(),
-                        definition.span(),
-                        self.diagnostics,
-                    ) else {
+                Declaration::Deffect(value) => {
+                    let Some(owner) = self
+                        .types
+                        .effect_at(self.source_id, value.span())
+                        .map(|declared| declared.root.clone())
+                    else {
                         continue;
                     };
-                    let name = definition.name().value().to_owned();
-                    if let Some(earlier) = self.module_names.get(&name).copied() {
-                        redeclaration(
-                            self.diagnostics,
+                    for (member_index, member) in value.members().iter().enumerate() {
+                        let Some((generics, bounds)) = nominal::function_generics(
+                            &self.types,
+                            &[],
+                            member,
                             self.source_id,
-                            definition.name().value(),
-                            definition.name().value(),
-                            definition.span(),
-                            earlier,
+                            self.diagnostics,
+                        ) else {
+                            continue;
+                        };
+                        let Some(signature) = check_signature(
+                            self.source_id,
+                            member,
+                            self.diagnostics,
+                            &self.types,
+                            nominal::Scope::new(None, &generics).with_bounds(&bounds),
+                        ) else {
+                            continue;
+                        };
+                        // An operation performs its owner root together with
+                        // the additive row it writes.
+                        let host = host_operation(
+                            self.source_id,
+                            member,
+                            value,
+                            &owner,
+                            &signature,
+                            &standard::role_types(&self.types),
+                            self.diagnostics,
                         );
-                        continue;
+                        let signature = operation_signature(signature, &owner);
+                        let name = format!(
+                            "{}.{}",
+                            value.name().value(),
+                            member.name().value()
+                        );
+                        let index = self.functions.len();
+                        self.function_indices.insert(name.clone(), index);
+                        self.functions.push(FunctionHeader {
+                            declaration_index,
+                            module_index: 0,
+                            source_id: self.source_id.to_owned(),
+                            name,
+                            external: compiler_intrinsic(
+                                self.source_id,
+                                member,
+                                self.diagnostics,
+                                self.trusted_bootstrap,
+                                &signature,
+                                &standard::role_types(&self.types),
+                            ),
+                            signature,
+                            external_declared: member.attributes().items().iter().any(
+                                |attribute| matches!(attribute, Attribute::External(_)),
+                            ),
+                            test: None,
+                            test_assertion: None,
+                            member_index: Some(member_index),
+                            self_type: None,
+                            type_parameters: generics,
+                            bounds,
+                            impl_member: None,
+                            implements: None,
+                            effect_owner: Some(owner.clone()),
+                            host,
+                        });
                     }
-                    self.module_names.insert(name.clone(), definition.span());
-                    let index = self.globals.len();
-                    self.global_indices.insert(name.clone(), index);
-                    self.globals.push(GlobalHeader {
-                        name,
-                        value_type,
-                        expression: definition.expression().clone(),
-                        span: definition.span(),
-                        source_id: self.source_id.to_owned(),
-                        module_index: 0,
-                        function_index: None,
-                        function_targets: FunctionTargetSet::default(),
-                    });
                 }
+                // Module values are declared before any signature is checked,
+                // because a labelled default may name one.
+                Declaration::Def(_) => {}
                 Declaration::Defn(function) => {
                     let Some((generics, bounds)) = nominal::function_generics(
                         &self.types,
@@ -821,6 +1065,7 @@ impl<'a> Checker<'a> {
                         continue;
                     };
                     let name = function.name().value().to_owned();
+                    self.reserve_vocabulary_spelling(&name, function.span());
                     if let Some(earlier) = self.module_names.get(&name).copied() {
                         redeclaration(
                             self.diagnostics,
@@ -860,6 +1105,8 @@ impl<'a> Checker<'a> {
                         bounds,
                         impl_member: None,
                         implements: None,
+                        effect_owner: None,
+                        host: None,
                     });
                 }
                 Declaration::Import(import)
@@ -869,19 +1116,7 @@ impl<'a> Checker<'a> {
                         && import.target().kind() == NameKind::Atom
                         && import.target().value() == "std.text" =>
                 {
-                    if let Some(earlier) = self.module_names.get("text").copied() {
-                        redeclaration(
-                            self.diagnostics,
-                            self.source_id,
-                            "text",
-                            "text",
-                            import.span(),
-                            earlier,
-                        );
-                    } else {
-                        self.module_names.insert("text".to_owned(), import.span());
-                    }
-                    self.text_import_span = Some(import.span());
+                    // Introduced with the module values, before them.
                 }
                 // Declared with the types above; contracts lower below.
                 Declaration::Defint(_) => {}
@@ -947,6 +1182,8 @@ impl<'a> Checker<'a> {
                     bounds,
                     impl_member: None,
                     implements: None,
+                    effect_owner: None,
+                    host: None,
                 });
             }
         }
@@ -1005,6 +1242,8 @@ impl<'a> Checker<'a> {
                     bounds: BTreeMap::new(),
                     impl_member: None,
                     implements: None,
+                    effect_owner: None,
+                    host: None,
                 });
             }
             self.text_import_span = Some(import_span);
@@ -1016,13 +1255,20 @@ impl<'a> Checker<'a> {
         if let Some((_, library)) = self.library {
             paths.extend(dotted_value_paths(library));
         }
-        for member in standard::builtin_members(&self.types) {
+        for member in standard::members_with_bodies(
+            standard::builtin_members(&self.types),
+            &paths,
+        ) {
             let path = member.path();
-            if !paths.contains(&path) || self.function_indices.contains_key(&path) {
+            if self.function_indices.contains_key(&path) {
                 continue;
             }
             let index = self.functions.len();
             self.function_indices.insert(path.clone(), index);
+            self.builtin_indices.insert(path.clone(), index);
+            if member.intrinsic.runs_body() {
+                self.native_bodies.insert(index, member.method);
+            }
             if self.library.is_some() {
                 self.library_indices.insert(path.clone(), index);
             }
@@ -1042,6 +1288,8 @@ impl<'a> Checker<'a> {
                 bounds: BTreeMap::new(),
                 impl_member: None,
                 implements: None,
+                effect_owner: None,
+                host: None,
             });
         }
         for _ in 0..=self.globals.len() {
@@ -1078,19 +1326,26 @@ impl<'a> Checker<'a> {
     }
 
     fn check_globals(&mut self) {
+        // The facts of a value the embedded library declares are not the
+        // checked source's.
+        let mut declared_elsewhere = Vec::new();
         for index in 0..self.globals.len() {
             let Some(header) = self.globals.get(index).cloned() else {
                 continue;
             };
             let mut environment = CheckEnvironment::new(
-                self.source_id,
+                &header.source_id,
                 self.diagnostics,
                 &self.global_indices,
                 &self.globals,
                 &self.functions,
                 &self.function_indices,
                 &self.module_names,
-                &mut self.bindings,
+                if header.source_id == self.source_id {
+                    &mut self.bindings
+                } else {
+                    &mut declared_elsewhere
+                },
                 &self.types,
             );
             let Some(expression) = check_expression(
@@ -1100,7 +1355,7 @@ impl<'a> Checker<'a> {
             ) else {
                 continue;
             };
-            let origin = SourceOrigin::new(self.source_id, header.span);
+            let origin = SourceOrigin::new(header.source_id.as_str(), header.span);
             match CheckedGlobal::new(
                 header.name,
                 header.value_type.clone(),
@@ -1122,12 +1377,69 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Checks the Vibra body that the embedded `@std.builtin` writes for a
+    /// native with no import, by the ordinary function checker in that
+    /// module's own environment: its names are the builtin members, and it
+    /// recurses through the wrapper it is carried by.
+    fn check_native_body(
+        &mut self,
+        header: &FunctionHeader,
+        method: &'static vibra_syntax::FunctionDeclaration,
+        intrinsic: CompilerIntrinsic,
+    ) -> Option<CheckedFunction> {
+        // The facts of a body the embedded library declares are not the
+        // checked source's.
+        let mut declared_elsewhere = Vec::new();
+        let mut environment = CheckEnvironment::new(
+            STDLIB_BUILTIN_SOURCE_ID,
+            self.diagnostics,
+            &self.no_indices,
+            &self.globals,
+            &self.functions,
+            &self.builtin_indices,
+            &self.no_names,
+            &mut declared_elsewhere,
+            &self.types,
+        );
+        let origin = SourceOrigin::new(STDLIB_BUILTIN_SOURCE_ID, method.span());
+        let body = check_function_body(&mut environment, method, header, &origin)?;
+        let slot_count = environment.next_slot;
+        match CheckedFunction::new_external_with_body(
+            header.name.clone(),
+            header.signature.clone(),
+            intrinsic,
+            body,
+            slot_count,
+            origin,
+        ) {
+            Ok(function) => Some(function),
+            Err(error) => {
+                unavailable(
+                    self.diagnostics,
+                    STDLIB_BUILTIN_SOURCE_ID,
+                    method.span(),
+                    format!("checked IR construction failed: {error}"),
+                );
+                None
+            }
+        }
+    }
+
     fn check_functions(&mut self) {
         for (index, header) in self.functions.clone().into_iter().enumerate() {
             if header.declaration_index == IMPORTED_FUNCTION_DECLARATION {
                 let Some(intrinsic) = header.external else {
                     continue;
                 };
+                if let Some(method) = self.native_bodies.get(&index).copied() {
+                    if let Some(function) =
+                        self.check_native_body(&header, method, intrinsic)
+                        && let Some(slot) = self.checked_functions.get_mut(index)
+                    {
+                        *slot = Some(function);
+                    }
+                    continue;
+                }
                 let origin = SourceOrigin::new(
                     self.source_id,
                     self.text_import_span.unwrap_or_else(|| self.ast.span()),
@@ -1164,6 +1476,33 @@ impl<'a> Checker<'a> {
                     function.span(),
                     "variadic, generic, external, and nonempty-effect attributes are unavailable in Step 7",
                 );
+                continue;
+            }
+            if let Some(row) = header.host {
+                let origin = SourceOrigin::new(source_id, function.span());
+                let owner = header.effect_owner.clone();
+                match CheckedFunction::new_host(
+                    header.name,
+                    header.signature,
+                    row,
+                    origin,
+                ) {
+                    Ok(checked) => {
+                        let checked = match owner {
+                            Some(owner) => checked.with_effect_owner(owner),
+                            None => checked,
+                        };
+                        if let Some(slot) = self.checked_functions.get_mut(index) {
+                            *slot = Some(checked);
+                        }
+                    }
+                    Err(error) => unavailable(
+                        self.diagnostics,
+                        source_id,
+                        function.span(),
+                        format!("checked IR construction failed: {error}"),
+                    ),
+                }
                 continue;
             }
             if let Some(intrinsic) = header.external {
@@ -1214,83 +1553,14 @@ impl<'a> Checker<'a> {
                 &mut self.bindings,
                 &self.types,
             );
-            environment.self_type = header.self_type.clone();
-            environment.generics = header.type_parameters.clone();
-            environment.bounds = header.bounds.clone();
-            environment.exit =
-                Some((header.signature.result(), Some(function.result_span())));
-            let mut parameters_valid = true;
-            let mut pending = Vec::new();
-            for (parameter_index, parameter) in function.parameters().iter().enumerate()
-            {
-                match parameter.parsed_pattern().kind() {
-                    PatternKind::Binding(name) if name.is_discard() => {}
-                    PatternKind::Binding(name) => {
-                        if !environment.add_binding(
-                            name.value(),
-                            parameter.value_type(),
-                            parameter.span(),
-                            parameter.parsed_pattern().span(),
-                        ) {
-                            parameters_valid = false;
-                        }
-                    }
-                    _ => match header.signature.parameters().get(parameter_index) {
-                        Some(value_type) => pending.push((
-                            parameter_index,
-                            parameter.parsed_pattern(),
-                            value_type.clone(),
-                        )),
-                        None => parameters_valid = false,
-                    },
-                }
-                environment.next_slot = parameter_index.saturating_add(1);
-            }
-            let mut labelled_index = 0;
-            for attribute in function.attributes().items() {
-                let Attribute::Labelled(entries) = attribute else {
-                    continue;
-                };
-                for entry in entries {
-                    let Some(labelled) =
-                        header.signature.labelled().get(labelled_index)
-                    else {
-                        continue;
-                    };
-                    labelled_index = labelled_index.saturating_add(1);
-                    if !environment.add_binding_type(
-                        labelled.name(),
-                        labelled.value_type(),
-                        entry.name_span(),
-                    ) {
-                        parameters_valid = false;
-                    }
-                }
-            }
-            if !environment
-                .bind_variadic(function.attributes().items(), &header.signature)
-            {
-                parameters_valid = false;
-            }
-            let destructured = environment.bind_parameter_patterns(&pending);
-            let Some(destructured) = destructured else {
-                continue;
-            };
-            if !parameters_valid {
-                continue;
-            }
-            let Some(body) = check_sequence(
-                &mut environment,
-                function.expressions(),
-                Some(header.signature.result()),
-                function.span(),
-                true,
-            ) else {
-                continue;
-            };
             let origin = SourceOrigin::new(source_id, function.span());
-            let body = wrap_destructured(body, destructured, &origin);
+            let Some(body) =
+                check_function_body(&mut environment, function, &header, &origin)
+            else {
+                continue;
+            };
             let implements = header.implements.clone();
+            let owner = header.effect_owner.clone();
             match CheckedFunction::with_slots(
                 header.name,
                 header.signature,
@@ -1300,6 +1570,10 @@ impl<'a> Checker<'a> {
             )
             .map(|function| match implements {
                 Some(implements) => function.with_implements(implements),
+                None => function,
+            })
+            .map(|function| match owner {
+                Some(owner) => function.with_effect_owner(owner),
                 None => function,
             }) {
                 Ok(function) => {
@@ -1315,6 +1589,19 @@ impl<'a> Checker<'a> {
                 ),
             }
         }
+    }
+
+    /// Checks every written ceiling against the performed row of its body,
+    /// once the whole function-call graph is checked.
+    fn check_effects(&mut self) {
+        let found = effects::check(
+            &self.checked_functions,
+            &self.checked_globals,
+            &self.functions,
+            &self.types,
+            &[],
+        );
+        self.diagnostics.extend(found);
     }
 
     fn finish(&mut self) -> Option<CheckedProgram> {
@@ -1384,6 +1671,10 @@ pub(crate) fn header_function<'a>(
         header.member_index,
     ) {
         (Declaration::Defn(function), None) => return Some(function),
+        // An effect operation is a member of its root.
+        (Declaration::Deffect(value), Some(index)) => {
+            return value.members().get(index);
+        }
         (Declaration::Deftype(value), Some(_)) => value.members(),
         (Declaration::Defint(value), Some(_)) => value.members(),
         _ => return None,
@@ -1395,6 +1686,89 @@ pub(crate) fn header_function<'a>(
         }
         _ => None,
     }
+}
+
+/// Checks the body of `function` in `environment` under `header`'s signature:
+/// binds its parameters, labelled operands, and variadic tail, then checks the
+/// expressions against the written result. The caller reads
+/// `environment.next_slot` for the slot count of the returned body.
+pub(crate) fn check_function_body(
+    environment: &mut CheckEnvironment<'_>,
+    function: &vibra_syntax::FunctionDeclaration,
+    header: &FunctionHeader,
+    origin: &SourceOrigin,
+) -> Option<Expr> {
+    environment.self_type = header.self_type.clone();
+    environment.generics = header.type_parameters.clone();
+    environment.bounds = header.bounds.clone();
+    environment.exit = Some((header.signature.result(), Some(function.result_span())));
+    let mut parameters_valid = true;
+    let mut pending = Vec::new();
+    for (parameter_index, parameter) in function.parameters().iter().enumerate() {
+        match parameter.parsed_pattern().kind() {
+            PatternKind::Binding(name) if name.is_discard() => {}
+            PatternKind::Binding(name)
+                if pattern::pattern_value_global(
+                    environment,
+                    name,
+                    parameter.parsed_pattern().span(),
+                )
+                .is_none() =>
+            {
+                if !environment.add_binding(
+                    name.value(),
+                    parameter.value_type(),
+                    parameter.span(),
+                    parameter.parsed_pattern().span(),
+                ) {
+                    parameters_valid = false;
+                }
+            }
+            _ => match header.signature.parameters().get(parameter_index) {
+                Some(value_type) => pending.push((
+                    parameter_index,
+                    parameter.parsed_pattern(),
+                    value_type.clone(),
+                )),
+                None => parameters_valid = false,
+            },
+        }
+        environment.next_slot = parameter_index.saturating_add(1);
+    }
+    let mut labelled_index = 0;
+    for attribute in function.attributes().items() {
+        let Attribute::Labelled(entries) = attribute else {
+            continue;
+        };
+        for entry in entries {
+            let Some(labelled) = header.signature.labelled().get(labelled_index) else {
+                continue;
+            };
+            labelled_index = labelled_index.saturating_add(1);
+            if !environment.add_binding_type(
+                labelled.name(),
+                labelled.value_type(),
+                entry.name_span(),
+            ) {
+                parameters_valid = false;
+            }
+        }
+    }
+    if !environment.bind_variadic(function.attributes().items(), &header.signature) {
+        parameters_valid = false;
+    }
+    let destructured = environment.bind_parameter_patterns(&pending)?;
+    if !parameters_valid {
+        return None;
+    }
+    let body = check_sequence(
+        environment,
+        function.expressions(),
+        Some(header.signature.result()),
+        function.span(),
+        true,
+    )?;
+    Some(wrap_destructured(body, destructured, origin))
 }
 
 /// The diagnostic for a checked-IR initializer cycle through the global
@@ -1618,6 +1992,21 @@ impl<'a> CheckEnvironment<'a> {
         {
             redeclaration(self.diagnostics, self.source_id, name, name, span, earlier);
         }
+        // A reserved spelling is rejected at the binder, which still binds so
+        // the rest of its scope checks without a cascade. A workspace's
+        // resolver reports it instead, as it does a redeclaration.
+        if self.reports_redeclarations
+            && vibra_syntax::is_reserved_binder_spelling(name)
+        {
+            self.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::NameReservedDeclaration,
+                    span,
+                    "a lexical binder uses a keyword, `any`, or a name of the closed import-free vocabulary",
+                )
+                .with_source_id(self.source_id),
+            );
+        }
         let slot = self.next_slot;
         self.locals.insert(
             name.to_owned(),
@@ -1653,7 +2042,11 @@ impl<'a> CheckEnvironment<'a> {
             self.next_slot = self.next_slot.saturating_add(1);
             return true;
         }
-        self.add_binding_type(parameter.name().value(), tail.clone(), parameter.span())
+        self.add_binding_type(
+            parameter.name().value(),
+            tail.clone(),
+            parameter.name_span(),
+        )
     }
 
     fn earlier_introduction(&self, name: &str) -> Option<ByteSpan> {
@@ -2091,6 +2484,7 @@ fn function_targets_from_expr(
         Expr::Call { .. }
         | Expr::Literal { .. }
         | Expr::External { .. }
+        | Expr::Host { .. }
         | Expr::Default { .. } => FunctionTargetSet::default(),
     }
 }
@@ -2144,7 +2538,17 @@ fn syntax_function_targets(
                     .and_then(|index| globals.get(*index))
                     .map(|global| global.function_targets.clone())
             })
-            .unwrap_or_default(),
+            // A dotted path no function or module value owns may be a contract
+            // member named as a value, a closure that selects its
+            // implementation at each application. Its target is not known, so
+            // a call through it is still a tail transfer.
+            .unwrap_or_else(|| {
+                if name.segments().len() > 1 {
+                    FunctionTargetSet::unknown()
+                } else {
+                    FunctionTargetSet::default()
+                }
+            }),
         ExpressionKind::Do(expressions) => syntax_sequence_targets(
             expressions,
             global_indices,
@@ -2871,11 +3275,15 @@ fn first_invalid_dict_key(
 }
 
 /// The generic callee of one application and what the call site wrote.
-struct GenericCall<'a> {
-    parameters: &'a [String],
-    signature: &'a FunctionSignature,
-    type_arguments: Option<&'a [Type]>,
-    expected: Option<&'a Type>,
+pub(crate) struct GenericCall<'a> {
+    pub(crate) parameters: &'a [String],
+    pub(crate) signature: &'a FunctionSignature,
+    pub(crate) type_arguments: Option<&'a [Type]>,
+    pub(crate) expected: Option<&'a Type>,
+    /// A positional operand the caller already checked, by its index: a
+    /// contract call selects its implementation from it, so it is not checked
+    /// a second time.
+    pub(crate) checked: Option<(usize, &'a Expr)>,
 }
 
 /// Where one checked operand of a generic application belongs.
@@ -2886,15 +3294,17 @@ enum OperandSlot {
 }
 
 /// The checked operands of a generic application.
-struct GenericOperands {
+pub(crate) struct GenericOperands {
     /// The instantiated signature.
-    signature: FunctionSignature,
+    pub(crate) signature: FunctionSignature,
+    /// The type argument of each generic parameter, in `parameters` order.
+    pub(crate) arguments: Vec<Type>,
     /// Positional operands in order.
-    positional: Vec<Expr>,
+    pub(crate) positional: Vec<Expr>,
     /// Written labelled operands by name.
-    labelled: BTreeMap<String, Expr>,
+    pub(crate) labelled: BTreeMap<String, Expr>,
     /// Variadic tail operands in order, not yet packed.
-    tail: Vec<Expr>,
+    pub(crate) tail: Vec<Expr>,
 }
 
 /// Checks the written operands of a generic application and infers its
@@ -2906,7 +3316,7 @@ struct GenericOperands {
 /// literals and lambdas see a concrete expectation; the rest are checked
 /// alone and unified with their parameter type. Lambda operands wait until
 /// every other operand has had the chance to fix their parameter type.
-fn check_generic_operands(
+pub(crate) fn check_generic_operands(
     environment: &mut CheckEnvironment<'_>,
     application: &Application,
     call: GenericCall<'_>,
@@ -2925,12 +3335,21 @@ fn check_generic_operands(
     let opened = instantiation.open_signature(call.signature);
 
     let mut pending = Vec::new();
+    let mut positional = BTreeMap::new();
     for (index, (argument, pattern)) in ordered
         .iter()
         .take(opened.parameters().len())
         .zip(opened.parameters())
         .enumerate()
     {
+        if let Some((checked, value)) = call.checked
+            && checked == index
+        {
+            // Already checked; it still fixes what its own type determines.
+            instantiation.unify(pattern, &value.result_type());
+            positional.insert(index, value.clone());
+            continue;
+        }
         pending.push((OperandSlot::Positional(index), pattern.clone(), *argument));
     }
     for parameter in opened.labelled() {
@@ -2960,7 +3379,6 @@ fn check_generic_operands(
                 || unsuffixed_literal(argument.value())
         });
 
-    let mut positional = BTreeMap::new();
     let mut labelled_values = BTreeMap::new();
     let mut tail_values = BTreeMap::new();
     for (slot, pattern, argument) in others.into_iter().chain(lambdas) {
@@ -2994,8 +3412,17 @@ fn check_generic_operands(
         ambiguous_generic(environment, application.span(), &unbound);
         return None;
     };
+    let arguments = call
+        .parameters
+        .iter()
+        .filter_map(|name| {
+            let variable = instantiation.open(&Type::Param(name.clone()));
+            instantiation.resolved(&variable)
+        })
+        .collect();
     Some(GenericOperands {
         signature: *instantiated,
+        arguments,
         positional: positional.into_values().collect(),
         labelled: labelled_values,
         tail: tail_values.into_values().collect(),
@@ -3130,6 +3557,8 @@ fn check_signature(
     };
     let mut labelled = Vec::new();
     let mut variadic = None;
+    let mut effects = vibra_ir::EffectRow::empty();
+    let owner = function.span();
     for attribute in function.attributes().items() {
         match attribute {
             Attribute::Labelled(entries) => {
@@ -3146,8 +3575,8 @@ fn check_signature(
                     };
                     let Some(default) = check_default(
                         source_id,
-                        entry.span(),
-                        entry.default(),
+                        types,
+                        entry,
                         &value_type,
                         diagnostics,
                     ) else {
@@ -3161,14 +3590,11 @@ fn check_signature(
                     ));
                 }
             }
-            Attribute::Effects(row) if !row.references().is_empty() => {
-                valid = false;
-                unavailable(
-                    diagnostics,
-                    source_id,
-                    row.span(),
-                    "nonempty effect ceilings remain unavailable in M2",
-                );
+            Attribute::Effects(row) => {
+                match types.lower_written_row(source_id, owner, row, diagnostics) {
+                    Some(written) => effects = written,
+                    None => valid = false,
+                }
             }
             Attribute::Variadic(parameter) => {
                 match types.lower_variadic(source_id, scope, parameter.value_type()) {
@@ -3189,10 +3615,120 @@ fn check_signature(
     }
     valid.then(|| {
         with_tail(
-            FunctionSignature::with_labelled(parameters, labelled, result),
+            FunctionSignature::with_labelled(parameters, labelled, result)
+                .with_effects(effects),
             variadic,
         )
     })
+}
+
+/// The language type of a type that appears in a host signature.
+fn host_signature_type(ty: vibra_ir::external::host::HostType) -> Type {
+    use vibra_ir::external::host::HostType;
+    match ty {
+        HostType::Path => Type::Declared(stdlib::stdlib_type_id(&["fs"], "path")),
+        HostType::FsMetadata => {
+            Type::Declared(stdlib::stdlib_type_id(&["fs"], "fs-metadata"))
+        }
+        HostType::Array(element) => {
+            Type::Array(Box::new(host_signature_type(*element)))
+        }
+        primitive => primitive.primitive().unwrap_or(Type::Void),
+    }
+}
+
+/// Checks the `external: @host` member of a `deffect` against the closed host
+/// registry (`docs/spec/03-effects.md`, "Nominal effects"). Three facts are
+/// checked independently, so a member that is wrong in two ways is reported
+/// for both: the symbol names a row (`@external.unknown-symbol` at the symbol
+/// string); the row's owner is the enclosing root (`@external.owner-mismatch` at
+/// the symbol string, relating the `deffect` name); and the written signature is
+/// the row's, every type exactly (`@type.type-argument-mismatch` at the
+/// declaration, with the registry signature as a note). Answers the row only
+/// when all three hold.
+pub(crate) fn host_operation(
+    source_id: &str,
+    member: &vibra_syntax::FunctionDeclaration,
+    effect: &vibra_syntax::DeffectDeclaration,
+    owner: &vibra_ir::EffectRoot,
+    written: &FunctionSignature,
+    roles: &vibra_ir::external::RoleTypes,
+    diagnostics: &mut Vec<Diagnostic>,
+) -> Option<&'static vibra_ir::external::host::HostRow> {
+    let items = member.attributes().items();
+    if !items.iter().any(
+        |attribute| matches!(attribute, Attribute::External(name) if name.value() == "host"),
+    ) {
+        return None;
+    }
+    // A member with an additive row is already `@syntax.invalid-attribute`; it
+    // is not checked against the registry as well, so one fault is one report.
+    if items.iter().any(
+        |attribute| matches!(attribute, Attribute::Effects(row) if !row.references().is_empty()),
+    ) {
+        return None;
+    }
+    let symbol = items.iter().find_map(|attribute| match attribute {
+        Attribute::Symbol(Literal::String(value)) => Some(value.value()),
+        _ => None,
+    })?;
+    let at_symbol = member
+        .attributes()
+        .value_span("symbol")
+        .unwrap_or(member.span());
+    let Some(row) = vibra_ir::external::host::host_row(symbol) else {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::ExternalUnknownSymbol,
+                at_symbol,
+                format!("`{symbol}` is not a symbol of the closed host registry"),
+            )
+            .with_source_id(source_id),
+        );
+        return None;
+    };
+    let mut accepted = true;
+    if format!("@{}", owner.path()) != row.owner {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::ExternalOwnerMismatch,
+                at_symbol,
+                format!(
+                    "host symbol `{symbol}` is owned by `{}`, not by the enclosing `{}`",
+                    row.owner,
+                    effect.name().value()
+                ),
+            )
+            .with_source_id(source_id)
+            .with_related(effect.name_span(), "the enclosing deffect"),
+        );
+        accepted = false;
+    }
+    let error_module = row.error.module().strip_prefix("std.").unwrap_or_default();
+    let modules = error_module.split('.').collect::<Vec<_>>();
+    let expected = FunctionSignature::new(
+        row.parameters
+            .iter()
+            .map(|parameter| host_signature_type(parameter.ty))
+            .collect(),
+        roles.result_of(
+            host_signature_type(row.ok),
+            Type::Declared(stdlib::stdlib_type_id(&modules, row.error.name())),
+        ),
+    );
+    if !written.same_shape(&expected) {
+        diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::TypeTypeArgumentMismatch,
+                member.span(),
+                format!("host symbol `{symbol}` has a different signature"),
+            )
+            .with_source_id(source_id)
+            .with_note(format!("the registry signature is {}", row.signature())),
+        );
+        accepted = false;
+    }
+    accepted.then_some(row)
 }
 
 fn compiler_intrinsic(
@@ -3227,13 +3763,9 @@ fn compiler_intrinsic(
         }
     });
     let provider = provider?;
+    // A `@host` member is checked against the host registry where its owner is
+    // known (`host_operation`); it is no `@compiler` row.
     if provider == "host" {
-        unavailable(
-            diagnostics,
-            source_id,
-            function.span(),
-            "the recognized @host provider remains unavailable until M4",
-        );
         return None;
     }
     if provider != "compiler" {
@@ -3402,6 +3934,8 @@ fn check_lambda_signature(
     )?;
     let mut labelled = Vec::new();
     let mut variadic = None;
+    let mut effects = vibra_ir::EffectRow::empty();
+    let owner = lambda.span();
     for attribute in lambda.attributes().items() {
         match attribute {
             Attribute::Labelled(entries) => {
@@ -3418,8 +3952,8 @@ fn check_lambda_signature(
                     };
                     let Some(default) = check_default(
                         source_id,
-                        entry.span(),
-                        entry.default(),
+                        types,
+                        entry,
                         &value_type,
                         diagnostics,
                     ) else {
@@ -3433,14 +3967,11 @@ fn check_lambda_signature(
                     ));
                 }
             }
-            Attribute::Effects(row) if !row.references().is_empty() => {
-                valid = false;
-                unavailable(
-                    diagnostics,
-                    source_id,
-                    row.span(),
-                    "nonempty effect ceilings remain unavailable in M2",
-                );
+            Attribute::Effects(row) => {
+                match types.lower_written_row(source_id, owner, row, diagnostics) {
+                    Some(written) => effects = written,
+                    None => valid = false,
+                }
             }
             Attribute::Variadic(parameter) => {
                 match types.lower_variadic(source_id, scope, parameter.value_type()) {
@@ -3461,7 +3992,8 @@ fn check_lambda_signature(
     }
     valid.then(|| {
         with_tail(
-            FunctionSignature::with_labelled(parameters, labelled, result),
+            FunctionSignature::with_labelled(parameters, labelled, result)
+                .with_effects(effects),
             variadic,
         )
     })
@@ -3472,8 +4004,10 @@ fn has_deferred_attributes(attributes: &[Attribute]) -> bool {
         // `any`-bounded generics are checked from M3 Step 3; an interface
         // bound was already reported unavailable at the header.
         Attribute::External(_) | Attribute::Symbol(_) => true,
-        Attribute::Where(_) | Attribute::Labelled(_) | Attribute::Variadic(_) => false,
-        Attribute::Effects(row) => !row.references().is_empty(),
+        Attribute::Where(_)
+        | Attribute::Labelled(_)
+        | Attribute::Variadic(_)
+        | Attribute::Effects(_) => false,
         // A native implementation keeps a checked body; `role:` is a type attribute.
         Attribute::Visibility(_)
         | Attribute::Doc(_)
@@ -3654,7 +4188,10 @@ fn check_let_pairs(
     let mut destructured = None;
     let slot = match pattern.kind() {
         PatternKind::Binding(name) if name.is_discard() => None,
-        PatternKind::Binding(name) => {
+        PatternKind::Binding(name)
+            if pattern::pattern_value_global(&nested, name, pattern.span())
+                .is_none() =>
+        {
             if !nested.add_binding_type_with_targets(
                 name.value(),
                 value.result_type(),
@@ -4339,10 +4876,9 @@ fn check_form(
             // callee; only a call that can reach no source code, such as a
             // compiler-intrinsic wrapper, creates no activation to reuse.
             let has_source_target = function_targets.known.iter().any(|index| {
-                environment
-                    .functions
-                    .get(*index)
-                    .is_some_and(|function| function.external.is_none())
+                environment.functions.get(*index).is_some_and(|function| {
+                    function.external.is_none_or(|row| row.runs_body())
+                })
             });
             let tail_transfer = tail_position
                 && (has_source_target
@@ -4387,6 +4923,7 @@ fn check_form(
                     positional,
                     labelled: labelled_values,
                     tail,
+                    ..
                 } = check_generic_operands(
                     environment,
                     application,
@@ -4395,6 +4932,7 @@ fn check_form(
                         signature: &signature,
                         type_arguments: type_arguments.as_deref(),
                         expected: expected.as_ref(),
+                        checked: None,
                     },
                     &ordered,
                     &mut labelled,
@@ -4760,7 +5298,14 @@ fn check_form(
                 parameter_types.push(value_type.clone());
                 match parameter.parsed_pattern().kind() {
                     PatternKind::Binding(name) if name.is_discard() => {}
-                    PatternKind::Binding(name) => {
+                    PatternKind::Binding(name)
+                        if pattern::pattern_value_global(
+                            &nested,
+                            name,
+                            parameter.parsed_pattern().span(),
+                        )
+                        .is_none() =>
+                    {
                         if !nested.add_binding_type(
                             name.value(),
                             value_type,
@@ -4914,8 +5459,10 @@ fn check_form(
 }
 
 /// A call to a module function. In tail position it is a tail transfer that
-/// reuses the activation, unless the function is a compiler-intrinsic wrapper,
-/// which creates no activation to reuse.
+/// reuses the activation, unless the function is a compiler-intrinsic wrapper
+/// that a module does not run as a body (an inline row or an import), which
+/// creates no activation to reuse. A native that runs its checked body creates
+/// one, so its call is marked by its position like any other.
 pub(crate) fn direct_call(
     environment: &CheckEnvironment<'_>,
     function: usize,
@@ -4927,7 +5474,7 @@ pub(crate) fn direct_call(
     let runs_source = environment
         .functions
         .get(function)
-        .is_some_and(|header| header.external.is_none());
+        .is_some_and(|header| header.external.is_none_or(|row| row.runs_body()));
     if tail_position && runs_source {
         Expr::tail_call(function, arguments, result, origin)
     } else {
@@ -5293,23 +5840,68 @@ fn check_resolved_reference(
     }
 }
 
-/// The value of a labelled parameter's default at its written type. An atom
-/// default has the type `atom` or its own singleton.
+/// The constant a labelled parameter's default denotes at its written type. A
+/// default is a constant expression: a literal, an atom, or any other
+/// expression the checker decided is constant before it checked a signature.
+/// An atom default has the type `atom` or its own singleton.
 fn check_default(
     source_id: &str,
-    span: ByteSpan,
-    default: &vibra_syntax::LabelledDefault,
+    types: &nominal::TypeNames,
+    entry: &vibra_syntax::LabelledParameter,
     value_type: &Type,
     diagnostics: &mut Vec<Diagnostic>,
-) -> Option<Value> {
-    match default {
+) -> Option<Constant> {
+    let span = entry.span();
+    match entry.default() {
+        vibra_syntax::LabelledDefault::Expression { expression, .. } => {
+            let value = match types.default_constant(source_id, entry.default_span()) {
+                Some(nominal::DefaultConstant::Value(value)) => value,
+                // The checker already said why the expression did not check.
+                Some(nominal::DefaultConstant::Failed) | None => return None,
+                Some(nominal::DefaultConstant::NotConstant(definition)) => {
+                    let mut diagnostic = Diagnostic::new(
+                        DiagnosticCode::TypeNotConstant,
+                        expression.span(),
+                        "a labelled default must be a constant expression",
+                    )
+                    .with_source_id(source_id);
+                    if let Some((definition_source, definition_span)) = definition {
+                        diagnostic = diagnostic.with_related_source(
+                            definition_source.clone(),
+                            *definition_span,
+                            "this module value is not a constant",
+                        );
+                    }
+                    diagnostics.push(diagnostic);
+                    return None;
+                }
+            };
+            let actual = value.value_type();
+            if !value_type.same_shape(&actual)
+                && !(matches!(value, Constant::Primitive(Value::Atom(_)))
+                    && (*value_type == Type::Atom
+                        || matches!(value_type, Type::AtomSingleton(_))))
+            {
+                mismatch(
+                    diagnostics,
+                    source_id,
+                    span,
+                    value_type.clone(),
+                    actual,
+                    "a constant default does not match the parameter type",
+                );
+                return None;
+            }
+            Some(value.clone())
+        }
         vibra_syntax::LabelledDefault::Literal(literal) => check_literal(
             source_id,
             span,
             literal,
             Some(value_type.clone()),
             diagnostics,
-        ),
+        )
+        .map(Constant::Primitive),
         vibra_syntax::LabelledDefault::Atom(name) => {
             let singleton = Type::AtomSingleton(name.value().to_owned());
             if *value_type != Type::Atom && *value_type != singleton {
@@ -5323,7 +5915,7 @@ fn check_default(
                 );
                 return None;
             }
-            Some(Value::Atom(name.value().to_owned()))
+            Some(Constant::Primitive(Value::Atom(name.value().to_owned())))
         }
     }
 }
@@ -5655,6 +6247,16 @@ pub(crate) fn unavailable(
 }
 
 /// `signature` with its variadic tail, when it has one.
+/// The signature of an effect operation: the additive row it writes together
+/// with its owner root, which is the complete row applying it performs.
+pub(crate) fn operation_signature(
+    signature: FunctionSignature,
+    owner: &vibra_ir::EffectRoot,
+) -> FunctionSignature {
+    let row = signature.effects().clone().with_root(owner.clone());
+    signature.with_effects(row)
+}
+
 fn with_tail(signature: FunctionSignature, tail: Option<Type>) -> FunctionSignature {
     match tail {
         Some(tail) => signature.with_variadic(tail),
@@ -5681,6 +6283,24 @@ fn dotted_value_paths(ast: &SourceAst) -> BTreeSet<String> {
     }
     let mut paths = BTreeSet::new();
     for body in bodies {
+        walk_expressions(body, &mut |expression| {
+            if let ExpressionKind::Name(name) = expression.kind()
+                && name.kind() == NameKind::Symbol
+                && name.segments().len() > 1
+            {
+                paths.insert(name.value().to_owned());
+            }
+        });
+    }
+    paths
+}
+
+/// Every dotted value path written in the body of `function`.
+pub(crate) fn function_value_paths(
+    function: &vibra_syntax::FunctionDeclaration,
+) -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+    for body in function.expressions() {
         walk_expressions(body, &mut |expression| {
             if let ExpressionKind::Name(name) = expression.kind()
                 && name.kind() == NameKind::Symbol
@@ -5792,7 +6412,16 @@ mod tests {
         let result =
             check_source("deferred.vib", "(def value i32 1)\n(defn answer () i32 2)");
         assert!(result.accepted(), "{:?}", result.diagnostics());
-        assert_eq!(result.program().expect("program").globals().len(), 1);
+        // The source's own value, then the closed vocabulary's two values that
+        // `@std.bool` declares and every module sees.
+        let names = result
+            .program()
+            .expect("program")
+            .globals()
+            .iter()
+            .map(|global| global.name().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(names, ["value", "true", "false"]);
     }
 
     #[test]
@@ -5827,7 +6456,7 @@ mod tests {
     fn rejects_shadowing_and_non_boolean_condition() {
         let result = check_source(
             "scope.vib",
-            "(def value i32 1)\n(defn answer (value i32) i32 (let value value) (if value 1i32 2i32))",
+            "(defn one () i32 1i32)\n(def value i32 (one))\n(defn answer (value i32) i32 (let value value) (if value 1i32 2i32))",
         );
         assert!(!result.accepted());
         assert!(result.program().is_none());
@@ -6033,7 +6662,7 @@ mod tests {
                 true,
             );
             let expected = if source.contains("@host") {
-                DiagnosticCode::ToolUnavailable
+                DiagnosticCode::SyntaxInvalidAttribute
             } else if source.contains("text.unknown")
                 || source.contains("u8.neg-checked")
             {

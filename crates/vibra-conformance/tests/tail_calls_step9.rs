@@ -394,7 +394,7 @@ fn corpus_source(case: &str) -> String {
 }
 
 /// Runs a corpus case source and checks the result, the transfer count, and
-/// that the activation depth stays far below the interpreter's bound.
+/// that the activation depth stays a few activations however many transfers run.
 fn assert_constant_depth(case: &str, expected: u64, transfers: usize, depth: usize) {
     let checked = check_source(format!("{case}.vib"), &corpus_source(case));
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
@@ -403,7 +403,7 @@ fn assert_constant_depth(case: &str, expected: u64, transfers: usize, depth: usi
     assert_eq!(execution.value(), Some(&vibra_ir::Value::U64(expected)));
     assert_eq!(execution.tail_transfer_count(), transfers);
     assert_eq!(execution.max_activation_depth(), depth);
-    assert!(depth < vibra_interp::MAX_ACTIVATION_DEPTH / 100);
+    assert!(depth < 40, "depth {depth} must stay a few activations");
     assert!(execution.audit_trace().is_empty());
 }
 
@@ -539,9 +539,11 @@ fn a_lambda_in_a_def_initializer_tail_calls_in_one_activation() {
 }
 
 /// Deep recursion whose every call is an operand keeps its activations live,
-/// whatever the callee is, and the interpreter stops it at its bound.
+/// whatever the callee is, so recursion with no base case ends in the memory
+/// host event under a small budget. The same shapes with a base case complete
+/// in `activations_m4_step3`.
 #[test]
-fn non_tail_recursion_through_every_callee_kind_still_exhausts_the_host_budget() {
+fn non_tail_recursion_through_every_callee_kind_exhausts_a_small_budget() {
     let lower = "(defn lower (count u64) u64\n  (match (u64.add-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
     let sources = [
         // A function value held in a parameter.
@@ -560,11 +562,13 @@ fn non_tail_recursion_through_every_callee_kind_still_exhausts_the_host_budget()
     for source in sources {
         let checked = check_source("deep-non-tail.vib", &source);
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
+        let budget = vibra_interp::MemoryBudget::new(2 * 1024 * 1024);
         assert_eq!(
-            vibra_interp::run(checked.program().expect("program")),
-            Err(vibra_interp::RuntimeError::HostStackExhausted {
-                limit: vibra_interp::MAX_ACTIVATION_DEPTH
-            }),
+            vibra_interp::Interpreter::run_with_budget(
+                checked.program().expect("program"),
+                budget
+            ),
+            Err(vibra_interp::RuntimeError::MemoryExhausted { budget }),
             "{source}"
         );
     }

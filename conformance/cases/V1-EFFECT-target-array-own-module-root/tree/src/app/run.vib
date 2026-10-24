@@ -1,0 +1,5 @@
+(import sinks @app.sinks)
+
+(defn execute () void
+  effects: (sinks.console)
+  (sinks.console.print "hi"))
