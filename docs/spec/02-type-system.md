@@ -13,8 +13,8 @@ and such a member used as a function value, are implemented by Milestone 4
 Step 2 in the type checker, the typed IR, and the reference interpreter, and
 Step 9 lowers them. Milestone 4 Step 2b implements the prelude values `true` and
 `false` and constant patterns in the same components. Effects and `@host`
-externals remain deferred to Stage 4B, whose contracts Milestone 4 Step 13
-closes in the effects chapter and implements from Step 14. The WebAssembly
+externals are Stage 4B, whose contracts Milestone 4 Step 13 closes in the
+effects chapter and which Steps 14 to 16 implement. The WebAssembly
 backend executes this chapter's pure forms since Stage 4A.
 
 ## Model
