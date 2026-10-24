@@ -179,3 +179,78 @@ arguments (18), entry outcomes (19), query metadata (20).
 
 The `io` cases match in both backends with identical events; the registry snapshot
 and the ambient-read test still pass; `@host` is no longer reported unavailable.
+
+## As built: 16b-1
+
+Landed on its branch, conditional on its pull request merging; the base is `m4` at
+`746e3d3`, where Step 16a (PR #374) merged. Nothing a source program does changed:
+`@host` is still `@tool.unavailable`, the corpus has the same 525 cases, and the
+parity inventory is unchanged (135 of 135 matched).
+
+- **IR.** `Expr::Host` carries a `&'static HostRow`, its operands, the checked
+  `(result t e)` type, and an origin. `CheckedFunction::new_host` builds the
+  function whose body is the call, marked an external wrapper, so the effect graph
+  and the interpreter treat it as they treat a `@compiler` row. Validation checks
+  the arity and the primitive parameter types against the row.
+- **Interpreter.** `vibra-interp::host::Values` is the `HostValues` over
+  `RuntimeValue`. The machine reads the call with `HostCall::read`, performs it,
+  appends `AuditEvent::completed`, and builds the reply with `build_reply`; a
+  provider's memory exhaustion is `Halt::Memory`, the host event, with no event
+  recorded. `Execution::audit_trace` and `TestExecution::audit_trace` are
+  `&[AuditEvent]`.
+- **Emitter.** A host call evaluates its operands, issues an `i64` ID for each arena
+  operand (`new_id`), calls the import `vibra_v1`.`<symbol>` with the IDs, adopts the
+  returned ID into the destination slot, and then releases the IDs it issued. The
+  imports follow the native imports in the function index space; the eight host
+  routines (the seven builders and the adoption) follow the object constructor, and
+  the optional routines after them are numbered from `extras_base()`. A module with no
+  host import is byte-identical to before.
+- **Runner.** `vibra-wasm-run::host` defines every row's import. Its `Access` is the
+  runner's `HostValues`; it reaches a value through the exported accessors and the
+  builders only (`host_single_source_m4_step16b` holds it to that). A value is an ID,
+  a scalar, or `void`. The first stop of an accessor or builder is kept and returned
+  from the import, after the module recorded it. `Runner::start_with_host`,
+  `run_observed_with_host`, and `run_test_with_host` take a provider;
+  `Instance::audit_trace` reads the events.
+- **Wiring.** `run_target_with_host` and `run_tests_in_world` in `vibra-workspace`;
+  the CLI builds a `SystemProvider`, capturing for `--format json`; the conformance
+  handlers pass a fresh `WorldProvider` per test and per backend;
+  `ExecutionObservation::audit_trace` and `TestRow::audit_trace` are `AuditEvent`s
+  and the `@test-run.v1` and audit snapshots are written with `trace_to_vibon`.
+
+### Rulings
+
+- The runtime chapter says the command chooses the system provider's output
+  destination (ledger D33.2).
+- Header word 20 is `unsealed`, and an unsealed value carries a written map (D33.3).
+- The `dict` and `function` kinds, an enum of more than one component, a wrapper or
+  union of other than one, a nonzero variant for a kind without one, a write to a
+  sealed value, and a second seal are `@runtime.invalid-host-value`.
+
+### Cases
+
+None added, re-expected, deleted, or downgraded: no source reaches an operation. The
+specification-example inventory follows the lines of the runtime chapter, 9 rows.
+
+### Evidence
+
+- Host tests: `host_boundary_m4_step16b` (7: the `io` rows over a world in both
+  backends, the same results and traces, non-ASCII text, arbitrary bytes, a second
+  read, invalid UTF-8, a 1 MiB input and a million-byte output, and a provider's
+  memory exhaustion as the host event in both), `host_builders_m4_step16b` (19: every
+  trap condition, the borrowed parameter, the adopted result, a slot written twice,
+  a value nested 5000 deep, and the arena returning to where it started), and
+  `host_single_source_m4_step16b` (4).
+- The output sink: two tests in `system_provider_m4_step16`.
+- Validation of the head: format, clippy, `cargo test` (1366 passed), docs, the
+  corpus (525 passed, 135 matched), the six named tests, the fuzz smoke, and
+  `git diff --check`, all exit code 0.
+
+### Left for 16b-2
+
+The checker's `@host` branch (symbol, owner, signature), `std/io.vib` and the six
+manifest symbols, the parser's attribute spans, the re-expected cases and tests
+that assert `@host` unavailable (`V1-EFFECT-availability-host-member`, the
+`@host` strings in `process_review`, `process_step13`, and `process_step14`, and
+two others found by running them), the `io` and walk cases with parity rows, and
+the negatives.
