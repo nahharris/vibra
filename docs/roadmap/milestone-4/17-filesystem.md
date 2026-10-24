@@ -18,8 +18,8 @@ Prerequisite: Step 16b merged. Stage 4B behavior step: `fs.read`, `fs.write`, an
 
 1. `@std.fs` with `path = (deftype path str)` and its public constructor, `fs-error`,
    `fs-kind`, `fs-metadata`, the roots `read`, `write`, `metadata`, and the six
-   operations: `fs.read-file`, `fs.read-text`, `fs.read-entries`, `fs.write-file`,
-   `fs.write-text`, `fs.metadata-stat`. The parameter is spelled `at`.
+   operations: `fs.read.file`, `fs.read.text`, `fs.read.entries`, `fs.write.file`,
+   `fs.write.text`, `fs.metadata.stat`. The parameter is spelled `at`.
 2. The system provider's filesystem operations with each OS failure mapped to a
    closed variant (`not-found`, `permission-denied`, `not-a-file`, `not-a-directory`,
    `invalid-path` for a NUL, `invalid-text`, `other`), no trap.
@@ -50,7 +50,7 @@ Prerequisite: Step 16b merged. Stage 4B behavior step: `fs.read`, `fs.write`, an
 5. Move the cases to `matched`.
 
 Invariants preserved: the language does not normalize paths; a host failure is
-always an `err` and never a trap; `fs.read-entries` order does not depend on the
+always an `err` and never a trap; `fs.read.entries` order does not depend on the
 host; the world's writes never reach the real filesystem.
 
 ## Test matrix
@@ -86,3 +86,64 @@ algebra, symlink creation, permissions management.
 
 The `fs` rows of the registry each have a success case and every reachable error
 case in both backends with identical events.
+
+## As built
+
+Landed on its branch, conditional on its pull request merging; the base is the head
+of Step 16b-2 (PR #376, `5889e81`), which had not merged. The six `fs` rows are
+callable from source in both backends at once.
+
+- **The module.** `stdlib/src/std/fs.vib` declares `path` (the wrapper
+  `(deftype path str)` with its public constructor `(fs.path "text")`), `fs-error`,
+  `fs-kind`, `fs-metadata`, and the roots `read`, `write`, and `metadata` with the
+  six `visibility: @public` operations, each taking its path as `at`. The manifest
+  lists `@std.fs` and the six `fs` symbols and stays `0.3.0`. The checker needed no
+  change: `host_operation` already builds the `path`, `fs-metadata`, and
+  `(array str)` types of a row.
+- **The operations.** None was added in a backend. `HostCall`, `perform`, and
+  `build_reply` in `vibra-host` already read the wrapper, the `str`, and the `bytes`,
+  call the provider, and build the `bytes`, `str`, `array`, `record`, and `enum`
+  results; the interpreter and the Wasm runner supply `HostValues` only. The world
+  provider resolves paths from its root with no links; the system provider hands the
+  text to the operating system.
+- **One provider change.** A path whose nearest existing ancestor is a file is
+  `not-a-directory` in the system provider on every platform (ledger D34.1); the
+  operating system says so on Unix and says the path was not found on Windows.
+
+### Rulings
+
+- D34.1, above. It applies the registry's meaning of `not-a-directory` ("a file where
+  a directory is needed, ... as a parent") and adds no rule to the language.
+- The entry outcome of an `err` result (`@command.program-failed`, exit 6) is
+  Step 19; until then `vibra run` reports it as `@command.ok` with the `err` as
+  `programResult`, and the process test does not assert the outcome.
+
+### Cases
+
+Added, all `matched` in both backends: `V1-RUNTIME-fs-read-file-and-text`,
+`V1-RUNTIME-fs-invalid-text`, `V1-RUNTIME-fs-errors-are-values` (not-found for a file
+and a parent, not-a-file, not-a-directory as a target and as a parent, invalid-path),
+`V1-RUNTIME-fs-read-entries-sorted`, `V1-RUNTIME-fs-write-then-read`,
+`V1-RUNTIME-fs-metadata-stat`, `V1-RUNTIME-fs-error-propagates-with-try`,
+`V1-RUNTIME-fs-demo-path-from-stdin`, and `V1-RUNTIME-fs-test-world-writes-are-fresh`
+(`workspace-test`). Negatives: `V1-EFFECT-host-target-array-omits-fs-read` and
+`V1-EFFECT-host-function-ceiling-omits-fs-read`. No case was re-expected, deleted, or
+downgraded. Parity: 9 rows added, 151 of 151 `matched`.
+
+### Evidence
+
+- `fs_operations_m4_step17` (6 portable host tests and 3 Unix-only) drives all six
+  rows through `HostCall::read`, `perform`, and `build_reply` once over the system
+  provider in a real directory under the system temporary directory and once over a
+  world, and requires one reply from both: reads, the empty file, non-ASCII names and
+  contents, sorted entries, stat, every error variant of every row, replace and
+  create, a failed write that leaves the prior contents, a 4 MiB file, a path of a
+  thousand components, and a directory of 10,000 entries. The Unix-only tests cover a
+  name that is not Unicode, a permission failure, and a device as the `other` kind.
+- `process_m4_filesystem` (2 tests) runs the real binary over real files: the demo
+  shape with a path from standard input, and a missing file as the `err` of its call.
+
+### Not run on this platform
+
+The development host was Windows, so the three Unix-only host tests (`cfg(unix)`)
+were neither compiled nor run there; a Unix host runs them.

@@ -559,6 +559,16 @@ fn a_name_that_is_not_unicode_is_invalid_text() {
 
 #[cfg(unix)]
 #[test]
+fn a_device_is_the_other_kind_with_size_zero() {
+    let mut system = SystemProvider::new();
+    assert_eq!(
+        call(&mut system, "fs.metadata-stat", &[path("/dev/null")]),
+        metadata("other", 0)
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn a_refusal_by_the_host_is_permission_denied() {
     use std::os::unix::fs::PermissionsExt;
     let scratch = Scratch::new("denied");
