@@ -1,0 +1,47 @@
+id = "V1-EFFECT-let-else-return-rows"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "The rows of a let value, a let-else fallback, and a return operand join the body that holds them, so each performs outside an empty ceiling."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [173, 178]
+notes = ["performs @write via @see"]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [101, 117]
+  message = "performs @write via @write.text"
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [262, 267]
+notes = ["performs @write via @see"]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [101, 117]
+  message = "performs @write via @write.text"
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [346, 351]
+notes = ["performs @write via @see"]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [101, 117]
+  message = "performs @write via @write.text"

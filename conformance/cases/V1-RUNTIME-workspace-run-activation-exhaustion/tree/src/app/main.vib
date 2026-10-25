@@ -1,0 +1,6 @@
+(defn execute () void (let - (forever 0u64)) (do))
+
+(defn forever (count u64) u64
+  (match (u64.add-checked (forever count) 1u64)
+    (result.ok total) total
+    (result.err -) 0u64))

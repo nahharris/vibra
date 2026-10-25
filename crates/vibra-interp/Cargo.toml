@@ -10,7 +10,9 @@ publish = false
 
 [dependencies]
 vibra-diagnostics.workspace = true
+vibra-host.workspace = true
 vibra-ir.workspace = true
+vibra-native.workspace = true
 
 [lints]
 workspace = true

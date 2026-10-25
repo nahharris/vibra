@@ -1,0 +1,7 @@
+(import io @std.io)
+
+(defn main () (result void io.io-error)
+  effects: (io.stdin io.stdout)
+  (let - (io.stdin.text))
+  (let rest (try (io.stdin.text)))
+  (io.stdout.text rest))

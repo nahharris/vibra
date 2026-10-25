@@ -1,0 +1,23 @@
+id = "V1-TOOL-format-contract-call-order"
+rule = "V1-TOOL"
+profile = "tooling-v1"
+operation = "format"
+description = "The formatter moves types: before every ordinary operand of a contract member call and writes its labelled operands in the member's declaration order, and the checker warns that the written order was not canonical."
+
+[inputs]
+source = "tree/src/hello/main.vib"
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@style.argument-order"
+level = "@warning"
+source = "src/hello/main.vib"
+
+[expect.diagnostics.span]
+start = 33
+end = 107

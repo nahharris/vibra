@@ -1,0 +1,3 @@
+(deffect write
+  visibility: @public
+  (defn text (target str) void (do)))

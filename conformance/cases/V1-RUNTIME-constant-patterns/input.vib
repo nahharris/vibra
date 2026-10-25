@@ -1,0 +1,36 @@
+(defn main () (tuple str str str str str str str str str bool)
+  (tupleof
+    (by-limit 10i32)
+    (by-limit 9i32)
+    (by-top 10i32)
+    (by-color (color.green))
+    (by-color (color.red))
+    (by-origin (tupleof 0i32 0i32))
+    (by-origin (tupleof 0i32 1i32))
+    (by-flag true)
+    (by-pair (tupleof 3i32 false))
+    (if false false true)))
+
+(deftype color (enum red void green void))
+(def limit i32 10i32)
+(def top i32 limit)
+(def favorite color (color.green))
+(def origin (tuple i32 i32) (tupleof 0i32 0i32))
+
+(defn by-limit (n i32) str
+  (match n limit "limit" - "other"))
+
+(defn by-top (n i32) str
+  (match n top "top" - "other"))
+
+(defn by-color (value color) str
+  (match value favorite "favorite" - "other"))
+
+(defn by-origin (point (tuple i32 i32)) str
+  (match point origin "origin" - "elsewhere"))
+
+(defn by-flag (flag bool) str
+  (match flag true "yes" false "no"))
+
+(defn by-pair (pair (tuple i32 bool)) str
+  (match pair (tupleof - true) "on" (tupleof - false) "off"))

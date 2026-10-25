@@ -1,0 +1,19 @@
+(defn main () (tuple tag tag str str str str)
+  (tupleof
+      (as atom @ok)
+      5i32
+      (name (as atom @ok))
+      (name 3i32)
+      (is-ok (as atom @ok))
+      (is-ok (as atom @err))))
+
+(deftype tag (union atom i32))
+
+(defn name (value tag) str
+  (match value (as atom -) "atom" (as i32 -) "int"))
+
+(defn is-ok (value tag) str
+  (match value
+    (as atom @ok) "ok"
+    (as atom -) "other atom"
+    (as i32 -) "int"))

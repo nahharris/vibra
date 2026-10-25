@@ -14,11 +14,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
-    FunctionSignature, LabelledParameter, Type, TypeBody, TypeDefinition, TypeId,
+    EffectRoot, EffectRow, FunctionSignature, LabelledParameter, Type, TypeBody,
+    TypeDefinition, TypeId,
 };
 use vibra_syntax::{
-    Attribute, Declaration, DefintDeclaration, DeftypeBody, DeftypeDeclaration, Name,
-    SourceAst, TypeExpr, TypeMember,
+    Attribute, Declaration, DeffectDeclaration, DefintDeclaration, DeftypeBody,
+    DeftypeDeclaration, EffectRowOrder, Name, SourceAst, TypeExpr, TypeMember,
 };
 
 use crate::unavailable;
@@ -55,6 +56,13 @@ pub(crate) enum LowerError {
     /// A type argument that does not implement its parameter's bound: the
     /// argument and the interface name.
     UnsatisfiedBound(Type, String),
+    /// An effect row entry that resolves to no effect root.
+    InvalidEffect(String),
+    /// An effect row entry that names a private root of another module.
+    PrivateEffect(String),
+    /// An effect row entry naming a root the row already names, and where the
+    /// first entry is written.
+    DuplicateEffect(String, ByteSpan),
 }
 
 /// What a type expression may name besides declared types: the receiver type
@@ -117,6 +125,18 @@ pub(crate) struct DeclaredType {
     pub(crate) bounds: BTreeMap<String, usize>,
 }
 
+/// A source identity with the start and end of a span in it.
+type SpanKey = (String, usize, usize);
+
+/// One declared effect root visible to a checking run.
+#[derive(Clone, Debug)]
+pub(crate) struct DeclaredEffect {
+    pub(crate) root: EffectRoot,
+    pub(crate) source_id: String,
+    pub(crate) span: ByteSpan,
+    pub(crate) public: bool,
+}
+
 /// One declared interface visible to a checking run.
 #[derive(Clone, Debug)]
 pub(crate) struct DeclaredInterface {
@@ -148,7 +168,7 @@ pub(crate) struct ContractMember {
     /// The default of each labelled parameter, by name, as it is written and
     /// as the value it denotes at the parameter's type: a default is not part
     /// of the signature, and an implementation must keep its value.
-    pub(crate) defaults: BTreeMap<String, (String, Option<vibra_ir::Value>)>,
+    pub(crate) defaults: BTreeMap<String, (String, Option<vibra_ir::Constant>)>,
     /// The position of the fixed positional `self` parameter that selects the
     /// implementation, or `None` for a destination-dispatched member.
     pub(crate) receiver: Option<usize>,
@@ -214,6 +234,33 @@ pub(crate) struct TypeNames {
     /// site, so it is unique within a source; the lambda arm records it and
     /// every application reads it back.
     lambda_bounds: std::cell::RefCell<BTreeMap<(String, String), usize>>,
+    /// What each labelled default written as a name denotes, keyed by source
+    /// identity and the span of the default.
+    default_constants: BTreeMap<(String, usize, usize), DefaultConstant>,
+    /// Every declared effect root of the run.
+    effects: Vec<DeclaredEffect>,
+    /// Declared effect indices keyed by the source ID of their module.
+    effects_by_module: BTreeMap<String, BTreeMap<String, usize>>,
+    /// The roots a written ceiling names, with where each entry is written,
+    /// keyed by source identity and the span of the function, `lambda`, or
+    /// test that writes the row. The row check reads them back to report an
+    /// unused root at its entry.
+    written_effects: std::cell::RefCell<BTreeMap<SpanKey, Vec<(EffectRoot, ByteSpan)>>>,
+    /// The canonical order of each written row, keyed by source identity and
+    /// the span of the row's first entry.
+    row_orders: std::cell::RefCell<BTreeMap<SpanKey, Vec<usize>>>,
+}
+
+/// What a labelled default written as a name denotes.
+#[derive(Clone, Debug)]
+pub(crate) enum DefaultConstant {
+    /// The constant the expression denotes.
+    Value(vibra_ir::Constant),
+    /// The expression is not a constant expression. When it is a name of a
+    /// module value, that value's source identity and span.
+    NotConstant(Option<(String, ByteSpan)>),
+    /// The expression did not check, and the diagnostics said why.
+    Failed,
 }
 
 /// A value path that names a type constructor or an enum variant.
@@ -226,6 +273,24 @@ pub(crate) enum ConstructorTarget {
 }
 
 impl TypeNames {
+    /// Records what the labelled defaults written as names denote.
+    pub(crate) fn add_default_constants(
+        &mut self,
+        constants: BTreeMap<(String, usize, usize), DefaultConstant>,
+    ) {
+        self.default_constants.extend(constants);
+    }
+
+    /// What the labelled default written as a name at `span` denotes.
+    pub(crate) fn default_constant(
+        &self,
+        source_id: &str,
+        span: ByteSpan,
+    ) -> Option<&DefaultConstant> {
+        self.default_constants
+            .get(&(source_id.to_owned(), span.start(), span.end()))
+    }
+
     /// Registers a declared type owned by `source_id`, returning its index.
     pub(crate) fn declare(
         &mut self,
@@ -339,6 +404,214 @@ impl TypeNames {
             .or_default()
             .insert(name, index);
         index
+    }
+
+    /// Registers an effect root owned by `source_id`, returning its index.
+    pub(crate) fn declare_effect(
+        &mut self,
+        source_id: &str,
+        declaration: &DeffectDeclaration,
+        root: EffectRoot,
+    ) -> usize {
+        let index = self.effects.len();
+        let name = declaration.name().value().to_owned();
+        self.effects.push(DeclaredEffect {
+            root,
+            source_id: source_id.to_owned(),
+            span: declaration.span(),
+            public: declaration.attributes().items().iter().any(|attribute| {
+                matches!(attribute, Attribute::Visibility(name) if name.value() == "public")
+            }),
+        });
+        self.effects_by_module
+            .entry(source_id.to_owned())
+            .or_default()
+            .insert(name, index);
+        index
+    }
+
+    /// The effect root declared at `span` in `source_id`, when it is one.
+    pub(crate) fn effect_at(
+        &self,
+        source_id: &str,
+        span: ByteSpan,
+    ) -> Option<&DeclaredEffect> {
+        self.effects
+            .iter()
+            .find(|declared| declared.source_id == source_id && declared.span == span)
+    }
+
+    /// Resolves an effect row entry written in `source_id`: `r` names a root of
+    /// the same module and `alias.r` a public root of an imported module. A
+    /// symbol that resolves to no effect root, including one that names an
+    /// entity of another kind, is [`LowerError::InvalidEffect`].
+    pub(crate) fn resolve_effect(
+        &self,
+        source_id: &str,
+        name: &Name,
+    ) -> Result<&DeclaredEffect, LowerError> {
+        let invalid = || LowerError::InvalidEffect(name.value().to_owned());
+        let scope = self.scopes.get(source_id);
+        let in_module = |target: &str, member: &str| {
+            self.effects_by_module
+                .get(target)
+                .and_then(|effects| effects.get(member))
+                .and_then(|index| self.effects.get(*index))
+        };
+        match name.segments() {
+            [local] => {
+                if let Some(declared) = in_module(source_id, local) {
+                    return Ok(declared);
+                }
+                // A declaration import binds one top-level declaration of
+                // another module under a local name.
+                let (target, declaration) = scope
+                    .and_then(|scope| scope.declarations.get(local))
+                    .ok_or_else(invalid)?;
+                let declared = in_module(target, declaration).ok_or_else(invalid)?;
+                if declared.public {
+                    Ok(declared)
+                } else {
+                    Err(LowerError::PrivateEffect(name.value().to_owned()))
+                }
+            }
+            [alias, member] => {
+                let target = scope
+                    .and_then(|scope| scope.imports.get(alias))
+                    .ok_or_else(invalid)?;
+                let declared = in_module(target, member).ok_or_else(invalid)?;
+                if declared.public {
+                    Ok(declared)
+                } else {
+                    Err(LowerError::PrivateEffect(name.value().to_owned()))
+                }
+            }
+            _ => Err(invalid()),
+        }
+    }
+
+    /// Lowers the row a function type writes. Each entry is reported at its
+    /// own span; a type expression carries no other.
+    pub(crate) fn lower_function_type_row(
+        &self,
+        source_id: &str,
+        function: &vibra_syntax::FunctionType,
+    ) -> Result<EffectRow, LowerError> {
+        let mut roots = Vec::with_capacity(function.effects().len());
+        let mut firsts = BTreeMap::<EffectRoot, ByteSpan>::new();
+        for reference in function.effects() {
+            match self.resolve_effect(source_id, reference.name()) {
+                Ok(declared) => {
+                    if let Some(first) = firsts.get(&declared.root) {
+                        return Err(LowerError::At(
+                            reference.span(),
+                            Box::new(LowerError::DuplicateEffect(
+                                reference.name().value().to_owned(),
+                                *first,
+                            )),
+                        ));
+                    }
+                    firsts.insert(declared.root.clone(), reference.span());
+                    roots.push(declared.root.clone());
+                }
+                Err(error) => {
+                    return Err(LowerError::At(reference.span(), Box::new(error)));
+                }
+            }
+        }
+        if let Some(first) = function.effects().first() {
+            self.record_row_order(source_id, first.span(), &roots);
+        }
+        Ok(EffectRow::new(roots))
+    }
+
+    /// Records the canonical order of a written row of two or more resolved
+    /// entries, named by the span of its first entry as written.
+    fn record_row_order(&self, source_id: &str, first: ByteSpan, roots: &[EffectRoot]) {
+        let mut order = (0..roots.len()).collect::<Vec<_>>();
+        order.sort_by(|left, right| roots.get(*left).cmp(&roots.get(*right)));
+        self.row_orders
+            .borrow_mut()
+            .insert((source_id.to_owned(), first.start(), first.end()), order);
+    }
+
+    /// The canonical order of every effect row written in `source_id`.
+    pub(crate) fn effect_row_orders(&self, source_id: &str) -> Vec<EffectRowOrder> {
+        self.row_orders
+            .borrow()
+            .iter()
+            .filter(|((source, _, _), _)| source == source_id)
+            .map(|((_, start, end), order)| {
+                EffectRowOrder::new(ByteSpan::new(*start, *end), order.clone())
+            })
+            .collect()
+    }
+
+    /// Lowers the row a function, `lambda`, or test writes as `effects:`,
+    /// reporting each entry that resolves to no root at its own span, and
+    /// records the roots the row names against the span of the declaration
+    /// that writes it. `None` when an entry did not resolve.
+    pub(crate) fn lower_written_row(
+        &self,
+        source_id: &str,
+        owner: ByteSpan,
+        row: &vibra_syntax::EffectRow,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> Option<EffectRow> {
+        let mut valid = true;
+        let mut written = Vec::with_capacity(row.references().len());
+        for (name, span) in row.references().iter().zip(row.entry_spans()) {
+            match self.resolve_effect(source_id, name) {
+                Ok(declared) => {
+                    if let Some((_, first)) =
+                        written.iter().find(|(root, _)| *root == declared.root)
+                    {
+                        valid = false;
+                        report_lower_error(
+                            diagnostics,
+                            source_id,
+                            *span,
+                            &LowerError::DuplicateEffect(
+                                name.value().to_owned(),
+                                *first,
+                            ),
+                        );
+                    } else {
+                        written.push((declared.root.clone(), *span));
+                    }
+                }
+                Err(error) => {
+                    valid = false;
+                    report_lower_error(diagnostics, source_id, *span, &error);
+                }
+            }
+        }
+        let lowered = EffectRow::new(written.iter().map(|(root, _)| root.clone()));
+        if valid && let Some(first) = row.entry_spans().first() {
+            let roots = written
+                .iter()
+                .map(|(root, _)| root.clone())
+                .collect::<Vec<_>>();
+            self.record_row_order(source_id, *first, &roots);
+        }
+        self.written_effects
+            .borrow_mut()
+            .insert((source_id.to_owned(), owner.start(), owner.end()), written);
+        valid.then_some(lowered)
+    }
+
+    /// The roots the ceiling written at `owner` in `source_id` names, with the
+    /// span of each entry.
+    pub(crate) fn written_roots(
+        &self,
+        source_id: &str,
+        owner: ByteSpan,
+    ) -> Vec<(EffectRoot, ByteSpan)> {
+        self.written_effects
+            .borrow()
+            .get(&(source_id.to_owned(), owner.start(), owner.end()))
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Classifies `key` as a dict key (`docs/spec/02-type-system.md`, "Nominal
@@ -1008,11 +1281,7 @@ impl TypeNames {
                 self.applied(source_id, name, Vec::new())
             }
             TypeExpr::Function(function) => {
-                if !function.effects().is_empty() {
-                    return Err(LowerError::Unavailable(
-                        "nonempty function-type effect rows arrive in M4",
-                    ));
-                }
+                let effects = self.lower_function_type_row(source_id, function)?;
                 let variadic = function
                     .variadic()
                     .map(|tail| self.lower_variadic(source_id, scope, tail))
@@ -1035,7 +1304,8 @@ impl TypeNames {
                     .collect::<Result<Vec<_>, _>>()?;
                 let result = self.lower(source_id, scope, function.result())?;
                 let signature =
-                    FunctionSignature::with_labelled(parameters, labelled, result);
+                    FunctionSignature::with_labelled(parameters, labelled, result)
+                        .with_effects(effects);
                 Ok(Type::Function(Box::new(match variadic {
                     Some(tail) => signature.with_variadic(tail),
                     None => signature,
@@ -1788,6 +2058,35 @@ pub(crate) fn report_lower_error(
                 DiagnosticCode::TypeUnsatisfiedBound,
                 span,
                 format!("{argument} does not implement `{interface}`"),
+            )
+            .with_source_id(source_id),
+        ),
+        LowerError::InvalidEffect(name) => diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::EffectInvalidReference,
+                span,
+                format!("`{name}` does not resolve to a nominal effect root"),
+            )
+            .with_source_id(source_id),
+        ),
+        LowerError::DuplicateEffect(name, first) => diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::EffectDuplicateRoot,
+                span,
+                format!("`{name}` names a root this row already names"),
+            )
+            .with_source_id(source_id)
+            .with_related_source(
+                source_id,
+                *first,
+                "the root is first named here",
+            ),
+        ),
+        LowerError::PrivateEffect(name) => diagnostics.push(
+            Diagnostic::new(
+                DiagnosticCode::NamePrivateAccess,
+                span,
+                format!("`{name}` names a private effect root of another module"),
             )
             .with_source_id(source_id),
         ),

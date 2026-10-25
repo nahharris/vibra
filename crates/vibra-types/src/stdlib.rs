@@ -14,9 +14,10 @@ use std::path::Path;
 
 use sha2::{Digest, Sha256};
 use vibra_ir::external::CompilerIntrinsic;
+use vibra_ir::external::host::{HostType, host_row};
 use vibra_syntax::{
-    Attribute, DataField, DataNode, DataValue, Declaration, Literal, NameKind,
-    TypeMember,
+    Attribute, DataField, DataNode, DataValue, Declaration, FunctionDeclaration,
+    Literal, NameKind, TypeExpr, TypeMember,
 };
 
 /// The source identity of the `@std.text` module.
@@ -48,7 +49,7 @@ const LANGUAGE_ROLES: &[&str] =
     &["bool", "str", "bytes", "option", "result", "dict", "iter"];
 
 const PACKAGE_NAME: &str = "vibra-stdlib";
-const PACKAGE_VERSION: &str = "0.2.0";
+const PACKAGE_VERSION: &str = "0.3.0";
 
 const EMBEDDED_MANIFEST: &[u8] = include_bytes!("../../../stdlib/manifest.vibon");
 
@@ -87,6 +88,14 @@ const EMBEDDED_MODULES: &[(&str, &[u8])] = &[
         include_bytes!("../../../stdlib/src/std/iter.vib"),
     ),
     (
+        "std/io.vib",
+        include_bytes!("../../../stdlib/src/std/io.vib"),
+    ),
+    (
+        "std/fs.vib",
+        include_bytes!("../../../stdlib/src/std/fs.vib"),
+    ),
+    (
         "std/builtin.vib",
         include_bytes!("../../../stdlib/src/std/builtin.vib"),
     ),
@@ -108,6 +117,14 @@ pub(crate) fn source_type_id(source_id: &str, name: &str) -> vibra_ir::TypeId {
         Some(module) => stdlib_type_id(&module.split('/').collect::<Vec<_>>(), name),
         None => vibra_ir::TypeId::new(format!("{source_id}:{name}"), name),
     }
+}
+
+/// The identity a single source gives its effect root `name`, as
+/// [`source_type_id`] gives a type: a single source has no package, so a
+/// root's path is its name.
+pub(crate) fn source_effect_root(source_id: &str, name: &str) -> vibra_ir::EffectRoot {
+    let id = source_type_id(source_id, name);
+    vibra_ir::EffectRoot::new(id.id(), id.path())
 }
 
 /// The identity of the declared type `name` in the standard-library module
@@ -203,13 +220,14 @@ impl StdlibModule {
     }
 }
 
-/// The loaded standard library: the `vibra-stdlib@0.2.0` package and its
+/// The loaded standard library: the `vibra-stdlib@0.3.0` package and its
 /// admitted modules.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Stdlib {
     package: vibra_resolve::PackageId,
     modules: Vec<StdlibModule>,
     compiler: Vec<String>,
+    host: Vec<String>,
     native: Vec<String>,
     assertions: Vec<String>,
 }
@@ -231,6 +249,12 @@ impl Stdlib {
     #[must_use]
     pub fn module(&self, atom: &str) -> Option<&StdlibModule> {
         self.modules.iter().find(|module| module.atom == atom)
+    }
+
+    /// The `@host` registry symbols the modules bind.
+    #[must_use]
+    pub fn host_symbols(&self) -> &[String] {
+        &self.host
     }
 
     /// The `@compiler` symbols the modules may bind.
@@ -315,8 +339,16 @@ impl fmt::Display for StdlibError {
 impl std::error::Error for StdlibError {}
 
 /// Loads the standard library embedded into this toolchain.
+///
+/// The embedded bytes are fixed for the life of the process, so they are
+/// verified once, and every later call returns the verified result: no check
+/// is skipped, it is not repeated.
 pub fn load_stdlib() -> Result<Stdlib, StdlibError> {
-    load_stdlib_bytes(&StdlibInputs::embedded())
+    static VERIFIED: std::sync::OnceLock<Result<Stdlib, StdlibError>> =
+        std::sync::OnceLock::new();
+    VERIFIED
+        .get_or_init(|| load_stdlib_bytes(&StdlibInputs::embedded()))
+        .clone()
 }
 
 /// Loads one set of standard-library bytes without touching the filesystem.
@@ -359,6 +391,25 @@ pub fn load_stdlib_bytes(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibErro
             )));
         }
     }
+    // The host list names rows of the host registry, each once.
+    for (index, symbol) in manifest.host.iter().enumerate() {
+        if host_row(symbol).is_none() {
+            return Err(StdlibError::new(format!(
+                "standard-library manifest lists `{symbol}`, which is not in the host registry"
+            )));
+        }
+        if manifest
+            .host
+            .iter()
+            .take(index)
+            .any(|earlier| earlier == symbol)
+        {
+            return Err(StdlibError::new(format!(
+                "standard-library manifest lists `{symbol}` more than once"
+            )));
+        }
+    }
+    let mut bound_host = Vec::new();
     let mut modules = Vec::with_capacity(manifest.modules.len());
     let mut claimed_roles = Vec::new();
     for entry in &manifest.modules {
@@ -384,12 +435,16 @@ pub fn load_stdlib_bytes(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibErro
             )));
         }
         let source_id = format!("{SOURCE_ROOT}{}", entry.path);
-        for role in check_compiler_symbols(
+        let bindings = check_compiler_symbols(
             &source_id,
+            &entry.atom,
             bytes,
             &manifest.compiler,
+            &manifest.host,
             &manifest.native,
-        )? {
+        )?;
+        bound_host.extend(bindings.host);
+        for role in bindings.roles {
             // A role is claimed once, from the closed table of the type chapter.
             if !LANGUAGE_ROLES.contains(&role.as_str()) {
                 return Err(StdlibError::new(format!(
@@ -410,6 +465,16 @@ pub fn load_stdlib_bytes(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibErro
             bytes: bytes.to_vec(),
         });
     }
+    // The host list holds exactly the symbols the modules bind.
+    if let Some(unbound) = manifest
+        .host
+        .iter()
+        .find(|symbol| !bound_host.contains(symbol))
+    {
+        return Err(StdlibError::new(format!(
+            "standard-library manifest lists `{unbound}`, which no module binds"
+        )));
+    }
     // Every role is claimed: syntax and checking fill each with a library
     // declaration, so a library missing one cannot be loaded.
     if let Some(missing) = LANGUAGE_ROLES
@@ -427,6 +492,7 @@ pub fn load_stdlib_bytes(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibErro
         ),
         modules,
         compiler: manifest.compiler,
+        host: manifest.host,
         native: manifest.native,
         assertions: manifest.assertions,
     })
@@ -434,14 +500,20 @@ pub fn load_stdlib_bytes(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibErro
 
 /// Requires every `external: @compiler` symbol and every `native:` symbol a
 /// module declares to be listed in the manifest's matching tier. The checker
-/// binds each against the registry signature. Returns the roles the module
-/// claims with `role:`.
+/// binds each against the registry signature. It also requires every
+/// `external: @host` declaration, which only a member of a `deffect` may write,
+/// to name a symbol of the `host` list and of the host registry, with the row's
+/// signature and with the row's owner equal to the module and root that declare
+/// it. Returns the roles the module claims with `role:` and the host symbols it
+/// binds.
 fn check_compiler_symbols(
     source_id: &str,
+    module_atom: &str,
     bytes: &[u8],
     compiler: &[String],
+    host: &[String],
     native: &[String],
-) -> Result<Vec<String>, StdlibError> {
+) -> Result<ModuleBindings, StdlibError> {
     let text = std::str::from_utf8(bytes)
         .map_err(|_| StdlibError::new(format!("`{source_id}` is not UTF-8")))?;
     let document = vibra_syntax::parse_source(Path::new(source_id), text)
@@ -452,14 +524,25 @@ fn check_compiler_symbols(
         )));
     }
     let Some(ast) = document.ast() else {
-        return Ok(Vec::new());
+        return Ok(ModuleBindings::default());
     };
     let mut roles = Vec::new();
+    let mut bound_host = Vec::new();
     let mut attribute_lists = Vec::new();
     for declaration in ast.declarations() {
         match declaration {
             Declaration::Defn(function) => {
                 attribute_lists.push(function.attributes().items())
+            }
+            Declaration::Deffect(deffect) => {
+                let owner = format!("@{module_atom}.{}", deffect.name().value());
+                for member in deffect.members() {
+                    if let Some(symbol) =
+                        check_host_member(source_id, &owner, host, member)?
+                    {
+                        bound_host.push(symbol);
+                    }
+                }
             }
             // `iter` plays its role as an interface.
             Declaration::Defint(defint) => {
@@ -499,7 +582,111 @@ fn check_compiler_symbols(
             }
         }
     }
-    Ok(roles)
+    Ok(ModuleBindings {
+        roles,
+        host: bound_host,
+    })
+}
+
+/// What one standard-library module binds.
+#[derive(Default)]
+struct ModuleBindings {
+    /// The roles it claims with `role:`.
+    roles: Vec<String>,
+    /// The host registry symbols it binds with `external: @host`.
+    host: Vec<String>,
+}
+
+/// Checks one member of a `deffect` that writes `external: @host`: the symbol is
+/// a row of the host registry and of the manifest's `host` list, the row's owner
+/// is the module and root that declare the member, and the written signature is
+/// the row's. Answers the symbol, or `None` for a member that is not a host
+/// operation.
+fn check_host_member(
+    source_id: &str,
+    owner: &str,
+    host: &[String],
+    member: &FunctionDeclaration,
+) -> Result<Option<String>, StdlibError> {
+    let attributes = member.attributes().items();
+    if !attributes
+        .iter()
+        .any(|attribute| matches!(attribute, Attribute::External(name) if name.value() == "host"))
+    {
+        return Ok(None);
+    }
+    let name = member.name().value();
+    let Some(symbol) = attributes.iter().find_map(|attribute| match attribute {
+        Attribute::Symbol(Literal::String(symbol)) => Some(symbol.value()),
+        _ => None,
+    }) else {
+        return Err(StdlibError::new(format!(
+            "`{source_id}` member `{name}` writes `external: @host` without a `symbol:`"
+        )));
+    };
+    let Some(row) = host_row(symbol) else {
+        return Err(StdlibError::new(format!(
+            "`{source_id}` binds `{symbol}`, which is not in the host registry"
+        )));
+    };
+    if !host.iter().any(|listed| listed == symbol) {
+        return Err(StdlibError::new(format!(
+            "`{source_id}` binds `{symbol}`, which the manifest does not list"
+        )));
+    }
+    if row.owner != owner {
+        return Err(StdlibError::new(format!(
+            "`{source_id}` binds `{symbol}` under owner `{owner}`, but the registry's owner is `{}`",
+            row.owner
+        )));
+    }
+    let written = written_signature(member);
+    if written.as_deref() != Some(row.signature().as_str()) {
+        return Err(StdlibError::new(format!(
+            "`{source_id}` binds `{symbol}` with signature `{}`, but the registry's signature is `{}`",
+            written.unwrap_or_else(|| "(unwritable)".to_owned()),
+            row.signature()
+        )));
+    }
+    Ok(Some(symbol.to_owned()))
+}
+
+/// The signature a member writes, spelled as the registry spells a row's:
+/// `(value str) -> (result void io-error)`.
+fn written_signature(member: &FunctionDeclaration) -> Option<String> {
+    let parameters = member
+        .parameters()
+        .iter()
+        .map(|parameter| {
+            let ty = type_spelling(parameter.value_type())?;
+            Some(format!("{} {ty}", parameter.pattern().source().trim()))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(format!(
+        "({}) -> {}",
+        parameters.join(" "),
+        type_spelling(member.result())?
+    ))
+}
+
+/// A type expression in the spelling of the registry: a name, `void`,
+/// `(array T)`, or an application. Any other form has none.
+fn type_spelling(ty: &TypeExpr) -> Option<String> {
+    match ty {
+        TypeExpr::Name(name) => Some(name.raw().to_owned()),
+        TypeExpr::Void => Some(HostType::Void.spelling()),
+        TypeExpr::Array(element) => {
+            Some(format!("(array {})", type_spelling(element)?))
+        }
+        TypeExpr::Applied { head, arguments } => {
+            let arguments = arguments
+                .iter()
+                .map(type_spelling)
+                .collect::<Option<Vec<_>>>()?;
+            Some(format!("({} {})", head.raw(), arguments.join(" ")))
+        }
+        _ => None,
+    }
 }
 
 /// One entry of the manifest's module dict.
@@ -518,6 +705,7 @@ struct Manifest {
     package_version: String,
     modules: Vec<ModuleEntry>,
     compiler: Vec<String>,
+    host: Vec<String>,
     native: Vec<String>,
     assertions: Vec<String>,
 }
@@ -544,6 +732,7 @@ fn decode_manifest(bytes: &[u8]) -> Result<Manifest, StdlibError> {
         package_version: record.string("package-version")?,
         modules: record.modules("modules")?,
         compiler: record.strings("compiler")?,
+        host: record.strings("host")?,
         native: record.strings("native")?,
         assertions: record.strings("assertions")?,
     };
@@ -716,7 +905,7 @@ mod tests {
         let stdlib = load_stdlib().expect("embedded standard library");
         assert_eq!(
             stdlib.package(),
-            &vibra_resolve::PackageId::new("vibra-stdlib", "0.2.0")
+            &vibra_resolve::PackageId::new("vibra-stdlib", "0.3.0")
         );
         assert!(stdlib.maps("std.text", super::STDLIB_TEXT_SOURCE_ID));
         assert!(stdlib.maps("std.option", super::STDLIB_OPTION_SOURCE_ID));
@@ -836,10 +1025,10 @@ mod tests {
             ),
             (
                 embedded.replace(
-                    "package-version: \"0.2.0\"",
+                    "package-version: \"0.3.0\"",
                     "package-version: \"0.1.0\"",
                 ),
-                "expected `vibra-stdlib@0.2.0`",
+                "expected `vibra-stdlib@0.3.0`",
             ),
             (
                 embedded.replace("sha256: \"sha256:", "sha256: \"md5:"),
@@ -859,5 +1048,235 @@ mod tests {
             inputs.manifest = text.as_bytes();
             rejects(&inputs, fragment);
         }
+    }
+
+    // --- the `host` list (Milestone 4, Step 16a) -----------------------------
+
+    use sha2::{Digest, Sha256};
+
+    /// The `host` symbols the embedded `@std.fs` binds, which every manifest of
+    /// these tests lists beside the symbols under test.
+    const FS_SYMBOLS: [&str; 6] = [
+        "fs.read-file",
+        "fs.read-text",
+        "fs.read-entries",
+        "fs.write-file",
+        "fs.write-text",
+        "fs.metadata-stat",
+    ];
+
+    /// The embedded manifest without `@std.io` and without its `host` list, so a
+    /// synthetic module can stand in for it.
+    fn bare_manifest() -> String {
+        let mut bare = manifest().to_owned();
+        let start = bare.find("    @std.io (record").expect("io entry");
+        let tail = "role: @source)\n";
+        let end = start + bare[start..].find(tail).expect("entry end") + tail.len();
+        bare.replace_range(start..end, "");
+        let host = bare.find("  host: (array").expect("host");
+        let native = bare.find("  native:").expect("native");
+        bare.replace_range(
+            host..native,
+            "  host: (array)
+",
+        );
+        bare
+    }
+
+    /// A manifest and a synthetic `@std.io` module that binds `body`, with the
+    /// manifest's `host` list set to `listed`.
+    fn host_inputs(body: &str, listed: &[&str]) -> (String, String) {
+        let digest = format!("{:x}", Sha256::digest(body.as_bytes()));
+        let list = format!(
+            "(array {})",
+            listed
+                .iter()
+                .chain(FS_SYMBOLS.iter())
+                .map(|symbol| format!("\"{symbol}\""))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        let manifest = bare_manifest()
+            .replace("  host: (array)\n", &format!("  host: {list}\n"))
+            .replace(
+                "    @std.core (record",
+                &format!(
+                    "    @std.io (record\n      path: \"std/io.vib\"\n      sha256: \"sha256:{digest}\"\n      role: @source)\n    @std.core (record"
+                ),
+            );
+        (manifest, body.to_owned())
+    }
+
+    fn loads_with(body: &str, listed: &[&str]) -> Result<super::Stdlib, String> {
+        let (manifest, module) = host_inputs(body, listed);
+        let mut inputs =
+            StdlibInputs::embedded().with_module("std/io.vib", module.as_bytes());
+        inputs.manifest = manifest.as_bytes();
+        load_stdlib_bytes(&inputs).map_err(|error| error.to_string())
+    }
+
+    const STDOUT_TEXT: &str = "(deffect stdout\n  (defn text (value str) (result void io-error)\n    external: @host\n    symbol: \"io.stdout-text\"))\n";
+
+    #[test]
+    fn the_package_is_0_3_0_and_the_embedded_host_list_is_the_io_and_fs_symbols() {
+        let stdlib = load_stdlib().expect("embedded standard library");
+        assert_eq!(stdlib.package().version(), "0.3.0");
+        assert_eq!(
+            stdlib.host_symbols(),
+            [
+                "io.stdin-text",
+                "io.stdin-bytes",
+                "io.stdout-text",
+                "io.stdout-bytes",
+                "io.stderr-text",
+                "io.stderr-bytes",
+                "fs.read-file",
+                "fs.read-text",
+                "fs.read-entries",
+                "fs.write-file",
+                "fs.write-text",
+                "fs.metadata-stat",
+            ]
+            .map(str::to_owned)
+        );
+    }
+
+    #[test]
+    fn the_host_field_sits_between_compiler_and_native() {
+        let embedded = manifest();
+        let compiler = embedded.find("  compiler:").expect("compiler");
+        let host = embedded.find("  host:").expect("host");
+        let native = embedded.find("  native:").expect("native");
+        assert!(compiler < host && host < native);
+        // A manifest without the field, or with it out of order, is rejected.
+        let without = {
+            let mut text = embedded.to_owned();
+            let start = text.find("  host:").expect("host");
+            let end = text.find("  native:").expect("native");
+            text.replace_range(start..end, "");
+            text
+        };
+        for text in [
+            without.clone(),
+            without.replace("  assertions:", "  host: (array)\n  assertions:"),
+        ] {
+            let mut inputs = StdlibInputs::embedded();
+            inputs.manifest = text.as_bytes();
+            let error = load_stdlib_bytes(&inputs)
+                .expect_err("rejected")
+                .to_string();
+            assert!(
+                error.contains("`host`") || error.contains("`compiler`"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_module_binding_a_listed_host_operation_of_its_owner_loads() {
+        let stdlib = loads_with(STDOUT_TEXT, &["io.stdout-text"]).expect("loads");
+        assert_eq!(
+            stdlib.host_symbols(),
+            ["io.stdout-text"]
+                .iter()
+                .chain(FS_SYMBOLS.iter())
+                .map(|symbol| (*symbol).to_owned())
+                .collect::<Vec<_>>()
+        );
+        assert!(stdlib.module("std.io").is_some());
+    }
+
+    #[test]
+    fn a_host_symbol_outside_the_registry_or_listed_twice_is_rejected() {
+        let error = loads_with(STDOUT_TEXT, &["io.stdout-line"]).expect_err("rejected");
+        assert!(
+            error.contains("`io.stdout-line`, which is not in the host registry"),
+            "{error}"
+        );
+        let error = loads_with(STDOUT_TEXT, &["io.stdout-text", "io.stdout-text"])
+            .expect_err("rejected");
+        assert!(
+            error.contains("lists `io.stdout-text` more than once"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn the_host_list_holds_exactly_the_symbols_the_modules_bind() {
+        let error = loads_with(
+            "(deftype io-error (enum closed void))\n",
+            &["io.stdin-text"],
+        )
+        .expect_err("rejected");
+        assert!(
+            error.contains("lists `io.stdin-text`, which no module binds"),
+            "{error}"
+        );
+        let error = loads_with(STDOUT_TEXT, &[]).expect_err("rejected");
+        assert!(
+            error.contains("binds `io.stdout-text`, which the manifest does not list"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_host_operation_of_another_owner_signature_or_module_is_rejected() {
+        // The owner is the module and root that declare the operation.
+        let wrong_root = STDOUT_TEXT.replace("(deffect stdout", "(deffect stderr");
+        let error = loads_with(&wrong_root, &["io.stdout-text"]).expect_err("rejected");
+        assert!(
+            error.contains("owner `@std.io.stderr`")
+                && error.contains("`@std.io.stdout`"),
+            "{error}"
+        );
+
+        let wrong_parameter_type = STDOUT_TEXT.replace("(value str)", "(value bytes)");
+        let error = loads_with(&wrong_parameter_type, &["io.stdout-text"])
+            .expect_err("rejected");
+        assert!(error.contains("signature"), "{error}");
+        assert!(
+            error.contains("(value str) -> (result void io-error)"),
+            "{error}"
+        );
+
+        let wrong_parameter_name = STDOUT_TEXT.replace("(value str)", "(text str)");
+        assert!(loads_with(&wrong_parameter_name, &["io.stdout-text"]).is_err());
+
+        let wrong_result =
+            STDOUT_TEXT.replace("(result void io-error)", "(result str io-error)");
+        assert!(loads_with(&wrong_result, &["io.stdout-text"]).is_err());
+
+        let wrong_error = STDOUT_TEXT.replace("io-error", "fs-error");
+        assert!(loads_with(&wrong_error, &["io.stdout-text"]).is_err());
+
+        let extra_parameter =
+            STDOUT_TEXT.replace("(value str)", "(value str more str)");
+        assert!(loads_with(&extra_parameter, &["io.stdout-text"]).is_err());
+    }
+
+    #[test]
+    fn a_host_binding_needs_a_deffect_and_a_symbol() {
+        let outside = "(defn text (value str) (result void io-error)\n  external: @host\n  symbol: \"io.stdout-text\")\n";
+        let error = loads_with(outside, &["io.stdout-text"]).expect_err("rejected");
+        // The reader owns both rules: `@host` belongs to a `deffect` member, and
+        // `external:` comes with a `symbol:`.
+        assert!(error.contains("does not read cleanly"), "{error}");
+        let no_symbol = STDOUT_TEXT.replace("    symbol: \"io.stdout-text\"", "");
+        // The reader already requires a `symbol:` beside an `external:`.
+        let error = loads_with(&no_symbol, &[]).expect_err("rejected");
+        assert!(error.contains("does not read cleanly"), "{error}");
+    }
+
+    #[test]
+    fn an_array_result_and_a_path_parameter_have_their_registry_spelling() {
+        // `fs.read-entries` is `(at path) -> (result (array str) fs-error)`, owned
+        // by `@std.fs.read`; the embedded module binds it and loads.
+        let stdlib = load_stdlib().expect("embedded standard library");
+        assert!(stdlib.module("std.fs").is_some());
+        assert!(
+            stdlib
+                .host_symbols()
+                .contains(&"fs.read-entries".to_owned())
+        );
     }
 }

@@ -14,10 +14,14 @@ use std::sync::Arc;
 
 use vibra_diagnostics::ByteSpan;
 
+mod constant;
+mod effect;
 mod nominal;
 mod observed;
 mod pattern;
 
+pub use constant::Constant;
+pub use effect::{EffectRoot, EffectRow, RowTail};
 pub use nominal::{TypeBody, TypeDefinition, TypeId, canonical_members};
 use nominal::{
     type_table, validate_declared_expr, validate_declared_signature,
@@ -26,6 +30,8 @@ use nominal::{
 pub use observed::ObservedValue;
 pub use pattern::{MatchArm, Pattern};
 
+pub mod arena;
+pub mod boundary;
 pub mod external;
 
 /// One of the primitive types admitted by the M2 literal profile.
@@ -294,6 +300,64 @@ impl Type {
         }
     }
 
+    /// This type's constructor over other components, in the order
+    /// [`Self::components`] lists them, or `None` when the count does not fit
+    /// the constructor or the constructor is a function type, whose parameter
+    /// kinds the components do not carry.
+    #[must_use]
+    pub fn with_components(&self, components: &[Self]) -> Option<Self> {
+        Some(match (self, components) {
+            (Self::Applied(id, values), _) if values.len() == components.len() => {
+                Self::Applied(id.clone(), components.to_vec())
+            }
+            (Self::Interface(id, values), _) if values.len() == components.len() => {
+                Self::Interface(id.clone(), components.to_vec())
+            }
+            (Self::Tuple(values), _) if values.len() == components.len() => {
+                Self::Tuple(components.to_vec())
+            }
+            (Self::Union(values), _) if values.len() == components.len() => {
+                Self::Union(components.to_vec())
+            }
+            (Self::Array(_), [element]) => Self::Array(Box::new(element.clone())),
+            (Self::Dict(..), [key, value]) => {
+                Self::Dict(Box::new(key.clone()), Box::new(value.clone()))
+            }
+            (Self::Record(members), _) if members.len() == components.len() => {
+                Self::Record(
+                    members
+                        .iter()
+                        .zip(components)
+                        .map(|((name, _), value)| (name.clone(), value.clone()))
+                        .collect(),
+                )
+            }
+            (Self::Enum(members), _) if members.len() == components.len() => {
+                Self::Enum(
+                    members
+                        .iter()
+                        .zip(components)
+                        .map(|((name, _), value)| (name.clone(), value.clone()))
+                        .collect(),
+                )
+            }
+            (
+                Self::Function(_)
+                | Self::Applied(..)
+                | Self::Interface(..)
+                | Self::Tuple(_)
+                | Self::Union(_)
+                | Self::Array(_)
+                | Self::Dict(..)
+                | Self::Record(_)
+                | Self::Enum(_),
+                _,
+            ) => return None,
+            (other, []) => other.clone(),
+            _ => return None,
+        })
+    }
+
     /// Whether any generic parameter occurs in this type.
     #[must_use]
     pub fn has_params(&self) -> bool {
@@ -410,6 +474,9 @@ impl fmt::Display for Type {
                 if let Some(tail) = signature.variadic() {
                     write!(formatter, " variadic: {tail}")?;
                 }
+                if !signature.effects().is_empty() {
+                    write!(formatter, " effects: {}", signature.effects())?;
+                }
                 formatter.write_str(")")
             }
             _ => formatter.write_str(self.as_str()),
@@ -422,7 +489,7 @@ impl fmt::Display for Type {
 pub struct LabelledParameter {
     name: String,
     value_type: Type,
-    default: Option<Value>,
+    default: Option<Constant>,
 }
 
 impl LabelledParameter {
@@ -432,7 +499,7 @@ impl LabelledParameter {
     pub fn new(
         name: impl Into<String>,
         value_type: Type,
-        default: Option<Value>,
+        default: Option<Constant>,
     ) -> Self {
         Self {
             name: name.into(),
@@ -455,7 +522,7 @@ impl LabelledParameter {
 
     /// The declaration default, when this is a callable declaration value.
     #[must_use]
-    pub const fn default(&self) -> Option<&Value> {
+    pub const fn default(&self) -> Option<&Constant> {
         self.default.as_ref()
     }
 }
@@ -469,6 +536,10 @@ pub struct FunctionSignature {
     /// the packed tail as one final argument after the labelled slots.
     variadic: Option<Type>,
     result: Type,
+    /// The exact closed effect row of the function type. For a declaration
+    /// it is the written or default-empty ceiling; for an effect operation it
+    /// is the owner root together with the additive row.
+    effects: EffectRow,
 }
 
 impl FunctionSignature {
@@ -480,7 +551,21 @@ impl FunctionSignature {
             labelled: Vec::new(),
             variadic: None,
             result,
+            effects: EffectRow::empty(),
         }
+    }
+
+    /// The same signature with the effect row `effects`.
+    #[must_use]
+    pub fn with_effects(mut self, effects: EffectRow) -> Self {
+        self.effects = effects;
+        self
+    }
+
+    /// The exact closed effect row, which is part of the function type.
+    #[must_use]
+    pub const fn effects(&self) -> &EffectRow {
+        &self.effects
     }
 
     /// Creates a signature with declaration-order labelled slots.
@@ -495,6 +580,7 @@ impl FunctionSignature {
             labelled,
             variadic: None,
             result,
+            effects: EffectRow::empty(),
         }
     }
 
@@ -558,6 +644,7 @@ impl FunctionSignature {
                 .zip(&other.parameters)
                 .all(|(left, right)| left.same_shape(right))
             && self.result.same_shape(&other.result)
+            && self.effects == other.effects
             && self.labelled.len() == other.labelled.len()
             && self
                 .labelled
@@ -597,6 +684,7 @@ impl FunctionSignature {
                 .as_ref()
                 .map(|tail| tail.substitute(arguments)),
             result: self.result.substitute(arguments),
+            effects: self.effects.clone(),
         }
     }
 
@@ -610,6 +698,7 @@ impl FunctionSignature {
                 .zip(&other.parameters)
                 .all(|(left, right)| left.admits(right))
             && self.result.admits(&other.result)
+            && self.effects == other.effects
             && self.labelled.len() == other.labelled.len()
             && self
                 .labelled
@@ -889,6 +978,19 @@ pub enum Expr {
         /// standard-library type that plays it.
         result: Type,
         /// The source origin of the intrinsic call.
+        origin: SourceOrigin,
+    },
+    /// A call to one host operation of the closed `vibra_v1` registry
+    /// (`docs/spec/06-runtime.md`, "The host registry"). It names its row and
+    /// no ID, offset, or instance.
+    Host {
+        /// The registry row.
+        row: &'static external::host::HostRow,
+        /// Checked operands in the row's parameter order.
+        arguments: Vec<Self>,
+        /// The checked `(result t e)` type.
+        result: Type,
+        /// The source origin of the call.
         origin: SourceOrigin,
     },
     /// A labelled argument whose default is resolved from the runtime callee.
@@ -1180,6 +1282,12 @@ pub enum CallTarget {
         /// The interface's type arguments at this call, for a generic
         /// interface: one receiver may implement it at several.
         arguments: Vec<Type>,
+        /// The member's own type arguments at this call, one for each generic
+        /// parameter of its `where:` clause in order, or none when the member
+        /// is not generic. They are fixed by inference, the expected type, or
+        /// a written `types:` list, and may name the enclosing activation's
+        /// own generic parameters.
+        member_types: Vec<Type>,
         /// For a member selected by its destination, the type that selects
         /// the implementation in place of the operand at `receiver`: a
         /// generic parameter bounded by the interface, instantiated at run
@@ -1270,6 +1378,22 @@ impl Expr {
     ) -> Self {
         Self::External {
             intrinsic,
+            arguments,
+            result,
+            origin,
+        }
+    }
+
+    /// Creates a checked host operation call.
+    #[must_use]
+    pub fn host(
+        row: &'static external::host::HostRow,
+        arguments: Vec<Self>,
+        result: Type,
+        origin: SourceOrigin,
+    ) -> Self {
+        Self::Host {
+            row,
             arguments,
             result,
             origin,
@@ -1518,6 +1642,7 @@ impl Expr {
         match self {
             Self::Literal { origin, .. }
             | Self::External { origin, .. }
+            | Self::Host { origin, .. }
             | Self::Default { origin, .. }
             | Self::Sequence { origin, .. }
             | Self::Variable { origin, .. }
@@ -1549,7 +1674,7 @@ impl Expr {
     pub fn result_type(&self) -> Type {
         match self {
             Self::Literal { value, .. } => value.ty(),
-            Self::External { result, .. } => result.clone(),
+            Self::External { result, .. } | Self::Host { result, .. } => result.clone(),
             Self::Default { value_type, .. } => value_type.clone(),
             Self::Sequence { expressions, .. } => {
                 expressions.last().map_or(Type::Void, Self::result_type)
@@ -1623,6 +1748,7 @@ impl Expr {
         match self {
             Self::Literal { .. }
             | Self::External { .. }
+            | Self::Host { .. }
             | Self::Default { .. }
             | Self::Variable { .. }
             | Self::Global { .. }
@@ -1656,6 +1782,7 @@ impl Expr {
             Self::Literal { value, .. } => Some(value),
             Self::Default { .. }
             | Self::External { .. }
+            | Self::Host { .. }
             | Self::Sequence { .. }
             | Self::Variable { .. }
             | Self::Global { .. }
@@ -1690,7 +1817,7 @@ impl Expr {
             | Self::Global { .. }
             | Self::Function { .. }
             | Self::Captured { .. } => 0,
-            Self::External { arguments, .. } => {
+            Self::External { arguments, .. } | Self::Host { arguments, .. } => {
                 arguments.iter().map(Self::slot_count).max().unwrap_or(0)
             }
             Self::Sequence { expressions, .. } => {
@@ -1791,6 +1918,37 @@ impl Expr {
                         return Err(IrError::InvalidExpression(format!(
                             "{} argument has type {actual}, expected {expected}",
                             intrinsic.symbol()
+                        )));
+                    }
+                }
+                Ok(result.clone())
+            }
+            Self::Host {
+                row,
+                arguments,
+                result,
+                ..
+            } => {
+                if arguments.len() != row.parameters.len() {
+                    return Err(IrError::InvalidExpression(format!(
+                        "host operation {} expects {} arguments, got {}",
+                        row.symbol,
+                        row.parameters.len(),
+                        arguments.len()
+                    )));
+                }
+                for (argument, parameter) in arguments.iter().zip(row.parameters) {
+                    let actual =
+                        argument.validate_shape_with_captures(slots, capture_types)?;
+                    // A declared parameter type (`path`) is bound by the
+                    // checker against the registry; the primitive ones are
+                    // held here.
+                    if let Some(expected) = parameter.ty.primitive()
+                        && !expected.admits(&actual)
+                    {
+                        return Err(IrError::InvalidExpression(format!(
+                            "host operation {} argument has type {actual}, expected {expected}",
+                            row.symbol
                         )));
                     }
                 }
@@ -2631,8 +2789,23 @@ pub struct CheckedFunction {
     origin: SourceOrigin,
     slot_count: usize,
     external_wrapper: bool,
+    native_body: Option<NativeBody>,
     test_assertion: Option<TestAssertion>,
     implements: Option<Implements>,
+    effect_owner: Option<EffectRoot>,
+}
+
+/// The checked Vibra body of a native whose meaning applies a function value.
+///
+/// Such a native has no import, because a pure import cannot call back into
+/// the module, so a module runs this body (`docs/spec/06-runtime.md`, "Native
+/// implementations"). The reference interpreter keeps running its native code,
+/// which the differential holds to the body. The body has the signature of the
+/// wrapper that carries it, and it calls the wrapper itself to recurse.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NativeBody {
+    body: Expr,
+    slot_count: usize,
 }
 
 /// The contract member a function implements for one receiver type, which
@@ -2649,6 +2822,11 @@ pub struct Implements {
     /// same generic parameters as `receiver`. A default member names the
     /// interface's own parameters.
     pub arguments: Vec<Type>,
+    /// The generic parameter this function declares for each of the contract
+    /// member's own generic parameters, in the contract's `where:` order, or
+    /// `None` where the function declares none that matches. A
+    /// [`CallTarget::Contract`] binds each to the call's `member_types`.
+    pub member_generics: Vec<Option<String>>,
 }
 
 impl CheckedFunction {
@@ -2691,6 +2869,97 @@ impl CheckedFunction {
         Self::with_slots_and_external(
             name, signature, body, origin, slot_count, true, None,
         )
+    }
+
+    /// Creates a checked function backed by one host operation of the closed
+    /// registry. Its operands are its parameters in order, and its result is
+    /// the declared `(result t e)`; the owner root is the caller's to set with
+    /// [`Self::with_effect_owner`].
+    ///
+    /// # Errors
+    ///
+    /// The signature's parameter count disagrees with the row, or the body does
+    /// not fit the signature.
+    pub fn new_host(
+        name: impl Into<String>,
+        signature: FunctionSignature,
+        row: &'static external::host::HostRow,
+        origin: SourceOrigin,
+    ) -> Result<Self, IrError> {
+        if signature.fixed_parameter_count() != row.parameters.len() {
+            return Err(IrError::InvalidExpression(format!(
+                "host operation {} has a mismatched declaration signature",
+                row.symbol
+            )));
+        }
+        let arguments = signature
+            .slot_types()
+            .into_iter()
+            .enumerate()
+            .map(|(slot, value_type)| Expr::variable(slot, value_type, origin.clone()))
+            .collect();
+        let body = Expr::host(row, arguments, signature.result(), origin.clone());
+        let slot_count = row.parameters.len();
+        Self::with_slots_and_external(
+            name, signature, body, origin, slot_count, true, None,
+        )
+    }
+
+    /// Creates the wrapper of a native whose meaning runs a Vibra body in a
+    /// module, carrying that checked body beside the wrapper the interpreter
+    /// runs as the native.
+    ///
+    /// The body has the wrapper's signature, `slot_count` immutable activation
+    /// slots, and recurses by calling the wrapper.
+    ///
+    /// # Errors
+    ///
+    /// The intrinsic is not a native without an import, the signature
+    /// disagrees with the registry, or the body is not of the signature's
+    /// result type.
+    pub fn new_external_with_body(
+        name: impl Into<String>,
+        signature: FunctionSignature,
+        intrinsic: external::CompilerIntrinsic,
+        body: Expr,
+        slot_count: usize,
+        origin: SourceOrigin,
+    ) -> Result<Self, IrError> {
+        if !intrinsic.runs_body() {
+            return Err(IrError::InvalidExpression(format!(
+                "external {} has an import or an inline lowering, so it has no body to run",
+                intrinsic.symbol()
+            )));
+        }
+        let mut function = Self::new_external(name, signature, intrinsic, origin)?;
+        function.validate_body(&body, slot_count)?;
+        function.native_body = Some(NativeBody { body, slot_count });
+        Ok(function)
+    }
+
+    /// Checks that `body` is a body of this function's signature.
+    fn validate_body(&self, body: &Expr, slot_count: usize) -> Result<(), IrError> {
+        if slot_count < self.signature.fixed_parameter_count() {
+            return Err(IrError::InvalidSlotCount {
+                function: self.name.clone(),
+                slots: slot_count,
+                parameters: self.signature.fixed_parameter_count(),
+            });
+        }
+        let mut slots = vec![None; slot_count];
+        for (slot, value_type) in self.signature.slot_types().into_iter().enumerate() {
+            if let Some(bound) = slots.get_mut(slot) {
+                *bound = Some(value_type);
+            }
+        }
+        let actual = body.validate_shape(&mut slots)?;
+        if actual != Type::Never && !actual.same_shape(&self.signature.result()) {
+            return Err(IrError::ResultTypeMismatch {
+                expected: Box::new(self.signature.result()),
+                actual: Box::new(actual),
+            });
+        }
+        Ok(())
     }
 
     /// Creates a checked function, rejecting a body whose final type differs
@@ -2781,8 +3050,10 @@ impl CheckedFunction {
             origin,
             slot_count,
             external_wrapper,
+            native_body: None,
             test_assertion,
             implements: None,
+            effect_owner: None,
         })
     }
 
@@ -2823,6 +3094,25 @@ impl CheckedFunction {
         self.external_wrapper
     }
 
+    /// The checked Vibra body of a native whose meaning applies a function
+    /// value, which a module runs where the interpreter runs the native. `None`
+    /// for every other function.
+    #[must_use]
+    pub fn native_body(&self) -> Option<&Expr> {
+        self.native_body.as_ref().map(|native| &native.body)
+    }
+
+    /// The body a module lowers for this function, and the number of
+    /// immutable activation slots it needs: the checked Vibra body of a native
+    /// that runs one, and the function's own body otherwise.
+    #[must_use]
+    pub fn module_body(&self) -> (&Expr, usize) {
+        match &self.native_body {
+            Some(native) => (&native.body, native.slot_count),
+            None => (&self.body, self.slot_count),
+        }
+    }
+
     /// Whether this is one of the closed verified test assertion functions.
     #[must_use]
     pub const fn test_assertion(&self) -> Option<TestAssertion> {
@@ -2840,6 +3130,21 @@ impl CheckedFunction {
     #[must_use]
     pub const fn implements(&self) -> Option<&Implements> {
         self.implements.as_ref()
+    }
+
+    /// The same function marked as an operation of the effect root `owner`.
+    /// An operation's signature row is its owner together with its additive
+    /// row, and applying it contributes that complete row.
+    #[must_use]
+    pub fn with_effect_owner(mut self, owner: EffectRoot) -> Self {
+        self.effect_owner = Some(owner);
+        self
+    }
+
+    /// The effect root that owns this function as an operation, if any.
+    #[must_use]
+    pub const fn effect_owner(&self) -> Option<&EffectRoot> {
+        self.effect_owner.as_ref()
     }
 }
 
@@ -2884,6 +3189,15 @@ fn static_program_edges(
             Some(DependencyNode::Function(index)),
             &mut dependencies,
         )?;
+        if let Some(body) = function.native_body() {
+            validate_program_expr(
+                body,
+                globals,
+                functions,
+                Some(DependencyNode::Function(index)),
+                &mut dependencies,
+            )?;
+        }
     }
     Ok(dependencies)
 }
@@ -2966,6 +3280,9 @@ impl CheckedModuleSet {
                     actual: Box::new(actual),
                 });
             }
+            if let Some(native) = &function.native_body {
+                function.validate_body(&native.body, native.slot_count)?;
+            }
         }
         for global in &globals {
             if let Err(message) = validate_type_shape(&global.value_type) {
@@ -2986,6 +3303,9 @@ impl CheckedModuleSet {
         for function in &functions {
             validate_declared_signature(function.signature(), &definitions)?;
             validate_declared_expr(function.body(), &definitions)?;
+            if let Some(body) = function.native_body() {
+                validate_declared_expr(body, &definitions)?;
+            }
         }
         for global in &globals {
             validate_declared_type(&global.value_type, &definitions)?;
@@ -2996,6 +3316,9 @@ impl CheckedModuleSet {
         }
         for function in &functions {
             validate_tail_calls(function.body(), true)?;
+            if let Some(body) = function.native_body() {
+                validate_tail_calls(body, true)?;
+            }
         }
         let static_dependencies = static_program_edges(&globals, &functions)?;
         reject_entry_free_initializer_cycles(
@@ -3165,13 +3488,17 @@ impl CheckedProgram {
                 .map(canonical_type)
                 .collect::<Vec<_>>();
             let body = canonical_expr(function.body());
+            let native = function.native_body().map_or_else(String::new, |body| {
+                format!(" native-body: {}", canonical_expr(body))
+            });
             output.push_str(&format!(
-                "    (record name: @{} params: {} result: {}{} body: {})\n",
+                "    (record name: @{} params: {} result: {}{} body: {}{})\n",
                 function.name,
                 canonical_array(&parameters),
                 canonical_type(&function.signature.result()),
                 canonical_labelled_field(&function.signature),
-                body
+                body,
+                native
             ));
         }
         output.push_str("  )\n)\n");
@@ -3320,6 +3647,17 @@ fn validate_program_expr(
         | Expr::Default { .. }
         | Expr::Variable { .. }
         | Expr::Captured { .. } => {}
+        Expr::Host { arguments, .. } => {
+            for argument in arguments {
+                validate_program_expr(
+                    argument,
+                    globals,
+                    functions,
+                    owner,
+                    dependencies,
+                )?;
+            }
+        }
         Expr::External {
             intrinsic,
             arguments,
@@ -3596,10 +3934,35 @@ fn validate_program_expr(
             if let CallTarget::Direct(function) = target {
                 targets.insert(*function);
             } else if let CallTarget::Contract {
-                interface, member, ..
+                interface,
+                member,
+                member_types,
+                ..
             } = target
             {
-                targets.extend(contract_targets(functions, interface, member));
+                let selected = contract_targets(functions, interface, member);
+                // Every implementation of a member declares one slot for each
+                // of the member's generic parameters, which the call fills.
+                for function in
+                    selected.iter().filter_map(|index| functions.get(*index))
+                {
+                    let declared = function
+                        .implements()
+                        .map(|implements| implements.member_generics.len());
+                    if declared.is_some_and(|declared| declared != member_types.len())
+                        && function.implements().is_some_and(|implements| {
+                            implements.interface == *interface
+                                && implements.member == *member
+                        })
+                    {
+                        return Err(IrError::InvalidExpression(format!(
+                            "contract call of {member} passes {} member type arguments, but an implementation declares {}",
+                            member_types.len(),
+                            declared.unwrap_or_default()
+                        )));
+                    }
+                }
+                targets.extend(selected);
             } else if let Some(callee_expression) = callee_expression {
                 let summary = possible_function_targets(
                     callee_expression,
@@ -3925,9 +4288,10 @@ fn possible_function_targets(
         Expr::External { result, .. } if holds_function(result) => {
             FunctionTargetSummary::unknown()
         }
-        Expr::Literal { .. } | Expr::External { .. } | Expr::Default { .. } => {
-            FunctionTargetSummary::default()
-        }
+        Expr::Literal { .. }
+        | Expr::External { .. }
+        | Expr::Host { .. }
+        | Expr::Default { .. } => FunctionTargetSummary::default(),
     }
 }
 
@@ -4617,9 +4981,10 @@ impl<'a> CallFlow<'a> {
             Expr::External { result, .. } if holds_function(result) => {
                 FlowTargetSummary::unknown_function()
             }
-            Expr::Literal { .. } | Expr::External { .. } | Expr::Default { .. } => {
-                FlowTargetSummary::default()
-            }
+            Expr::Literal { .. }
+            | Expr::External { .. }
+            | Expr::Host { .. }
+            | Expr::Default { .. } => FlowTargetSummary::default(),
         }
     }
 
@@ -4651,6 +5016,11 @@ impl<'a> CallFlow<'a> {
                         )));
                     };
                     dependencies.insert(DependencyNode::Global(*index));
+                }
+            }
+            Expr::Host { arguments, .. } => {
+                for argument in arguments {
+                    self.collect_expr(argument, owner, environment, captures)?;
                 }
             }
             Expr::External {
@@ -4938,14 +5308,14 @@ fn validate_signature_shape(signature: &FunctionSignature) -> Result<(), String>
         // An atom default has its own singleton type, which is one atom of
         // `atom`.
         if let Some(default) = parameter.default()
-            && !default.ty().same_shape(&parameter.value_type())
-            && !(matches!(default, Value::Atom(_))
+            && !default.value_type().same_shape(&parameter.value_type())
+            && !(matches!(default, Constant::Primitive(Value::Atom(_)))
                 && parameter.value_type() == Type::Atom)
         {
             return Err(format!(
                 "default for labelled parameter `{}` has type {}, expected {}",
                 parameter.name(),
-                default.ty(),
+                default.value_type(),
                 parameter.value_type()
             ));
         }
@@ -4995,7 +5365,7 @@ fn validate_tail_calls(expression: &Expr, tail_position: bool) -> Result<(), IrE
         // The operand of `return` hands its value to the caller of the
         // activation it exits, so it is in tail position there.
         Expr::Return { value, .. } => validate_tail_calls(value, true)?,
-        Expr::External { arguments, .. } => {
+        Expr::External { arguments, .. } | Expr::Host { arguments, .. } => {
             for argument in arguments {
                 validate_tail_calls(argument, false)?;
             }
@@ -5272,6 +5642,17 @@ fn canonical_expr(expression: &Expr) -> String {
             canonical_type(result),
             canonical_array(&arguments.iter().map(canonical_expr).collect::<Vec<_>>())
         ),
+        Expr::Host {
+            row,
+            arguments,
+            result,
+            ..
+        } => format!(
+            "(record kind: @host symbol: \"{}\" result: {} arguments: {})",
+            row.symbol,
+            canonical_type(result),
+            canonical_array(&arguments.iter().map(canonical_expr).collect::<Vec<_>>())
+        ),
         Expr::Default { value_type, .. } => format!(
             "(record kind: @default type: {})",
             canonical_type(value_type)
@@ -5403,14 +5784,28 @@ fn canonical_expr(expression: &Expr) -> String {
                     interface,
                     member,
                     receiver,
+                    member_types,
                     closed,
                     ..
                 } => format!(
-                    "(record kind: @call contract: @{} member: @{member} receiver: {receiver}u64{}{} result: {} arguments: {})",
+                    "(record kind: @call contract: @{} member: @{member} receiver: {receiver}u64{}{}{} result: {} arguments: {})",
                     interface.path(),
                     closed
                         .map(|closed| format!(" closed: @{}", closed.symbol()))
                         .unwrap_or_default(),
+                    if member_types.is_empty() {
+                        String::new()
+                    } else {
+                        format!(
+                            " types: {}",
+                            canonical_array(
+                                &member_types
+                                    .iter()
+                                    .map(canonical_type)
+                                    .collect::<Vec<_>>()
+                            )
+                        )
+                    },
                     tail_field,
                     canonical_type(result),
                     canonical_array(&values)
@@ -5525,9 +5920,10 @@ fn canonical_function_signature(signature: &FunctionSignature) -> String {
         .map(|tail| format!(" variadic: {}", canonical_type(tail)))
         .unwrap_or_default();
     format!(
-        "(record type: @fn parameters: {} labelled: (record{labelled}){variadic} result: {})",
+        "(record type: @fn parameters: {} labelled: (record{labelled}){variadic} result: {} effects: {})",
         canonical_array(&parameters),
-        canonical_type(&signature.result())
+        canonical_type(&signature.result()),
+        signature.effects().canonical_vibon()
     )
 }
 
@@ -5597,6 +5993,34 @@ fn canonical_character(value: char) -> String {
             format!("\\u{:04X}", value as u32)
         }
         _ => format!("\\{value}"),
+    }
+}
+
+/// The one quiet NaN of binary32: the positive sign and a zero payload.
+pub const CANONICAL_NAN_F32: u32 = 0x7FC0_0000;
+
+/// The one quiet NaN of binary64: the positive sign and a zero payload.
+pub const CANONICAL_NAN_F64: u64 = 0x7FF8_0000_0000_0000;
+
+/// The bits of a binary32 value as an operation that observes a float sees
+/// them (`docs/spec/06-runtime.md`, "Evaluation"): any NaN is the canonical
+/// quiet NaN, and every other value is itself.
+#[must_use]
+pub const fn canonical_f32_bits(bits: u32) -> u32 {
+    if bits & 0x7FFF_FFFF > 0x7F80_0000 {
+        CANONICAL_NAN_F32
+    } else {
+        bits
+    }
+}
+
+/// [`canonical_f32_bits`] for a binary64 value.
+#[must_use]
+pub const fn canonical_f64_bits(bits: u64) -> u64 {
+    if bits & 0x7FFF_FFFF_FFFF_FFFF > 0x7FF0_0000_0000_0000 {
+        CANONICAL_NAN_F64
+    } else {
+        bits
     }
 }
 
@@ -6169,7 +6593,7 @@ mod tests {
             vec![super::LabelledParameter::new(
                 "value",
                 Type::I32,
-                Some(Value::I32(7)),
+                Some(crate::Constant::Primitive(Value::I32(7))),
             )],
             Type::I32,
         );
@@ -6295,7 +6719,7 @@ mod tests {
             vec![super::LabelledParameter::new(
                 "value",
                 Type::I32,
-                Some(Value::Str("wrong".to_owned())),
+                Some(crate::Constant::Primitive(Value::Str("wrong".to_owned()))),
             )],
             Type::I32,
         );

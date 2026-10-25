@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-io-invalid-text"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "Standard input that is not UTF-8 read as text is the typed error invalid-text, returned as the err of the call and discarded by the program, which continues; the position is then at the end, so the next read is the empty text."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

@@ -1,0 +1,13 @@
+id = "V1-RUNTIME-workspace-test-effect-operation"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "A test that writes its complete ceiling applies an effect operation with a Vibra body, and one with an additive row, and passes; a pure test omits the row."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon" }

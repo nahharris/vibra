@@ -1,0 +1,23 @@
+id = "V1-TYPE-NAMES-vocabulary-declarations"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "type-check"
+description = "Only the embedded standard library declares a name of the closed import-free vocabulary: a user module value or function spelled true or false is @name.reserved-value-spelling, as one spelled bool is."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.reserved-value-spelling"
+level = "@error"
+source = "input.vib"
+span = [0, 27]
+
+[[expect.diagnostics]]
+code = "@name.reserved-value-spelling"
+level = "@error"
+source = "input.vib"
+span = [28, 61]

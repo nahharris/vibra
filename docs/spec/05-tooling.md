@@ -1,9 +1,15 @@
 # Vibra v1 CLI, MCP, and code tooling
 
 Status: normative target
-Implementation status: M2 provides `project init`, `fmt`, `check`, `run`, and
-`test` through the shared workspace engine. MCP and the remaining v1 tooling
-commands remain unavailable.
+Implementation status: `project init`, `fmt`, `check`, `run`, and `test` run
+through the shared workspace engine, with `run` and `test` executing the
+reference interpreter for the complete pure language. M3 adds the index
+records and the workspace position envelope as library projections. MCP, the
+public `query` command, and the remaining v1 tooling commands remain
+unavailable. Milestone 4 Step 13 closes the Stage 4B contracts of this chapter,
+program arguments, the `@command.program-failed` result, the audit-event
+payloads, and the effect fields of the position envelope and the index, and
+implements none of them; Steps 16, 18, 19, and 20 do.
 
 ## One workspace engine
 
@@ -28,7 +34,7 @@ vibra fmt
 vibra check
 vibra lint
 vibra test
-vibra run
+vibra run <target> [-- <arg>...]
 vibra build
 vibra query <subject> [--include <metadata>] [--expand <relations>]
 vibra edit fix|rename|organize-imports
@@ -50,10 +56,21 @@ The admitted process grammar is closed and uses one global option prefix:
 vibra [--format human|json] [--workspace PATH] project init [DEST]
 vibra [--format human|json] [--workspace PATH] fmt PATH [--write]
 vibra [--format human|json] [--workspace PATH] check [TARGET]
-vibra [--format human|json] [--workspace PATH] run TARGET
+vibra [--format human|json] [--workspace PATH] run TARGET [-- ARG...]
 vibra [--format human|json] [--workspace PATH] test [TEST]
 vibra [--format human|json] help
 ```
+
+**Program arguments.** `run` takes the program arguments after a literal `--`
+token. Every token after `--` is one argument, in order and verbatim, including a
+token that begins with `-` or is itself `--`; `--` with no argument after it is
+valid and gives none. The arguments are what `env.read.args` returns. `--` is
+accepted only by `run`, only after `TARGET`, and only once as the separator;
+before `TARGET` it is invalid input, as is `--` on any other command. `test`
+takes no arguments: its host world supplies `args`, as the runtime chapter's host
+world section states, so the same test gives the same result wherever it runs. An
+argument that is not Unicode is `not-unicode` to the operation that reads it, not
+an error of the command.
 
 `help` may also be spelled `--help` or `-h` in the command position. It takes
 no arguments, prints this grammar to stdout in human mode, and succeeds with
@@ -108,7 +125,10 @@ The `tests[].name` payload field is the exact canonical selector spelling.
 `tests[].result` is one of the five `@test.*` result atoms defined by the
 projects chapter. `tests[].failure` is non-null only for
 `@test.assertion-failed`; `tests[].trap` is non-null only for `@test.trap`;
-`tests[].auditTrace` is an event-string array and is empty for every M2 test.
+`tests[].auditTrace` is the array of `AuditEvent` objects the test completed in
+its fresh host world, standard output and error included, and is empty for a
+test that completes no host call, which includes every invalid and unavailable
+item.
 `tests[].diagnostics` contains suite-wide static diagnostics attributed through
 the test's module/import closure and item-owned diagnostics attributed by test
 identity and declaration-dependency closure. The same diagnostic documents also
@@ -117,8 +137,9 @@ most once in the envelope array, in canonical diagnostic order, even if shared
 by multiple test items. `selected` is the
 number of selected test items, `passed` counts
 `@test.passed`, and `failed` is `selected - passed`. Options after the command
-are limited to the explicit `fmt --write` spelling; unknown options, extra
-positionals, and alternate spellings are invalid input.
+are limited to the explicit `fmt --write` spelling and the `--` separator of
+`run`; unknown options, extra positionals before the separator, and alternate
+spellings are invalid input.
 
 `TARGET` is a relative filesystem path. After canonicalization beneath the
 discovered project root, it MUST identify exactly one validated local target's
@@ -149,7 +170,8 @@ hyphen, and trim edge hyphens. Use `hello` when no ASCII letter or digit
 remains, and prefix `project-` when the result starts with a digit.
 
 The initialized package is version `0.1.0` with no dependencies, one binary
-target rooted at `src/<name>` with entry `@<name>.main.main`, and source
+target rooted at `src/<name>` with entry `@<name>.main.main` and the empty
+target effect array `effects: (array)`, and source
 `src/<name>/main.vib` containing a pure `void` `main`. It also creates `src/`
 and `tests/`. The generated entry imports no standard-library module. Init rejects a
 nonempty destination and any path that escapes the canonical workspace. Its
@@ -190,29 +212,45 @@ and operational logs to stderr. The envelope always has these fields:
 
 `result` is one of `@command.ok`, `@command.diagnostics`,
 `@command.test-failed`, `@command.invalid-input`,
-`@command.operational-failure`, `@command.trap`, or `@command.unavailable`.
+`@command.operational-failure`, `@command.trap`, `@command.unavailable`, or
+`@command.program-failed`.
 `diagnostics` is always an array of the versioned diagnostic documents. Payloads are closed by
 command: `help` has `{ "usage": string }`; `init` has
 `{ "workspace": string, "created": string[] }`; `fmt`
 has `{ "path": string, "changed": boolean, "written": boolean,
 "text": string|null }`; `check` has `{ "accepted": boolean }`; `run` has
 `{ "target": string, "programResult": string|null, "stdout": string,
-"stderr": string, "auditTrace": string[], "trap":
+"stderr": string, "auditTrace": AuditEvent[], "trap":
 { "trapCode": string, "origin": SpanDocument|null }|null }`; and `test` has
 `{ "selected": integer, "passed": integer, "failed": integer,
 "tests": [{ "name": string, "result": string, "failure":
 { "assertion": string, "expected": string, "actual": string,
 "primarySpan": SpanDocument }|null, "trap": { "trapCode": string,
-"origin": SpanDocument|null }|null, "auditTrace": string[],
+"origin": SpanDocument|null }|null, "auditTrace": AuditEvent[],
 "diagnostics": DiagnosticDocument[] }] }`.
+An `AuditEvent` is `{ "kind": string, "op": string, "args": string[],
+"result": string }`: the event record of the runtime chapter's audit-trace
+section, every value as its VIBON text, in call order. A consumer preserves an
+event of a `kind` it does not know, with its fields as text.
 `programResult` is the pure value result in the runtime chapter's canonical
 value encoding; a runtime trap is represented by
 `@command.trap` and its structured diagnostic, never as a successful value.
 The trap payload has `trapCode: string` and `origin: SpanDocument|null` when
 the command owns a program result. In JSON mode
-`stdout` captures program output in the envelope, preserving one machine
-document on the process stdout. Human `run` writes the program's stdout bytes
+`stdout` and `stderr` capture the program's output in the envelope, preserving
+one machine document on the process stdout; bytes that are not UTF-8 are
+decoded with each invalid sequence replaced by U+FFFD, and the exact bytes are
+the arguments of the audit events. Human `run` writes the program's stdout bytes
 directly and keeps command diagnostics on stderr.
+
+An entry that returns `err` ends `run` with `@command.program-failed` and exit
+code 6, and the run is neither a trap nor a diagnostic: `err` is a value the
+program returned. The payload's `programResult` is the canonical encoding of the
+entry's `result`, `trap` is `null`, the envelope's `diagnostics` is empty, and
+human mode prints the encoding to standard error. An entry that returns `void` or
+`ok` is `@command.ok`. Every failure of a host operation reaches the entry only
+as the `err` of that operation, so no host failure is a command result of its
+own; memory exhaustion stays the host event, `@command.operational-failure`.
 Human `test` keeps diagnostics on stderr and reports on stdout. A fully passing
 suite prints `test suite passed: N test(s)`. Otherwise every non-passing item
 prints `FAIL <selector> <@test.* result>`, followed by an indented
@@ -223,18 +261,25 @@ N selected`.
 For M2 checked-program execution failures, `trapCode` is exactly the string
 `"@runtime.invalid-checked-program"`; their diagnostic uses that code with
 primary span `0..0` and no source ID, and the CLI trap `origin` is `null`.
-The other trap code is `"@runtime.unobservable-function"`, whose origin in a
-test is the assertion call. `run` reports either trap as `@command.trap`, with
-the code in its payload's `trap` and a `null` origin. Only a host event, such
-as `@runtime.host-stack-exhausted`, is `@command.operational-failure`.
+The other trap codes are `"@runtime.unobservable-function"`, whose origin in a
+test is the assertion call, and `"@runtime.invalid-host-value"`, which has no
+origin: it is raised when a host call, an accessor, or a builder receives a value
+it does not admit, and no checked program reaches it unless the toolchain has a
+defect. The `test` item schema and the `run` payload admit all three. `run` reports any trap as
+`@command.trap`, with the code in its payload's `trap` and a `null` origin. Only a
+host event, such as `@runtime.memory-exhausted`, is
+`@command.operational-failure`.
 
 The process exit mapping is fixed: `0` for `@command.ok`, `1` for
 `@command.diagnostics` or `@command.test-failed`, `2` for
 `@command.invalid-input`, `3` for `@command.operational-failure`, `4` for
-`@command.unavailable`, and `5` for `@command.trap`. A valid deferred command
+`@command.unavailable`, `5` for `@command.trap`, and `6` for
+`@command.program-failed`. A valid deferred command
 or language form uses `@command.unavailable` and includes `@tool.unavailable`;
 an unknown command or option uses `@command.invalid-input` instead. A trap is
-never recast as an operational failure or an unavailable feature.
+never recast as an operational failure or an unavailable feature, and a program
+failure, an entry that returned `err`, is neither a trap nor an operational
+failure.
 
 Query subjects are a source position such as `src/main.vib:120`, an atom entity
 reference such as `@std.fs.read`, a built-in diagnostic code such as
@@ -257,6 +302,28 @@ All commands accept `--format human|json` where their output is structured.
 JSON goes to stdout, diagnostics and operational logs go to stderr, and a
 nonzero exit is classified by a stable result atom. No command infers an output
 format from a filename extension.
+
+### Execution backend of `run` and `test`
+
+`run` and `test` execute the reference interpreter. They take no option that
+selects a backend, and an unknown option remains `@command.invalid-input`.
+`build` stays `@command.unavailable` with `@tool.unavailable`. The WebAssembly
+backend is reached only through the conformance harness, which runs every
+executable case in both backends and fails on a disagreement, as the
+conformance chapter states; whether a shipped command ever executes a module is
+decided with the build products. A command's observable result is therefore the
+interpreter's, and the module the harness runs produces the same one.
+
+`run` gives the program the system provider of the runtime chapter, so its
+filesystem, environment, clocks, random bytes, and standard streams are the real
+ones, and the arguments after `--` are its `env.read.args`. `test` always gives
+each test a fresh deterministic in-memory host world, standard output and error
+included, which go to the test's audit trace and never to the process. The
+provider is not a language mode and not an option of either command.
+
+A host event ends `run` or `test` with an unlocated error diagnostic. The `run`
+payload then has a null `programResult` and a null `trap`; the `test` payload
+has zero `selected`, `passed`, and `failed` and an empty `tests` array.
 
 ## Project operations
 
@@ -350,7 +417,9 @@ A **declaration** record describes one module-level or nested declaration:
 | `visibility` | `@public` or `@private` |
 | `source` | `(record source-id: "…" start: n end: n)`, the declaration's byte span |
 | `signature` | The canonical type encoding of a value, function, or method's checked type; a type's or interface's generic parameter list otherwise |
-| `effects` | The checked performed effect row, as canonical root atoms, sorted |
+| `ceiling` | The written or default-empty effect ceiling, as the row record `(record roots: (array @root...))` of the effects chapter. For an effect operation it is the complete row: the owner root together with the additive row |
+| `effects` | The checked performed effect row, as the same row record |
+| `external` | `void`, or `(record provider: @host symbol: "…")` or `(record provider: @compiler symbol: "…")` for a declaration bound by `external:`. A user package cannot write `external:`, so every record of a local package has `void`, and the record of an embedded standard-library declaration carries its provider and registry symbol |
 | `errors` | The error types its result can carry: `e` for a result type `(result t e)`, else `(array)` |
 | `applications` | The canonical identities of every declaration its body applies — calls, constructors, and interface members — sorted and without duplicates |
 | `text` | The formatter-normalized source of the declaration, byte for byte what `vibra fmt` writes |
@@ -373,8 +442,9 @@ The document is canonical VIBON. Declarations are sorted by the UTF-8 bytes of
 `id`, implementations by `receiver` and then `interface`, and references by
 `source-id`, `start`, and `end`. An identical snapshot produces a byte-identical
 document on every host. An unavailable or recovered declaration keeps its
-record with `signature`, `effects`, `errors`, and `applications` absent, and
-the envelope's fact status says why.
+record with `signature`, `ceiling`, `effects`, `errors`, and `applications`
+absent, and the envelope's fact status says why. `external` is a syntactic fact,
+so it is present on every record.
 
 A module record's `signature` is `void` and its `text` is the whole formatted
 module. A member written in an `impl` block has no atom identity, so it has no
@@ -388,7 +458,10 @@ local package; a standard-library declaration appears only as a target.
 `urn:vibra:schema:v1:index` is the JSON wire form of the same document for a
 tooling consumer: the same records in the same order, with identities as atom
 spellings without `@`, canonical type encodings as VIBON text, and absent facts
-as `null`.
+as `null`. A row is `{ "roots": [...] }` and `external` is `null` or
+`{ "provider": "host"|"compiler", "symbol": string }`. The `index` schema is major version 1
+and gains `ceiling` and `external` and the row form of `effects` in Milestone 4
+Step 20, which replaces the identity list of the earlier shape in place.
 
 ### M2 workspace position envelope
 
@@ -402,8 +475,8 @@ complete structural result under `structural`.
 The workspace envelope has these required fields: `schemaVersion`,
 `workspaceRevision`, `sourceId`, `offset`, `nodeId`, `structural`, `role`,
 `context`, `identity`, `expectedType`, `observedType`, `visibleLocals`,
-`visibleImports`, `declarationCandidates`, `application`, and `pattern`. The
-envelope's `schemaVersion` is `1`. `sourceId` is the immutable project-relative
+`visibleImports`, `declarationCandidates`, `application`, `pattern`, and
+`effects`. The envelope's `schemaVersion` is `1`. `sourceId` is the immutable project-relative
 source identity and `nodeId` is the canonical locator
 `<sourceId>#<start>-<end>`, using the selected structural span. A consumer joins
 semantic observations only by the triple `(workspaceRevision, sourceId,
@@ -455,7 +528,10 @@ candidates are sorted by canonical identity. Private declarations are not
 candidates outside their visibility.
 
 Types are closed objects with `kind`, `name`, `parameters`, `result`, and
-`labelled`. Only a function has a non-null `result`. The kinds are:
+`labelled`, and a function also has `effects`, its closed effect row as the
+record `{ "roots": [...] }` of the effects chapter, so two function types that
+differ only in their rows are different types in a query as in the checker. Only
+a function has a non-null `result`. The kinds are:
 
 | `kind` | `name` | `parameters` | `labelled` |
 |---|---|---|---|
@@ -511,9 +587,42 @@ declaration order; on any other kind `narrowed` is null and `unionMembers` is
 empty. A subpattern has no fact of its own, and a position outside an arm
 pattern has an unavailable `pattern`.
 
-Projection, lookup, effect operations, and lambda calls have no application
-fact. An expected type is reported where the source writes a primitive or
+Projection, lookup, and lambda calls have no application fact. A call of an
+effect operation is a call of a function whose callee is that operation: it has an
+application fact of kind `@function`, with the operation's identity as `callee`
+and the operation's function type, whose row is its complete row, as
+`calleeType`. An expected type is reported where the source writes a primitive or
 function type or the checker binds an argument; elsewhere it is unavailable.
+
+The **effect fact** `effects` is `{ "status": ..., "value": ... }` like every
+semantic field, and its value is `null` when unavailable and otherwise the closed
+object `{ "enclosing": ..., "application": ..., "target": ... }`, with
+`"witnesses"` added by `--expand effect-witnesses` and absent without it:
+
+- `enclosing` is `null` outside every function, or `{ "identity": ..., "kind":
+  ..., "ceiling": ..., "performed": ... }` for the smallest enclosing `defn`,
+  nested method, effect operation, `lambda`, or `test`. `identity` is the
+  identity object of the function, operation, or test, and `null` for a
+  `lambda`, which has none, `kind` is
+  `function`, `operation`, `lambda`, or `test`, and `ceiling` and `performed` are
+  rows `{ "roots": [...] }` of canonical identities. For an operation, `ceiling`
+  is its complete row;
+- `application` is `null` unless the position is in an application with an
+  application fact, and then the callee's complete row as the effects chapter
+  defines it: a row `{ "roots": [...] }`, empty for a constructor;
+- `target` is `null` unless the position is in a source module reached from a
+  binary target's entry, and then `{ "entry": ..., "effects": ... }`, the entry's
+  identity and the target's `effects` array as a row. The array is the consent
+  that admitted the entry, not the module's own ceiling; and
+- `witnesses` is an array with one record `{ "root": ..., "hops": [...] }` for
+  each root of the `enclosing` performed row, in canonical root order, each hop
+  `{ "span": SpanDocument, "callee": { "kind": "function"|"operation"|"function-value"|"contract-member", "identity": string|null } }`
+  in the order of the witness section of the effects chapter. It is the chain
+  the checker would report for that root if it were missing from the ceiling,
+  and it is empty when `enclosing` is `null`.
+
+All of it comes from the one function-call graph and performed-row result that
+the checker uses; a query never recomputes a row of its own.
 
 `workspaceRevision` is a SHA-256 digest over a binary byte sequence with the
 exact spelling `sha256:<64 lowercase hexadecimal digits>`. The digest input is
@@ -541,8 +650,11 @@ Implementations MUST cover this vector and an equal-length source edit in
 their host tests.
 
 The semantic envelope is deterministic for one snapshot. It does not add a
-public query CLI, MCP endpoint, relation index, effect witness, edit plan, or
-execution behavior; those remain later milestone work.
+public query CLI, MCP endpoint, relation index, edit plan, or execution
+behavior; those remain later milestone work. The `effects` fact and its
+witnesses are the contract of Milestone 4 Step 20, which adds the field, its
+schema entry, and its producer in one change and replaces the M3 envelope in
+place.
 
 Entity metadata and expanded references operate on resolved identities, not
 token spelling. They distinguish module, type, value, function, method,
@@ -557,8 +669,10 @@ Discards have no identity, definition, references, or rename target; a query at
 `-`, `@-`, or `-:` reports its discard role and enclosing context only.
 
 Function and source-position metadata can include written-or-default ceilings
-and performed rows. `--expand effect-witnesses` adds the call paths that
-introduced those roots. `vibra query @workspace --expand declarations` emits
+and performed rows, as the `effects` fact and the `ceiling` and `effects` fields
+of an index record. `--expand effect-witnesses` adds the call paths that
+introduced those roots, with the structure of the effects chapter's witness
+section. `vibra query @workspace --expand declarations` emits
 one normalized record per declaration: canonical source, signature, effect
 row, visibility, call edges, referenced types, error types, and source
 fingerprint. The exact checker remains the admission test for a retrieved
@@ -567,8 +681,9 @@ candidate; workspace metadata is not a substitute type system.
 Every resolved application reports one of `@function`, `@constructor`,
 `@tuple-projection`, `@record-projection`, or `@collection-lookup`. Projection
 metadata includes the compile-time component or field identity; lookup
-metadata includes the required key or index type. Only `@function` carries a
-callee effect row or contributes a function-call edge. Completion after a
+metadata includes the required key or index type. Only `@function` and
+`@contract` applications carry a callee effect row, the callee's complete row of
+the effects chapter, and contribute a function-call edge. Completion after a
 tuple callee proposes valid literal indices, completion after a record callee
 proposes visible atom field selectors, and collection lookup proposes the
 required operand type. Pattern completion uses the same resolved field,

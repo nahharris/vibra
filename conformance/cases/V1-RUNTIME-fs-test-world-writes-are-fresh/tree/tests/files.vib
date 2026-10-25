@@ -1,0 +1,18 @@
+(import assert @std.assert)
+(import fs @std.fs)
+
+(test "a write is visible to a later read in the same test"
+  effects: (fs.read fs.write)
+  (let seed (fs.path "/data/seed.txt"))
+  (match (fs.write.text seed "changed")
+    (result.ok)
+      (match (fs.read.text seed)
+        (result.ok text) (assert.equal "changed" text)
+        (result.err -) (assert.true false))
+    (result.err -) (assert.true false)))
+
+(test "each test starts from a fresh copy of the world"
+  effects: (fs.read)
+  (match (fs.read.text (fs.path "/data/seed.txt"))
+    (result.ok text) (assert.equal "original" text)
+    (result.err -) (assert.true false)))

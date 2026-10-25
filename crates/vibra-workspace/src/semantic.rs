@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
+use vibra_host::{HostProvider, HostWorld, WorldProvider};
 use vibra_interp::{Execution, RuntimeError};
 use vibra_ir::CheckedProgram;
 use vibra_resolve::{EntityKind, ResolvedSnapshot};
@@ -15,8 +16,9 @@ use crate::{
 
 pub use crate::test_runner::{
     TestFailure, TestItem, TestItemStatus, TestSelector, TestSuiteStatus, TestTrap,
-    WorkspaceTestResult, run_tests,
+    WorkspaceTestResult, run_tests, run_tests_in_world, run_tests_with_budget,
 };
+pub use vibra_interp::MemoryBudget;
 
 /// Overall result of checking a workspace scope.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -137,6 +139,32 @@ pub fn run_target_with_bootstrap(
     target: &Target,
     verification: Option<&vibra_types::Stdlib>,
 ) -> WorkspaceRunResult {
+    run_target_with_budget(snapshot, target, verification, MemoryBudget::DEFAULT)
+}
+
+/// Like [`run_target_with_bootstrap`], with the memory budget the runner
+/// supplies for the instance: exhausting it ends the run with the host event
+/// `@runtime.memory-exhausted`.
+pub fn run_target_with_budget(
+    snapshot: &WorkspaceSnapshot,
+    target: &Target,
+    verification: Option<&vibra_types::Stdlib>,
+    budget: MemoryBudget,
+) -> WorkspaceRunResult {
+    let mut host = WorldProvider::new(&HostWorld::default());
+    run_target_with_host(snapshot, target, verification, budget, &mut host)
+}
+
+/// Like [`run_target_with_budget`], with `host` as the provider of every host
+/// operation the program performs: the system provider for `run`, a world
+/// provider for a conformance case.
+pub fn run_target_with_host(
+    snapshot: &WorkspaceSnapshot,
+    target: &Target,
+    verification: Option<&vibra_types::Stdlib>,
+    budget: MemoryBudget,
+    host: &mut dyn HostProvider,
+) -> WorkspaceRunResult {
     let check = check_target_with_bootstrap(snapshot, target, verification);
     let outcome = if check.status() != CheckStatus::Accepted
         || target.kind() != TargetKind::Bin
@@ -144,7 +172,7 @@ pub fn run_target_with_bootstrap(
         None
     } else {
         check.program_for_target(target).map(|program| {
-            match vibra_interp::run(program) {
+            match vibra_interp::Interpreter::run_with_host(program, budget, host) {
                 Ok(execution) => RunOutcome::Program(execution),
                 Err(error) => RunOutcome::InterpreterFailure(error),
             }
@@ -240,6 +268,8 @@ fn check_resolved_scope(
     mut diagnostics: Vec<Diagnostic>,
 ) -> WorkspaceCheckResult {
     let (units, source_ids) = import_closure(resolved, initial_units, verification);
+    // The atoms of the target slots of `project.vibon` that the selected
+    // units own: the entry and each atom of the `effects` array.
     let entry_spans = resolved
         .entries()
         .iter()
@@ -251,6 +281,19 @@ fn check_resolved_scope(
                 entry.span().end(),
             )
         })
+        .chain(
+            resolved
+                .target_effects()
+                .iter()
+                .filter(|effect| units.contains(effect.unit()))
+                .map(|effect| {
+                    (
+                        effect.source_id().to_owned(),
+                        effect.span().start(),
+                        effect.span().end(),
+                    )
+                }),
+        )
         .collect::<BTreeSet<_>>();
     let missing_bootstrap_spans = if verification.is_none() {
         resolved

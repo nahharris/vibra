@@ -1,0 +1,29 @@
+; Effect operations are ordinary functions with Vibra bodies: applying one runs
+; its body, a row is erased at run time, and recursion through operations
+; and callers behaves as it does without rows.
+(defn main () (tuple str str u32 str)
+  effects: (audit greet)
+  (tupleof (greet.word) (describe) (audit.record 7u32) (ping false)))
+
+(deffect greet
+  (defn word () str "hello")
+  (defn shout (text str) str text))
+
+(deffect audit
+  (defn record (count u32) u32
+    effects: (greet)
+    (let - (greet.word))
+    count))
+
+(defn describe () str
+  effects: (audit greet)
+  (let - (audit.record 1u32))
+  (greet.word))
+
+(defn ping (flag bool) str
+  effects: (greet)
+  (if flag (greet.shout "ping") (pong)))
+
+(defn pong () str
+  effects: (greet)
+  (ping true))

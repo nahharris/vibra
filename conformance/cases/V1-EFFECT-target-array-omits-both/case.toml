@@ -1,0 +1,39 @@
+id = "V1-EFFECT-target-array-omits-both"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "An empty array permits only an effect-free entry graph: an entry that performs two roots is missing both, so it emits two diagnostics at the entry value, one for each missing root, in the canonical order of the roots; the owner root has a one-hop witness."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "project.vibon"
+span = [145, 162]
+
+  [[expect.diagnostics.related]]
+  source = "src/app/main.vib"
+  span = [80, 109]
+  message = "performs @ops.log.audit via @ops.log.audit.record"
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "project.vibon"
+span = [145, 162]
+
+  [[expect.diagnostics.related]]
+  source = "src/app/main.vib"
+  span = [80, 109]
+  message = "performs @ops.log.write via @ops.log.audit.record"
+
+  [[expect.diagnostics.related]]
+  source = "src/ops/log.vib"
+  span = [223, 242]
+  message = "performs @ops.log.write via @ops.log.write.text"

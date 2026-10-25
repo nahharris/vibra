@@ -1,0 +1,49 @@
+; A tree is a chain: its `next` holds its one child, or nothing at the end.
+; Comparing two trees builds a dict keyed by trees, and inserting the second
+; key compares it with the first, which is this `compare` again one level
+; down. Three hundred levels nest a user's `compare` inside a dict insertion
+; inside a user's `compare`, three hundred deep.
+(defn main () (tuple core.ordering core.ordering)
+  (tupleof
+    (ordered.compare (chain 300u64) (chain 300u64))
+    (ordered.compare (chain 300u64) (chain 301u64))))
+
+(import core @std.core)
+(import ordered @std.core.ordered)
+(import option @std.option)
+
+(deftype tree (record next (array tree))
+  (impl ordered
+    (defn compare (left self right self) core.ordering
+      (match ((left @next) 0u64)
+        (option.some below)
+          (match ((right @next) 0u64)
+            (option.some other) (order below other)
+            (option.none) (core.ordering.greater))
+        (option.none)
+          (match ((right @next) 0u64)
+            (option.some -) (core.ordering.less)
+            (option.none) (core.ordering.equal))))))
+
+; The first key of the dict is the smaller tree, and an equal pair is one key.
+(defn order (first tree second tree) core.ordering
+  (let both (dict.of first 0u64 second 1u64))
+  (match (u64.equal (array.length (dict.entries both)) 1u64)
+    true (core.ordering.equal)
+    false
+      (match ((dict.entries both) 0u64)
+        (option.some (tupleof - tag))
+          (match (u64.equal tag 0u64)
+            true (core.ordering.less)
+            false (core.ordering.greater))
+        (option.none) (core.ordering.equal))))
+
+(defn chain (levels u64) tree
+  (if (u64.equal levels 0u64)
+    (tree next: (array.of))
+    (tree next: (array.of (chain (lower levels))))))
+
+(defn lower (count u64) u64
+  (match (u64.sub-checked count 1u64)
+    (result.ok value) value
+    (result.err -) 0u64))

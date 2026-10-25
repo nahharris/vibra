@@ -1,0 +1,53 @@
+(defn main () (tuple i32 i32 str str i32 i32 i32 str str)
+  (tupleof
+      (code (first (option.some 3i32)))
+      (code (first (option.none)))
+      (text (checked true))
+      (text (checked false))
+      (code (flatten (option.some (option.some 7i32))))
+      (code (flatten (option.some (option.none))))
+      (require (option.some 4i32))
+      (describe true)
+      (reason (widen false))))
+
+(defn first (o (option i32)) (option i32)
+  (option.some (try o)))
+
+(defn code (o (option i32)) i32
+  (match o (option.some n) n (option.none) -1i32))
+
+(defn parse (flag bool) (result i32 str)
+  (if flag (result.ok 1i32) (result.err "bad flag")))
+
+(defn checked (flag bool) (result i32 str)
+  (let value (try (parse flag)))
+  (result.ok value))
+
+(defn text (r (result i32 str)) str
+  (match r (result.ok -) "ok" (result.err message) message))
+
+(defn flatten (nested (option (option i32))) (option i32)
+  (option.some (try (try nested))))
+
+; The success type changes and the error does not.
+(defn widen (flag bool) (result str str)
+  (let n (try (parse-again flag)))
+  (result.ok "parsed"))
+
+(defn parse-again (flag bool) (result i32 str)
+  (if flag (result.ok 7i32) (result.err "e")))
+
+(defn reason (r (result str str)) str
+  (match r (result.ok s) s (result.err message) message))
+
+; A fallback and a branch of type never have no value and no slot, and these
+; calls take the paths that do not reach them.
+(defn fail (message str) never
+  (fail message))
+
+(defn require (o (option i32)) i32
+  (let-else (option.some n) o (fail "missing"))
+  n)
+
+(defn describe (flag bool) str
+  (if flag "yes" (fail "no")))

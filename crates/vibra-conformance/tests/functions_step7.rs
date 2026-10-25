@@ -283,7 +283,7 @@ fn invalid_result_does_not_emit_argument_order_facts_or_warnings() {
 }
 
 #[test]
-fn rejects_nonempty_effects_in_function_values() {
+fn function_values_carry_their_rows_and_an_unresolved_entry_is_an_invalid_reference() {
     let checked = check_source(
         "effects.vib",
         "(defn answer () i32\n  effects: (io.stdout)\n  1i32)",
@@ -293,8 +293,14 @@ fn rejects_nonempty_effects_in_function_values() {
         checked
             .diagnostics()
             .iter()
-            .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+            .any(|diagnostic| diagnostic.code()
+                == DiagnosticCode::EffectInvalidReference)
     );
+    let declared = check_source(
+        "effects.vib",
+        "(deffect out (defn text () void (do)))\n(defn answer () i32\n  effects: (out)\n  (out.text)\n  1i32)",
+    );
+    assert!(declared.accepted(), "{:?}", declared.diagnostics());
 }
 
 #[test]

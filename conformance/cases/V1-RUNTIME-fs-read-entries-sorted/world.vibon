@@ -1,0 +1,1 @@
+(record format: @host-world.v1 directories: (array "/box/empty" "/box/Zeta") files: (dict "/box/b" "" "/box/é" "" "/box/a" "" "/box/B" "" "/box/😀" "" "/box/10" "" "/box/9" ""))

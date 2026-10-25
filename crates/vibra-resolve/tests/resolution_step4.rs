@@ -87,7 +87,7 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
     )
     .with_verified_overlay(
         "vibra-stdlib",
-        "0.2.0",
+        "0.3.0",
         vec![
             vibra_resolve::SourceModule::new(
                 "std",
@@ -107,6 +107,12 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
                 "stdlib/src/std/char.vib",
                 include_bytes!("../../../stdlib/src/std/char.vib"),
             ),
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["bool"],
+                "stdlib/src/std/bool.vib",
+                include_bytes!("../../../stdlib/src/std/bool.vib"),
+            ),
         ],
     );
     let snapshot = Resolver::resolve(input);
@@ -118,7 +124,7 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
         .find(|module| module.source_id() == "stdlib/src/std/text.vib")
         .expect("bootstrap module in overlay");
     assert_eq!(module.package().name(), "vibra-stdlib");
-    assert_eq!(module.package().version(), "0.2.0");
+    assert_eq!(module.package().version(), "0.3.0");
     assert_eq!(
         snapshot.imports()[0]
             .module()
@@ -134,7 +140,7 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
         .and_then(|reference| reference.target())
         .expect("resolved bootstrap declaration");
     assert_eq!(target.package().name(), "vibra-stdlib");
-    assert_eq!(target.package().version(), "0.2.0");
+    assert_eq!(target.package().version(), "0.3.0");
 }
 
 #[test]
@@ -170,7 +176,7 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
     )
     .with_verified_overlay(
         "vibra-stdlib",
-        "0.2.0",
+        "0.3.0",
         vec![
             vibra_resolve::SourceModule::new(
                 "std",
@@ -189,6 +195,12 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
                 ["char"],
                 "stdlib/src/std/char.vib",
                 include_bytes!("../../../stdlib/src/std/char.vib"),
+            ),
+            vibra_resolve::SourceModule::new(
+                "std",
+                ["bool"],
+                "stdlib/src/std/bool.vib",
+                include_bytes!("../../../stdlib/src/std/bool.vib"),
             ),
         ],
     );
@@ -702,7 +714,7 @@ fn lexical_and_lambda_label_bindings_cannot_shadow_visible_names() {
 }
 
 #[test]
-fn deferred_effect_declarations_and_members_are_explicitly_unavailable() {
+fn effect_roots_and_their_operations_resolve_with_their_own_visibility() {
     let input = ResolveInput::single_module(
         "demo",
         "1.0.0",
@@ -710,21 +722,66 @@ fn deferred_effect_declarations_and_members_are_explicitly_unavailable() {
         "main",
         br#"(deftype user (record field str) (defn method () void (do)))
 (defint iface (defn call () void))
-(deffect io (defn op () void))"#,
+(deffect audit
+  visibility: @public
+  (defn record (message str) void visibility: @public (do)))
+(deffect hidden
+  visibility: @public
+  (defn record (message str) void (do)))
+(defn caller () void effects: (audit) (audit.record "x"))"#,
     );
     let snapshot = Resolver::resolve(input);
 
-    // Declared types, their fields, and nested methods resolve from M3 Step 2
-    // and interfaces from Step 11; the effect declaration and its member stay
-    // unavailable.
-    let unavailable: Vec<_> = snapshot
+    assert!(snapshot.accepted(), "{:?}", snapshot.diagnostics());
+    let visibility = |path: &[&str], kind: EntityKind| {
+        snapshot
+            .declarations()
+            .iter()
+            .find(|declaration| {
+                declaration.id().kind() == kind && declaration.id().path() == path
+            })
+            .map(|declaration| declaration.visibility())
+            .expect("declaration")
+    };
+    use vibra_resolve::Visibility::{Private, Public};
+    assert_eq!(visibility(&["audit"], EntityKind::Effect), Public);
+    assert_eq!(
+        visibility(&["audit", "record"], EntityKind::Operation),
+        Public
+    );
+    assert_eq!(visibility(&["hidden"], EntityKind::Effect), Public);
+    assert_eq!(
+        visibility(&["hidden", "record"], EntityKind::Operation),
+        Private
+    );
+    // The call resolves to the operation of the root it names.
+    let target = snapshot
+        .references()
+        .iter()
+        .find(|reference| reference.written() == "audit.record")
+        .and_then(vibra_resolve::ResolvedReference::target)
+        .expect("operation target");
+    assert_eq!(target.kind(), EntityKind::Operation);
+    assert_eq!(target.path(), ["audit", "record"]);
+}
+
+#[test]
+fn an_effect_root_is_not_a_body_value() {
+    let input = ResolveInput::single_module(
+        "demo",
+        "1.0.0",
+        "app",
+        "main",
+        br#"(deffect audit (defn record (message str) void (do)))
+(defn caller () void (audit))"#,
+    );
+    let snapshot = Resolver::resolve(input);
+    let codes = snapshot
         .diagnostics()
         .iter()
-        .filter(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
-        .map(vibra_diagnostics::Diagnostic::primary_span)
-        .collect();
-    assert_eq!(unavailable.len(), 2, "{unavailable:?}");
-    assert!(unavailable.iter().all(|span| span.start() >= 96));
+        .map(vibra_diagnostics::Diagnostic::code)
+        .collect::<Vec<_>>();
+    assert_eq!(codes, [DiagnosticCode::NameWrongEntityKind]);
 }
 
 #[test]

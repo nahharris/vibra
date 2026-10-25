@@ -1,0 +1,41 @@
+(defn main () (tuple str str str str str str str str str str str bool bool bool bool bool)
+  (tupleof
+      (int 1i32)
+      (int -5i32)
+      (int 7i32)
+      (wide 10000000000u64)
+      (wide 3u64)
+      (word "alpha")
+      (word "alphabet")
+      (word "")
+      (letter \a)
+      (color @green)
+      (color @blue)
+      (narrow-i8 -3i8)
+      (narrow-u16 40000u16)
+      (narrow-u8 200u8)
+      (narrow-u32 4000000000u32)
+      (narrow-i8 3i8)))
+
+(defn int (n i32) str
+  (match n 1i32 "one" -5i32 "minus five" - "other"))
+
+(defn wide (n u64) str
+  (match n 10000000000u64 "ten billion" - "other"))
+
+(defn word (text str) str
+  (match text "alpha" "first" "" "empty" - "other"))
+
+(defn letter (c char) str
+  (match c \a "a" - "other"))
+
+(defn color (name atom) str
+  (match name @red "red" @green "green" - "other"))
+
+(defn narrow-i8 (n i8) bool (match n -3i8 true - false))
+
+(defn narrow-u16 (n u16) bool (match n 40000u16 true - false))
+
+(defn narrow-u8 (n u8) bool (match n 200u8 true - false))
+
+(defn narrow-u32 (n u32) bool (match n 4000000000u32 true - false))

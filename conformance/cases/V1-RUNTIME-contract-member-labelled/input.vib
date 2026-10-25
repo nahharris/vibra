@@ -1,0 +1,26 @@
+(defn main () (tuple (tuple i32 i32) (tuple i32 i32) (tuple i32 i32) (tuple i32 i32) (tuple i32 i32))
+  (tupleof
+    (scaler.scale (gauge base: 1i32))
+    (scaler.scale (gauge base: 1i32) offset: 7i32 by: 3i32)
+    (scaler.scale (gauge base: 1i32) by: 5i32)
+    (through (gauge base: 1i32))
+    (via-value (as scaler (gauge base: 1i32)))))
+
+; Labelled parameters with contract defaults, selected by the receiver
+; statically, through a bounded parameter, and through an interface value.
+(defint scaler
+  (defn scale (value self) (tuple i32 i32)
+    labelled: (by i32 2i32 offset i32 0i32)))
+
+(deftype gauge (record base i32)
+  (impl scaler
+    (defn scale (value self) (tuple i32 i32)
+      labelled: (by i32 2i32 offset i32 0i32)
+      (tupleof by offset))))
+
+(defn through (value t) (tuple i32 i32)
+  where: (t scaler)
+  (scaler.scale value offset: 4i32))
+
+(defn via-value (value scaler) (tuple i32 i32)
+  (scaler.scale value by: 8i32))

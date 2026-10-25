@@ -2,7 +2,7 @@ id = "V1-TYPE-INTERFACE-iter-default-rejections"
 rule = "V1-TYPE-INTERFACE"
 profile = "static-v1"
 operation = "type-check"
-description = "An iter implementation supplies only next: a default member cannot be redeclared. A default callback must be pure, and a default over a value that is not an iterator is rejected."
+description = "An iter implementation supplies only next: a default member cannot be redeclared. A default callback must be pure: a lambda that writes a row is not the callback type, whose row is empty, and a default over a value that is not an iterator is rejected."
 
 [inputs]
 source = "input.vib"
@@ -17,13 +17,13 @@ source = "input.vib"
 span = [157, 207]
 
 [[expect.diagnostics]]
-code = "@tool.unavailable"
+code = "@type.argument-mismatch"
 level = "@error"
 source = "input.vib"
-span = [302, 306]
+span = [269, 332]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "input.vib"
-span = [367, 371]
+span = [386, 390]

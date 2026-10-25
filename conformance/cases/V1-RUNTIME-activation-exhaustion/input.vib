@@ -1,0 +1,8 @@
+; `forever` has no base case, and each call is an operand of the checked
+; addition, so no activation is ever released.
+(defn main () u64 (forever 0u64))
+
+(defn forever (count u64) u64
+  (match (u64.add-checked (forever count) 1u64)
+    (result.ok total) total
+    (result.err -) 0u64))

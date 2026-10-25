@@ -206,7 +206,20 @@ pub fn check_resolved(
     source_ids: &[String],
     verification: Option<&crate::Stdlib>,
 ) -> ResolvedCheckResult {
-    let selected = source_ids.iter().cloned().collect::<BTreeSet<_>>();
+    let mut selected = source_ids.iter().cloned().collect::<BTreeSet<_>>();
+    // The module that declares the closed import-free vocabulary's values is
+    // in every checked graph, so every module sees them without an import.
+    selected.extend(
+        snapshot
+            .modules()
+            .iter()
+            .filter(|module| {
+                module.package().name() == "vibra-stdlib"
+                    && module.unit() == "std"
+                    && module.segments() == ["bool"]
+            })
+            .map(|module| module.source_id().to_owned()),
+    );
     let mut seen_source_ids = BTreeSet::new();
     let mut duplicate_source_ids = BTreeSet::new();
     for module in snapshot
@@ -279,6 +292,23 @@ pub fn check_resolved(
     for module in &modules {
         types.note_other_names(module.record.source_id(), module.ast);
         for declaration in module.ast.declarations() {
+            if let Declaration::Deffect(value) = declaration
+                && let Some(id) = module
+                    .declarations
+                    .get(&(module.record.source_id().to_owned(), value.span()))
+            {
+                let path = std::iter::once(id.unit())
+                    .chain(id.module().iter().map(String::as_str))
+                    .chain(id.path().iter().map(String::as_str))
+                    .collect::<Vec<_>>()
+                    .join(".");
+                types.declare_effect(
+                    module.record.source_id(),
+                    value,
+                    vibra_ir::EffectRoot::new(id.canonical(), path),
+                );
+                continue;
+            }
             if let Declaration::Defint(value) = declaration
                 && let Some(id) = module
                     .declarations
@@ -352,41 +382,95 @@ pub fn check_resolved(
     let mut global_indices = BTreeMap::<DeclarationId, usize>::new();
     let mut function_indices = BTreeMap::<DeclarationId, usize>::new();
 
+    // Module values are declared before any signature is checked, because a
+    // labelled default may name one.
+    for (module_index, module) in modules.iter().enumerate() {
+        for declaration in module.ast.declarations() {
+            let Declaration::Def(definition) = declaration else {
+                continue;
+            };
+            let Some(id) = module
+                .declarations
+                .get(&(module.record.source_id().to_owned(), definition.span()))
+                .cloned()
+            else {
+                continue;
+            };
+            let Some(value_type) = types.lower_or_report(
+                module.record.source_id(),
+                crate::nominal::Scope::NONE,
+                definition.value_type(),
+                definition.span(),
+                &mut diagnostics,
+            ) else {
+                continue;
+            };
+            let index = globals.len();
+            global_indices.insert(id.clone(), index);
+            // A module value of function type may hold any function or
+            // closure, including a contract member named as a value, so
+            // its target is unknown and a call through it in tail
+            // position still reuses the activation.
+            let function_targets = if matches!(value_type, vibra_ir::Type::Function(_))
+            {
+                FunctionTargetSet::unknown()
+            } else {
+                FunctionTargetSet::default()
+            };
+            globals.push(GlobalHeader {
+                name: id.canonical(),
+                value_type,
+                expression: definition.expression().clone(),
+                span: definition.span(),
+                source_id: module.record.source_id().to_owned(),
+                module_index,
+                function_index: None,
+                function_targets,
+            });
+        }
+    }
+    {
+        let mut default_targets = BTreeMap::new();
+        for reference in snapshot
+            .references()
+            .iter()
+            .filter(|reference| selected.contains(reference.source_id()))
+        {
+            if let Some(index) = reference
+                .target()
+                .and_then(|target| global_indices.get(target))
+            {
+                default_targets.insert(
+                    (
+                        reference.source_id().to_owned(),
+                        reference.span().start(),
+                        reference.span().end(),
+                    ),
+                    ResolvedReferenceTarget::Global(*index),
+                );
+            }
+        }
+        let sources = modules
+            .iter()
+            .map(|module| (module.record.source_id(), module.ast))
+            .collect::<Vec<_>>();
+        let constants = crate::defaults::decide(
+            &types,
+            &sources,
+            &globals,
+            &crate::defaults::DefaultNames::Resolved(&default_targets),
+            &BTreeMap::new(),
+            &mut diagnostics,
+        );
+        types.add_default_constants(constants);
+    }
+
     for (module_index, module) in modules.iter().enumerate() {
         for (declaration_index, declaration) in
             module.ast.declarations().iter().enumerate()
         {
             match declaration {
-                Declaration::Def(definition) => {
-                    let Some(id) = module
-                        .declarations
-                        .get(&(module.record.source_id().to_owned(), definition.span()))
-                        .cloned()
-                    else {
-                        continue;
-                    };
-                    let Some(value_type) = types.lower_or_report(
-                        module.record.source_id(),
-                        crate::nominal::Scope::NONE,
-                        definition.value_type(),
-                        definition.span(),
-                        &mut diagnostics,
-                    ) else {
-                        continue;
-                    };
-                    let index = globals.len();
-                    global_indices.insert(id.clone(), index);
-                    globals.push(GlobalHeader {
-                        name: id.canonical(),
-                        value_type,
-                        expression: definition.expression().clone(),
-                        span: definition.span(),
-                        source_id: module.record.source_id().to_owned(),
-                        module_index,
-                        function_index: None,
-                        function_targets: FunctionTargetSet::default(),
-                    });
-                }
+                Declaration::Def(_) => {}
                 Declaration::Defn(function) => {
                     let Some(id) = module
                         .declarations
@@ -446,6 +530,8 @@ pub fn check_resolved(
                         bounds,
                         impl_member: None,
                         implements: None,
+                        effect_owner: None,
+                        host: None,
                     });
                 }
                 Declaration::Test(test) => {
@@ -465,15 +551,18 @@ pub fn check_resolved(
                     else {
                         continue;
                     };
-                    if let Some(effects) = test.effects()
-                        && !effects.references().is_empty()
-                    {
-                        unavailable(
-                            &mut diagnostics,
+                    // A test writes its complete ceiling like a function does.
+                    let mut signature = FunctionSignature::new(Vec::new(), Type::Void);
+                    if let Some(row) = test.effects() {
+                        let Some(effects) = types.lower_written_row(
                             module.record.source_id(),
-                            effects.span(),
-                            "nonempty test effect ceilings are unavailable in M2",
-                        );
+                            test.span(),
+                            row,
+                            &mut diagnostics,
+                        ) else {
+                            continue;
+                        };
+                        signature = signature.with_effects(effects);
                     }
                     let index = functions.len();
                     function_indices.insert(id.clone(), index);
@@ -482,7 +571,7 @@ pub fn check_resolved(
                         module_index,
                         source_id: module.record.source_id().to_owned(),
                         name: id.canonical(),
-                        signature: FunctionSignature::new(Vec::new(), Type::Void),
+                        signature,
                         external: None,
                         external_declared: false,
                         test: Some(test.clone()),
@@ -493,6 +582,8 @@ pub fn check_resolved(
                         bounds: BTreeMap::new(),
                         impl_member: None,
                         implements: None,
+                        effect_owner: None,
+                        host: None,
                     });
                 }
                 Declaration::Deftype(value) => {
@@ -571,18 +662,99 @@ pub fn check_resolved(
                             bounds,
                             impl_member: None,
                             implements: None,
+                            effect_owner: None,
+                            host: None,
+                        });
+                    }
+                }
+                Declaration::Deffect(value) => {
+                    let Some(owner) = types
+                        .effect_at(module.record.source_id(), value.span())
+                        .map(|declared| declared.root.clone())
+                    else {
+                        continue;
+                    };
+                    for (member_index, member) in value.members().iter().enumerate() {
+                        let Some(id) = module
+                            .declarations
+                            .get(&(module.record.source_id().to_owned(), member.span()))
+                            .cloned()
+                        else {
+                            continue;
+                        };
+                        let Some((generics, bounds)) =
+                            crate::nominal::function_generics(
+                                &types,
+                                &[],
+                                member,
+                                module.record.source_id(),
+                                &mut diagnostics,
+                            )
+                        else {
+                            continue;
+                        };
+                        let Some(signature) = check_signature(
+                            module.record.source_id(),
+                            member,
+                            &mut diagnostics,
+                            &types,
+                            crate::nominal::Scope::new(None, &generics)
+                                .with_bounds(&bounds),
+                        ) else {
+                            continue;
+                        };
+                        // An operation performs its owner root together with
+                        // the additive row it writes.
+                        let host = crate::host_operation(
+                            module.record.source_id(),
+                            member,
+                            value,
+                            &owner,
+                            &signature,
+                            &crate::standard::role_types(&types),
+                            &mut diagnostics,
+                        );
+                        let signature = crate::operation_signature(signature, &owner);
+                        let index = functions.len();
+                        function_indices.insert(id.clone(), index);
+                        functions.push(FunctionHeader {
+                            declaration_index,
+                            module_index,
+                            source_id: module.record.source_id().to_owned(),
+                            name: id.canonical(),
+                            external: compiler_intrinsic(
+                                module.record.source_id(),
+                                member,
+                                &mut diagnostics,
+                                module.trusted_bootstrap,
+                                &signature,
+                                &crate::standard::role_types(&types),
+                            ),
+                            signature,
+                            external_declared: member.attributes().items().iter().any(
+                                |attribute| {
+                                    matches!(
+                                        attribute,
+                                        vibra_syntax::Attribute::External(_)
+                                    )
+                                },
+                            ),
+                            test: None,
+                            test_assertion: None,
+                            member_index: Some(member_index),
+                            self_type: None,
+                            type_parameters: generics,
+                            bounds,
+                            impl_member: None,
+                            implements: None,
+                            effect_owner: Some(owner.clone()),
+                            host,
                         });
                     }
                 }
                 // Declared with the types above; contracts lower below.
                 Declaration::Defint(_) => {}
                 Declaration::Import(_) => {}
-                _ => unavailable(
-                    &mut diagnostics,
-                    module.record.source_id(),
-                    declaration.span(),
-                    "this declaration family is outside the Step 12 monomorphic profile",
-                ),
             }
         }
     }
@@ -652,21 +824,42 @@ pub fn check_resolved(
             bounds: BTreeMap::new(),
             impl_member: None,
             implements: None,
+            effect_owner: None,
+            host: None,
         });
     }
 
     // Builtin static methods such as `array.of` have no module in the graph;
     // only the members a selected module names join its programs.
-    for member in crate::standard::builtin_members(&types) {
+    // A native with no import runs its checked Vibra body in a module, and that
+    // body names other members, which join the programs with it.
+    let mut builtin_indices: BTreeMap<String, usize> = BTreeMap::new();
+    let mut native_bodies: BTreeMap<usize, &'static vibra_syntax::FunctionDeclaration> =
+        BTreeMap::new();
+    let all_members = crate::standard::builtin_members(&types);
+    let referenced_paths: BTreeSet<String> = all_members
+        .iter()
+        .filter(|member| {
+            let id =
+                vibra_resolve::builtin_member_id(&member.type_name, &member.member);
+            snapshot.references().iter().any(|reference| {
+                selected.contains(reference.source_id())
+                    && reference.target() == Some(&id)
+            })
+        })
+        .map(crate::standard::BuiltinMember::path)
+        .collect();
+    for member in crate::standard::members_with_bodies(all_members, &referenced_paths) {
         let id = vibra_resolve::builtin_member_id(&member.type_name, &member.member);
-        let referenced = snapshot.references().iter().any(|reference| {
-            selected.contains(reference.source_id()) && reference.target() == Some(&id)
-        });
-        if !referenced || function_indices.contains_key(&id) {
+        if function_indices.contains_key(&id) {
             continue;
         }
         let index = functions.len();
         function_indices.insert(id.clone(), index);
+        builtin_indices.insert(member.path(), index);
+        if member.intrinsic.runs_body() {
+            native_bodies.insert(index, member.method);
+        }
         functions.push(FunctionHeader {
             declaration_index: crate::IMPORTED_FUNCTION_DECLARATION,
             module_index: usize::MAX,
@@ -683,6 +876,8 @@ pub fn check_resolved(
             bounds: BTreeMap::new(),
             impl_member: None,
             implements: None,
+            effect_owner: None,
+            host: None,
         });
     }
 
@@ -784,6 +979,55 @@ pub fn check_resolved(
         if header.declaration_index == crate::IMPORTED_FUNCTION_DECLARATION
             && let Some(intrinsic) = header.external
         {
+            if let Some(method) = native_bodies.get(&index).copied() {
+                // The body is the embedded module's own text, checked in its
+                // own environment: its names are the builtin members.
+                let mut declared_elsewhere = Vec::new();
+                let mut environment = CheckEnvironment::new(
+                    crate::STDLIB_BUILTIN_SOURCE_ID,
+                    &mut diagnostics,
+                    &empty_indices,
+                    &globals,
+                    &functions,
+                    &builtin_indices,
+                    &empty_names,
+                    &mut declared_elsewhere,
+                    &types,
+                );
+                environment.reports_redeclarations = false;
+                let origin =
+                    SourceOrigin::new(crate::STDLIB_BUILTIN_SOURCE_ID, method.span());
+                let Some(body) = crate::check_function_body(
+                    &mut environment,
+                    method,
+                    &header,
+                    &origin,
+                ) else {
+                    continue;
+                };
+                let slot_count = environment.next_slot;
+                match CheckedFunction::new_external_with_body(
+                    header.name,
+                    header.signature,
+                    intrinsic,
+                    body,
+                    slot_count,
+                    origin,
+                ) {
+                    Ok(checked) => {
+                        if let Some(slot) = checked_functions.get_mut(index) {
+                            *slot = Some(checked);
+                        }
+                    }
+                    Err(error) => unavailable(
+                        &mut diagnostics,
+                        crate::STDLIB_BUILTIN_SOURCE_ID,
+                        method.span(),
+                        format!("checked IR construction failed: {error}"),
+                    ),
+                }
+                continue;
+            }
             let origin =
                 SourceOrigin::new(header.source_id.as_str(), ByteSpan::empty_at(0));
             if let Ok(checked) = CheckedFunction::new_external(
@@ -879,6 +1123,29 @@ pub fn check_resolved(
             );
             continue;
         }
+        if let Some(row) = header.host {
+            let origin = SourceOrigin::new(header.source_id.as_str(), function.span());
+            let owner = header.effect_owner.clone();
+            match CheckedFunction::new_host(header.name, header.signature, row, origin)
+            {
+                Ok(checked) => {
+                    let checked = match owner {
+                        Some(owner) => checked.with_effect_owner(owner),
+                        None => checked,
+                    };
+                    if let Some(slot) = checked_functions.get_mut(index) {
+                        *slot = Some(checked);
+                    }
+                }
+                Err(error) => unavailable(
+                    &mut diagnostics,
+                    &header.source_id,
+                    function.span(),
+                    format!("checked IR construction failed: {error}"),
+                ),
+            }
+            continue;
+        }
         if let Some(intrinsic) = header.external {
             let origin = SourceOrigin::new(header.source_id.as_str(), function.span());
             match CheckedFunction::new_external(
@@ -916,80 +1183,15 @@ pub fn check_resolved(
             &types,
         );
         environment.resolved_targets = Some(&resolved_targets);
-        environment.self_type = header.self_type.clone();
-        environment.generics = header.type_parameters.clone();
-        environment.bounds = header.bounds.clone();
-        environment.exit =
-            Some((header.signature.result(), Some(function.result_span())));
         environment.reports_redeclarations = false;
-        let mut parameters_valid = true;
-        let mut pending = Vec::new();
-        for (parameter_index, parameter) in function.parameters().iter().enumerate() {
-            match parameter.parsed_pattern().kind() {
-                vibra_syntax::PatternKind::Binding(name) if name.is_discard() => {}
-                vibra_syntax::PatternKind::Binding(name) => {
-                    if !environment.add_binding(
-                        name.value(),
-                        parameter.value_type(),
-                        parameter.span(),
-                        parameter.parsed_pattern().span(),
-                    ) {
-                        parameters_valid = false;
-                    }
-                }
-                _ => match header.signature.parameters().get(parameter_index) {
-                    Some(value_type) => pending.push((
-                        parameter_index,
-                        parameter.parsed_pattern(),
-                        value_type.clone(),
-                    )),
-                    None => parameters_valid = false,
-                },
-            }
-            environment.next_slot = parameter_index.saturating_add(1);
-        }
-        let mut labelled_index = 0;
-        for attribute in function.attributes().items() {
-            let vibra_syntax::Attribute::Labelled(entries) = attribute else {
-                continue;
-            };
-            for entry in entries {
-                let Some(labelled) = header.signature.labelled().get(labelled_index)
-                else {
-                    continue;
-                };
-                labelled_index = labelled_index.saturating_add(1);
-                if !environment.add_binding_type(
-                    labelled.name(),
-                    labelled.value_type(),
-                    entry.name_span(),
-                ) {
-                    parameters_valid = false;
-                }
-            }
-        }
-        if !environment.bind_variadic(function.attributes().items(), &header.signature)
-        {
-            parameters_valid = false;
-        }
-        let Some(destructured) = environment.bind_parameter_patterns(&pending) else {
-            continue;
-        };
-        if !parameters_valid {
-            continue;
-        }
-        let Some(body) = crate::check_sequence(
-            &mut environment,
-            function.expressions(),
-            Some(header.signature.result()),
-            function.span(),
-            true,
-        ) else {
-            continue;
-        };
         let origin = SourceOrigin::new(header.source_id.as_str(), function.span());
-        let body = crate::wrap_destructured(body, destructured, &origin);
+        let Some(body) =
+            crate::check_function_body(&mut environment, function, &header, &origin)
+        else {
+            continue;
+        };
         let implements = header.implements.clone();
+        let owner = header.effect_owner.clone();
         match CheckedFunction::with_slots(
             header.name,
             header.signature,
@@ -999,6 +1201,10 @@ pub fn check_resolved(
         )
         .map(|checked| match implements {
             Some(implements) => checked.with_implements(implements),
+            None => checked,
+        })
+        .map(|checked| match owner {
+            Some(owner) => checked.with_effect_owner(owner),
             None => checked,
         }) {
             Ok(checked) => {
@@ -1014,6 +1220,48 @@ pub fn check_resolved(
             ),
         }
     }
+
+    // Performed rows close over the whole graph of the selected modules.
+    // Each binary target whose entry is checked here is admitted against its
+    // `effects` array.
+    let mut consents = Vec::new();
+    for entry in snapshot.entries() {
+        let Some(declaration) = entry.declaration() else {
+            continue;
+        };
+        let Some(function) = function_indices.get(declaration).copied() else {
+            continue;
+        };
+        consents.push(crate::effects::EntryConsent {
+            function,
+            source_id: entry.source_id().to_owned(),
+            span: entry.span(),
+            array: snapshot
+                .target_effects()
+                .iter()
+                .filter(|effect| effect.unit() == entry.unit())
+                .filter_map(|effect| {
+                    let id = effect.root()?;
+                    let path = std::iter::once(id.unit())
+                        .chain(id.module().iter().map(String::as_str))
+                        .chain(id.path().iter().map(String::as_str))
+                        .collect::<Vec<_>>()
+                        .join(".");
+                    Some((
+                        vibra_ir::EffectRoot::new(id.canonical(), path),
+                        effect.span(),
+                    ))
+                })
+                .collect(),
+        });
+    }
+    diagnostics.extend(crate::effects::check(
+        &checked_functions,
+        &checked_globals,
+        &functions,
+        &types,
+        &consents,
+    ));
 
     let can_build_unavailable_stubs = diagnostics.iter().all(|diagnostic| {
         diagnostic.level() != Level::Error

@@ -1,0 +1,3 @@
+(defn f () bool
+  labelled: (flag bool true at point (point x: 1i32 y: 2i32) size i32 7i32)
+  flag)

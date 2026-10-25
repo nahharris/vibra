@@ -1,0 +1,19 @@
+id = "V1-EFFECT-equal-names-different-modules"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "Two effect roots of one spelling in different modules are different roots: a row that lists one does not contain the other, and a row of both is written in the canonical order of their module-qualified identities."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "src/app/main.vib"
+span = [253, 278]
+notes = ["performs @ops.other.write via @ops.other.write.text"]

@@ -5,7 +5,12 @@ use std::fmt;
 use std::path::{Component, Path, PathBuf};
 
 use crate::manifest::{CaseManifest, MANIFEST_FILE_NAME, ManifestError};
+use vibra_diagnostics::Diagnostic;
+use vibra_host::HostWorld;
 use vibra_syntax::DocumentMode;
+
+/// The name of the parity inventory file, beside the corpus root.
+pub const PARITY_INVENTORY_FILE_NAME: &str = "parity.tsv";
 
 /// One immutable document supplied to a profile handler.
 ///
@@ -138,6 +143,21 @@ impl Case {
             .collect()
     }
 
+    /// The host world of the case: the decoded `host-world` input, or the
+    /// default world when the case supplies none.
+    ///
+    /// Each call decodes the document again, so a caller owns a fresh copy; a
+    /// test and a backend never share one. A document that fails to decode is
+    /// the data diagnostics of its violation, each reported once at the
+    /// document, and it fails this case only.
+    pub fn host_world(&self) -> Result<HostWorld, HostWorldError> {
+        let Some(path) = self.manifest.inputs.host_world.as_deref() else {
+            return Ok(HostWorld::default());
+        };
+        let text = self.read_file(path).map_err(HostWorldError::Corpus)?;
+        HostWorld::decode(path, &text).map_err(HostWorldError::Invalid)
+    }
+
     /// Resolves the manifest-declared tree root as a canonical directory.
     pub(crate) fn tree_path(&self) -> Result<PathBuf, CorpusError> {
         let Some(relative) = self.manifest.inputs.tree.as_deref() else {
@@ -161,6 +181,32 @@ impl Case {
         })
     }
 }
+
+/// Why a case's host world could not be loaded.
+#[derive(Debug)]
+pub enum HostWorldError {
+    /// The document could not be read.
+    Corpus(CorpusError),
+    /// The document does not decode as `@host-world.v1`.
+    Invalid(Vec<Diagnostic>),
+}
+
+impl fmt::Display for HostWorldError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Corpus(error) => error.fmt(formatter),
+            Self::Invalid(diagnostics) => {
+                write!(
+                    formatter,
+                    "the host world has {} diagnostics",
+                    diagnostics.len()
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for HostWorldError {}
 
 /// A deterministic collection of loaded corpus cases.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -252,6 +298,14 @@ impl Corpus {
     #[must_use]
     pub fn cases(&self) -> &[Case] {
         &self.cases
+    }
+
+    /// Where this corpus's parity inventory is: `parity.tsv` beside the corpus
+    /// root, so that `conformance/cases` has `conformance/parity.tsv`. The
+    /// file need not exist, because a synthetic corpus has no inventory.
+    #[must_use]
+    pub fn parity_inventory_path(&self) -> Option<PathBuf> {
+        Some(self.root.parent()?.join(PARITY_INVENTORY_FILE_NAME))
     }
 
     /// Number of loaded cases.
@@ -465,6 +519,9 @@ fn validate_declared_files(
     for data in &manifest.inputs.data {
         let _ = resolve_file(directory, data, &manifest.id)?;
     }
+    if let Some(world) = &manifest.inputs.host_world {
+        let _ = resolve_file(directory, world, &manifest.id)?;
+    }
 
     let expectations = &manifest.expectations;
     for snapshot in [
@@ -483,13 +540,7 @@ fn validate_declared_files(
     for query in &expectations.queries {
         let _ = resolve_file(directory, &query.snapshot, &manifest.id)?;
     }
-    for execution in [
-        expectations.interpreter.as_ref(),
-        expectations.wasm.as_ref(),
-    ]
-    .into_iter()
-    .flatten()
-    {
+    if let Some(execution) = expectations.interpreter.as_ref() {
         for snapshot in [execution.result.as_ref(), execution.audit_trace.as_ref()]
             .into_iter()
             .flatten()

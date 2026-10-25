@@ -155,11 +155,11 @@ fn unavailable_helper_is_attributed_only_to_tests_that_reference_it() {
             ("src/app/main.vib", "(defn execute () void void)\n"),
             (
                 "tests/helpers.vib",
-                "(defn unavailable () i32 visibility: @public effects: (io.stdout) 1i32)\n",
+                "(deffect host\n  visibility: @public\n  (defn unavailable () i32 visibility: @public native: \"audit.call\" 1i32))\n",
             ),
             (
                 "tests/math.vib",
-                "(import assert @std.assert)\n(import helpers @tests.helpers)\n(test \"depends\" (do (helpers.unavailable) void))\n(test \"independent\" (assert.true true))\n",
+                "(import assert @std.assert)\n(import helpers @tests.helpers)\n(test \"depends\" effects: (helpers.host) (do (helpers.host.unavailable) void))\n(test \"independent\" (assert.true true))\n",
             ),
         ],
     );
@@ -175,7 +175,11 @@ fn unavailable_helper_is_attributed_only_to_tests_that_reference_it() {
         diagnostic.code() == vibra_diagnostics::DiagnosticCode::ToolUnavailable
     }));
     assert_eq!(result.items()[1].status(), TestItemStatus::Passed);
-    assert!(result.items()[1].diagnostics().is_empty());
+    assert!(
+        result.items()[1].diagnostics().is_empty(),
+        "{:?}",
+        result.items()[1].diagnostics()
+    );
 }
 
 #[test]
@@ -185,8 +189,12 @@ fn unsupported_test_form_is_unavailable_at_its_reference() {
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),
             (
+                "tests/helpers.vib",
+                "(deffect host\n  visibility: @public\n  (defn call () i32 visibility: @public native: \"audit.call\" 1i32))\n",
+            ),
+            (
                 "tests/math.vib",
-                "(import assert @std.assert)\n(test \"generic\" (let - (lambda () void effects: (audit) void)) (assert.true true))\n",
+                "(import assert @std.assert)\n(import helpers @tests.helpers)\n(test \"generic\" effects: (helpers.host) (let - (helpers.host.call)) (assert.true true))\n",
             ),
         ],
     );
@@ -344,6 +352,65 @@ fn warnings_are_reported_without_blocking_test_execution() {
 }
 
 #[test]
+fn a_test_that_exhausts_its_budget_ends_the_run_with_the_host_event_and_no_counts() {
+    use vibra_workspace::semantic::{MemoryBudget, run_tests_with_budget};
+
+    let project = TempProject::new(
+        "memory-exhausted",
+        &[
+            ("src/app/main.vib", "(defn execute () void void)\n"),
+            (
+                "tests/deep/forever.vib",
+                "(import assert @std.assert)
+(defn forever (count u64) u64\n  (match (u64.add-checked (forever count) 1u64)\n    (result.ok total) total\n    (result.err -) 0u64))\n(test \"first\" (assert.true true))\n(test \"never ends\" (assert.equal (forever 0u64) 0u64))\n",
+            ),
+        ],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let verification = verified_bootstrap();
+    let budget = MemoryBudget::new(2 * 1024 * 1024);
+
+    let result = run_tests_with_budget(&snapshot, None, Some(&verification), budget);
+
+    assert_eq!(result.status(), TestSuiteStatus::OperationalFailure);
+    assert_eq!(result.selected(), 0, "a host event reports no counts");
+    assert_eq!(result.passed(), 0);
+    assert_eq!(result.failed(), 0);
+    assert!(result.items().is_empty());
+    let [diagnostic] = result.diagnostics() else {
+        panic!("one unlocated diagnostic: {:?}", result.diagnostics());
+    };
+    assert_eq!(
+        diagnostic.code(),
+        vibra_diagnostics::DiagnosticCode::RuntimeMemoryExhausted
+    );
+    assert_eq!(diagnostic.source_id(), None);
+    assert_eq!(
+        diagnostic.primary_span(),
+        vibra_diagnostics::ByteSpan::empty_at(0)
+    );
+
+    // The same suite under the default budget stops the same way, and a
+    // following suite without the recursion runs normally in this process.
+    let result = run_tests(&snapshot, None, Some(&verification));
+    assert_eq!(result.status(), TestSuiteStatus::OperationalFailure);
+    let passing = TempProject::new(
+        "memory-recovered",
+        &[
+            ("src/app/main.vib", "(defn execute () void void)\n"),
+            (
+                "tests/deep/fine.vib",
+                "(import assert @std.assert)\n(test \"first\" (assert.true true))\n",
+            ),
+        ],
+    );
+    let snapshot = WorkspaceSnapshot::load(passing.path()).expect("snapshot");
+    let result = run_tests(&snapshot, None, Some(&verification));
+    assert_eq!(result.status(), TestSuiteStatus::Ok);
+    assert_eq!(result.passed(), 1);
+}
+
+#[test]
 fn a_test_body_ending_in_a_source_call_reuses_its_activation() {
     let project = TempProject::new(
         "tail-test-body",
@@ -352,7 +419,7 @@ fn a_test_body_ending_in_a_source_call_reuses_its_activation() {
             (
                 "tests/tail/loop.vib",
                 "(import assert @std.assert)
-(defn finish () void (do))\n(defn spin (count u64) void\n  (if (u64.equal count 0u64) (finish) (spin (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n(test \"one call\" (finish))\n(test \"a loop past the activation bound\" (spin 100000u64))\n",
+(defn finish () void (do))\n(defn spin (count u64) void\n  (if (u64.equal count 0u64) (finish) (spin (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n(test \"one call\" (finish))\n(test \"a loop of a hundred thousand tail calls\" (spin 100000u64))\n",
             ),
         ],
     );

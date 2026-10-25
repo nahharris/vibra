@@ -6,7 +6,10 @@
     (defn collect (value self) (array i32) (array.of))))
 
 (defn effectful () (iter i32)
-  (iter.map (array.of 1i32) (lambda (value i32) i32 effects: (io) value)))
+  (iter.map (array.of 1i32) (lambda (value i32) i32 effects: (console) (console.out) value)))
 
 (defn not-iterable () (array i32)
   (iter.collect 5i32))
+
+(deffect console
+  (defn out () void (do)))
