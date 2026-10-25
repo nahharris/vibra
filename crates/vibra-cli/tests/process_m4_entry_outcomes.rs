@@ -36,7 +36,8 @@ impl Scratch {
                 .as_nanos()
         ));
         std::fs::create_dir_all(path.join("src/app")).expect("project");
-        std::fs::write(path.join("project.vibon"), manifest(effects)).expect("manifest");
+        std::fs::write(path.join("project.vibon"), manifest(effects))
+            .expect("manifest");
         std::fs::write(path.join("src/app/main.vib"), main).expect("source");
         Self(path)
     }
@@ -111,7 +112,9 @@ fn an_entry_returning_its_own_err_is_program_failed_in_json() {
     let envelope = scratch.json(b"", 6, "@command.program-failed");
     assert_eq!(envelope["diagnostics"], serde_json::json!([]));
     assert_eq!(envelope["payload"]["trap"], Value::Null);
-    let result = envelope["payload"]["programResult"].as_str().expect("result");
+    let result = envelope["payload"]["programResult"]
+        .as_str()
+        .expect("result");
     assert!(result.contains("variant: @err"), "{result}");
     assert!(result.contains("code: 7i32"), "{result}");
     // The program's own output stays in the envelope.
@@ -146,7 +149,9 @@ fn a_host_error_propagated_with_try_ends_the_run_program_failed() {
     let envelope = scratch.json(&[0xff, 0xfe], 6, "@command.program-failed");
     assert_eq!(envelope["diagnostics"], serde_json::json!([]));
     assert_eq!(envelope["payload"]["trap"], Value::Null);
-    let result = envelope["payload"]["programResult"].as_str().expect("result");
+    let result = envelope["payload"]["programResult"]
+        .as_str()
+        .expect("result");
     assert!(result.contains("variant: @err"), "{result}");
     assert!(result.contains("variant: @invalid-text"), "{result}");
     let human = scratch.human(&[0xff, 0xfe], 6);
@@ -177,7 +182,9 @@ fn a_host_error_the_program_handles_is_not_a_failure() {
     let envelope = scratch.json(&[0xff], 0, "@command.ok");
     assert_eq!(envelope["payload"]["stdout"], "recovered");
     assert_eq!(envelope["payload"]["trap"], Value::Null);
-    let result = envelope["payload"]["programResult"].as_str().expect("result");
+    let result = envelope["payload"]["programResult"]
+        .as_str()
+        .expect("result");
     assert!(result.contains("variant: @ok"), "{result}");
     let human = scratch.human(&[0xff], 0);
     assert_eq!(text(&human.stdout), "recovered");
@@ -191,7 +198,10 @@ fn a_void_entry_stays_ok() {
     assert_eq!(envelope["diagnostics"], serde_json::json!([]));
     assert_eq!(envelope["payload"]["trap"], Value::Null);
     let human = scratch.human(b"", 0);
-    assert!(human.stdout.is_empty() && human.stderr.is_empty(), "{human:?}");
+    assert!(
+        human.stdout.is_empty() && human.stderr.is_empty(),
+        "{human:?}"
+    );
 }
 
 /// A function behind `any` in the err the entry holds has no encoding.
@@ -275,7 +285,9 @@ const DEEP_ERR: &str = r#"(deftype nat (record prev (array nat)))
 fn an_error_nested_five_thousand_deep_is_reported_whole() {
     let scratch = Scratch::new("deep", "", DEEP_ERR);
     let envelope = scratch.json(b"", 6, "@command.program-failed");
-    let result = envelope["payload"]["programResult"].as_str().expect("result");
+    let result = envelope["payload"]["programResult"]
+        .as_str()
+        .expect("result");
     assert!(result.contains("variant: @err"), "{result}");
     assert_eq!(result.matches("kind: @array").count(), 5001);
     let human = scratch.human(b"", 6);
@@ -307,7 +319,9 @@ const BIG_UNION_ERR: &str = r#"(import text @std.text)
 fn a_union_payload_and_a_result_of_a_million_bytes_are_reported_whole() {
     let scratch = Scratch::new("big", "", BIG_UNION_ERR);
     let envelope = scratch.json(b"", 6, "@command.program-failed");
-    let result = envelope["payload"]["programResult"].as_str().expect("result");
+    let result = envelope["payload"]["programResult"]
+        .as_str()
+        .expect("result");
     assert!(result.contains("kind: @union"), "{result:.300}");
     assert!(result.len() > 1_000_000, "{}", result.len());
     let human = scratch.human(b"", 6);

@@ -19,7 +19,9 @@ fn only_an_err_result_is_a_program_failure() {
     assert!(failed(
         "(deftype failure (record code i32))\n(defn main () (result void failure) (result.err (failure code: 1i32)))"
     ));
-    assert!(!failed("(deftype failure (record code i32))\n(defn main () (result void failure) (result.ok))"));
+    assert!(!failed(
+        "(deftype failure (record code i32))\n(defn main () (result void failure) (result.ok))"
+    ));
     assert!(!failed("(defn main () void (do))"));
 }
 

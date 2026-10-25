@@ -950,7 +950,11 @@ fn wasm_status(case: &Case, observation: &CaseObservation) -> WasmStatus {
                 return WasmStatus::Failed {
                     reason: format!(
                         "command outcome mismatch: the interpreter's entry {} err, the module's {}",
-                        if interpreter { "returned" } else { "did not return" },
+                        if interpreter {
+                            "returned"
+                        } else {
+                            "did not return"
+                        },
                         if wasm { "did" } else { "did not" }
                     ),
                 };
