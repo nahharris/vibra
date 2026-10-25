@@ -98,17 +98,23 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             result.check().status() == vibra_workspace::semantic::CheckStatus::Accepted;
         let mut host_event = None;
         // Both backends run the one checked program of the target.
-        let wasm = if accepted {
+        let (wasm, wasm_program_failed) = if accepted {
             result
                 .check()
                 .program_for_target(target)
-                .map(|program| crate::wasm::observe(program, &world))
+                .map(|program| crate::wasm::observe_entry(program, &world))
+                .map_or((None, None), |(observation, failed)| {
+                    (Some(observation), failed)
+                })
         } else {
-            None
+            (None, None)
         };
+        let mut program_failed = None;
+        let mut trap_diagnostics = Vec::new();
         let interpreter = if accepted {
             match result.outcome() {
                 Some(vibra_workspace::semantic::RunOutcome::Program(execution)) => {
+                    program_failed = Some(execution.program_failed());
                     Some(ExecutionObservation {
                         result: Some(execution.canonical_result()),
                         audit_trace: execution.audit_trace().to_vec(),
@@ -119,6 +125,20 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
                     error,
                 )) if error.is_host_event() => {
                     host_event = crate::types::host_event_atom(error);
+                    None
+                }
+                // A trap ends the run with its unlocated diagnostic, never a
+                // program failure, and with no result or trace.
+                Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(
+                    error,
+                )) if error.program_trap().is_some() => {
+                    if let Some((code, _)) = error.program_trap() {
+                        trap_diagnostics.push(vibra_diagnostics::Diagnostic::new(
+                            code,
+                            vibra_diagnostics::ByteSpan::empty_at(0),
+                            error.trap_message(),
+                        ));
+                    }
                     None
                 }
                 Some(vibra_workspace::semantic::RunOutcome::InterpreterFailure(
@@ -137,12 +157,16 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
         } else {
             None
         };
+        let mut diagnostics = result.check().diagnostics().to_vec();
+        diagnostics.extend(trap_diagnostics);
         Ok(CaseObservation {
             accepted,
-            diagnostics: result.check().diagnostics().to_vec(),
+            diagnostics,
             interpreter,
             host_event,
             wasm,
+            program_failed,
+            wasm_program_failed,
             ..CaseObservation::default()
         })
     }

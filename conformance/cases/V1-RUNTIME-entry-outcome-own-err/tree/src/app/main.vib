@@ -1,0 +1,8 @@
+(import io @std.io)
+
+(deftype failure (record code i32))
+
+(defn main () (result void failure)
+  effects: (io.stdout)
+  (let - (io.stdout.text "before\n"))
+  (result.err (failure code: 7i32)))

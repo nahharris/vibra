@@ -482,7 +482,12 @@ compares it as data.
 A `workspace-run` case whose entry returns `err` records the entry's
 `(result void e)` in the canonical result observation, as for any result. Its
 command result, `@command.program-failed`, follows from that observation, so the
-case adds no field for it and expects no trap and no diagnostic.
+case adds no field for it and expects no trap and no diagnostic. Both backends
+classify the entry's result by its variant and the harness holds them to the
+same outcome. A `workspace-run` case whose run traps is an accepted case that
+expects the trap's runtime error diagnostic, unlocated with span `0..0`, in
+place of the result and audit-trace snapshots, as for a host event: it declares
+neither, and the Wasm backend must end with the same trap code.
 
 Cases use the following stable section IDs, followed by a descriptive
 kebab-case suffix such as `V1-SRC-CALLS-labelled-after-variadic`:

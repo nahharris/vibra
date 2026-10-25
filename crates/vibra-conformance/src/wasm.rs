@@ -39,6 +39,26 @@ fn runner() -> Result<&'static Runner, String> {
 /// on each program they run; it is public so that a host test can run a
 /// hand-built program through the same path.
 pub fn observe(program: &CheckedProgram, world: &HostWorld) -> WasmObservation {
+    observe_entry(program, world).0
+}
+
+/// [`observe`], and whether the entry returned `err` when the run completed:
+/// the module's result slot, read by the entry's result type, is classified
+/// by its variant, as the interpreter classifies its own.
+pub(crate) fn observe_entry(
+    program: &CheckedProgram,
+    world: &HostWorld,
+) -> (WasmObservation, Option<bool>) {
+    let mut program_failed = None;
+    let observation = observe_with_flag(program, world, &mut program_failed);
+    (observation, program_failed)
+}
+
+fn observe_with_flag(
+    program: &CheckedProgram,
+    world: &HostWorld,
+    program_failed: &mut Option<bool>,
+) -> WasmObservation {
     let module = match vibra_wasm::emit(program) {
         Ok(module) => module,
         Err(not_lowered) => {
@@ -75,10 +95,18 @@ pub fn observe(program: &CheckedProgram, world: &HostWorld) -> WasmObservation {
     ) {
         Ok(Observed::Completed {
             value, audit_trace, ..
-        }) => WasmObservation::Completed(ExecutionObservation {
-            result: Some(value.canonical_observation(&result)),
-            audit_trace,
-        }),
+        }) => {
+            *program_failed = Some(value.is_err_variant());
+            WasmObservation::Completed(ExecutionObservation {
+                result: Some(value.canonical_observation(&result)),
+                audit_trace,
+            })
+        }
+        // A trap while the host reads the entry's result, such as a function
+        // behind `any`, is the program's trap and not a backend failure.
+        Ok(Observed::Stopped(Outcome::Trapped { code, .. })) => {
+            WasmObservation::Trapped(code.diagnostic_code().as_atom().to_owned())
+        }
         Ok(Observed::Stopped(outcome)) => stopped(&outcome),
         Err(error) => WasmObservation::Failed {
             reason: error.to_string(),
