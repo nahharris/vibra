@@ -69,6 +69,15 @@ enum Piece<'a> {
 }
 
 impl ObservedValue {
+    /// Whether this is the `err` variant of a `result`, which is how a run
+    /// classifies an entry's value: an entry signature is `void` or
+    /// `(result void e)`, so the only enum an entry returns is a `result`,
+    /// and an `err` of it is a program failure whatever the error holds.
+    #[must_use]
+    pub fn is_err_variant(&self) -> bool {
+        matches!(self, Self::Enum { variant, .. } if variant == "err")
+    }
+
     /// The canonical value encoding.
     #[must_use]
     pub fn canonical_vibon(&self) -> String {
