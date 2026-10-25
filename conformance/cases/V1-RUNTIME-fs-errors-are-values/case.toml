@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-fs-errors-are-values"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "Every failure of a read is the err of its own call and never a trap: a missing file and a missing parent are not-found, a directory read as a file is not-a-file, a file listed as a directory or used as a parent is not-a-directory, and a path with a NUL is invalid-path. The program discards each and runs to the end."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

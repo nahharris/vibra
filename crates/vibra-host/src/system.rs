@@ -107,6 +107,26 @@ fn fs_error(error: &std::io::Error) -> FsError {
     }
 }
 
+/// The error of an operation on `path`. A path that is missing is `not-found`,
+/// unless the nearest ancestor that exists is a file, which is
+/// `not-a-directory` whatever the platform reports for it: Unix says so itself
+/// and Windows says the path was not found, and the registry has one meaning.
+fn fs_error_at(path: &std::path::Path, error: &std::io::Error) -> FsError {
+    let kind = fs_error(error);
+    if kind != FsError::NotFound {
+        return kind;
+    }
+    let nearest = path
+        .ancestors()
+        .skip(1)
+        .find_map(|ancestor| std::fs::metadata(ancestor).ok());
+    if nearest.is_some_and(|metadata| !metadata.is_dir()) {
+        FsError::NotADirectory
+    } else {
+        FsError::NotFound
+    }
+}
+
 fn path_text(at: &str) -> Result<&std::path::Path, FsError> {
     if at.contains('\0') {
         Err(FsError::InvalidPath)
@@ -162,11 +182,13 @@ impl SystemProvider {
 impl SystemProvider {
     fn file_bytes(at: &str) -> Done<Vec<u8>, FsError> {
         let path = path_text(at)?;
-        let metadata = std::fs::metadata(path).map_err(|error| fs_error(&error))?;
+        let metadata =
+            std::fs::metadata(path).map_err(|error| fs_error_at(path, &error))?;
         if metadata.is_dir() {
             return Err(Failure::Error(FsError::NotAFile));
         }
-        let mut file = std::fs::File::open(path).map_err(|error| fs_error(&error))?;
+        let mut file =
+            std::fs::File::open(path).map_err(|error| fs_error_at(path, &error))?;
         read_all(&mut file, metadata.len()).map_err(|failure| match failure {
             ReadFailure::Memory => Failure::MemoryExhausted,
             ReadFailure::Io(error) => Failure::Error(fs_error(&error)),
@@ -178,7 +200,8 @@ impl SystemProvider {
         if std::fs::metadata(path).is_ok_and(|metadata| metadata.is_dir()) {
             return Err(Failure::Error(FsError::NotAFile));
         }
-        std::fs::write(path, contents).map_err(|error| Failure::Error(fs_error(&error)))
+        std::fs::write(path, contents)
+            .map_err(|error| Failure::Error(fs_error_at(path, &error)))
     }
 
     fn write_stream(stream: &mut impl Write, value: &[u8]) -> Done<(), IoError> {
@@ -233,7 +256,8 @@ impl HostProvider for SystemProvider {
 
     fn read_entries(&mut self, at: &str) -> Done<Vec<String>, FsError> {
         let path = path_text(at)?;
-        let entries = std::fs::read_dir(path).map_err(|error| fs_error(&error))?;
+        let entries =
+            std::fs::read_dir(path).map_err(|error| fs_error_at(path, &error))?;
         let mut names = Vec::new();
         for entry in entries {
             let entry = entry.map_err(|error| fs_error(&error))?;
@@ -261,7 +285,8 @@ impl HostProvider for SystemProvider {
     fn stat(&mut self, at: &str) -> Done<Metadata, FsError> {
         let path = path_text(at)?;
         // `metadata` follows symbolic links.
-        let metadata = std::fs::metadata(path).map_err(|error| fs_error(&error))?;
+        let metadata =
+            std::fs::metadata(path).map_err(|error| fs_error_at(path, &error))?;
         Ok(if metadata.is_file() {
             Metadata {
                 kind: FsKind::File,

@@ -1,0 +1,7 @@
+(import fs @std.fs)
+
+(defn main () (result void fs.fs-error)
+  effects: (fs.read)
+  (let - (try (fs.read.entries (fs.path "/box"))))
+  (let - (try (fs.read.entries (fs.path "/box/empty"))))
+  (result.ok))

@@ -1,0 +1,13 @@
+(import fs @std.fs)
+(import io @std.io)
+(import text @std.text)
+
+(defn main () (result void fs.fs-error)
+  effects: (fs.read io.stdin io.stdout)
+  (let name (match (io.stdin.text)
+    (result.ok line) (text.trim line)
+    (result.err -) ""))
+  (let contents (try (fs.read.text (fs.path name))))
+  (match (io.stdout.text (text.concat "> " contents))
+    (result.ok) (result.ok)
+    (result.err -) (result.ok)))

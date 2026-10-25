@@ -7,7 +7,7 @@ including binding sequences, `let-else`, `return`, and `never`, and Milestone 4
 Step 2b removes the source boolean literal for the prelude values `true` and
 `false`. Milestone 4 Step 14
 implements `deffect` with Vibra-bodied operations and nonempty effect rows;
-Milestone 4 Step 16 implements `@host` externals and `@std.io`, as the surface
+Milestone 4 Steps 16 and 17 implement `@host` externals, `@std.io`, and `@std.fs`, as the surface
 inventory records.
 
 ## Reader
