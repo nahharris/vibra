@@ -1,0 +1,1 @@
+(record format: @host-world.v1 args: (array "/in/greeting.txt") files: (dict "/in/greeting.txt" "hello from a file\n"))

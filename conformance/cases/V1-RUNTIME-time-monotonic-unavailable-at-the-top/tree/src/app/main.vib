@@ -1,0 +1,8 @@
+(import time @std.time)
+
+(defn main () (result void time.time-error)
+  effects: (time.now)
+  (let - (try (time.now.monotonic)))
+  (let - (time.now.monotonic))
+  (let - (time.now.monotonic))
+  (result.ok))

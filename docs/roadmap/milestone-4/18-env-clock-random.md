@@ -90,3 +90,58 @@ options on `test`.
 
 The five operations match in both backends; the demo gate's runtime path works
 through `vibra run TARGET -- ARG...` in a process test.
+
+## As built
+
+Landed on its branch, conditional on its pull request merging; the base is the head
+of Step 17 (PR #377, not yet merged).
+
+- **The modules.** `std/env.vib`, `std/time.vib`, and `std/random.vib` declare the
+  three error enums, the roots `read`, `now`, and `generate`, and the five
+  `visibility: @public` operations. The manifest lists the modules and the five
+  symbols and stays `0.3.0`. The checker, the operations (`vibra-host`), both
+  providers, and both backends needed no change: the registry rows, the world's
+  clock and SplitMix64 generator, and the system provider's environment, clocks, and
+  randomness were built in Step 16a.
+- **The CLI.** `parse_run_command` splits `run`'s tokens at the first literal `--`.
+  What precedes it must be exactly one `TARGET`; everything after it, including
+  another `--`, an option-like token, and the empty string, is one program argument,
+  verbatim and in order, handed to `SystemProvider::with_arguments`. `--` before
+  `TARGET` leaves no target and is invalid input, and `--` on `test`, `check`, `fmt`,
+  `help`, and `project` was already invalid input because those commands take no
+  such token. The `USAGE` text and the tooling chapter's grammar are the same text
+  (`run TARGET [-- ARG...]`); no schema changed.
+
+### Rulings
+
+None. "Everything after the first `--` is an argument" is the tooling chapter's
+existing sentence, and the second `--` of `run app -- a -- b` is therefore an
+argument.
+
+### Cases
+
+Added, all `matched` in both backends: `V1-RUNTIME-env-read-var`,
+`V1-RUNTIME-env-read-args-from-the-world`, `V1-RUNTIME-env-read-args-default-empty`,
+`V1-RUNTIME-time-wall-from-the-world`, `V1-RUNTIME-time-monotonic-steps`,
+`V1-RUNTIME-time-monotonic-unavailable-at-the-top`, `V1-RUNTIME-random-seeded-bytes`
+(seed 1234567, bytes written from the SplitMix64 output),
+`V1-RUNTIME-random-state-continues` (seed 0, three bytes then nine),
+`V1-RUNTIME-env-error-propagates-with-try`, `V1-RUNTIME-env-demo-args-name-a-file`,
+and `V1-RUNTIME-world-sets-env-args-clock-random` (`workspace-test`, three tests, the
+third seeing the clock at its start again). Negatives:
+`V1-EFFECT-host-target-array-omits-env-read`, `-time-now`, and `-random-generate`.
+No case was re-expected, deleted, or downgraded. Parity: 11 rows added, 162 of 162
+`matched`.
+
+### Evidence
+
+- `process_m4_arguments` (8 portable tests and 1 Unix-only): `run app -- a b c`,
+  `run app --`, `run app -- --flag -- ...`, the JSON trace, the invalid forms
+  (`run -- app`, `-- run app`, `test -- x`, `test --`, `check`, `fmt`, `help`, and
+  `project init` with `--`), nothing runs after a command-line error, the help text,
+  ten thousand arguments and a 1 MiB argument (through the library entry point,
+  because a Windows command line cannot hold them), and a non-Unicode argument as
+  `not-unicode` at the operation.
+- `env_clock_random_m4_step18` (6 host tests, 1 Unix-only): the system environment,
+  verbatim large arguments, the world's wall and stepped monotonic clock with
+  `step: 0`, a read past the `u64` range, the system clocks, and `count` 0 and 1 MiB.

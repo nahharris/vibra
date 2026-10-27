@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-env-error-propagates-with-try"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "A typed env error reaches the program only as the err of its own call: try returns it from the entry, so the args read after it never runs and the trace holds the one completed call."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

@@ -119,9 +119,9 @@ merging, and report `@tool.unavailable` no longer. Step 9 lowers them to WebAsse
 | I11 | The `@host` ABI: borrowed parameters, an owned result, and the seven builders (D30) | Step 16b-1; landed, conditional on its pull request merging (the imports, the builders, and the adoption in `vibra-wasm`; `host_builders_m4_step16b`) |
 | I12 | The `@audit-trace.v1` event record and the CLI `AuditEvent` objects (D18) | Step 16a; landed, PR #374 (the event type and its VIBON and JSON codecs, `audit_events_m4_step16`); events: Step 16b-1, landed conditional on its pull request merging (both backends append `AuditEvent::completed`; `host_boundary_m4_step16b`) |
 | I13 | The `@host-world.v1` test world, the system provider, and the corpus `host-world` input (D20) | Step 16a; landed, PR #374 (the decoder, `WorldProvider`, `SystemProvider`, and the corpus input); fields in Steps 16b–18 |
-| I14 | Program arguments, `vibra run TARGET -- ARG...` (D22) | Step 18 |
+| I14 | Program arguments, `vibra run TARGET -- ARG...` (D22) | Step 18; landed, conditional on its pull request merging (`run` splits at the first `--`; `process_m4_arguments`) |
 | I15 | `@command.program-failed` and exit code 6 (D21) | Step 19 |
 | I16 | The effect diagnostics, the witness, the indirect-call rule, and the row record (D23–D25) | Step 14; landed; target array in Step 15, landed |
-| I17 | The manifest `host` list, the `0.3.0` package, and the five effect modules (D27) | Step 16a; landed, PR #374 (the list, the load-time check, and `0.3.0`); `std/io.vib` landed in PR #376 and `std/fs.vib` in Step 17 (conditional on its pull request merging), with the six `fs` symbols in the list; modules in Step 18 |
+| I17 | The manifest `host` list, the `0.3.0` package, and the five effect modules (D27) | Step 16a; landed, PR #374 (the list, the load-time check, and `0.3.0`); `std/io.vib` landed in PR #376 and `std/fs.vib` in Step 17 (conditional on its pull request merging), with the six `fs` symbols in the list; `std/env.vib`, `std/time.vib`, and `std/random.vib` in Step 18 (conditional on its pull request merging), with the five symbols in the list |
 | I18 | The `effects` fact of the position envelope and the effect fields of the index (D28) | Step 20 |
 | I19 | The performance baseline and its CI check (D29) | Step 21 |
