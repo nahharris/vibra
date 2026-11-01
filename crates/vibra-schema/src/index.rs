@@ -122,10 +122,12 @@ impl IndexDeclarationDocument {
                 errors: facts.errors().to_vec(),
                 applications: facts.applications().to_vec(),
             }),
-            external: declaration.external().map(|external| IndexExternalDocument {
-                provider: external.provider().to_owned(),
-                symbol: external.symbol().to_owned(),
-            }),
+            external: declaration
+                .external()
+                .map(|external| IndexExternalDocument {
+                    provider: external.provider().to_owned(),
+                    symbol: external.symbol().to_owned(),
+                }),
             text: declaration.text().to_owned(),
         }
     }

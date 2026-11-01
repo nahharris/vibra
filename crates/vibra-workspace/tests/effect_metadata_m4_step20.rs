@@ -117,11 +117,17 @@ fn a_call_reports_its_enclosing_body_its_complete_row_and_its_target() {
     assert_eq!(roots(enclosing.ceiling()), [AUDIT, WRITE]);
     assert_eq!(roots(enclosing.performed()), [AUDIT, WRITE]);
     // The operation's complete row: the owner together with the additive row.
-    assert_eq!(roots(value.application().expect("application")), [AUDIT, WRITE]);
+    assert_eq!(
+        roots(value.application().expect("application")),
+        [AUDIT, WRITE]
+    );
     let target = value.target().expect("target");
     assert_eq!(target.entry().canonical(), "@demo@0.1.0/app.main.execute");
     assert_eq!(roots(target.effects()), [AUDIT, WRITE]);
-    assert!(value.witnesses().is_none(), "a compact query omits witnesses");
+    assert!(
+        value.witnesses().is_none(),
+        "a compact query omits witnesses"
+    );
 }
 
 #[test]
@@ -141,7 +147,10 @@ fn a_lambda_is_its_own_enclosing_body_and_has_no_identity() {
     assert!(enclosing.identity().is_none());
     assert_eq!(roots(enclosing.ceiling()), [AUDIT, WRITE]);
     // The callee's complete row is its performed row, not its ceiling.
-    assert_eq!(roots(value.application().expect("application")), [AUDIT, WRITE]);
+    assert_eq!(
+        roots(value.application().expect("application")),
+        [AUDIT, WRITE]
+    );
 }
 
 #[test]
@@ -215,7 +224,11 @@ fn a_position_at_end_of_file_belongs_to_the_declaration_that_ends_there() {
     .expect("query at end of file");
     let value = query.effects().value().expect("effects value");
     assert_eq!(
-        value.enclosing().expect("enclosing").identity().map(|id| id.canonical()),
+        value
+            .enclosing()
+            .expect("enclosing")
+            .identity()
+            .map(|id| id.canonical()),
         Some("@demo@0.1.0/solo.lone.lone")
     );
 }
@@ -267,7 +280,10 @@ fn the_witness_is_the_chain_the_checker_reports() {
     assert_eq!(roots(enclosing.ceiling()), ["@demo@0.1.0/app.helper.audit"]);
     assert_eq!(
         roots(enclosing.performed()),
-        ["@demo@0.1.0/app.helper.audit", "@demo@0.1.0/app.helper.write"]
+        [
+            "@demo@0.1.0/app.helper.audit",
+            "@demo@0.1.0/app.helper.write"
+        ]
     );
     let witnesses = value.witnesses().expect("expanded");
     assert_eq!(witnesses.len(), 2, "one record for each performed root");
@@ -430,9 +446,10 @@ fn the_index_holds_the_ceiling_the_performed_row_and_the_external_binding() {
     assert_eq!(facts.effects(), ["ops.log.write"]);
 
     let vibon = document.canonical_vibon();
-    assert!(vibon.contains(
-        "ceiling: (record roots: (array @ops.log.audit @ops.log.write))"
-    ));
+    assert!(
+        vibon
+            .contains("ceiling: (record roots: (array @ops.log.audit @ops.log.write))")
+    );
     assert!(vibon.contains("external: void"));
 }
 
@@ -462,6 +479,9 @@ fn a_rejected_external_binding_is_kept_while_the_checked_facts_are_omitted() {
         .iter()
         .find(|declaration| declaration.id() == "app.main.broken")
         .expect("function record");
-    assert!(broken.facts().is_none(), "a body that did not check has no row");
+    assert!(
+        broken.facts().is_none(),
+        "a body that did not check has no row"
+    );
     assert!(broken.external().is_none());
 }

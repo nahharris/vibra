@@ -639,7 +639,9 @@ fn function_at(ast: &SourceAst, position: Position) -> Option<&FunctionDeclarati
     let declaration = ast.declarations().get(index)?;
     match (declaration, member, inner) {
         (Declaration::Defn(function), None, _) => Some(function),
-        (Declaration::Deffect(effect), Some(member), None) => effect.members().get(member),
+        (Declaration::Deffect(effect), Some(member), None) => {
+            effect.members().get(member)
+        }
         (_, Some(member), None) => match members(declaration).get(member) {
             Some(TypeMember::Method(method)) => Some(method),
             _ => None,
@@ -654,7 +656,8 @@ fn is_contract_member(ast: &SourceAst, position: Position) -> bool {
     matches!(
         ast.declarations().get(position.0),
         Some(Declaration::Defint(_))
-    ) && function_at(ast, position).is_some_and(|function| function.expressions().is_empty())
+    ) && function_at(ast, position)
+        .is_some_and(|function| function.expressions().is_empty())
 }
 
 /// The provider binding a function writes with `external:` and `symbol:`.
@@ -915,19 +918,15 @@ fn build(
                             Some(node)
                                 if node.checked() && graph.performed_known(node) =>
                             {
-                                (
-                                    roots(node.ceiling()),
-                                    roots(graph.performed(node)),
-                                )
+                                (roots(node.ceiling()), roots(graph.performed(node)))
                             }
                             Some(_) => return None,
                             // A contract member of an interface has no body and
                             // so no node: a call of it performs its contract
                             // ceiling, which is its complete row.
-                            None if is_contract_member(ast, position) => (
-                                roots(signature.row()),
-                                roots(signature.row()),
-                            ),
+                            None if is_contract_member(ast, position) => {
+                                (roots(signature.row()), roots(signature.row()))
+                            }
                             None => return None,
                         };
                         Some(IndexFacts {

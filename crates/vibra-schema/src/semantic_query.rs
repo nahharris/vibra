@@ -602,7 +602,14 @@ fn parse_type(value: Value) -> Result<SemanticTypeDocument, String> {
     let object = object(value, "semantic type")?;
     ensure_keys(
         &object,
-        &["kind", "name", "parameters", "result", "labelled", "effects"],
+        &[
+            "kind",
+            "name",
+            "parameters",
+            "result",
+            "labelled",
+            "effects",
+        ],
     )?;
     let kind = required_string(&object, "kind")?;
     // Only a function carries the closed row its type is compared by.
@@ -743,8 +750,7 @@ fn parse_enclosing(value: Value) -> Result<EnclosingEffectsDocument, String> {
     };
     if !identity_fits {
         return Err(
-            "a lambda has no identity, and an operation and a test have one"
-                .to_owned(),
+            "a lambda has no identity, and an operation and a test have one".to_owned(),
         );
     }
     Ok(EnclosingEffectsDocument {
@@ -787,7 +793,9 @@ fn parse_hop(value: Value) -> Result<WitnessHopDocument, String> {
             identity_value
                 .as_str()
                 .filter(|identity| !identity.is_empty())
-                .ok_or_else(|| "a witness identity must be a non-empty string".to_owned())?
+                .ok_or_else(|| {
+                    "a witness identity must be a non-empty string".to_owned()
+                })?
                 .to_owned(),
         )
     };

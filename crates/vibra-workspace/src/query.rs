@@ -17,7 +17,9 @@ use vibra_syntax::{
     FunctionDeclaration, GrammarCategory, IntegerSuffix, Literal, NameKind, Pattern,
     PatternKind, SourceAst, StructuralQuery, TypeExpr, VariadicParameter,
 };
-use vibra_types::{EffectGraph, EffectNode, EffectNodeKind, WitnessCallee, check_source};
+use vibra_types::{
+    EffectGraph, EffectNode, EffectNodeKind, WitnessCallee, check_source,
+};
 
 use crate::WorkspaceSnapshot;
 
@@ -1188,7 +1190,10 @@ impl CallableCatalog {
                 version,
                 unit,
                 module,
-                vec![root.name().value().to_owned(), operation.name().value().to_owned()],
+                vec![
+                    root.name().value().to_owned(),
+                    operation.name().value().to_owned(),
+                ],
                 operation,
                 EntityKind::Operation,
                 resolved,
@@ -1210,23 +1215,29 @@ impl CallableCatalog {
     ) {
         // A generic or variadic function keeps its application unavailable:
         // its operand list is not the declared parameters.
-        if function
-            .attributes()
-            .items()
-            .iter()
-            .any(|attribute| matches!(attribute, Attribute::Where(_) | Attribute::Variadic(_)))
-        {
+        if function.attributes().items().iter().any(|attribute| {
+            matches!(attribute, Attribute::Where(_) | Attribute::Variadic(_))
+        }) {
             return;
         }
-        let id = DeclarationId::new(package, version, unit, module.iter().cloned(), path, kind);
+        let id = DeclarationId::new(
+            package,
+            version,
+            unit,
+            module.iter().cloned(),
+            path,
+            kind,
+        );
         let canonical = id.canonical();
         if resolved
             .declarations()
             .iter()
             .any(|declaration| declaration.id().canonical() == canonical)
         {
-            self.by_identity
-                .insert(canonical.clone(), QueryIdentity::new(id.kind().as_str(), canonical));
+            self.by_identity.insert(
+                canonical.clone(),
+                QueryIdentity::new(id.kind().as_str(), canonical),
+            );
         }
     }
 }
@@ -1486,7 +1497,8 @@ impl<'a> SemanticCollector<'a> {
             span: function.span(),
             locals: locals.clone(),
         });
-        self.returns.push(self.semantic_type_expr(function.result()));
+        self.returns
+            .push(self.semantic_type_expr(function.result()));
         self.collect_sequence(
             function.expressions(),
             &locals,
@@ -1956,8 +1968,7 @@ impl<'a> SemanticCollector<'a> {
                     .effects()
                     .iter()
                     .map(|entry| {
-                        let target =
-                            self.reference_for_span(entry.span())?.target()?;
+                        let target = self.reference_for_span(entry.span())?.target()?;
                         let path = std::iter::once(target.unit())
                             .chain(target.module().iter().map(String::as_str))
                             .chain(target.path().iter().map(String::as_str))
@@ -2404,9 +2415,10 @@ impl<'a> SemanticCollector<'a> {
             complete &= row.is_some();
             row
         });
-        let witnesses = self.expansion.effect_witnesses.then(|| {
-            node.map(|node| self.witnesses(node)).unwrap_or_default()
-        });
+        let witnesses = self
+            .expansion
+            .effect_witnesses
+            .then(|| node.map(|node| self.witnesses(node)).unwrap_or_default());
         let value = EffectsFact {
             enclosing,
             application,

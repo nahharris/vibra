@@ -663,7 +663,7 @@ conversion, has the empty row. The fact is `exact` when every row it reports is
 the checked row; it is `recovered`, with the rows it has, when the enclosing body
 did not check, or reaches a function that did not, or the application's call is in
 a body that did not check, because such a row is a lower bound; and it is
-`unavailable` when the structural position is recovered or the check produced no
+`unavailable` when the structural position is recovered or unavailable, or the check produced no
 graph. A function that checked and reaches only functions that checked keeps an
 exact fact beside a module that did not check.
 

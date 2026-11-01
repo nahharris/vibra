@@ -443,3 +443,130 @@ fn consumer_rejects_malformed_type_metadata() {
     absent.as_object_mut().expect("object").remove("pattern");
     rejected(absent, "a query without a pattern fact");
 }
+
+/// One query of the effects corpus project, at the first `needle`.
+fn effects_query(
+    case: &str,
+    source_id: &str,
+    needle: &str,
+    witnesses: bool,
+) -> WorkspacePositionQueryDocument {
+    let tree = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../conformance/cases")
+        .join(case)
+        .join("tree");
+    let source = fs::read_to_string(tree.join(source_id)).expect("source");
+    let workspace = WorkspaceSnapshot::load_confined(tree).expect("workspace");
+    let query = vibra_workspace::query::query_position_expanded(
+        &workspace,
+        source_id,
+        source.find(needle).expect("needle"),
+        None,
+        vibra_workspace::query::PositionExpansion {
+            effect_witnesses: witnesses,
+        },
+    )
+    .expect("workspace query");
+    WorkspacePositionQueryDocument::render_with_source(&query, &LineIndex::new(&source))
+}
+
+#[test]
+fn the_effects_fact_validates_round_trips_and_reads_back() {
+    let validator = validator();
+    for witnesses in [false, true] {
+        let rendered = effects_query(
+            "V1-TOOL-workspace-position-effect-witnesses",
+            "src/main.vib",
+            "(three))",
+            witnesses,
+        );
+        let text = serde_json::to_string(&rendered).expect("query serializes");
+        let instance: Value = serde_json::from_str(&text).expect("query JSON");
+        assert_valid(&validator, &instance);
+        let parsed: WorkspacePositionQueryDocument =
+            serde_json::from_str(&text).expect("query reads back");
+        assert_eq!(parsed, rendered);
+        let value = &instance["effects"]["value"];
+        assert_eq!(value["witnesses"].is_array(), witnesses);
+        assert_eq!(
+            value["enclosing"]["performed"]["roots"]
+                .as_array()
+                .map(Vec::len),
+            Some(2)
+        );
+    }
+}
+
+#[test]
+fn the_schema_rejects_a_malformed_effects_fact_or_function_row() {
+    let validator = validator();
+    let base = serde_json::to_value(effects_query(
+        "V1-TOOL-workspace-position-effect-witnesses",
+        "src/main.vib",
+        "(three))",
+        true,
+    ))
+    .expect("JSON");
+    let rejected = |instance: Value, why: &str| {
+        assert!(
+            validator.iter_errors(&instance).next().is_some(),
+            "schema: {why}"
+        );
+        assert!(
+            serde_json::from_value::<WorkspacePositionQueryDocument>(instance).is_err(),
+            "reader: {why}"
+        );
+    };
+
+    let mut unknown_row = base.clone();
+    unknown_row["effects"]["value"]["enclosing"]["ceiling"]["tail"] = json!(null);
+    rejected(unknown_row, "an unknown field in a row");
+
+    let mut unknown_member = base.clone();
+    unknown_member["effects"]["value"]["extra"] = json!(1);
+    rejected(unknown_member, "an unknown member of the fact");
+
+    let mut absent = base.clone();
+    absent.as_object_mut().expect("object").remove("effects");
+    rejected(absent, "an envelope without the effects fact");
+
+    let mut kind = base.clone();
+    kind["effects"]["value"]["enclosing"]["kind"] = json!("method");
+    rejected(kind, "an unknown enclosing kind");
+
+    let mut lambda = base.clone();
+    lambda["effects"]["value"]["enclosing"]["kind"] = json!("lambda");
+    rejected(lambda, "a lambda with an identity");
+
+    let mut hops = base.clone();
+    hops["effects"]["value"]["witnesses"] = json!([]);
+    // The count is a cross-field rule only the consumer checks.
+    assert!(
+        serde_json::from_value::<WorkspacePositionQueryDocument>(hops).is_err(),
+        "reader: witnesses that omit a performed root"
+    );
+
+    let mut callee = base.clone();
+    callee["effects"]["value"]["witnesses"][0]["hops"][0]["callee"]["kind"] =
+        json!("function-value");
+    rejected(callee, "a function value with an identity");
+
+    // The application's callee type carries its row, and only a function does.
+    let call = serde_json::to_value(effects_query(
+        "V1-TOOL-workspace-position-effects",
+        "src/app/main.vib",
+        "(log.audit.record target)",
+        false,
+    ))
+    .expect("JSON");
+    assert_valid(&validator, &call);
+    let mut no_row = call.clone();
+    no_row["application"]["value"]["calleeType"]
+        .as_object_mut()
+        .expect("type")
+        .remove("effects");
+    rejected(no_row, "a function type without its row");
+    let mut primitive = call;
+    primitive["application"]["value"]["resultType"]["effects"] = json!({"roots": []});
+    rejected(primitive, "a primitive type with a row");
+}

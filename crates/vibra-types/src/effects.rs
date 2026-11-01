@@ -382,7 +382,8 @@ impl EffectGraph {
                     );
                     nodes.push(EffectNode {
                         index: nodes.len(),
-                        name: header.map_or_else(String::new, |header| header.name.clone()),
+                        name: header
+                            .map_or_else(String::new, |header| header.name.clone()),
                         label: header
                             .map_or_else(String::new, |header| identity(&header.name)),
                         kind: kind_of(index, owner.as_ref()),
@@ -525,7 +526,11 @@ impl EffectGraph {
     /// checker's admission reads it, or `None` when no call is applied
     /// there.
     #[must_use]
-    pub fn application_row(&self, source_id: &str, span: ByteSpan) -> Option<&EffectRow> {
+    pub fn application_row(
+        &self,
+        source_id: &str,
+        span: ByteSpan,
+    ) -> Option<&EffectRow> {
         self.nodes
             .iter()
             .flat_map(|node| node.sites.iter())
@@ -576,7 +581,9 @@ impl EffectGraph {
                 Some(node) if node.owner.is_some() => {
                     WitnessCallee::Operation(node.name.clone())
                 }
-                Some(node) => WitnessCallee::Function(node.identity().map(str::to_owned)),
+                Some(node) => {
+                    WitnessCallee::Function(node.identity().map(str::to_owned))
+                }
                 None => WitnessCallee::Function(None),
             },
             Callee::Value { .. } => WitnessCallee::FunctionValue,

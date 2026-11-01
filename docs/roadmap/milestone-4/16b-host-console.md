@@ -311,7 +311,7 @@ Re-expected, because they asserted `@host` unavailable:
 | --- | --- |
 | `V1-EFFECT-availability-host-member` | `@external.unknown-symbol` at the symbol string |
 | `V1-PROJECT-workspace-check-nominal-availability` | `@external.unknown-symbol` at the symbol string |
-| `V1-TOOL-index-unavailable` | `@external.unknown-symbol` at the symbol string; the index is unchanged |
+| `V1-TOOL-index-unavailable` | `@external.unknown-symbol` at the symbol string; the index is re-expected in Step 20 |
 | `process_review`, `process_step13` (2), `test_runner_step13` (2), `process_step14` | the unavailable fixture is a `native:` declaration outside the standard library, which is still `@tool.unavailable` |
 | `semantic_step12::host_provider_outside_a_deffect_and_unknown_provider_are_rejected` | `@host` on a module-level `defn` is `@syntax.invalid-attribute` |
 | `trusted_checker_rejects_unknown_external_provider_symbol_and_signature` | the same, for the `@host` source |
