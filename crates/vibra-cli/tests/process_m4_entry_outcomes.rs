@@ -27,13 +27,13 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(label: &str, effects: &str, main: &str) -> Self {
+        // A counter, not the clock, makes the name unique within the process.
+        static NEXT: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(0);
         let path = std::env::temp_dir().join(format!(
             "vibra-outcome19-{label}-{}-{}",
             std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("after the epoch")
-                .as_nanos()
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
         std::fs::create_dir_all(path.join("src/app")).expect("project");
         std::fs::write(path.join("project.vibon"), manifest(effects))
