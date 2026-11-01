@@ -1,0 +1,3 @@
+(defn inc (x i32) i32 x)
+
+(defn main () (result void any) (result.err inc))

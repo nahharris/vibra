@@ -606,6 +606,13 @@ fn execute_run<E: Write>(
         }
         vibra_workspace::semantic::CheckStatus::Accepted => {
             match outcome.outcome() {
+                // An entry that returned `err` returned a value: neither a
+                // trap nor a diagnostic, whatever the error holds.
+                Some(vibra_workspace::semantic::RunOutcome::Program(execution))
+                    if execution.program_failed() =>
+                {
+                    CommandResult::ProgramFailed
+                }
                 Some(vibra_workspace::semantic::RunOutcome::Program(_)) => {
                     CommandResult::Ok
                 }
@@ -666,6 +673,17 @@ fn execute_run<E: Write>(
             (None, String::new(), String::new(), Vec::new())
         }
     };
+    // Human mode reports a program failure as the encoding of the entry's
+    // result on standard error; standard output keeps the program's own bytes.
+    if result == CommandResult::ProgramFailed
+        && invocation.output_format == OutputFormat::Human
+        && let Some(encoding) = &program_result
+    {
+        let _ = stderr.write_all(encoding.as_bytes());
+        if !encoding.ends_with('\n') {
+            let _ = stderr.write_all(b"\n");
+        }
+    }
     // The entry's result is observed after the program ends, so the trap
     // has no source origin.
     let trap = match outcome.outcome() {

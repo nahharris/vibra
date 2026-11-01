@@ -86,3 +86,39 @@ Exit codes for individual error types, a way for a program to choose its exit co
 The exit clause "success, typed host error, propagation, and trap have
 interpreter/Wasm parity" passes through a `workspace-run` sweep, and the M3 inherited
 row I7 is closed.
+
+## As built
+
+Landed on its branch, conditional on its pull request merging; the base is the head
+of Step 18 (PR #378, not yet merged).
+
+- **Classification.** `Execution::program_failed` is the `err` variant of the entry's
+  observed value (`ObservedValue::is_err_variant`); an entry signature is `void` or
+  `(result void e)`, so the only enum an entry returns is a `result`, and the error's
+  content is never inspected. `execute_run` maps it to `CommandResult::ProgramFailed`
+  and, in human mode, writes the `programResult` encoding (a line of its own) to
+  standard error; standard output keeps the program's bytes. A trap and the memory
+  host event are decided before the value is read, so neither is recast.
+- **Conformance observation.** The result snapshot already distinguishes `err` from
+  `ok`, so no field was added for the command outcome (the corpus chapter already
+  says so). The harness classifies the result in both backends (`wasm::observe_entry`
+  classifies the module's `vibra_v1_result` value) and fails the Wasm backend on a
+  disagreement. The corpus had no way to record a `workspace-run` trap, which the
+  sweep needs: an accepted `workspace-run` case may expect the trap's runtime error
+  diagnostic (unlocated, `0..0`) in place of the result and trace snapshots, and the
+  Wasm backend must end with the same trap code (`WasmObservation::Trapped`).
+  Written into the conformance chapter.
+- **Cases.** `V1-RUNTIME-entry-outcome-own-err`, `-trap-holding-err`, and
+  `-memory-holding-err`, all `matched`. Success with host output
+  (`io-write-text-and-bytes`), a handled typed error (`fs-errors-are-values`,
+  `io-invalid-text`), and propagation with `try` (`io`, `fs`, `env`
+  `-error-propagates-with-try`) already existed and already recorded an `err`
+  result; none needed re-expecting.
+- **Re-expected.** `process_review_fixes::a_deeply_nested_entry_result_does_not_abort_the_process`
+  asserted exit 0 and `@command.ok` for an entry returning `err`; it now expects exit 6
+  and `@command.program-failed`.
+- **Process tests.** `process_m4_entry_outcomes` (real binary, JSON validated against
+  the command-result schema, and human mode): exit 0, 3, 5, and 6; own error,
+  propagated host error, handled error, `void`, trap and memory exhaustion holding an
+  `err`, an error nested 5000 deep, and a union payload with a result over a million
+  bytes.

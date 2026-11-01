@@ -85,6 +85,8 @@ pub struct Execution {
     value: Option<Value>,
     /// The canonical observation of the entry's value.
     canonical: String,
+    /// Whether the entry returned `err`: a program failure.
+    program_failed: bool,
     audit_trace: Vec<AuditEvent>,
     max_activation_depth: usize,
     tail_transfer_count: usize,
@@ -127,6 +129,14 @@ impl Execution {
     #[must_use]
     pub const fn peak_memory_bytes(&self) -> usize {
         self.peak_memory_bytes
+    }
+
+    /// Whether the entry returned `err`. The run then ends as a program
+    /// failure: `err` is a value the program returned, so it is neither a trap
+    /// nor a diagnostic, and the error's content is not inspected.
+    #[must_use]
+    pub const fn program_failed(&self) -> bool {
+        self.program_failed
     }
 
     /// Canonical typed value observation.
@@ -355,10 +365,12 @@ impl Interpreter {
             return Err(RuntimeError::UnobservableFunction { origin: None });
         };
         let canonical = value.canonical_observation(&value_type);
+        let program_failed = value.is_err_variant();
         let peak_memory_bytes = machine.peak_memory_bytes();
         Ok(Execution {
             value: value.as_primitive().cloned(),
             canonical,
+            program_failed,
             max_activation_depth: machine.max_depth,
             tail_transfer_count: machine.tail_transfers,
             peak_memory_bytes,

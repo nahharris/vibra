@@ -175,3 +175,6 @@ V1-RUNTIME-random-state-continues	matched
 V1-RUNTIME-env-error-propagates-with-try	matched
 V1-RUNTIME-env-demo-args-name-a-file	matched
 V1-RUNTIME-world-sets-env-args-clock-random	matched
+V1-RUNTIME-entry-outcome-own-err	matched
+V1-RUNTIME-entry-outcome-trap-holding-err	matched
+V1-RUNTIME-entry-outcome-memory-holding-err	matched

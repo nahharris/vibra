@@ -410,7 +410,21 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
                 "format cases must declare a formatted snapshot".to_owned(),
             ));
         }
-        if operation == ConformanceOperation::WorkspaceRun
+        // A trap ends an accepted run with its runtime error diagnostic and no
+        // result or trace: the run has none to record.
+        let expects_trap = expectations.accepted
+            && expectations.diagnostics.iter().any(|diagnostic| {
+                diagnostic.level == Level::Error
+                    && diagnostic.code.domain() == vibra_diagnostics::Domain::Runtime
+            });
+        if operation == ConformanceOperation::WorkspaceRun && expects_trap {
+            if expectations.host_event.is_some() || expectations.interpreter.is_some() {
+                return Err(ManifestError::Invalid(
+                    "a workspace-run case that expects a trap declares neither a host event nor execution snapshots"
+                        .to_owned(),
+                ));
+            }
+        } else if operation == ConformanceOperation::WorkspaceRun
             && expectations.host_event.is_none()
         {
             if expectations.accepted

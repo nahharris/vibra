@@ -60,6 +60,10 @@ pub enum WasmObservation {
     /// The instance ended in a host event: the atom of its unlocated
     /// diagnostic, such as `@runtime.memory-exhausted`.
     HostEvent(String),
+    /// The entry's run ended in a trap: the atom of its code, such as
+    /// `@runtime.unobservable-function`. The case expects that code as its one
+    /// runtime error diagnostic.
+    Trapped(String),
     /// The backend failed on a program it lowered: the module did not
     /// validate, the engine refused it, or the run stopped some way the
     /// interpreter did not. It fails the Wasm backend on the case.
@@ -110,6 +114,13 @@ pub struct CaseObservation {
     /// executable case sets it for every program it runs. A rejected program
     /// is no executable case, so a handler leaves it unset.
     pub wasm: Option<WasmObservation>,
+    /// Whether the interpreter's entry returned `err`, for a run that
+    /// completed. The command outcome follows from the result, so a case
+    /// records no field for it; the harness holds the backends to the same one.
+    pub program_failed: Option<bool>,
+    /// Whether the Wasm backend's entry returned `err`, for a run that
+    /// completed.
+    pub wasm_program_failed: Option<bool>,
     /// Deterministic artifact hashes.
     pub artifact_hashes: Vec<String>,
 }
@@ -919,6 +930,35 @@ fn wasm_status(case: &Case, observation: &CaseObservation) -> WasmStatus {
                     ),
                 };
             }
+            // A case with no result snapshot and a runtime error expects the
+            // run to trap, so a module that completed disagrees.
+            if let Some(trap) = expectations.diagnostics.iter().find(|diagnostic| {
+                expectations.interpreter.is_none()
+                    && diagnostic.code.domain() == vibra_diagnostics::Domain::Runtime
+            }) {
+                return WasmStatus::Failed {
+                    reason: format!(
+                        "trap mismatch: expected {}, but the module completed",
+                        trap.code.as_atom()
+                    ),
+                };
+            }
+            if let (Some(interpreter), Some(wasm)) =
+                (observation.program_failed, observation.wasm_program_failed)
+                && interpreter != wasm
+            {
+                return WasmStatus::Failed {
+                    reason: format!(
+                        "command outcome mismatch: the interpreter's entry {} err, the module's {}",
+                        if interpreter {
+                            "returned"
+                        } else {
+                            "did not return"
+                        },
+                        if wasm { "did" } else { "did not" }
+                    ),
+                };
+            }
             compare_execution(
                 case,
                 "wasm",
@@ -933,6 +973,21 @@ fn wasm_status(case: &Case, observation: &CaseObservation) -> WasmStatus {
         Some(WasmObservation::Failed { reason }) => WasmStatus::Failed {
             reason: reason.clone(),
         },
+        Some(WasmObservation::Trapped(code)) => {
+            if expectations
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code.as_atom() == code)
+            {
+                WasmStatus::Matched
+            } else {
+                WasmStatus::Failed {
+                    reason: format!(
+                        "trap mismatch: the module trapped with {code}, which the case does not expect"
+                    ),
+                }
+            }
+        }
         Some(WasmObservation::HostEvent(event)) => {
             if expectations.host_event.as_deref() == Some(event.as_str()) {
                 WasmStatus::Matched
