@@ -28,6 +28,7 @@ pub struct ResolvedCheckResult {
     signatures: BTreeMap<DeclarationId, IndexedSignature>,
     implementations: Vec<IndexedImplementation>,
     modules: Option<Arc<CheckedModuleSet>>,
+    effects: crate::effects::EffectGraph,
 }
 
 /// The checked type of one value, function, or method, for an index record
@@ -35,6 +36,7 @@ pub struct ResolvedCheckResult {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexedSignature {
     signature: String,
+    row: vibra_ir::EffectRow,
     errors: Vec<String>,
 }
 
@@ -50,6 +52,13 @@ impl IndexedSignature {
     #[must_use]
     pub fn errors(&self) -> &[String] {
         &self.errors
+    }
+
+    /// The effect row of the checked type: the ceiling of a function type, the
+    /// empty row of every other type.
+    #[must_use]
+    pub const fn row(&self) -> &vibra_ir::EffectRow {
+        &self.row
     }
 }
 
@@ -175,6 +184,13 @@ impl ResolvedCheckResult {
         self.modules.as_deref()
     }
 
+    /// The function-call graph and performed rows of the selected modules:
+    /// the one result the effect diagnostics were reported from.
+    #[must_use]
+    pub const fn effects(&self) -> &crate::effects::EffectGraph {
+        &self.effects
+    }
+
     /// Every `impl` block of the selected modules, in registration order.
     #[must_use]
     pub fn implementations(&self) -> &[IndexedImplementation] {
@@ -252,6 +268,7 @@ pub fn check_resolved(
             signatures: BTreeMap::new(),
             implementations: Vec::new(),
             modules: None,
+            effects: crate::effects::EffectGraph::default(),
         };
     }
     let mut modules = snapshot
@@ -1233,6 +1250,8 @@ pub fn check_resolved(
             continue;
         };
         consents.push(crate::effects::EntryConsent {
+            unit: entry.unit().to_owned(),
+            identity: declaration.canonical(),
             function,
             source_id: entry.source_id().to_owned(),
             span: entry.span(),
@@ -1255,13 +1274,23 @@ pub fn check_resolved(
                 .collect(),
         });
     }
-    diagnostics.extend(crate::effects::check(
+    let spans = crate::header_spans(
+        |header| {
+            modules
+                .get(header.module_index)
+                .map(|module| module.ast.declarations())
+        },
+        &functions,
+    );
+    let (found, effect_graph) = crate::effects::check(
         &checked_functions,
         &checked_globals,
         &functions,
+        &spans,
         &types,
         &consents,
-    ));
+    );
+    diagnostics.extend(found);
 
     let can_build_unavailable_stubs = diagnostics.iter().all(|diagnostic| {
         diagnostic.level() != Level::Error
@@ -1325,6 +1354,10 @@ pub fn check_resolved(
         .map(|declared| declared.id.clone());
     let describe = |value: &Type| IndexedSignature {
         signature: vibra_ir::canonical_type(value),
+        row: match value {
+            Type::Function(signature) => signature.effects().clone(),
+            _ => vibra_ir::EffectRow::empty(),
+        },
         errors: match value {
             Type::Function(signature) => match signature.result() {
                 Type::Applied(id, arguments) if Some(&id) == result_id.as_ref() => {
@@ -1550,6 +1583,7 @@ pub fn check_resolved(
         signatures,
         implementations,
         modules: module_set,
+        effects: effect_graph,
     }
 }
 

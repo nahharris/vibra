@@ -1,0 +1,181 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:6d7bbafa63abb14661a95b61bd061994d0a6949493ec87cc62c17b7556fed4a6",
+  "sourceId": "src/app/main.vib",
+  "offset": 80,
+  "nodeId": "src/app/main.vib#80-81",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 80,
+    "sourceId": "src/app/main.vib",
+    "span": {
+      "sourceId": "src/app/main.vib",
+      "start": 80,
+      "end": 81,
+      "startPosition": {
+        "line": 5,
+        "column": 16
+      },
+      "endPosition": {
+        "line": 5,
+        "column": 17
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "open-paren",
+    "category": "expression",
+    "status": "exact",
+    "permittedForms": [
+      "lambda",
+      "do",
+      "if",
+      "match",
+      "return",
+      "as",
+      "try"
+    ],
+    "permittedLabels": [
+      "types"
+    ]
+  },
+  "role": {
+    "status": "exact",
+    "value": "@application"
+  },
+  "context": {
+    "status": "exact",
+    "value": "initializer"
+  },
+  "identity": {
+    "status": "unavailable",
+    "value": null
+  },
+  "expectedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "i32",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "observedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "i32",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": []
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": [
+      {
+        "alias": "log",
+        "module": "@ops.log",
+        "sourceId": "src/app/main.vib",
+        "span": {
+          "sourceId": "src/app/main.vib",
+          "start": 0,
+          "end": 21,
+          "startPosition": {
+            "line": 1,
+            "column": 1
+          },
+          "endPosition": {
+            "line": 1,
+            "column": 22
+          }
+        }
+      }
+    ]
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": []
+  },
+  "application": {
+    "status": "exact",
+    "value": {
+      "kind": "@function",
+      "callee": {
+        "kind": "function",
+        "canonical": "@demo@0.1.0/app.main.pure-double"
+      },
+      "calleeType": {
+        "kind": "function",
+        "name": "fn",
+        "parameters": [
+          {
+            "kind": "primitive",
+            "name": "i32",
+            "parameters": [],
+            "result": null,
+            "labelled": []
+          }
+        ],
+        "result": {
+          "kind": "primitive",
+          "name": "i32",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        },
+        "labelled": [],
+        "effects": {
+          "roots": []
+        }
+      },
+      "positional": [
+        {
+          "kind": "primitive",
+          "name": "i32",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        }
+      ],
+      "labelled": [],
+      "resultType": {
+        "kind": "primitive",
+        "name": "i32",
+        "parameters": [],
+        "result": null,
+        "labelled": []
+      },
+      "dispatch": null
+    }
+  },
+  "pattern": {
+    "status": "unavailable",
+    "value": null
+  },
+  "effects": {
+    "status": "exact",
+    "value": {
+      "enclosing": null,
+      "application": {
+        "roots": []
+      },
+      "target": {
+        "entry": {
+          "kind": "function",
+          "canonical": "@demo@0.1.0/app.main.execute"
+        },
+        "effects": {
+          "roots": [
+            "@demo@0.1.0/ops.log.audit",
+            "@demo@0.1.0/ops.log.write"
+          ]
+        }
+      }
+    }
+  }
+}

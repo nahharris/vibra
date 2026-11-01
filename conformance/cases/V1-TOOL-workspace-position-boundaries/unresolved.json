@@ -79,5 +79,25 @@
   "pattern": {
     "status": "unavailable",
     "value": null
+  },
+  "effects": {
+    "status": "recovered",
+    "value": {
+      "enclosing": {
+        "identity": {
+          "kind": "function",
+          "canonical": "@app@0.1.0/app.unresolved.broken"
+        },
+        "kind": "function",
+        "ceiling": {
+          "roots": []
+        },
+        "performed": {
+          "roots": []
+        }
+      },
+      "application": null,
+      "target": null
+    }
   }
 }

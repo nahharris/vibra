@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:6d7bbafa63abb14661a95b61bd061994d0a6949493ec87cc62c17b7556fed4a6",
+  "sourceId": "src/app/main.vib",
+  "offset": 428,
+  "nodeId": "src/app/main.vib#428-429",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 428,
+    "sourceId": "src/app/main.vib",
+    "span": {
+      "sourceId": "src/app/main.vib",
+      "start": 428,
+      "end": 429,
+      "startPosition": {
+        "line": 19,
+        "column": 3
+      },
+      "endPosition": {
+        "line": 19,
+        "column": 4
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "open-paren",
+    "category": "expression",
+    "status": "exact",
+    "permittedForms": [
+      "lambda",
+      "do",
+      "let",
+      "let-else",
+      "if",
+      "match",
+      "return",
+      "as",
+      "try"
+    ],
+    "permittedLabels": [
+      "types"
+    ]
+  },
+  "role": {
+    "status": "exact",
+    "value": "@application"
+  },
+  "context": {
+    "status": "exact",
+    "value": "result"
+  },
+  "identity": {
+    "status": "unavailable",
+    "value": null
+  },
+  "expectedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "void",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "observedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "void",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": []
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": [
+      {
+        "alias": "log",
+        "module": "@ops.log",
+        "sourceId": "src/app/main.vib",
+        "span": {
+          "sourceId": "src/app/main.vib",
+          "start": 0,
+          "end": 21,
+          "startPosition": {
+            "line": 1,
+            "column": 1
+          },
+          "endPosition": {
+            "line": 1,
+            "column": 22
+          }
+        }
+      }
+    ]
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": []
+  },
+  "application": {
+    "status": "exact",
+    "value": {
+      "kind": "@function",
+      "callee": {
+        "kind": "function",
+        "canonical": "@demo@0.1.0/app.main.run-twice"
+      },
+      "calleeType": {
+        "kind": "function",
+        "name": "fn",
+        "parameters": [],
+        "result": {
+          "kind": "primitive",
+          "name": "void",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        },
+        "labelled": [],
+        "effects": {
+          "roots": [
+            "@demo@0.1.0/ops.log.audit",
+            "@demo@0.1.0/ops.log.write"
+          ]
+        }
+      },
+      "positional": [],
+      "labelled": [],
+      "resultType": {
+        "kind": "primitive",
+        "name": "void",
+        "parameters": [],
+        "result": null,
+        "labelled": []
+      },
+      "dispatch": null
+    }
+  },
+  "pattern": {
+    "status": "unavailable",
+    "value": null
+  },
+  "effects": {
+    "status": "exact",
+    "value": {
+      "enclosing": {
+        "identity": {
+          "kind": "function",
+          "canonical": "@demo@0.1.0/app.main.execute"
+        },
+        "kind": "function",
+        "ceiling": {
+          "roots": [
+            "@demo@0.1.0/ops.log.audit",
+            "@demo@0.1.0/ops.log.write"
+          ]
+        },
+        "performed": {
+          "roots": [
+            "@demo@0.1.0/ops.log.audit",
+            "@demo@0.1.0/ops.log.write"
+          ]
+        }
+      },
+      "application": {
+        "roots": [
+          "@demo@0.1.0/ops.log.audit",
+          "@demo@0.1.0/ops.log.write"
+        ]
+      },
+      "target": {
+        "entry": {
+          "kind": "function",
+          "canonical": "@demo@0.1.0/app.main.execute"
+        },
+        "effects": {
+          "roots": [
+            "@demo@0.1.0/ops.log.audit",
+            "@demo@0.1.0/ops.log.write"
+          ]
+        }
+      }
+    }
+  }
+}

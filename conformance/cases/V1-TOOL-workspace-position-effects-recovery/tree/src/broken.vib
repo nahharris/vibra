@@ -1,0 +1,13 @@
+(import good @app.good)
+
+(defn mistyped () i32 "text")
+
+(defn half-checked () void
+  effects: (good.audit)
+  (do
+    (good.audit.record "x")
+    (missing-name)))
+
+(defn after-broken () void
+  effects: (good.audit)
+  (half-checked))

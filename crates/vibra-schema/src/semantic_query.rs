@@ -4,8 +4,8 @@ use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use serde_json::{Map, Value};
 use vibra_diagnostics::LineIndex;
 use vibra_workspace::query::{
-    ApplicationContract, ImportAlias, LabelledType, LocalBinding, QueryIdentity,
-    SemanticFact, SemanticType, WorkspacePositionQuery,
+    ApplicationContract, EffectRowFact, EffectsFact, ImportAlias, LabelledType,
+    LocalBinding, QueryIdentity, SemanticFact, SemanticType, WorkspacePositionQuery,
 };
 
 use crate::{SCHEMA_VERSION, SourcePositionQueryDocument, SpanDocument};
@@ -90,6 +90,24 @@ impl<'de> Deserialize<'de> for QueryIdentityDocument {
     }
 }
 
+/// A closed effect row: the record `{ "roots": [...] }` of the effects
+/// chapter. A consumer never assumes the record holds only `roots`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EffectRowDocument {
+    /// The canonical identities of the roots, in canonical order.
+    pub roots: Vec<String>,
+}
+
+impl<'de> Deserialize<'de> for EffectRowDocument {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        parse_row(Value::deserialize(deserializer)?).map_err(D::Error::custom)
+    }
+}
+
 /// A structured primitive or function type.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -104,6 +122,9 @@ pub struct SemanticTypeDocument {
     pub result: Option<Box<Self>>,
     /// Ordered labelled function slots.
     pub labelled: Vec<LabelledTypeDocument>,
+    /// A function's closed effect row, absent on every other kind.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effects: Option<EffectRowDocument>,
 }
 
 impl<'de> Deserialize<'de> for SemanticTypeDocument {
@@ -246,6 +267,104 @@ impl<'de> Deserialize<'de> for ApplicationContractDocument {
     }
 }
 
+/// The smallest function body that encloses a position.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EnclosingEffectsDocument {
+    /// The function, operation, or test; null for a `lambda`.
+    pub identity: Option<QueryIdentityDocument>,
+    /// `function`, `operation`, `lambda`, or `test`.
+    pub kind: String,
+    /// The written or default-empty ceiling; the complete row of an operation.
+    pub ceiling: EffectRowDocument,
+    /// The performed row the checker computed.
+    pub performed: EffectRowDocument,
+}
+
+impl<'de> Deserialize<'de> for EnclosingEffectsDocument {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        parse_enclosing(Value::deserialize(deserializer)?).map_err(D::Error::custom)
+    }
+}
+
+/// The binary target whose entry reaches a position.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TargetEffectsDocument {
+    /// The entry declaration.
+    pub entry: QueryIdentityDocument,
+    /// The target `effects` array as a row: the consent that admitted the
+    /// entry.
+    pub effects: EffectRowDocument,
+}
+
+impl<'de> Deserialize<'de> for TargetEffectsDocument {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        parse_target(Value::deserialize(deserializer)?).map_err(D::Error::custom)
+    }
+}
+
+/// What a witness hop applies.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WitnessCalleeDocument {
+    /// `function`, `operation`, `function-value`, or `contract-member`.
+    pub kind: String,
+    /// The canonical identity; null for a function value.
+    pub identity: Option<String>,
+}
+
+/// One call site of a witness.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WitnessHopDocument {
+    /// The call site, carrying its own source identity.
+    pub span: SpanDocument,
+    /// What it applies.
+    pub callee: WitnessCalleeDocument,
+}
+
+/// The chain of call sites that carries one performed root.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RootWitnessDocument {
+    /// The performed root's canonical identity.
+    pub root: String,
+    /// The call sites in the order of the checker's witness.
+    pub hops: Vec<WitnessHopDocument>,
+}
+
+/// The effect metadata at a position.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EffectsDocument {
+    /// The smallest enclosing function body, or null outside every function.
+    pub enclosing: Option<EnclosingEffectsDocument>,
+    /// The callee's complete row, or null outside an application.
+    pub application: Option<EffectRowDocument>,
+    /// The binary target that reaches the position, or null.
+    pub target: Option<TargetEffectsDocument>,
+    /// One witness per performed root; present only under
+    /// `--expand effect-witnesses`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub witnesses: Option<Vec<RootWitnessDocument>>,
+}
+
+impl<'de> Deserialize<'de> for EffectsDocument {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        parse_effects(Value::deserialize(deserializer)?).map_err(D::Error::custom)
+    }
+}
+
 /// One complete semantic workspace-position result.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -282,6 +401,8 @@ pub struct WorkspacePositionQueryDocument {
     pub application: SemanticFactDocument<ApplicationContractDocument>,
     /// The `match` arm pattern at the position, when it is one.
     pub pattern: SemanticFactDocument<PatternFactDocument>,
+    /// The effect metadata at the position.
+    pub effects: SemanticFactDocument<EffectsDocument>,
 }
 
 impl<'de> Deserialize<'de> for WorkspacePositionQueryDocument {
@@ -315,6 +436,11 @@ const PRIMITIVE_NAMES: &[&str] = &[
 const APPLICATION_KINDS: &[&str] = &["@function", "@constructor", "@contract"];
 
 const SELECTION_NAMES: &[&str] = &["static", "default", "dynamic", "closed"];
+
+const ENCLOSING_KINDS: &[&str] = &["function", "operation", "lambda", "test"];
+
+const WITNESS_CALLEE_KINDS: &[&str] =
+    &["function", "operation", "function-value", "contract-member"];
 
 const PATTERN_KINDS: &[&str] = &[
     "@wildcard",
@@ -476,9 +602,30 @@ fn parse_type(value: Value) -> Result<SemanticTypeDocument, String> {
     let object = object(value, "semantic type")?;
     ensure_keys(
         &object,
-        &["kind", "name", "parameters", "result", "labelled"],
+        &[
+            "kind",
+            "name",
+            "parameters",
+            "result",
+            "labelled",
+            "effects",
+        ],
     )?;
     let kind = required_string(&object, "kind")?;
+    // Only a function carries the closed row its type is compared by.
+    let effects = match (kind == "function", object.get("effects")) {
+        (true, Some(row)) => Some(
+            serde_json::from_value(row.clone())
+                .map_err(|error| format!("invalid function effect row: {error}"))?,
+        ),
+        (true, None) => {
+            return Err("function semantic types require an effects row".to_owned());
+        }
+        (false, None) => None,
+        (false, Some(_)) => {
+            return Err("only function types carry an effects row".to_owned());
+        }
+    };
     let name = required_string(&object, "name")?;
     let parameters_value = required(&object, "parameters")?;
     let parameters = parameters_value
@@ -553,6 +700,189 @@ fn parse_type(value: Value) -> Result<SemanticTypeDocument, String> {
         parameters,
         result,
         labelled,
+        effects,
+    })
+}
+
+fn parse_row(value: Value) -> Result<EffectRowDocument, String> {
+    let object = object(value, "effect row")?;
+    ensure_keys(&object, &["roots"])?;
+    let roots = required(&object, "roots")?
+        .as_array()
+        .ok_or_else(|| "effect row roots must be an array".to_owned())?
+        .iter()
+        .map(|root| {
+            root.as_str()
+                .filter(|root| !root.is_empty())
+                .map(str::to_owned)
+                .ok_or_else(|| "an effect root must be a non-empty string".to_owned())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    // A row is a set: a duplicate root is malformed.
+    let mut distinct = roots.clone();
+    distinct.sort_unstable();
+    distinct.dedup();
+    if distinct.len() != roots.len() {
+        return Err("effect row roots must be distinct".to_owned());
+    }
+    Ok(EffectRowDocument { roots })
+}
+
+fn parse_enclosing(value: Value) -> Result<EnclosingEffectsDocument, String> {
+    let object = object(value, "enclosing effects")?;
+    ensure_keys(&object, &["identity", "kind", "ceiling", "performed"])?;
+    let kind = required_string(&object, "kind")?;
+    if !ENCLOSING_KINDS.contains(&kind.as_str()) {
+        return Err(format!("unknown enclosing kind {kind:?}"));
+    }
+    let identity_value = required(&object, "identity")?;
+    let identity = if identity_value.is_null() {
+        None
+    } else {
+        Some(parse_identity(identity_value.clone())?)
+    };
+    // A `lambda` has no identity, and neither has a member written in an
+    // `impl` block; an operation and a test always have one.
+    let identity_fits = match kind.as_str() {
+        "lambda" => identity.is_none(),
+        "operation" | "test" => identity.is_some(),
+        _ => true,
+    };
+    if !identity_fits {
+        return Err(
+            "a lambda has no identity, and an operation and a test have one".to_owned(),
+        );
+    }
+    Ok(EnclosingEffectsDocument {
+        identity,
+        kind,
+        ceiling: parse_row(required(&object, "ceiling")?.clone())?,
+        performed: parse_row(required(&object, "performed")?.clone())?,
+    })
+}
+
+fn parse_target(value: Value) -> Result<TargetEffectsDocument, String> {
+    let object = object(value, "target effects")?;
+    ensure_keys(&object, &["entry", "effects"])?;
+    Ok(TargetEffectsDocument {
+        entry: parse_identity(required(&object, "entry")?.clone())?,
+        effects: parse_row(required(&object, "effects")?.clone())?,
+    })
+}
+
+fn parse_hop(value: Value) -> Result<WitnessHopDocument, String> {
+    let object = object(value, "witness hop")?;
+    ensure_keys(&object, &["span", "callee"])?;
+    let span: SpanDocument = serde_json::from_value(required(&object, "span")?.clone())
+        .map_err(|error| format!("invalid hop span: {error}"))?;
+    validate_span(&span, None)?;
+    if span.source_id.is_none() {
+        return Err("a hop span carries its source identity".to_owned());
+    }
+    let callee = object_of(required(&object, "callee")?, "witness callee")?;
+    ensure_keys(&callee, &["kind", "identity"])?;
+    let kind = required_string(&callee, "kind")?;
+    if !WITNESS_CALLEE_KINDS.contains(&kind.as_str()) {
+        return Err(format!("unknown witness callee kind {kind:?}"));
+    }
+    let identity_value = required(&callee, "identity")?;
+    let identity = if identity_value.is_null() {
+        None
+    } else {
+        Some(
+            identity_value
+                .as_str()
+                .filter(|identity| !identity.is_empty())
+                .ok_or_else(|| {
+                    "a witness identity must be a non-empty string".to_owned()
+                })?
+                .to_owned(),
+        )
+    };
+    // A function value has no identity; so does a member written in an `impl`
+    // block, but an operation and a contract member always have one.
+    let identity_fits = match kind.as_str() {
+        "function-value" => identity.is_none(),
+        "operation" | "contract-member" => identity.is_some(),
+        _ => true,
+    };
+    if !identity_fits {
+        return Err(
+            "a function value has no identity, and an operation and a contract member have one"
+                .to_owned(),
+        );
+    }
+    Ok(WitnessHopDocument {
+        span,
+        callee: WitnessCalleeDocument { kind, identity },
+    })
+}
+
+fn object_of(value: &Value, name: &str) -> Result<Map<String, Value>, String> {
+    object(value.clone(), name)
+}
+
+fn parse_effects(value: Value) -> Result<EffectsDocument, String> {
+    let object = object(value, "effects")?;
+    ensure_keys(
+        &object,
+        &["enclosing", "application", "target", "witnesses"],
+    )?;
+    let optional = |key: &str| -> Result<Option<Value>, String> {
+        let value = required(&object, key)?;
+        Ok((!value.is_null()).then(|| value.clone()))
+    };
+    let enclosing = optional("enclosing")?.map(parse_enclosing).transpose()?;
+    let application = optional("application")?.map(parse_row).transpose()?;
+    let target = optional("target")?.map(parse_target).transpose()?;
+    let witnesses = object
+        .get("witnesses")
+        .map(|witnesses| {
+            witnesses
+                .as_array()
+                .ok_or_else(|| "effect witnesses must be an array".to_owned())?
+                .iter()
+                .map(|witness| {
+                    let witness = object_of(witness, "root witness")?;
+                    ensure_keys(&witness, &["root", "hops"])?;
+                    Ok(RootWitnessDocument {
+                        root: required_string(&witness, "root")?,
+                        hops: required(&witness, "hops")?
+                            .as_array()
+                            .ok_or_else(|| "witness hops must be an array".to_owned())?
+                            .iter()
+                            .cloned()
+                            .map(parse_hop)
+                            .collect::<Result<Vec<_>, _>>()?,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()
+        })
+        .transpose()?;
+    // One witness for each performed root of the enclosing body, in the
+    // order of the row, and none outside every function.
+    if let Some(witnesses) = &witnesses {
+        let performed = enclosing
+            .as_ref()
+            .map(|enclosing| enclosing.performed.roots.as_slice())
+            .unwrap_or_default();
+        if witnesses.len() != performed.len()
+            || witnesses
+                .iter()
+                .zip(performed)
+                .any(|(witness, root)| &witness.root != root)
+        {
+            return Err(
+                "witnesses must hold one record for each performed root, in order"
+                    .to_owned(),
+            );
+        }
+    }
+    Ok(EffectsDocument {
+        enclosing,
+        application,
+        target,
+        witnesses,
     })
 }
 
@@ -726,6 +1056,7 @@ fn parse_workspace(value: Value) -> Result<WorkspacePositionQueryDocument, Strin
             "declarationCandidates",
             "application",
             "pattern",
+            "effects",
         ],
     )?;
     let schema_version = required(&object, "schemaVersion")?
@@ -793,6 +1124,9 @@ fn parse_workspace(value: Value) -> Result<WorkspacePositionQueryDocument, Strin
     let pattern: SemanticFactDocument<PatternFactDocument> =
         serde_json::from_value(required(&object, "pattern")?.clone())
             .map_err(|error| format!("invalid pattern fact: {error}"))?;
+    let effects: SemanticFactDocument<EffectsDocument> =
+        serde_json::from_value(required(&object, "effects")?.clone())
+            .map_err(|error| format!("invalid effects fact: {error}"))?;
     let (node_start, node_end) = parse_node_id(&node_id, &source_id)?;
     validate_structural(&structural, &source_id, offset, node_start, node_end)?;
     Ok(WorkspacePositionQueryDocument {
@@ -813,6 +1147,7 @@ fn parse_workspace(value: Value) -> Result<WorkspacePositionQueryDocument, Strin
         declaration_candidates,
         application,
         pattern,
+        effects,
     })
 }
 
@@ -1014,7 +1349,55 @@ impl WorkspacePositionQueryDocument {
                     .map(render_type)
                     .collect(),
             }),
+            effects: render_fact(query.effects(), render_effects),
         }
+    }
+}
+
+fn render_row(row: &EffectRowFact) -> EffectRowDocument {
+    EffectRowDocument {
+        roots: row.roots().to_vec(),
+    }
+}
+
+fn render_effects(value: &EffectsFact) -> EffectsDocument {
+    EffectsDocument {
+        enclosing: value.enclosing().map(|enclosing| EnclosingEffectsDocument {
+            identity: enclosing.identity().map(render_identity),
+            kind: enclosing.kind().to_owned(),
+            ceiling: render_row(enclosing.ceiling()),
+            performed: render_row(enclosing.performed()),
+        }),
+        application: value.application().map(render_row),
+        target: value.target().map(|target| TargetEffectsDocument {
+            entry: render_identity(target.entry()),
+            effects: render_row(target.effects()),
+        }),
+        witnesses: value.witnesses().map(|witnesses| {
+            witnesses
+                .iter()
+                .map(|witness| RootWitnessDocument {
+                    root: witness.root().to_owned(),
+                    hops: witness
+                        .hops()
+                        .iter()
+                        .map(|hop| WitnessHopDocument {
+                            span: SpanDocument {
+                                source_id: Some(hop.source_id().to_owned()),
+                                start: hop.span().start(),
+                                end: hop.span().end(),
+                                start_position: hop.start_position().into(),
+                                end_position: hop.end_position().into(),
+                            },
+                            callee: WitnessCalleeDocument {
+                                kind: hop.callee().kind().to_owned(),
+                                identity: hop.callee().identity().map(str::to_owned),
+                            },
+                        })
+                        .collect(),
+                })
+                .collect()
+        }),
     }
 }
 
@@ -1042,6 +1425,7 @@ fn render_type(value: &SemanticType) -> SemanticTypeDocument {
         parameters: value.parameters().iter().map(render_type).collect(),
         result: value.result().map(|result| Box::new(render_type(result))),
         labelled: value.labelled().iter().map(render_labelled).collect(),
+        effects: value.effects().map(render_row),
     }
 }
 

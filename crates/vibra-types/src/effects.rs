@@ -22,66 +22,185 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
     CallTarget, CheckedFunction, CheckedGlobal, EffectRoot, EffectRow, Expr,
-    SourceOrigin, Type,
+    FunctionSignature, SourceOrigin, Type,
 };
 
 use crate::nominal::TypeNames;
 
 /// What an application applies.
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum Callee {
     /// A function or operation of the checked program, by node index.
     Node(usize),
     /// A function value, whose callee is unknown: its type's row.
     Value { description: String, row: EffectRow },
     /// A contract member: the contract's ceiling.
-    Contract { description: String, row: EffectRow },
+    Contract {
+        description: String,
+        identity: String,
+        row: EffectRow,
+    },
 }
 
 /// One application in a body.
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct Site {
     origin: SourceOrigin,
     callee: Callee,
 }
 
-struct Node<'a> {
+/// What a node of the function-call graph is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EffectNodeKind {
+    /// A module-level function or a method.
+    Function,
+    /// An effect operation.
+    Operation,
+    /// A `test` declaration.
+    Test,
+    /// A `lambda`, which has no identity.
+    Lambda,
+    /// A module value's initializer.
+    Value,
+}
+
+/// One node of the function-call graph: a function, an operation, a test, a
+/// module value's initializer, or a `lambda`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffectNode {
+    index: usize,
+    /// The canonical declaration identity, empty for a `lambda`.
+    name: String,
     /// The identity a note names this node by.
     label: String,
+    kind: EffectNodeKind,
     origin: SourceOrigin,
-    body: Option<&'a Expr>,
+    /// Whether the body of this declaration checked.
+    checked: bool,
     /// The exact row the declaration writes, which the performed row must be
     /// contained in. For an operation it already holds the owner root.
     ceiling: EffectRow,
+    /// The signature of a function, method, operation, `lambda`, or test.
+    signature: Option<FunctionSignature>,
     /// The root that owns an operation.
     owner: Option<EffectRoot>,
+    /// Whether the checker reads the body for applications: a host
+    /// operation has none.
+    has_body: bool,
+    /// Whether the declaration is a member written in an `impl` block, which
+    /// has no atom identity.
+    impl_member: bool,
     sites: Vec<Site>,
     /// Whether the body of this function did not check, so its performed row
     /// is not known.
     unknown: bool,
 }
 
+impl EffectNode {
+    /// The position of this node in [`EffectGraph::nodes`].
+    #[must_use]
+    pub const fn index(&self) -> usize {
+        self.index
+    }
+
+    /// The canonical declaration identity, empty for a `lambda`.
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The canonical identity the node is reported by. A `lambda` and a
+    /// member written in an `impl` block have no atom identity.
+    #[must_use]
+    pub fn identity(&self) -> Option<&str> {
+        (!self.name.is_empty() && !self.impl_member).then_some(self.name.as_str())
+    }
+
+    /// What the node is.
+    #[must_use]
+    pub const fn kind(&self) -> EffectNodeKind {
+        self.kind
+    }
+
+    /// The source document that holds the node.
+    #[must_use]
+    pub fn source_id(&self) -> &str {
+        self.origin.source_id()
+    }
+
+    /// The span of the whole declaration, `test`, or `lambda`.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.origin.span()
+    }
+
+    /// The written or default-empty ceiling. For an operation it is the
+    /// complete row: the owner root together with the additive row.
+    #[must_use]
+    pub const fn ceiling(&self) -> &EffectRow {
+        &self.ceiling
+    }
+
+    /// The signature of a function, method, operation, `lambda`, or test.
+    #[must_use]
+    pub const fn signature(&self) -> Option<&FunctionSignature> {
+        self.signature.as_ref()
+    }
+
+    /// Whether the body of the declaration checked.
+    #[must_use]
+    pub const fn checked(&self) -> bool {
+        self.checked
+    }
+
+    /// Whether the declaration is an operation bound to the host, which has
+    /// no source-level body.
+    #[must_use]
+    pub const fn is_external_operation(&self) -> bool {
+        self.owner.is_some() && !self.has_body
+    }
+}
+
 struct Closure<'a> {
     body: &'a Expr,
     ceiling: EffectRow,
+    signature: FunctionSignature,
     origin: SourceOrigin,
 }
 
 /// Checks every written ceiling against the performed row of its body and
 /// reports each root a ceiling does not contain with its witness, and each
-/// written root that is never performed.
+/// written root that is never performed. The graph that produced the
+/// diagnostics is returned with them: it is the one result both the checker
+/// and a query read.
 pub(crate) fn check(
     functions: &[Option<CheckedFunction>],
     globals: &[Option<CheckedGlobal>],
     headers: &[crate::FunctionHeader],
+    spans: &[Option<ByteSpan>],
     types: &TypeNames,
     entries: &[EntryConsent],
-) -> Vec<Diagnostic> {
-    let graph = Graph::build(functions, globals, headers);
-    graph.diagnostics(types, entries)
+) -> (Vec<Diagnostic>, EffectGraph) {
+    let mut graph = EffectGraph::build(functions, globals, headers, spans);
+    let diagnostics = graph.diagnostics(types, entries);
+    graph.entries = entries
+        .iter()
+        .map(|entry| EffectEntry {
+            unit: entry.unit.clone(),
+            identity: entry.identity.clone(),
+            array: EffectRow::new(entry.array.iter().map(|(root, _)| root.clone())),
+        })
+        .collect();
+    (diagnostics, graph)
 }
 
 /// The consent of one binary target, to be admitted against the performed
 /// row of its entry (`docs/spec/03-effects.md`, "Target consent").
 pub(crate) struct EntryConsent {
+    /// The target unit that owns the entry.
+    pub(crate) unit: String,
+    /// The canonical identity of the entry declaration.
+    pub(crate) identity: String,
     /// The index of the entry declaration in the checked functions.
     pub(crate) function: usize,
     /// The project document and span of the `entry:` value.
@@ -91,81 +210,224 @@ pub(crate) struct EntryConsent {
     pub(crate) array: Vec<(EffectRoot, ByteSpan)>,
 }
 
-struct Graph<'a> {
-    nodes: Vec<Node<'a>>,
+/// The consent of one binary target: its entry and the `effects` array that
+/// admitted it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffectEntry {
+    unit: String,
+    identity: String,
+    array: EffectRow,
+}
+
+impl EffectEntry {
+    /// The target unit that owns the entry.
+    #[must_use]
+    pub fn unit(&self) -> &str {
+        &self.unit
+    }
+
+    /// The canonical identity of the entry declaration.
+    #[must_use]
+    pub fn identity(&self) -> &str {
+        &self.identity
+    }
+
+    /// The target `effects` array as a row: the consent that admitted the
+    /// entry, not the entry's own ceiling.
+    #[must_use]
+    pub const fn array(&self) -> &EffectRow {
+        &self.array
+    }
+}
+
+/// What a witness hop applies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WitnessCallee {
+    /// A function, by canonical identity; a member written in an `impl` block
+    /// has none.
+    Function(Option<String>),
+    /// An effect operation, by canonical identity.
+    Operation(String),
+    /// A function value, which has no identity.
+    FunctionValue,
+    /// An interface contract member, by canonical identity.
+    ContractMember(String),
+}
+
+/// One hop of a witness: a call site and what it applies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WitnessHop {
+    source_id: String,
+    span: ByteSpan,
+    callee: WitnessCallee,
+}
+
+impl WitnessHop {
+    /// The source document of the call site.
+    #[must_use]
+    pub fn source_id(&self) -> &str {
+        &self.source_id
+    }
+
+    /// The span of the call site.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+
+    /// What the call site applies.
+    #[must_use]
+    pub const fn callee(&self) -> &WitnessCallee {
+        &self.callee
+    }
+}
+
+/// The chain that carries one performed root.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RootWitness {
+    root: EffectRoot,
+    hops: Vec<WitnessHop>,
+}
+
+impl RootWitness {
+    /// The performed root.
+    #[must_use]
+    pub const fn root(&self) -> &EffectRoot {
+        &self.root
+    }
+
+    /// The call sites from the queried body down to the declaration that
+    /// introduces the root, in the order of the checker's witness.
+    #[must_use]
+    pub fn hops(&self) -> &[WitnessHop] {
+        &self.hops
+    }
+}
+
+/// The function-call graph and the performed row of every node: the one
+/// result the checker's diagnostics and every query read.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct EffectGraph {
+    /// Whether a graph was built, as opposed to a source that stopped before
+    /// it could be checked.
+    available: bool,
+    nodes: Vec<EffectNode>,
     performed: Vec<EffectRow>,
     /// Whether the performed row of a node is a lower bound only, because
     /// its body, or the body of a function it reaches, did not check. An
     /// error can still be reported from a lower bound, but "never
     /// performed" cannot.
     partial: Vec<bool>,
+    entries: Vec<EffectEntry>,
 }
 
-impl<'a> Graph<'a> {
+impl EffectGraph {
     fn build(
-        functions: &'a [Option<CheckedFunction>],
-        globals: &'a [Option<CheckedGlobal>],
+        functions: &[Option<CheckedFunction>],
+        globals: &[Option<CheckedGlobal>],
         headers: &[crate::FunctionHeader],
+        spans: &[Option<ByteSpan>],
     ) -> Self {
         let mut nodes = Vec::with_capacity(functions.len() + globals.len());
+        let mut bodies = Vec::<Option<&Expr>>::new();
+        let kind_of = |index: usize, owner: Option<&EffectRoot>| {
+            if owner.is_some() {
+                EffectNodeKind::Operation
+            } else if headers
+                .get(index)
+                .is_some_and(|header| header.test.is_some())
+            {
+                EffectNodeKind::Test
+            } else {
+                EffectNodeKind::Function
+            }
+        };
         for (index, function) in functions.iter().enumerate() {
-            nodes.push(match function {
-                Some(function) if !function.is_external_wrapper() => Node {
-                    label: identity(function.name()),
-                    origin: function.origin().clone(),
-                    body: Some(function.body()),
-                    ceiling: function.signature().effects().clone(),
-                    owner: function.effect_owner().cloned(),
-                    sites: Vec::new(),
-                    unknown: false,
-                },
-                Some(function) => Node {
-                    label: identity(function.name()),
-                    origin: function.origin().clone(),
-                    body: None,
-                    ceiling: function.signature().effects().clone(),
-                    owner: function.effect_owner().cloned(),
-                    sites: Vec::new(),
-                    unknown: false,
-                },
+            match function {
+                Some(function) => {
+                    let owner = function.effect_owner().cloned();
+                    let has_body = !function.is_external_wrapper();
+                    nodes.push(EffectNode {
+                        index: nodes.len(),
+                        name: function.name().to_owned(),
+                        label: identity(function.name()),
+                        kind: kind_of(index, owner.as_ref()),
+                        origin: function.origin().clone(),
+                        checked: true,
+                        ceiling: function.signature().effects().clone(),
+                        signature: Some(function.signature().clone()),
+                        owner,
+                        has_body,
+                        impl_member: headers
+                            .get(index)
+                            .is_some_and(|header| header.impl_member.is_some()),
+                        sites: Vec::new(),
+                        unknown: false,
+                    });
+                    bodies.push(has_body.then(|| function.body()));
+                }
                 // A function that did not check still has its declared
                 // signature, which is all a caller needs of an operation. An
                 // ordinary function's performed row is then unknown.
                 None => {
                     let header = headers.get(index);
                     let owner = header.and_then(|header| header.effect_owner.clone());
-                    Node {
+                    let origin = SourceOrigin::new(
+                        header.map_or("", |header| header.source_id.as_str()),
+                        spans
+                            .get(index)
+                            .copied()
+                            .flatten()
+                            .unwrap_or_else(|| ByteSpan::empty_at(0)),
+                    );
+                    nodes.push(EffectNode {
+                        index: nodes.len(),
+                        name: header
+                            .map_or_else(String::new, |header| header.name.clone()),
                         label: header
                             .map_or_else(String::new, |header| identity(&header.name)),
-                        origin: SourceOrigin::new("", ByteSpan::empty_at(0)),
-                        body: None,
+                        kind: kind_of(index, owner.as_ref()),
+                        origin,
+                        checked: false,
                         ceiling: header.map_or_else(EffectRow::empty, |header| {
                             header.signature.effects().clone()
                         }),
+                        signature: header.map(|header| header.signature.clone()),
+                        has_body: false,
+                        impl_member: header
+                            .is_some_and(|header| header.impl_member.is_some()),
                         unknown: owner.is_none(),
                         owner,
                         sites: Vec::new(),
-                    }
+                    });
+                    bodies.push(None);
                 }
-            });
+            }
         }
         for global in globals.iter().flatten() {
-            nodes.push(Node {
+            nodes.push(EffectNode {
+                index: nodes.len(),
+                name: global.name().to_owned(),
                 label: identity(global.name()),
+                kind: EffectNodeKind::Value,
                 origin: global.origin().clone(),
-                body: Some(global.initializer()),
+                checked: true,
                 // A module value has no `effects:` attribute, so its
                 // initializer has the default-empty ceiling.
                 ceiling: EffectRow::empty(),
+                signature: None,
                 owner: None,
+                has_body: true,
+                impl_member: false,
                 sites: Vec::new(),
                 unknown: false,
             });
+            bodies.push(Some(global.initializer()));
         }
         let function_count = functions.len();
         let mut cursor = 0;
         while cursor < nodes.len() {
-            if let Some(body) = nodes.get(cursor).and_then(|node| node.body) {
+            if let Some(body) = bodies.get(cursor).copied().flatten() {
                 let (mut sites, closures) = collect(body, function_count);
                 sites.sort_by(|left, right| {
                     (
@@ -183,30 +445,152 @@ impl<'a> Graph<'a> {
                     node.sites = sites;
                 }
                 for closure in closures {
-                    nodes.push(Node {
+                    nodes.push(EffectNode {
+                        index: nodes.len(),
+                        name: String::new(),
                         label: format!(
                             "a lambda at byte {}",
                             closure.origin.span().start()
                         ),
+                        kind: EffectNodeKind::Lambda,
                         origin: closure.origin,
-                        body: Some(closure.body),
+                        checked: true,
                         ceiling: closure.ceiling,
+                        signature: Some(closure.signature),
                         owner: None,
+                        has_body: true,
+                        impl_member: false,
                         sites: Vec::new(),
                         unknown: false,
                     });
+                    bodies.push(Some(closure.body));
                 }
             }
             cursor += 1;
         }
         let mut graph = Self {
+            available: true,
             performed: vec![EffectRow::empty(); nodes.len()],
             partial: vec![false; nodes.len()],
             nodes,
+            entries: Vec::new(),
         };
         graph.close();
         graph.taint();
         graph
+    }
+
+    /// Whether a graph was built. A source that stopped before it could be
+    /// checked has none, and a query then reports its effects as unavailable.
+    #[must_use]
+    pub const fn available(&self) -> bool {
+        self.available
+    }
+
+    /// Every node: the functions, operations, and tests in checked order, the
+    /// module values, and then the `lambda` bodies.
+    #[must_use]
+    pub fn nodes(&self) -> &[EffectNode] {
+        &self.nodes
+    }
+
+    /// The node of the declaration with canonical identity `name`.
+    #[must_use]
+    pub fn node_named(&self, name: &str) -> Option<&EffectNode> {
+        if name.is_empty() {
+            return None;
+        }
+        self.nodes.iter().find(|node| node.name == name)
+    }
+
+    /// The performed row of `node`: the least row containing the complete row
+    /// of every application of its body. For a host operation, which has no
+    /// body, it is the complete row the host performs.
+    #[must_use]
+    pub fn performed<'g>(&'g self, node: &'g EffectNode) -> &'g EffectRow {
+        if node.is_external_operation() {
+            return &node.ceiling;
+        }
+        self.performed.get(node.index).unwrap_or(&EMPTY)
+    }
+
+    /// Whether the performed row of `node` is exact. It is a lower bound
+    /// only when the body of the node, or of a function it reaches, did not
+    /// check.
+    #[must_use]
+    pub fn performed_known(&self, node: &EffectNode) -> bool {
+        node.checked && !self.partial.get(node.index).copied().unwrap_or(true)
+    }
+
+    /// The complete row of the application at `span` of `source_id`, as the
+    /// checker's admission reads it, or `None` when no call is applied
+    /// there.
+    #[must_use]
+    pub fn application_row(
+        &self,
+        source_id: &str,
+        span: ByteSpan,
+    ) -> Option<&EffectRow> {
+        self.nodes
+            .iter()
+            .flat_map(|node| node.sites.iter())
+            .find(|site| {
+                site.origin.source_id() == source_id && site.origin.span() == span
+            })
+            .map(|site| self.complete(&site.callee))
+    }
+
+    /// The consent of every binary target whose entry was checked.
+    #[must_use]
+    pub fn entries(&self) -> &[EffectEntry] {
+        &self.entries
+    }
+
+    /// The witness of each root `node` performs, in canonical root order: the
+    /// chain the checker reports for that root when the ceiling omits it.
+    #[must_use]
+    pub fn witnesses(&self, node: &EffectNode) -> Vec<RootWitness> {
+        let Some(performed) = self.performed.get(node.index) else {
+            return Vec::new();
+        };
+        performed
+            .roots()
+            .iter()
+            .map(|root| {
+                let distances = self.distances(root);
+                let hops = self
+                    .witness(node.index, root, &distances)
+                    .into_iter()
+                    .map(|site| WitnessHop {
+                        source_id: site.origin.source_id().to_owned(),
+                        span: site.origin.span(),
+                        callee: self.witness_callee(&site.callee),
+                    })
+                    .collect();
+                RootWitness {
+                    root: root.clone(),
+                    hops,
+                }
+            })
+            .collect()
+    }
+
+    fn witness_callee(&self, callee: &Callee) -> WitnessCallee {
+        match callee {
+            Callee::Node(index) => match self.nodes.get(*index) {
+                Some(node) if node.owner.is_some() => {
+                    WitnessCallee::Operation(node.name.clone())
+                }
+                Some(node) => {
+                    WitnessCallee::Function(node.identity().map(str::to_owned))
+                }
+                None => WitnessCallee::Function(None),
+            },
+            Callee::Value { .. } => WitnessCallee::FunctionValue,
+            Callee::Contract { identity, .. } => {
+                WitnessCallee::ContractMember(identity.clone())
+            }
+        }
     }
 
     /// Marks every node whose performed row is a lower bound because it
@@ -314,7 +698,7 @@ impl<'a> Graph<'a> {
             let Some(performed) = self.performed.get(index) else {
                 continue;
             };
-            if node.body.is_none() {
+            if !node.has_body {
                 continue;
             }
             for root in performed.difference(&node.ceiling) {
@@ -710,6 +1094,7 @@ fn collect(body: &Expr, function_count: usize) -> (Vec<Site>, Vec<Closure<'_>>) 
                 closures.push(Closure {
                     body,
                     ceiling: signature.effects().clone(),
+                    signature: signature.clone(),
                     origin: origin.clone(),
                 });
             }
@@ -773,6 +1158,7 @@ fn collect(body: &Expr, function_count: usize) -> (Vec<Site>, Vec<Closure<'_>>) 
                             "contract member @{}.{member}",
                             interface.path()
                         ),
+                        identity: format!("{}.{member}", interface.id()),
                         row: signature.effects().clone(),
                     },
                 };

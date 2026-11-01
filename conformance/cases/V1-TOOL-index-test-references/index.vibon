@@ -10,7 +10,9 @@
       visibility: @public
       source: (record source-id: "src/app/main.vib" start: 0u64 end: 72u64)
       signature: void
-      effects: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
       errors: (array)
       applications: (array)
       text: "(defn one () i32 visibility: @public 1i32)\n\n(defn execute () void void)\n")
@@ -22,7 +24,9 @@
       visibility: @private
       source: (record source-id: "src/app/main.vib" start: 44u64 end: 71u64)
       signature: (record type: @fn parameters: (array) labelled: (record) result: @void effects: (record roots: (array)))
-      effects: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
       errors: (array)
       applications: (array)
       text: "(defn execute () void void)")
@@ -34,7 +38,9 @@
       visibility: @public
       source: (record source-id: "src/app/main.vib" start: 0u64 end: 42u64)
       signature: (record type: @fn parameters: (array) labelled: (record) result: @i32 effects: (record roots: (array)))
-      effects: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
       errors: (array)
       applications: (array)
       text: "(defn one () i32 visibility: @public 1i32)")
@@ -46,7 +52,9 @@
       visibility: @public
       source: (record source-id: "tests/t.vib" start: 0u64 end: 105u64)
       signature: void
-      effects: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
       errors: (array)
       applications: (array)
       text: "(import assert @std.assert)\n\n(import main @app.main)\n\n(test \"one is one\" (assert.equal (main.one) 1i32))\n"))

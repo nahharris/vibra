@@ -81,9 +81,20 @@ impl ProfileHandler for ToolingV1QueryHandler {
             let text = std::str::from_utf8(source.bytes()).map_err(|_| {
                 HandlerError::new(format!("query source `{source_id}` is not UTF-8"))
             })?;
-            let query = workspace
-                .query_position_with_bootstrap(source_id, expected.offset, &stdlib)
-                .map_err(|error| HandlerError::new(error.to_string()))?;
+            let expansion = vibra_workspace::query::PositionExpansion {
+                effect_witnesses: expected
+                    .expand
+                    .iter()
+                    .any(|expansion| expansion == "effect-witnesses"),
+            };
+            let query = vibra_workspace::query::query_position_expanded(
+                &workspace,
+                source_id,
+                expected.offset,
+                Some(&stdlib),
+                expansion,
+            )
+            .map_err(|error| HandlerError::new(error.to_string()))?;
             let index = LineIndex::new(text);
             let rendered =
                 WorkspacePositionQueryDocument::render_with_source(&query, &index);

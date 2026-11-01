@@ -55,21 +55,47 @@
         "end": { "type": "integer", "minimum": 0 }
       }
     },
+    "row": {
+      "description": "An effect row, the record of the effects chapter: its roots as atom spellings without the leading @, in canonical order. Consumers must not assume the record holds only roots.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roots"],
+      "properties": {
+        "roots": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identity" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "external": {
+      "description": "The provider binding of a declaration written with external:. A user package cannot write it validly, so the record of a local package is null unless the declaration was rejected; an embedded standard-library declaration carries its provider and registry symbol.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "symbol"],
+      "properties": {
+        "provider": { "enum": ["host", "compiler"] },
+        "symbol": { "type": "string", "minLength": 1 }
+      }
+    },
     "facts": {
       "description": "The checked facts of a declaration.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["signature", "effects", "errors", "applications"],
+      "required": ["signature", "ceiling", "effects", "errors", "applications"],
       "properties": {
         "signature": {
-          "description": "Canonical VIBON: the checked type of a value, function, or method, the generic parameter list of a type or interface, or void for a module.",
+          "description": "Canonical VIBON: the checked type of a value, function, method, or effect operation, the generic parameter list of a type, interface, or effect root, or void for a module.",
           "type": "string",
           "minLength": 1
         },
+        "ceiling": {
+          "description": "The written or default-empty effect ceiling. For an effect operation it is the complete row: the owner root together with the additive row.",
+          "$ref": "#/$defs/row"
+        },
         "effects": {
-          "description": "The performed effect roots, sorted.",
-          "type": "array",
-          "items": { "$ref": "#/$defs/identity" }
+          "description": "The checked performed effect row. For an operation bound by external: it is the complete row, which the host performs.",
+          "$ref": "#/$defs/row"
         },
         "errors": {
           "description": "Canonical VIBON of each error type the result can carry.",
@@ -95,6 +121,7 @@
         "visibility",
         "source",
         "facts",
+        "external",
         "text"
       ],
       "properties": {
@@ -121,6 +148,10 @@
         "facts": {
           "description": "The checked facts, or null for an unavailable or recovered declaration.",
           "oneOf": [{ "$ref": "#/$defs/facts" }, { "type": "null" }]
+        },
+        "external": {
+          "description": "The provider binding written with external:, or null. It is a syntactic fact, so a declaration that did not check keeps it.",
+          "oneOf": [{ "$ref": "#/$defs/external" }, { "type": "null" }]
         },
         "text": {
           "description": "The formatter-normalized source of the declaration.",

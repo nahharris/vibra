@@ -1,0 +1,193 @@
+(record
+  format: @index.v1
+  revision: "sha256:59683f26252772943a155796981b88daf3e851031abcccc96cef3e646b6af4f7"
+  declarations: (array
+    (record
+      id: @app.main
+      kind: @module
+      module: @app.main
+      owner: void
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 0u64 end: 605u64)
+      signature: void
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
+      errors: (array)
+      applications: (array)
+      text: "(deffect write\n  visibility: @public\n  (defn text (target str) void visibility: @public (do)))\n\n(deffect audit\n  visibility: @public\n  (defn record (target str) void\n    visibility: @public\n    effects: (write)\n    (write.text target)))\n\n(defn handle (target str) void\n  visibility: @public\n  effects: (audit write)\n  (audit.record target))\n\n(defn pure-sum (left i32 right i32) i32 left)\n\n(def three i32 (pure-sum 1i32 2i32))\n\n(deftype box (record id i32)\n  (defn show (value self) void effects: (write) (write.text \"box\")))\n\n(defn execute () void effects: (audit write) (handle \"x\"))\n")
+    (record
+      id: @app.main.audit
+      kind: @effect-root
+      module: @app.main
+      owner: void
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 104u64 end: 244u64)
+      signature: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
+      errors: (array)
+      applications: (array)
+      text: "(deffect audit\n  visibility: @public\n  (defn record (target str) void\n    visibility: @public\n    effects: (write)\n    (write.text target)))")
+    (record
+      id: @app.main.audit.record
+      kind: @operation
+      module: @app.main
+      owner: @app.main.audit
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 143u64 end: 243u64)
+      signature: (record type: @fn parameters: (array @str) labelled: (record) result: @void effects: (record roots: (array @app.main.audit @app.main.write)))
+      ceiling: (record roots: (array @app.main.audit @app.main.write))
+      effects: (record roots: (array @app.main.write))
+      external: void
+      errors: (array)
+      applications: (array @app.main.write.text)
+      text: "(defn record (target str) void\n    visibility: @public\n    effects: (write)\n    (write.text target))")
+    (record
+      id: @app.main.box
+      kind: @type
+      module: @app.main
+      owner: void
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 435u64 end: 540u64)
+      signature: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
+      errors: (array)
+      applications: (array)
+      text: "(deftype box (record id i32)\n  (defn show (value self) void effects: (write) (write.text \"box\")))")
+    (record
+      id: @app.main.box.show
+      kind: @method
+      module: @app.main
+      owner: @app.main.box
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 466u64 end: 539u64)
+      signature: (record type: @fn parameters: (array @app.main.box) labelled: (record) result: @void effects: (record roots: (array @app.main.write)))
+      ceiling: (record roots: (array @app.main.write))
+      effects: (record roots: (array @app.main.write))
+      external: void
+      errors: (array)
+      applications: (array @app.main.write.text)
+      text: "(defn show (value self) void effects: (write) (write.text \"box\"))")
+    (record
+      id: @app.main.execute
+      kind: @function
+      module: @app.main
+      owner: void
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 542u64 end: 604u64)
+      signature: (record type: @fn parameters: (array) labelled: (record) result: @void effects: (record roots: (array @app.main.audit @app.main.write)))
+      ceiling: (record roots: (array @app.main.audit @app.main.write))
+      effects: (record roots: (array @app.main.audit @app.main.write))
+      external: void
+      errors: (array)
+      applications: (array @app.main.handle)
+      text: "(defn execute () void effects: (audit write) (handle \"x\"))")
+    (record
+      id: @app.main.handle
+      kind: @function
+      module: @app.main
+      owner: void
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 246u64 end: 348u64)
+      signature: (record type: @fn parameters: (array @str) labelled: (record) result: @void effects: (record roots: (array @app.main.audit @app.main.write)))
+      ceiling: (record roots: (array @app.main.audit @app.main.write))
+      effects: (record roots: (array @app.main.audit @app.main.write))
+      external: void
+      errors: (array)
+      applications: (array @app.main.audit.record)
+      text: "(defn handle (target str) void\n  visibility: @public\n  effects: (audit write)\n  (audit.record target))")
+    (record
+      id: @app.main.pure-sum
+      kind: @function
+      module: @app.main
+      owner: void
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 350u64 end: 395u64)
+      signature: (record type: @fn parameters: (array @i32 @i32) labelled: (record) result: @i32 effects: (record roots: (array)))
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
+      errors: (array)
+      applications: (array)
+      text: "(defn pure-sum (left i32 right i32) i32 left)")
+    (record
+      id: @app.main.three
+      kind: @value
+      module: @app.main
+      owner: void
+      visibility: @private
+      source: (record source-id: "src/app/main.vib" start: 397u64 end: 433u64)
+      signature: @i32
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
+      errors: (array)
+      applications: (array @app.main.pure-sum)
+      text: "(def three i32 (pure-sum 1i32 2i32))")
+    (record
+      id: @app.main.write
+      kind: @effect-root
+      module: @app.main
+      owner: void
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 0u64 end: 102u64)
+      signature: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
+      errors: (array)
+      applications: (array)
+      text: "(deffect write\n  visibility: @public\n  (defn text (target str) void visibility: @public (do)))")
+    (record
+      id: @app.main.write.text
+      kind: @operation
+      module: @app.main
+      owner: @app.main.write
+      visibility: @public
+      source: (record source-id: "src/app/main.vib" start: 39u64 end: 101u64)
+      signature: (record type: @fn parameters: (array @str) labelled: (record) result: @void effects: (record roots: (array @app.main.write)))
+      ceiling: (record roots: (array @app.main.write))
+      effects: (record roots: (array))
+      external: void
+      errors: (array)
+      applications: (array)
+      text: "(defn text (target str) void visibility: @public (do))")
+    (record
+      id: @ops.clean
+      kind: @module
+      module: @ops.clean
+      owner: void
+      visibility: @public
+      source: (record source-id: "src/ops/clean.vib" start: 0u64 end: 25u64)
+      signature: void
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
+      errors: (array)
+      applications: (array)
+      text: "(defn clean () i32 1i32)\n")
+    (record
+      id: @ops.clean.clean
+      kind: @function
+      module: @ops.clean
+      owner: void
+      visibility: @private
+      source: (record source-id: "src/ops/clean.vib" start: 0u64 end: 24u64)
+      signature: (record type: @fn parameters: (array) labelled: (record) result: @i32 effects: (record roots: (array)))
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
+      errors: (array)
+      applications: (array)
+      text: "(defn clean () i32 1i32)"))
+  implementations: (array)
+  references: (array
+    (record from: @app.main.audit.record written: "write.text" source: (record source-id: "src/app/main.vib" start: 224u64 end: 234u64) to: @app.main.write.text)
+    (record from: @app.main.handle written: "audit.record" source: (record source-id: "src/app/main.vib" start: 327u64 end: 339u64) to: @app.main.audit.record)
+    (record from: @app.main.three written: "pure-sum" source: (record source-id: "src/app/main.vib" start: 413u64 end: 421u64) to: @app.main.pure-sum)
+    (record from: @app.main.box.show written: "write.text" source: (record source-id: "src/app/main.vib" start: 521u64 end: 531u64) to: @app.main.write.text)
+    (record from: @app.main.execute written: "handle" source: (record source-id: "src/app/main.vib" start: 592u64 end: 598u64) to: @app.main.handle)))

@@ -1,0 +1,30 @@
+(deffect write
+  visibility: @public
+  (defn text (target str) void
+    visibility: @public
+    (do)))
+
+(deffect audit
+  visibility: @public
+  (defn record (target str) void
+    visibility: @public
+    effects: (write)
+    (write.text target)))
+
+(defn handle (target str) void
+  visibility: @public
+  effects: (audit write)
+  (audit.record target))
+
+(defn pure-sum (left i32 right i32) i32 left)
+
+(def three i32 (pure-sum 1i32 2i32))
+
+(deftype box (record id i32)
+  (defn show (value self) void
+    effects: (write)
+    (write.text "box")))
+
+(defn execute () void
+  effects: (audit write)
+  (handle "x"))

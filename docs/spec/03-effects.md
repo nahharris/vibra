@@ -11,8 +11,8 @@ test, performed rows over the function-call graph, `@effect.outside-ceiling`
 with its witness, `@effect.invalid-reference`, `@contract.unused-effect` for a
 written root, and the row in the canonical `fn` type encoding. Step 15 adds the
 target `effects` array and effectful-test consent, and Steps 16 to 18 the `@host`
-externals, `@std.io`, and `@std.fs`, with the environment, clock, and random modules; the query
-and index metadata remain unimplemented until Milestone 4 Step 20.
+externals, `@std.io`, and `@std.fs`, with the environment, clock, and random modules; Step 20
+adds the query and index metadata, read from the same graph.
 
 ## Static contract
 

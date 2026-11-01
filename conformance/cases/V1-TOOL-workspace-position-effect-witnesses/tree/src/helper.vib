@@ -1,0 +1,12 @@
+(deffect write
+  visibility: @public
+  (defn text (target str event str) void
+    visibility: @public
+    (do)))
+
+(deffect audit
+  visibility: @public
+  (defn record (target str event str) void
+    visibility: @public
+    effects: (write)
+    (write.text target event)))

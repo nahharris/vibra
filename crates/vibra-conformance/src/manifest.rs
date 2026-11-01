@@ -231,6 +231,8 @@ pub struct ExpectedQuery {
     pub offset: usize,
     /// A case-relative JSON snapshot rendered by the schema adapter.
     pub snapshot: String,
+    /// The expansions requested, as `--expand` values: `effect-witnesses`.
+    pub expand: Vec<String>,
 }
 
 /// Expected execution-independent outputs of a case.
@@ -489,6 +491,16 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             if operation == ConformanceOperation::Query {
                 let tree = inputs.tree.as_deref().unwrap_or_default();
                 validate_query_input(tree, &query.input)?;
+            }
+            if let Some(unknown) = query
+                .expand
+                .iter()
+                .find(|expansion| expansion.as_str() != "effect-witnesses")
+            {
+                return Err(ManifestError::Invalid(format!(
+                    "query expectation expansion `{unknown}` is not `effect-witnesses` in case `{}`",
+                    raw.id
+                )));
             }
         }
 
@@ -943,6 +955,7 @@ fn decode_expectations(
                 input: query.input,
                 offset: query.offset,
                 snapshot: query.snapshot,
+                expand: query.expand,
             })
             .collect(),
         interpreter,
@@ -1180,4 +1193,6 @@ pub(crate) struct RawQuery {
     pub(crate) input: String,
     pub(crate) offset: usize,
     pub(crate) snapshot: String,
+    #[serde(default)]
+    pub(crate) expand: Vec<String>,
 }

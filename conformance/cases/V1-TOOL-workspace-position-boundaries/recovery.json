@@ -67,5 +67,9 @@
   "pattern": {
     "status": "unavailable",
     "value": null
+  },
+  "effects": {
+    "status": "unavailable",
+    "value": null
   }
 }

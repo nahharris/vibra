@@ -94,3 +94,45 @@ The public `query` command and MCP (M6), edit plans, row variables.
 
 The exit clause on effect metadata: performed, enclosing, and target rows at a source
 position and the witness of each root, through the library projection.
+
+## As built
+
+Landed on `claude/m4-step-20-effect-metadata`, conditional on its pull request merging.
+
+- `vibra-types` exposes the graph the checker reports from as `EffectGraph` (nodes, performed rows,
+  per-root witnesses, the consent of each binary entry), returned by `ResolvedCheckResult::effects()`.
+  The diagnostics and the query read the same value; the query never computes a row.
+- The envelope's `effects` fact is `exact`, `recovered` (the body, or a function it reaches, did not
+  check, or the call is in a body that did not), or `unavailable` (the structural position is not
+  exact). `PositionExpansion { effect_witnesses }` and the corpus `expand = ["effect-witnesses"]`
+  request the witnesses. Hops carry their own `sourceId` and display positions.
+- Rulings written into the tooling chapter: roots in the envelope are canonical declaration
+  identities (`@pkg@ver/path`) and in the index atom paths; a source is reached from the first
+  binary target, in unit-name order, whose unit import closure holds it; a `lambda` and an `impl`
+  member have a null identity; an application that applies no function has the empty row; a
+  declaration without a body (an `external:` operation, an interface contract member) has its
+  complete row as `effects`; an effect root has `(array)` and empty rows.
+- The application fact now exists for any module-level function or operation the checker holds,
+  with the checked type as `calleeType` (the earlier syntax-derived type excluded nonempty rows).
+  Positions in operation bodies are collected like any function body.
+- Index records without checked facts keep `external`; a declaration whose body did not check no
+  longer keeps its signature (all-or-nothing, as the chapter says).
+
+### Cases
+
+- **Added, tooling (4):** `V1-TOOL-workspace-position-effects` (8 queries),
+  `V1-TOOL-workspace-position-effect-witnesses` (6, five expanded), `V1-TOOL-workspace-position-effects-recovery`
+  (3), `V1-TOOL-index-effects`.
+- **Re-expected:** the 28 position snapshots of `V1-TOOL-workspace-position-query` (6),
+  `-boundaries` (2), `-types` (11), `-variadic` (2), and `V1-TOOL-let-else-contexts` (7), by the new
+  `effects` fact and the `effects` row of each function type, and nothing else (the removed lines are
+  the trailing commas); `V1-TOOL-index-member-order`, `-records`, `-test-references` gained the empty
+  `ceiling`, the row record `effects`, and `external: void` on every record, identical to the
+  mechanical re-expectation of the old files; `V1-TOOL-index-unavailable` gained the same, the effect
+  root `audit` now has facts, and the rejected `@host` operation keeps its `external` binding.
+  `V1-TOOL-index-unavailable` previously pinned the absence of effect facts.
+- **Host tests:** `effect_metadata_m4_step20` in `vibra-workspace` (10), and five in `vibra-schema`.
+
+### Left for Steps 21 and 22
+
+The performance baseline (21) and the M4 exit sweep (22). The public `query` command stays M6's.

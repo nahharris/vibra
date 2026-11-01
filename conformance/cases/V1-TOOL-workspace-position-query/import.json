@@ -102,5 +102,13 @@
   "pattern": {
     "status": "unavailable",
     "value": null
+  },
+  "effects": {
+    "status": "exact",
+    "value": {
+      "enclosing": null,
+      "application": null,
+      "target": null
+    }
   }
 }
