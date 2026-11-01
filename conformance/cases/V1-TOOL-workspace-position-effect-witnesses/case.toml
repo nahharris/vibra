@@ -1,0 +1,47 @@
+id = "V1-TOOL-workspace-position-effect-witnesses"
+rule = "V1-TOOL-workspace-position-query"
+profile = "tooling-v1"
+operation = "query"
+description = "Under the effect-witnesses expansion the effects fact adds one witness for each root the enclosing body performs, with the structure of the checker's witness: a five-hop chain that crosses modules, a chain that ends at a function value, one that ends at a contract member, the written member of an impl block, and a body that performs nothing, whose witnesses are empty."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 316
+expand = ["effect-witnesses"]
+snapshot = "many-hops.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 425
+expand = ["effect-witnesses"]
+snapshot = "function-value.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 723
+expand = ["effect-witnesses"]
+snapshot = "contract-member.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 629
+expand = ["effect-witnesses"]
+snapshot = "impl-member.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 769
+expand = ["effect-witnesses"]
+snapshot = "pure-body.json"
+
+[[expect.queries]]
+input = "tree/src/main.vib"
+offset = 316
+snapshot = "compact.json"

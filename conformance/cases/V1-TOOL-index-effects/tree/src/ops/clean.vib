@@ -1,0 +1,1 @@
+(defn clean () i32 1i32)

@@ -37,14 +37,44 @@ impl IndexSourceDocument {
     }
 }
 
+/// An effect row: the record `{ "roots": [...] }` of the effects chapter,
+/// with the roots as atom spellings without `@`, in canonical order.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct IndexRowDocument {
+    /// The roots' identities.
+    pub roots: Vec<String>,
+}
+
+impl IndexRowDocument {
+    fn render(roots: &[String]) -> Self {
+        Self {
+            roots: roots.to_vec(),
+        }
+    }
+}
+
+/// The provider binding of a declaration written with `external:`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct IndexExternalDocument {
+    /// `host` or `compiler`.
+    pub provider: String,
+    /// The registry symbol.
+    pub symbol: String,
+}
+
 /// The checked facts of one declaration.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct IndexFactsDocument {
     /// The canonical VIBON of the signature.
     pub signature: String,
-    /// The performed effect roots, sorted.
-    pub effects: Vec<String>,
+    /// The written or default-empty effect ceiling; the complete row of an
+    /// effect operation.
+    pub ceiling: IndexRowDocument,
+    /// The checked performed effect row.
+    pub effects: IndexRowDocument,
     /// The canonical VIBON of each error type the result can carry.
     pub errors: Vec<String>,
     /// The identities of the declarations the body applies, sorted.
@@ -69,6 +99,9 @@ pub struct IndexDeclarationDocument {
     pub source: IndexSourceDocument,
     /// The checked facts, or null for a declaration that did not check.
     pub facts: Option<IndexFactsDocument>,
+    /// The provider binding written with `external:`, or null. It is a
+    /// syntactic fact, so a declaration that did not check keeps it.
+    pub external: Option<IndexExternalDocument>,
     /// The formatter-normalized source of the declaration.
     pub text: String,
 }
@@ -84,9 +117,14 @@ impl IndexDeclarationDocument {
             source: IndexSourceDocument::render(declaration.source()),
             facts: declaration.facts().map(|facts| IndexFactsDocument {
                 signature: facts.signature().to_owned(),
-                effects: facts.effects().to_vec(),
+                ceiling: IndexRowDocument::render(facts.ceiling()),
+                effects: IndexRowDocument::render(facts.effects()),
                 errors: facts.errors().to_vec(),
                 applications: facts.applications().to_vec(),
+            }),
+            external: declaration.external().map(|external| IndexExternalDocument {
+                provider: external.provider().to_owned(),
+                symbol: external.symbol().to_owned(),
             }),
             text: declaration.text().to_owned(),
         }

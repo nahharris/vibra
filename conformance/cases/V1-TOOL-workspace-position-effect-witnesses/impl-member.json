@@ -1,0 +1,234 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:4207916c68bbe221cc0a501c8d135e79410633c6a42bb1dcc88fecaf583db79b",
+  "sourceId": "src/main.vib",
+  "offset": 629,
+  "nodeId": "src/main.vib#629-630",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 629,
+    "sourceId": "src/main.vib",
+    "span": {
+      "sourceId": "src/main.vib",
+      "start": 629,
+      "end": 630,
+      "startPosition": {
+        "line": 31,
+        "column": 7
+      },
+      "endPosition": {
+        "line": 31,
+        "column": 8
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "open-paren",
+    "category": "expression",
+    "status": "exact",
+    "permittedForms": [
+      "lambda",
+      "do",
+      "let",
+      "let-else",
+      "if",
+      "match",
+      "return",
+      "as",
+      "try"
+    ],
+    "permittedLabels": [
+      "types"
+    ]
+  },
+  "role": {
+    "status": "exact",
+    "value": "@application"
+  },
+  "context": {
+    "status": "exact",
+    "value": "result"
+  },
+  "identity": {
+    "status": "unavailable",
+    "value": null
+  },
+  "expectedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "void",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "observedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "void",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": [
+      {
+        "name": "value",
+        "identity": "binder:src/main.vib:576-581"
+      }
+    ]
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": [
+      {
+        "alias": "helper",
+        "module": "@app.helper",
+        "sourceId": "src/main.vib",
+        "span": {
+          "sourceId": "src/main.vib",
+          "start": 0,
+          "end": 27,
+          "startPosition": {
+            "line": 1,
+            "column": 1
+          },
+          "endPosition": {
+            "line": 1,
+            "column": 28
+          }
+        }
+      }
+    ]
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": []
+  },
+  "application": {
+    "status": "exact",
+    "value": {
+      "kind": "@function",
+      "callee": {
+        "kind": "operation",
+        "canonical": "@demo@0.1.0/app.helper.write.text"
+      },
+      "calleeType": {
+        "kind": "function",
+        "name": "fn",
+        "parameters": [
+          {
+            "kind": "primitive",
+            "name": "str",
+            "parameters": [],
+            "result": null,
+            "labelled": []
+          },
+          {
+            "kind": "primitive",
+            "name": "str",
+            "parameters": [],
+            "result": null,
+            "labelled": []
+          }
+        ],
+        "result": {
+          "kind": "primitive",
+          "name": "void",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        },
+        "labelled": [],
+        "effects": {
+          "roots": [
+            "@demo@0.1.0/app.helper.write"
+          ]
+        }
+      },
+      "positional": [
+        {
+          "kind": "primitive",
+          "name": "str",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        },
+        {
+          "kind": "primitive",
+          "name": "str",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        }
+      ],
+      "labelled": [],
+      "resultType": {
+        "kind": "primitive",
+        "name": "void",
+        "parameters": [],
+        "result": null,
+        "labelled": []
+      },
+      "dispatch": null
+    }
+  },
+  "pattern": {
+    "status": "unavailable",
+    "value": null
+  },
+  "effects": {
+    "status": "exact",
+    "value": {
+      "enclosing": {
+        "identity": null,
+        "kind": "function",
+        "ceiling": {
+          "roots": [
+            "@demo@0.1.0/app.helper.write"
+          ]
+        },
+        "performed": {
+          "roots": [
+            "@demo@0.1.0/app.helper.write"
+          ]
+        }
+      },
+      "application": {
+        "roots": [
+          "@demo@0.1.0/app.helper.write"
+        ]
+      },
+      "target": null,
+      "witnesses": [
+        {
+          "root": "@demo@0.1.0/app.helper.write",
+          "hops": [
+            {
+              "span": {
+                "sourceId": "src/main.vib",
+                "start": 629,
+                "end": 656,
+                "startPosition": {
+                  "line": 31,
+                  "column": 7
+                },
+                "endPosition": {
+                  "line": 31,
+                  "column": 34
+                }
+              },
+              "callee": {
+                "kind": "operation",
+                "identity": "@demo@0.1.0/app.helper.write.text"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

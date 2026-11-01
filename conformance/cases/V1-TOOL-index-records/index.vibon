@@ -10,7 +10,9 @@
       visibility: @public
       source: (record source-id: "src/app/main.vib" start: 0u64 end: 824u64)
       signature: void
-      effects: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
       errors: (array)
       applications: (array)
       text: "(import core @std.core)\n\n(import from @std.core.from)\n\n(def limit i32 10i32)\n\n(defint shape\n  visibility: @public\n  (defn name (value self) str)\n  (defn label (value self) str (shape.name value)))\n\n(deftype celsius (record degrees i32)\n  visibility: @public\n  (defn warmer (value self) self (celsius degrees: limit))\n  (impl shape (defn name (value self) str \"celsius\"))\n  (impl (from i16)\n    (defn convert (value i16) self (celsius degrees: (as i32 (from.convert value)))))\n  (impl (from i8)\n    (defn convert (value i8) self (celsius degrees: (as i32 (from.convert value))))))\n\n(defn describe (value celsius) (option str)\n  visibility: @public\n  (option.some (shape.label (celsius.warmer value))))\n\n(defn parse (text str) (result i32 core.conversion-error) (i32.parse text))\n\n(defn execute () void void)\n")
@@ -22,7 +24,9 @@
       visibility: @public
       source: (record source-id: "src/app/main.vib" start: 197u64 end: 594u64)
       signature: (array)
-      effects: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
       errors: (array)
       applications: (array)
       text: "(deftype celsius (record degrees i32)\n  visibility: @public\n  (defn warmer (value self) self (celsius degrees: limit))\n  (impl shape (defn name (value self) str \"celsius\"))\n  (impl (from i16)\n    (defn convert (value i16) self (celsius degrees: (as i32 (from.convert value)))))\n  (impl (from i8)\n    (defn convert (value i8) self (celsius degrees: (as i32 (from.convert value))))))")
@@ -34,7 +38,9 @@
       visibility: @private
       source: (record source-id: "src/app/main.vib" start: 259u64 end: 315u64)
       signature: (record type: @fn parameters: (array @app.main.celsius) labelled: (record) result: @app.main.celsius effects: (record roots: (array)))
-      effects: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
       errors: (array)
       applications: (array @app.main.celsius)
       text: "(defn warmer (value self) self (celsius degrees: limit))")
@@ -46,7 +52,9 @@
       visibility: @public
       source: (record source-id: "src/app/main.vib" start: 596u64 end: 715u64)
       signature: (record type: @fn parameters: (array @app.main.celsius) labelled: (record) result: (record type: @std.option.option arguments: (array @str)) effects: (record roots: (array)))
-      effects: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
       errors: (array)
       applications: (array @app.main.celsius.warmer @app.main.shape.label)
       text: "(defn describe (value celsius) (option str)\n  visibility: @public\n  (option.some (shape.label (celsius.warmer value))))")
@@ -58,7 +66,9 @@
       visibility: @private
       source: (record source-id: "src/app/main.vib" start: 796u64 end: 823u64)
       signature: (record type: @fn parameters: (array) labelled: (record) result: @void effects: (record roots: (array)))
-      effects: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
       errors: (array)
       applications: (array)
       text: "(defn execute () void void)")
@@ -70,7 +80,9 @@
       visibility: @private
       source: (record source-id: "src/app/main.vib" start: 54u64 end: 75u64)
       signature: @i32
-      effects: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
       errors: (array)
       applications: (array)
       text: "(def limit i32 10i32)")
@@ -82,7 +94,9 @@
       visibility: @private
       source: (record source-id: "src/app/main.vib" start: 717u64 end: 794u64)
       signature: (record type: @fn parameters: (array @str) labelled: (record) result: (record type: @std.result.result arguments: (array @i32 @std.core.conversion-error)) effects: (record roots: (array)))
-      effects: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
       errors: (array @std.core.conversion-error)
       applications: (array @std.builtin.i32.parse)
       text: "(defn parse (text str) (result i32 core.conversion-error) (i32.parse text))")
@@ -94,7 +108,9 @@
       visibility: @public
       source: (record source-id: "src/app/main.vib" start: 77u64 end: 195u64)
       signature: (array)
-      effects: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
       errors: (array)
       applications: (array)
       text: "(defint shape\n  visibility: @public\n  (defn name (value self) str)\n  (defn label (value self) str (shape.name value)))")
@@ -106,7 +122,9 @@
       visibility: @public
       source: (record source-id: "src/app/main.vib" start: 146u64 end: 194u64)
       signature: (record type: @fn parameters: (array (record type: @param name: @self)) labelled: (record) result: @str effects: (record roots: (array)))
-      effects: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
       errors: (array)
       applications: (array @app.main.shape.name)
       text: "(defn label (value self) str (shape.name value))")
@@ -118,7 +136,9 @@
       visibility: @public
       source: (record source-id: "src/app/main.vib" start: 115u64 end: 143u64)
       signature: (record type: @fn parameters: (array (record type: @param name: @self)) labelled: (record) result: @str effects: (record roots: (array)))
-      effects: (array)
+      ceiling: (record roots: (array))
+      effects: (record roots: (array))
+      external: void
       errors: (array)
       applications: (array)
       text: "(defn name (value self) str)"))

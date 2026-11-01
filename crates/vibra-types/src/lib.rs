@@ -34,6 +34,10 @@ use vibra_syntax::{
 mod construct;
 mod defaults;
 mod effects;
+pub use effects::{
+    EffectEntry, EffectGraph, EffectNode, EffectNodeKind, RootWitness, WitnessCallee,
+    WitnessHop,
+};
 mod infer;
 mod interfaces;
 mod nominal;
@@ -1594,10 +1598,22 @@ impl<'a> Checker<'a> {
     /// Checks every written ceiling against the performed row of its body,
     /// once the whole function-call graph is checked.
     fn check_effects(&mut self) {
-        let found = effects::check(
+        let spans = header_spans(
+            |header| {
+                let ast = if header.module_index == LIBRARY_MODULE {
+                    self.library.map(|(_, ast)| ast)?
+                } else {
+                    self.ast
+                };
+                Some(ast.declarations())
+            },
+            &self.functions,
+        );
+        let (found, _) = effects::check(
             &self.checked_functions,
             &self.checked_globals,
             &self.functions,
+            &spans,
             &self.types,
             &[],
         );
@@ -1657,6 +1673,27 @@ impl<'a> Checker<'a> {
             }
         }
     }
+}
+
+/// The span of the declaration each header was collected from, which locates
+/// a function whose body did not check: the `defn` or the `test`.
+pub(crate) fn header_spans<'d>(
+    declarations: impl Fn(&FunctionHeader) -> Option<&'d [Declaration]>,
+    headers: &[FunctionHeader],
+) -> Vec<Option<ByteSpan>> {
+    headers
+        .iter()
+        .map(|header| {
+            header
+                .test
+                .as_ref()
+                .map(vibra_syntax::TestDeclaration::span)
+                .or_else(|| {
+                    header_function(declarations(header)?, header)
+                        .map(vibra_syntax::FunctionDeclaration::span)
+                })
+        })
+        .collect()
 }
 
 /// The `defn` a header was collected from: a top-level function, a nested

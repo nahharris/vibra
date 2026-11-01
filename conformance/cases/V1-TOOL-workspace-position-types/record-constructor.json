@@ -139,5 +139,27 @@
   "pattern": {
     "status": "unavailable",
     "value": null
+  },
+  "effects": {
+    "status": "exact",
+    "value": {
+      "enclosing": {
+        "identity": {
+          "kind": "function",
+          "canonical": "@app@0.1.0/app.main.origin"
+        },
+        "kind": "function",
+        "ceiling": {
+          "roots": []
+        },
+        "performed": {
+          "roots": []
+        }
+      },
+      "application": {
+        "roots": []
+      },
+      "target": null
+    }
   }
 }

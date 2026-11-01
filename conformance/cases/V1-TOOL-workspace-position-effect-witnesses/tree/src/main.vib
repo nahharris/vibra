@@ -1,0 +1,37 @@
+(import helper @app.helper)
+
+(defn one () void
+  effects: (helper.audit helper.write)
+  (helper.audit.record "a" "b"))
+
+(defn two () void
+  effects: (helper.audit helper.write)
+  (one))
+
+(defn three () void
+  effects: (helper.audit helper.write)
+  (two))
+
+(defn four () void
+  effects: (helper.audit helper.write)
+  (three))
+
+(defn apply (f (fn (str) void effects: (helper.write)) value str) void
+  effects: (helper.write)
+  (f value))
+
+(defint logger
+  (defn log (value self) void
+    effects: (helper.write)))
+
+(deftype console (record id i32)
+  (impl logger
+    (defn log (value self) void
+      effects: (helper.write)
+      (helper.write.text "x" "y"))))
+
+(defn use-it (target logger) void
+  effects: (helper.write)
+  (logger.log target))
+
+(defn pure-value () i32 5i32)

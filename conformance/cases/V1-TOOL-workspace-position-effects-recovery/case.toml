@@ -1,0 +1,39 @@
+id = "V1-TOOL-workspace-position-effects-recovery"
+rule = "V1-TOOL-workspace-position-query"
+profile = "tooling-v1"
+operation = "query"
+description = "A module that does not check beside one that does: the unrelated module keeps its exact effects fact, and a position in a body that did not check, or in a function that reaches one, is recovered because its performed row is a lower bound."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/broken.vib"
+span = [47, 53]
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "src/broken.vib"
+span = [146, 158]
+
+[[expect.queries]]
+input = "tree/src/good.vib"
+offset = 180
+snapshot = "unrelated-call.json"
+
+[[expect.queries]]
+input = "tree/src/broken.vib"
+offset = 117
+snapshot = "call-in-unchecked-body.json"
+
+[[expect.queries]]
+input = "tree/src/broken.vib"
+offset = 216
+snapshot = "call-of-unchecked-function.json"

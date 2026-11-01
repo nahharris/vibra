@@ -147,5 +147,24 @@
   "pattern": {
     "status": "unavailable",
     "value": null
+  },
+  "effects": {
+    "status": "exact",
+    "value": {
+      "enclosing": {
+        "identity": null,
+        "kind": "function",
+        "ceiling": {
+          "roots": []
+        },
+        "performed": {
+          "roots": []
+        }
+      },
+      "application": {
+        "roots": []
+      },
+      "target": null
+    }
   }
 }

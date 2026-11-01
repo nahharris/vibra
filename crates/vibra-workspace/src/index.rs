@@ -13,7 +13,10 @@ use std::path::Path;
 
 use vibra_diagnostics::ByteSpan;
 use vibra_resolve::{DeclarationId, EntityKind, ResolvedSnapshot, Visibility};
-use vibra_syntax::{Declaration, Expression, ExpressionKind, SourceAst, TypeMember};
+use vibra_syntax::{
+    Attribute, Declaration, Expression, ExpressionKind, FunctionDeclaration, Literal,
+    SourceAst, TypeMember,
+};
 
 use crate::{WorkspaceError, WorkspaceSnapshot};
 
@@ -58,6 +61,7 @@ impl IndexSource {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexFacts {
     signature: String,
+    ceiling: Vec<String>,
     effects: Vec<String>,
     errors: Vec<String>,
     applications: Vec<String>,
@@ -71,7 +75,16 @@ impl IndexFacts {
         &self.signature
     }
 
-    /// The performed effect roots, as canonical atoms without `@`, sorted.
+    /// The roots of the written or default-empty effect ceiling, as canonical
+    /// atoms without `@`, in canonical order. For an effect operation it is
+    /// the complete row: the owner root together with the additive row.
+    #[must_use]
+    pub fn ceiling(&self) -> &[String] {
+        &self.ceiling
+    }
+
+    /// The roots of the checked performed effect row, as canonical atoms
+    /// without `@`, in canonical order.
     #[must_use]
     pub fn effects(&self) -> &[String] {
         &self.effects
@@ -91,6 +104,27 @@ impl IndexFacts {
     }
 }
 
+/// The provider binding of a declaration written with `external:`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct IndexExternal {
+    provider: &'static str,
+    symbol: String,
+}
+
+impl IndexExternal {
+    /// `host` or `compiler`.
+    #[must_use]
+    pub const fn provider(&self) -> &'static str {
+        self.provider
+    }
+
+    /// The registry symbol the declaration names.
+    #[must_use]
+    pub fn symbol(&self) -> &str {
+        &self.symbol
+    }
+}
+
 /// One module-level or nested declaration.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexDeclaration {
@@ -101,6 +135,7 @@ pub struct IndexDeclaration {
     visibility: &'static str,
     source: IndexSource,
     facts: Option<IndexFacts>,
+    external: Option<IndexExternal>,
     text: String,
 }
 
@@ -145,6 +180,13 @@ impl IndexDeclaration {
     #[must_use]
     pub const fn facts(&self) -> Option<&IndexFacts> {
         self.facts.as_ref()
+    }
+
+    /// The provider binding written with `external:`, a syntactic fact that a
+    /// declaration keeps whether or not it checked.
+    #[must_use]
+    pub const fn external(&self) -> Option<&IndexExternal> {
+        self.external.as_ref()
     }
 
     /// The formatter-normalized source of the declaration.
@@ -321,12 +363,34 @@ impl IndexDocument {
                 declaration.visibility,
                 source(&declaration.source),
             );
+            // The fields follow the order of the specification's table; an
+            // unavailable or recovered declaration omits its checked facts and
+            // keeps `external`, which is syntactic.
             if let Some(facts) = &declaration.facts {
                 let _ = write!(
                     output,
-                    "\n      signature: {}\n      effects: {}\n      errors: {}\n      applications: {}",
+                    "\n      signature: {}\n      ceiling: {}\n      effects: {}",
                     facts.signature,
-                    atoms(&facts.effects),
+                    row(&facts.ceiling),
+                    row(&facts.effects),
+                );
+            }
+            let _ = write!(
+                output,
+                "\n      external: {}",
+                declaration.external.as_ref().map_or_else(
+                    || "void".to_owned(),
+                    |external| format!(
+                        "(record provider: @{} symbol: {})",
+                        external.provider,
+                        quoted(&external.symbol)
+                    )
+                ),
+            );
+            if let Some(facts) = &declaration.facts {
+                let _ = write!(
+                    output,
+                    "\n      errors: {}\n      applications: {}",
                     array(&facts.errors),
                     atoms(&facts.applications),
                 );
@@ -385,6 +449,11 @@ fn source(source: &IndexSource) -> String {
         source.start,
         source.end
     )
+}
+
+/// The row record `(record roots: (array @root...))` of the effects chapter.
+fn row(roots: &[String]) -> String {
+    format!("(record roots: {})", atoms(roots))
 }
 
 fn atoms(names: &[String]) -> String {
@@ -563,6 +632,51 @@ fn formatted_span(
     }
 }
 
+/// The function the declaration at `position` is: a `defn`, a method, or an
+/// effect operation.
+fn function_at(ast: &SourceAst, position: Position) -> Option<&FunctionDeclaration> {
+    let (index, member, inner) = position;
+    let declaration = ast.declarations().get(index)?;
+    match (declaration, member, inner) {
+        (Declaration::Defn(function), None, _) => Some(function),
+        (Declaration::Deffect(effect), Some(member), None) => effect.members().get(member),
+        (_, Some(member), None) => match members(declaration).get(member) {
+            Some(TypeMember::Method(method)) => Some(method),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Whether the declaration at `position` is a contract member of an
+/// interface: a member with no body.
+fn is_contract_member(ast: &SourceAst, position: Position) -> bool {
+    matches!(
+        ast.declarations().get(position.0),
+        Some(Declaration::Defint(_))
+    ) && function_at(ast, position).is_some_and(|function| function.expressions().is_empty())
+}
+
+/// The provider binding a function writes with `external:` and `symbol:`.
+/// A provider other than `host` or `compiler` is a rejected form and records
+/// nothing.
+fn external_of(function: &FunctionDeclaration) -> Option<IndexExternal> {
+    let items = function.attributes().items();
+    let provider = items.iter().find_map(|attribute| match attribute {
+        Attribute::External(name) => match name.value() {
+            "host" => Some("host"),
+            "compiler" => Some("compiler"),
+            _ => None,
+        },
+        _ => None,
+    })?;
+    let symbol = items.iter().find_map(|attribute| match attribute {
+        Attribute::Symbol(Literal::String(symbol)) => Some(symbol.value().to_owned()),
+        _ => None,
+    })?;
+    Some(IndexExternal { provider, symbol })
+}
+
 /// The body expressions of the declaration at `position`.
 fn body(ast: &SourceAst, position: Position) -> Vec<&Expression> {
     let (index, member, inner) = position;
@@ -574,6 +688,11 @@ fn body(ast: &SourceAst, position: Position) -> Vec<&Expression> {
         (Declaration::Defn(function), None, _) => {
             function.expressions().iter().collect()
         }
+        (Declaration::Deffect(effect), Some(member), None) => effect
+            .members()
+            .get(member)
+            .map(|operation| operation.expressions().iter().collect())
+            .unwrap_or_default(),
         (_, Some(member), None) => match members(declaration).get(member) {
             Some(TypeMember::Method(method)) => method.expressions().iter().collect(),
             _ => Vec::new(),
@@ -689,10 +808,12 @@ fn build(
             },
             facts: Some(IndexFacts {
                 signature: "void".to_owned(),
+                ceiling: Vec::new(),
                 effects: Vec::new(),
                 errors: Vec::new(),
                 applications: Vec::new(),
             }),
+            external: None,
             text: text
                 .and_then(|(text, _)| text.formatted.as_ref())
                 .map_or_else(
@@ -753,28 +874,74 @@ fn build(
                 }
                 applied.into_iter().collect::<Vec<_>>()
             };
+            // The rows are the checker's own: the graph that reported the
+            // effect diagnostics holds the ceiling and the performed row of
+            // every declaration, so the index never computes a row.
+            let graph = checked.effects();
+            let roots = |row: &vibra_ir::EffectRow| {
+                row.roots()
+                    .iter()
+                    .map(|root| root.path().to_owned())
+                    .collect::<Vec<_>>()
+            };
             let facts = match kind {
                 "type" | "interface" => {
                     ast.declarations()
                         .get(position.0)
                         .map(|written| IndexFacts {
                             signature: generics(written),
+                            ceiling: Vec::new(),
                             effects: Vec::new(),
                             errors: Vec::new(),
                             applications: Vec::new(),
                         })
                 }
-                "value" | "function" | "method" => {
-                    checked.signature(id).map(|signature| IndexFacts {
-                        signature: signature.signature().to_owned(),
-                        effects: Vec::new(),
-                        errors: signature.errors().to_vec(),
-                        applications: applications(),
+                // An effect root has no generic parameter and performs
+                // nothing itself; its operations carry the rows.
+                "effect-root" => Some(IndexFacts {
+                    signature: atoms(&[]),
+                    ceiling: Vec::new(),
+                    effects: Vec::new(),
+                    errors: Vec::new(),
+                    applications: Vec::new(),
+                }),
+                // A declaration whose body did not check, or whose row reaches
+                // one that did not, keeps its record without checked facts: a
+                // lower bound is not a row.
+                "value" | "function" | "method" | "operation" => {
+                    checked.signature(id).and_then(|signature| {
+                        let (ceiling, effects) = match graph.node_named(&id.canonical())
+                        {
+                            Some(node)
+                                if node.checked() && graph.performed_known(node) =>
+                            {
+                                (
+                                    roots(node.ceiling()),
+                                    roots(graph.performed(node)),
+                                )
+                            }
+                            Some(_) => return None,
+                            // A contract member of an interface has no body and
+                            // so no node: a call of it performs its contract
+                            // ceiling, which is its complete row.
+                            None if is_contract_member(ast, position) => (
+                                roots(signature.row()),
+                                roots(signature.row()),
+                            ),
+                            None => return None,
+                        };
+                        Some(IndexFacts {
+                            signature: signature.signature().to_owned(),
+                            ceiling,
+                            effects,
+                            errors: signature.errors().to_vec(),
+                            applications: applications(),
+                        })
                     })
                 }
-                // Effect roots and operations are unavailable until M4.
                 _ => None,
             };
+            let external = function_at(ast, position).and_then(external_of);
             let owner = nested.then(|| {
                 std::iter::once(id.unit())
                     .chain(id.module().iter().map(String::as_str))
@@ -798,6 +965,7 @@ fn build(
                 },
                 source: IndexSource::new(module.source_id(), span),
                 facts,
+                external,
                 text: text.text(span),
             });
         }

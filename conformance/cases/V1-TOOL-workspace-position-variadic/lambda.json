@@ -77,7 +77,10 @@
         "result": null,
         "labelled": []
       },
-      "labelled": []
+      "labelled": [],
+      "effects": {
+        "roots": []
+      }
     }
   },
   "visibleLocals": {
@@ -108,5 +111,22 @@
   "pattern": {
     "status": "unavailable",
     "value": null
+  },
+  "effects": {
+    "status": "exact",
+    "value": {
+      "enclosing": {
+        "identity": null,
+        "kind": "lambda",
+        "ceiling": {
+          "roots": []
+        },
+        "performed": {
+          "roots": []
+        }
+      },
+      "application": null,
+      "target": null
+    }
   }
 }

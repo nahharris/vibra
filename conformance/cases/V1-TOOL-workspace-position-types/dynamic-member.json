@@ -132,7 +132,10 @@
           "result": null,
           "labelled": []
         },
-        "labelled": []
+        "labelled": [],
+        "effects": {
+          "roots": []
+        }
       },
       "positional": [
         {
@@ -169,5 +172,27 @@
   "pattern": {
     "status": "unavailable",
     "value": null
+  },
+  "effects": {
+    "status": "exact",
+    "value": {
+      "enclosing": {
+        "identity": {
+          "kind": "function",
+          "canonical": "@app@0.1.0/app.main.erased"
+        },
+        "kind": "function",
+        "ceiling": {
+          "roots": []
+        },
+        "performed": {
+          "roots": []
+        }
+      },
+      "application": {
+        "roots": []
+      },
+      "target": null
+    }
   }
 }

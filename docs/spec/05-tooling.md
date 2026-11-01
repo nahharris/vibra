@@ -458,10 +458,29 @@ local package; a standard-library declaration appears only as a target.
 `urn:vibra:schema:v1:index` is the JSON wire form of the same document for a
 tooling consumer: the same records in the same order, with identities as atom
 spellings without `@`, canonical type encodings as VIBON text, and absent facts
-as `null`. A row is `{ "roots": [...] }` and `external` is `null` or
+as `null`. The checked facts form the object `facts`, which holds `signature`,
+`ceiling`, `effects`, `errors`, and `applications` and is `null` for an
+unavailable or recovered declaration, and `external` is a field of the record
+itself. A row is `{ "roots": [...] }` with its roots as atom spellings without
+`@` in the canonical order of the effects chapter, and `external` is `null` or
 `{ "provider": "host"|"compiler", "symbol": string }`. The `index` schema is major version 1
 and gains `ceiling` and `external` and the row form of `effects` in Milestone 4
 Step 20, which replaces the identity list of the earlier shape in place.
+
+Every effect root and every effect operation is an indexed entity. An effect root
+has the generic parameter list `(array)` as its `signature`, and the empty rows as
+its `ceiling` and `effects`, since only its operations carry rows. An operation has
+the checked function type as its `signature`, its complete row as its `ceiling`,
+and, for a body written in Vibra, the row its body performs as its `effects`; an
+operation bound by `external:` has no body, and its `effects` is its complete row,
+which the host performs. A type, an interface, a module, and a value have the empty
+`ceiling`, and a value's `effects` is the row its initializer performs. The rows
+are those of the one graph the checker reports its effect diagnostics from. A
+declaration whose body did not check, or whose performed row reaches a function
+that did not, has none of the checked facts, because a lower bound is not a row;
+`external` is read from the written `external:` and `symbol:` attributes whether
+or not the declaration checked, and a provider other than `@host` or `@compiler`
+is a rejected form that records `void`.
 
 ### M2 workspace position envelope
 
@@ -603,7 +622,9 @@ object `{ "enclosing": ..., "application": ..., "target": ... }`, with
   ..., "ceiling": ..., "performed": ... }` for the smallest enclosing `defn`,
   nested method, effect operation, `lambda`, or `test`. `identity` is the
   identity object of the function, operation, or test, and `null` for a
-  `lambda`, which has none, `kind` is
+  `lambda` and for a member written in an `impl` block, which have none (a member
+  is identified by the triple of the type-system chapter, never by a spelling of
+  this fact), `kind` is
   `function`, `operation`, `lambda`, or `test`, and `ceiling` and `performed` are
   rows `{ "roots": [...] }` of canonical identities. For an operation, `ceiling`
   is its complete row;
@@ -623,6 +644,28 @@ object `{ "enclosing": ..., "application": ..., "target": ... }`, with
 
 All of it comes from the one function-call graph and performed-row result that
 the checker uses; a query never recomputes a row of its own.
+
+The members of the effect fact are read as follows. A **root** in a row is the
+canonical declaration identity of its `deffect`, spelled as the `canonical` of an
+identity object (`@demo@0.1.0/ops.log.audit`), so a consumer joins a root to the
+identity of the declaration it names; roots are in the canonical order of the
+effects chapter, which is the order of their atom paths and not of these
+spellings. A hop's `span` is the application's span in the source that holds it,
+with that source's own `sourceId`, and its `callee.identity` is the canonical
+identity of the function or operation, or of the contract member
+(`<interface identity>.<member>`), and `null` for a function value and for a
+member written in an `impl` block. A
+source is *reached from a binary target's entry* when it belongs to the import
+closure of the target's unit; a source that several targets reach belongs to the
+first of them in the order of the unit names, so the fact is a function of the
+snapshot. An application that applies no function, a constructor or a compiler
+conversion, has the empty row. The fact is `exact` when every row it reports is
+the checked row; it is `recovered`, with the rows it has, when the enclosing body
+did not check, or reaches a function that did not, or the application's call is in
+a body that did not check, because such a row is a lower bound; and it is
+`unavailable` when the structural position is recovered or the check produced no
+graph. A function that checked and reaches only functions that checked keeps an
+exact fact beside a module that did not check.
 
 `workspaceRevision` is a SHA-256 digest over a binary byte sequence with the
 exact spelling `sha256:<64 lowercase hexadecimal digits>`. The digest input is
@@ -652,9 +695,15 @@ their host tests.
 The semantic envelope is deterministic for one snapshot. It does not add a
 public query CLI, MCP endpoint, relation index, edit plan, or execution
 behavior; those remain later milestone work. The `effects` fact and its
-witnesses are the contract of Milestone 4 Step 20, which adds the field, its
-schema entry, and its producer in one change and replaces the M3 envelope in
-place.
+witnesses are the contract of Milestone 4 Step 20, which added the field, its
+schema entry, and its producer in one change and replaced the M3 envelope in
+place. They are a library projection, as the envelope is: the library requests
+the `effect-witnesses` expansion with `PositionExpansion`, and the corpus
+`query` operation declares `expand = ["effect-witnesses"]` on an expected query.
+An application fact is available for a call of any module-level function or
+effect operation whose type the checker holds, including one with a nonempty
+effect row, and its `calleeType` is the checked function type with its ceiling as
+`effects`.
 
 Entity metadata and expanded references operate on resolved identities, not
 token spelling. They distinguish module, type, value, function, method,

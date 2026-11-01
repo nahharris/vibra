@@ -1,0 +1,174 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:a4cebec835caf266800f142d262db0581acc9718d6295e5429a4897ae60264bf",
+  "sourceId": "src/broken.vib",
+  "offset": 117,
+  "nodeId": "src/broken.vib#117-118",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 117,
+    "sourceId": "src/broken.vib",
+    "span": {
+      "sourceId": "src/broken.vib",
+      "start": 117,
+      "end": 118,
+      "startPosition": {
+        "line": 8,
+        "column": 5
+      },
+      "endPosition": {
+        "line": 8,
+        "column": 6
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "open-paren",
+    "category": "expression",
+    "status": "exact",
+    "permittedForms": [
+      "lambda",
+      "do",
+      "let",
+      "let-else",
+      "if",
+      "match",
+      "return",
+      "as",
+      "try"
+    ],
+    "permittedLabels": [
+      "types"
+    ]
+  },
+  "role": {
+    "status": "exact",
+    "value": "@application"
+  },
+  "context": {
+    "status": "exact",
+    "value": "result"
+  },
+  "identity": {
+    "status": "unavailable",
+    "value": null
+  },
+  "expectedType": {
+    "status": "unavailable",
+    "value": null
+  },
+  "observedType": {
+    "status": "unavailable",
+    "value": null
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": []
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": [
+      {
+        "alias": "good",
+        "module": "@app.good",
+        "sourceId": "src/broken.vib",
+        "span": {
+          "sourceId": "src/broken.vib",
+          "start": 0,
+          "end": 23,
+          "startPosition": {
+            "line": 1,
+            "column": 1
+          },
+          "endPosition": {
+            "line": 1,
+            "column": 24
+          }
+        }
+      }
+    ]
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": []
+  },
+  "application": {
+    "status": "exact",
+    "value": {
+      "kind": "@function",
+      "callee": {
+        "kind": "operation",
+        "canonical": "@demo@0.1.0/app.good.audit.record"
+      },
+      "calleeType": {
+        "kind": "function",
+        "name": "fn",
+        "parameters": [
+          {
+            "kind": "primitive",
+            "name": "str",
+            "parameters": [],
+            "result": null,
+            "labelled": []
+          }
+        ],
+        "result": {
+          "kind": "primitive",
+          "name": "void",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        },
+        "labelled": [],
+        "effects": {
+          "roots": [
+            "@demo@0.1.0/app.good.audit"
+          ]
+        }
+      },
+      "positional": [
+        {
+          "kind": "primitive",
+          "name": "str",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        }
+      ],
+      "labelled": [],
+      "resultType": {
+        "kind": "primitive",
+        "name": "void",
+        "parameters": [],
+        "result": null,
+        "labelled": []
+      },
+      "dispatch": null
+    }
+  },
+  "pattern": {
+    "status": "unavailable",
+    "value": null
+  },
+  "effects": {
+    "status": "recovered",
+    "value": {
+      "enclosing": {
+        "identity": {
+          "kind": "function",
+          "canonical": "@demo@0.1.0/app.broken.half-checked"
+        },
+        "kind": "function",
+        "ceiling": {
+          "roots": [
+            "@demo@0.1.0/app.good.audit"
+          ]
+        },
+        "performed": {
+          "roots": []
+        }
+      },
+      "application": null,
+      "target": null
+    }
+  }
+}
