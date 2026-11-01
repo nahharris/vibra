@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-random-seeded-bytes"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "The generator is SplitMix64 from the world's seed, each output as eight little-endian bytes: seed 1234567 starts 6457827717110365317, and a count of zero is the empty bytes."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

@@ -1,0 +1,23 @@
+id = "V1-EFFECT-host-target-array-omits-random-generate"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "The target array is the user's consent: an entry that performs @std.random.generate.bytes, with its ceiling written, is rejected at the entry value when the array omits @std.random.generate. The witness is the one call that introduces the root."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "project.vibon"
+span = [145, 159]
+
+  [[expect.diagnostics.related]]
+  source = "src/app/main.vib"
+  span = [115, 143]
+  message = "performs @std.random.generate via @std.random.generate.bytes"

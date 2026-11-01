@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-env-read-args-from-the-world"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "The program arguments are the world's args, in order and verbatim, including an option-like token and the empty string."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

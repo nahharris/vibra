@@ -1,0 +1,6 @@
+(import env @std.env)
+
+(defn main () (result void env.env-error)
+  effects: (env.read)
+  (let - (env.read.var "HOME"))
+  (result.ok))

@@ -1,0 +1,7 @@
+(import random @std.random)
+
+(defn main () (result void random.random-error)
+  effects: (random.generate)
+  (let - (try (random.generate.bytes 3u64)))
+  (let - (try (random.generate.bytes 9u64)))
+  (result.ok))

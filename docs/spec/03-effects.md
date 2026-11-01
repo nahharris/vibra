@@ -10,9 +10,9 @@ rows on every function, `lambda`, function type, interface contract member, and
 test, performed rows over the function-call graph, `@effect.outside-ceiling`
 with its witness, `@effect.invalid-reference`, `@contract.unused-effect` for a
 written root, and the row in the canonical `fn` type encoding. Step 15 adds the
-target `effects` array and effectful-test consent, and Steps 16 and 17 the `@host`
-externals, `@std.io`, and `@std.fs`; the query and index metadata and the other host
-modules remain unimplemented until Milestone 4 Steps 18 to 20.
+target `effects` array and effectful-test consent, and Steps 16 to 18 the `@host`
+externals, `@std.io`, and `@std.fs`, with the environment, clock, and random modules; the query
+and index metadata remain unimplemented until Milestone 4 Step 20.
 
 ## Static contract
 
@@ -37,7 +37,7 @@ Since Milestone 4 Step 14, checking and execution admit nonempty written
 ceilings and nonempty performed rows on function types, `defn`, `lambda`,
 tests, and effect operations. Rows are erased: neither backend consults one, and
 an effect operation with a Vibra body is an ordinary function that both run as
-such. An omitted row is empty as specified below. Since Steps 16 and 17 a `@host`
+such. An omitted row is empty as specified below. Since Steps 16 to 18 a `@host`
 external is executable in both backends, and since Step 15 a project target's
 effect-consent array gates an effectful entry.
 

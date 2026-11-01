@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-env-demo-args-name-a-file"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "The demo shape: the world supplies the program arguments and a file; the program reads the argument, reads the file it names as text, and writes it to standard output."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

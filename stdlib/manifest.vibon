@@ -43,6 +43,18 @@
       path: "std/fs.vib"
       sha256: "sha256:f871676dd119bb8ae7e90adc79b2c2ae921629565766d377dce271c406b4f341"
       role: @source)
+    @std.env (record
+      path: "std/env.vib"
+      sha256: "sha256:8c9262a0fcafd28ed31fed5003092d028023554bc49844210369842df86394ab"
+      role: @source)
+    @std.time (record
+      path: "std/time.vib"
+      sha256: "sha256:ce1efddbe24db398f204c4f0a1981a4fda77a0967a030289e947b1ec442e053d"
+      role: @source)
+    @std.random (record
+      path: "std/random.vib"
+      sha256: "sha256:058ab96d1b728b108bee16032b3c0689d82d7335afc6145f4091eac8c34dcbc7"
+      role: @source)
     @std.builtin (record
       path: "std/builtin.vib"
       sha256: "sha256:974e5c71afc4162b7ba325c045a30b4cb489ebd2c9847cce281be3f14d907242"
@@ -237,7 +249,12 @@
     "fs.read-entries"
     "fs.write-file"
     "fs.write-text"
-    "fs.metadata-stat")
+    "fs.metadata-stat"
+    "env.read-var"
+    "env.read-args"
+    "time.now-wall"
+    "time.now-monotonic"
+    "random.generate-bytes")
   native: (array "array.of" "array.fold" "dict.of" "bytes.length" "bytes.concat" "bytes.equal" "bytes.compare" "bytes.slice" "bytes.to-array" "bytes.from-array" "text.concat" "text.length" "text.equal" "text.compare" "text.slice" "text.to-chars" "text.from-chars" "text.to-utf8" "text.from-utf8")
   assertions: (array
     "assert.true"
