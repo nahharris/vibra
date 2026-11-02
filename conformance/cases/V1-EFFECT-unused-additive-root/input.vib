@@ -1,0 +1,7 @@
+(deffect write
+  (defn text (target str) void (do)))
+
+(deffect lazy
+  (defn nothing () void effects: (write) (do)))
+
+(defn caller () void (lazy.nothing))

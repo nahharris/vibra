@@ -1,0 +1,8 @@
+(deffect write
+  (defn text (target str) void (do)))
+
+(defn broken () void (write.text 1i32))
+
+(defn caller () void
+  effects: (write)
+  (broken))

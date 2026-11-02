@@ -4,3 +4,15 @@
 (defn idle () void
   effects: (write)
   (do))
+
+(deffect audit
+  (defn record (target str) void
+    effects: (write)
+    (write.text target)))
+
+(defn idle-two () void
+  effects: (write audit)
+  (do))
+
+(defn idle-lambda () (fn (str) void effects: (write))
+  (lambda (value str) void effects: (write) (do)))

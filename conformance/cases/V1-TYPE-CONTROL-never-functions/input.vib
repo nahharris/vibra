@@ -3,3 +3,5 @@
 (defn wrong-final () never 1i32)
 
 (defn empty-body () never)
+
+(defn return-final () never (return 1i32))

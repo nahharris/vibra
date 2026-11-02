@@ -1,0 +1,18 @@
+id = "V1-EFFECT-lambda-own-row"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "A lambda is checked against its own row: a lambda written at an empty row that applies an operation is outside its ceiling at that call."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [121, 145]
+notes = ["performs @write via @write.text"]

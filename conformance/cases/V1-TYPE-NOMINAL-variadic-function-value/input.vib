@@ -1,0 +1,9 @@
+(defn variadic-apply (f (fn () (array i32) variadic: (array i32))) (array i32)
+  (f 1i32 2i32))
+
+(defn fixed-apply (f (fn ((array i32)) (array i32))) (array i32)
+  (f (array.of 1i32)))
+
+(defn accepted () (array i32) (variadic-apply array.of))
+
+(defn rejected () (array i32) (fixed-apply array.of))

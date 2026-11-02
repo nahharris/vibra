@@ -1,0 +1,5 @@
+(import ordered @std.core.ordered)
+
+(defn keyed (m (dict (tuple t str) i32)) i32
+  where: (t ordered)
+  0i32)

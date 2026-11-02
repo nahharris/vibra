@@ -2,7 +2,7 @@ id = "V1-TYPE-CONTROL-inhabitedness"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
 operation = "type-check"
-description = "A type is uninhabited when it is never, a tuple, record, or wrapper with an uninhabited component, or an enum or union of only such members; arrays, options, function types, and enums with a payloadless variant are inhabited."
+description = "A type is uninhabited when it is never, a tuple, record, or wrapper with an uninhabited component, or an enum or union of only such members; arrays, options, function types, and enums with a payloadless variant are inhabited. A recursive declared type is examined without a fixed-point search."
 
 [inputs]
 source = "input.vib"

@@ -1,0 +1,5 @@
+(deffect write
+  (defn text (target str event str) void (do)))
+
+(defn make () (fn (str) void)
+  (lambda (value str) void (write.text value value)))

@@ -7,3 +7,13 @@
 (defn outside () i32 ((tupleof 1i32 "x") 2))
 
 (defn padded () i32 ((tupleof 1i32 "x") 00))
+
+(defn inside () i32 ((tupleof 1i32 "x") 0))
+
+(defn padded-one () i32 ((tupleof 1i32 "x") 01))
+
+(defn suffixed () i32 ((tupleof 1i32 "x") 1u64))
+
+(defn one-key-short () (dict str i32) (dict.of "a"))
+
+(defn no-reverse () (array i32) (array.reverse (array.of 1i32)))

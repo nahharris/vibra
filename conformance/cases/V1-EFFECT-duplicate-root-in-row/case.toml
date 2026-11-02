@@ -2,7 +2,7 @@ id = "V1-EFFECT-duplicate-root-in-row"
 rule = "V1-EFFECT"
 profile = "static-v1"
 operation = "type-check"
-description = "A row is a duplicate-free set: a root named twice in a function ceiling or in a function type is a duplicate at the second entry, relating the first."
+description = "A row is a duplicate-free set: a root named twice in a function ceiling or in a function type is a duplicate at the second entry, relating the first. The same holds in the row of an operation, of a function type in a result, and of a lambda."
 
 [inputs]
 source = "input.vib"
@@ -29,3 +29,33 @@ span = [186, 191]
   [[expect.diagnostics.related]]
   source = "input.vib"
   span = [180, 185]
+
+[[expect.diagnostics]]
+code = "@effect.duplicate-root"
+level = "@error"
+source = "input.vib"
+span = [255, 260]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [249, 254]
+
+[[expect.diagnostics]]
+code = "@effect.duplicate-root"
+level = "@error"
+source = "input.vib"
+span = [329, 334]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [323, 328]
+
+[[expect.diagnostics]]
+code = "@effect.duplicate-root"
+level = "@error"
+source = "input.vib"
+span = [476, 481]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [470, 475]

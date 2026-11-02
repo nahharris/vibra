@@ -2,7 +2,7 @@ id = "V1-TYPE-NOMINAL-collection-construction"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
 operation = "type-check"
-description = "An odd dict.of tail and a heterogeneous array.of are argument mismatches, an empty array.of needs an expected type, and a tuple index must name a component."
+description = "An odd dict.of tail and a heterogeneous array.of are argument mismatches, an empty array.of needs an expected type, and a tuple index must name a component. A tuple index is a canonical literal without a suffix, and a builtin type has no method it does not declare."
 
 [inputs]
 source = "input.vib"
@@ -39,3 +39,27 @@ code = "@type.invalid-tuple-index"
 level = "@error"
 source = "input.vib"
 span = [237, 239]
+
+[[expect.diagnostics]]
+code = "@type.invalid-tuple-index"
+level = "@error"
+source = "input.vib"
+span = [332, 334]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [360, 385]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [426, 439]
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "input.vib"
+span = [475, 488]

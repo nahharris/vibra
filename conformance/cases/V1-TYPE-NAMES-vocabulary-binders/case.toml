@@ -2,7 +2,7 @@ id = "V1-TYPE-NAMES-vocabulary-binders"
 rule = "V1-TYPE-NAMES"
 profile = "static-v1"
 operation = "type-check"
-description = "Every name of the closed import-free vocabulary, a value or a type, is a reserved spelling at a binder site: a labelled or variadic parameter named true or false, and a let-else binder named option, are @name.reserved-declaration at the name. A positional or let pattern spelled true is a value pattern, not a binder, so it is refutable: @pattern.refutable-binding."
+description = "Every name of the closed import-free vocabulary, a value or a type, is a reserved spelling at a binder site: a labelled or variadic parameter named true or false, and a let-else binder named option, are @name.reserved-declaration at the name. A positional or let pattern spelled true is a value pattern, not a binder, so it is refutable: @pattern.refutable-binding. Each of true and false is reserved at a labelled and a variadic parameter and at a labelled parameter of a lambda."
 
 [inputs]
 source = "input.vib"
@@ -33,3 +33,27 @@ code = "@pattern.refutable-binding"
 level = "@error"
 source = "input.vib"
 span = [283, 287]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [343, 347]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [408, 413]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [505, 509]
+
+[[expect.diagnostics]]
+code = "@name.reserved-declaration"
+level = "@error"
+source = "input.vib"
+span = [606, 611]

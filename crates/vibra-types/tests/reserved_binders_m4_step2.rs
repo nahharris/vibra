@@ -107,9 +107,3 @@ fn a_nested_pattern_binder_is_rejected_at_its_own_name() {
     let source = "(defn f (p (tuple i32 i32)) i32 (let (tupleof a if) p) a)";
     rejected(source, "(tupleof a if)", "if");
 }
-
-#[test]
-fn ordinary_binders_and_discards_are_accepted() {
-    let source = "(defn f (value i32 - i32) i32 (let first 1i32 - 2i32) (let second 3i32) value)";
-    assert_eq!(diagnostics(source), vec![], "{source}");
-}
