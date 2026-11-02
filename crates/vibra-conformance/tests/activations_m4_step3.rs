@@ -475,10 +475,12 @@ fn the_runner_compares_the_host_event_a_case_expects_with_the_one_observed() {
     };
     let completed = || CaseObservation {
         accepted: true,
-        interpreter: Some(vibra_conformance::ExecutionObservation {
-            result: Some("(record type: @void value: void)\n".to_owned()),
-            audit_trace: Vec::new(),
-        }),
+        interpreter: Some(vibra_conformance::BackendObservation::new(
+            vibra_conformance::ExecutionObservation {
+                result: Some("(record type: @void value: void)\n".to_owned()),
+                audit_trace: Vec::new(),
+            },
+        )),
         ..CaseObservation::default()
     };
     let expects_event = "accepted = true\nhost_event = \"@runtime.memory-exhausted\"";

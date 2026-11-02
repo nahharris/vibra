@@ -6,8 +6,9 @@
 use std::path::{Path, PathBuf};
 
 use vibra_conformance::{
-    Case, CaseObservation, ConformanceProfile, ConformanceRunner, Corpus, HandlerError,
-    InterpreterV1Handler, ProfileDispatcher, ProfileHandler, StaticV1TypeHandler,
+    BackendObservation, Case, CaseObservation, ConformanceProfile, ConformanceRunner,
+    Corpus, HandlerError, InterpreterV1Handler, ProfileDispatcher, ProfileHandler,
+    StaticV1TypeHandler,
 };
 use vibra_ir::Value;
 use vibra_syntax::parse_data;
@@ -84,7 +85,7 @@ fn interpreter_handler_produces_an_empty_pure_trace() {
         .expect("interpreter handler");
     let repeated = InterpreterV1Handler.run(&case).expect("repeat handler");
     assert_eq!(observation, repeated);
-    let execution = observation.interpreter.expect("execution");
+    let execution = observation.interpreter.expect("execution").outcome;
     assert_eq!(
         execution.result.as_deref(),
         Some("(record type: @i32 value: 42i32)\n")
@@ -131,13 +132,15 @@ fn runner_rejects_a_nonempty_trace_for_a_pure_program() {
         FixedHandler {
             observation: CaseObservation {
                 accepted: true,
-                interpreter: Some(vibra_conformance::ExecutionObservation {
-                    result: Some("(record type: @i32 value: 42i32)\n".to_owned()),
-                    audit_trace: vec![vibra_host::AuditEvent::completed(
-                        &vibra_host::HostCall::NowWall,
-                        &Ok(vibra_host::HostOk::Integer(0)),
-                    )],
-                }),
+                interpreter: Some(BackendObservation::new(
+                    vibra_conformance::ExecutionObservation {
+                        result: Some("(record type: @i32 value: 42i32)\n".to_owned()),
+                        audit_trace: vec![vibra_host::AuditEvent::completed(
+                            &vibra_host::HostCall::NowWall,
+                            &Ok(vibra_host::HostOk::Integer(0)),
+                        )],
+                    },
+                )),
                 ..CaseObservation::default()
             },
         },

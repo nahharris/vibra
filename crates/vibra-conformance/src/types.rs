@@ -3,7 +3,8 @@
 use crate::corpus::Case;
 use crate::manifest::ConformanceOperation;
 use crate::runner::{
-    CaseObservation, ExecutionObservation, HandlerError, ProfileHandler,
+    BackendObservation, CaseObservation, ExecutionObservation, HandlerError,
+    ProfileHandler,
 };
 use std::path::Path;
 
@@ -171,7 +172,7 @@ impl ProfileHandler for InterpreterV1Handler {
                     accepted: checked.accepted(),
                     diagnostics: checked.diagnostics().to_vec(),
                     host_event: host_event_atom(&error),
-                    wasm: Some(crate::wasm::observe(
+                    wasm: Some(crate::wasm::observe_entry(
                         program,
                         &vibra_host::HostWorld::default(),
                     )),
@@ -183,11 +184,14 @@ impl ProfileHandler for InterpreterV1Handler {
         Ok(CaseObservation {
             accepted: checked.accepted(),
             diagnostics: checked.diagnostics().to_vec(),
-            interpreter: Some(ExecutionObservation {
-                result: Some(execution.canonical_result()),
-                audit_trace: execution.audit_trace().to_vec(),
+            interpreter: Some(BackendObservation {
+                outcome: ExecutionObservation {
+                    result: Some(execution.canonical_result()),
+                    audit_trace: execution.audit_trace().to_vec(),
+                },
+                program_failed: Some(execution.program_failed()),
             }),
-            wasm: Some(crate::wasm::observe(
+            wasm: Some(crate::wasm::observe_entry(
                 program,
                 &vibra_host::HostWorld::default(),
             )),

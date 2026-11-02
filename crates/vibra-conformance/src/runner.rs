@@ -73,6 +73,30 @@ pub enum WasmObservation {
     },
 }
 
+/// What one backend observed of an executable case: its outcome, and whether
+/// the entry returned `err` when the run completed. The command outcome follows
+/// from the result, so a case records no field for it; the harness holds the
+/// backends to the same one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackendObservation<T> {
+    /// What the backend did with the case.
+    pub outcome: T,
+    /// Whether the entry returned `err`, for a run that completed and whose
+    /// handler reports it.
+    pub program_failed: Option<bool>,
+}
+
+impl<T> BackendObservation<T> {
+    /// An observation that does not say whether the entry returned `err`.
+    #[must_use]
+    pub const fn new(outcome: T) -> Self {
+        Self {
+            outcome,
+            program_failed: None,
+        }
+    }
+}
+
 /// One structural query result returned by a profile handler.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct QueryObservation {
@@ -106,21 +130,14 @@ pub struct CaseObservation {
     /// Structural source-position query observations.
     pub queries: Vec<QueryObservation>,
     /// Reference-interpreter observation.
-    pub interpreter: Option<ExecutionObservation>,
+    pub interpreter: Option<BackendObservation<ExecutionObservation>>,
     /// The host event that ended execution, instead of a result: the atom of
     /// the unlocated diagnostic, such as `@runtime.memory-exhausted`.
     pub host_event: Option<String>,
     /// What the WebAssembly backend did with the case. A handler that runs an
     /// executable case sets it for every program it runs. A rejected program
     /// is no executable case, so a handler leaves it unset.
-    pub wasm: Option<WasmObservation>,
-    /// Whether the interpreter's entry returned `err`, for a run that
-    /// completed. The command outcome follows from the result, so a case
-    /// records no field for it; the harness holds the backends to the same one.
-    pub program_failed: Option<bool>,
-    /// Whether the Wasm backend's entry returned `err`, for a run that
-    /// completed.
-    pub wasm_program_failed: Option<bool>,
+    pub wasm: Option<BackendObservation<WasmObservation>>,
     /// Deterministic artifact hashes.
     pub artifact_hashes: Vec<String>,
 }
@@ -892,7 +909,10 @@ impl CaseExpectations {
             case,
             "interpreter",
             self.interpreter.as_ref(),
-            observation.interpreter.as_ref(),
+            observation
+                .interpreter
+                .as_ref()
+                .map(|backend| &backend.outcome),
         )?;
         if let Some(expected_hashes) = &self.artifact_hashes
             && expected_hashes != &observation.artifact_hashes
@@ -910,13 +930,15 @@ impl CaseExpectations {
 /// expectation the case has.
 fn wasm_status(case: &Case, observation: &CaseObservation) -> WasmStatus {
     let expectations = &case.manifest().expectations;
-    match &observation.wasm {
+    let Some(wasm) = &observation.wasm else {
         // No Wasm execution handler took part, so nothing is lowered.
-        None => WasmStatus::NotLowered { forms: Vec::new() },
-        Some(WasmObservation::NotLowered { forms }) => WasmStatus::NotLowered {
+        return WasmStatus::NotLowered { forms: Vec::new() };
+    };
+    match &wasm.outcome {
+        WasmObservation::NotLowered { forms } => WasmStatus::NotLowered {
             forms: forms.clone(),
         },
-        Some(WasmObservation::Completed(actual)) => {
+        WasmObservation::Completed(actual) => {
             if let Some(event) = &expectations.host_event {
                 return WasmStatus::Failed {
                     reason: format!(
@@ -937,9 +959,13 @@ fn wasm_status(case: &Case, observation: &CaseObservation) -> WasmStatus {
                     ),
                 };
             }
-            if let (Some(interpreter), Some(wasm)) =
-                (observation.program_failed, observation.wasm_program_failed)
-                && interpreter != wasm
+            if let (Some(interpreter), Some(wasm)) = (
+                observation
+                    .interpreter
+                    .as_ref()
+                    .and_then(|backend| backend.program_failed),
+                wasm.program_failed,
+            ) && interpreter != wasm
             {
                 return WasmStatus::Failed {
                     reason: format!(
@@ -964,10 +990,10 @@ fn wasm_status(case: &Case, observation: &CaseObservation) -> WasmStatus {
                 |()| WasmStatus::Matched,
             )
         }
-        Some(WasmObservation::Failed { reason }) => WasmStatus::Failed {
+        WasmObservation::Failed { reason } => WasmStatus::Failed {
             reason: reason.clone(),
         },
-        Some(WasmObservation::Trapped(code)) => {
+        WasmObservation::Trapped(code) => {
             if expectations
                 .diagnostics
                 .iter()
@@ -982,7 +1008,7 @@ fn wasm_status(case: &Case, observation: &CaseObservation) -> WasmStatus {
                 }
             }
         }
-        Some(WasmObservation::HostEvent(event)) => {
+        WasmObservation::HostEvent(event) => {
             if expectations.host_event.as_deref() == Some(event.as_str()) {
                 WasmStatus::Matched
             } else {

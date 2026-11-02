@@ -16,8 +16,8 @@
 
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::{Path, PathBuf};
 
+use vibra_conformance::{ConformanceOperation, Corpus, corpus_root};
 use vibra_diagnostics::Level;
 use vibra_types::{check_bootstrap_text_import, check_source, load_stdlib};
 
@@ -37,27 +37,23 @@ const EXPECTED_DIFFERENCES: &[(&str, &str)] = &[
     ),
 ];
 
-fn corpus_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases")
-}
-
 /// `(case id, source text)` for every single-source type-check or interpret case.
 fn single_source_cases() -> Vec<(String, String)> {
+    let corpus = Corpus::discover(corpus_root()).expect("the corpus loads");
     let mut cases = Vec::new();
-    for entry in fs::read_dir(corpus_root()).expect("corpus directory") {
-        let directory = entry.expect("corpus entry").path();
-        let manifest: toml::Table = fs::read_to_string(directory.join("case.toml"))
-            .expect("case manifest")
-            .parse()
-            .expect("case manifest is TOML");
-        let operation = manifest.get("operation").and_then(toml::Value::as_str);
-        if !matches!(operation, Some("type-check" | "interpret")) {
+    for case in corpus.cases() {
+        let manifest = case.manifest();
+        if !matches!(
+            manifest.operation,
+            ConformanceOperation::TypeCheck | ConformanceOperation::Interpret
+        ) {
             continue;
         }
-        let source = manifest["inputs"]["source"].as_str().expect("source input");
-        let id = manifest["id"].as_str().expect("case id").to_owned();
-        let text = fs::read_to_string(directory.join(source)).expect("case source");
-        cases.push((id, text));
+        let text = case
+            .read_source()
+            .expect("case source")
+            .expect("a single-source case declares its source");
+        cases.push((manifest.id.clone(), text));
     }
     cases.sort();
     assert!(cases.len() >= 50, "the corpus lost its static cases");

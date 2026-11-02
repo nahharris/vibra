@@ -12,6 +12,19 @@ use vibra_syntax::DocumentMode;
 /// The name of the parity inventory file, beside the corpus root.
 pub const PARITY_INVENTORY_FILE_NAME: &str = "parity.tsv";
 
+/// The workspace root, found from this crate's manifest.
+#[must_use]
+pub fn workspace_root() -> PathBuf {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    root.canonicalize().unwrap_or(root)
+}
+
+/// The conformance corpus of the workspace: `conformance/cases`.
+#[must_use]
+pub fn corpus_root() -> PathBuf {
+    workspace_root().join("conformance/cases")
+}
+
 /// One immutable document supplied to a profile handler.
 ///
 /// The path is the neutral source identity used by diagnostics and snapshots;

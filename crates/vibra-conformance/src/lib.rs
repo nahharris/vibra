@@ -46,7 +46,7 @@ mod workspace_semantic;
 
 pub use corpus::{
     Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError, HostWorldError,
-    PARITY_INVENTORY_FILE_NAME,
+    PARITY_INVENTORY_FILE_NAME, corpus_root, workspace_root,
 };
 pub use format::ToolingV1FormatHandler;
 pub use graph::StaticV1SourceGraphHandler;
@@ -64,10 +64,10 @@ pub use project::StaticV1ProjectHandler;
 pub use reader::ReaderV1Handler;
 pub use resolve::StaticV1ResolveHandler;
 pub use runner::{
-    BackendStatuses, CaseObservation, CaseReport, CaseStatus, ConformanceRunner,
-    DispatchResult, ExecutionObservation, HandlerError, INSTANCE_MEMORY_LIMIT_BYTES,
-    InterpreterCounts, ProfileDispatcher, ProfileHandler, QueryObservation, RunReport,
-    WasmCounts, WasmObservation, WasmStatus,
+    BackendObservation, BackendStatuses, CaseObservation, CaseReport, CaseStatus,
+    ConformanceRunner, DispatchResult, ExecutionObservation, HandlerError,
+    INSTANCE_MEMORY_LIMIT_BYTES, InterpreterCounts, ProfileDispatcher, ProfileHandler,
+    QueryObservation, RunReport, WasmCounts, WasmObservation, WasmStatus,
 };
 pub use standard::standard_dispatcher;
 pub use test_run::{

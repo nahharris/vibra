@@ -20,9 +20,9 @@ use vibra_ir::{
 };
 
 use vibra_conformance::{
-    CaseObservation, CaseReport, CaseStatus, ConformanceProfile, ConformanceRunner,
-    Corpus, ExecutionObservation, HandlerError, ProfileDispatcher, ProfileHandler,
-    WasmObservation, WasmStatus, observe_wasm, standard_dispatcher,
+    BackendObservation, CaseObservation, CaseReport, CaseStatus, ConformanceProfile,
+    ConformanceRunner, Corpus, ExecutionObservation, HandlerError, ProfileDispatcher,
+    ProfileHandler, WasmObservation, WasmStatus, observe_wasm, standard_dispatcher,
 };
 
 static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
@@ -175,8 +175,8 @@ fn expected_observation(
 ) -> CaseObservation {
     CaseObservation {
         accepted: true,
-        interpreter,
-        wasm,
+        interpreter: interpreter.map(BackendObservation::new),
+        wasm: wasm.map(BackendObservation::new),
         ..CaseObservation::default()
     }
 }
@@ -440,7 +440,7 @@ fn the_host_event_is_held_to_both_backends() {
         ..CaseObservation::default()
     };
     let with_wasm = |wasm| CaseObservation {
-        wasm: Some(wasm),
+        wasm: Some(BackendObservation::new(wasm)),
         ..event()
     };
 

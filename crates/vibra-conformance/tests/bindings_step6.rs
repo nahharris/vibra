@@ -35,7 +35,12 @@ fn interpreter_runs_checked_bindings_and_selected_if_branch() {
     let second = InterpreterV1Handler.run(&case).expect("repeat interpreter");
     assert_eq!(first, second);
     assert_eq!(
-        first.interpreter.expect("execution").result.as_deref(),
+        first
+            .interpreter
+            .expect("execution")
+            .outcome
+            .result
+            .as_deref(),
         Some("(record type: @i32 value: 2i32)\n")
     );
 }

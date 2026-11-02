@@ -156,7 +156,10 @@ fn workspace_test_handler_compares_authored_outcomes_and_empty_item_traces() {
             .and_then(|execution| execution.result.as_deref())
             .expect("workspace-test result snapshot");
         let expected = case.read_file(expected_path).expect("read result snapshot");
-        let actual = observation.interpreter.expect("test-run observation");
+        let actual = observation
+            .interpreter
+            .expect("test-run observation")
+            .outcome;
         assert_eq!(
             actual.result.as_deref(),
             Some(expected.as_str()),
