@@ -87,3 +87,32 @@ machines.
 
 The committed `performance-baseline.vibon`, the cause of the nested-value cost, and
 the passing host test, recorded in the README.
+
+## As built
+
+Landed on `claude/m4-step-21-performance-baseline`, conditional on its pull request merging.
+The prose is in [the note](performance-baseline.md); the data is in `performance-baseline.vibon`.
+
+- The tool is the `perf-baseline` binary of `vibra-conformance` (`--write`, `--check`,
+  `--runs`), the library module `baseline`, and the host test `performance_baseline_m4_step21`
+  (11 tests: the checked-in exact metrics equal a regeneration, two measurements agree, a changed
+  program and a moved metric are named, a missing or extra program fails, a failing program is an
+  error naming it, the document is canonical VIBON and round-trips, the 5,000-deep value runs in
+  bounded debug time, and a measured module computes what the plain one does).
+- Hooks. The interpreter counts allocations and reductions beside its existing activation and
+  tail-transfer counters (`Execution::allocation_count`, `reduction_count`; the same on
+  `TestExecution`, which also exposes `peak_memory_bytes`); they change no run. The Wasm
+  allocator counts only in a module from `emit_measured` or `emit_tests_measured`, in two state
+  fields at 112 and 120 that no other module writes, so `emit` is byte-identical to before. Fuel
+  is metered only by a runner from `Runner::with_fuel`; the conformance runner's configuration is
+  unchanged.
+- Exact metrics: module bytes, fuel, allocations, peak live bytes (Wasm); allocations, peak bytes,
+  reductions (interpreter). Recorded only: medians over 11 runs and the machine. None is
+  per-platform; see the note for why and for the one residual risk.
+- D14.2 reproduced and found already fixed by Step 3 (linear now); nothing to fix.
+- Known costs recorded for M7: the quadratic `array.fold` body (D10.5, not rewritten), a result
+  allocation per checked arithmetic call, and the type-directed canonical equality (D8.4).
+
+### Left for Step 22
+
+The M4 demo and exit sweep. Step 22 re-runs the tool's `--check` on the exit head.
