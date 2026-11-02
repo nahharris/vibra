@@ -371,6 +371,20 @@ pub fn host_row(symbol: &str) -> Option<&'static HostRow> {
     HOST_ROWS.iter().find(|row| row.symbol == symbol)
 }
 
+/// The derived registry minor of a set of symbols: the greatest `since` among
+/// them, and `0` when the set is empty. A symbol outside the registry has no
+/// minor, so the answer is `None`.
+#[must_use]
+pub fn derived_registry_minor<'a>(
+    symbols: impl IntoIterator<Item = &'a str>,
+) -> Option<u32> {
+    let mut minor = 0;
+    for symbol in symbols {
+        minor = minor.max(host_row(symbol)?.since);
+    }
+    Some(minor)
+}
+
 /// The registry as the text of the checked-in snapshot.
 #[must_use]
 pub fn registry_snapshot() -> String {
