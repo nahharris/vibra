@@ -1,0 +1,12 @@
+id = "V1-PROJECT-workspace-check-constant-default"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "A labelled default may be a dotted name through a module alias that resolves to another module's public constant, or `true`, which a module names without an import."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true

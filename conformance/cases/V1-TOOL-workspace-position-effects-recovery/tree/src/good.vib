@@ -1,0 +1,12 @@
+(deffect audit
+  visibility: @public
+  (defn record (target str) void
+    visibility: @public
+    (do)))
+
+(defn log-it (target str) void
+  visibility: @public
+  effects: (audit)
+  (audit.record target))
+
+(defn clean () i32 1i32)

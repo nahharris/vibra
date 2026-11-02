@@ -19,13 +19,30 @@
         "@command.invalid-input",
         "@command.operational-failure",
         "@command.trap",
-        "@command.unavailable"
+        "@command.unavailable",
+        "@command.program-failed"
       ]
     },
     "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } },
     "payload": { "type": "object" }
   },
   "allOf": [
+    {
+      "description": "A program failure is an entry that returned err: only run ends so, with the encoding of the result, no trap, and no diagnostic.",
+      "if": { "properties": { "result": { "const": "@command.program-failed" } } },
+      "then": {
+        "properties": {
+          "command": { "const": "run" },
+          "diagnostics": { "maxItems": 0 },
+          "payload": {
+            "properties": {
+              "programResult": { "type": "string", "minLength": 1 },
+              "trap": { "type": "null" }
+            }
+          }
+        }
+      }
+    },
     {
       "if": { "properties": { "command": { "const": "init" } } },
       "then": {
@@ -86,7 +103,7 @@
               "programResult": { "type": ["string", "null"] },
               "stdout": { "type": "string" },
               "stderr": { "type": "string" },
-              "auditTrace": { "type": "array", "items": { "type": "string" } },
+              "auditTrace": { "type": "array", "items": { "$ref": "#/$defs/auditEvent" } },
               "trap": {
                 "oneOf": [
                   { "type": "null" },
@@ -95,7 +112,7 @@
                     "additionalProperties": false,
                     "required": ["trapCode", "origin"],
                     "properties": {
-                      "trapCode": { "type": "string", "minLength": 1 },
+                      "trapCode": { "$ref": "#/$defs/trapCode" },
                       "origin": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
                     }
                   }
@@ -175,18 +192,13 @@
                           "additionalProperties": false,
                           "required": ["trapCode", "origin"],
                           "properties": {
-                            "trapCode": {
-                              "enum": [
-                                "@runtime.invalid-checked-program",
-                                "@runtime.unobservable-function"
-                              ]
-                            },
+                            "trapCode": { "$ref": "#/$defs/trapCode" },
                             "origin": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
                           }
                         }
                       ]
                     },
-                    "auditTrace": { "type": "array", "maxItems": 0 },
+                    "auditTrace": { "type": "array", "items": { "$ref": "#/$defs/auditEvent" } },
                     "diagnostics": { "type": "array", "items": { "$ref": "#/$defs/diagnostic" } }
                   },
                   "allOf": [
@@ -209,12 +221,7 @@
                             "additionalProperties": false,
                             "required": ["trapCode", "origin"],
                             "properties": {
-                              "trapCode": {
-                              "enum": [
-                                "@runtime.invalid-checked-program",
-                                "@runtime.unobservable-function"
-                              ]
-                            },
+                              "trapCode": { "$ref": "#/$defs/trapCode" },
                               "origin": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/span" }] }
                             }
                           },
@@ -247,6 +254,34 @@
     }
   ],
   "$defs": {
+    "trapCode": {
+      "description": "The closed trap codes of the runtime chapter.",
+      "enum": [
+        "@runtime.invalid-checked-program",
+        "@runtime.unobservable-function",
+        "@runtime.invalid-host-value"
+      ]
+    },
+    "auditEvent": {
+      "description": "One completed host call of the audit trace. A host event is closed; an event of a kind this schema does not know keeps its field names and carries every value as text, so a consumer preserves it.",
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "type": "string", "pattern": "^@[a-z][a-z0-9-]*$" }
+      },
+      "if": { "properties": { "kind": { "const": "@host" } } },
+      "then": {
+        "additionalProperties": false,
+        "required": ["kind", "op", "args", "result"],
+        "properties": {
+          "kind": { "const": "@host" },
+          "op": { "type": "string", "minLength": 1 },
+          "args": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "result": { "type": "string", "minLength": 1 }
+        }
+      },
+      "else": { "additionalProperties": { "type": "string" } }
+    },
     "position": {
       "type": "object",
       "additionalProperties": false,

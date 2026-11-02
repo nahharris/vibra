@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-contract-member-dict-tail"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A dict variadic tail on a contract member builds one dict by the rule dict.of shares: entries come out in canonical key order, an empty tail is an empty dict, a repeated key keeps its later value, and the tail binds the same through a known receiver and through an interface value."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

@@ -22,8 +22,8 @@ use std::path::Path;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 use vibra_syntax::{
     Attribute, Declaration, DeftypeBody, Expression, ExpressionKind,
-    FunctionDeclaration, Literal, Name, Pattern, PatternKind, TypeExpr, TypeMember,
-    parse_source,
+    FunctionDeclaration, LabelledDefault, Literal, Name, Pattern, PatternKind,
+    TypeExpr, TypeMember, parse_source,
 };
 
 /// Package provenance carried by every declaration identity.
@@ -179,6 +179,7 @@ pub struct SourceUnit {
     name: String,
     kind: TargetKind,
     entry: Option<ReferencePath>,
+    effects: Vec<ReferencePath>,
     modules: Vec<SourceModule>,
 }
 
@@ -195,8 +196,16 @@ impl SourceUnit {
             name: name.into(),
             kind,
             entry,
+            effects: Vec::new(),
             modules,
         }
+    }
+
+    /// Sets the effect roots a binary target's `effects` array names.
+    #[must_use]
+    pub fn with_effects(mut self, effects: Vec<ReferencePath>) -> Self {
+        self.effects = effects;
+        self
     }
 
     /// Creates a binary unit from a dotted entry spelling.
@@ -234,6 +243,12 @@ impl SourceUnit {
     #[must_use]
     pub const fn entry(&self) -> Option<&ReferencePath> {
         self.entry.as_ref()
+    }
+
+    /// Effect roots of the target `effects` array, in written order.
+    #[must_use]
+    pub fn effects(&self) -> &[ReferencePath] {
+        &self.effects
     }
 
     /// Modules in this unit.
@@ -729,6 +744,7 @@ pub struct ResolvedSnapshot {
     modules: Vec<ModuleRecord>,
     declarations: Vec<ResolvedDeclaration>,
     entries: Vec<ResolvedEntry>,
+    target_effects: Vec<ResolvedTargetEffect>,
     imports: Vec<ResolvedImport>,
     references: Vec<ResolvedReference>,
     diagnostics: Vec<Diagnostic>,
@@ -765,6 +781,12 @@ impl ResolvedSnapshot {
     #[must_use]
     pub fn entries(&self) -> &[ResolvedEntry] {
         &self.entries
+    }
+
+    /// The atoms of each binary target's `effects` array, in written order.
+    #[must_use]
+    pub fn target_effects(&self) -> &[ResolvedTargetEffect] {
+        &self.target_effects
     }
 
     /// Import edges in deterministic source order.
@@ -945,6 +967,43 @@ impl ResolvedEntry {
     }
 }
 
+/// One atom of a binary target's `effects` array after atom-path resolution.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedTargetEffect {
+    unit: String,
+    source_id: String,
+    span: ByteSpan,
+    root: Option<DeclarationId>,
+}
+
+impl ResolvedTargetEffect {
+    /// Binary target unit whose array holds this atom.
+    #[must_use]
+    pub fn unit(&self) -> &str {
+        &self.unit
+    }
+
+    /// Project document that contains the atom.
+    #[must_use]
+    pub fn source_id(&self) -> &str {
+        &self.source_id
+    }
+
+    /// Half-open span of the atom.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+
+    /// The canonical identity of the effect root the atom names, or `None`
+    /// when the atom was reported as a diagnostic: it resolves to no effect
+    /// root, or repeats a root listed before it.
+    #[must_use]
+    pub const fn root(&self) -> Option<&DeclarationId> {
+        self.root.as_ref()
+    }
+}
+
 /// Stateless resolver over one explicit input snapshot.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Resolver;
@@ -1003,6 +1062,7 @@ struct Resolution {
     declarations: Vec<DeclarationWork>,
     declaration_indexes: BTreeMap<(ModuleKey, Vec<String>), usize>,
     entries: Vec<ResolvedEntry>,
+    target_effects: Vec<ResolvedTargetEffect>,
     imports: Vec<(ModuleKey, ImportWork)>,
     imports_by_module: BTreeMap<ModuleKey, Vec<usize>>,
     references: Vec<ResolvedReference>,
@@ -1019,6 +1079,7 @@ impl Resolution {
             declarations: Vec::new(),
             declaration_indexes: BTreeMap::new(),
             entries: Vec::new(),
+            target_effects: Vec::new(),
             imports: Vec::new(),
             imports_by_module: BTreeMap::new(),
             references: Vec::new(),
@@ -1032,6 +1093,7 @@ impl Resolution {
         self.resolve_imports();
         self.check_import_cycles();
         self.resolve_entries();
+        self.resolve_target_effects();
         self.resolve_bodies();
 
         self.diagnostics.sort_by_key(diagnostic_key);
@@ -1098,11 +1160,13 @@ impl Resolution {
             })
             .collect::<Vec<_>>();
         let entries = self.entries;
+        let target_effects = self.target_effects;
         ResolvedSnapshot {
             package: self.input.package,
             modules,
             declarations,
             entries,
+            target_effects,
             imports,
             references: self.references,
             diagnostics: self.diagnostics,
@@ -1182,45 +1246,11 @@ impl Resolution {
             }
             let index = self.modules.len();
             self.module_indexes.insert(key, index);
-            let ast = match std::str::from_utf8(&module.bytes) {
-                Ok(source) => {
-                    match parse_source(Path::new(&module.source_id), source) {
-                        Ok(document) => {
-                            self.diagnostics.extend(
-                                document.diagnostics().iter().cloned().map(
-                                    |diagnostic| {
-                                        diagnostic
-                                            .with_source_id(module.source_id.clone())
-                                    },
-                                ),
-                            );
-                            document.ast().cloned()
-                        }
-                        Err(error) => {
-                            self.diagnostics.push(
-                                Diagnostic::new(
-                                    DiagnosticCode::ModuleIoError,
-                                    ByteSpan::empty_at(0),
-                                    error.to_string(),
-                                )
-                                .with_source_id(module.source_id.clone()),
-                            );
-                            None
-                        }
-                    }
-                }
-                Err(error) => {
-                    self.diagnostics.push(
-                        Diagnostic::new(
-                            DiagnosticCode::ModuleIoError,
-                            ByteSpan::empty_at(0),
-                            format!("source module is not UTF-8: {error}"),
-                        )
-                        .with_source_id(module.source_id.clone()),
-                    );
-                    None
-                }
-            };
+            // A verified overlay module parses to the same tree every time, so
+            // it is parsed once per process; a local module always parses.
+            let (parse_diagnostics, ast) =
+                parse_module(&module, package != self.input.package);
+            self.diagnostics.extend(parse_diagnostics);
             self.modules.push(ParsedModule {
                 package,
                 module,
@@ -1315,7 +1345,9 @@ impl Resolution {
         span: ByteSpan,
         source_id: &str,
     ) {
-        if vibra_syntax::is_reserved_value_spelling(name) {
+        if vibra_syntax::is_reserved_value_spelling(name)
+            || vibra_syntax::is_prelude_value_spelling(name)
+        {
             self.diagnostics.push(
                 Diagnostic::new(
                     DiagnosticCode::NameReservedValueSpelling,
@@ -1342,13 +1374,6 @@ impl Resolution {
         } else {
             names.insert(name.to_owned(), (span, source_id.to_owned()));
         }
-    }
-
-    fn unavailable(&mut self, source_id: &str, span: ByteSpan, message: &'static str) {
-        self.diagnostics.push(
-            Diagnostic::new(DiagnosticCode::ToolUnavailable, span, message)
-                .with_source_id(source_id),
-        );
     }
 
     fn collect_declaration(
@@ -1425,20 +1450,6 @@ impl Resolution {
             Declaration::Import(_) => return,
             Declaration::Test(_) => return,
         };
-        let unavailable_message = match declaration {
-            // Declared types resolve from M3 Step 2 and interfaces from Step 11.
-            Declaration::Deftype(_) | Declaration::Defint(_) => None,
-            Declaration::Deffect(_) => {
-                Some("effect resolution is unavailable in Step 4")
-            }
-            Declaration::Import(_)
-            | Declaration::Def(_)
-            | Declaration::Defn(_)
-            | Declaration::Test(_) => None,
-        };
-        if let Some(message) = unavailable_message {
-            self.unavailable(source_id, span, message);
-        }
         let mut path = owner;
         path.push(name.to_owned());
         if path.len() == 1 {
@@ -1459,8 +1470,11 @@ impl Resolution {
             } else {
                 names.insert(name.to_owned(), (span, source_id.to_owned()));
             }
+            // Only the embedded standard library declares a vocabulary name.
             if matches!(kind, EntityKind::Value | EntityKind::Function)
-                && vibra_syntax::is_reserved_value_spelling(name)
+                && (vibra_syntax::is_reserved_value_spelling(name)
+                    || (vibra_syntax::is_prelude_value_spelling(name)
+                        && module.package.name() != "vibra-stdlib"))
             {
                 self.diagnostics.push(
                     Diagnostic::new(
@@ -1522,11 +1536,6 @@ impl Resolution {
             }
             Declaration::Deffect(value) => {
                 for member in value.members() {
-                    self.unavailable(
-                        source_id,
-                        member.span(),
-                        "effect operations are unavailable in Step 4",
-                    );
                     self.collect_member(
                         module,
                         member,
@@ -2172,6 +2181,173 @@ impl Resolution {
         }
     }
 
+    /// Resolves each atom of every target `effects` array to one canonical
+    /// effect root. The project document is a privileged referrer, like the
+    /// entry, so a private root may be named. A bad atom is reported at its
+    /// span and does not stop the other atoms or the other targets.
+    fn resolve_target_effects(&mut self) {
+        for unit_index in 0..self.input.units.len() {
+            let Some(unit) = self.input.units.get(unit_index) else {
+                continue;
+            };
+            let name = unit.name.clone();
+            let atoms = unit.effects.clone();
+            let mut seen = Vec::<(DeclarationId, String, ByteSpan)>::new();
+            for atom in atoms {
+                let id = match self.resolve_effect_atom(&atom) {
+                    Ok(id) => id,
+                    Err(diagnostic) => {
+                        self.diagnostics.push(*diagnostic);
+                        self.target_effects.push(ResolvedTargetEffect {
+                            unit: name.clone(),
+                            source_id: atom.source_id,
+                            span: atom.span,
+                            root: None,
+                        });
+                        continue;
+                    }
+                };
+                if let Some((_, first_source, first_span)) =
+                    seen.iter().find(|(existing, ..)| *existing == id)
+                {
+                    self.diagnostics.push(
+                        Diagnostic::new(
+                            DiagnosticCode::EffectDuplicateRoot,
+                            atom.span,
+                            "this effect root is already listed in the target `effects` array",
+                        )
+                        .with_source_id(atom.source_id.clone())
+                        .with_related_source(
+                            first_source.clone(),
+                            *first_span,
+                            "the root is first listed here",
+                        ),
+                    );
+                    self.target_effects.push(ResolvedTargetEffect {
+                        unit: name.clone(),
+                        source_id: atom.source_id,
+                        span: atom.span,
+                        root: None,
+                    });
+                    continue;
+                }
+                seen.push((id.clone(), atom.source_id.clone(), atom.span));
+                self.target_effects.push(ResolvedTargetEffect {
+                    unit: name.clone(),
+                    source_id: atom.source_id,
+                    span: atom.span,
+                    root: Some(id),
+                });
+            }
+        }
+    }
+
+    fn resolve_effect_atom(
+        &self,
+        atom: &ReferencePath,
+    ) -> Result<DeclarationId, Box<Diagnostic>> {
+        let fail = |code: DiagnosticCode, message: &str| {
+            Box::new(
+                Diagnostic::new(code, atom.span, message)
+                    .with_source_id(atom.source_id.clone()),
+            )
+        };
+        let Some(unit) = atom.segments.first() else {
+            return Err(fail(
+                DiagnosticCode::ModuleUnknownPath,
+                "effect root does not resolve to a source module",
+            ));
+        };
+        let path = atom.segments.iter().skip(1).cloned().collect::<Vec<_>>();
+        let builtin =
+            unit == "std" && path.first().is_some_and(|name| name == "builtin");
+        if unit == "tests" || builtin {
+            return Err(fail(
+                DiagnosticCode::ModuleUnknownPath,
+                if builtin {
+                    "`@std.builtin` declares no effect root"
+                } else {
+                    "the reserved `@tests` unit is importable only from test modules"
+                },
+            ));
+        }
+        let overlay_package = self
+            .input
+            .overlay
+            .as_ref()
+            .filter(|overlay| {
+                overlay.modules.iter().any(|module| {
+                    module.unit == *unit && path.starts_with(&module.segments)
+                })
+            })
+            .map(|overlay| overlay.package.clone());
+        let reserved = self.input.reserved_import_paths.iter().any(
+            |(reserved_unit, reserved_segments)| {
+                reserved_unit == unit && path.starts_with(reserved_segments)
+            },
+        );
+        let package = match overlay_package {
+            Some(package) => package,
+            None if reserved => {
+                return Err(fail(
+                    DiagnosticCode::ModuleUnknownPath,
+                    "reserved path requires its verified package overlay",
+                ));
+            }
+            None => self.input.package.clone(),
+        };
+        let Some(module_len) = self.longest_module_prefix(&package, unit, &path) else {
+            return Err(fail(
+                DiagnosticCode::ModuleUnknownPath,
+                "effect root does not resolve to a source module",
+            ));
+        };
+        let (Some(module_segments), Some(declaration_segments)) =
+            (path.get(..module_len), path.get(module_len..))
+        else {
+            return Err(fail(
+                DiagnosticCode::ModuleUnknownPath,
+                "effect root does not resolve to a source module",
+            ));
+        };
+        let module = ModuleKey {
+            package,
+            unit: unit.clone(),
+            segments: module_segments.to_vec(),
+        };
+        if declaration_segments.is_empty() {
+            return Err(fail(
+                DiagnosticCode::NameWrongEntityKind,
+                "the target `effects` array names a module, not an effect root",
+            ));
+        }
+        let Some(work) = self
+            .declaration_indexes
+            .get(&(module, declaration_segments.to_vec()))
+            .and_then(|index| self.declarations.get(*index))
+        else {
+            return Err(fail(
+                DiagnosticCode::NameUnknownSymbol,
+                "effect root does not resolve to a declaration",
+            ));
+        };
+        let id = &work.declaration.id;
+        if id.kind() != EntityKind::Effect || id.path().len() != 1 {
+            return Err(Box::new(
+                Diagnostic::new(
+                    DiagnosticCode::NameWrongEntityKind,
+                    atom.span,
+                    format!(
+                        "the target `effects` array names a {}, not an effect root",
+                        id.kind().as_str()
+                    ),
+                )
+                .with_source_id(atom.source_id.clone()),
+            ));
+        }
+        Ok(id.clone())
+    }
+
     fn resolve_bodies(&mut self) {
         let works = self
             .declarations
@@ -2205,7 +2381,9 @@ impl Resolution {
                 }
                 BodyWork::Function(function) => {
                     let mut scope = Vec::new();
-                    self.bind_parameters(&module, &function, &mut scope, &source_id);
+                    self.bind_parameters(
+                        &module, &from, &function, &mut scope, &source_id,
+                    );
                     self.resolve_sequence(
                         &module,
                         &from,
@@ -2227,20 +2405,173 @@ impl Resolution {
         }
     }
 
+    /// Every named binder a written pattern introduces. A name that resolves to
+    /// a module-level value, bare or dotted, is not a binder: it is a constant
+    /// pattern, and the resolver records the reference for the checker.
+    fn collect_pattern_names(
+        &mut self,
+        module: &ModuleKey,
+        from: &DeclarationId,
+        pattern: &Pattern,
+        scope: &[(String, ByteSpan)],
+        source_id: &str,
+        names: &mut Vec<(String, ByteSpan)>,
+    ) {
+        match pattern.kind() {
+            PatternKind::Binding(name) if !name.is_discard() => {
+                if !self.reference_value_pattern(
+                    module,
+                    from,
+                    name,
+                    pattern.span(),
+                    scope,
+                    source_id,
+                ) {
+                    names.push((name.value().to_owned(), pattern.span()));
+                }
+            }
+            PatternKind::Constructor { head, arguments } => {
+                if arguments.is_empty() {
+                    self.reference_value_pattern(
+                        module,
+                        from,
+                        head,
+                        pattern.span(),
+                        scope,
+                        source_id,
+                    );
+                }
+                for argument in arguments {
+                    self.collect_pattern_names(
+                        module,
+                        from,
+                        argument.pattern(),
+                        scope,
+                        source_id,
+                        names,
+                    );
+                }
+            }
+            PatternKind::Tuple(patterns) | PatternKind::Array(patterns) => {
+                for pattern in patterns {
+                    self.collect_pattern_names(
+                        module, from, pattern, scope, source_id, names,
+                    );
+                }
+            }
+            PatternKind::RecordOf(fields) => {
+                for field in fields {
+                    self.collect_pattern_names(
+                        module,
+                        from,
+                        field.pattern(),
+                        scope,
+                        source_id,
+                        names,
+                    );
+                }
+            }
+            PatternKind::EnumOf(variant) => self.collect_pattern_names(
+                module,
+                from,
+                variant.pattern(),
+                scope,
+                source_id,
+                names,
+            ),
+            PatternKind::As { pattern, .. } => {
+                self.collect_pattern_names(
+                    module, from, pattern, scope, source_id, names,
+                );
+            }
+            PatternKind::Binding(_)
+            | PatternKind::Literal(_)
+            | PatternKind::Atom(_) => {}
+        }
+    }
+
+    /// Records a reference when a pattern name resolves to a module-level
+    /// value, and says whether it did. A name already bound lexically is a
+    /// repeated binder, never a reference.
+    fn reference_value_pattern(
+        &mut self,
+        module: &ModuleKey,
+        from: &DeclarationId,
+        name: &Name,
+        span: ByteSpan,
+        scope: &[(String, ByteSpan)],
+        source_id: &str,
+    ) -> bool {
+        if name.kind() != vibra_syntax::NameKind::Symbol {
+            return false;
+        }
+        let path = name.segments();
+        if path.len() == 1 && scope.iter().any(|(bound, _)| Some(bound) == path.first())
+        {
+            return false;
+        }
+        let (target_module, declaration_path, imported) = self.locate(module, path);
+        let Some(target) = target_module
+            .and_then(|target_module| {
+                self.declaration_indexes
+                    .get(&(target_module, declaration_path))
+            })
+            .and_then(|index| self.declarations.get(*index))
+            .map(|work| work.declaration.clone())
+        else {
+            return false;
+        };
+        if target.id.kind() != EntityKind::Value {
+            return false;
+        }
+        if imported && target.visibility == Visibility::Private {
+            self.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::NamePrivateAccess,
+                    span,
+                    "imported declaration is private",
+                )
+                .with_source_id(source_id)
+                .with_related_source(
+                    target.source_id.clone(),
+                    target.span,
+                    "the private declaration is here",
+                ),
+            );
+        }
+        self.references.push(ResolvedReference {
+            from: from.clone(),
+            written: name.value().to_owned(),
+            target: Some(target.id),
+            source_id: source_id.to_owned(),
+            span,
+        });
+        true
+    }
+
     fn bind_parameters(
         &mut self,
         module: &ModuleKey,
+        from: &DeclarationId,
         function: &FunctionDeclaration,
         scope: &mut Vec<(String, ByteSpan)>,
         source_id: &str,
     ) {
         for parameter in function.parameters() {
             let mut names = Vec::new();
-            collect_pattern_names(parameter.parsed_pattern(), &mut names);
+            self.collect_pattern_names(
+                module,
+                from,
+                parameter.parsed_pattern(),
+                scope,
+                source_id,
+                &mut names,
+            );
             self.bind_names(module, scope, names, source_id);
         }
         self.bind_function_attributes(
             module,
+            from,
             function.attributes().items(),
             scope,
             source_id,
@@ -2250,6 +2581,7 @@ impl Resolution {
     fn bind_function_attributes(
         &mut self,
         module: &ModuleKey,
+        from: &DeclarationId,
         attributes: &[Attribute],
         scope: &mut Vec<(String, ByteSpan)>,
         source_id: &str,
@@ -2258,6 +2590,19 @@ impl Resolution {
             match attribute {
                 Attribute::Labelled(parameters) => {
                     for parameter in parameters {
+                        // A default written as a name denotes a module value:
+                        // no parameter is in scope there.
+                        if let LabelledDefault::Expression { expression, .. } =
+                            parameter.default()
+                        {
+                            self.resolve_expression(
+                                module,
+                                from,
+                                expression,
+                                &[],
+                                source_id,
+                            );
+                        }
                         self.bind_names(
                             module,
                             scope,
@@ -2274,7 +2619,10 @@ impl Resolution {
                         self.bind_names(
                             module,
                             scope,
-                            [(parameter.name().value().to_owned(), parameter.span())],
+                            [(
+                                parameter.name().value().to_owned(),
+                                parameter.name_span(),
+                            )],
                             source_id,
                         );
                     }
@@ -2303,6 +2651,18 @@ impl Resolution {
         for (name, span) in names {
             if name == "-" || name == "@-" || name == "-:" {
                 continue;
+            }
+            // A reserved spelling is rejected at the binder and still binds,
+            // so the rest of its scope resolves without a cascade.
+            if vibra_syntax::is_reserved_binder_spelling(&name) {
+                self.diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::NameReservedDeclaration,
+                        span,
+                        "a lexical binder uses a keyword, `any`, or a name of the closed import-free vocabulary",
+                    )
+                    .with_source_id(source_id),
+                );
             }
             // One diagnostic per introduction, relating the nearest earlier
             // one: the innermost lexical binding, else the module binding.
@@ -2369,7 +2729,14 @@ impl Resolution {
                             source_id,
                         );
                         let mut names = Vec::new();
-                        collect_pattern_names(binding.pattern(), &mut names);
+                        self.collect_pattern_names(
+                            module,
+                            from,
+                            binding.pattern(),
+                            &local,
+                            source_id,
+                            &mut names,
+                        );
                         self.bind_names(module, &mut local, names, source_id);
                     }
                 }
@@ -2381,7 +2748,9 @@ impl Resolution {
                     self.resolve_expression(module, from, value, &local, source_id);
                     self.resolve_expression(module, from, fallback, &local, source_id);
                     let mut names = Vec::new();
-                    collect_pattern_names(pattern, &mut names);
+                    self.collect_pattern_names(
+                        module, from, pattern, &local, source_id, &mut names,
+                    );
                     self.bind_names(module, &mut local, names, source_id);
                 }
                 _ => self.resolve_expression(module, from, element, &local, source_id),
@@ -2437,11 +2806,19 @@ impl Resolution {
                 let mut nested_scope = scope.to_vec();
                 for parameter in lambda.parameters() {
                     let mut names = Vec::new();
-                    collect_pattern_names(parameter.parsed_pattern(), &mut names);
+                    self.collect_pattern_names(
+                        module,
+                        from,
+                        parameter.parsed_pattern(),
+                        &nested_scope,
+                        source_id,
+                        &mut names,
+                    );
                     self.bind_names(module, &mut nested_scope, names, source_id);
                 }
                 self.bind_function_attributes(
                     module,
+                    from,
                     lambda.attributes().items(),
                     &mut nested_scope,
                     source_id,
@@ -2477,7 +2854,14 @@ impl Resolution {
                 for arm in arms {
                     let mut nested_scope = scope.to_vec();
                     let mut names = Vec::new();
-                    collect_pattern_names(arm.pattern(), &mut names);
+                    self.collect_pattern_names(
+                        module,
+                        from,
+                        arm.pattern(),
+                        &nested_scope,
+                        source_id,
+                        &mut names,
+                    );
                     self.bind_names(module, &mut nested_scope, names, source_id);
                     self.resolve_expression(
                         module,
@@ -2590,37 +2974,7 @@ impl Resolution {
             });
             return;
         }
-        let (target_module, declaration_path, imported) =
-            if let Some(first) = path.first() {
-                let import = self
-                    .imports
-                    .iter()
-                    .find(|(owner, import)| owner == module && import.alias == *first);
-                if let Some((_, import)) = import {
-                    match &import.declaration {
-                        // A declaration alias stands for that declaration,
-                        // whose visibility was checked at the import. A
-                        // member reached through it is checked here, as it
-                        // is through a module alias.
-                        Some(declaration) => (
-                            import.module.clone(),
-                            std::iter::once(declaration.clone())
-                                .chain(path.iter().skip(1).cloned())
-                                .collect::<Vec<_>>(),
-                            path.len() > 1,
-                        ),
-                        None => (
-                            import.module.clone(),
-                            path.iter().skip(1).cloned().collect::<Vec<_>>(),
-                            true,
-                        ),
-                    }
-                } else {
-                    (Some(module.clone()), path.to_vec(), false)
-                }
-            } else {
-                (Some(module.clone()), Vec::new(), false)
-            };
+        let (target_module, declaration_path, imported) = self.locate(module, path);
         if imported
             && declaration_path.is_empty()
             && let Some(target_module) = target_module.as_ref()
@@ -2694,7 +3048,11 @@ impl Resolution {
                     && target.segments == ["assert"]
                     && imported
             });
-            let code = if unavailable_assertion {
+            // The vocabulary's values live in the verified standard library.
+            let unavailable_vocabulary = matches!(path, [only]
+                if vibra_syntax::is_prelude_value_spelling(only))
+                && self.input.overlay.is_none();
+            let code = if unavailable_assertion || unavailable_vocabulary {
                 DiagnosticCode::ToolUnavailable
             } else {
                 DiagnosticCode::NameUnknownSymbol
@@ -2705,6 +3063,8 @@ impl Resolution {
                     span,
                     if unavailable_assertion {
                         "assertion members outside the closed M2 table are unavailable"
+                    } else if unavailable_vocabulary {
+                        "the vocabulary's values require the verified standard library"
                     } else {
                         "symbol does not resolve to a declaration"
                     },
@@ -2745,6 +3105,22 @@ impl Resolution {
                 .with_source_id(source_id),
             );
         }
+        // A root names a row, never a value: its operations are applied.
+        if target.id.kind() == EntityKind::Effect {
+            self.diagnostics.push(
+                Diagnostic::new(
+                    DiagnosticCode::NameWrongEntityKind,
+                    span,
+                    "an effect root is not a body value; its operations are",
+                )
+                .with_source_id(source_id)
+                .with_related_source(
+                    target.source_id.clone(),
+                    target.span,
+                    "the effect root is declared here",
+                ),
+            );
+        }
         self.references.push(ResolvedReference {
             from: from.clone(),
             written: name.value().to_owned(),
@@ -2752,6 +3128,64 @@ impl Resolution {
             source_id: source_id.to_owned(),
             span,
         });
+    }
+
+    /// The module, declaration path inside it, and whether an import was
+    /// crossed, for a path written in `module`.
+    ///
+    /// The path's first segment is an import alias, else a declaration of the
+    /// module itself, else a value of the closed import-free vocabulary, which
+    /// every module sees and which `@std.bool` declares.
+    fn locate(
+        &self,
+        module: &ModuleKey,
+        path: &[String],
+    ) -> (Option<ModuleKey>, Vec<String>, bool) {
+        let Some(first) = path.first() else {
+            return (Some(module.clone()), Vec::new(), false);
+        };
+        let import = self
+            .imports
+            .iter()
+            .find(|(owner, import)| owner == module && import.alias == *first);
+        if let Some((_, import)) = import {
+            return match &import.declaration {
+                // A declaration alias stands for that declaration, whose
+                // visibility was checked at the import. A member reached
+                // through it is checked here, as it is through a module
+                // alias.
+                Some(declaration) => (
+                    import.module.clone(),
+                    std::iter::once(declaration.clone())
+                        .chain(path.iter().skip(1).cloned())
+                        .collect::<Vec<_>>(),
+                    path.len() > 1,
+                ),
+                None => (
+                    import.module.clone(),
+                    path.iter().skip(1).cloned().collect::<Vec<_>>(),
+                    true,
+                ),
+            };
+        }
+        if let [name] = path
+            && vibra_syntax::is_prelude_value_spelling(name)
+            && !self
+                .declaration_indexes
+                .contains_key(&(module.clone(), path.to_vec()))
+            && let Some(overlay) = self.input.overlay.as_ref()
+        {
+            return (
+                Some(ModuleKey {
+                    package: overlay.package.clone(),
+                    unit: "std".to_owned(),
+                    segments: vec!["bool".to_owned()],
+                }),
+                path.to_vec(),
+                false,
+            );
+        }
+        (Some(module.clone()), path.to_vec(), false)
     }
 
     fn resolve_module_path(
@@ -2787,32 +3221,6 @@ impl Resolution {
             unit: work.module.unit.clone(),
             segments: work.module.segments.clone(),
         })
-    }
-}
-
-fn collect_pattern_names(pattern: &Pattern, names: &mut Vec<(String, ByteSpan)>) {
-    match pattern.kind() {
-        PatternKind::Binding(name) if !name.is_discard() => {
-            names.push((name.value().to_owned(), pattern.span()));
-        }
-        PatternKind::Constructor { arguments, .. } => {
-            for argument in arguments {
-                collect_pattern_names(argument.pattern(), names);
-            }
-        }
-        PatternKind::Tuple(patterns) | PatternKind::Array(patterns) => {
-            for pattern in patterns {
-                collect_pattern_names(pattern, names);
-            }
-        }
-        PatternKind::RecordOf(fields) => {
-            for field in fields {
-                collect_pattern_names(field.pattern(), names);
-            }
-        }
-        PatternKind::EnumOf(variant) => collect_pattern_names(variant.pattern(), names),
-        PatternKind::As { pattern, .. } => collect_pattern_names(pattern, names),
-        PatternKind::Binding(_) | PatternKind::Literal(_) | PatternKind::Atom(_) => {}
     }
 }
 
@@ -2866,12 +3274,71 @@ impl SpanOr for Name {
     }
 }
 
+/// Parses one source module into its diagnostics and tree. With `memoize`, the
+/// result is kept for the life of the process, keyed by identity and bytes.
+fn parse_module(
+    module: &SourceModule,
+    memoize: bool,
+) -> (Vec<Diagnostic>, Option<vibra_syntax::SourceAst>) {
+    type Parsed = (Vec<Diagnostic>, Option<vibra_syntax::SourceAst>);
+    type Memo = std::sync::Mutex<std::collections::HashMap<(String, Vec<u8>), Parsed>>;
+    static MEMO: std::sync::OnceLock<Memo> = std::sync::OnceLock::new();
+    let key = (module.source_id.clone(), module.bytes.clone());
+    if memoize
+        && let Ok(memo) = MEMO.get_or_init(Default::default).lock()
+        && let Some(parsed) = memo.get(&key)
+    {
+        return parsed.clone();
+    }
+    let parsed: Parsed = match std::str::from_utf8(&module.bytes) {
+        Ok(source) => match parse_source(Path::new(&module.source_id), source) {
+            Ok(document) => (
+                document
+                    .diagnostics()
+                    .iter()
+                    .cloned()
+                    .map(|diagnostic| {
+                        diagnostic.with_source_id(module.source_id.clone())
+                    })
+                    .collect(),
+                document.ast().cloned(),
+            ),
+            Err(error) => (
+                vec![
+                    Diagnostic::new(
+                        DiagnosticCode::ModuleIoError,
+                        ByteSpan::empty_at(0),
+                        error.to_string(),
+                    )
+                    .with_source_id(module.source_id.clone()),
+                ],
+                None,
+            ),
+        },
+        Err(error) => (
+            vec![
+                Diagnostic::new(
+                    DiagnosticCode::ModuleIoError,
+                    ByteSpan::empty_at(0),
+                    format!("source module is not UTF-8: {error}"),
+                )
+                .with_source_id(module.source_id.clone()),
+            ],
+            None,
+        ),
+    };
+    if memoize && let Ok(mut memo) = MEMO.get_or_init(Default::default).lock() {
+        memo.insert(key, parsed.clone());
+    }
+    parsed
+}
+
 /// The identity of a builtin type's static method, declared by the embedded
-/// `@std.builtin` module of `vibra-stdlib@0.2.0`.
+/// `@std.builtin` module of `vibra-stdlib@0.3.0`.
 #[must_use]
 pub fn builtin_member_id(type_name: &str, member: &str) -> DeclarationId {
     DeclarationId::with_package(
-        &PackageId::new("vibra-stdlib", "0.2.0"),
+        &PackageId::new("vibra-stdlib", "0.3.0"),
         "std",
         ["builtin"],
         [type_name.to_owned(), member.to_owned()],

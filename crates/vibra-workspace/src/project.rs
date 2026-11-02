@@ -1150,6 +1150,10 @@ fn canonical_target(target: &Target) -> String {
     }
     if let Some(effects) = &target.effects {
         output.push_str(" effects: (array");
+        // The roots are a set, written in the canonical order of their
+        // identities, which for canonical atoms is the order of their bytes.
+        let mut effects = effects.iter().collect::<Vec<_>>();
+        effects.sort_by(|left, right| left.raw().cmp(right.raw()));
         for effect in effects {
             output.push(' ');
             output.push_str(effect.raw());

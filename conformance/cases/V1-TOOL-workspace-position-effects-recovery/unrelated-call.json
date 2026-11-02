@@ -1,0 +1,178 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:a4cebec835caf266800f142d262db0581acc9718d6295e5429a4897ae60264bf",
+  "sourceId": "src/good.vib",
+  "offset": 180,
+  "nodeId": "src/good.vib#180-181",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 180,
+    "sourceId": "src/good.vib",
+    "span": {
+      "sourceId": "src/good.vib",
+      "start": 180,
+      "end": 181,
+      "startPosition": {
+        "line": 10,
+        "column": 3
+      },
+      "endPosition": {
+        "line": 10,
+        "column": 4
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "open-paren",
+    "category": "expression",
+    "status": "exact",
+    "permittedForms": [
+      "lambda",
+      "do",
+      "let",
+      "let-else",
+      "if",
+      "match",
+      "return",
+      "as",
+      "try"
+    ],
+    "permittedLabels": [
+      "types"
+    ]
+  },
+  "role": {
+    "status": "exact",
+    "value": "@application"
+  },
+  "context": {
+    "status": "exact",
+    "value": "result"
+  },
+  "identity": {
+    "status": "unavailable",
+    "value": null
+  },
+  "expectedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "void",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "observedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "void",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": [
+      {
+        "name": "target",
+        "identity": "binder:src/good.vib:120-126"
+      }
+    ]
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": []
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": []
+  },
+  "application": {
+    "status": "exact",
+    "value": {
+      "kind": "@function",
+      "callee": {
+        "kind": "operation",
+        "canonical": "@demo@0.1.0/app.good.audit.record"
+      },
+      "calleeType": {
+        "kind": "function",
+        "name": "fn",
+        "parameters": [
+          {
+            "kind": "primitive",
+            "name": "str",
+            "parameters": [],
+            "result": null,
+            "labelled": []
+          }
+        ],
+        "result": {
+          "kind": "primitive",
+          "name": "void",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        },
+        "labelled": [],
+        "effects": {
+          "roots": [
+            "@demo@0.1.0/app.good.audit"
+          ]
+        }
+      },
+      "positional": [
+        {
+          "kind": "primitive",
+          "name": "str",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        }
+      ],
+      "labelled": [],
+      "resultType": {
+        "kind": "primitive",
+        "name": "void",
+        "parameters": [],
+        "result": null,
+        "labelled": []
+      },
+      "dispatch": null
+    }
+  },
+  "pattern": {
+    "status": "unavailable",
+    "value": null
+  },
+  "effects": {
+    "status": "exact",
+    "value": {
+      "enclosing": {
+        "identity": {
+          "kind": "function",
+          "canonical": "@demo@0.1.0/app.good.log-it"
+        },
+        "kind": "function",
+        "ceiling": {
+          "roots": [
+            "@demo@0.1.0/app.good.audit"
+          ]
+        },
+        "performed": {
+          "roots": [
+            "@demo@0.1.0/app.good.audit"
+          ]
+        }
+      },
+      "application": {
+        "roots": [
+          "@demo@0.1.0/app.good.audit"
+        ]
+      },
+      "target": null
+    }
+  }
+}

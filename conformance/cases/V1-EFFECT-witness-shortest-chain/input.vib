@@ -1,0 +1,32 @@
+(deffect write
+  (defn text (target str event str) void (do)))
+
+(deffect audit
+  (defn record (target str event str) void
+    effects: (write)
+    (write.text target event)))
+
+(defn leaf () void
+  effects: (audit write)
+  (audit.record "x" "y"))
+
+(defn slow-b () void
+  effects: (audit write)
+  (leaf))
+
+(defn slow-a () void
+  effects: (audit write)
+  (slow-b))
+
+(defn fast () void
+  effects: (audit write)
+  (leaf))
+
+(defn branch () void
+  effects: (audit write)
+  (slow-a)
+  (fast))
+
+(defn top () void
+  effects: (audit)
+  (branch))

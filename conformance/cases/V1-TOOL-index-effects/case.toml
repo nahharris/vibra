@@ -1,0 +1,13 @@
+id = "V1-TOOL-index-effects"
+rule = "V1-TOOL"
+profile = "tooling-v1"
+operation = "index"
+description = "Effect roots and operations are indexed entities with checked facts: a root has the empty rows, an operation has its complete row as ceiling and the row its body performs as effects, a caller has its written ceiling and its performed row, a method has its own row, and a pure function and a module value have the empty rows. Every record has external void."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+index = "index.vibon"

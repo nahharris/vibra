@@ -1,0 +1,1 @@
+(record type: (record type: @tuple arguments: (array @str @str @str @str @str @str @str @str @str @bool)) value: (record kind: @tuple values: (array "limit" "other" "top" "favorite" "other" "origin" "elsewhere" "yes" "off" true)))

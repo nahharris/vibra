@@ -1,0 +1,33 @@
+; A function value carries its row in its type and runs as any function value
+; does: an operation named as a value, a lambda that writes a row, and a call
+; through a contract whose ceiling is the row.
+(defn main () (tuple str str str str)
+  effects: (greet)
+  (let local (lambda (text str) str effects: (greet) (greet.shout text)))
+  (tupleof
+    (apply greet.shout "named")
+    (apply local "lambda")
+    (through-contract (as voice (caller name: "contract")))
+    (greet.word)))
+
+(deffect greet
+  (defn word () str "hello")
+  (defn shout (text str) str text))
+
+(defint voice
+  (defn say (value self) str
+    effects: (greet)))
+
+(deftype caller (record name str)
+  (impl voice
+    (defn say (value self) str
+      effects: (greet)
+      (greet.shout (value @name)))))
+
+(defn apply (f (fn (str) str effects: (greet)) text str) str
+  effects: (greet)
+  (f text))
+
+(defn through-contract (v voice) str
+  effects: (greet)
+  (voice.say v))

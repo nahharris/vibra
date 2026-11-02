@@ -1,0 +1,16 @@
+id = "V1-PROJECT-static-library-effects"
+rule = "V1-PROJECT"
+profile = "static-v1"
+description = "A library target declares no execution consent: an effects array on a library is an invalid shape at the target record."
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@data.invalid-shape"
+level = "@error"
+source = "project.vibon"
+span = [94, 154]

@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-interface-result-nesting"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A result that names self is converted to the interface value at every depth of an array, a dict, and a record, in both backends."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

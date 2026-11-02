@@ -1,0 +1,20 @@
+(import assert @std.assert)
+
+(deffect marker
+  (defn mark () i32 1i32))
+
+(deffect audit
+  (defn record () i32
+    effects: (marker)
+    (marker.mark)))
+
+(test "an operation runs"
+  effects: (marker)
+  (assert.equal 1i32 (marker.mark)))
+
+(test "an additive row runs"
+  effects: (audit marker)
+  (assert.equal 1i32 (audit.record)))
+
+(test "a pure test needs no row"
+  (assert.true true))

@@ -1,0 +1,23 @@
+id = "V1-TYPE-NAMES-fs-parameter-named-path"
+rule = "V1-TYPE-NAMES"
+profile = "static-v1"
+operation = "workspace-check"
+description = "A parameter named path in a module whose top level has the path type is a lexical name that shadows a visible module binding, @name.redeclaration, which is why the filesystem operations spell their path parameter at."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "src/app/main.vib"
+span = [52, 56]
+
+  [[expect.diagnostics.related]]
+  source = "src/app/main.vib"
+  span = [0, 38]
+  message = "the visible module binding is here"

@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-module-value-initializer-call"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A module value's initializer is an activation like any other, so it calls a function with operands: directly, through a binding, nested in another call, and with a labelled operand left out and given."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

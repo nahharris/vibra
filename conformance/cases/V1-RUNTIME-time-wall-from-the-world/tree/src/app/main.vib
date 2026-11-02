@@ -1,0 +1,7 @@
+(import time @std.time)
+
+(defn main () (result void time.time-error)
+  effects: (time.now)
+  (let - (try (time.now.wall)))
+  (let - (try (time.now.wall)))
+  (result.ok))

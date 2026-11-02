@@ -1,0 +1,11 @@
+(deffect write
+  (defn text (target str) void (do)))
+
+(defn ping (n u32) void
+  effects: (write)
+  (write.text "ping")
+  (pong n))
+
+(defn pong (n u32) void
+  effects: (write)
+  (ping n))

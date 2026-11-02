@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-union-atom-member"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A singleton atom reaches a union's atom member only after it has widened to atom, so the union records the member type atom, and an as pattern narrows to the atom and then compares it."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

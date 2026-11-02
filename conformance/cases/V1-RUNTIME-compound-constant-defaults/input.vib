@@ -1,0 +1,45 @@
+(defn main () (tuple bool point shape (tuple i32 i32) point point)
+  (tupleof
+    (flagged)
+    (placed)
+    (shaped)
+    (paired)
+    (via-constant)
+    (anchored.anchor (pin id: 7i32))))
+
+(deftype point (record x i32 y i32))
+(deftype shape (enum empty void circle i32))
+(deftype pin (record id i32)
+  (impl anchored
+    (defn anchor (value self) point
+      labelled: (at point first-spot)
+      at)))
+
+(def origin point (point x: 0i32 y: 0i32))
+(def first-spot point (point x: 1i32 y: 2i32))
+
+(defn flagged () bool
+  labelled: (flag bool (bool.true))
+  flag)
+
+(defn placed () point
+  labelled: (at point (point x: 3i32 y: 4i32))
+  at)
+
+(defn shaped () shape
+  labelled: (form shape (shape.circle 4i32))
+  form)
+
+(defn paired () (tuple i32 i32)
+  labelled: (both (tuple i32 i32) (tupleof 1i32 2i32))
+  both)
+
+(defn via-constant () point
+  labelled: (at point origin)
+  at)
+
+; The contract writes its default as a construction and the implementation as
+; a constant of the same value, which is the same default.
+(defint anchored
+  (defn anchor (value self) point
+    labelled: (at point (point x: 1i32 y: 2i32))))

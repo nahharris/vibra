@@ -4,7 +4,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Domain, Level};
-use vibra_ir::SourceOrigin;
+use vibra_host::{AuditEvent, HostWorld, WorldProvider};
+use vibra_interp::MemoryBudget;
+use vibra_ir::{CheckedProgram, SourceOrigin};
 use vibra_resolve::{DeclarationId, EntityKind, ResolvedSnapshot};
 use vibra_syntax::{Declaration, Literal};
 
@@ -217,8 +219,9 @@ pub struct TestItem {
     status: TestItemStatus,
     failure: Option<TestFailure>,
     trap: Option<TestTrap>,
-    audit_trace: Vec<String>,
+    audit_trace: Vec<AuditEvent>,
     diagnostics: Vec<Diagnostic>,
+    program: Option<CheckedProgram>,
 }
 
 impl TestItem {
@@ -248,8 +251,16 @@ impl TestItem {
 
     /// Isolated ordered host trace, empty for M2.
     #[must_use]
-    pub fn audit_trace(&self) -> &[String] {
+    pub fn audit_trace(&self) -> &[AuditEvent] {
         &self.audit_trace
+    }
+
+    /// The checked program this test ran as, for a backend that runs it again.
+    /// Every test of a workspace shares one module set, and the program selects
+    /// the test as its entry. `None` for a test that never ran.
+    #[must_use]
+    pub const fn program(&self) -> Option<&CheckedProgram> {
+        self.program.as_ref()
     }
 
     /// Diagnostics attributed to this test.
@@ -301,6 +312,7 @@ pub struct WorkspaceTestResult {
     status: TestSuiteStatus,
     diagnostics: Vec<Diagnostic>,
     items: Vec<TestItem>,
+    stopped_programs: Vec<vibra_ir::CheckedProgram>,
 }
 
 impl WorkspaceTestResult {
@@ -320,6 +332,16 @@ impl WorkspaceTestResult {
     #[must_use]
     pub fn items(&self) -> &[TestItem] {
         &self.items
+    }
+
+    /// The checked programs of the tests that ran up to and including the one a
+    /// host event stopped, in canonical discovery order. A run that ended in a
+    /// host event reports no item (zero selected, passed, and failed), so this
+    /// is how a second backend runs the same tests. It is empty for any other
+    /// result.
+    #[must_use]
+    pub fn stopped_programs(&self) -> &[vibra_ir::CheckedProgram] {
+        &self.stopped_programs
     }
 
     /// Number of selected records.
@@ -356,6 +378,38 @@ pub fn run_tests(
     selector: Option<&TestSelector>,
     verification: Option<&vibra_types::Stdlib>,
 ) -> WorkspaceTestResult {
+    run_tests_with_budget(workspace, selector, verification, MemoryBudget::DEFAULT)
+}
+
+/// Like [`run_tests`], with the memory budget the runner supplies for each
+/// test's instance: exhausting it ends the run with the host event
+/// `@runtime.memory-exhausted` and no test counts.
+pub fn run_tests_with_budget(
+    workspace: &WorkspaceSnapshot,
+    selector: Option<&TestSelector>,
+    verification: Option<&vibra_types::Stdlib>,
+    budget: MemoryBudget,
+) -> WorkspaceTestResult {
+    run_tests_in_world(
+        workspace,
+        selector,
+        verification,
+        budget,
+        &HostWorld::default(),
+    )
+}
+
+/// Like [`run_tests_with_budget`], with the host world each test starts in. A
+/// test runs over a fresh copy of `world`, so nothing a test writes or reads
+/// reaches another test or the process: standard output and error go to the
+/// test's audit trace and nowhere else.
+pub fn run_tests_in_world(
+    workspace: &WorkspaceSnapshot,
+    selector: Option<&TestSelector>,
+    verification: Option<&vibra_types::Stdlib>,
+    budget: MemoryBudget,
+    world: &HostWorld,
+) -> WorkspaceTestResult {
     let graph = match workspace.source_graph() {
         Ok(graph) => graph,
         Err(error) => return diagnostics_result(error.diagnostics().to_vec()),
@@ -367,13 +421,15 @@ pub fn run_tests(
         Ok(resolved) => resolved,
         Err(error) => return diagnostics_result(error.diagnostics().to_vec()),
     };
-    select_tests(&resolved, selector, verification)
+    select_tests(&resolved, selector, verification, budget, world)
 }
 
 fn select_tests(
     resolved: &ResolvedSnapshot,
     selector: Option<&TestSelector>,
     verification: Option<&vibra_types::Stdlib>,
+    budget: MemoryBudget,
+    world: &HostWorld,
 ) -> WorkspaceTestResult {
     let local = resolved.package();
     let modules = resolved
@@ -603,6 +659,7 @@ fn select_tests(
             status: TestSuiteStatus::Diagnostics,
             diagnostics: envelope_diagnostics,
             items,
+            stopped_programs: Vec::new(),
         };
     }
 
@@ -628,6 +685,8 @@ fn select_tests(
                 trap: None,
                 audit_trace: Vec::new(),
                 diagnostics: item_diagnostics,
+
+                program: None,
             });
             continue;
         }
@@ -640,7 +699,9 @@ fn select_tests(
             items.push(item);
             continue;
         };
-        match vibra_interp::Interpreter::run_test(program) {
+        let mut host = WorldProvider::new(world);
+        match vibra_interp::Interpreter::run_test_with_host(program, budget, &mut host)
+        {
             Ok(execution) => {
                 if let Some(failure) = execution.assertion_failure() {
                     items.push(TestItem {
@@ -656,6 +717,8 @@ fn select_tests(
                         trap: None,
                         audit_trace: execution.audit_trace().to_vec(),
                         diagnostics: item_diagnostics.clone(),
+
+                        program: Some(program.clone()),
                     });
                 } else {
                     items.push(TestItem {
@@ -665,6 +728,8 @@ fn select_tests(
                         trap: None,
                         audit_trace: execution.audit_trace().to_vec(),
                         diagnostics: item_diagnostics.clone(),
+
+                        program: Some(program.clone()),
                     });
                 }
             }
@@ -676,14 +741,21 @@ fn select_tests(
                         error.to_string(),
                     )
                 });
+                let mut stopped_programs = items
+                    .iter()
+                    .filter_map(|item: &TestItem| item.program.clone())
+                    .collect::<Vec<_>>();
+                stopped_programs.push(program.clone());
                 return WorkspaceTestResult {
                     status: TestSuiteStatus::OperationalFailure,
                     diagnostics: vec![diagnostic],
                     items: Vec::new(),
+                    stopped_programs,
                 };
             }
             Err(error) => {
                 let mut item = trap_item(test_name(test), error);
+                item.program = Some(program.clone());
                 item.diagnostics.extend(item_diagnostics);
                 sort_and_deduplicate(&mut item.diagnostics);
                 items.push(item);
@@ -717,6 +789,7 @@ fn select_tests(
         status,
         diagnostics: envelope_diagnostics,
         items,
+        stopped_programs: Vec::new(),
     }
 }
 
@@ -970,7 +1043,13 @@ mod provenance_tests {
         let verification =
             vibra_types::load_stdlib().expect("embedded standard library");
 
-        let result = select_tests(&resolved, None, Some(&verification));
+        let result = select_tests(
+            &resolved,
+            None,
+            Some(&verification),
+            vibra_interp::MemoryBudget::DEFAULT,
+            &vibra_host::HostWorld::default(),
+        );
 
         assert_eq!(
             result.status(),
@@ -1057,6 +1136,8 @@ fn invalid_item(test: &TestRef<'_>, diagnostics: &[Diagnostic]) -> TestItem {
         trap: None,
         audit_trace: Vec::new(),
         diagnostics: diagnostics.to_vec(),
+
+        program: None,
     }
 }
 
@@ -1081,6 +1162,8 @@ fn trap_item(name: String, error: vibra_interp::RuntimeError) -> TestItem {
         }),
         audit_trace: Vec::new(),
         diagnostics: vec![diagnostic],
+
+        program: None,
     }
 }
 
@@ -1090,6 +1173,7 @@ fn diagnostics_result(mut diagnostics: Vec<Diagnostic>) -> WorkspaceTestResult {
         status: TestSuiteStatus::Diagnostics,
         diagnostics,
         items: Vec::new(),
+        stopped_programs: Vec::new(),
     }
 }
 
@@ -1098,6 +1182,7 @@ fn empty_result(status: TestSuiteStatus) -> WorkspaceTestResult {
         status,
         diagnostics: Vec::new(),
         items: Vec::new(),
+        stopped_programs: Vec::new(),
     }
 }
 

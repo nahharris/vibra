@@ -1,0 +1,10 @@
+; Random bytes (`docs/spec/06-runtime.md`, "The host registry"): exactly `count`
+; bytes from the provider's generator.
+(deftype random-error (enum unavailable void) visibility: @public)
+
+(deffect generate
+  visibility: @public
+  (defn bytes (count u64) (result bytes random-error)
+    visibility: @public
+    external: @host
+    symbol: "random.generate-bytes"))

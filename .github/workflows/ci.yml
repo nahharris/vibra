@@ -36,7 +36,12 @@ jobs:
       - name: Install pinned toolchain
         run: rustup toolchain install
 
+      # The cache key is shared with the conformance job of the same operating
+      # system, which runs after this job and so restores the build this job
+      # saves, Wasmtime included, instead of compiling the engine a second time.
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace-${{ matrix.os }}
 
       - name: Fetch locked dependencies
         run: cargo fetch --locked
@@ -55,9 +60,21 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
 
+  # The conformance corpus is a separate job from the host-language tests, and
+  # since milestone 4 Step 4 it also runs every executable case in the
+  # WebAssembly backend, so it runs on the three platforms the engine must build
+  # on. It needs `check`, which compiles the workspace on each platform and
+  # saves the build under the shared cache key, so this job restores Wasmtime
+  # rather than compiling it again. The cost of the engine is one compile per
+  # platform, in `check`.
   conformance:
-    name: reader-v1 conformance corpus
-    runs-on: ubuntu-latest
+    name: conformance corpus (${{ matrix.os }})
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v5
 
@@ -65,20 +82,32 @@ jobs:
         run: rustup toolchain install
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: workspace-${{ matrix.os }}
 
       - name: Fetch locked dependencies
         run: cargo fetch --locked
 
       # This is the internal runner, not a user-facing `vibra` binary. It
-      # executes the checked-in cases through the real reader-v1 handler and
-      # exits nonzero on a failed or unavailable case.
-      - name: Run reader-v1 corpus
+      # executes the checked-in cases through the real handlers, the reference
+      # interpreter and the WebAssembly backend, and exits nonzero on a failed or
+      # unavailable case. It prints the counts by profile and by backend.
+      - name: Run the corpus in both backends
         run: cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
 
-      - name: Run specification inventory and fuzz smoke
-        run: |
-          cargo test --locked --offline -p vibra-conformance --test evidence_step11
-          cargo run --locked --offline -p vibra-conformance --bin m1-fuzz -- --profile ci-smoke
+      - name: Test the emitter and the runner
+        run: cargo test --locked --offline -p vibra-wasm -p vibra-wasm-run
+
+      - name: Test the parity inventory and deterministic emission
+        run: cargo test --locked --offline -p vibra-conformance --test parity_inventory_m4_step4 --test wasm_skeleton_m4_step4 --test differential_m4_step4
+
+      - name: Run specification inventory
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test --locked --offline -p vibra-conformance --test evidence_step11
+
+      - name: Run fuzz smoke
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo run --locked --offline -p vibra-conformance --bin m1-fuzz -- --profile ci-smoke
 
   archive-isolation:
     name: archive stays out of the build

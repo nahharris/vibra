@@ -46,17 +46,6 @@ pub struct Name {
 }
 
 impl Name {
-    /// An unqualified symbol spelled `text`, for a reader position that admits a
-    /// spelling the lexer classifies otherwise.
-    pub(crate) fn symbol(text: &str) -> Self {
-        Self {
-            raw: text.to_owned(),
-            value: text.to_owned(),
-            segments: vec![text.to_owned()],
-            kind: NameKind::Symbol,
-        }
-    }
-
     /// The exact source spelling, including `@` or `:` when present.
     #[must_use]
     pub fn raw(&self) -> &str {

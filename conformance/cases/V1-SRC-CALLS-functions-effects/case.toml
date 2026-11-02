@@ -2,7 +2,7 @@ id = "V1-SRC-CALLS-functions-effects"
 rule = "V1-SRC-CALLS"
 profile = "static-v1"
 operation = "type-check"
-description = "Function values in Step 7 retain the empty-effect admission boundary."
+description = "A function ceiling that names a symbol resolving to no effect root is an invalid reference at that entry, and the function's body is not checked against it."
 
 [inputs]
 source = "input.vib"
@@ -11,7 +11,7 @@ source = "input.vib"
 accepted = false
 
 [[expect.diagnostics]]
-code = "@tool.unavailable"
+code = "@effect.invalid-reference"
 level = "@error"
 source = "input.vib"
-span = [31, 42]
+span = [32, 41]

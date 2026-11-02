@@ -34,11 +34,11 @@ use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_syntax::{
     Application, ApplicationBinding, Attribute, BindingError, BindingFacts,
     CallArgument, CstNode, Declaration, DeftypeBody, Document, DocumentMode,
-    DocumentModeError, Expression, ExpressionKind, FunctionDeclaration, FunctionType,
-    ImplDeclaration, LambdaExpression, Literal, LiteralClassification, Parameter,
-    Pattern, PatternArgument, PatternKind, SourceAst, SyntaxKind, TypeExpr, TypeField,
-    TypeMember, TypeSlot, VariadicType, canonical_character_spelling, canonical_data,
-    classify, parse_document,
+    DocumentModeError, EffectRowOrder, Expression, ExpressionKind, FunctionDeclaration,
+    FunctionType, ImplDeclaration, LabelledDefault, LambdaExpression, Literal,
+    LiteralClassification, Parameter, Pattern, PatternArgument, PatternKind, SourceAst,
+    SyntaxKind, TypeExpr, TypeField, TypeMember, TypeSlot, VariadicType,
+    canonical_character_spelling, canonical_data, classify, parse_document,
 };
 
 /// An error selecting or formatting a document.
@@ -790,7 +790,13 @@ fn render_function_type(value: &FunctionType, output: &mut String) {
     }
     if !value.effects().is_empty() {
         output.push_str(" effects: ");
-        render_effect_row(value.effects(), output);
+        render_effect_row(
+            value
+                .effects()
+                .iter()
+                .map(vibra_syntax::EffectReference::name),
+            output,
+        );
     }
     output.push(')');
 }
@@ -848,7 +854,17 @@ fn render_attributes(attributes: &[Attribute], output: &mut String) {
                     output.push(' ');
                     render_type(parameter.value_type(), output);
                     output.push(' ');
-                    output.push_str(&format_leaf(parameter.default().raw()));
+                    match parameter.default() {
+                        LabelledDefault::Expression { expression, .. } => {
+                            // A default has no application binding to reorder by.
+                            render_expression(
+                                expression,
+                                output,
+                                &mut RenderContext::new(&[]),
+                            );
+                        }
+                        other => output.push_str(&format_leaf(other.raw())),
+                    }
                 }
                 output.push(')');
             }
@@ -874,9 +890,12 @@ fn render_attributes(attributes: &[Attribute], output: &mut String) {
     }
 }
 
-fn render_effect_row(references: &[vibra_syntax::Name], output: &mut String) {
+fn render_effect_row<'row>(
+    references: impl IntoIterator<Item = &'row vibra_syntax::Name>,
+    output: &mut String,
+) {
     output.push('(');
-    for (index, reference) in references.iter().enumerate() {
+    for (index, reference) in references.into_iter().enumerate() {
         if index != 0 {
             output.push(' ');
         }
@@ -1330,7 +1349,36 @@ pub fn format_source_with_bindings(
     source: &str,
     bindings: &[ApplicationBinding],
 ) -> Result<BoundFormat, FormatError> {
+    format_source_with_facts(path, source, bindings, &[])
+}
+
+/// Selects a document mode from `path`, parses, and formats with authoritative
+/// application binding facts and the canonical order of each written effect
+/// row.
+///
+/// A row is written sorted by the canonical identity of the roots its symbols
+/// resolve to, each symbol as the source wrote it. Without a fact for a row,
+/// its written order is preserved: the formatter never resolves a symbol.
+pub fn format_source_with_facts(
+    path: impl AsRef<Path>,
+    source: &str,
+    bindings: &[ApplicationBinding],
+    effect_rows: &[EffectRowOrder],
+) -> Result<BoundFormat, FormatError> {
     let document = parse_document(path, source)?;
+    if document.accepted()
+        && !document.recovered()
+        && document.mode() == DocumentMode::Source
+        && let Some(ordered) = structural::canonical_effect_row_order(
+            document.root(),
+            document.source(),
+            effect_rows,
+        )
+        && let Ok(reordered) = parse_document(document.path(), &ordered)
+        && reordered.accepted()
+    {
+        return format_document_with_bindings(&reordered, bindings);
+    }
     format_document_with_bindings(&document, bindings)
 }
 

@@ -1,0 +1,12 @@
+id = "V1-EFFECT-target-array-private-root"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "The project document is a privileged referrer, like the entry slot: it may name a root that is not public, here one declared in the entry's own module, and the entry is admitted."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true

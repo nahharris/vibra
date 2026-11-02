@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-tail-counter-field-and-binding"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A function value read from a record field into a binding and called in tail position reuses the activation, so a loop through a field-held function runs a hundred thousand rounds in one activation. The count comes from a counter built only from `if`, a tuple of digits, and a call."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

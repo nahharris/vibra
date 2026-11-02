@@ -1,0 +1,1 @@
+(record format: @host-world.v1 env: (dict "MODE" "test") args: (array "one" "two") clock: (record wall: 42i64 monotonic: 10u64 step: 3u64) random: (record seed: 0u64))

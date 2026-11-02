@@ -1,0 +1,1 @@
+(record format: @host-world.v1 stdin: "/notes/today.txt\n" files: (dict "/notes/today.txt" "write the spec\n"))

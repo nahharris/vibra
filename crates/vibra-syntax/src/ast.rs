@@ -538,6 +538,39 @@ impl BindingFacts {
     }
 }
 
+/// The canonical order of one written effect row, supplied by the checker.
+///
+/// A row is a set, and the formatter writes it sorted by the canonical
+/// identity of the roots its symbols resolve to. Only the checker resolves a
+/// symbol, so the formatter reorders a row only when it holds this fact, and
+/// keeps each lexical symbol as written.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffectRowOrder {
+    first_entry: ByteSpan,
+    order: Vec<usize>,
+}
+
+impl EffectRowOrder {
+    /// The order of the row whose first written entry is at `first_entry`:
+    /// position `n` of the formatted row is the entry written at `order[n]`.
+    #[must_use]
+    pub const fn new(first_entry: ByteSpan, order: Vec<usize>) -> Self {
+        Self { first_entry, order }
+    }
+
+    /// The span of the first entry as written, which names the row.
+    #[must_use]
+    pub const fn first_entry(&self) -> ByteSpan {
+        self.first_entry
+    }
+
+    /// The written index of the entry at each formatted position.
+    #[must_use]
+    pub fn order(&self) -> &[usize] {
+        &self.order
+    }
+}
+
 /// A structural failure while applying supplied binding facts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BindingError {
@@ -821,12 +854,19 @@ impl DefintDeclaration {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DeffectDeclaration {
     name: Name,
+    name_span: ByteSpan,
     attributes: DeclarationAttributes,
     members: Vec<FunctionDeclaration>,
     span: ByteSpan,
 }
 
 impl DeffectDeclaration {
+    /// The span of the effect root's name.
+    #[must_use]
+    pub const fn name_span(&self) -> ByteSpan {
+        self.name_span
+    }
+
     /// The unqualified effect root name.
     #[must_use]
     pub const fn name(&self) -> &Name {
@@ -1085,14 +1125,24 @@ impl Parameter {
     }
 }
 
-/// The default of a labelled parameter: any literal of the source grammar,
-/// which counts an atom name among them.
+/// The default of a labelled parameter: a constant expression, written as any
+/// literal of the source grammar, which counts an atom name among them, or as
+/// the name of a constant module value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LabelledDefault {
-    /// A string, character, boolean, numeric, or `void` literal.
+    /// A string, character, numeric, or `void` literal.
     Literal(Literal),
     /// An atom literal, `@name`.
     Atom(Name),
+    /// Any other expression, such as the name `true` or the construction
+    /// `(bool.true)`. It must be a constant expression, which the checker
+    /// decides.
+    Expression {
+        /// The parsed expression.
+        expression: Expression,
+        /// Its exact source spelling.
+        raw: String,
+    },
 }
 
 impl LabelledDefault {
@@ -1102,6 +1152,7 @@ impl LabelledDefault {
         match self {
             Self::Literal(literal) => literal.raw(),
             Self::Atom(name) => name.raw(),
+            Self::Expression { raw, .. } => raw,
         }
     }
 }
@@ -1112,11 +1163,18 @@ pub struct LabelledParameter {
     name: Name,
     value_type: TypeExpr,
     default: LabelledDefault,
+    default_span: ByteSpan,
     name_span: ByteSpan,
     span: ByteSpan,
 }
 
 impl LabelledParameter {
+    /// The source span of the default alone.
+    #[must_use]
+    pub const fn default_span(&self) -> ByteSpan {
+        self.default_span
+    }
+
     /// The unqualified parameter name.
     #[must_use]
     pub const fn name(&self) -> &Name {
@@ -1152,6 +1210,7 @@ impl LabelledParameter {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VariadicParameter {
     name: Name,
+    name_span: ByteSpan,
     value_type: VariadicType,
     span: ByteSpan,
 }
@@ -1161,6 +1220,12 @@ impl VariadicParameter {
     #[must_use]
     pub const fn name(&self) -> &Name {
         &self.name
+    }
+
+    /// The source span of the binding name alone.
+    #[must_use]
+    pub const fn name_span(&self) -> ByteSpan {
+        self.name_span
     }
 
     /// The variadic tail type.
@@ -1237,7 +1302,30 @@ pub struct FunctionType {
     result: Box<TypeExpr>,
     labelled: Vec<TypeSlot>,
     variadic: Option<VariadicType>,
-    effects: Vec<Name>,
+    effects: Vec<EffectReference>,
+}
+
+/// One symbol of a function type's effect row, with where it is written.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffectReference {
+    name: Name,
+    span: TypeSpan,
+}
+
+impl EffectReference {
+    /// The effect symbol.
+    #[must_use]
+    pub const fn name(&self) -> &Name {
+        &self.name
+    }
+
+    /// Where the symbol is written. Like every type expression, a function
+    /// type is the same type wherever it is written, so this span takes no
+    /// part in a comparison.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span.span()
+    }
 }
 
 impl FunctionType {
@@ -1267,7 +1355,7 @@ impl FunctionType {
 
     /// Effect references in source order.
     #[must_use]
-    pub fn effects(&self) -> &[Name] {
+    pub fn effects(&self) -> &[EffectReference] {
         &self.effects
     }
 }
@@ -1375,6 +1463,8 @@ impl GenericBinding {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EffectRow {
     references: Vec<Name>,
+    /// The source span of each entry of `references`, in the same order.
+    entry_spans: Vec<ByteSpan>,
     span: ByteSpan,
 }
 
@@ -1383,6 +1473,13 @@ impl EffectRow {
     #[must_use]
     pub fn references(&self) -> &[Name] {
         &self.references
+    }
+
+    /// The source span of each effect symbol, in the order of
+    /// [`Self::references`].
+    #[must_use]
+    pub fn entry_spans(&self) -> &[ByteSpan] {
+        &self.entry_spans
     }
 
     /// The source span.
@@ -1485,9 +1582,29 @@ impl DeclarationAttributes {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct FunctionAttributes {
     items: Vec<Attribute>,
+    spans: Box<[(String, ByteSpan, ByteSpan)]>,
 }
 
 impl FunctionAttributes {
+    /// The span of the attribute written with `label` (without the colon), from
+    /// its label to the end of its value.
+    #[must_use]
+    pub fn attribute_span(&self, label: &str) -> Option<ByteSpan> {
+        self.spans
+            .iter()
+            .find(|(known, _, _)| known == label)
+            .map(|(_, attribute, _)| *attribute)
+    }
+
+    /// The span of the value of the attribute written with `label`.
+    #[must_use]
+    pub fn value_span(&self, label: &str) -> Option<ByteSpan> {
+        self.spans
+            .iter()
+            .find(|(known, _, _)| known == label)
+            .map(|(_, _, value)| *value)
+    }
+
     /// Attributes in source order.
     #[must_use]
     pub fn items(&self) -> &[Attribute] {
@@ -1565,6 +1682,7 @@ enum FunctionOwner {
 
 struct ParsedAttributes {
     items: Vec<Attribute>,
+    spans: Vec<(String, ByteSpan, ByteSpan)>,
     next: usize,
 }
 
@@ -1572,6 +1690,7 @@ struct ParsedAttributes {
 enum AttributeContext {
     Type,
     Declaration,
+    Effect,
     Function,
     Lambda,
 }
@@ -1668,7 +1787,7 @@ impl AstParser {
         let claims_role = forms.get(3..).is_some_and(|attributes| {
             attributes.iter().any(|form| {
                 matches!(
-                    form.name(),
+                    form.source_name(),
                     Some(NameClassification::Name(name))
                         if name.kind() == NameKind::Label && name.value() == "role"
                 )
@@ -1744,7 +1863,7 @@ impl AstParser {
         let claims_role = forms.get(2..).is_some_and(|attributes| {
             attributes.iter().any(|form| {
                 matches!(
-                    form.name(),
+                    form.source_name(),
                     Some(NameClassification::Name(name))
                         if name.kind() == NameKind::Label && name.value() == "role"
                 )
@@ -1803,8 +1922,7 @@ impl AstParser {
             return None;
         }
         let name = self.declaration_name(forms[1])?;
-        let parsed =
-            self.parse_attributes(&forms[2..], AttributeContext::Declaration, &[]);
+        let parsed = self.parse_attributes(&forms[2..], AttributeContext::Effect, &[]);
         let attributes = DeclarationAttributes {
             items: parsed.items,
         };
@@ -1829,6 +1947,7 @@ impl AstParser {
             }
         }
         Some(Declaration::Deffect(DeffectDeclaration {
+            name_span: forms[1].span(),
             name,
             attributes,
             members,
@@ -1941,7 +2060,8 @@ impl AstParser {
         let name =
             self.local_name(forms[1], "defn names must be unqualified symbols")?;
         if matches!(owner, FunctionOwner::Module)
-            && is_reserved_value_spelling(name.value())
+            && (is_reserved_value_spelling(name.value())
+                || is_prelude_type_spelling(name.value()))
         {
             self.error(
                 DiagnosticCode::NameReservedValueSpelling,
@@ -1984,6 +2104,13 @@ impl AstParser {
             .collect::<Option<Vec<_>>>();
         self.generic_scope = enclosing;
         let expressions = expressions?;
+        let attribute_span = |label: &str| {
+            parsed
+                .spans
+                .iter()
+                .find(|(known, _, _)| known == label)
+                .map(|(_, span, _)| *span)
+        };
         let has_external = parsed
             .items
             .iter()
@@ -2020,7 +2147,7 @@ impl AstParser {
             if !provider_is_host {
                 self.error(
                     DiagnosticCode::SyntaxInvalidAttribute,
-                    node.span(),
+                    attribute_span("external").unwrap_or_else(|| node.span()),
                     "an effect member external must use the host provider",
                 );
             }
@@ -2038,7 +2165,7 @@ impl AstParser {
             {
                 self.error(
                     DiagnosticCode::SyntaxInvalidAttribute,
-                    node.span(),
+                    attribute_span("external").unwrap_or_else(|| node.span()),
                     "the host provider is restricted to effect members",
                 );
             }
@@ -2049,8 +2176,8 @@ impl AstParser {
                 if has_additive_effects {
                     self.error(
                         DiagnosticCode::SyntaxInvalidAttribute,
-                        node.span(),
-                        "external declarations cannot add effects",
+                        attribute_span("effects").unwrap_or_else(|| node.span()),
+                        "an external declaration has no additive row: a @host member performs exactly its owner root",
                     );
                 }
             }
@@ -2062,6 +2189,7 @@ impl AstParser {
             result_span,
             attributes: FunctionAttributes {
                 items: parsed.items,
+                spans: parsed.spans.into(),
             },
             body,
             expressions,
@@ -2135,7 +2263,7 @@ impl AstParser {
 
     fn parse_expression_inner(&mut self, node: &CstNode) -> Option<Expression> {
         if node.kind() != SyntaxKind::List {
-            if let Some(classification) = node.literal() {
+            if let Some(classification) = node.source_literal() {
                 match classification {
                     LiteralClassification::Literal(literal) => {
                         return Some(Expression {
@@ -2147,7 +2275,7 @@ impl AstParser {
                     LiteralClassification::Opaque => {}
                 }
             }
-            return match node.name() {
+            return match node.source_name() {
                 Some(NameClassification::Name(name))
                     if matches!(name.kind(), NameKind::Symbol | NameKind::Atom) =>
                 {
@@ -2333,6 +2461,7 @@ impl AstParser {
                 result_span,
                 attributes: FunctionAttributes {
                     items: parsed.items,
+                    spans: parsed.spans.into(),
                 },
                 body,
                 span: node.span(),
@@ -2649,7 +2778,7 @@ impl AstParser {
 
     fn parse_pattern_inner(&mut self, node: &CstNode) -> Option<Pattern> {
         if node.kind() != SyntaxKind::List {
-            if let Some(classification) = node.literal() {
+            if let Some(classification) = node.source_literal() {
                 match classification {
                     LiteralClassification::Literal(literal) => {
                         return Some(Pattern {
@@ -2661,7 +2790,7 @@ impl AstParser {
                     LiteralClassification::Opaque => {}
                 }
             }
-            return match node.name() {
+            return match node.source_name() {
                 Some(NameClassification::Name(name)) => match name.kind() {
                     NameKind::Symbol if name.segments().len() == 1 => Some(Pattern {
                         kind: PatternKind::Binding(name.clone()),
@@ -2856,7 +2985,7 @@ impl AstParser {
     }
 
     fn label_name(&self, node: &CstNode) -> Option<Name> {
-        match node.name() {
+        match node.source_name() {
             Some(NameClassification::Name(name)) if name.kind() == NameKind::Label => {
                 Some(name.clone())
             }
@@ -2869,7 +2998,7 @@ impl AstParser {
             Some("intrinsic-type") => {
                 let forms = meaningful_children(node);
                 let atom = match forms.as_slice() {
-                    [_, value] => match value.name() {
+                    [_, value] => match value.source_name() {
                         Some(NameClassification::Name(name))
                             if name.kind() == NameKind::Atom =>
                         {
@@ -2932,17 +3061,8 @@ impl AstParser {
         let mut fields = Vec::with_capacity((forms.len() - 1) / 2);
         let mut seen = BTreeSet::new();
         for pair in forms[1..].chunks_exact(2) {
-            // An enum may name variants `true` and `false`, as `bool` does.
-            let name = match pair[0].literal() {
-                Some(LiteralClassification::Literal(Literal::Boolean(value)))
-                    if !record =>
-                {
-                    Name::symbol(if value.value() { "true" } else { "false" })
-                }
-                _ => {
-                    self.local_name(pair[0], "type body members must be local names")?
-                }
-            };
+            let name =
+                self.local_name(pair[0], "type body members must be local names")?;
             if !seen.insert(name.value().to_owned()) {
                 self.error(
                     DiagnosticCode::NameMemberCollision,
@@ -3066,9 +3186,9 @@ impl AstParser {
                 }
             }
         } else {
-            let Some(classification) = node.name() else {
+            let Some(classification) = node.source_name() else {
                 if matches!(
-                    node.literal(),
+                    node.source_literal(),
                     Some(LiteralClassification::Literal(Literal::Void(_)))
                 ) {
                     return Some(TypeExpr::Void);
@@ -3123,7 +3243,7 @@ impl AstParser {
         while index < forms.len() {
             let label = forms[index];
             let Some(label_name) = label
-                .name()
+                .source_name()
                 .and_then(|classification| classification.as_name().cloned())
             else {
                 self.invalid_form(label, "function type attributes must be labels");
@@ -3147,7 +3267,18 @@ impl AstParser {
             match label_name.value() {
                 "labelled" => labelled = self.parse_type_slots(value)?,
                 "variadic" => variadic = Some(self.parse_variadic_type(value)?),
-                "effects" => effects = self.parse_effect_row(value)?.references,
+                "effects" => {
+                    let row = self.parse_effect_row(value)?;
+                    effects = row
+                        .references
+                        .into_iter()
+                        .zip(row.entry_spans)
+                        .map(|(name, span)| EffectReference {
+                            name,
+                            span: TypeSpan(span),
+                        })
+                        .collect();
+                }
                 _ => {
                     self.error(
                         DiagnosticCode::SyntaxUnknownAttribute,
@@ -3244,6 +3375,7 @@ impl AstParser {
         let allowed = match context {
             AttributeContext::Type => &["where", "role", "visibility", "doc"][..],
             AttributeContext::Declaration => &["visibility", "doc"][..],
+            AttributeContext::Effect => &["visibility", "doc", "effects"][..],
             AttributeContext::Function => &[
                 "where",
                 "labelled",
@@ -3260,11 +3392,12 @@ impl AstParser {
             }
         };
         let mut items = Vec::new();
+        let mut spans = Vec::new();
         let mut seen = BTreeSet::new();
         let mut index = 0;
         while index < forms.len() {
             let Some(label_name) = forms[index]
-                .name()
+                .source_name()
                 .and_then(|classification| classification.as_name().cloned())
             else {
                 break;
@@ -3311,6 +3444,18 @@ impl AstParser {
                 index += 1;
                 continue;
             };
+            // A root is a name and not a row: its operations declare their
+            // additive rows one by one, so `effects:` on the `deffect` itself
+            // is a malformed attribute and not an unknown one.
+            if matches!(context, AttributeContext::Effect) && label == "effects" {
+                self.error(
+                    DiagnosticCode::SyntaxInvalidAttribute,
+                    forms[index].span().join(value.span()),
+                    "a deffect takes no effects: attribute; its operations declare their additive rows",
+                );
+                index += 2;
+                continue;
+            }
             if let Some(attribute) =
                 self.parse_attribute(label, value, inherited_generics)
             {
@@ -3318,11 +3463,20 @@ impl AstParser {
                     // The next nested method may inherit these names. The
                     // containing declaration collects them from the result.
                 }
+                spans.push((
+                    label.to_owned(),
+                    forms[index].span().join(value.span()),
+                    value.span(),
+                ));
                 items.push(attribute);
             }
             index += 2;
         }
-        ParsedAttributes { items, next: index }
+        ParsedAttributes {
+            items,
+            spans,
+            next: index,
+        }
     }
 
     fn parse_attribute(
@@ -3380,6 +3534,7 @@ impl AstParser {
                 self.local_name(pair[0], "generic names must be unqualified symbols")?;
             if RESERVED_TYPE_HEADS.contains(&name.value())
                 || BUILTIN_TYPE_NAMES.contains(&name.value())
+                || is_prelude_value_spelling(name.value())
                 || matches!(name.value(), "any" | "self")
             {
                 self.error(
@@ -3454,21 +3609,29 @@ impl AstParser {
                 return None;
             }
             let value_type = self.parse_type_expr(triple[1])?;
-            // An atom name is a literal of the source grammar.
-            let default = match triple[2].name() {
+            // An atom name is a literal of the source grammar; any other
+            // form is an expression, which must be a constant one.
+            let default = match triple[2].source_name() {
                 Some(NameClassification::Name(atom))
                     if atom.kind() == NameKind::Atom =>
                 {
                     LabelledDefault::Atom(atom)
                 }
-                _ => LabelledDefault::Literal(
-                    self.literal(triple[2], "labelled defaults must be literals")?,
-                ),
+                _ => match triple[2].source_literal() {
+                    Some(LiteralClassification::Literal(literal)) => {
+                        LabelledDefault::Literal(literal)
+                    }
+                    _ => LabelledDefault::Expression {
+                        expression: self.parse_expression(triple[2])?,
+                        raw: triple[2].to_source(),
+                    },
+                },
             };
             parameters.push(LabelledParameter {
                 name,
                 value_type,
                 default,
+                default_span: triple[2].span(),
                 name_span: triple[0].span(),
                 span: ByteSpan::new(triple[0].span().start(), triple[2].span().end()),
             });
@@ -3492,6 +3655,7 @@ impl AstParser {
         let value_type = self.parse_variadic_type(forms[1])?;
         Some(VariadicParameter {
             name,
+            name_span: forms[0].span(),
             value_type,
             span: node.span(),
         })
@@ -3503,12 +3667,14 @@ impl AstParser {
             return None;
         };
         let mut references = Vec::with_capacity(forms.len());
+        let mut entry_spans = Vec::with_capacity(forms.len());
         for form in forms {
-            match form.name() {
+            match form.source_name() {
                 Some(NameClassification::Name(name))
                     if name.kind() == NameKind::Symbol =>
                 {
-                    references.push(name)
+                    references.push(name);
+                    entry_spans.push(form.span());
                 }
                 Some(NameClassification::Name(_)) => self.error(
                     DiagnosticCode::EffectInvalidReference,
@@ -3527,6 +3693,7 @@ impl AstParser {
         }
         Some(EffectRow {
             references,
+            entry_spans,
             span: node.span(),
         })
     }
@@ -3547,6 +3714,7 @@ impl AstParser {
             self.local_name(node, "declaration names must be unqualified symbols")?;
         // `any` is the predeclared empty interface; no declaration takes it.
         if name.value() == "any"
+            || is_prelude_value_spelling(name.value())
             || RESERVED_TYPE_HEADS.contains(&name.value())
             || (!allow_builtin
                 && (BUILTIN_TYPE_NAMES.contains(&name.value())
@@ -3563,7 +3731,9 @@ impl AstParser {
 
     fn value_declaration_name(&mut self, node: &CstNode) -> Option<Name> {
         let name = self.local_name(node, "value names must be unqualified symbols")?;
-        if is_reserved_value_spelling(name.value()) {
+        if is_reserved_value_spelling(name.value())
+            || is_prelude_type_spelling(name.value())
+        {
             self.error(
                 DiagnosticCode::NameReservedValueSpelling,
                 node.span(),
@@ -3574,7 +3744,7 @@ impl AstParser {
     }
 
     fn type_name(&mut self, node: &CstNode) -> Option<Name> {
-        match node.name() {
+        match node.source_name() {
             Some(NameClassification::Name(name)) if name.kind() == NameKind::Symbol => {
                 Some(name)
             }
@@ -3591,7 +3761,7 @@ impl AstParser {
     }
 
     fn local_name(&mut self, node: &CstNode, message: &'static str) -> Option<Name> {
-        match node.name() {
+        match node.source_name() {
             Some(NameClassification::Name(name))
                 if name.kind() == NameKind::Symbol && name.segments().len() == 1 =>
             {
@@ -3610,7 +3780,7 @@ impl AstParser {
     }
 
     fn binding_name(&mut self, node: &CstNode) -> Option<Name> {
-        match node.name() {
+        match node.source_name() {
             Some(NameClassification::Name(name))
                 if (name.kind() == NameKind::Symbol && name.segments().len() == 1)
                     || name.kind() == NameKind::Discard =>
@@ -3630,7 +3800,7 @@ impl AstParser {
     }
 
     fn atom_name(&mut self, node: &CstNode, message: &'static str) -> Option<Name> {
-        match node.name() {
+        match node.source_name() {
             Some(NameClassification::Name(name)) if name.kind() == NameKind::Atom => {
                 Some(name)
             }
@@ -3643,7 +3813,7 @@ impl AstParser {
     }
 
     fn literal(&mut self, node: &CstNode, message: &'static str) -> Option<Literal> {
-        match node.literal() {
+        match node.source_literal() {
             Some(LiteralClassification::Literal(literal)) => Some(literal),
             Some(LiteralClassification::Invalid(_)) | None => {
                 self.invalid_form(node, message);
@@ -3692,7 +3862,7 @@ fn head_text(node: &CstNode) -> Option<&str> {
 }
 
 fn is_label(node: &CstNode, expected: &str) -> bool {
-    node.name()
+    node.source_name()
         .and_then(|classification| classification.as_name().cloned())
         .is_some_and(|name| name.kind() == NameKind::Label && name.value() == expected)
 }
@@ -3745,9 +3915,61 @@ fn deftype_member_names(body: &DeftypeBody) -> BTreeSet<String> {
     }
 }
 
+/// Heads that are reserved expression forms, which no lexical binder may take.
+const BINDER_KEYWORDS: &[&str] = &[
+    "do", "let", "let-else", "if", "match", "return", "as", "try", "lambda", "tupleof",
+    "recordof", "enumof",
+];
+/// The primitive type names of the type chapter.
+const PRIMITIVE_TYPE_NAMES: &[&str] = &[
+    "bool", "void", "never", "char", "str", "bytes", "atom", "i8", "i16", "i32", "i64",
+    "u8", "u16", "u32", "u64", "f32", "f64",
+];
+
+/// The values of the closed import-free vocabulary that `@std.bool` declares.
+/// Every module sees them without an import, and nothing can shadow them
+/// (`docs/spec/02-type-system.md`, "Language core and standard library").
+pub const PRELUDE_VALUES: &[&str] = &["true", "false"];
+
+/// Whether `spelling` is a value of the closed import-free vocabulary.
+#[must_use]
+pub fn is_prelude_value_spelling(spelling: &str) -> bool {
+    PRELUDE_VALUES.contains(&spelling)
+}
+
+/// Whether `spelling` is a name of the closed import-free vocabulary, a type
+/// or a value. Every such name is a reserved spelling.
+#[must_use]
+pub fn is_vocabulary_name(spelling: &str) -> bool {
+    is_prelude_value_spelling(spelling)
+        || ROLE_TYPE_NAMES.contains(&spelling)
+        || BUILTIN_TYPE_NAMES.contains(&spelling)
+}
+
+/// Whether a lexical binder may not be spelled `spelling`: a keyword, `any`,
+/// or a name of the closed import-free vocabulary
+/// (`docs/spec/01-source-language.md`, "Reader"). Such a binder is
+/// `@name.reserved-declaration` at its name and still binds.
+#[must_use]
+pub fn is_reserved_binder_spelling(spelling: &str) -> bool {
+    spelling == "any"
+        || BINDER_KEYWORDS.contains(&spelling)
+        || PRIMITIVE_TYPE_NAMES.contains(&spelling)
+        || is_vocabulary_name(spelling)
+}
+
 /// Whether a module-level value or import alias spelling names a builtin
 /// type, whose static methods are reached by the same dotted path.
 #[must_use]
 pub fn is_reserved_value_spelling(spelling: &str) -> bool {
     spelling == "tuple" || BUILTIN_TYPE_NAMES.contains(&spelling)
+}
+
+/// Whether `spelling` names a type that plays a language role, a name of the
+/// prelude. A module-level value or function may not take it. An import alias
+/// may: `(import option @std.option)` and `(import iter @std.iter.iter)` are
+/// the specification's own spelling of a declaration import.
+#[must_use]
+pub fn is_prelude_type_spelling(spelling: &str) -> bool {
+    ROLE_TYPE_NAMES.contains(&spelling)
 }

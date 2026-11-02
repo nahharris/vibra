@@ -1,0 +1,16 @@
+(import log @ops.log)
+(import audit @ops.log.audit)
+
+(defn handle (target str) void
+  effects: (log.audit log.write)
+  (log.audit.record target))
+
+(defn through-alias (target str) void
+  effects: (audit log.write)
+  (audit.record target))
+
+(defn apply (f (fn (str) void effects: (log.write)) target str) void
+  effects: (log.write)
+  (f target))
+
+(defn execute () void void)

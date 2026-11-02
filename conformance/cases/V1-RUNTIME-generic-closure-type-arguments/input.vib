@@ -1,0 +1,9 @@
+(defn main () (tuple (maybe void) (maybe i32))
+  (tupleof ((make void)) ((make 5i32))))
+
+(defn make (value t) (fn () (maybe t))
+  where: (t any)
+  (lambda () (maybe t) (maybe.some value)))
+
+(deftype maybe (enum some t none void)
+  where: (t any))

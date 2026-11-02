@@ -1,0 +1,36 @@
+id = "V1-PROJECT-workspace-check-effects-wrong-kind"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "A type, a function, an operation, and a module named in a target array are each @name.wrong-entity-kind at the atom, since none is an effect root."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.wrong-entity-kind"
+level = "@error"
+source = "project.vibon"
+span = [209, 224]
+
+[[expect.diagnostics]]
+code = "@name.wrong-entity-kind"
+level = "@error"
+source = "project.vibon"
+span = [225, 240]
+
+[[expect.diagnostics]]
+code = "@name.wrong-entity-kind"
+level = "@error"
+source = "project.vibon"
+span = [241, 262]
+
+[[expect.diagnostics]]
+code = "@name.wrong-entity-kind"
+level = "@error"
+source = "project.vibon"
+span = [263, 271]

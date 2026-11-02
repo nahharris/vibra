@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-fs-test-world-writes-are-fresh"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "A test world is a file tree: a write in one test is visible to a later read in the same test, and it never reaches the next test or the real filesystem, because the world is copied fresh for each test and each backend. The second test reads the original contents."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon" }

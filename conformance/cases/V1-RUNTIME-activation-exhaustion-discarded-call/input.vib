@@ -1,0 +1,5 @@
+; `forever` has no base case, and each call is followed by the rest of its
+; sequence, so it is not in tail position and no activation is ever released.
+(defn main () void (do (forever) void))
+
+(defn forever () void (do (forever) void))

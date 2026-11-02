@@ -1,0 +1,16 @@
+; The canonical encoding of a union names the member its discriminant selects,
+; as the union declares it: `(array walker)` here, where the implementation built
+; an array of `ticker`. The result is observed as the union itself.
+(defn main () (either walker)
+  (walker.either (as walker (ticker n: 4u32))))
+
+(deftype either (union (array t) str)
+  where: (t any))
+
+(defint walker
+  (defn either (value self) (either self)))
+
+(deftype ticker (record n u32)
+  (impl walker
+    (defn either (value self) (either self)
+      (as (either self) (array.of value)))))

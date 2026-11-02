@@ -1,0 +1,1 @@
+(record format: @audit-trace.v1 events: (array (record kind: @host op: "fs.read-text" args: (array (record kind: @wrapper type: @std.fs.path value: "/missing.txt")) result: (record kind: @enum type: @std.result.result variant: @err payload: (record kind: @enum type: @std.fs.fs-error variant: @not-found)))))

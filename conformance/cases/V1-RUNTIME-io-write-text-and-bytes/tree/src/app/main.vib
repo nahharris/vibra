@@ -1,0 +1,8 @@
+(import io @std.io)
+
+(defn main () (result void io.io-error)
+  effects: (io.stderr io.stdout)
+  (let - (try (io.stdout.text "héllo 😀\n")))
+  (let - (try (io.stdout.bytes (bytes (array.of 0u8 255u8 104u8)))))
+  (let - (try (io.stderr.text "warn\n")))
+  (io.stderr.bytes (bytes (array.of 10u8))))

@@ -1,0 +1,21 @@
+; A member that names `self` in its result is called through an interface value,
+; so the result is converted where the implementation returns the type it is
+; for: at every depth of an array, a dict, and a record.
+(defn main ()
+  (tuple (array walker) (dict str walker) (record item walker count u32))
+  (tupleof
+    (walker.pair (as walker (counter n: 1u32)))
+    (walker.labelled (as walker (counter n: 2u32)))
+    (walker.boxed (as walker (counter n: 3u32)))))
+
+(defint walker
+  (defn pair (value self) (array self))
+  (defn labelled (value self) (dict str self))
+  (defn boxed (value self) (record item self count u32)))
+
+(deftype counter (record n u32)
+  (impl walker
+    (defn pair (value self) (array self) (array.of value value))
+    (defn labelled (value self) (dict str self) (dict.of "b" value "a" value))
+    (defn boxed (value self) (record item self count u32)
+      (recordof item: value count: 7u32))))

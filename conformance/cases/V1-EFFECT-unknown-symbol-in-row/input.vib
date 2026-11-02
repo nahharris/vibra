@@ -1,0 +1,5 @@
+(defn helper () void (do))
+
+(defn f () void
+  effects: (nowhere helper)
+  (do))

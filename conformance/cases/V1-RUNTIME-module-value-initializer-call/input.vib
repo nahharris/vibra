@@ -1,0 +1,14 @@
+(def plain i32 (one 1i32))
+(def bound i32 (do (let t (one 2i32)) t))
+(def nested i32 (one (one 3i32)))
+(def defaulted i32 (pick 4i32))
+(def labelled i32 (pick 5i32 extra: 10i32))
+
+(defn main () (tuple i32 i32 i32 i32 i32)
+  (tupleof plain bound nested defaulted labelled))
+
+(defn one (n i32) i32 n)
+
+(defn pick (n i32) i32
+  labelled: (extra i32 7i32)
+  extra)

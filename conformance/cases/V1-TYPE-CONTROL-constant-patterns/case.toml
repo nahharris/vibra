@@ -1,0 +1,11 @@
+id = "V1-TYPE-CONTROL-constant-patterns"
+rule = "V1-TYPE-CONTROL"
+profile = "static-v1"
+operation = "type-check"
+description = "A name that resolves to a constant module value is a value pattern: an integer, a declared enum value, a constant defined by another constant, and a tuple, each in a match arm, and `true` and `false`, which every program names without an import, cover bool exactly as (bool.true) and (bool.false) do, bare, nested in a tuple, and in a let-else."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

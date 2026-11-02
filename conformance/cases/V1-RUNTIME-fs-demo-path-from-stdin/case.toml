@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-fs-demo-path-from-stdin"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "The demo shape: the path is read from standard input, the file it names is read as text, transformed by the program, and written to standard output. The three completed calls are the three events, and the entry returns ok."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

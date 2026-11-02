@@ -75,6 +75,96 @@ pub(crate) fn canonical_structural_order(
     Some(output)
 }
 
+/// Returns the source with every written effect row in the canonical order of
+/// `rows`, or `None` when every row is already in it.
+///
+/// A row is a set, written sorted by the canonical identity of its roots. Only
+/// the checker resolves a symbol, so `rows` is its fact for each row, named by
+/// the start of the row's first entry. Like the pass above, this one permutes
+/// the entry texts within their own slots and keeps every separator, so the
+/// byte length of the row is unchanged and no span outside it moves: each
+/// lexical symbol is kept as written, and binding facts stay valid. A row that
+/// contains a comment, or whose fact does not match its entries, is left as
+/// written. A caller applies it once, since the fact describes the written
+/// order and not the order a pass leaves.
+pub(crate) fn canonical_effect_row_order(
+    root: &CstNode,
+    source: &str,
+    rows: &[vibra_syntax::EffectRowOrder],
+) -> Option<String> {
+    if rows.is_empty() {
+        return None;
+    }
+    let mut replacements = Vec::new();
+    let mut pending = vec![root];
+    while let Some(node) = pending.pop() {
+        let children = meaningful(node);
+        for (index, child) in children.iter().enumerate() {
+            if child.kind() == SyntaxKind::List {
+                pending.push(child);
+            }
+            let is_row = child.kind() == SyntaxKind::List
+                && index
+                    .checked_sub(1)
+                    .and_then(|before| children.get(before))
+                    .and_then(|before| before.leaf_text())
+                    .is_some_and(|label| label == "effects:");
+            if is_row && let Some(text) = ordered_row(child, source, rows) {
+                replacements.push((child.span().start(), child.span().end(), text));
+            }
+        }
+    }
+    if replacements.is_empty() {
+        return None;
+    }
+    replacements.sort_by_key(|(start, _, _)| *start);
+    replacements.dedup_by_key(|(start, _, _)| *start);
+    let mut output = String::with_capacity(source.len());
+    let mut cursor = 0;
+    for (start, end, text) in replacements {
+        output.push_str(source.get(cursor..start)?);
+        output.push_str(&text);
+        cursor = end;
+    }
+    output.push_str(source.get(cursor..)?);
+    Some(output)
+}
+
+/// The text of the row `node` with its entries in the order of its fact, or
+/// `None` when it is already in that order or has no applicable fact.
+fn ordered_row(
+    node: &CstNode,
+    source: &str,
+    rows: &[vibra_syntax::EffectRowOrder],
+) -> Option<String> {
+    if contains_comment(node) {
+        return None;
+    }
+    let entries = meaningful(node);
+    let first = entries.first()?;
+    if entries.iter().any(|entry| entry.kind() != SyntaxKind::Atom) {
+        return None;
+    }
+    let fact = rows
+        .iter()
+        .find(|fact| fact.first_entry().start() == first.span().start())?;
+    let order = fact.order();
+    let is_permutation = order.len() == entries.len()
+        && (0..entries.len()).all(|position| order.contains(&position));
+    if !is_permutation || order.iter().enumerate().all(|(n, entry)| n == *entry) {
+        return None;
+    }
+    let mut output = String::new();
+    let mut cursor = node.span().start();
+    for (slot, entry) in entries.iter().zip(order) {
+        output.push_str(source.get(cursor..slot.span().start())?);
+        output.push_str(slice(source, entries.get(*entry)?));
+        cursor = slot.span().end();
+    }
+    output.push_str(source.get(cursor..node.span().end())?);
+    Some(output)
+}
+
 /// The head of an anonymous structural type whose members may be reordered.
 fn structural_head(node: &CstNode) -> Option<&'static str> {
     match head_text(node)? {

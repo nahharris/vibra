@@ -40,7 +40,7 @@ The delivery sequence and measurable release gates are in
 | v1 specification | Normative target, open to deliberate revision |
 | v1 roadmap | Defined |
 | post-v1 direction | [Design tracks drafted](docs/roadmap/beyond-v1/README.md); non-normative |
-| v1 implementation | Milestone 1 merged; [Milestone 2 planned](docs/roadmap/milestone-2/README.md) on `m2`, implementation not started |
+| v1 implementation | Milestones 1 to 3 merged to `main`; [Milestone 4](docs/roadmap/milestone-4/README.md) complete on its integration branch `m4` with its [exit gate evidenced](docs/roadmap/milestone-4/exit-evidence.md), merge to `main` pending |
 | pre-v1 implementation | Archived; unsupported |
 
 No user-facing build or install instructions are published while the active

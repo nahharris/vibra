@@ -31,14 +31,16 @@ mod reader;
 pub use ast::{
     Application, ApplicationBinding, Attribute, BindingError, BindingFacts,
     CallArgument, Declaration, DeclarationAttributes, DefDeclaration,
-    DeffectDeclaration, DefintDeclaration, DeftypeBody, DeftypeDeclaration, EffectRow,
-    Expression, ExpressionKind, FunctionAttributes, FunctionDeclaration, FunctionType,
-    GenericBinding, ImplDeclaration, ImportDeclaration, LabelledDefault,
-    LabelledParameter, LambdaExpression, LetBinding, MatchArm, Parameter, Pattern,
+    DeffectDeclaration, DefintDeclaration, DeftypeBody, DeftypeDeclaration,
+    EffectReference, EffectRow, EffectRowOrder, Expression, ExpressionKind,
+    FunctionAttributes, FunctionDeclaration, FunctionType, GenericBinding,
+    ImplDeclaration, ImportDeclaration, LabelledDefault, LabelledParameter,
+    LambdaExpression, LetBinding, MatchArm, PRELUDE_VALUES, Parameter, Pattern,
     PatternArgument, PatternKind, RawNode, SourceAst, SourceDecode, TestDeclaration,
     TypeAttributes, TypeExpr, TypeField, TypeMember, TypeSlot, VariadicBinding,
     VariadicParameter, VariadicType, contains_declaration_head, decode_source_root,
-    is_reserved_value_spelling,
+    is_prelude_type_spelling, is_prelude_value_spelling, is_reserved_binder_spelling,
+    is_reserved_value_spelling, is_vocabulary_name,
 };
 pub use data::{
     AtomRole, DataDecode, DataField, DataNode, DataValue, TypedDataSchema,

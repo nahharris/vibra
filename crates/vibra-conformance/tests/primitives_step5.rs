@@ -133,7 +133,10 @@ fn runner_rejects_a_nonempty_trace_for_a_pure_program() {
                 accepted: true,
                 interpreter: Some(vibra_conformance::ExecutionObservation {
                     result: Some("(record type: @i32 value: 42i32)\n".to_owned()),
-                    audit_trace: vec!["ambient.clock".to_owned()],
+                    audit_trace: vec![vibra_host::AuditEvent::completed(
+                        &vibra_host::HostCall::NowWall,
+                        &Ok(vibra_host::HostOk::Integer(0)),
+                    )],
                 }),
                 ..CaseObservation::default()
             },

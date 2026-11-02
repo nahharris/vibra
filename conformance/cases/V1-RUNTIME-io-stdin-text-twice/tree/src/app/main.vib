@@ -1,0 +1,8 @@
+(import io @std.io)
+
+(defn main () (result void io.io-error)
+  effects: (io.stdin io.stdout)
+  (let first (try (io.stdin.text)))
+  (let second (try (io.stdin.text)))
+  (let - (try (io.stdout.text first)))
+  (io.stdout.text second))

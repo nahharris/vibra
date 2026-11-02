@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-time-monotonic-steps"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "The first monotonic read answers the world's monotonic and each later read adds step."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

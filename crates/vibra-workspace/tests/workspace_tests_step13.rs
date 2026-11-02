@@ -7,10 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use vibra_diagnostics::DiagnosticCode;
-use vibra_workspace::{
-    WorkspaceSnapshot,
-    semantic::{CheckStatus, TestSelector},
-};
+use vibra_workspace::{WorkspaceSnapshot, semantic::CheckStatus};
 
 static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
 
@@ -252,51 +249,6 @@ fn test_declaration_outside_tests_is_unavailable_and_not_runnable() {
 }
 
 #[test]
-fn test_bootstrap_query_scopes_verified_assertions_to_selected_test_closure() {
-    let project = TempProject::new(
-        "test-bootstrap-query",
-        &[
-            ("src/app/main.vib", "(defn execute () void void)\n"),
-            (
-                "tests/helpers.vib",
-                "(import assert @std.assert)\n(defn check () void visibility: @public (assert.true true))\n",
-            ),
-            (
-                "tests/math.vib",
-                "(import helpers @tests.helpers)\n(test \"uses-helper\" (helpers.check))\n",
-            ),
-            ("tests/plain.vib", "(test \"no-bootstrap\" void)\n"),
-        ],
-    );
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let helper_test = TestSelector::parse("@tests.math::\"uses-helper\"")
-        .expect("canonical test selector");
-    let plain_test = TestSelector::parse("@tests.plain::\"no-bootstrap\"")
-        .expect("canonical test selector");
-
-    assert!(
-        snapshot
-            .requires_test_bootstrap_verification(None)
-            .expect("all tests")
-    );
-    assert!(
-        snapshot
-            .requires_test_bootstrap_verification(Some(&helper_test))
-            .expect("selected test closure")
-    );
-    assert!(
-        !snapshot
-            .requires_test_bootstrap_verification(Some(&plain_test))
-            .expect("selected test closure")
-    );
-    assert!(
-        snapshot
-            .requires_bootstrap_verification()
-            .expect("whole-snapshot query includes tests")
-    );
-}
-
-#[test]
 fn test_import_bootstrap_requires_verified_check_and_run_without_becoming_target_work()
 {
     let project = TempProject::new(
@@ -310,13 +262,6 @@ fn test_import_bootstrap_requires_verified_check_and_run_without_becoming_target
         ],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-
-    assert!(
-        snapshot
-            .requires_bootstrap_verification()
-            .expect("whole-snapshot bootstrap query"),
-        "test import must request the embedded standard library"
-    );
 
     let target = snapshot
         .project()

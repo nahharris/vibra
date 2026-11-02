@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-tail-counter-unrelated-function-loop"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A loop hands its activation on in tail position to a different loop, and that one to a last function that neither of them is reachable from, with a hundred thousand rounds in each loop. The count comes from a counter built only from `if`, a tuple of digits, and a call."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

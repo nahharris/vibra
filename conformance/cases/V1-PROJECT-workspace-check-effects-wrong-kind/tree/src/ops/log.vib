@@ -1,0 +1,24 @@
+(deffect write
+  visibility: @public
+  (defn text (target str) void
+    visibility: @public
+    (do)))
+
+(deffect audit
+  visibility: @public
+  (defn record (target str) void
+    visibility: @public
+    effects: (write)
+    (write.text target)))
+
+(deffect extra
+  visibility: @public
+  (defn noop () void
+    visibility: @public
+    (do)))
+
+(deftype config (record id i32))
+
+(defn helper () void
+  visibility: @public
+  (do))

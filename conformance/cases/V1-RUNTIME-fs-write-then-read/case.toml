@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-fs-write-then-read"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "A write creates or replaces the whole file and a later read in the same run sees it: text and bytes writes both replace the previous contents, a new file is created in an existing directory, and the directory then lists both names."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

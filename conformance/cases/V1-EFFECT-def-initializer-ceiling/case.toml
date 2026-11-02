@@ -1,0 +1,18 @@
+id = "V1-EFFECT-def-initializer-ceiling"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "A def initializer cannot write effects:, so its ceiling is empty and applying an operation in it is outside that ceiling; a lambda stored by a def performs nothing until it is applied."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [59, 72]
+notes = ["performs @marker via @marker.mark"]

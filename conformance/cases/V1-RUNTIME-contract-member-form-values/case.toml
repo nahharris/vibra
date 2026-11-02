@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-contract-member-form-values"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A contract member with its own generic parameter, one with labelled parameters, and one with a dict variadic tail, each named as a function value at a written fn type, perform the contract call for the receiver the type fixes: the written type fixes the member's own type argument, carries the labelled slots, and takes the dict tail."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

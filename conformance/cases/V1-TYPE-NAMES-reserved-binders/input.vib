@@ -1,0 +1,31 @@
+(defn parameter-site (if i32 next i32) i32 next)
+
+(defn let-site () i32
+  (let str 1i32)
+  (let kept str)
+  kept)
+
+(defn let-else-site (found (option i32)) i32
+  (let-else (option.some never) found (return 0i32))
+  (let after never)
+  after)
+
+(defn match-site (found (option i32)) i32
+  (match found (option.some lambda) lambda (option.none) 0i32))
+
+(defn lambda-site () i32
+  (let double (lambda (tupleof i32) i32 tupleof))
+  (let value (double 2i32))
+  value)
+
+(defn labelled-site (flag i32) i32
+  labelled: (bool i32 0i32)
+  bool)
+
+(defn variadic-site () u64
+  variadic: (any (array i32))
+  (array.length any))
+
+(defn valid-site (first i32 second i32) i32
+  (let value first)
+  second)

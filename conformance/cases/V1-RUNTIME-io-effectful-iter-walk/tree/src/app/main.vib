@@ -1,0 +1,17 @@
+(import iter @std.iter.iter)
+(import io @std.io)
+
+; Writes each item of `items`, in order, and stops at the first failure. The
+; recursion is in tail position, so the walk is constant depth.
+(defn write-all (items (iter str)) (result void io.io-error)
+  effects: (io.stdout)
+  (match (iter.next items)
+    (option.some (tupleof first rest))
+      (match (io.stdout.text first)
+        (result.ok) (write-all rest)
+        (result.err failure) (result.err failure))
+    (option.none) (result.ok)))
+
+(defn main () (result void io.io-error)
+  effects: (io.stdout)
+  (write-all (array.of "alpha\n" "beta\n" "gamma\n")))

@@ -1,0 +1,12 @@
+(import assert @std.assert)
+
+(import io @std.io)
+
+(import walk @console.walk)
+
+(test "the walk writes each item to standard output"
+  effects: (io.stdout)
+  (match
+    (walk.write-all (array.of "a" "b"))
+    (result.ok) (assert.true true)
+    (result.err -) (assert.true false)))

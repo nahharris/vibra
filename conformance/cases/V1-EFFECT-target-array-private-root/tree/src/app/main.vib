@@ -1,0 +1,6 @@
+(deffect secret
+  (defn quiet () void (do)))
+
+(defn execute () void
+  effects: (secret)
+  (secret.quiet))

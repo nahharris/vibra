@@ -1,0 +1,24 @@
+id = "V1-EFFECT-demo-gate-function-ceiling-omits"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "The demo gate, rejection side one: the source of the accepted case, with the array complete, is rejected when the entry's own ceiling omits a performed root; the target array adds no second diagnostic."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "src/app/main.vib"
+span = [70, 99]
+notes = ["performs @ops.log.write via @ops.log.audit.record"]
+
+  [[expect.diagnostics.related]]
+  source = "src/ops/log.vib"
+  span = [223, 242]
+  message = "performs @ops.log.write via @ops.log.write.text"

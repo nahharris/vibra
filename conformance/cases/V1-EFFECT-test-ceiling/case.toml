@@ -1,0 +1,20 @@
+id = "V1-EFFECT-test-ceiling"
+rule = "V1-EFFECT"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "A test writes its complete ceiling like a function: a test that applies an operation with an empty ceiling is outside it, and the same test with the owner root written is within it. The module's static error makes both of its tests invalid."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+interpreter = { result = "result.vibon" }
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "tests/math.vib"
+span = [119, 132]
+notes = ["performs @tests.math.marker via @tests.math.marker.mark"]

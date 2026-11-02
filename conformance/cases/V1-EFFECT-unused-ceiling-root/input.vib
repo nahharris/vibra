@@ -1,0 +1,6 @@
+(deffect write
+  (defn text (target str) void (do)))
+
+(defn idle () void
+  effects: (write)
+  (do))

@@ -1,0 +1,20 @@
+(import assert @std.assert)
+
+; A value nested five thousand levels deep is built, compared with a second copy,
+; and released. The comparison walks both values to the bottom.
+(deftype chain (record next (array chain)))
+
+(defn build (count u64 tip chain) chain
+  (if (u64.equal count 0u64)
+    tip
+    (build (lower count) (chain next: (array.of tip)))))
+
+(defn lower (count u64) u64
+  (match (u64.sub-checked count 1u64)
+    (result.ok value) value
+    (result.err -) 0u64))
+
+(test "a value nested five thousand deep compares equal to its copy"
+  (assert.equal
+    (build 5000u64 (chain next: (array.of)))
+    (build 5000u64 (chain next: (array.of)))))

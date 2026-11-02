@@ -1,0 +1,9 @@
+(import fs @std.fs)
+
+(defn main () (result void fs.fs-error)
+  effects: (fs.metadata)
+  (let - (try (fs.metadata.stat (fs.path "/d/f.txt"))))
+  (let - (try (fs.metadata.stat (fs.path "/d"))))
+  (let - (try (fs.metadata.stat (fs.path "/d/empty"))))
+  (let - (fs.metadata.stat (fs.path "/d/none")))
+  (result.ok))

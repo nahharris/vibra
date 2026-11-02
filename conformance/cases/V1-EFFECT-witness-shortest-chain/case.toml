@@ -1,0 +1,38 @@
+id = "V1-EFFECT-witness-shortest-chain"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "When a body reaches the root through two chains of different length, the witness takes the primary span from the first call site and then the shortest chain by hops, even when the shorter chain is written later."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [525, 533]
+notes = ["performs @write via @branch"]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [477, 483]
+  message = "performs @write via @fast"
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [409, 415]
+  message = "performs @write via @leaf"
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [222, 244]
+  message = "performs @write via @audit.record"
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [147, 172]
+  message = "performs @write via @write.text"

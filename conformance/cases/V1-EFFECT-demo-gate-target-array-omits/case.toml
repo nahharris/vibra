@@ -1,0 +1,28 @@
+id = "V1-EFFECT-demo-gate-target-array-omits"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "The demo gate, rejection side two: the same source as the accepted case is rejected when the target array omits a performed root that the entry reaches only through an additive row. The diagnostic is at the entry value and its related spans are the two hops of the witness."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "project.vibon"
+span = [145, 162]
+
+  [[expect.diagnostics.related]]
+  source = "src/app/main.vib"
+  span = [80, 109]
+  message = "performs @ops.log.write via @ops.log.audit.record"
+
+  [[expect.diagnostics.related]]
+  source = "src/ops/log.vib"
+  span = [223, 242]
+  message = "performs @ops.log.write via @ops.log.write.text"

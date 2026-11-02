@@ -358,7 +358,7 @@ fn actual_binary_run_preflight_failures_never_produce_a_program_result() {
     host.write("project.vibon", &binary_project("(dict)"));
     host.write(
         "src/hello/main.vib",
-        "(deffect audit (defn record (message str) void external: @host symbol: \"audit.record\"))\n(defn main () void (do))\n",
+        "(deffect audit (defn record (message str) void native: \"audit.record\" (do)))\n(defn main () void (do))\n",
     );
     assert_nonexecuting_run(&host, "@command.unavailable", 4, "@tool.unavailable");
 

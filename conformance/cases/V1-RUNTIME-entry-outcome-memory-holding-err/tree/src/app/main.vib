@@ -1,0 +1,10 @@
+(deftype failure (record code i32))
+
+(defn forever () i32 (let v (forever)) v)
+
+(defn make () (result void failure) (result.err (failure code: 1i32)))
+
+(defn main () (result void failure)
+  (let held (make))
+  (let - (forever))
+  held)

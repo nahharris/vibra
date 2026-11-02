@@ -1,0 +1,12 @@
+id = "V1-EFFECT-target-array-own-module-root"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "The entry lives in a module of its own target other than main, and the array names a root declared in a third module of that target through the target's own name: the atom is resolved like an entry, with no import."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true

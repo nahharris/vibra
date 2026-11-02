@@ -126,5 +126,25 @@
       "narrowed": null,
       "unionMembers": []
     }
+  },
+  "effects": {
+    "status": "exact",
+    "value": {
+      "enclosing": {
+        "identity": {
+          "kind": "function",
+          "canonical": "@app@0.1.0/app.main.sum"
+        },
+        "kind": "function",
+        "ceiling": {
+          "roots": []
+        },
+        "performed": {
+          "roots": []
+        }
+      },
+      "application": null,
+      "target": null
+    }
   }
 }

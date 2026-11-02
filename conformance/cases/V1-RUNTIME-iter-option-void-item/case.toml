@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-iter-option-void-item"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "An option iterates its payload once, and a some of void yields the item void."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

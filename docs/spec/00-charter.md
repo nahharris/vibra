@@ -1,8 +1,11 @@
 # Vibra v1 charter
 
 Status: normative target
-Implementation status: M1's lossless reader and M2's executable pure subset
-are implemented; the full v1 target remains incomplete.
+Implementation status: M1's lossless reader, M2's executable pure subset, and
+M3's complete nominal static core are implemented, with the reference
+interpreter running the complete pure language. The WebAssembly backend,
+nominal effects, host operations, dependency delivery, and build products
+remain unimplemented; the full v1 target remains incomplete.
 Version: 1.0 design line
 
 ## Mission
@@ -63,6 +66,10 @@ conformance case or an explicit review-only invariant.
 - Every call in tail position MUST reuse the current activation and so MUST NOT
   consume additional language-level stack, whatever its callee is; the
   interpreter and WebAssembly backend MUST implement this obligation.
+- Non-tail recursion has no depth limit of its own: neither backend consumes
+  host stack per activation, so depth is bounded only by the memory of the
+  instance, and exhausting that memory is a host event rather than a program
+  result.
 - Source files use `.vib`; compiler-owned persistent data uses `.vibon`. Both
   are UTF-8 S-expression document grammars over one lexical reader and are
   never inferred from contents.

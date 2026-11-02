@@ -1,0 +1,1 @@
+(record format: @audit-trace.v1 events: (array (record kind: @host op: "env.read-var" args: (array "MISSING") result: (record kind: @enum type: @std.result.result variant: @err payload: (record kind: @enum type: @std.env.env-error variant: @not-present)))))

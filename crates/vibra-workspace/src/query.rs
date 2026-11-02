@@ -17,7 +17,9 @@ use vibra_syntax::{
     FunctionDeclaration, GrammarCategory, IntegerSuffix, Literal, NameKind, Pattern,
     PatternKind, SourceAst, StructuralQuery, TypeExpr, VariadicParameter,
 };
-use vibra_types::check_source;
+use vibra_types::{
+    EffectGraph, EffectNode, EffectNodeKind, WitnessCallee, check_source,
+};
 
 use crate::WorkspaceSnapshot;
 
@@ -123,6 +125,41 @@ impl QueryIdentity {
     }
 }
 
+/// A closed effect row as a record of canonical root identities
+/// (`docs/spec/03-effects.md`, "Function effect rows"). A consumer never
+/// assumes a row is a closed literal set: the record may gain fields.
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct EffectRowFact {
+    roots: Vec<String>,
+}
+
+impl EffectRowFact {
+    /// A row of `roots`, which are already in canonical order.
+    #[must_use]
+    pub fn new(roots: Vec<String>) -> Self {
+        Self { roots }
+    }
+
+    /// The row of a checked type or declaration: canonical declaration
+    /// identities, in the canonical order of the roots' atom paths.
+    #[must_use]
+    pub fn from_row(row: &vibra_ir::EffectRow) -> Self {
+        Self {
+            roots: row
+                .roots()
+                .iter()
+                .map(|root| root.id().to_owned())
+                .collect(),
+        }
+    }
+
+    /// The roots' canonical declaration identities, in canonical order.
+    #[must_use]
+    pub fn roots(&self) -> &[String] {
+        &self.roots
+    }
+}
+
 /// A structured primitive or function type for tooling consumers.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SemanticType {
@@ -131,6 +168,7 @@ pub struct SemanticType {
     parameters: Vec<Self>,
     result: Option<Box<Self>>,
     labelled: Vec<LabelledType>,
+    effects: Option<EffectRowFact>,
 }
 
 /// The closed type shape used by the semantic query schema.
@@ -193,6 +231,7 @@ impl SemanticType {
             parameters: Vec::new(),
             result: None,
             labelled: Vec::new(),
+            effects: None,
         }
     }
 
@@ -211,15 +250,18 @@ impl SemanticType {
             parameters,
             result: None,
             labelled,
+            effects: None,
         }
     }
 
-    /// Creates a function type.
+    /// Creates a function type with its closed effect row, so two function
+    /// types that differ only in their rows are different types.
     #[must_use]
     pub fn function(
         parameters: Vec<Self>,
         result: Self,
         labelled: Vec<LabelledType>,
+        effects: EffectRowFact,
     ) -> Self {
         Self {
             kind: SemanticTypeKind::Function,
@@ -227,7 +269,14 @@ impl SemanticType {
             parameters,
             result: Some(Box::new(result)),
             labelled,
+            effects: Some(effects),
         }
+    }
+
+    /// A function's closed effect row, absent on every other kind.
+    #[must_use]
+    pub const fn effects(&self) -> Option<&EffectRowFact> {
+        self.effects.as_ref()
     }
 
     /// Type shape.
@@ -593,6 +642,196 @@ impl ApplicationContract {
     }
 }
 
+/// The smallest function body that encloses a position, with its written (or
+/// default-empty) ceiling and its computed performed row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnclosingEffects {
+    kind: &'static str,
+    identity: Option<QueryIdentity>,
+    ceiling: EffectRowFact,
+    performed: EffectRowFact,
+}
+
+impl EnclosingEffects {
+    /// `function`, `operation`, `lambda`, or `test`.
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    /// The identity of the function, operation, or test; none for a `lambda`.
+    #[must_use]
+    pub const fn identity(&self) -> Option<&QueryIdentity> {
+        self.identity.as_ref()
+    }
+
+    /// The ceiling. For an operation it is the complete row.
+    #[must_use]
+    pub const fn ceiling(&self) -> &EffectRowFact {
+        &self.ceiling
+    }
+
+    /// The performed row the checker computed for the body.
+    #[must_use]
+    pub const fn performed(&self) -> &EffectRowFact {
+        &self.performed
+    }
+}
+
+/// The binary target whose entry reaches a position, and the `effects` array
+/// that admitted the entry.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TargetEffects {
+    entry: QueryIdentity,
+    effects: EffectRowFact,
+}
+
+impl TargetEffects {
+    /// The identity of the target's entry.
+    #[must_use]
+    pub const fn entry(&self) -> &QueryIdentity {
+        &self.entry
+    }
+
+    /// The target `effects` array as a row: the consent that admitted the
+    /// entry, not a module's own ceiling.
+    #[must_use]
+    pub const fn effects(&self) -> &EffectRowFact {
+        &self.effects
+    }
+}
+
+/// What a witness hop applies.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WitnessCalleeFact {
+    kind: &'static str,
+    identity: Option<String>,
+}
+
+impl WitnessCalleeFact {
+    /// `function`, `operation`, `function-value`, or `contract-member`.
+    #[must_use]
+    pub const fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    /// The canonical identity, none for a function value.
+    #[must_use]
+    pub fn identity(&self) -> Option<&str> {
+        self.identity.as_deref()
+    }
+}
+
+/// One call site of a witness.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WitnessHopFact {
+    source_id: String,
+    span: ByteSpan,
+    start: vibra_diagnostics::Position,
+    end: vibra_diagnostics::Position,
+    callee: WitnessCalleeFact,
+}
+
+impl WitnessHopFact {
+    /// The source document of the call site.
+    #[must_use]
+    pub fn source_id(&self) -> &str {
+        &self.source_id
+    }
+
+    /// The span of the call site.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+
+    /// The display position of the start of the call site.
+    #[must_use]
+    pub const fn start_position(&self) -> vibra_diagnostics::Position {
+        self.start
+    }
+
+    /// The display position of the end of the call site.
+    #[must_use]
+    pub const fn end_position(&self) -> vibra_diagnostics::Position {
+        self.end
+    }
+
+    /// What the call site applies.
+    #[must_use]
+    pub const fn callee(&self) -> &WitnessCalleeFact {
+        &self.callee
+    }
+}
+
+/// The chain of call sites that carries one performed root.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RootWitnessFact {
+    root: String,
+    hops: Vec<WitnessHopFact>,
+}
+
+impl RootWitnessFact {
+    /// The root's canonical identity.
+    #[must_use]
+    pub fn root(&self) -> &str {
+        &self.root
+    }
+
+    /// The call sites, in the order of the checker's witness.
+    #[must_use]
+    pub fn hops(&self) -> &[WitnessHopFact] {
+        &self.hops
+    }
+}
+
+/// The effect metadata at a position (`docs/spec/05-tooling.md`, "M2
+/// workspace position envelope"): read from the one function-call graph and
+/// performed-row result the checker reported its diagnostics from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EffectsFact {
+    enclosing: Option<EnclosingEffects>,
+    application: Option<EffectRowFact>,
+    target: Option<TargetEffects>,
+    witnesses: Option<Vec<RootWitnessFact>>,
+}
+
+impl EffectsFact {
+    /// The smallest enclosing function body, or none outside every function.
+    #[must_use]
+    pub const fn enclosing(&self) -> Option<&EnclosingEffects> {
+        self.enclosing.as_ref()
+    }
+
+    /// The callee's complete row, when the position is an application with an
+    /// application fact.
+    #[must_use]
+    pub const fn application(&self) -> Option<&EffectRowFact> {
+        self.application.as_ref()
+    }
+
+    /// The binary target whose entry reaches the position.
+    #[must_use]
+    pub const fn target(&self) -> Option<&TargetEffects> {
+        self.target.as_ref()
+    }
+
+    /// One witness for each root of the enclosing performed row. Present only
+    /// when the query expanded `effect-witnesses`.
+    #[must_use]
+    pub fn witnesses(&self) -> Option<&[RootWitnessFact]> {
+        self.witnesses.as_deref()
+    }
+}
+
+/// The expansions of a position query (`--expand` in the tooling chapter).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PositionExpansion {
+    /// `effect-witnesses`: add the call path that introduced each performed
+    /// root.
+    pub effect_witnesses: bool,
+}
+
 /// One complete semantic source-position query result.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorkspacePositionQuery {
@@ -610,9 +849,18 @@ pub struct WorkspacePositionQuery {
     declaration_candidates: SemanticFact<Vec<QueryIdentity>>,
     application: SemanticFact<ApplicationContract>,
     pattern: SemanticFact<PatternFact>,
+    effects: SemanticFact<EffectsFact>,
 }
 
 impl WorkspacePositionQuery {
+    /// The effect metadata at the position: the enclosing function body, the
+    /// application's complete row, the binary target that reaches it, and
+    /// under `effect-witnesses` the witness of each performed root.
+    #[must_use]
+    pub const fn effects(&self) -> &SemanticFact<EffectsFact> {
+        &self.effects
+    }
+
     /// The shape of the `match` arm pattern at the position, when it is one.
     #[must_use]
     pub const fn pattern(&self) -> &SemanticFact<PatternFact> {
@@ -752,6 +1000,25 @@ pub fn query_position_with_bootstrap(
     offset: usize,
     verification: Option<&vibra_types::Stdlib>,
 ) -> Result<WorkspacePositionQuery, WorkspaceQueryError> {
+    query_position_expanded(
+        workspace,
+        source_id,
+        offset,
+        verification,
+        PositionExpansion::default(),
+    )
+}
+
+/// Queries one captured source module with the requested expansions
+/// (`--expand` in the tooling chapter). A compact query omits every
+/// expansion, and an expansion never changes the underlying metadata.
+pub fn query_position_expanded(
+    workspace: &WorkspaceSnapshot,
+    source_id: &str,
+    offset: usize,
+    verification: Option<&vibra_types::Stdlib>,
+    expansion: PositionExpansion,
+) -> Result<WorkspacePositionQuery, WorkspaceQueryError> {
     let document = workspace
         .source()
         .documents()
@@ -770,11 +1037,6 @@ pub fn query_position_with_bootstrap(
     }
     .map_err(|error| WorkspaceQueryError::Workspace(error.to_string()))?;
     let catalog = CallableCatalog::build(workspace, &resolved);
-    let mut collector =
-        SemanticCollector::new(source_id, source, &resolved, &catalog, source.len());
-    if let Some(ast) = syntax.ast() {
-        collector.collect_ast(ast);
-    }
     // The checked facts come from the whole workspace when it checks: every
     // unit and its import closure, as one module set. A workspace that does
     // not check falls back to this source alone, which keeps the facts of a
@@ -790,6 +1052,26 @@ pub fn query_position_with_bootstrap(
     let selected = selected.into_iter().collect::<Vec<_>>();
     let workspace_checked =
         vibra_types::check_resolved(&resolved, &selected, verification);
+    // The effect metadata is read from the workspace check's own graph,
+    // whether or not the whole workspace checks: a function that did not
+    // check marks its row as a lower bound, and a neighbour that did check
+    // keeps its exact row.
+    let graph = workspace_checked.effects();
+    let target = reaching_target(&resolved, graph, source_id, verification);
+    let mut collector = SemanticCollector::new(
+        source_id,
+        source,
+        &resolved,
+        &catalog,
+        graph,
+        source.len(),
+    );
+    collector.target = target;
+    collector.expansion = expansion;
+    collector.sources = source_texts(workspace);
+    if let Some(ast) = syntax.ast() {
+        collector.collect_ast(ast);
+    }
     let checked = check_source(source_id, source);
     if let Some(modules) = workspace_checked.modules() {
         collector.functions = modules
@@ -826,15 +1108,13 @@ pub fn query_position_with_bootstrap(
     Ok(collector.finish(structural, workspace.revision().clone()))
 }
 
-#[derive(Clone, Debug)]
-struct CallableInfo {
-    identity: QueryIdentity,
-    ty: SemanticType,
-}
-
+/// The declarations a call can name an application fact for: module-level
+/// functions and effect operations, whose type the checker holds. Their type
+/// is read from the checked graph at the time of the query, never rebuilt from
+/// the written syntax.
 #[derive(Clone, Debug, Default)]
 struct CallableCatalog {
-    by_identity: BTreeMap<String, CallableInfo>,
+    by_identity: BTreeMap<String, QueryIdentity>,
 }
 
 impl CallableCatalog {
@@ -855,36 +1135,110 @@ impl CallableCatalog {
                     continue;
                 };
                 for declaration in ast.declarations() {
-                    let Declaration::Defn(function) = declaration else {
-                        continue;
-                    };
-                    let Some(ty) = function_type(function) else {
-                        continue;
-                    };
-                    let id = DeclarationId::new(
+                    // A function, or the operations of an effect root.
+                    let (path, function, kind): (Vec<String>, &FunctionDeclaration, _) =
+                        match declaration {
+                            Declaration::Defn(function) => (
+                                vec![function.name().value().to_owned()],
+                                function,
+                                EntityKind::Function,
+                            ),
+                            Declaration::Deffect(_) => {
+                                catalog.add_operations(
+                                    package.name().value(),
+                                    package.version().value(),
+                                    unit.name(),
+                                    document.module_segments(),
+                                    declaration,
+                                    resolved,
+                                );
+                                continue;
+                            }
+                            _ => continue,
+                        };
+                    catalog.add(
                         package.name().value(),
                         package.version().value(),
                         unit.name(),
-                        document.module_segments().iter().cloned(),
-                        [function.name().value().to_owned()],
-                        EntityKind::Function,
+                        document.module_segments(),
+                        path,
+                        function,
+                        kind,
+                        resolved,
                     );
-                    let canonical = id.canonical();
-                    let kind = id.kind().as_str().to_owned();
-                    let identity = QueryIdentity::new(kind, canonical.clone());
-                    if resolved
-                        .declarations()
-                        .iter()
-                        .any(|declaration| declaration.id().canonical() == canonical)
-                    {
-                        catalog
-                            .by_identity
-                            .insert(canonical, CallableInfo { identity, ty });
-                    }
                 }
             }
         }
         catalog
+    }
+
+    fn add_operations(
+        &mut self,
+        package: &str,
+        version: &str,
+        unit: &str,
+        module: &[String],
+        declaration: &Declaration,
+        resolved: &ResolvedSnapshot,
+    ) {
+        let Declaration::Deffect(root) = declaration else {
+            return;
+        };
+        for operation in root.members() {
+            self.add(
+                package,
+                version,
+                unit,
+                module,
+                vec![
+                    root.name().value().to_owned(),
+                    operation.name().value().to_owned(),
+                ],
+                operation,
+                EntityKind::Operation,
+                resolved,
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn add(
+        &mut self,
+        package: &str,
+        version: &str,
+        unit: &str,
+        module: &[String],
+        path: Vec<String>,
+        function: &FunctionDeclaration,
+        kind: EntityKind,
+        resolved: &ResolvedSnapshot,
+    ) {
+        // A generic or variadic function keeps its application unavailable:
+        // its operand list is not the declared parameters.
+        if function.attributes().items().iter().any(|attribute| {
+            matches!(attribute, Attribute::Where(_) | Attribute::Variadic(_))
+        }) {
+            return;
+        }
+        let id = DeclarationId::new(
+            package,
+            version,
+            unit,
+            module.iter().cloned(),
+            path,
+            kind,
+        );
+        let canonical = id.canonical();
+        if resolved
+            .declarations()
+            .iter()
+            .any(|declaration| declaration.id().canonical() == canonical)
+        {
+            self.by_identity.insert(
+                canonical.clone(),
+                QueryIdentity::new(id.kind().as_str(), canonical),
+            );
+        }
     }
 }
 
@@ -924,6 +1278,15 @@ struct SemanticCollector<'a> {
     source: &'a str,
     resolved: &'a ResolvedSnapshot,
     catalog: &'a CallableCatalog,
+    /// The function-call graph and performed rows the checker reported its
+    /// effect diagnostics from.
+    graph: &'a EffectGraph,
+    /// The binary target whose entry reaches the queried source.
+    target: Option<TargetEffects>,
+    expansion: PositionExpansion,
+    /// The text of every UTF-8 source of the snapshot, to derive display
+    /// positions for a witness hop in another source.
+    sources: BTreeMap<String, &'a str>,
     source_length: usize,
     expressions: Vec<ExpressionSite>,
     binders: Vec<BinderSite>,
@@ -949,6 +1312,7 @@ impl<'a> SemanticCollector<'a> {
         source: &'a str,
         resolved: &'a ResolvedSnapshot,
         catalog: &'a CallableCatalog,
+        graph: &'a EffectGraph,
         source_length: usize,
     ) -> Self {
         Self {
@@ -956,6 +1320,10 @@ impl<'a> SemanticCollector<'a> {
             source,
             resolved,
             catalog,
+            graph,
+            target: None,
+            expansion: PositionExpansion::default(),
+            sources: BTreeMap::new(),
             source_length,
             expressions: Vec::new(),
             binders: Vec::new(),
@@ -980,7 +1348,7 @@ impl<'a> SemanticCollector<'a> {
                         value.expression(),
                         &[],
                         "initializer",
-                        semantic_type_expr(value.value_type()),
+                        self.semantic_type_expr(value.value_type()),
                     );
                 }
                 Declaration::Defn(function) => self.collect_function(function),
@@ -998,7 +1366,13 @@ impl<'a> SemanticCollector<'a> {
                 // interface default, and the members of each `impl` block.
                 Declaration::Deftype(owner) => self.collect_members(owner.members()),
                 Declaration::Defint(owner) => self.collect_members(owner.members()),
-                Declaration::Import(_) | Declaration::Deffect(_) => {}
+                // An effect root owns its operations, which are functions.
+                Declaration::Deffect(root) => {
+                    for operation in root.members() {
+                        self.collect_function(operation);
+                    }
+                }
+                Declaration::Import(_) => {}
             }
         }
     }
@@ -1123,12 +1497,13 @@ impl<'a> SemanticCollector<'a> {
             span: function.span(),
             locals: locals.clone(),
         });
-        self.returns.push(semantic_type_expr(function.result()));
+        self.returns
+            .push(self.semantic_type_expr(function.result()));
         self.collect_sequence(
             function.expressions(),
             &locals,
             &|last| if last { "result" } else { "function" }.to_owned(),
-            semantic_type_expr(function.result()),
+            self.semantic_type_expr(function.result()),
         );
         self.returns.pop();
     }
@@ -1434,12 +1809,12 @@ impl<'a> SemanticCollector<'a> {
                     span: lambda.span(),
                     locals: nested.clone(),
                 });
-                self.returns.push(semantic_type_expr(lambda.result()));
+                self.returns.push(self.semantic_type_expr(lambda.result()));
                 self.collect_sequence(
                     lambda.body(),
                     &nested,
                     &|_| "lambda".to_owned(),
-                    semantic_type_expr(lambda.result()),
+                    self.semantic_type_expr(lambda.result()),
                 );
                 self.returns.pop();
             }
@@ -1451,7 +1826,7 @@ impl<'a> SemanticCollector<'a> {
                     operand,
                     locals,
                     context,
-                    semantic_type_expr(value_type),
+                    self.semantic_type_expr(value_type),
                 );
             }
             ExpressionKind::Try(operand) => {
@@ -1563,22 +1938,81 @@ impl<'a> SemanticCollector<'a> {
             })
     }
 
+    /// The type a written type expression denotes, when it is a primitive or a
+    /// function type. A written function type's row is the effect roots its
+    /// entries resolve to; a row with an entry the resolver left unresolved is
+    /// not guessed, so the type is unavailable.
+    fn semantic_type_expr(&self, value: &TypeExpr) -> Option<SemanticType> {
+        match value {
+            TypeExpr::Void => Some(SemanticType::primitive("void")),
+            TypeExpr::Name(name) => {
+                primitive_name(name.value()).map(SemanticType::primitive)
+            }
+            TypeExpr::Function(function) => {
+                let parameters = function
+                    .parameters()
+                    .iter()
+                    .map(|parameter| self.semantic_type_expr(parameter))
+                    .collect::<Option<Vec<_>>>()?;
+                let labelled = function
+                    .labelled()
+                    .iter()
+                    .map(|slot| {
+                        Some(LabelledType::new(
+                            slot.name().value(),
+                            self.semantic_type_expr(slot.value_type())?,
+                        ))
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                let roots = function
+                    .effects()
+                    .iter()
+                    .map(|entry| {
+                        let target = self.reference_for_span(entry.span())?.target()?;
+                        let path = std::iter::once(target.unit())
+                            .chain(target.module().iter().map(String::as_str))
+                            .chain(target.path().iter().map(String::as_str))
+                            .collect::<Vec<_>>()
+                            .join(".");
+                        Some(vibra_ir::EffectRoot::new(target.canonical(), path))
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                Some(SemanticType::function(
+                    parameters,
+                    self.semantic_type_expr(function.result())?,
+                    labelled,
+                    EffectRowFact::from_row(&vibra_ir::EffectRow::new(roots)),
+                ))
+            }
+            TypeExpr::Applied { .. }
+            | TypeExpr::Tuple(_)
+            | TypeExpr::Record(_)
+            | TypeExpr::Enum(_)
+            | TypeExpr::Union(_, _)
+            | TypeExpr::Array(_)
+            | TypeExpr::Dict(_, _, _) => None,
+        }
+    }
+
     fn application_contract(
         &self,
         application: &Application,
     ) -> Option<ApplicationContract> {
         let reference = self.reference_for_span(application.callee().span())?;
         let target = reference.target()?;
-        let info = self.catalog.by_identity.get(&target.canonical())?;
-        let SemanticTypeKind::Function = info.ty.kind() else {
-            return None;
-        };
+        let canonical = target.canonical();
+        let identity = self.catalog.by_identity.get(&canonical)?;
+        // The callee's type is the checker's own, so its row is the row the
+        // checker admitted: the ceiling of a function, and the complete row of
+        // an operation.
+        let signature = self.graph.node_named(&canonical)?.signature()?;
+        let ty = semantic_type_signature(signature);
         Some(ApplicationContract::new(
-            Some(info.identity.clone()),
-            Some(info.ty.clone()),
-            info.ty.parameters().to_vec(),
-            info.ty.labelled().to_vec(),
-            info.ty.result()?.clone(),
+            Some(identity.clone()),
+            Some(ty.clone()),
+            ty.parameters().to_vec(),
+            ty.labelled().to_vec(),
+            ty.result()?.clone(),
         ))
     }
 
@@ -1616,6 +2050,7 @@ impl<'a> SemanticCollector<'a> {
             | Expr::Function { .. }
             | Expr::Captured { .. } => {}
             Expr::External { arguments, .. }
+            | Expr::Host { arguments, .. }
             | Expr::Sequence {
                 expressions: arguments,
                 ..
@@ -1881,6 +2316,34 @@ impl<'a> SemanticCollector<'a> {
         } else {
             SemanticFact::unavailable()
         };
+        let effects = if structural_status == SemanticFactStatus::Exact {
+            // The application whose contract the `application` fact reports.
+            let applied = (!is_discard)
+                .then(|| {
+                    self.best_expression(structural.offset())
+                        .filter(|site| site.application.is_some())
+                        .map(|site| (site.span, site.application.as_ref()))
+                        .or_else(|| {
+                            self.best_ir(structural.offset())
+                                .filter(|site| site.application.is_some())
+                                .map(|site| (site.span, site.application.as_ref()))
+                        })
+                })
+                .flatten()
+                .and_then(|(span, contract)| {
+                    let contract = contract?;
+                    // A constructor and a compiler conversion apply no
+                    // function, so they perform nothing.
+                    let calls_nothing = contract.kind() == ApplicationKind::Constructor
+                        || contract.dispatch().is_some_and(|dispatch| {
+                            dispatch.selection() == DispatchSelection::Closed
+                        });
+                    Some((span, calls_nothing))
+                });
+            self.effects_fact(structural.offset(), applied)
+        } else {
+            SemanticFact::unavailable()
+        };
         WorkspacePositionQuery {
             structural,
             workspace_revision: revision,
@@ -1896,7 +2359,130 @@ impl<'a> SemanticCollector<'a> {
             declaration_candidates,
             application,
             pattern,
+            effects,
         }
+    }
+
+    /// The effect metadata at `offset`, read from the checker's own graph.
+    /// `applied` is the span of the application whose contract the position
+    /// reports, and whether it applies no function.
+    fn effects_fact(
+        &self,
+        offset: usize,
+        applied: Option<(ByteSpan, bool)>,
+    ) -> SemanticFact<EffectsFact> {
+        if !self.graph.available() {
+            return SemanticFact::unavailable();
+        }
+        let node = self
+            .graph
+            .nodes()
+            .iter()
+            .filter(|node| {
+                node.kind() != EffectNodeKind::Value
+                    && node.source_id() == self.source_id
+                    && contains(node.span(), offset, self.source_length)
+            })
+            .min_by_key(|node| node.span().len());
+        let enclosing = node.map(|node| {
+            let kind = match node.kind() {
+                EffectNodeKind::Operation => "operation",
+                EffectNodeKind::Test => "test",
+                EffectNodeKind::Lambda => "lambda",
+                EffectNodeKind::Function | EffectNodeKind::Value => "function",
+            };
+            EnclosingEffects {
+                kind,
+                identity: node
+                    .identity()
+                    .map(|identity| QueryIdentity::new(kind, identity)),
+                ceiling: EffectRowFact::from_row(node.ceiling()),
+                performed: EffectRowFact::from_row(self.graph.performed(node)),
+            }
+        });
+        // An application that applies no function performs nothing. A call the
+        // graph does not hold is in a body that did not check: its row is
+        // unknown and is never guessed.
+        let mut complete = true;
+        let application = applied.and_then(|(span, calls_nothing)| {
+            if calls_nothing {
+                return Some(EffectRowFact::default());
+            }
+            let row = self
+                .graph
+                .application_row(self.source_id, span)
+                .map(EffectRowFact::from_row);
+            complete &= row.is_some();
+            row
+        });
+        let witnesses = self
+            .expansion
+            .effect_witnesses
+            .then(|| node.map(|node| self.witnesses(node)).unwrap_or_default());
+        let value = EffectsFact {
+            enclosing,
+            application,
+            target: self.target.clone(),
+            witnesses,
+        };
+        // A row is exact only when the body, and every body it reaches,
+        // checked; otherwise it is a lower bound, which is a recovered fact.
+        if !complete || node.is_some_and(|node| !self.graph.performed_known(node)) {
+            SemanticFact::recovered(Some(value))
+        } else {
+            SemanticFact::exact(value)
+        }
+    }
+
+    /// The witness of each root `node` performs, with display positions for
+    /// every call site, which may lie in another source of the snapshot.
+    fn witnesses(&self, node: &EffectNode) -> Vec<RootWitnessFact> {
+        let mut indexes = BTreeMap::<String, vibra_diagnostics::LineIndex<'_>>::new();
+        let mut position = |source_id: &str, offset: usize| {
+            let index = indexes.entry(source_id.to_owned()).or_insert_with(|| {
+                vibra_diagnostics::LineIndex::new(
+                    self.sources.get(source_id).copied().unwrap_or_default(),
+                )
+            });
+            index.position(offset)
+        };
+        self.graph
+            .witnesses(node)
+            .into_iter()
+            .map(|witness| RootWitnessFact {
+                root: witness.root().id().to_owned(),
+                hops: witness
+                    .hops()
+                    .iter()
+                    .map(|hop| WitnessHopFact {
+                        source_id: hop.source_id().to_owned(),
+                        span: hop.span(),
+                        start: position(hop.source_id(), hop.span().start()),
+                        end: position(hop.source_id(), hop.span().end()),
+                        callee: match hop.callee() {
+                            WitnessCallee::Function(identity) => WitnessCalleeFact {
+                                kind: "function",
+                                identity: identity.clone(),
+                            },
+                            WitnessCallee::Operation(identity) => WitnessCalleeFact {
+                                kind: "operation",
+                                identity: Some(identity.clone()),
+                            },
+                            WitnessCallee::FunctionValue => WitnessCalleeFact {
+                                kind: "function-value",
+                                identity: None,
+                            },
+                            WitnessCallee::ContractMember(identity) => {
+                                WitnessCalleeFact {
+                                    kind: "contract-member",
+                                    identity: Some(identity.clone()),
+                                }
+                            }
+                        },
+                    })
+                    .collect(),
+            })
+            .collect()
     }
 
     /// The shape of one checked arm pattern against `scrutinee`.
@@ -2219,44 +2805,6 @@ fn query_identity(id: &DeclarationId) -> QueryIdentity {
     QueryIdentity::new(id.kind().as_str(), id.canonical())
 }
 
-fn semantic_type_expr(value: &TypeExpr) -> Option<SemanticType> {
-    match value {
-        TypeExpr::Void => Some(SemanticType::primitive("void")),
-        TypeExpr::Name(name) => {
-            primitive_name(name.value()).map(SemanticType::primitive)
-        }
-        TypeExpr::Function(function) => {
-            let parameters = function
-                .parameters()
-                .iter()
-                .map(semantic_type_expr)
-                .collect::<Option<Vec<_>>>()?;
-            let labelled = function
-                .labelled()
-                .iter()
-                .map(|slot| {
-                    Some(LabelledType::new(
-                        slot.name().value(),
-                        semantic_type_expr(slot.value_type())?,
-                    ))
-                })
-                .collect::<Option<Vec<_>>>()?;
-            Some(SemanticType::function(
-                parameters,
-                semantic_type_expr(function.result())?,
-                labelled,
-            ))
-        }
-        TypeExpr::Applied { .. }
-        | TypeExpr::Tuple(_)
-        | TypeExpr::Record(_)
-        | TypeExpr::Enum(_)
-        | TypeExpr::Union(_, _)
-        | TypeExpr::Array(_)
-        | TypeExpr::Dict(_, _, _) => None,
-    }
-}
-
 fn primitive_name(value: &str) -> Option<&'static str> {
     Some(match value {
         "bool" => "bool",
@@ -2378,6 +2926,7 @@ fn semantic_type_signature(signature: &FunctionSignature) -> SemanticType {
         semantic_type_primitive(&signature.result())
             .unwrap_or_else(|| SemanticType::primitive("void")),
         labelled,
+        EffectRowFact::from_row(signature.effects()),
     )
 }
 
@@ -2436,6 +2985,45 @@ fn float_expected_name(value: &SemanticType) -> Option<&str> {
     matches!(value.name(), "f32" | "f64").then_some(value.name())
 }
 
+/// The text of every UTF-8 source of the snapshot, by source identity.
+fn source_texts(workspace: &WorkspaceSnapshot) -> BTreeMap<String, &str> {
+    workspace
+        .source()
+        .documents()
+        .filter_map(|document| {
+            Some((
+                document.source_id().to_owned(),
+                std::str::from_utf8(document.bytes()).ok()?,
+            ))
+        })
+        .collect()
+}
+
+/// The binary target whose entry reaches `source_id`: the source belongs to
+/// the import closure of the target's unit. A source several targets reach
+/// belongs to the first of them in the order of the unit names.
+fn reaching_target(
+    resolved: &ResolvedSnapshot,
+    graph: &EffectGraph,
+    source_id: &str,
+    verification: Option<&vibra_types::Stdlib>,
+) -> Option<TargetEffects> {
+    let mut entries = graph.entries().iter().collect::<Vec<_>>();
+    entries.sort_by(|left, right| left.unit().cmp(right.unit()));
+    entries
+        .into_iter()
+        .find(|entry| {
+            let units = std::collections::BTreeSet::from([entry.unit().to_owned()]);
+            let (_, sources) =
+                crate::semantic::import_closure(resolved, &units, verification);
+            sources.contains(source_id)
+        })
+        .map(|entry| TargetEffects {
+            entry: QueryIdentity::new("function", entry.identity()),
+            effects: EffectRowFact::from_row(entry.array()),
+        })
+}
+
 fn ir_application_contract(expression: &Expr) -> Option<ApplicationContract> {
     let Expr::Call {
         target: CallTarget::Indirect { callee, .. },
@@ -2472,48 +3060,5 @@ fn ir_application_contract(expression: &Expr) -> Option<ApplicationContract> {
             .collect(),
         semantic_type_primitive(&signature.result())
             .unwrap_or_else(|| SemanticType::primitive("void")),
-    ))
-}
-
-fn function_type(function: &FunctionDeclaration) -> Option<SemanticType> {
-    if function
-        .attributes()
-        .items()
-        .iter()
-        .any(|attribute| match attribute {
-            Attribute::Where(_) | Attribute::Variadic(_) | Attribute::External(_) => {
-                true
-            }
-            Attribute::Effects(row) => !row.references().is_empty(),
-            Attribute::Labelled(_)
-            | Attribute::Visibility(_)
-            | Attribute::Symbol(_)
-            | Attribute::Native(_)
-            | Attribute::Role(_)
-            | Attribute::Doc(_) => false,
-        })
-    {
-        return None;
-    }
-    let parameters = function
-        .parameters()
-        .iter()
-        .map(|parameter| semantic_type_expr(parameter.value_type()))
-        .collect::<Option<Vec<_>>>()?;
-    let mut labelled = Vec::new();
-    for attribute in function.attributes().items() {
-        if let Attribute::Labelled(entries) = attribute {
-            for entry in entries {
-                labelled.push(LabelledType::new(
-                    entry.name().value(),
-                    semantic_type_expr(entry.value_type())?,
-                ));
-            }
-        }
-    }
-    Some(SemanticType::function(
-        parameters,
-        semantic_type_expr(function.result())?,
-        labelled,
     ))
 }

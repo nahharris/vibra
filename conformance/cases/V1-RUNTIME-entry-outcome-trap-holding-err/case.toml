@@ -1,0 +1,17 @@
+id = "V1-RUNTIME-entry-outcome-trap-holding-err"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "An entry whose err holds a function behind any traps with @runtime.unobservable-function when its result is observed: a trap is never recast as a program failure, so the run has the trap diagnostic with no origin and no result or trace snapshot."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+
+[[expect.diagnostics]]
+code = "@runtime.unobservable-function"
+level = "@error"
+span = [0, 0]

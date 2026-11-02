@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-world-sets-env-args-clock-random"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "A test world supplies the environment, the program arguments, the clock, and the generator, and each test starts from a fresh copy: the third test sees the clock at its start again, not where the second left it."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon" }

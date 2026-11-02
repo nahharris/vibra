@@ -1,0 +1,19 @@
+(import log @ops.log)
+
+(defn pure-double (value i32) i32 value)
+
+(def three i32 (pure-double 3i32))
+
+(defn record-it (target str) void
+  effects: (log.audit log.write)
+  (log.audit.record target))
+
+(defn run-twice () void
+  effects: (log.audit log.write)
+  (let again (lambda () void effects: (log.audit log.write) (record-it "again")))
+  (record-it "first")
+  (again))
+
+(defn execute () void
+  effects: (log.audit log.write)
+  (run-twice))

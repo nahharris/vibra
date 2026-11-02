@@ -1,0 +1,24 @@
+id = "V1-EFFECT-witness-contract-member"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "A call of a contract member contributes the contract ceiling, whatever the implementation performs, and its witness is one hop marked as a contract member. The pure implementation declares the ceiling and so leaves a warning."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@contract.unused-effect"
+level = "@warning"
+source = "input.vib"
+span = [219, 224]
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [277, 296]
+notes = ["performs @write via contract member @logger.log"]

@@ -1,0 +1,6 @@
+(import fs @std.fs)
+
+(defn main () (result void fs.fs-error)
+  effects: (fs.read fs.write)
+  (let text (try (fs.read.text (fs.path "/missing.txt"))))
+  (fs.write.text (fs.path "/copy.txt") text))

@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-effect-function-values"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A function value with a row runs like any function value: an operation named as a value, a lambda that writes a row, and a call through a contract member whose implementation performs the ceiling; creating the value performed nothing."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

@@ -1,0 +1,14 @@
+; Two thousand concatenations onto one growing text, then its length.
+(import text @std.text)
+
+(defn main () u64 (text.length (grow 2000u64 "")))
+
+(defn grow (remaining u64 acc str) str
+  (if (u64.equal remaining 0u64)
+    acc
+    (grow (lower remaining) (text.concat acc "ab"))))
+
+(defn lower (count u64) u64
+  (match (u64.sub-checked count 1u64)
+    (result.ok value) value
+    (result.err -) 0u64))

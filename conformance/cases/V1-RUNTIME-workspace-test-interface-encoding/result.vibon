@@ -1,0 +1,14 @@
+(record
+  format: @test-run.v1
+  result: @command.test-failed
+  tests: (array
+    (record name: "@tests.encoding::\"empty arrays of different element types are equal\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.encoding::\"the none of two options is equal whatever they hold\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.encoding::\"the none of two applications of a declared enum is equal\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.encoding::\"an array of interface values equals itself element by element\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.encoding::\"two declared records of different types differ\"" result: @test.assertion-failed failure: (record assertion: @std.assert.equal expected: "(record kind: @record type: @tests.encoding.first fields: (record n: 1u32))" actual: "(record kind: @record type: @tests.encoding.second fields: (record n: 1u32))" primary-span: (record source-id: "tests/encoding.vib" start: 1287u64 end: 1352u64)) audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.encoding::\"the same value under two primitive types differs\"" result: @test.assertion-failed failure: (record assertion: @std.assert.equal expected: "1i32" actual: "1u32" primary-span: (record source-id: "tests/encoding.vib" start: 1414u64 end: 1456u64)) audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.encoding::\"one declared enum holding different payload types differs\"" result: @test.assertion-failed failure: (record assertion: @std.assert.equal expected: "(record kind: @enum type: @tests.encoding.maybe variant: @some payload: 1i32)" actual: "(record kind: @enum type: @tests.encoding.maybe variant: @some payload: \"1\")" primary-span: (record source-id: "tests/encoding.vib" start: 1527u64 end: 1594u64)) audit-trace: (record format: @audit-trace.v1 events: (array)))
+    (record name: "@tests.encoding::\"an empty array differs from a nonempty one in the other type\"" result: @test.assertion-failed failure: (record assertion: @std.assert.equal expected: "(record kind: @array values: (array))" actual: "(record kind: @array values: (array \"a\"))" primary-span: (record source-id: "tests/encoding.vib" start: 1668u64 end: 1725u64)) audit-trace: (record format: @audit-trace.v1 events: (array)))
+  )
+)

@@ -1,0 +1,35 @@
+(import assert @std.assert)
+(import raw @std.bytes)
+(import env @std.env)
+(import random @std.random)
+(import time @std.time)
+
+(test "the world supplies the environment and the arguments"
+  effects: (env.read)
+  (match (env.read.var "MODE")
+    (result.ok mode) (assert.equal "test" mode)
+    (result.err -) (assert.true false))
+  (match (env.read.args)
+    (result.ok found) (assert.equal 2u64 (array.length found))
+    (result.err -) (assert.true false)))
+
+(test "the clock and the generator start from the world"
+  effects: (time.now random.generate)
+  (match (time.now.wall)
+    (result.ok wall) (assert.equal 42i64 wall)
+    (result.err -) (assert.true false))
+  (match (time.now.monotonic)
+    (result.ok first) (assert.equal 10u64 first)
+    (result.err -) (assert.true false))
+  (match (time.now.monotonic)
+    (result.ok second) (assert.equal 13u64 second)
+    (result.err -) (assert.true false))
+  (match (random.generate.bytes 1u64)
+    (result.ok found) (assert.equal 1u64 (raw.length found))
+    (result.err -) (assert.true false)))
+
+(test "each test starts from a fresh copy of the world"
+  effects: (time.now)
+  (match (time.now.monotonic)
+    (result.ok first) (assert.equal 10u64 first)
+    (result.err -) (assert.true false)))

@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-try-and-never"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "try yields the payload of some or ok and otherwise leaves the activation with none or the error rebuilt at the enclosing result type, and a let-else fallback or branch of type never has no value."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

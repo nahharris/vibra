@@ -1,0 +1,23 @@
+; A thousand `f64.to-str` calls over values that grow by a little more than a
+; quarter each step, summing the lengths of the texts.
+(import text @std.text)
+
+(defn main () u64 (spin 1000u64 0.1f64 0u64))
+
+(defn spin (remaining u64 value f64 total u64) u64
+  (if (u64.equal remaining 0u64)
+    total
+    (spin
+      (lower remaining)
+      (f64.add (f64.mul value 1.0009765625f64) 0.25f64)
+      (add total (text.length (f64.to-str value))))))
+
+(defn lower (count u64) u64
+  (match (u64.sub-checked count 1u64)
+    (result.ok value) value
+    (result.err -) 0u64))
+
+(defn add (left u64 right u64) u64
+  (match (u64.add-checked left right)
+    (result.ok sum) sum
+    (result.err -) 0u64))

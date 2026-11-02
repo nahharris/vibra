@@ -4,16 +4,15 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use vibra_diagnostics::DiagnosticCode;
 use vibra_workspace::WorkspaceSnapshot;
 
 fn temporary_directory(label: &str) -> PathBuf {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("clock before epoch")
-        .as_nanos();
+    // A counter, not the clock, makes the name unique within the process: the
+    // clock of some platforms is too coarse to tell two parallel tests apart.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let stamp = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let path = std::env::temp_dir().join(format!(
         "vibra-step13-{label}-{}-{stamp}",
         std::process::id()

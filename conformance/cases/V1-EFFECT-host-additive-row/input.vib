@@ -1,0 +1,5 @@
+(deffect console
+  (defn text (value str) void
+    effects: (console)
+    external: @host
+    symbol: "io.stdout-text"))

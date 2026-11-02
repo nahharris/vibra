@@ -1,0 +1,8 @@
+(deffect write
+  (defn text (target str) void (do)))
+
+(defn twice (target str) void
+  effects: (write write)
+  (write.text target))
+
+(defn typed (callback (fn (str) void effects: (write write))) void (do))

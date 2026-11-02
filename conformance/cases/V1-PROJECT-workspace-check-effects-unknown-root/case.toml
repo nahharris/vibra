@@ -1,0 +1,18 @@
+id = "V1-PROJECT-workspace-check-effects-unknown-root"
+rule = "V1-PROJECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "An atom of a target array whose module exists but declares no such name is @name.unknown-symbol at the atom; the other atoms are still resolved and the entry is still admitted against them."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "project.vibon"
+span = [179, 195]

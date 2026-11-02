@@ -1,0 +1,18 @@
+id = "V1-EFFECT-witness-function-value"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "A call through a function value contributes the row of the value's type, and its witness is one hop marked as a function value of that type."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [120, 129]
+notes = ["performs @write via a function value of type (fn (str) void effects: (write))"]

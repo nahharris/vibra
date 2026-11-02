@@ -1,0 +1,7 @@
+(import log @ops.log)
+
+(defn handle (target str) void
+  effects: (log.audit)
+  (log.audit.record target))
+
+(defn execute () void void)

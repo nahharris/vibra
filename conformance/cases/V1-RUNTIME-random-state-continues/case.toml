@@ -1,0 +1,14 @@
+id = "V1-RUNTIME-random-state-continues"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "The state continues across calls and the unused bytes of a call are discarded: with the default seed 0, three bytes take the first output (AF CD 1D ...) and discard its other five, so the next call of nine bytes is the whole second output and the first byte of the third."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+host-world = "world.vibon"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

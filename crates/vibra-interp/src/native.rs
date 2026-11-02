@@ -1,0 +1,409 @@
+//! The interpreter's side of the native code.
+//!
+//! The rows of the closed table of native imports (`vibra_ir::external`,
+//! `NATIVE_ROWS`) are implemented once, in `vibra-native`, and a WebAssembly
+//! module reaches them through an import. The interpreter calls the same
+//! functions directly. This module is the interpreter's half of the
+//! value-access interface: it reads a `str`, `bytes`, array, or dict value as a
+//! [`Source`] of its units, and builds the result from a [`Sink`]. It holds no
+//! algorithm of its own.
+
+use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp, NumericType};
+use vibra_ir::{Type, Value};
+use vibra_native::number::Parsed;
+use vibra_native::{Sink, Source};
+
+use crate::RuntimeValue;
+use crate::registry::{
+    err, integer_value, make_integer, ok, option, ordering, primitive,
+};
+
+/// A slice of units read as a [`Source`].
+struct Units<'a, U>(&'a [U]);
+
+impl<U: Copy> Source for Units<'_, U> {
+    type Unit = U;
+    type Iter<'a>
+        = std::iter::Copied<std::slice::Iter<'a, U>>
+    where
+        Self: 'a;
+
+    fn len(&self) -> u64 {
+        self.0.len() as u64
+    }
+
+    fn range(&self, from: u64, to: u64) -> Self::Iter<'_> {
+        let bounds = usize::try_from(from).ok().zip(usize::try_from(to).ok());
+        bounds
+            .and_then(|(from, to)| self.0.get(from..to))
+            .unwrap_or(&[])
+            .iter()
+            .copied()
+    }
+}
+
+/// Units collected into a vector as a [`Sink`].
+struct Collect<U>(Vec<U>);
+
+impl<U: Copy> Sink for Collect<U> {
+    type Unit = U;
+
+    fn put(&mut self, unit: U) {
+        self.0.push(unit);
+    }
+}
+
+fn scalars(text: &str) -> Vec<u32> {
+    text.chars().map(u32::from).collect()
+}
+
+fn text_of(units: Vec<u32>) -> Option<String> {
+    units.into_iter().map(char::from_u32).collect()
+}
+
+fn text_value(units: Vec<u32>) -> Option<RuntimeValue> {
+    text_of(units).map(|text| primitive(Value::Str(text)))
+}
+
+fn bytes_value(units: Vec<u8>) -> RuntimeValue {
+    primitive(Value::Bytes(units))
+}
+
+fn array_value(value_type: &Type, values: Vec<RuntimeValue>) -> RuntimeValue {
+    RuntimeValue::Array {
+        value_type: value_type.clone(),
+        values: values.into(),
+    }
+}
+/// Applies a native row of the closed table to its evaluated operands, which
+/// the checker has already held to the row's signature. `None` for an operand
+/// that does not match it.
+pub(crate) fn apply(
+    intrinsic: CompilerIntrinsic,
+    operands: &[RuntimeValue],
+    result: &Type,
+) -> Option<RuntimeValue> {
+    use CompilerIntrinsic as C;
+    use RuntimeValue::{Array, Dict, Primitive};
+    let text = |value: &RuntimeValue| match value {
+        Primitive(Value::Str(text)) => Some(scalars(text)),
+        _ => None,
+    };
+    let bytes = |value: &RuntimeValue| match value {
+        Primitive(Value::Bytes(bytes)) => Some(bytes.clone()),
+        _ => None,
+    };
+    let index = |value: &RuntimeValue| match value {
+        Primitive(Value::U64(index)) => Some(*index),
+        _ => None,
+    };
+    Some(match (intrinsic, operands) {
+        (C::TextLength, [value]) => {
+            let value = text(value)?;
+            primitive(Value::U64(vibra_native::length(&Units(&value))))
+        }
+        (C::BytesLength, [value]) => {
+            let value = bytes(value)?;
+            primitive(Value::U64(vibra_native::length(&Units(&value))))
+        }
+        (C::TextEqual, [first, second]) => {
+            let (first, second) = (text(first)?, text(second)?);
+            primitive(Value::Bool(vibra_native::same(
+                &Units(&first),
+                &Units(&second),
+            )))
+        }
+        (C::BytesEqual, [first, second]) => {
+            let (first, second) = (bytes(first)?, bytes(second)?);
+            primitive(Value::Bool(vibra_native::same(
+                &Units(&first),
+                &Units(&second),
+            )))
+        }
+        (C::TextCompare, [first, second]) => {
+            let (first, second) = (text(first)?, text(second)?);
+            ordering(
+                result,
+                vibra_native::compare(&Units(&first), &Units(&second)),
+            )
+        }
+        (C::BytesCompare, [first, second]) => {
+            let (first, second) = (bytes(first)?, bytes(second)?);
+            ordering(
+                result,
+                vibra_native::compare(&Units(&first), &Units(&second)),
+            )
+        }
+        (C::TextConcat, [first, second]) => {
+            let (first, second) = (text(first)?, text(second)?);
+            let mut out = Collect(Vec::new());
+            vibra_native::concat(&Units(&first), &Units(&second), &mut out);
+            text_value(out.0)?
+        }
+        (C::BytesConcat, [first, second]) => {
+            let (first, second) = (bytes(first)?, bytes(second)?);
+            let mut out = Collect(Vec::new());
+            vibra_native::concat(&Units(&first), &Units(&second), &mut out);
+            bytes_value(out.0)
+        }
+        (C::TextSlice, [value, start, end]) => {
+            let (value, start, end) = (text(value)?, index(start)?, index(end)?);
+            let mut out = Collect(Vec::new());
+            let some = vibra_native::slice(&Units(&value), start, end, &mut out);
+            option(result, some.then(|| text_value(out.0)).flatten())
+        }
+        (C::BytesSlice, [value, start, end]) => {
+            let (value, start, end) = (bytes(value)?, index(start)?, index(end)?);
+            let mut out = Collect(Vec::new());
+            let some = vibra_native::slice(&Units(&value), start, end, &mut out);
+            option(result, some.then(|| bytes_value(out.0)))
+        }
+        (C::TextToChars, [value]) => {
+            let value = text(value)?;
+            let mut out = Collect(Vec::new());
+            vibra_native::copy(&Units(&value), &mut out);
+            array_value(
+                result,
+                out.0
+                    .into_iter()
+                    .map(|scalar| char::from_u32(scalar).map(Value::Char))
+                    .map(|value| value.map(primitive))
+                    .collect::<Option<Vec<_>>>()?,
+            )
+        }
+        (C::BytesToArray, [value]) => {
+            let value = bytes(value)?;
+            let mut out = Collect(Vec::new());
+            vibra_native::copy(&Units(&value), &mut out);
+            array_value(
+                result,
+                out.0
+                    .into_iter()
+                    .map(|byte| primitive(Value::U8(byte)))
+                    .collect(),
+            )
+        }
+        (C::TextFromChars, [Array { values, .. }]) => {
+            let items = values
+                .iter()
+                .map(|value| match value {
+                    Primitive(Value::Char(value)) => Some(u32::from(*value)),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            let mut out = Collect(Vec::new());
+            vibra_native::copy(&Units(&items), &mut out);
+            text_value(out.0)?
+        }
+        (C::BytesFromArray, [Array { values, .. }]) => {
+            let items = values
+                .iter()
+                .map(|value| match value {
+                    Primitive(Value::U8(value)) => Some(*value),
+                    _ => None,
+                })
+                .collect::<Option<Vec<_>>>()?;
+            let mut out = Collect(Vec::new());
+            vibra_native::copy(&Units(&items), &mut out);
+            bytes_value(out.0)
+        }
+        (C::TextToUtf8, [value]) => {
+            let value = text(value)?;
+            let mut out = Collect(Vec::new());
+            vibra_native::to_utf8(&Units(&value), &mut out);
+            bytes_value(out.0)
+        }
+        (C::TextFromUtf8, [value]) => {
+            let value = bytes(value)?;
+            let mut out = Collect(Vec::new());
+            if vibra_native::from_utf8(&Units(&value), &mut out) {
+                ok(result, text_value(out.0)?)
+            } else {
+                err(result, "invalid-format")
+            }
+        }
+        (C::ArrayAppend, [Array { value_type, values }, item]) => {
+            let items = values.iter().collect::<Vec<_>>();
+            let mut out = Collect(Vec::new());
+            vibra_native::append(&Units(&items), item, &mut out);
+            array_value(value_type, out.0.into_iter().cloned().collect())
+        }
+        (
+            C::ArrayConcat,
+            [Array { value_type, values }, Array { values: second, .. }],
+        ) => {
+            let (first, second) = (
+                values.iter().collect::<Vec<_>>(),
+                second.iter().collect::<Vec<_>>(),
+            );
+            let mut out = Collect(Vec::new());
+            vibra_native::concat(&Units(&first), &Units(&second), &mut out);
+            array_value(value_type, out.0.into_iter().cloned().collect())
+        }
+        (C::ArraySlice, [Array { value_type, values }, start, end]) => {
+            let (start, end) = (index(start)?, index(end)?);
+            let items = values.iter().collect::<Vec<_>>();
+            let mut out = Collect(Vec::new());
+            let some = vibra_native::slice(&Units(&items), start, end, &mut out);
+            option(
+                result,
+                some.then(|| {
+                    array_value(value_type, out.0.into_iter().cloned().collect())
+                }),
+            )
+        }
+        (C::Integer(_, IntegerOp::ToStr), [Primitive(value)]) => {
+            let mut out = Collect(Vec::new());
+            vibra_native::number::integer_to_str(integer_value(value)?, &mut out);
+            text_value(out.0)?
+        }
+        (C::Float(numeric, FloatOp::ToStr), [Primitive(value)]) => {
+            let bits = match value {
+                Value::F32(bits) => u64::from(*bits),
+                Value::F64(bits) => *bits,
+                _ => return None,
+            };
+            let mut out = Collect(Vec::new());
+            vibra_native::number::float_to_str(numeric, bits, &mut out);
+            text_value(out.0)?
+        }
+        (C::Integer(numeric, IntegerOp::Parse), [value]) => {
+            let value = text(value)?;
+            match vibra_native::number::parse_integer(numeric, &Units(&value)) {
+                Parsed::Value(value) => {
+                    ok(result, primitive(make_integer(numeric, value)?))
+                }
+                Parsed::InvalidFormat => err(result, "invalid-format"),
+                Parsed::OutOfRange => err(result, "out-of-range"),
+            }
+        }
+        (C::Float(numeric, FloatOp::Parse), [value]) => {
+            let value = text(value)?;
+            match vibra_native::number::parse_float(numeric, &Units(&value)) {
+                Parsed::Value(bits) => ok(
+                    result,
+                    primitive(if numeric == NumericType::F32 {
+                        Value::F32(u32::try_from(bits).ok()?)
+                    } else {
+                        Value::F64(bits)
+                    }),
+                ),
+                Parsed::InvalidFormat => err(result, "invalid-format"),
+                Parsed::OutOfRange => err(result, "out-of-range"),
+            }
+        }
+        (
+            C::DictEntries,
+            [
+                Dict {
+                    value_type: Type::Dict(key, value),
+                    entries,
+                },
+            ],
+        ) => {
+            let items = entries.iter().collect::<Vec<_>>();
+            let mut out = Collect(Vec::new());
+            vibra_native::copy(&Units(&items), &mut out);
+            let entry_type =
+                Type::Tuple(vec![key.as_ref().clone(), value.as_ref().clone()]);
+            RuntimeValue::Array {
+                value_type: Type::Array(Box::new(entry_type.clone())),
+                values: out
+                    .0
+                    .into_iter()
+                    .map(|(key, value)| RuntimeValue::Tuple {
+                        value_type: entry_type.clone(),
+                        values: vec![key.clone(), value.clone()].into(),
+                    })
+                    .collect::<Vec<_>>()
+                    .into(),
+            }
+        }
+        _ => return None,
+    })
+}
+
+// The rest of the interpreter that reads a sequence. Canonical key order, the
+// `iter.next` of a builtin value, and the array a `str` or `bytes` pattern is
+// written over are the same operations as a native row: ordering text or bytes
+// is `text.compare` and `bytes.compare`, the iterator that remains is `slice`
+// from the second unit, and the array of a text is `text.to-chars`. Each goes
+// through the one function of `vibra-native` that the row is, so the
+// interpreter holds no second copy of an algorithm.
+
+/// A `str`, an atom's spelling, or a variant's name, read as its Unicode
+/// scalars.
+struct Scalars<'a>(&'a str);
+
+impl Source for Scalars<'_> {
+    type Unit = u32;
+    type Iter<'a>
+        = std::iter::Map<
+        std::iter::Take<std::iter::Skip<std::str::Chars<'a>>>,
+        fn(char) -> u32,
+    >
+    where
+        Self: 'a;
+
+    fn len(&self) -> u64 {
+        self.0.chars().count() as u64
+    }
+
+    fn range(&self, from: u64, to: u64) -> Self::Iter<'_> {
+        let skip = usize::try_from(from).unwrap_or(usize::MAX);
+        let take = usize::try_from(to.saturating_sub(from)).unwrap_or(0);
+        self.0
+            .chars()
+            .skip(skip)
+            .take(take)
+            .map(u32::from as fn(char) -> u32)
+    }
+}
+
+/// `text.compare` of two spellings: a `str`, an atom, or the name of a variant.
+pub(crate) fn order_text(first: &str, second: &str) -> std::cmp::Ordering {
+    vibra_native::compare(&Scalars(first), &Scalars(second))
+}
+
+/// `bytes.compare`.
+pub(crate) fn order_bytes(first: &[u8], second: &[u8]) -> std::cmp::Ordering {
+    vibra_native::compare(&Units(first), &Units(second))
+}
+
+/// The units after the first, which is how `iter.next` leaves the iterator that
+/// remains: `array.slice` from `1` to the length.
+pub(crate) fn rest<U: Copy>(units: &[U]) -> Vec<U> {
+    let source = Units(units);
+    let mut out = Collect(Vec::new());
+    vibra_native::slice(&source, 1, source.len(), &mut out);
+    out.0
+}
+
+/// The first scalar of a `str` and the text after it (`text.slice` from `1`),
+/// or `None` for the empty text.
+pub(crate) fn text_rest(text: &str) -> Option<(char, String)> {
+    let head = text.chars().next()?;
+    let source = Scalars(text);
+    let mut out = Collect(Vec::new());
+    vibra_native::slice(&source, 1, source.len(), &mut out);
+    Some((head, text_of(out.0)?))
+}
+
+/// The array of `char` or `u8` a `str` or `bytes` value is written over:
+/// `text.to-chars` and `bytes.to-array`.
+pub(crate) fn items_of(value: &RuntimeValue) -> Option<RuntimeValue> {
+    let (row, element) = match value {
+        RuntimeValue::Primitive(Value::Str(_)) => {
+            (CompilerIntrinsic::TextToChars, Type::Char)
+        }
+        RuntimeValue::Primitive(Value::Bytes(_)) => {
+            (CompilerIntrinsic::BytesToArray, Type::U8)
+        }
+        _ => return None,
+    };
+    apply(
+        row,
+        std::slice::from_ref(value),
+        &Type::Array(Box::new(element)),
+    )
+}

@@ -1,0 +1,19 @@
+id = "V1-EFFECT-host-function-ceiling-omits-fs-read"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "A function's own ceiling bounds what it performs: an entry whose written ceiling omits @std.fs.read is rejected at the call of @std.fs.read.file, although the target array is complete; the array adds no second diagnostic."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "src/app/main.vib"
+span = [144, 178]
+notes = ["performs @std.fs.read via @std.fs.read.file"]

@@ -1,0 +1,4 @@
+(import log @ops.log)
+
+(defn execute () void
+  (log.audit.record "recorded"))

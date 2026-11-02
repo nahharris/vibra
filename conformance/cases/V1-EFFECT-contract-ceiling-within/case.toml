@@ -1,0 +1,11 @@
+id = "V1-EFFECT-contract-ceiling-within"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "An interface contract member writes its ceiling, an implementation within it is accepted, and a caller through the contract writes the ceiling."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

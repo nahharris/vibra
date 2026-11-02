@@ -1,0 +1,2 @@
+(def max i32 10i32
+  visibility: @public)

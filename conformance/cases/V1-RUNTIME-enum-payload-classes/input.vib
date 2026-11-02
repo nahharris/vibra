@@ -1,0 +1,4 @@
+(deftype value (enum small i8 wide i64 single f32 double f64 text str flag bool none void))
+
+(defn main () (tuple value value value value value value value)
+  (tupleof (value.small -5i8) (value.wide -9i64) (value.single 1.5f32) (value.double 2.25f64) (value.text "héllo") (value.flag true) (value.none)))

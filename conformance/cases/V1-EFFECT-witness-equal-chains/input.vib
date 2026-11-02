@@ -1,0 +1,24 @@
+(deffect write
+  (defn text (target str event str) void (do)))
+
+(deffect audit
+  (defn record (target str event str) void
+    effects: (write)
+    (write.text target event)))
+
+(defn left () void
+  effects: (audit write)
+  (audit.record "left" "x"))
+
+(defn right () void
+  effects: (audit write)
+  (audit.record "right" "y"))
+
+(defn middle () void
+  effects: (audit write)
+  (right)
+  (left))
+
+(defn top () void
+  effects: (audit)
+  (middle))

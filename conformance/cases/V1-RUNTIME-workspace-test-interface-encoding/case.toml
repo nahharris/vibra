@@ -1,0 +1,13 @@
+id = "V1-RUNTIME-workspace-test-interface-encoding"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-test"
+description = "An interface value is encoded as the value it holds: values of different types are equal when their canonical encodings are, and differ where the encoding names a type."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon" }

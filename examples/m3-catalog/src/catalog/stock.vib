@@ -74,6 +74,22 @@
     (result.ok sum) sum
     (result.err -) 18446744073709551615u64))
 
+; Walks `rounds` rounds over a line of stock, adding one unit to the count in
+; each round, and returns the count it ends on. Each round builds a fresh
+; `part`, and the call that repeats is in tail position, so the walk grows
+; neither the stack nor the arena however long it is.
+(defn walk (line part rounds u64) u64
+  visibility: @public
+  (match
+    (u64.sub-checked rounds 1u64)
+    (result.err -) (line @count)
+    (result.ok left) (walk
+      (part
+        name: (line @name)
+        unit-cents: (line @unit-cents)
+        count: (plus (line @count) 1u64))
+      left)))
+
 ; The worth of every item, in cents.
 (defn total (items (array t)) u64
   where: (t priced)

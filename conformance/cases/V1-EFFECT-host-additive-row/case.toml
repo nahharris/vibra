@@ -1,0 +1,17 @@
+id = "V1-EFFECT-host-additive-row"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "A @host member has no additive row, since it performs exactly its owner root: an effects attribute with entries is @syntax.invalid-attribute at that attribute."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-attribute"
+level = "@error"
+source = "input.vib"
+span = [51, 69]

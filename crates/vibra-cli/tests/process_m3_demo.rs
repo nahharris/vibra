@@ -45,8 +45,8 @@ fn the_m3_demo_checks_tests_and_runs() {
     assert_eq!(test.status.code(), Some(0), "{test:?}");
     let test = envelope(&test);
     assert_eq!(test["result"], "@command.ok");
-    assert_eq!(test["payload"]["selected"], 7);
-    assert_eq!(test["payload"]["passed"], 7);
+    assert_eq!(test["payload"]["selected"], 8);
+    assert_eq!(test["payload"]["passed"], 8);
 
     let run = vibra(&["run", "src/app"]);
     assert_eq!(run.status.code(), Some(0), "{run:?}");

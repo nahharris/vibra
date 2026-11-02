@@ -1,0 +1,33 @@
+id = "V1-EFFECT-witness-equal-chains"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "Among chains of equal length the witness takes the one whose call sites come first in source order, not the one whose callee is declared first."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [432, 440]
+notes = ["performs @write via @middle"]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [374, 381]
+  message = "performs @write via @right"
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [297, 323]
+  message = "performs @write via @audit.record"
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [147, 172]
+  message = "performs @write via @write.text"

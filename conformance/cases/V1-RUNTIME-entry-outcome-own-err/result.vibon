@@ -1,0 +1,1 @@
+(record type: (record type: @std.result.result arguments: (array @void @app.main.failure)) value: (record kind: @enum type: @std.result.result variant: @err payload: (record kind: @record type: @app.main.failure fields: (record code: 7i32))))

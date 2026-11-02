@@ -1,0 +1,7 @@
+(import fs @std.fs)
+
+(defn main () (result void fs.fs-error)
+  effects: (fs.read)
+  (let - (fs.read.text (fs.path "/raw.bin")))
+  (let - (try (fs.read.file (fs.path "/raw.bin"))))
+  (result.ok))

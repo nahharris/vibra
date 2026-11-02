@@ -1,0 +1,7 @@
+(import log @ops.log)
+
+(defn peek () void
+  effects: (log.secret)
+  (do))
+
+(defn execute () void void)

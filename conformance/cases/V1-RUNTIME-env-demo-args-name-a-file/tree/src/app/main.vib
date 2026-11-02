@@ -1,0 +1,15 @@
+(import env @std.env)
+(import fs @std.fs)
+(import io @std.io)
+(import text @std.text)
+
+(defn main () (result void fs.fs-error)
+  effects: (env.read fs.read io.stdout)
+  (let arguments (match (env.read.args)
+    (result.ok found) found
+    (result.err -) (array.of "")))
+  (let name (array.fold arguments "" text.concat))
+  (let contents (try (fs.read.text (fs.path name))))
+  (match (io.stdout.text contents)
+    (result.ok) (result.ok)
+    (result.err -) (result.ok)))

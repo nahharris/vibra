@@ -1,0 +1,13 @@
+id = "V1-RUNTIME-io-effectful-iter-walk"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "An effectful walk over iter.next: a tail-recursive module-level function declares its host ceiling and writes each item of an array seen as an iterator, one event per item in order, and stops at the first err."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

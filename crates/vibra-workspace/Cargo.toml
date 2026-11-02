@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 vibra-diagnostics.workspace = true
 vibra-fmt.workspace = true
+vibra-host.workspace = true
 vibra-syntax.workspace = true
 vibra-resolve.workspace = true
 vibra-ir.workspace = true

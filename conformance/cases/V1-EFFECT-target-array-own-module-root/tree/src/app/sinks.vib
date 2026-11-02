@@ -1,0 +1,3 @@
+(deffect console
+  visibility: @public
+  (defn print (text str) void visibility: @public (do)))

@@ -21,7 +21,8 @@
     "visibleImports",
     "declarationCandidates",
     "application",
-    "pattern"
+    "pattern",
+    "effects"
   ],
   "properties": {
     "schemaVersion": { "const": 1 },
@@ -45,7 +46,8 @@
     "visibleImports": { "$ref": "#/$defs/importFact" },
     "declarationCandidates": { "$ref": "#/$defs/identityListFact" },
     "application": { "$ref": "#/$defs/applicationFact" },
-    "pattern": { "$ref": "#/$defs/patternFact" }
+    "pattern": { "$ref": "#/$defs/patternFact" },
+    "effects": { "$ref": "#/$defs/effectsFact" }
   },
   "$defs": {
     "position": {
@@ -141,13 +143,14 @@
         {
           "type": "object",
           "additionalProperties": false,
-          "required": ["kind", "name", "parameters", "result", "labelled"],
+          "required": ["kind", "name", "parameters", "result", "labelled", "effects"],
           "properties": {
             "kind": { "const": "function" },
             "name": { "const": "fn" },
             "parameters": { "type": "array", "items": { "$ref": "#/$defs/type" } },
             "result": { "$ref": "#/$defs/type" },
-            "labelled": { "type": "array", "items": { "$ref": "#/$defs/labelled" } }
+            "labelled": { "type": "array", "items": { "$ref": "#/$defs/labelled" } },
+            "effects": { "$ref": "#/$defs/row" }
           }
         },
         {
@@ -359,6 +362,109 @@
       "oneOf": [
         { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "$ref": "#/$defs/application" } } },
         { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "anyOf": [{ "$ref": "#/$defs/application" }, { "type": "null" }] } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "unavailable" }, "value": { "type": "null" } } }
+      ]
+    },
+    "row": {
+      "description": "A closed effect row, the record of the effects chapter: the canonical identities of its roots, without duplicates. Consumers must not assume the record holds only roots.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roots"],
+      "properties": {
+        "roots": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      }
+    },
+    "enclosing": {
+      "description": "The smallest enclosing function body: a defn, nested method, effect operation, lambda, or test. A lambda has no identity.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "kind", "ceiling", "performed"],
+      "properties": {
+        "identity": { "$ref": "#/$defs/identityOrNull" },
+        "kind": { "enum": ["function", "operation", "lambda", "test"] },
+        "ceiling": { "$ref": "#/$defs/row" },
+        "performed": { "$ref": "#/$defs/row" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "lambda" } } },
+          "then": { "properties": { "identity": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["operation", "test"] } } },
+          "then": { "properties": { "identity": { "$ref": "#/$defs/identity" } } }
+        }
+      ]
+    },
+    "target": {
+      "description": "The binary target whose entry reaches the source, with the target effects array as a row: the consent that admitted the entry.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry", "effects"],
+      "properties": {
+        "entry": { "$ref": "#/$defs/identity" },
+        "effects": { "$ref": "#/$defs/row" }
+      }
+    },
+    "witnessCallee": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "identity"],
+      "properties": {
+        "kind": { "enum": ["function", "operation", "function-value", "contract-member"] },
+        "identity": { "type": ["string", "null"], "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "const": "function-value" } } },
+          "then": { "properties": { "identity": { "type": "null" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "enum": ["operation", "contract-member"] } } },
+          "then": { "properties": { "identity": { "type": "string" } } }
+        }
+      ]
+    },
+    "witnessHop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["span", "callee"],
+      "properties": {
+        "span": { "$ref": "#/$defs/span" },
+        "callee": { "$ref": "#/$defs/witnessCallee" }
+      }
+    },
+    "rootWitness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "hops"],
+      "properties": {
+        "root": { "type": "string", "minLength": 1 },
+        "hops": { "type": "array", "items": { "$ref": "#/$defs/witnessHop" } }
+      }
+    },
+    "effects": {
+      "description": "The effect metadata at the position. witnesses is present only under --expand effect-witnesses, one record for each root of the enclosing performed row in its order.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enclosing", "application", "target"],
+      "properties": {
+        "enclosing": { "anyOf": [{ "$ref": "#/$defs/enclosing" }, { "type": "null" }] },
+        "application": { "anyOf": [{ "$ref": "#/$defs/row" }, { "type": "null" }] },
+        "target": { "anyOf": [{ "$ref": "#/$defs/target" }, { "type": "null" }] },
+        "witnesses": { "type": "array", "items": { "$ref": "#/$defs/rootWitness" } }
+      }
+    },
+    "effectsFact": {
+      "type": "object",
+      "unevaluatedProperties": false,
+      "oneOf": [
+        { "required": ["status", "value"], "properties": { "status": { "const": "exact" }, "value": { "$ref": "#/$defs/effects" } } },
+        { "required": ["status", "value"], "properties": { "status": { "const": "recovered" }, "value": { "anyOf": [{ "$ref": "#/$defs/effects" }, { "type": "null" }] } } },
         { "required": ["status", "value"], "properties": { "status": { "const": "unavailable" }, "value": { "type": "null" } } }
       ]
     }

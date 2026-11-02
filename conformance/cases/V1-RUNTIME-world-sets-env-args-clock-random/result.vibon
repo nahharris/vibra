@@ -1,0 +1,9 @@
+(record
+  format: @test-run.v1
+  result: @command.ok
+  tests: (array
+    (record name: "@tests.world::\"the world supplies the environment and the arguments\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array (record kind: @host op: "env.read-var" args: (array "MODE") result: (record kind: @enum type: @std.result.result variant: @ok payload: "test")) (record kind: @host op: "env.read-args" args: (array) result: (record kind: @enum type: @std.result.result variant: @ok payload: (record kind: @array values: (array "one" "two")))))))
+    (record name: "@tests.world::\"the clock and the generator start from the world\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array (record kind: @host op: "time.now-wall" args: (array) result: (record kind: @enum type: @std.result.result variant: @ok payload: 42i64)) (record kind: @host op: "time.now-monotonic" args: (array) result: (record kind: @enum type: @std.result.result variant: @ok payload: 10u64)) (record kind: @host op: "time.now-monotonic" args: (array) result: (record kind: @enum type: @std.result.result variant: @ok payload: 13u64)) (record kind: @host op: "random.generate-bytes" args: (array 1u64) result: (record kind: @enum type: @std.result.result variant: @ok payload: (record kind: @bytes values: (array 175u8)))))))
+    (record name: "@tests.world::\"each test starts from a fresh copy of the world\"" result: @test.passed audit-trace: (record format: @audit-trace.v1 events: (array (record kind: @host op: "time.now-monotonic" args: (array) result: (record kind: @enum type: @std.result.result variant: @ok payload: 10u64)))))
+  )
+)

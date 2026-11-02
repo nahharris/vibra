@@ -1,0 +1,7 @@
+(import fs @std.fs)
+
+(defn main () (result void fs.fs-error)
+  effects: (fs.metadata)
+  (let - (fs.metadata.stat (fs.path "/in.txt")))
+  (let - (fs.read.file (fs.path "/in.txt")))
+  (result.ok))

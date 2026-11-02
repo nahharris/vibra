@@ -1,0 +1,8 @@
+(import io @std.io)
+
+(deffect console
+  (defn text (value i32) (result void io.io-error)
+    external: @host
+    symbol: "io.stdout-text"))
+
+(defn main () void (do))

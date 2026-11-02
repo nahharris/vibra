@@ -36,10 +36,10 @@ fn a_deeply_nested_entry_result_does_not_abort_the_process() {
         .output()
         .expect("vibra binary");
     let _ = fs::remove_dir_all(&root);
-    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.status.code(), Some(6), "{output:?}");
     let envelope: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("json envelope");
-    assert_eq!(envelope["result"], "@command.ok");
+    assert_eq!(envelope["result"], "@command.program-failed");
     assert!(
         envelope["payload"]["programResult"]
             .as_str()

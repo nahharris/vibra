@@ -1,0 +1,40 @@
+(defn main () (tuple str str str i32 i32 str str str str str str str)
+  (tupleof
+      (render 1i32)
+      (render "text")
+      (kind true)
+      (width 7u8)
+      (get-int 5i32)
+      (which 5i32)
+      (which "s")
+      (which true)
+      (which 7u8)
+      (which 1.5f64)
+      (which \x)
+      (which 9i64)))
+
+(deftype number (union i32 str))
+
+(deftype many (union i32 str bool u8 f64 char i64))
+
+(defn render (value number) str
+  (match value (as i32 -) "integer" (as str text) text))
+
+(defn kind (value (union bool u8)) str
+  (match value (as bool true) "yes" (as bool false) "no" (as u8 -) "byte"))
+
+(defn width (value (union bool u8)) i32
+  (match value (as u8 8u8) 8i32 (as u8 -) 1i32 (as bool -) 0i32))
+
+(defn get-int (value number) i32
+  (match value (as i32 n) n (as str -) 0i32))
+
+(defn which (value many) str
+  (match value
+    (as i32 -) "a"
+    (as str -) "b"
+    (as bool -) "c"
+    (as u8 -) "d"
+    (as f64 -) "e"
+    (as char -) "f"
+    (as i64 -) "g"))

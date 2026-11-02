@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-record-projection"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A declared record builds from its fields and an anonymous record stores its fields in canonical order whatever order they were written in, and a projection reads one field of a record held in a binding."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

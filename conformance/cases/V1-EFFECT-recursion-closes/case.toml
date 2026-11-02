@@ -1,0 +1,11 @@
+id = "V1-EFFECT-recursion-closes"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "Mutual recursion closes the performed row to a fixed point: each of two functions that call each other lists the root that only one of them performs."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true

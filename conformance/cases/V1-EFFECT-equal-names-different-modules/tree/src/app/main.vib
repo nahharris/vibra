@@ -1,0 +1,14 @@
+(import log @ops.log)
+(import other @ops.other)
+
+(defn both (target str) void
+  effects: (other.write log.write)
+  (log.write.text target)
+  (other.write.text target))
+
+(defn one-only (target str) void
+  effects: (log.write)
+  (log.write.text target)
+  (other.write.text target))
+
+(defn execute () void void)

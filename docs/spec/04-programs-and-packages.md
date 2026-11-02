@@ -3,8 +3,12 @@
 Status: normative target
 Implementation status: M1 supplies generic VIBON data and structural query
 metadata; M2 decodes projects, resolves local modules, and supports init,
-check, run, and test for its pure subset. Ordinary dependency delivery remains
-deferred.
+check, run, and test; M3 embeds the standard library as the toolchain input.
+Ordinary dependency delivery (M5) and build products (M7) remain unimplemented,
+and `run` and `test` execute the reference interpreter. Milestone 4 Step 13 closes
+the Stage 4B contracts of this chapter, the `host` list and effect modules of the
+standard-library manifest, the test host world, and the target `effects`
+diagnostics, and implements none of them; Steps 14 to 18 do.
 
 ## VIBON data documents
 
@@ -253,7 +257,8 @@ record MUST omit both. A library has no execution entry and no index module: its
 surface is every public declaration of every module under its root, reached by
 import. An `entry` on a library target is `@project.entry-on-library`. The
 binary `effects` array is the entry's complete static effect ceiling and
-execution consent as defined by the effects chapter.
+execution consent as defined by the effects chapter, which also closes the
+diagnostics of an unknown, mistyped, or repeated root in it.
 
 `entry` is a declaration reference. Its first component MUST be the target's own
 name, so an entry always resolves inside its own target's root; any other unit
@@ -269,8 +274,9 @@ signature emits `@project.invalid-entry-signature`.
 
 An entry signature has no parameters and a result of either `void` or
 `result void e` for a nominal error type `e`; `never` is neither, so an entry
-result of `never` or an error type of `never` is not an entry signature. Returning an error produces a
-structured nonzero program result; traps remain distinct.
+result of `never` or an error type of `never` is not an entry signature. An entry
+that returns `err` ends `run` with `@command.program-failed` and exit code 6, as
+the tooling chapter states; traps remain distinct.
 The error type MUST NOT hold a function type, directly or through a declared
 type, because the result is observed and a function has no observable value;
 such a signature also emits `@project.invalid-entry-signature`.
@@ -353,9 +359,11 @@ declaration in every namespace the declaration occupies, so `ordering` then
 names the type and `ordering.less` its variant; members of a declared type are
 reached through the alias exactly as through the type name. Because the layout
 rule makes a module a leaf, a path never denotes both a module and a
-declaration. Apart from the closed core and role vocabulary the type chapter
-lists, the standard library is imported explicitly like any other package; it
-is not an ambient prelude.
+declaration. Apart from the prelude, the closed set of declarations the type
+chapter lists (the core and role types and the values `true` and `false`),
+the standard library is imported explicitly like any other package. The
+prelude is fixed by the specification, cannot be extended by a package, and the
+module that declares it, `@std.bool`, is in every checked graph.
 
 ## Dependencies and lock
 
@@ -419,18 +427,23 @@ and nothing a project supplies can add to it.
 The input is the repository directory `stdlib/`. Its authority is
 `stdlib/manifest.vibon`, a closed `@stdlib-manifest.v1` record with fields, in
 order, `format`, `package-name`, `package-version`, `modules`, `compiler`,
-`native`, and `assertions`. `package-name` is `"vibra-stdlib"` and
-`package-version` is `"0.2.0"`. `modules` is a dict from each module atom to a
+`host`, `native`, and `assertions`. `package-name` is `"vibra-stdlib"` and
+`package-version` is `"0.3.0"`. `modules` is a dict from each module atom to a
 record with `path` (a `stdlib/src/`-relative slash path), `sha256` (the
 `sha256:` digest of the module's exact bytes), and `role` (`@source` or
 `@test-registry`). `compiler` lists every `@compiler` symbol the modules may
-bind, `native` lists every native implementation symbol the modules may name
-with `native:`, and `assertions` lists the test-only assertion members.
+bind, `host` lists every `@host` registry symbol the modules may bind, `native`
+lists every native implementation symbol the modules may name with `native:`,
+and `assertions` lists the test-only assertion members.
 
 The toolchain embeds the manifest and every listed module at build time. At
 load it decodes the manifest through its closed record, hashes each embedded
 module against its entry, and requires every `external: @compiler` declaration
-to name a listed symbol whose signature matches the registry exactly. Every
+to name a listed symbol whose signature matches the registry exactly. It
+requires every `external: @host` declaration likewise to name a symbol of the
+`host` list and of the host registry, with the registry's signature and with the
+registry's owner root equal to the root of the enclosing `deffect`, and it
+requires the `host` list to hold exactly the symbols the modules bind. Every
 `native:` symbol MUST likewise be listed and implemented by the toolchain, and
 every language role MUST be claimed by exactly one `role:` declaration. A
 mismatch is an internal toolchain defect reported as an operational provenance
@@ -438,18 +451,24 @@ diagnostic, never a fallback. `check`, `run`, and `test` never read the
 standard library from the project, the build checkout, the installation
 directory, a vendor tree, a cache, or the network.
 
-The admitted modules enter the resolver as the `vibra-stdlib@0.2.0` package
+The admitted modules enter the resolver as the `vibra-stdlib@0.3.0` package
 with unit `@std`, keep that provenance in every declaration identity, and are
-imported explicitly; there is no ambient prelude. A declaration outside this
+imported explicitly, except for the prelude of the type chapter, whose
+declarations every module sees and whose declaring module `@std.bool` is in
+every checked graph, so `check`, `run`, and `test` always load the embedded
+library. A declaration outside this
 embedded package that writes `external:` acquires no provider authority and is
-rejected before execution. The M3 module set is `@std.core`, `@std.option`,
-`@std.result`, `@std.bool`, `@std.char`, `@std.text`, `@std.bytes`,
-the builtin-member module `@std.builtin`, and the test-registry module
-`@std.assert`. `@std.builtin` is never imported: it declares the members of the
+rejected before execution. The module set of the M3 package is `@std.core`,
+`@std.option`, `@std.result`, `@std.bool`, `@std.char`, `@std.text`,
+`@std.bytes`, `@std.iter`, the builtin-member module `@std.builtin`, and the
+test-registry module `@std.assert`. Milestone 4 adds the five effect modules
+`@std.io`, `@std.fs`, `@std.env`, `@std.time`, and `@std.random`, which declare
+the roots, operations, and error types of the host registry in the runtime
+chapter. `@std.builtin` is never imported: it declares the members of the
 builtin numeric, `array`, `dict`, and `tuple` types, which are reached
-through those type paths; Stage 3B adds its own
-modules by the same rule. Adding a module or symbol is a specification change to
-this list and to the runtime registry.
+through those type paths. Adding a module or symbol is a specification change to
+this list and to the runtime registry, and replaces the manifest and the package
+version in place.
 
 The combined project and standard-library graph MUST keep source IDs unique
 across all packages, because a source ID selects the document used for
@@ -526,11 +545,13 @@ tests runnable. A module that declares a test MUST explicitly import
 imports use ordinary unit aliases and ordinary public-visibility rules; no
 test-only prelude or private-access exception exists.
 
-The full v1 test language permits declared effect ceilings, but M2 admits only
-tests whose computed effects are empty. An omitted `effects:` is empty; an
-explicit nonempty row or a test that performs an effect is unavailable in M2
-and emits `@tool.unavailable` before execution. M2 test selection grants no
-effect consent and cannot add effects to a test declaration.
+The full v1 test language permits declared effect ceilings. Since Milestone 4
+Step 14 a test is checked against its written ceiling like a function, an
+omitted `effects:` is empty, and a test whose ceiling holds only operations with
+Vibra bodies runs. Selecting and running a test is consent to the roots of its written row, with no
+target array involved, and a test cannot add effects to a test declaration. An
+effectful test runs in the default host world of the runtime chapter, which
+provides no host operation to call until the standard effect modules exist.
 
 ### M2 assertion contract
 
@@ -571,7 +592,8 @@ A passing assertion returns `void`. A false assertion records one structured
 test failure with the assertion's canonical name, the canonical literal forms
 of its expected and actual values, and the assertion call's primary source
 span, then stops that test's body. For `assert.true` and `assert.false`,
-`expected` is the required boolean literal and `actual` is the operand. For an
+`expected` is the required boolean value, rendered `true` or `false`, and
+`actual` is the operand. For an
 `assert.equal-*` member, `expected` is the first operand and `actual` is the
 second operand; both are rendered with the canonical literal formatter. It
 does not throw, create a `result` value,
@@ -604,9 +626,17 @@ that test. The runner then starts the next selected test with fresh value state
 and an empty audit trace. Empty test selection is a successful empty suite only
 when the selector is omitted; an unknown explicit selector is invalid input.
 
-The runner isolates each test's values and host event log. Time and random
-operations use deterministic providers by default. An unconsumed failure or
-unrecorded dependency on a nondeterministic provider fails the test.
+The runner isolates each test's values and audit trace. Every test, effectful
+or not, runs in a fresh copy of the deterministic in-memory host world of the
+runtime chapter, for every root and with standard output and error going to the
+test's audit trace, and a test supplies no provider, response, or mode of its
+own. The world's clock, random generator, filesystem, environment, arguments,
+and standard input are fields of one `@host-world.v1` document, and the default
+world, empty and fixed, is what a test sees when nothing supplies another. A
+conformance case may supply a world; the project has no field for one, and a
+user-supplied world, like replay of a recorded run, comes after v1. There is no
+failure for a dependency on a nondeterministic provider, because a test cannot
+name one.
 
 ### M3 assertion contract
 
@@ -632,7 +662,8 @@ the M2 assertion contract is unchanged.
 
 - `<target>.wasm`, the deterministic program or library module;
 - `<target>.build.vibon`, canonical `@build.v1` data containing toolchain,
-  project, dependency, source, required-effect, and module hashes; and
+  project, dependency, source, required-effect, required registry symbols and
+  the derived registry minor of the runtime chapter, and module hashes; and
 - optional human-readable diagnostics on stderr.
 
 The metadata is descriptive and not executable policy. A conforming runner

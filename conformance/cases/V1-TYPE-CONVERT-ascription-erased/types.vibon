@@ -1,5 +1,9 @@
 (record
   format: @types.v1
+  globals: (array
+    (record name: @true type: @bool body: (record kind: @variant type: @bool variant: @true))
+    (record name: @false type: @bool body: (record kind: @variant type: @bool variant: @false))
+  )
   functions: (array
     (record name: @keep params: (array) result: @str body: (record kind: @sequence type: @str values: (array (record kind: @literal type: @str value: "text"))))
     (record name: @empty params: (array) result: (record type: @array arguments: (array @u32)) body: (record kind: @sequence type: (record type: @array arguments: (array @u32)) values: (array (record kind: @call function: 3u64 result: (record type: @array arguments: (array @u32)) arguments: (array (record kind: @array type: (record type: @array arguments: (array @u32)) elements: (array)))))))

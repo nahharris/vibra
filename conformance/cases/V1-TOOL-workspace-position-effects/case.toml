@@ -1,0 +1,52 @@
+id = "V1-TOOL-workspace-position-effects"
+rule = "V1-TOOL-workspace-position-query"
+profile = "tooling-v1"
+operation = "query"
+description = "The effects fact of the position envelope: the enclosing body with its ceiling and performed row, the callee's complete row at an application, and the binary target that reaches the source with its effects array as a row. A lambda has no identity, an operation reports its complete row as its ceiling, a def initializer and an import are outside every function, a call of a function without effects reports the empty row, and a source no entry reaches has a null target."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+
+[[expect.queries]]
+input = "tree/src/app/main.vib"
+offset = 170
+snapshot = "call-in-function.json"
+
+[[expect.queries]]
+input = "tree/src/app/main.vib"
+offset = 315
+snapshot = "call-in-lambda.json"
+
+[[expect.queries]]
+input = "tree/src/app/main.vib"
+offset = 428
+snapshot = "call-in-entry.json"
+
+[[expect.queries]]
+input = "tree/src/app/main.vib"
+offset = 80
+snapshot = "call-in-initializer.json"
+
+[[expect.queries]]
+input = "tree/src/app/main.vib"
+offset = 0
+snapshot = "outside-every-function.json"
+
+[[expect.queries]]
+input = "tree/src/ops/log.vib"
+offset = 223
+snapshot = "call-in-operation.json"
+
+[[expect.queries]]
+input = "tree/src/solo/lone.vib"
+offset = 18
+snapshot = "unreached-source.json"
+
+[[expect.queries]]
+input = "tree/src/solo/tail.vib"
+offset = 23
+snapshot = "end-of-file.json"

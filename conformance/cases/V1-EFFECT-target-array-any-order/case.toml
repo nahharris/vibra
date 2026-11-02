@@ -1,0 +1,12 @@
+id = "V1-EFFECT-target-array-any-order"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "The array is a set of canonical atoms: listing the roots in an order other than the canonical order is admitted."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true

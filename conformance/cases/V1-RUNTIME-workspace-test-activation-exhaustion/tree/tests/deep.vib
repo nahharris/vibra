@@ -1,0 +1,10 @@
+(import assert @std.assert)
+
+(test "an earlier test passes" (assert.true true))
+
+(defn forever (count u64) u64
+  (match (u64.add-checked (forever count) 1u64)
+    (result.ok total) total
+    (result.err -) 0u64))
+
+(test "recursion without a base case" (assert.equal (forever 0u64) 0u64))

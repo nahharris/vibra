@@ -180,10 +180,16 @@ fn missing_assertion_import_is_static_diagnostics_not_unavailable() {
 fn unavailable_test_form_stays_distinct_from_failure() {
     let project = TempProject::new(
         "unavailable-assertion",
-        &[(
-            "tests/math.vib",
-            "(import assert @std.assert)\n(test \"generic\" (let - (lambda () void effects: (audit) void)) (assert.true true))\n",
-        )],
+        &[
+            (
+                "tests/helpers.vib",
+                "(deffect host\n  visibility: @public\n  (defn call () i32 visibility: @public native: \"audit.call\" 1i32))\n",
+            ),
+            (
+                "tests/math.vib",
+                "(import assert @std.assert)\n(import helpers @tests.helpers)\n(test \"generic\" effects: (helpers.host) (let - (helpers.host.call)) (assert.true true))\n",
+            ),
+        ],
     );
 
     let output = run(&project, &[]);
@@ -373,10 +379,16 @@ fn warnings_are_attributed_to_passing_items_without_blocking_execution() {
 fn unavailability_takes_precedence_over_assertion_failure() {
     let project = TempProject::new(
         "unavailable-precedence",
-        &[(
-            "tests/math.vib",
-            "(import assert @std.assert)\n(test \"fails\" (assert.false true))\n(test \"unavailable\" (let - (lambda () void effects: (audit) void)) (assert.true true))\n",
-        )],
+        &[
+            (
+                "tests/helpers.vib",
+                "(deffect host\n  visibility: @public\n  (defn call () i32 visibility: @public native: \"audit.call\" 1i32))\n",
+            ),
+            (
+                "tests/math.vib",
+                "(import assert @std.assert)\n(import helpers @tests.helpers)\n(test \"fails\" (assert.false true))\n(test \"unavailable\" effects: (helpers.host) (let - (helpers.host.call)) (assert.true true))\n",
+            ),
+        ],
     );
 
     let output = run(&project, &[]);

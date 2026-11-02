@@ -554,10 +554,9 @@ hashes = ["sha256:test"]
 
 #[test]
 fn execution_audit_snapshots_require_vibon_extensions() {
-    for field in ["interpreter", "wasm"] {
-        let manifest = |extension: &str| {
-            format!(
-                r#"
+    let manifest = |extension: &str| {
+        format!(
+            r#"
 id = "V1-RUNTIME-audit-snapshot-extension"
 rule = "V1-RUNTIME"
 profile = "full-v1"
@@ -568,23 +567,49 @@ source = "input.vib"
 
 [expect]
 accepted = true
-{field} = {{ result = "result.vibon", audit_trace = "audit.{extension}" }}
+interpreter = {{ result = "result.vibon", audit_trace = "audit.{extension}" }}
 "#
-            )
-        };
+        )
+    };
 
-        CaseManifest::from_str(&manifest("vibon"))
-            .expect("VIBON audit-trace snapshots are valid");
+    CaseManifest::from_str(&manifest("vibon"))
+        .expect("VIBON audit-trace snapshots are valid");
 
-        let error = CaseManifest::from_str(&manifest("txt"))
-            .expect_err("plain-text audit-trace snapshots must be rejected");
-        assert!(
-            error
-                .to_string()
-                .contains("audit-trace snapshots must use the .vibon extension"),
-            "unexpected validation error: {error}"
-        );
-    }
+    let error = CaseManifest::from_str(&manifest("txt"))
+        .expect_err("plain-text audit-trace snapshots must be rejected");
+    assert!(
+        error
+            .to_string()
+            .contains("audit-trace snapshots must use the .vibon extension"),
+        "unexpected validation error: {error}"
+    );
+}
+
+#[test]
+fn no_case_carries_a_second_expectation_for_the_wasm_backend() {
+    // `docs/spec/07-diagnostics-and-conformance.md`, "Differential execution":
+    // both backends are held to the one expectation, so the manifest has no
+    // field for a WebAssembly result or trace.
+    let error = CaseManifest::from_str(
+        r#"
+id = "V1-RUNTIME-wasm-expectation"
+rule = "V1-RUNTIME"
+profile = "full-v1"
+operation = "interpret"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+wasm = { result = "result.vibon", audit_trace = "audit.vibon" }
+"#,
+    )
+    .expect_err("a Wasm-specific expectation must be rejected");
+    assert!(
+        error.to_string().contains("wasm"),
+        "unexpected error: {error}"
+    );
 }
 
 #[test]

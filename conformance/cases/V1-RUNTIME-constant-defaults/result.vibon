@@ -1,0 +1,1 @@
+(record type: (record type: @tuple arguments: (array @bool @bool @i32 @i32 @bool @bool)) value: (record kind: @tuple values: (array true false 10i32 10i32 true false)))

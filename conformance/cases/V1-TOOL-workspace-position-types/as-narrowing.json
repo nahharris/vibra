@@ -139,5 +139,25 @@
         }
       ]
     }
+  },
+  "effects": {
+    "status": "exact",
+    "value": {
+      "enclosing": {
+        "identity": {
+          "kind": "function",
+          "canonical": "@app@0.1.0/app.main.render"
+        },
+        "kind": "function",
+        "ceiling": {
+          "roots": []
+        },
+        "performed": {
+          "roots": []
+        }
+      },
+      "application": null,
+      "target": null
+    }
   }
 }

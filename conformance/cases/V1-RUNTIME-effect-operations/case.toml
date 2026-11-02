@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-effect-operations"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "An effect operation with a Vibra body is an ordinary function: applying it runs the body, an operation with an additive row runs the operations its body applies, and mutually recursive callers of operations run as they do without rows. Rows are erased at run time."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

@@ -1,0 +1,66 @@
+(defn unknown-label () (tuple i32 i32)
+  (scaler.scale (gauge base: 1i32) bogus: 1i32))
+
+(defn duplicate-label () (tuple i32 i32)
+  (scaler.scale (gauge base: 1i32) by: 1i32 by: 2i32))
+
+(defn mistyped-label () (tuple i32 i32)
+  (scaler.scale (gauge base: 1i32) by: "no"))
+
+(defn missing-receiver () (tuple i32 i32)
+  (scaler.scale by: 1i32))
+
+(defn valid-labelled () (tuple i32 i32)
+  (scaler.scale (gauge base: 1i32) by: 3i32 offset: 4i32))
+
+(defn odd-dict-tail () (dict str i32)
+  (collector.collect (gauge base: 1i32) "a"))
+
+(defn mistyped-dict-key () (dict str i32)
+  (collector.collect (gauge base: 1i32) 1i32 "a"))
+
+(defn valid-dict-tail () (dict str i32)
+  (collector.collect (gauge base: 1i32) "a" 1i32))
+
+(defn valid-empty-dict-tail () (dict str i32)
+  (collector.collect (gauge base: 1i32)))
+
+(defn ambiguous-implementation () i32
+  (let answer (tagged.tag-with (both n: 1i32) true))
+  0i32)
+
+(defn valid-after-ambiguity () (tuple str bool)
+  (tagged.tag-with types: (str bool) (both n: 1i32) true))
+
+(defint scaler
+  (defn scale (value self) (tuple i32 i32)
+    labelled: (by i32 2i32 offset i32 0i32)))
+
+(defint collector
+  (defn collect (value self) (dict str i32)
+    variadic: (entries (dict str i32))))
+
+(defint tagged
+  where: (t any)
+  (defn tag-with (value self other u) (tuple t u)
+    where: (u any)))
+
+(deftype gauge (record base i32)
+  (impl scaler
+    (defn scale (value self) (tuple i32 i32)
+      labelled: (by i32 2i32 offset i32 0i32)
+      (tupleof by offset)))
+  (impl collector
+    (defn collect (value self) (dict str i32)
+      variadic: (entries (dict str i32))
+      entries)))
+
+(deftype both (record n i32)
+  (impl (tagged str)
+    (defn tag-with (value self other u) (tuple str u)
+      where: (u any)
+      (tupleof "s" other)))
+  (impl (tagged i64)
+    (defn tag-with (value self other u) (tuple i64 u)
+      where: (u any)
+      (tupleof 7i64 other))))

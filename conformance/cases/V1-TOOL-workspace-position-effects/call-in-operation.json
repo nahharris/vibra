@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:6d7bbafa63abb14661a95b61bd061994d0a6949493ec87cc62c17b7556fed4a6",
+  "sourceId": "src/ops/log.vib",
+  "offset": 223,
+  "nodeId": "src/ops/log.vib#223-224",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 223,
+    "sourceId": "src/ops/log.vib",
+    "span": {
+      "sourceId": "src/ops/log.vib",
+      "start": 223,
+      "end": 224,
+      "startPosition": {
+        "line": 12,
+        "column": 5
+      },
+      "endPosition": {
+        "line": 12,
+        "column": 6
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "open-paren",
+    "category": "expression",
+    "status": "exact",
+    "permittedForms": [
+      "lambda",
+      "do",
+      "let",
+      "let-else",
+      "if",
+      "match",
+      "return",
+      "as",
+      "try"
+    ],
+    "permittedLabels": [
+      "types"
+    ]
+  },
+  "role": {
+    "status": "exact",
+    "value": "@application"
+  },
+  "context": {
+    "status": "exact",
+    "value": "result"
+  },
+  "identity": {
+    "status": "unavailable",
+    "value": null
+  },
+  "expectedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "void",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "observedType": {
+    "status": "exact",
+    "value": {
+      "kind": "primitive",
+      "name": "void",
+      "parameters": [],
+      "result": null,
+      "labelled": []
+    }
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": [
+      {
+        "name": "target",
+        "identity": "binder:src/ops/log.vib:157-163"
+      }
+    ]
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": []
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": []
+  },
+  "application": {
+    "status": "exact",
+    "value": {
+      "kind": "@function",
+      "callee": {
+        "kind": "operation",
+        "canonical": "@demo@0.1.0/ops.log.write.text"
+      },
+      "calleeType": {
+        "kind": "function",
+        "name": "fn",
+        "parameters": [
+          {
+            "kind": "primitive",
+            "name": "str",
+            "parameters": [],
+            "result": null,
+            "labelled": []
+          }
+        ],
+        "result": {
+          "kind": "primitive",
+          "name": "void",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        },
+        "labelled": [],
+        "effects": {
+          "roots": [
+            "@demo@0.1.0/ops.log.write"
+          ]
+        }
+      },
+      "positional": [
+        {
+          "kind": "primitive",
+          "name": "str",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        }
+      ],
+      "labelled": [],
+      "resultType": {
+        "kind": "primitive",
+        "name": "void",
+        "parameters": [],
+        "result": null,
+        "labelled": []
+      },
+      "dispatch": null
+    }
+  },
+  "pattern": {
+    "status": "unavailable",
+    "value": null
+  },
+  "effects": {
+    "status": "exact",
+    "value": {
+      "enclosing": {
+        "identity": {
+          "kind": "operation",
+          "canonical": "@demo@0.1.0/ops.log.audit.record"
+        },
+        "kind": "operation",
+        "ceiling": {
+          "roots": [
+            "@demo@0.1.0/ops.log.audit",
+            "@demo@0.1.0/ops.log.write"
+          ]
+        },
+        "performed": {
+          "roots": [
+            "@demo@0.1.0/ops.log.write"
+          ]
+        }
+      },
+      "application": {
+        "roots": [
+          "@demo@0.1.0/ops.log.write"
+        ]
+      },
+      "target": {
+        "entry": {
+          "kind": "function",
+          "canonical": "@demo@0.1.0/app.main.execute"
+        },
+        "effects": {
+          "roots": [
+            "@demo@0.1.0/ops.log.audit",
+            "@demo@0.1.0/ops.log.write"
+          ]
+        }
+      }
+    }
+  }
+}

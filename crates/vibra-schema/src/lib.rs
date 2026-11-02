@@ -65,17 +65,19 @@ pub use diagnostic::{
     RelatedSpanDocument, SCHEMA_VERSION, SpanDocument,
 };
 pub use index::{
-    INDEX_SCHEMA, IndexDeclarationDocument, IndexDocumentJson, IndexFactsDocument,
-    IndexImplementationDocument, IndexImplementationMemberDocument,
-    IndexReferenceDocument, IndexSourceDocument,
+    INDEX_SCHEMA, IndexDeclarationDocument, IndexDocumentJson, IndexExternalDocument,
+    IndexFactsDocument, IndexImplementationDocument, IndexImplementationMemberDocument,
+    IndexReferenceDocument, IndexRowDocument, IndexSourceDocument,
 };
 pub use query::{
     SOURCE_POSITION_QUERY_SCHEMA, SourcePositionQueryDocument, category_name,
     status_name,
 };
 pub use semantic_query::{
-    ApplicationContractDocument, ImportAliasDocument, LabelledTypeDocument,
-    LocalBindingDocument, QueryIdentityDocument, SemanticFactDocument,
-    SemanticTypeDocument, WORKSPACE_POSITION_QUERY_SCHEMA,
+    ApplicationContractDocument, EffectRowDocument, EffectsDocument,
+    EnclosingEffectsDocument, ImportAliasDocument, LabelledTypeDocument,
+    LocalBindingDocument, QueryIdentityDocument, RootWitnessDocument,
+    SemanticFactDocument, SemanticTypeDocument, TargetEffectsDocument,
+    WORKSPACE_POSITION_QUERY_SCHEMA, WitnessCalleeDocument, WitnessHopDocument,
     WorkspacePositionQueryDocument,
 };

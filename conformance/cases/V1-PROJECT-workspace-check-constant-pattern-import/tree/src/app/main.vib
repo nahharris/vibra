@@ -1,0 +1,14 @@
+(import limits @lib.limits)
+
+(import ceiling @lib.limits.ceiling)
+
+(defn by-max (n i32) str
+  (match n limits.max "max" - "other"))
+
+(defn by-ceiling (n i32) str
+  (match n ceiling "ceiling" - "other"))
+
+(defn by-flag (flag bool) str
+  (match flag true "yes" false "no"))
+
+(defn execute () void void)

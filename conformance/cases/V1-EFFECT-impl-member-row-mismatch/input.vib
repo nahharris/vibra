@@ -1,0 +1,10 @@
+(deffect write
+  (defn text (target str) void (do)))
+
+(defint logger
+  (defn log (value self) void
+    effects: (write)))
+
+(deftype console (record id i32)
+  (impl logger
+    (defn log (value self) void (do))))

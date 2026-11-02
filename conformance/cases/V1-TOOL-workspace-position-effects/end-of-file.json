@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "workspaceRevision": "sha256:6d7bbafa63abb14661a95b61bd061994d0a6949493ec87cc62c17b7556fed4a6",
+  "sourceId": "src/solo/tail.vib",
+  "offset": 23,
+  "nodeId": "src/solo/tail.vib#22-23",
+  "structural": {
+    "schemaVersion": 1,
+    "offset": 23,
+    "sourceId": "src/solo/tail.vib",
+    "span": {
+      "sourceId": "src/solo/tail.vib",
+      "start": 22,
+      "end": 23,
+      "startPosition": {
+        "line": 1,
+        "column": 23
+      },
+      "endPosition": {
+        "line": 1,
+        "column": 24
+      }
+    },
+    "mode": "source",
+    "syntaxKind": "close-paren",
+    "category": "declaration",
+    "status": "exact",
+    "permittedForms": [
+      "import",
+      "deftype",
+      "defint",
+      "deffect",
+      "def",
+      "defn",
+      "test"
+    ],
+    "permittedLabels": []
+  },
+  "role": {
+    "status": "exact",
+    "value": "@declaration"
+  },
+  "context": {
+    "status": "exact",
+    "value": "module"
+  },
+  "identity": {
+    "status": "exact",
+    "value": {
+      "kind": "function",
+      "canonical": "@demo@0.1.0/solo.tail.tail"
+    }
+  },
+  "expectedType": {
+    "status": "unavailable",
+    "value": null
+  },
+  "observedType": {
+    "status": "unavailable",
+    "value": null
+  },
+  "visibleLocals": {
+    "status": "exact",
+    "value": []
+  },
+  "visibleImports": {
+    "status": "exact",
+    "value": []
+  },
+  "declarationCandidates": {
+    "status": "exact",
+    "value": [
+      {
+        "kind": "function",
+        "canonical": "@demo@0.1.0/solo.tail.tail"
+      }
+    ]
+  },
+  "application": {
+    "status": "unavailable",
+    "value": null
+  },
+  "pattern": {
+    "status": "unavailable",
+    "value": null
+  },
+  "effects": {
+    "status": "exact",
+    "value": {
+      "enclosing": {
+        "identity": {
+          "kind": "function",
+          "canonical": "@demo@0.1.0/solo.tail.tail"
+        },
+        "kind": "function",
+        "ceiling": {
+          "roots": []
+        },
+        "performed": {
+          "roots": []
+        }
+      },
+      "application": null,
+      "target": null
+    }
+  }
+}

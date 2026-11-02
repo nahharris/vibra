@@ -1,0 +1,1 @@
+(record type: (record type: @tuple arguments: (array @tag @tag @str @str @str @str)) value: (record kind: @tuple values: (array (record kind: @union type: @tag member: @atom value: @ok) (record kind: @union type: @tag member: @i32 value: 5i32) "atom" "int" "ok" "other atom")))

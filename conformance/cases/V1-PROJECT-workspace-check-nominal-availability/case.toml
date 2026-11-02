@@ -2,7 +2,7 @@ id = "V1-PROJECT-workspace-check-nominal-availability"
 rule = "V1-PROJECT"
 profile = "static-v1"
 operation = "workspace-check"
-description = "After M3 Step 11, host effects stay unavailable at their owning forms, while a wrapper over an array, a declared union, a parameter naming the wrapper, and an interface with an implementation for i32 are available."
+description = "A @host effect member naming no registry row is rejected at its symbol string, while a wrapper over an array, a declared union, a parameter naming the wrapper, and an interface with an implementation for i32 are available."
 
 [inputs]
 project = "tree/project.vibon"
@@ -13,19 +13,7 @@ accepted = false
 
 
 [[expect.diagnostics]]
-code = "@tool.unavailable"
+code = "@external.unknown-symbol"
 level = "@error"
 source = "src/main.vib"
-span = [172, 269]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [172, 269]
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "src/main.vib"
-span = [189, 268]
+span = [253, 267]

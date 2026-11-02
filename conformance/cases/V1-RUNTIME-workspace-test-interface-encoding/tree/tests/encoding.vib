@@ -1,0 +1,50 @@
+(import assert @std.assert)
+
+(deftype first (record n u32))
+
+(deftype second (record n u32))
+
+(deftype maybe (enum some t none void)
+  where: (t any))
+
+(defn no-ints () (array i32) (array.of))
+
+(defn no-texts () (array str) (array.of))
+
+(defn none-of-int () (option i32) (option.none))
+
+(defn none-of-text () (option str) (option.none))
+
+(defn maybe-none-of-int () (maybe i32) (maybe.none))
+
+(defn maybe-none-of-text () (maybe str) (maybe.none))
+
+; An interface value is encoded as the value it holds, and an encoding names a
+; type only where it carries `type:`, a primitive's suffix, or a union's member.
+; Values of different types are equal when their encodings are.
+
+(test "empty arrays of different element types are equal"
+  (assert.equal (as any (no-ints)) (as any (no-texts))))
+
+(test "the none of two options is equal whatever they hold"
+  (assert.equal (as any (none-of-int)) (as any (none-of-text))))
+
+(test "the none of two applications of a declared enum is equal"
+  (assert.equal (as any (maybe-none-of-int)) (as any (maybe-none-of-text))))
+
+(test "an array of interface values equals itself element by element"
+  (assert.equal
+    (array.of (as any 1i32) (as any "a"))
+    (array.of (as any 1i32) (as any "a"))))
+
+(test "two declared records of different types differ"
+  (assert.equal (as any (first n: 1u32)) (as any (second n: 1u32))))
+
+(test "the same value under two primitive types differs"
+  (assert.equal (as any 1i32) (as any 1u32)))
+
+(test "one declared enum holding different payload types differs"
+  (assert.equal (as any (maybe.some 1i32)) (as any (maybe.some "1"))))
+
+(test "an empty array differs from a nonempty one in the other type"
+  (assert.equal (as any (no-ints)) (as any (array.of "a"))))
