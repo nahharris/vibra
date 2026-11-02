@@ -29,7 +29,7 @@ use std::process::Command;
 use std::time::Instant;
 
 use vibra_host::{HostWorld, WorldProvider};
-use vibra_ir::CheckedProgram;
+use vibra_ir::{CheckedProgram, canonical_string};
 use vibra_syntax::{DataNode, DataValue, Literal};
 use vibra_wasm::layout::state;
 use vibra_wasm_run::{Instance, Outcome, Runner, Started};
@@ -711,20 +711,6 @@ fn environment(root: &Path) -> Environment {
 
 // -- The document ------------------------------------------------------------
 
-fn string_literal(text: &str) -> String {
-    let mut quoted = String::from("\"");
-    for character in text.chars() {
-        match character {
-            '"' => quoted.push_str("\\\""),
-            '\\' => quoted.push_str("\\\\"),
-            '\n' => quoted.push_str("\\n"),
-            other => quoted.push(other),
-        }
-    }
-    quoted.push('"');
-    quoted
-}
-
 impl Baseline {
     /// The canonical `@perf-baseline.v1` text: written by the tool, formatted by
     /// the repository's formatter, never edited by hand.
@@ -757,13 +743,13 @@ impl Baseline {
         let _ = write!(
             text,
             ") informational: (record environment: (record os: {} os-version: {} arch: {} cpu: {} logical-cpus: {}u32 rust: {} wasmtime: {} profile: @{}) runs: {}u32 median-microseconds: (array",
-            string_literal(&env.os),
-            string_literal(&env.os_version),
-            string_literal(&env.arch),
-            string_literal(&env.cpu),
+            canonical_string(&env.os),
+            canonical_string(&env.os_version),
+            canonical_string(&env.arch),
+            canonical_string(&env.cpu),
             env.logical_cpus,
-            string_literal(&env.rust),
-            string_literal(&env.wasmtime),
+            canonical_string(&env.rust),
+            canonical_string(&env.wasmtime),
             env.profile,
             info.runs,
         );

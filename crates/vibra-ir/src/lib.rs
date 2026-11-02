@@ -943,7 +943,7 @@ impl Value {
             Self::Bool(value) => value.to_string(),
             Self::Void => "void".to_owned(),
             Self::Char(value) => canonical_character(*value),
-            Self::Str(value) => quote(value),
+            Self::Str(value) => canonical_string(value),
             Self::Bytes(value) => {
                 let bytes = value
                     .iter()
@@ -5981,7 +5981,9 @@ fn canonical_labelled_array(signature: &FunctionSignature) -> String {
     canonical_array(&labelled)
 }
 
-fn canonical_array(values: &[String]) -> String {
+/// The canonical Vibon array of already-rendered `values`.
+#[must_use]
+pub fn canonical_array(values: &[String]) -> String {
     if values.is_empty() {
         "(array)".to_owned()
     } else {
@@ -5989,7 +5991,10 @@ fn canonical_array(values: &[String]) -> String {
     }
 }
 
-fn quote(value: &str) -> String {
+/// The canonical Vibon string literal of `value`: the quotes, the escapes of
+/// `\`, `"`, and every control character.
+#[must_use]
+pub fn canonical_string(value: &str) -> String {
     let mut output = String::with_capacity(value.len() + 2);
     output.push('"');
     for character in value.chars() {

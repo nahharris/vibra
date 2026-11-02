@@ -12,6 +12,7 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use vibra_diagnostics::ByteSpan;
+use vibra_ir::{canonical_array, canonical_string};
 use vibra_resolve::{DeclarationId, EntityKind, ResolvedSnapshot, Visibility};
 use vibra_syntax::{
     Attribute, Declaration, Expression, ExpressionKind, FunctionDeclaration, Literal,
@@ -347,7 +348,7 @@ impl IndexDocument {
     #[must_use]
     pub fn canonical_vibon(&self) -> String {
         let mut output = String::from("(record\n  format: @index.v1\n");
-        let _ = writeln!(output, "  revision: {}", quoted(&self.revision));
+        let _ = writeln!(output, "  revision: {}", canonical_string(&self.revision));
         output.push_str("  declarations: (array");
         for declaration in &self.declarations {
             let _ = write!(
@@ -383,7 +384,7 @@ impl IndexDocument {
                     |external| format!(
                         "(record provider: @{} symbol: {})",
                         external.provider,
-                        quoted(&external.symbol)
+                        canonical_string(&external.symbol)
                     )
                 ),
             );
@@ -391,11 +392,15 @@ impl IndexDocument {
                 let _ = write!(
                     output,
                     "\n      errors: {}\n      applications: {}",
-                    array(&facts.errors),
+                    canonical_array(&facts.errors),
                     atoms(&facts.applications),
                 );
             }
-            let _ = write!(output, "\n      text: {})", quoted(&declaration.text));
+            let _ = write!(
+                output,
+                "\n      text: {})",
+                canonical_string(&declaration.text)
+            );
         }
         output.push_str(")\n  implementations: (array");
         for implementation in &self.implementations {
@@ -405,7 +410,7 @@ impl IndexDocument {
                 implementation.receiver,
                 implementation.interface,
                 source(&implementation.source),
-                quoted(&implementation.text),
+                canonical_string(&implementation.text),
             );
             for member in &implementation.members {
                 let _ = write!(
@@ -414,7 +419,7 @@ impl IndexDocument {
                     member.contract,
                     source(&member.source),
                     member.signature,
-                    quoted(&member.text),
+                    canonical_string(&member.text),
                 );
             }
             output.push_str("))");
@@ -425,7 +430,7 @@ impl IndexDocument {
                 output,
                 "\n    (record from: @{} written: {} source: {} to: {})",
                 reference.from,
-                quoted(&reference.written),
+                canonical_string(&reference.written),
                 source(&reference.source),
                 reference
                     .to
@@ -438,14 +443,10 @@ impl IndexDocument {
     }
 }
 
-fn quoted(text: &str) -> String {
-    vibra_ir::Value::Str(text.to_owned()).canonical_vibon()
-}
-
 fn source(source: &IndexSource) -> String {
     format!(
         "(record source-id: {} start: {}u64 end: {}u64)",
-        quoted(&source.source_id),
+        canonical_string(&source.source_id),
         source.start,
         source.end
     )
@@ -457,20 +458,12 @@ fn row(roots: &[String]) -> String {
 }
 
 fn atoms(names: &[String]) -> String {
-    array(
+    canonical_array(
         &names
             .iter()
             .map(|name| format!("@{name}"))
             .collect::<Vec<_>>(),
     )
-}
-
-fn array(items: &[String]) -> String {
-    if items.is_empty() {
-        "(array)".to_owned()
-    } else {
-        format!("(array {})", items.join(" "))
-    }
 }
 
 /// The atom identity of a declaration, without `@`: unit, module, and path.

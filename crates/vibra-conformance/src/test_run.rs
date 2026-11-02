@@ -9,6 +9,7 @@
 
 use std::fmt::Write as _;
 
+use vibra_ir::canonical_string;
 use vibra_workspace::semantic::{TestItem, TestItemStatus};
 
 /// Where a failed assertion or a trap is: a source and a span.
@@ -120,7 +121,7 @@ pub fn format_test_run(command_result: &str, rows: &[TestRow]) -> String {
         let _ = write!(
             output,
             "    (record name: {} result: {}",
-            vibon_string(&row.name),
+            canonical_string(&row.name),
             row.status
         );
         if let Some(failure) = &row.failure {
@@ -128,9 +129,9 @@ pub fn format_test_run(command_result: &str, rows: &[TestRow]) -> String {
                 output,
                 " failure: (record assertion: {} expected: {} actual: {} primary-span: (record source-id: {} start: {}u64 end: {}u64))",
                 failure.assertion,
-                vibon_string(&failure.expected),
-                vibon_string(&failure.actual),
-                vibon_string(&failure.origin.source_id),
+                canonical_string(&failure.expected),
+                canonical_string(&failure.actual),
+                canonical_string(&failure.origin.source_id),
                 failure.origin.start,
                 failure.origin.end
             );
@@ -139,13 +140,13 @@ pub fn format_test_run(command_result: &str, rows: &[TestRow]) -> String {
             let _ = write!(
                 output,
                 " trap: (record trap-code: {}",
-                vibon_string(&trap.code)
+                canonical_string(&trap.code)
             );
             if let Some(origin) = &trap.origin {
                 let _ = write!(
                     output,
                     " origin: (record source-id: {} start: {}u64 end: {}u64)",
-                    vibon_string(&origin.source_id),
+                    canonical_string(&origin.source_id),
                     origin.start,
                     origin.end
                 );
@@ -160,8 +161,4 @@ pub fn format_test_run(command_result: &str, rows: &[TestRow]) -> String {
     }
     output.push_str("  )\n)\n");
     output
-}
-
-fn vibon_string(value: &str) -> String {
-    vibra_ir::Value::Str(value.to_owned()).canonical_vibon()
 }
