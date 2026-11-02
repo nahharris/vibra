@@ -78,3 +78,41 @@ fn a_wrapping_closure_that_captures_a_function_value_checks() {
         panic!("{reason}");
     }
 }
+
+/// Runs the case in the reference interpreter on a thread with `stack` bytes
+/// and returns its canonical result.
+fn interpret_on_small_stack(case: &str, stack: usize) -> String {
+    let source = case_input(case);
+    std::thread::Builder::new()
+        .stack_size(stack)
+        .spawn(move || {
+            let checked = check_source("input.vib", &source);
+            let program = checked.program().expect("a checked program");
+            let world = vibra_host::HostWorld::default();
+            let mut host = vibra_host::WorldProvider::new(&world);
+            vibra_interp::Interpreter::run_with_host(
+                program,
+                vibra_interp::MemoryBudget::new(
+                    vibra_conformance::INSTANCE_MEMORY_LIMIT_BYTES,
+                ),
+                &mut host,
+            )
+            .expect("the run must end in a result")
+            .canonical_result()
+        })
+        .expect("thread")
+        .join()
+        .expect("the interpreter must not abort the thread")
+}
+
+#[test]
+fn a_hundred_thousand_closure_chain_runs_and_is_released_on_a_small_stack() {
+    for (case, expected) in [
+        ("V1-RUNTIME-continuation-chain", "100000u64"),
+        ("V1-RUNTIME-continuation-chain-non-tail", "100000u64"),
+        ("V1-RUNTIME-continuation-chain-mutual", "150000u64"),
+    ] {
+        let result = interpret_on_small_stack(case, SMALL_STACK);
+        assert!(result.contains(expected), "{case}: {result}");
+    }
+}

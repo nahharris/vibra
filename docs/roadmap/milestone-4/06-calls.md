@@ -173,11 +173,13 @@ D9.5](decision-ledger.md)); the design is written once in the documentation of
   single source is its entry, and `one` was written first). The case
   `V1-RUNTIME-module-value-initializer-call` and
   `crates/vibra-conformance/tests/initializer_calls_m4_step6.rs` hold every
-  initializer shape. The checker's indirect call-flow analysis does not
+  initializer shape. The checker's indirect call-flow analysis did not
   converge on a walk that passes a continuation closure through a loop
   (`checked IR construction failed: indirect call-flow analysis did not
-  converge`, `@tool.unavailable`), so no case is written in continuation-passing
-  style; a counter does the same work.
+  converge`, `@tool.unavailable`), so no case here is written in
+  continuation-passing style. Fixed in Step 21b (ledger D35.1): the analysis
+  has a finite domain and no budget, and `V1-RUNTIME-continuation-chain` and
+  its two siblings cover the style in both backends.
 - **The risk Step 5b noted.** A union's member in Wasm comes from the member list
   at the discriminant, and the interpreter records the operand's static type. No
   form of Step 6 makes them differ: an anonymous union's members must be concrete,
