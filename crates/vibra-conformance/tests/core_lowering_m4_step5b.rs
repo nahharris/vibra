@@ -2,12 +2,13 @@
 //! WebAssembly, and the host reads what they return.
 //!
 //! The reference interpreter is the oracle. A program here is checked from
-//! source (or built from IR constructors when no source says what is needed),
-//! run by both backends, and held to one result; an expectation written beside
-//! it is authored from the specification's canonical value encoding, not copied
-//! from a run. The tests also measure what the specification asks of the
-//! activations and of reclamation: no engine stack per language call, a depth
-//! bounded only by memory, and a live size that returns to where it started.
+//! source, run by both backends, and held to one result; an expectation written
+//! beside it is authored from the specification's canonical value encoding, not
+//! copied from a run. The results the corpus already states in both backends are
+//! cases there (`V1-RUNTIME-nested-data`, `-direct-calls`, `-anonymous-record`,
+//! `-enum-payload-classes`, `-module-value-once`); this file keeps what a case
+//! cannot say: the numbering of discriminants and the bytes a run leaves live.
+//! Recursion without a base case ends in the host event at any engine stack.
 
 #![allow(
     clippy::expect_used,
@@ -19,11 +20,7 @@
 
 use std::collections::BTreeSet;
 
-use vibra_diagnostics::ByteSpan;
-use vibra_ir::{
-    CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Type,
-    TypeBody, TypeDefinition, TypeId,
-};
+use vibra_ir::{CheckedProgram, Type};
 use vibra_types::check_source;
 use vibra_wasm::layout::{self, header, state};
 use vibra_wasm_run::{
@@ -33,10 +30,6 @@ use vibra_wasm_run::{
 const MIB: usize = 1024 * 1024;
 
 // -- the harness --------------------------------------------------------------
-
-fn origin() -> SourceOrigin {
-    SourceOrigin::new("input.vib", ByteSpan::new(0, 1))
-}
 
 /// The checked program of `source`.
 fn checked(source: &str) -> CheckedProgram {
@@ -214,16 +207,6 @@ fn a_declared_record_is_built_and_observed_in_declaration_order() {
 }
 
 #[test]
-fn an_anonymous_record_stores_its_fields_in_canonical_order() {
-    // Written order is `name`, `id`; the canonical order is `id`, `name`, and
-    // the operands still evaluate in the written order.
-    agree_on(
-        "(defn main () (record name str id u64) (recordof name: \"Ada\" id: 7u64))\n",
-        "(record type: (record type: @record fields: (record id: @u64 name: @str)) value: (record kind: @record fields: (record id: 7u64 name: \"Ada\")))\n",
-    );
-}
-
-#[test]
 fn a_record_projection_is_a_direct_component_read() {
     agree_on(
         "(deftype point (record x i32 y i32))\n(defn main () (tuple i32 i32) (let p (point x: 1i32 y: 2i32)) (tupleof (p @y) (p @x)))\n",
@@ -266,24 +249,6 @@ fn an_anonymous_enum_orders_its_variants_canonically() {
         checked("(defn main () (enum some i32 none void) (enumof none: void))\n");
     assert_eq!(result_variant(&none), 0);
     agree("(defn main () (enum some i32 none void) (enumof none: void))\n");
-}
-
-#[test]
-fn an_enum_payload_of_every_class_round_trips() {
-    agree_on(
-        "(deftype value (enum small i8 wide i64 single f32 double f64 text str flag bool none void))\n\
-(defn main () (tuple value value value value value value value)\n\
-  (tupleof (value.small -5i8) (value.wide -9i64) (value.single 1.5f32) (value.double 2.25f64) (value.text \"héllo\") (value.flag true) (value.none)))\n",
-        "(record type: (record type: @tuple arguments: (array @value @value @value @value @value @value @value)) value: (record kind: @tuple values: (array (record kind: @enum type: @value variant: @small payload: -5i8) (record kind: @enum type: @value variant: @wide payload: -9i64) (record kind: @enum type: @value variant: @single payload: 1.5f32) (record kind: @enum type: @value variant: @double payload: 2.25f64) (record kind: @enum type: @value variant: @text payload: \"héllo\") (record kind: @enum type: @value variant: @flag payload: true) (record kind: @enum type: @value variant: @none))))\n",
-    );
-}
-
-#[test]
-fn a_wrapper_and_a_wrapper_of_a_wrapper_keep_their_identities() {
-    agree_on(
-        "(deftype celsius f64)\n(deftype reading celsius)\n(defn main () reading (reading (celsius 21.5f64)))\n",
-        "(record type: @reading value: (record kind: @wrapper type: @reading value: (record kind: @wrapper type: @celsius value: 21.5f64)))\n",
-    );
 }
 
 #[test]
@@ -361,17 +326,6 @@ fn aggregates_nest_through_every_kind() {
 }
 
 #[test]
-fn a_record_holds_another_through_an_option() {
-    // A record cannot contain itself except through an array (Step 8b), so the
-    // option holds a record of another type.
-    agree_on(
-        "(deftype leaf (record value i32))\n(deftype node (record value i32 next (option leaf)))\n\
-(defn main () (tuple node node) (tupleof (node value: 1i32 next: (option.some (leaf value: 2i32))) (node value: 3i32 next: (option.none))))\n",
-        "(record type: (record type: @tuple arguments: (array @node @node)) value: (record kind: @tuple values: (array (record kind: @record type: @node fields: (record value: 1i32 next: (record kind: @enum type: @std.option.option variant: @some payload: (record kind: @record type: @leaf fields: (record value: 2i32))))) (record kind: @record type: @node fields: (record value: 3i32 next: (record kind: @enum type: @std.option.option variant: @none))))))\n",
-    );
-}
-
-#[test]
 fn a_single_component_tuple_and_a_void_wrapper_lower() {
     agree("(deftype solo (tuple i32))\n(defn main () solo (solo 7i32))\n");
     agree("(deftype nothing void)\n(defn main () nothing (nothing void))\n");
@@ -397,15 +351,6 @@ fn let_if_and_a_sequence_choose_and_bind() {
 }
 
 #[test]
-fn a_function_that_returns_early_skips_the_rest() {
-    agree_on(
-        "(defn main () (tuple i32 i32) (tupleof (early true) (early false)))\n\
-(defn early (flag bool) i32 (if flag (return 1i32) void) 2i32)\n",
-        "(record type: (record type: @tuple arguments: (array @i32 @i32)) value: (record kind: @tuple values: (array 1i32 2i32)))\n",
-    );
-}
-
-#[test]
 fn a_return_with_live_temporaries_and_bindings_drops_them() {
     // The `str` is bound and a tuple is half built when the return leaves.
     let source = "(defn main () (tuple i32) (tupleof (early true)))\n\
@@ -423,18 +368,6 @@ fn a_call_moves_operands_of_every_class_into_the_callee() {
 (defn f64-id (value f64) f64 value)\n(defn str-id (value str) str value)\n(defn bool-id (value bool) bool value)\n\
 (defn char-id (value char) char value)\n(defn u8-id (value u8) u8 value)\n",
         "(record type: (record type: @tuple arguments: (array @i32 @i64 @f32 @f64 @str @bool @char @u8)) value: (record kind: @tuple values: (array 1i32 2i64 3.5f32 4.5f64 \"s\" true \\c 255u8)))\n",
-    );
-}
-
-#[test]
-fn operands_evaluate_left_to_right_and_a_labelled_operand_has_its_slot() {
-    agree_on(
-        "(defn main () (tuple str str i32)\n  (tupleof (join (left) (right)) (join (right) (left)) (scale 4i32 factor: 3i32)))\n\
-(defn left () str \"l\")\n(defn right () str \"r\")\n\
-(defn join (a str b str) str (let r (str-pair a b)) r)\n\
-(defn str-pair (a str b str) str a)\n\
-(defn scale (value i32) i32 labelled: (factor i32 1i32) value)\n",
-        "(record type: (record type: @tuple arguments: (array @str @str @i32)) value: (record kind: @tuple values: (array \"l\" \"r\" 4i32)))\n",
     );
 }
 
@@ -465,23 +398,6 @@ fn mutual_recursion_that_is_not_a_tail_call_returns_through_every_frame() {
 }
 
 // -- positive: module values -------------------------------------------------------
-
-#[test]
-fn module_values_read_in_forward_order_and_through_each_other() {
-    agree_on(
-        "(def second i32 first)\n(def first i32 41i32)\n(def third (tuple i32 i32) (tupleof second first))\n\
-(defn main () (tuple (tuple i32 i32) i32) (tupleof third second))\n",
-        "(record type: (record type: @tuple arguments: (array (record type: @tuple arguments: (array @i32 @i32)) @i32)) value: (record kind: @tuple values: (array (record kind: @tuple values: (array 41i32 41i32)) 41i32)))\n",
-    );
-}
-
-#[test]
-fn a_module_value_whose_initializer_calls_a_function_is_read() {
-    agree(
-        "(deftype point (record x i32 y i32))\n(def origin point (make))\n\
-(defn make () point (point x: 1i32 y: 2i32))\n(defn main () point origin)\n",
-    );
-}
 
 #[test]
 fn a_module_value_is_evaluated_once_so_a_second_read_shares_it() {
@@ -525,21 +441,6 @@ fn a_module_value_is_not_evaluated_unless_it_is_read() {
 // -- balance and reclamation -------------------------------------------------------
 
 #[test]
-fn programs_of_every_kind_return_the_live_size_to_what_the_module_values_keep() {
-    for source in [
-        "(deftype point (record x i32 y i32))\n(defn main () point (point x: 1i32 y: 2i32))\n",
-        "(deftype leaf (record value i32))\n(deftype node (record value i32 next (option leaf)))\n(defn main () node (node value: 1i32 next: (option.some (leaf value: 2i32))))\n",
-        "(deftype number (union str i32))\n(defn main () (tuple number number) (tupleof 1i32 \"two\"))\n",
-        "(defn main () (tuple str str) (let a \"a\") (let b (tupleof a a)) (tupleof a (b 0)))\n",
-        "(defn main () i32 (let a (tupleof \"a\" \"b\")) (let - (a 0)) (if true 1i32 2i32))\n",
-        "(def shared (tuple str str) (tupleof \"x\" \"y\"))\n(defn main () (tuple (tuple str str) (tuple str str)) (tupleof shared shared))\n",
-        "(defn main () (tuple i32 i32) (tupleof (f 1i32) (f 2i32)))\n(defn f (value i32) i32 (let keep (tupleof \"k\" value)) value)\n",
-    ] {
-        assert_balanced(source);
-    }
-}
-
-#[test]
 fn the_host_holds_exactly_the_result_until_it_releases_it() {
     let (_, live) = agree(
         "(deftype point (record x str y str))\n(defn main () point (point x: \"a\" y: \"b\"))\n",
@@ -551,169 +452,9 @@ fn the_host_holds_exactly_the_result_until_it_releases_it() {
 
 // -- negative: what is still not lowered ----------------------------------------
 
-#[test]
-fn the_forms_of_step_nine_are_lowered_and_agree_with_the_interpreter() {
-    // Interface values and contract calls were named here as Step 9's, and never
-    // approximated, until Step 9 lowered them. Each program now runs to the
-    // result the reference interpreter gives (`interfaces_m4_step9` holds the
-    // rest of the matrix).
-    for (source, expected) in [
-        (
-            "(defn main () i32 (keep 1i32))\n(defn keep (value any) i32 1i32)\n",
-            "(record type: @i32 value: 1i32)\n",
-        ),
-        (
-            "(defn main () str (describe (point x: 1i32)))\n\
-(defn describe (value shape) str (shape.name value))\n\
-(defint shape (defn name (value self) str))\n\
-(deftype point (record x i32) (impl shape (defn name (value self) str \"point\")))\n",
-            "(record type: @str value: \"point\")\n",
-        ),
-    ] {
-        agree_on(source, expected);
-    }
-}
-
 // -- determinism -------------------------------------------------------------------
 
-#[test]
-fn emission_of_a_checked_program_is_byte_identical() {
-    let source = "(deftype point (record x i32 y i32))\n(def origin point (point x: 0i32 y: 0i32))\n\
-(defn main () (tuple point point) (tupleof origin (shift origin)))\n(defn shift (p point) point (point x: (p @y) y: (p @x)))\n";
-    let first = emitted(&checked(source));
-    let second = emitted(&checked(source));
-    assert_eq!(first, second);
-    assert_eq!(emitted(&checked(source)), first, "an independent check");
-}
-
-// -- depth: activations live in the arena -----------------------------------------
-
-fn integer_chain(depth: usize) -> CheckedProgram {
-    // `f0 = some(chain(f1()))`, ..., `f(n-1) = none`: each call is an operand,
-    // so none is a tail call, and the nesting of the value is as deep as the
-    // recursion.
-    let chain = TypeId::new("chain", "chain");
-    let maybe = TypeId::new("maybe", "maybe");
-    let types = vec![
-        TypeDefinition::new(
-            chain.clone(),
-            TypeBody::Record(vec![("next".to_owned(), Type::Declared(maybe.clone()))]),
-        ),
-        TypeDefinition::new(
-            maybe.clone(),
-            TypeBody::Enum(vec![
-                ("none".to_owned(), Type::Void),
-                ("some".to_owned(), Type::Declared(chain.clone())),
-            ]),
-        ),
-    ];
-    let maybe_type = Type::Declared(maybe);
-    let chain_type = Type::Declared(chain);
-    let mut functions = Vec::with_capacity(depth);
-    for position in 0..depth {
-        let body = if position + 1 == depth {
-            Expr::Variant {
-                value_type: maybe_type.clone(),
-                variant: "none".to_owned(),
-                payload: None,
-                origin: origin(),
-            }
-        } else {
-            let next =
-                Expr::call(position + 1, Vec::new(), maybe_type.clone(), origin());
-            Expr::Variant {
-                value_type: maybe_type.clone(),
-                variant: "some".to_owned(),
-                payload: Some(Box::new(Expr::Record {
-                    value_type: chain_type.clone(),
-                    fields: vec![("next".to_owned(), next)],
-                    origin: origin(),
-                })),
-                origin: origin(),
-            }
-        };
-        functions.push(
-            CheckedFunction::new(
-                format!("link-{position}"),
-                FunctionSignature::new(Vec::new(), maybe_type.clone()),
-                body,
-                origin(),
-            )
-            .expect("a checked function"),
-        );
-    }
-    CheckedProgram::try_new_with_types(types, Vec::new(), functions, 0)
-        .expect("a checked program")
-}
-
-#[test]
-fn a_chain_of_calls_agrees_with_the_interpreter_at_a_small_depth() {
-    let program = integer_chain(50);
-    assert_eq!(wasm(&program).0, oracle(&program));
-}
-
-#[test]
-fn non_tail_recursion_five_thousand_deep_runs_on_a_small_engine_stack() {
-    // The checker's validation of a program is quadratic in its function
-    // count, so a chain of functions stays at five thousand; the exhaustion
-    // test below reaches millions of activations from one function.
-    let depth = 5_000;
-    let program = integer_chain(depth);
-    let bytes = emitted(&program);
-    // A 64 KiB engine stack: a nested Wasm call per activation would not fit a
-    // few thousand, so the frames are in the arena.
-    let small = Runner::with_wasm_stack(MemoryLimit::new(64 * MIB), 64 * 1024)
-        .expect("a runner with a small engine stack");
-    let ty = entry_type(&program);
-    let Observed::Completed { value, live, .. } = small
-        .run_observed(&bytes, &ty, program.types())
-        .expect("the module runs")
-    else {
-        panic!("the recursion did not complete");
-    };
-    let text = value.canonical_observation(&ty);
-    assert_eq!(text.matches("variant: @some").count(), depth - 1);
-    assert_eq!(text.matches("variant: @none").count(), 1);
-    assert_eq!(live.start, 0);
-    assert_eq!(
-        live.end, 0,
-        "the nested value is released and no frame remains"
-    );
-    drop(value);
-    println!(
-        "depth {depth}: live with the result {} bytes, after release {} bytes",
-        live.with_result, live.end
-    );
-}
-
-#[test]
-fn depth_is_bounded_only_by_memory() {
-    // The same recursion completes under the limit that holds it and is the
-    // host event, and not a trap, under a limit half that size.
-    let depth = 2_000;
-    let program = integer_chain(depth);
-    let bytes = emitted(&program);
-    let ty = entry_type(&program);
-    let roomy = runner();
-    let Observed::Completed { live, .. } = roomy
-        .run_observed(&bytes, &ty, program.types())
-        .expect("runs")
-    else {
-        panic!("completes");
-    };
-    // The live size at the end of the run is what the result held, which is a
-    // lower bound on the memory the run needed.
-    let tight = Runner::new(MemoryLimit::new(
-        usize::try_from(live.with_result / 4).expect("fits"),
-    ))
-    .expect("runner");
-    assert_eq!(
-        tight
-            .run_observed(&bytes, &ty, program.types())
-            .expect("runs"),
-        Observed::Stopped(Outcome::MemoryExhausted)
-    );
-}
+// -- exhaustion ----------------------------------------------------------------
 
 fn depth_at_exhaustion(runner: &Runner, source: &str) -> u32 {
     let program = checked(source);

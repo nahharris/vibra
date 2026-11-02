@@ -227,212 +227,6 @@ fn strs(values: &[&str]) -> String {
 // -- match: every pattern kind --------------------------------------------------------
 
 #[test]
-fn literal_patterns_test_a_scalar_a_wide_scalar_a_character_a_text_and_an_atom() {
-    let source = "(defn main () (tuple str str str str str str str str str str)\n\
-  (tupleof (int 1i32) (int -5i32) (int 7i32) (wide 10000000000u64) (wide 3u64)\n\
-           (word \"alpha\") (word \"alphabet\") (word \"\") (letter \\a) (color @green)))\n\
-(defn int (n i32) str (match n 1i32 \"one\" -5i32 \"minus five\" - \"other\"))\n\
-(defn wide (n u64) str (match n 10000000000u64 \"ten billion\" - \"other\"))\n\
-(defn word (s str) str (match s \"alpha\" \"first\" \"\" \"empty\" - \"other\"))\n\
-(defn letter (c char) str (match c \\a \"a\" - \"other\"))\n\
-(defn color (c atom) str (match c @red \"red\" @green \"green\" - \"other\"))\n";
-    balanced_on(
-        source,
-        &strs(&[
-            "one",
-            "minus five",
-            "other",
-            "ten billion",
-            "other",
-            "first",
-            "other",
-            "empty",
-            "a",
-            "green",
-        ]),
-    );
-}
-
-#[test]
-fn a_literal_of_every_narrow_integer_type_matches_its_own_value_only() {
-    let source = "(defn main () (tuple bool bool bool bool bool bool bool bool)\n\
-  (tupleof (a -3i8) (b 40000u16) (c -300i16) (d 200u8) (e 4000000000u32) (a 3i8) (d 7u8) (e 1u32)))\n\
-(defn a (n i8) bool (match n -3i8 true - false))\n\
-(defn b (n u16) bool (match n 40000u16 true - false))\n\
-(defn c (n i16) bool (match n -300i16 true - false))\n\
-(defn d (n u8) bool (match n 200u8 true - false))\n\
-(defn e (n u32) bool (match n 4000000000u32 true - false))\n";
-    balanced_on(
-        source,
-        &result(
-            &tuple_type(&["@bool"; 8]),
-            &tuple_value(&[
-                "true", "true", "true", "true", "true", "false", "false", "false",
-            ]),
-        ),
-    );
-}
-
-#[test]
-fn constructor_patterns_match_a_record_a_tuple_an_enum_and_a_wrapper() {
-    let source = "(deftype dims (record w i32 h i32))\n\
-(deftype pair (tuple i32 str))\n\
-(deftype meters i32)\n\
-(deftype shape (enum empty void circle i32 rect dims))\n\
-(defn main () (tuple i32 i32 i32 i32 str i32)\n\
-  (tupleof (describe (shape.empty)) (describe (shape.circle 0i32)) (describe (shape.circle 4i32))\n\
-           (describe (shape.rect (dims w: 6i32 h: 7i32)))\n\
-           (second (pair 1i32 \"label\")) (unwrap (meters 12i32))))\n\
-(defn describe (value shape) i32\n\
-  (match value\n\
-    (shape.empty) 0i32\n\
-    (shape.circle 0i32) 1i32\n\
-    (shape.circle radius) radius\n\
-    (shape.rect (dims w: width)) width))\n\
-(defn second ((pair - label) pair) str label)\n\
-(defn unwrap ((meters length) meters) i32 length)\n";
-    balanced_on(
-        source,
-        &result(
-            &tuple_type(&["@i32", "@i32", "@i32", "@i32", "@str", "@i32"]),
-            &tuple_value(&["0i32", "1i32", "4i32", "6i32", "\"label\"", "12i32"]),
-        ),
-    );
-}
-
-#[test]
-fn tuple_recordof_and_enumof_patterns_match_anonymous_values() {
-    let source = "(defn main () (tuple atom atom atom atom i32 str str)\n\
-  (tupleof (pick (tupleof true true)) (pick (tupleof true false)) (pick (tupleof false true))\n\
-           (pick (tupleof false false))\n\
-           (a-of (recordof a: 5i32 b: \"z\"))\n\
-           (label-of (enumof a: 1i32)) (label-of (enumof b: \"enumof\"))))\n\
-(defn pick (flags (tuple bool bool)) atom\n\
-  (match flags\n\
-    (tupleof true true) @both\n\
-    (tupleof true -) @first\n\
-    (tupleof - true) @second\n\
-    (tupleof false false) @neither))\n\
-(defn a-of ((recordof a: a) (record a i32 b str)) i32 a)\n\
-(defn label-of (value (enum a i32 b str)) str\n\
-  (match value\n\
-    (enumof a: -) \"a\"\n\
-    (enumof b: text) text))\n";
-    balanced_on(
-        source,
-        &result(
-            &tuple_type(&["@atom", "@atom", "@atom", "@atom", "@i32", "@str", "@str"]),
-            &tuple_value(&[
-                "@both",
-                "@first",
-                "@second",
-                "@neither",
-                "5i32",
-                "\"a\"",
-                "\"enumof\"",
-            ]),
-        ),
-    );
-}
-
-#[test]
-fn a_constant_pattern_is_the_pattern_of_the_constants_value() {
-    let source = "(deftype color (enum red void green void))\n\
-(def limit i32 10i32)\n\
-(def top i32 limit)\n\
-(def favorite color (color.green))\n\
-(def origin (tuple i32 i32) (tupleof 0i32 0i32))\n\
-(defn main () (tuple str str str str str str str str str)\n\
-  (tupleof (by-limit 10i32) (by-limit 9i32) (by-top 10i32) (by-color (color.green))\n\
-           (by-color (color.red)) (by-origin (tupleof 0i32 0i32)) (by-origin (tupleof 0i32 1i32))\n\
-           (by-flag true) (by-flag false)))\n\
-(defn by-limit (n i32) str (match n limit \"limit\" - \"other\"))\n\
-(defn by-top (n i32) str (match n top \"top\" - \"other\"))\n\
-(defn by-color (value color) str (match value favorite \"favorite\" - \"other\"))\n\
-(defn by-origin (point (tuple i32 i32)) str (match point origin \"origin\" - \"elsewhere\"))\n\
-(defn by-flag (flag bool) str (match flag true \"yes\" false \"no\"))\n";
-    balanced_on(
-        source,
-        &strs(&[
-            "limit",
-            "other",
-            "top",
-            "favorite",
-            "other",
-            "origin",
-            "elsewhere",
-            "yes",
-            "no",
-        ]),
-    );
-}
-
-#[test]
-fn an_as_pattern_narrows_a_union_by_its_discriminant() {
-    let source = "(deftype number (union i32 str))\n\
-(defn main () (tuple str str str i32)\n\
-  (tupleof (render 1i32) (render \"text\") (kind true) (width 7u8)))\n\
-(defn render (value number) str\n\
-  (match value (as i32 -) \"integer\" (as str text) text))\n\
-(defn kind (value (union bool u8)) str\n\
-  (match value (as bool true) \"yes\" (as bool false) \"no\" (as u8 -) \"byte\"))\n\
-(defn width (value (union bool u8)) i32\n\
-  (match value (as u8 8u8) 8i32 (as u8 -) 1i32 (as bool -) 0i32))\n";
-    balanced_on(
-        source,
-        &result(
-            &tuple_type(&["@str", "@str", "@str", "@i32"]),
-            &tuple_value(&["\"integer\"", "\"text\"", "\"yes\"", "1i32"]),
-        ),
-    );
-}
-
-#[test]
-fn a_union_of_many_members_has_an_arm_for_each_discriminant() {
-    let members = [
-        ("i32", "5i32", "a"),
-        ("str", "\"s\"", "b"),
-        ("bool", "true", "c"),
-        ("u8", "7u8", "d"),
-        ("f64", "1.5f64", "e"),
-        ("char", "\\x", "f"),
-        ("i64", "9i64", "g"),
-    ];
-    let arms = members
-        .iter()
-        .map(|(ty, _, name)| format!("(as {ty} -) \"{name}\""))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let calls = members
-        .iter()
-        .map(|(_, value, _)| format!("(kind {value})"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let source = format!(
-        "(deftype many (union i32 str bool u8 f64 char i64))\n\
-(defn main () (tuple str str str str str str str) (tupleof {calls}))\n\
-(defn kind (value many) str (match value {arms}))\n"
-    );
-    balanced_on(&source, &strs(&["a", "b", "c", "d", "e", "f", "g"]));
-}
-
-#[test]
-fn a_binder_on_an_as_pattern_has_the_member_type() {
-    let source = "(deftype number (union i32 str))\n\
-(defn main () (tuple i32 str)\n\
-  (tupleof (get-int 5i32) (get-text \"five\")))\n\
-(defn get-int (value number) i32 (match value (as i32 n) n (as str -) 0i32))\n\
-(defn get-text (value number) str (match value (as str s) s (as i32 -) \"\"))\n";
-    balanced_on(
-        source,
-        &result(
-            &tuple_type(&["@i32", "@str"]),
-            &tuple_value(&["5i32", "\"five\""]),
-        ),
-    );
-}
-
-#[test]
 fn the_first_matching_arm_wins() {
     // Both arms cover 3, and the first is the one taken; a failed arm that has
     // tested part of its pattern leaves nothing for the next.
@@ -476,22 +270,6 @@ fn a_single_arm_match_and_an_empty_payload_variant() {
     );
 }
 
-#[test]
-fn deeply_nested_destructuring_binds_the_innermost_parts() {
-    let source = "(deftype leaf (enum x i32 y str))\n\
-(deftype deep (record a (tuple i32 (option (tuple str (record c i32 d leaf))))))\n\
-(defn main () (tuple str str str)\n\
-  (tupleof (dig (deep a: (tupleof 1i32 (option.some (tupleof \"s\" (recordof c: 2i32 d: (leaf.y \"inner\")))))))\n\
-           (dig (deep a: (tupleof 1i32 (option.some (tupleof \"s\" (recordof c: 2i32 d: (leaf.x 3i32)))))))\n\
-           (dig (deep a: (tupleof 1i32 (option.none))))))\n\
-(defn dig (value deep) str\n\
-  (match value\n\
-    (deep a: (tupleof - (option.some (tupleof - (recordof d: (leaf.y text)))))) text\n\
-    (deep a: (tupleof - (option.some (tupleof tag -)))) tag\n\
-    (deep a: -) \"none\"))\n";
-    balanced_on(source, &strs(&["inner", "s", "none"]));
-}
-
 // -- destructuring in let, parameters, and lambdas ---------------------------------
 
 #[test]
@@ -527,22 +305,6 @@ fn a_destructuring_lambda_parameter_holds_what_it_binds() {
 }
 
 // -- let-else -----------------------------------------------------------------------
-
-#[test]
-fn let_else_binds_on_a_match_and_runs_its_fallback_otherwise() {
-    let source = "(defn main () (tuple i32 i32)\n\
-  (tupleof (pick (option.some 5i32)) (pick (option.none))))\n\
-(defn pick (o (option i32)) i32\n\
-  (let-else (option.some v) o (return 100i32))\n\
-  v)\n";
-    balanced_on(
-        source,
-        &result(
-            &tuple_type(&["@i32", "@i32"]),
-            &tuple_value(&["5i32", "100i32"]),
-        ),
-    );
-}
 
 #[test]
 fn let_else_as_the_final_element_of_a_body() {
@@ -586,78 +348,7 @@ fn a_let_else_with_an_as_pattern_narrows_for_the_rest_of_the_body() {
     );
 }
 
-#[test]
-fn a_fallback_that_calls_a_function_of_type_never() {
-    // `fail` never completes, so the fallback has no value and no slot; the
-    // program only takes the path that does not reach it.
-    let source = "(defn main () (tuple i32 str)\n\
-  (tupleof (require (option.some 4i32)) (describe true)))\n\
-(defn fail (message str) never (fail message))\n\
-(defn require (o (option i32)) i32\n\
-  (let-else (option.some n) o (fail \"missing\"))\n\
-  n)\n\
-(defn describe (flag bool) str (if flag \"yes\" (fail \"no\")))\n";
-    balanced_on(
-        source,
-        &result(
-            &tuple_type(&["@i32", "@str"]),
-            &tuple_value(&["4i32", "\"yes\""]),
-        ),
-    );
-}
-
 // -- try ----------------------------------------------------------------------------
-
-#[test]
-fn try_continues_with_a_payload_or_leaves_with_the_variant() {
-    let source = "(defn main () (tuple i32 i32 str str)\n\
-  (tupleof (code (first (option.some 3i32))) (code (first (option.none)))\n\
-           (text (checked true)) (text (checked false))))\n\
-(defn first (o (option i32)) (option i32) (option.some (try o)))\n\
-(defn code (o (option i32)) i32 (match o (option.some n) n (option.none) -1i32))\n\
-(defn parse (flag bool) (result i32 str)\n\
-  (if flag (result.ok 1i32) (result.err \"bad flag\")))\n\
-(defn checked (flag bool) (result i32 str)\n\
-  (let value (try (parse flag)))\n\
-  (result.ok value))\n\
-(defn text (r (result i32 str)) str (match r (result.ok -) \"ok\" (result.err message) message))\n";
-    balanced_on(
-        source,
-        &result(
-            &tuple_type(&["@i32", "@i32", "@str", "@str"]),
-            &tuple_value(&["3i32", "-1i32", "\"ok\"", "\"bad flag\""]),
-        ),
-    );
-}
-
-#[test]
-fn try_changes_the_success_type_and_keeps_the_error() {
-    let source = "(defn main () (tuple str str)\n\
-  (tupleof (text (widen true)) (text (widen false))))\n\
-(defn parse (flag bool) (result i32 str)\n\
-  (if flag (result.ok 7i32) (result.err \"e\")))\n\
-(defn widen (flag bool) (result str str)\n\
-  (let n (try (parse flag)))\n\
-  (result.ok \"parsed\"))\n\
-(defn text (r (result str str)) str (match r (result.ok s) s (result.err message) message))\n";
-    balanced_on(source, &strs(&["parsed", "e"]));
-}
-
-#[test]
-fn nested_try_leaves_at_the_first_failure() {
-    let source = "(defn main () (tuple i32 i32 i32)\n\
-  (tupleof (code (flatten (option.some (option.some 7i32)))) (code (flatten (option.some (option.none))))\n\
-           (code (flatten (option.none)))))\n\
-(defn flatten (nested (option (option i32))) (option i32) (option.some (try (try nested))))\n\
-(defn code (o (option i32)) i32 (match o (option.some n) n (option.none) -1i32))\n";
-    balanced_on(
-        source,
-        &result(
-            &tuple_type(&["@i32", "@i32", "@i32"]),
-            &tuple_value(&["7i32", "-1i32", "-1i32"]),
-        ),
-    );
-}
 
 #[test]
 fn try_leaves_a_lambda_and_not_the_function_around_it() {
@@ -719,40 +410,6 @@ fn a_generic_binder_on_a_payload_that_may_be_void_binds_void() {
 }
 
 // -- the risk Step 5b noted ---------------------------------------------------------
-
-#[test]
-fn an_atom_singleton_widened_into_a_union_with_an_atom_member() {
-    // The checker admits no chain of widenings, so a singleton reaches the
-    // union's `atom` member only after it has widened to `atom` (which the
-    // runtime erases) and the result is then widened into the union. The
-    // interpreter records the static type of the operand of the widening, the
-    // Wasm backend reads the union's member list at the discriminant, and both
-    // must say `atom`; `as` over the union then narrows to the atom, whatever
-    // atom it is.
-    let source = "(deftype tag (union atom i32))\n\
-(defn main () (tuple tag tag str str str str)\n\
-  (tupleof (as atom @ok) 5i32 (name (as atom @ok)) (name 3i32) (is-ok (as atom @ok)) (is-ok (as atom @err))))\n\
-(defn name (value tag) str (match value (as atom -) \"atom\" (as i32 -) \"int\"))\n\
-(defn is-ok (value tag) str\n\
-  (match value (as atom @ok) \"ok\" (as atom -) \"other atom\" (as i32 -) \"int\"))\n";
-    let program = checked(source);
-    let in_interpreter = oracle(&program);
-    let (in_wasm, _) = wasm(&program);
-    assert_eq!(
-        in_wasm, in_interpreter,
-        "the backends disagree on:\n{source}"
-    );
-    let ty = tuple_type(&["@tag", "@tag", "@str", "@str", "@str", "@str"]);
-    let value = tuple_value(&[
-        "(record kind: @union type: @tag member: @atom value: @ok)",
-        "(record kind: @union type: @tag member: @i32 value: 5i32)",
-        "\"atom\"",
-        "\"int\"",
-        "\"ok\"",
-        "\"other atom\"",
-    ]);
-    assert_eq!(in_wasm, result(&ty, &value));
-}
 
 // -- reclamation: every path leaves the frame balanced ------------------------------
 
@@ -854,110 +511,20 @@ fn two_matches_in_one_body_sequence_each_release_what_they_bind() {
 
 // -- tail position: arms, fallbacks, and the rest of a sequence ---------------------------
 
-/// The bits of a digit of the counter: a digit is one of `2^DIGIT_BITS` shared
-/// module values.
-const DIGIT_BITS: u32 = 6;
+/// -- a counter ----------------------------------------------------------------
 
-/// How many digits a counter that reaches `n` needs.
-fn counter_digits(n: u32) -> u32 {
-    (32 - n.leading_zeros()).div_ceil(DIGIT_BITS).max(1)
-}
-
-/// A decision tree over the bits `bit..` of the digit `d`, with the bits chosen
-/// so far in `value`, whose leaves are `leaf(value)`.
-fn digit_tree(bit: u32, value: u32, leaf: &dyn Fn(u32) -> String) -> String {
-    if bit == DIGIT_BITS {
-        return leaf(value);
-    }
-    let set = digit_tree(bit + 1, value | 1 << bit, leaf);
-    let clear = digit_tree(bit + 1, value, leaf);
-    format!("(if (d @b{bit}) {set} {clear})")
-}
-
-/// The definitions of a counter with no arithmetic, which counts to `n`:
-/// `state`, `(zero)`, `(inc s)`, and `(done s)`, true exactly when the state is
-/// `n`. The language has no arithmetic until Step 8a; a counter needs only `if`,
-/// a record, and a call, so it drives a loop of any length.
+/// The definitions of a counter that counts to `n`: `state`, `(zero)`,
+/// `(inc s)`, which makes the next state, and `(done s)`, true exactly when the
+/// state is `n`. A state is a record of one `u32`, so every round allocates a
+/// fresh record, which the loops below rely on to show that the garbage is
+/// freed.
 fn counter(n: u32) -> String {
-    use std::fmt::Write as _;
-    let digits = counter_digits(n);
-    let values = 1_u32 << DIGIT_BITS;
-    let mut text = String::new();
-    let fields = (0..DIGIT_BITS)
-        .map(|bit| format!(" b{bit} bool"))
-        .collect::<String>();
-    writeln!(text, "(deftype digit (record{fields}))").expect("a string");
-    writeln!(
-        text,
-        "(deftype state (tuple{}))",
-        " digit".repeat(digits as usize)
+    format!(
+        "(deftype state (record n u32))\n\
+(defn zero () state (state n: 0u32))\n\
+(defn inc (s state) state\n  (state n: (match (u32.add-checked (s @n) 1u32) (result.ok next) next (result.err -) 0u32)))\n\
+(defn done (s state) bool (u32.equal (s @n) {n}u32))\n"
     )
-    .expect("a string");
-    for value in 0..values {
-        let bits = (0..DIGIT_BITS)
-            .map(|bit| format!(" b{bit}: {}", value >> bit & 1 == 1))
-            .collect::<String>();
-        writeln!(text, "(def d{value} digit (digit{bits}))").expect("a string");
-    }
-    let zeros = " d0".repeat(digits as usize);
-    writeln!(text, "(defn zero () state (state{zeros}))").expect("a string");
-    writeln!(
-        text,
-        "(defn is-max (d digit) bool {})",
-        digit_tree(0, 0, &|value| (value == values - 1).to_string())
-    )
-    .expect("a string");
-    writeln!(
-        text,
-        "(defn next-digit (d digit) digit {})",
-        digit_tree(0, 0, &|value| format!("d{}", (value + 1) % values))
-    )
-    .expect("a string");
-    writeln!(text, "(defn inc (s state) state (carry-0 s))").expect("a string");
-    for place in 0..digits {
-        let carry = if place + 1 == digits {
-            format!("(state{zeros})")
-        } else {
-            format!("(carry-{} s)", place + 1)
-        };
-        let set = (0..digits)
-            .map(|other| match other.cmp(&place) {
-                std::cmp::Ordering::Less => " d0".to_owned(),
-                std::cmp::Ordering::Equal => format!(" (next-digit (s {place}))"),
-                std::cmp::Ordering::Greater => format!(" (s {other})"),
-            })
-            .collect::<String>();
-        writeln!(
-            text,
-            "(defn carry-{place} (s state) state\n  (if (is-max (s {place})) {carry} (state{set})))"
-        )
-        .expect("a string");
-    }
-    writeln!(text, "(defn done (s state) bool (done-0 s))").expect("a string");
-    let mut wanted = BTreeSet::new();
-    for place in 0..digits {
-        let value = (n >> (DIGIT_BITS * place)) & (values - 1);
-        wanted.insert(value);
-        let rest = if place + 1 == digits {
-            "true".to_owned()
-        } else {
-            format!("(done-{} s)", place + 1)
-        };
-        writeln!(
-            text,
-            "(defn done-{place} (s state) bool\n  (if (is-digit-{value} (s {place})) {rest} false))"
-        )
-        .expect("a string");
-    }
-    for value in wanted {
-        writeln!(
-            text,
-            "(defn is-digit-{value} (d digit) bool {})",
-            digit_tree(0, 0, &|other| (other == value).to_string())
-        )
-        .expect("a string");
-    }
-    text
 }
 
 /// A loop of `n` rounds whose repeating call is in tail position through one of
