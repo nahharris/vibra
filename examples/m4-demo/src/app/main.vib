@@ -1,0 +1,32 @@
+(import env @std.env)
+
+(import fs @std.fs)
+
+(import io @std.io)
+
+(import text @std.text)
+
+(defn quote (quoted str line str) str
+  (text.concat quoted (text.concat "> " (text.concat line "\n"))))
+
+; The M4 demo: reads the file named by the first program argument, quotes each
+; of its lines, and writes the result to standard output. The entry declares
+; each root it performs, and so does the target.
+(defn main () (result void fs.fs-error)
+  effects: (env.read fs.read io.stdout)
+  (let
+    arguments
+    (match (env.read.args) (result.ok found) found (result.err -) (array.of "")))
+  (let
+    first
+    (match
+      (array.slice arguments 0u64 1u64)
+      (option.some picked) picked
+      (option.none) (array.of "")))
+  (let name (array.fold first "" text.concat))
+  (let contents (try (fs.read.text (fs.path name))))
+  (let lines (text.split (text.trim contents) "\n"))
+  (match
+    (io.stdout.text (array.fold lines "" quote))
+    (result.ok) (result.ok)
+    (result.err -) (result.ok)))
