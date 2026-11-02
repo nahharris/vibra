@@ -102,6 +102,36 @@ pub enum Type {
 }
 
 impl Type {
+    /// Every primitive type, in the order of `vibra_syntax::PRIMITIVE_TYPES`,
+    /// which holds their spellings for the layers below the IR.
+    pub const PRIMITIVES: [Self; 17] = [
+        Self::Bool,
+        Self::Void,
+        Self::Never,
+        Self::Char,
+        Self::Str,
+        Self::Bytes,
+        Self::Atom,
+        Self::I8,
+        Self::I16,
+        Self::I32,
+        Self::I64,
+        Self::U8,
+        Self::U16,
+        Self::U32,
+        Self::U64,
+        Self::F32,
+        Self::F64,
+    ];
+
+    /// The primitive type spelled `name`.
+    #[must_use]
+    pub fn primitive(name: &str) -> Option<Self> {
+        Self::PRIMITIVES
+            .into_iter()
+            .find(|primitive| primitive.as_str() == name)
+    }
+
     /// The source spelling of a primitive or function type head.
     ///
     /// Declared and structural types have no single head word; they spell

@@ -1473,3 +1473,20 @@ fn render_application(value: &ApplicationContract) -> ApplicationContractDocumen
         }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::PRIMITIVE_NAMES;
+
+    /// The wire contract lists the primitive names on its own, so a schema
+    /// check stays independent of the table it validates; this keeps the two
+    /// from drifting.
+    #[test]
+    fn the_wire_primitive_names_are_the_syntax_table() {
+        let table: Vec<&str> = vibra_syntax::PRIMITIVE_TYPES
+            .iter()
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(PRIMITIVE_NAMES, table.as_slice());
+    }
+}
