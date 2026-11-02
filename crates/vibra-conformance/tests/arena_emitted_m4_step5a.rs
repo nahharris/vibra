@@ -2,8 +2,10 @@
 //! under the baseline, deterministic, balanced, and observed through the
 //! accessors a host has.
 //!
-//! The programs are built from IR constructors, because no checked source
-//! program lowers before the prelude's module values do (Step 5b).
+//! The programs are built from IR constructors, so that each is exactly the
+//! literals it names. Emission is deterministic for every program of the corpus
+//! (`lowers_every_form_m4_step11`) and across processes for an arena program
+//! (`wasm_skeleton_m4_step4`).
 
 #![allow(
     clippy::expect_used,
@@ -151,15 +153,6 @@ fn equal_literal_contents_share_one_data_segment() {
     };
     let summary = validate(&emitted(&returning(Type::Str, body))).expect("valid");
     assert_eq!(summary.data_segments, 2);
-}
-
-#[test]
-fn emission_of_a_literal_program_is_byte_identical() {
-    for value in literals() {
-        let a = emitted(&literal(value.clone()));
-        let b = emitted(&literal(value));
-        assert_eq!(a, b);
-    }
 }
 
 // -- what the host observes -------------------------------------------------

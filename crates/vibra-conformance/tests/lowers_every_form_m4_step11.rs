@@ -10,7 +10,10 @@
 //!   native that runs its checked body;
 //! - every program the corpus checks lowers, or is refused only for an entry
 //!   with parameters, which `check_source` admits and no executable case has;
-//! - the corpus reports no case as not lowered.
+//! - emission of each of those programs is byte-identical.
+//!
+//! That the corpus reports no case as not lowered is held by
+//! `parity_inventory_m4_step4`, whose table has only `matched` rows.
 
 #![allow(
     clippy::expect_used,
@@ -79,7 +82,15 @@ fn every_program_the_corpus_checks_lowers() {
             continue;
         };
         match vibra_wasm::emit(program) {
-            Ok(_) => lowered += 1,
+            Ok(module) => {
+                let again = vibra_wasm::emit(program).expect("a second emission");
+                assert_eq!(
+                    module.bytes(),
+                    again.bytes(),
+                    "emission differs for:\n{source}"
+                );
+                lowered += 1;
+            }
             Err(error) => {
                 let names = error
                     .forms()
@@ -95,20 +106,4 @@ fn every_program_the_corpus_checks_lowers() {
         }
     }
     assert!(lowered > 100, "{lowered} programs lowered");
-}
-
-#[test]
-fn the_corpus_reports_no_case_as_not_lowered() {
-    let corpus = vibra_conformance::Corpus::discover(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases"),
-    )
-    .expect("the corpus");
-    let runner = vibra_conformance::ConformanceRunner::new(
-        vibra_conformance::standard_dispatcher(),
-    );
-    let report = runner.run(&corpus);
-    let wasm = report.wasm_counts();
-    assert_eq!(wasm.not_lowered, 0);
-    assert_eq!(wasm.failed, 0);
-    assert!(wasm.matched > 100);
 }

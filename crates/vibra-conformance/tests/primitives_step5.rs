@@ -1,50 +1,28 @@
-//! Step 5 typed-literal and reference-execution contract tests.
+//! Step 5 typed-literal and runner contract tests that a corpus case cannot
+//! state. The typed observation and the result and trace of `V1-TYPE-INFER-primitives`
+//! and `V1-RUNTIME-literal` are held by those cases.
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 #![allow(missing_docs)]
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use vibra_conformance::{
     BackendObservation, Case, CaseObservation, ConformanceProfile, ConformanceRunner,
-    Corpus, HandlerError, InterpreterV1Handler, ProfileDispatcher, ProfileHandler,
-    StaticV1TypeHandler,
+    Corpus, HandlerError, ProfileDispatcher, ProfileHandler, StaticV1TypeHandler,
 };
 use vibra_ir::Value;
 use vibra_syntax::parse_data;
 
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("crate has a workspace root")
-        .to_path_buf()
-}
-
-fn corpus() -> Corpus {
-    Corpus::discover(workspace_root().join("conformance/cases")).expect("Step 5 corpus")
-}
-
+/// The one case `id`, discovered from its own directory and not from the whole
+/// corpus.
 fn case(id: &str) -> Case {
-    corpus()
+    Corpus::discover(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases").join(id))
+        .expect("Step 5 case directory")
         .cases()
-        .iter()
-        .find(|case| case.manifest().id() == id)
+        .first()
         .cloned()
         .expect("Step 5 case")
-}
-
-#[test]
-fn static_handler_produces_an_independent_typed_program_observation() {
-    let case = case("V1-TYPE-INFER-primitives");
-    let observation = StaticV1TypeHandler.run(&case).expect("type handler");
-    assert!(observation.accepted);
-    assert!(
-        observation
-            .types
-            .as_deref()
-            .is_some_and(|types| types.contains("@types.v1"))
-    );
 }
 
 #[test]
@@ -75,22 +53,6 @@ fn bytes_and_unicode_whitespace_observations_are_valid_vibon() {
         assert!(document.accepted(), "{:?}", document.diagnostics());
         assert!(document.data().is_some());
     }
-}
-
-#[test]
-fn interpreter_handler_produces_an_empty_pure_trace() {
-    let case = case("V1-RUNTIME-literal");
-    let observation = InterpreterV1Handler
-        .run(&case)
-        .expect("interpreter handler");
-    let repeated = InterpreterV1Handler.run(&case).expect("repeat handler");
-    assert_eq!(observation, repeated);
-    let execution = observation.interpreter.expect("execution").outcome;
-    assert_eq!(
-        execution.result.as_deref(),
-        Some("(record type: @i32 value: 42i32)\n")
-    );
-    assert!(execution.audit_trace.is_empty());
 }
 
 #[derive(Clone, Debug)]

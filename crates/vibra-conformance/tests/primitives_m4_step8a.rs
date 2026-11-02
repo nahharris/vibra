@@ -468,27 +468,6 @@ fn a_program_of_primitive_rows_is_emitted_to_the_same_bytes_twice() {
 }
 
 #[test]
-fn the_number_text_and_float_rows_and_the_function_applying_native_are_lowered() {
-    // Step 8c lowers `to-str`, `parse`, and the float rows, and Step 8d lowers
-    // `array.fold` by running its checked Vibra body, so every registry row
-    // emits.
-    for source in [
-        "(defn main () str (i32.to-str 1i32))\n",
-        "(defn main () f64 (f64.add 1.0 2.0))\n",
-        "(defn main () (result f32 core.conversion-error) (f32.parse \"1.5\"))\n",
-        "(defn main () i32 (array.fold (array.of 1i32) 0i32 (lambda (total i32 item i32) i32 item)))\n",
-    ] {
-        let source = if source.contains("core.") {
-            format!("(import core @std.core)\n{source}")
-        } else {
-            source.to_owned()
-        };
-        let program = checked(&source);
-        vibra_wasm::emit(&program).expect("lowered");
-    }
-}
-
-#[test]
 fn operations_compose_in_a_program_with_matches_try_and_tail_calls() {
     // gcd by the remainder, the number of set bits by shifts, and a checked sum
     // that stops at the first overflow through `try`.
@@ -652,10 +631,20 @@ fn a_primitive_application_creates_no_activation_so_a_long_loop_of_them_holds_a_
         "the arena grew with the loop"
     );
     assert_eq!(large.frame_depth, 0);
+    // Each round adds `3 << 2`, so the module's result at a hundred thousand
+    // rounds is written out, and the interpreter is held to the module at a
+    // thousand: the interpreter's own run of a hundred thousand rounds is the
+    // slowest thing in this file and says nothing more.
     let program = checked(&source(100_000));
     assert_eq!(
         observed_by_wasm(&runner(), &program),
-        interpreted(&program),
+        "(record type: @u64 value: 1200000u64)\n",
         "the loop's result"
+    );
+    let program = checked(&source(1_000));
+    assert_eq!(
+        observed_by_wasm(&runner(), &program),
+        interpreted(&program),
+        "the loop's result in both backends"
     );
 }

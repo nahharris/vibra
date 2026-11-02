@@ -656,11 +656,20 @@ fn a_loop_of_number_text_holds_a_bounded_arena() {
     assert_eq!(small.live, small.kept);
     assert_eq!(large.live, large.kept);
     assert_eq!(large.frame_depth, 0);
+    // The loop sums the rounds' numbers, 1 through 20000, after each has been
+    // printed and parsed back. The interpreter is held to the module at 500
+    // rounds; its run of twenty thousand says nothing more and is slow.
     let program = checked(&source(20_000));
     assert_eq!(
         observed_by_wasm(&runner(), &program),
-        interpreted(&program),
+        "(record type: @u64 value: 200010000u64)\n",
         "the loop's result"
+    );
+    let program = checked(&source(500));
+    assert_eq!(
+        observed_by_wasm(&runner(), &program),
+        interpreted(&program),
+        "the loop's result in both backends"
     );
 }
 
