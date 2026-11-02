@@ -553,23 +553,31 @@ fn prepare_all(root: &Path) -> Result<Vec<Prepared>, String> {
         .collect()
 }
 
-/// Runs every program in both backends and returns the exact metrics. Two calls
-/// give the same result.
+/// Runs every program in both backends and returns the exact metrics, in the
+/// order of [`PROGRAMS`]. Two calls give the same result. The programs are
+/// independent, so each runs on a thread of its own and the call takes as long as
+/// the slowest one.
 ///
 /// # Errors
 ///
 /// A message naming the program that did not check, lower, complete, or pass.
 pub fn measure_exact(root: &Path) -> Result<Vec<Exact>, String> {
-    prepare_all(root)?
-        .iter()
-        .map(|prepared| {
-            Ok(Exact {
-                program: prepared.name.to_owned(),
-                interpreter: run_interpreter(prepared)?,
-                wasm: run_wasm_exact(prepared)?,
+    std::thread::scope(|scope| {
+        let handles = PROGRAMS
+            .iter()
+            .map(|program| {
+                (program, scope.spawn(move || measure_program(root, program)))
             })
-        })
-        .collect()
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .map(|(program, handle)| {
+                handle.join().unwrap_or_else(|_| {
+                    Err(format!("program `{}`: panicked", program.name))
+                })
+            })
+            .collect()
+    })
 }
 
 fn median_micros(
