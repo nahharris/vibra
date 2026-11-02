@@ -49,6 +49,8 @@
 //! | 92 | `failure` (u32) | After status `3`: the failed assertion, `1` for `assert.true`, `2` for `assert.false`, `3` for `assert.equal` |
 //! | 96 | `expected` (u64) | After status `3` and `assert.equal`: the expected operand, as the bits of a scalar or a value ID |
 //! | 104 | `actual` (u64) | The same for the actual operand |
+//! | 112 | `alloc_count` (u64) | Only in a module emitted for measurement (`emit_measured`): the allocations made so far; `0` and never written otherwise |
+//! | 120 | `live_peak` (u64) | Only in a module emitted for measurement: the largest `live_size` after any allocation; `0` and never written otherwise |
 //!
 //! # The arena
 //!
@@ -375,8 +377,12 @@ pub mod state {
     pub const EXPECTED: u32 = 96;
     /// `actual`.
     pub const ACTUAL: u32 = 104;
+    /// `alloc_count`, written only by a module emitted for measurement.
+    pub const ALLOC_COUNT: u32 = 112;
+    /// `live_peak`, written only by a module emitted for measurement.
+    pub const LIVE_PEAK: u32 = 120;
     /// The end of the fields.
-    pub const END: u32 = 112;
+    pub const END: u32 = 128;
     /// The free-list heads: one `u32` per size class, indexed by the class.
     pub const FREE_LISTS: u32 = 128;
 }

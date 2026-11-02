@@ -47,6 +47,8 @@ $env:RUSTDOCFLAGS = '-D warnings'
 cargo doc --locked --offline --workspace --no-deps --all-features
 cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
 cargo test --locked --offline -p vibra-conformance --test evidence_step11 --test m4_contract_inventory --test m3_contract_inventory --test diagnostic_registry
+# From Step 21 the exact performance metrics are a host test of the workspace run:
+# cargo test --locked --offline -p vibra-conformance --test performance_baseline_m4_step21
 cargo run --locked --offline -p vibra-conformance --bin m1-fuzz -- --profile ci-smoke
 git diff --check
 ```

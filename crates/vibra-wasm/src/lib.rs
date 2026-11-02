@@ -155,7 +155,20 @@ impl EmittedModule {
 /// [`NotLowered`] names every form the program uses that this step does not
 /// lower. No module is produced for such a program.
 pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
-    build(program, None)
+    build(program, None, false)
+}
+
+/// [`emit`] for a module the performance baseline measures: the allocator also
+/// counts its allocations and records the peak live size in two state fields
+/// (`layout::state::ALLOC_COUNT` and `LIVE_PEAK`) that a module built by [`emit`]
+/// never writes. The module is otherwise the same program, and the same
+/// program always yields the same bytes.
+///
+/// # Errors
+///
+/// [`NotLowered`] as for [`emit`].
+pub fn emit_measured(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
+    build(program, None, true)
 }
 
 /// Lowers the tests of a checked module set to a v1 test module.
@@ -172,13 +185,27 @@ pub fn emit_tests(
     program: &CheckedProgram,
     entries: &[usize],
 ) -> Result<EmittedModule, NotLowered> {
-    build(program, Some(entries))
+    build(program, Some(entries), false)
+}
+
+/// [`emit_tests`] for a module the performance baseline measures, as
+/// [`emit_measured`].
+///
+/// # Errors
+///
+/// [`NotLowered`] as for [`emit`].
+pub fn emit_tests_measured(
+    program: &CheckedProgram,
+    entries: &[usize],
+) -> Result<EmittedModule, NotLowered> {
+    build(program, Some(entries), true)
 }
 
 #[allow(clippy::too_many_lines)]
 fn build(
     program: &CheckedProgram,
     tests: Option<&[usize]>,
+    measure: bool,
 ) -> Result<EmittedModule, NotLowered> {
     // A module indexes its functions with 32 bits. A count that does not fit is
     // reported, never wrapped.
@@ -326,6 +353,7 @@ fn build(
         imports,
         host_imports,
         extra,
+        measure,
     };
     let bytes =
         encode::module(&parts).ok_or_else(|| NotLowered::single(Form::ModuleSize))?;
