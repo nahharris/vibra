@@ -235,7 +235,7 @@ fn an_application_evaluates_its_callee_once_before_its_operands() {
     );
 }
 
-/// -- a counter ----------------------------------------------------------------
+// -- a counter ----------------------------------------------------------------
 
 /// The definitions of a counter that counts to `n`: `state`, `(zero)`,
 /// `(inc s)`, which makes the next state, and `(done s)`, true exactly when the

@@ -511,7 +511,7 @@ fn two_matches_in_one_body_sequence_each_release_what_they_bind() {
 
 // -- tail position: arms, fallbacks, and the rest of a sequence ---------------------------
 
-/// -- a counter ----------------------------------------------------------------
+// -- a counter ----------------------------------------------------------------
 
 /// The definitions of a counter that counts to `n`: `state`, `(zero)`,
 /// `(inc s)`, which makes the next state, and `(done s)`, true exactly when the
