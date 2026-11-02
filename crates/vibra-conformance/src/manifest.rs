@@ -384,14 +384,7 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
         let operation = decode_operation(raw.operation.as_deref(), profile, &inputs)?;
 
         let expectations = decode_expectations(raw.expect)?;
-        if expectations.host_event.is_some()
-            && !matches!(
-                operation,
-                ConformanceOperation::Interpret
-                    | ConformanceOperation::WorkspaceRun
-                    | ConformanceOperation::WorkspaceTest
-            )
-        {
+        if expectations.host_event.is_some() && !operation.executes_programs() {
             return Err(ManifestError::Invalid(format!(
                 "host_event is valid only on interpret, workspace-run, and workspace-test cases, not {operation}"
             )));
@@ -559,174 +552,122 @@ fn decode_operation(
         }
         None => ConformanceOperation::Reader,
     };
-    if operation == ConformanceOperation::ProjectDecode
-        && (inputs.project.is_none()
-            || inputs.source.is_some()
-            || !inputs.data.is_empty()
-            || inputs.tree.is_some())
-    {
-        return Err(ManifestError::Invalid(
-            "project-decode requires exactly one project input".to_owned(),
-        ));
-    }
-    if matches!(
-        operation,
-        ConformanceOperation::TypeCheck | ConformanceOperation::Interpret
-    ) && (inputs.source.is_none()
-        || inputs.project.is_some()
-        || !inputs.data.is_empty()
-        || inputs.tree.is_some())
-    {
-        return Err(ManifestError::Invalid(
-            "type-check and interpret require exactly one source input".to_owned(),
-        ));
-    }
-    if matches!(
-        operation,
-        ConformanceOperation::SourceGraph | ConformanceOperation::Resolve
-    ) {
-        let Some(tree) = inputs.tree.as_deref() else {
-            return Err(ManifestError::Invalid(
-                "source-graph and resolve require one confined tree input".to_owned(),
-            ));
-        };
-        let Some(project) = inputs.project.as_deref() else {
-            return Err(ManifestError::Invalid(
-                "source-graph and resolve require one project input".to_owned(),
-            ));
-        };
-        let expected_project = format!("{tree}/project.vibon");
-        if project != expected_project {
-            return Err(ManifestError::Invalid(format!(
-                "source-graph project input must be exactly `{expected_project}`"
-            )));
-        }
-    }
-    if operation == ConformanceOperation::Index {
-        let Some(tree) = inputs.tree.as_deref() else {
-            return Err(ManifestError::Invalid(
-                "index requires one confined tree input".to_owned(),
-            ));
-        };
-        if inputs.project.as_deref() != Some(format!("{tree}/project.vibon").as_str())
-            || inputs.source.is_some()
-            || !inputs.data.is_empty()
-        {
-            return Err(ManifestError::Invalid(
-                "index cases use the confined tree and its project.vibon as their only input"
-                    .to_owned(),
-            ));
-        }
-    }
-    if operation == ConformanceOperation::Query {
-        let Some(tree) = inputs.tree.as_deref() else {
-            return Err(ManifestError::Invalid(
-                "query requires one confined tree input".to_owned(),
-            ));
-        };
-        let Some(project) = inputs.project.as_deref() else {
-            return Err(ManifestError::Invalid(
-                "query requires one project input".to_owned(),
-            ));
-        };
-        let expected_project = format!("{tree}/project.vibon");
-        if project != expected_project {
-            return Err(ManifestError::Invalid(format!(
-                "query project input must be exactly `{expected_project}`"
-            )));
-        }
-        if inputs.source.is_some() || !inputs.data.is_empty() {
-            return Err(ManifestError::Invalid(
-                "query cases use the confined tree as their source input".to_owned(),
-            ));
-        }
-    }
-    if operation == ConformanceOperation::Format {
-        if profile != ConformanceProfile::ToolingV1 {
-            return Err(ManifestError::Invalid(
-                "format cases require the tooling-v1 profile".to_owned(),
-            ));
-        }
-        let Some(tree) = inputs.tree.as_deref() else {
-            return Err(ManifestError::Invalid(
-                "format requires one confined tree input".to_owned(),
-            ));
-        };
-        let Some(project) = inputs.project.as_deref() else {
-            return Err(ManifestError::Invalid(
-                "format requires one project input".to_owned(),
-            ));
-        };
-        let Some(source) = inputs.source.as_deref() else {
-            return Err(ManifestError::Invalid(
-                "format requires one source input".to_owned(),
-            ));
-        };
-        let expected_project = format!("{tree}/project.vibon");
-        if project != expected_project {
-            return Err(ManifestError::Invalid(format!(
-                "format project input must be exactly `{expected_project}`"
-            )));
-        }
-        if !inputs.data.is_empty() {
-            return Err(ManifestError::Invalid(
-                "format cases may not declare additional data inputs".to_owned(),
-            ));
-        }
-        validate_tree_source_input(tree, source, "format")?;
-    }
-    if matches!(
-        operation,
-        ConformanceOperation::WorkspaceCheck
-            | ConformanceOperation::WorkspaceRun
-            | ConformanceOperation::WorkspaceTest
-    ) {
-        let required_profile = match operation {
-            ConformanceOperation::WorkspaceCheck => ConformanceProfile::StaticV1,
-            ConformanceOperation::WorkspaceRun
-            | ConformanceOperation::WorkspaceTest => ConformanceProfile::InterpreterV1,
-            _ => {
-                return Err(ManifestError::Invalid(
-                    "workspace operation profile validation was misrouted".to_owned(),
-                ));
-            }
-        };
-        if profile != required_profile {
-            return Err(ManifestError::Invalid(format!(
-                "{} cases require the {required_profile} profile",
-                operation.as_str()
-            )));
-        }
-        let Some(tree) = inputs.tree.as_deref() else {
-            return Err(ManifestError::Invalid(format!(
-                "{} requires one confined tree input",
-                operation.as_str()
-            )));
-        };
-        let Some(project) = inputs.project.as_deref() else {
-            return Err(ManifestError::Invalid(format!(
-                "{} requires one project input",
-                operation.as_str()
-            )));
-        };
-        let expected_project = format!("{tree}/project.vibon");
-        if project != expected_project {
-            return Err(ManifestError::Invalid(format!(
-                "{} project input must be exactly `{expected_project}`",
-                operation.as_str()
-            )));
-        }
-        if inputs.source.is_some() || !inputs.data.is_empty() {
-            return Err(ManifestError::Invalid(format!(
-                "{} cases use only the confined tree as their source input",
-                operation.as_str()
-            )));
-        }
-    }
+    check_shape(operation, profile, inputs)?;
     if let Some(world) = inputs.host_world.as_deref() {
         validate_host_world_input(operation, world, inputs.tree.as_deref())?;
     }
     Ok(operation)
+}
+
+/// Whether an operation's case declares one kind of input.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Presence {
+    Required,
+    Forbidden,
+    /// The operation does not look at it, and the case may declare it.
+    Free,
+}
+
+/// The inputs an operation reads: its tree, project, source, and data. Where a
+/// tree is required, the project beside it is exactly the tree's own
+/// `project.vibon`.
+const fn input_shape(
+    operation: ConformanceOperation,
+) -> Option<[(&'static str, Presence); 4]> {
+    use Presence::{Forbidden, Free, Required};
+    let [tree, project, source, data] = match operation {
+        ConformanceOperation::Reader => return None,
+        ConformanceOperation::ProjectDecode => {
+            [Forbidden, Required, Forbidden, Forbidden]
+        }
+        ConformanceOperation::TypeCheck | ConformanceOperation::Interpret => {
+            [Forbidden, Forbidden, Required, Forbidden]
+        }
+        ConformanceOperation::SourceGraph | ConformanceOperation::Resolve => {
+            [Required, Required, Free, Free]
+        }
+        ConformanceOperation::Format => [Required, Required, Required, Forbidden],
+        ConformanceOperation::Index
+        | ConformanceOperation::Query
+        | ConformanceOperation::WorkspaceCheck
+        | ConformanceOperation::WorkspaceRun
+        | ConformanceOperation::WorkspaceTest => {
+            [Required, Required, Forbidden, Forbidden]
+        }
+    };
+    Some([
+        ("tree", tree),
+        ("project", project),
+        ("source", source),
+        ("data", data),
+    ])
+}
+
+/// The profile an operation runs under, for the operations that have one.
+const fn required_profile(
+    operation: ConformanceOperation,
+) -> Option<ConformanceProfile> {
+    match operation {
+        ConformanceOperation::Format => Some(ConformanceProfile::ToolingV1),
+        ConformanceOperation::WorkspaceCheck => Some(ConformanceProfile::StaticV1),
+        ConformanceOperation::WorkspaceRun | ConformanceOperation::WorkspaceTest => {
+            Some(ConformanceProfile::InterpreterV1)
+        }
+        _ => None,
+    }
+}
+
+/// Holds a case's inputs to the shape of its operation.
+fn check_shape(
+    operation: ConformanceOperation,
+    profile: ConformanceProfile,
+    inputs: &CaseInputs,
+) -> Result<(), ManifestError> {
+    if let Some(required) = required_profile(operation)
+        && profile != required
+    {
+        return Err(ManifestError::Invalid(format!(
+            "{operation} cases require the {required} profile"
+        )));
+    }
+    let Some(shape) = input_shape(operation) else {
+        return Ok(());
+    };
+    let declared = [
+        inputs.tree.is_some(),
+        inputs.project.is_some(),
+        inputs.source.is_some(),
+        !inputs.data.is_empty(),
+    ];
+    for ((kind, presence), declared) in shape.into_iter().zip(declared) {
+        match (presence, declared) {
+            (Presence::Required, false) => {
+                return Err(ManifestError::Invalid(format!(
+                    "{operation} requires one {kind} input"
+                )));
+            }
+            (Presence::Forbidden, true) => {
+                return Err(ManifestError::Invalid(format!(
+                    "{operation} cases may not declare a {kind} input"
+                )));
+            }
+            _ => {}
+        }
+    }
+    if let (Some(tree), Some(project)) = (inputs.tree.as_deref(), &inputs.project) {
+        let expected_project = format!("{tree}/project.vibon");
+        if *project != expected_project {
+            return Err(ManifestError::Invalid(format!(
+                "{operation} project input must be exactly `{expected_project}`"
+            )));
+        }
+    }
+    if operation == ConformanceOperation::Format
+        && let (Some(tree), Some(source)) = (inputs.tree.as_deref(), &inputs.source)
+    {
+        validate_tree_source_input(tree, source, "format")?;
+    }
+    Ok(())
 }
 
 /// A `host-world` input belongs to `workspace-run` and `workspace-test`, which
