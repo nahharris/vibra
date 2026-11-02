@@ -32,16 +32,6 @@ fn corpus_root() -> PathBuf {
 /// case is the latest step among the forms it needs.
 fn suggested_step(form: &str) -> Option<&'static str> {
     Some(match form {
-        // Lowered by Step 5b; no longer reported, kept for a stale row.
-        "sequence" | "variable" | "let" | "if" | "return" | "global"
-        | "module-value" | "record" | "variant" | "project" | "tuple"
-        | "tuple-project" | "widen" | "call:direct" => "5b",
-        // Lowered by Step 6; no longer reported, kept for a stale row.
-        "closure" | "captured" | "function" | "default" | "call:indirect"
-        | "call:tail-direct" | "call:tail-indirect" | "type:param"
-        | "type:function" => "6",
-        // Lowered by Step 7; no longer reported, kept for a stale row.
-        "match" | "try" => "7",
         "array"
         | "dict"
         | "lookup"
@@ -195,9 +185,9 @@ fn the_failure_message_names_the_rows_to_add() {
     let empty = ParityInventory::parse("# nothing\n").expect("an empty table");
     let lowering = WasmStatus::NotLowered {
         forms: vec![
-            "call:direct".to_owned(),
+            "dict".to_owned(),
             "external:array.of".to_owned(),
-            "closure".to_owned(),
+            "lookup".to_owned(),
         ],
     };
     let matched = WasmStatus::Matched;
@@ -206,9 +196,9 @@ fn the_failure_message_names_the_rows_to_add() {
     assert_eq!(
         findings.missing[1].observed,
         Observed::NotLowered(vec![
-            "call:direct".to_owned(),
+            "dict".to_owned(),
             "external:array.of".to_owned(),
-            "closure".to_owned(),
+            "lookup".to_owned(),
         ])
     );
     if let Observed::NotLowered(forms) = &findings.missing[1].observed {
@@ -223,7 +213,7 @@ fn the_failure_message_names_the_rows_to_add() {
     );
     assert!(
         message.contains(
-            "B-new\tnot-lowered\t8b\t# forms: call:direct, external:array.of, closure\n"
+            "B-new\tnot-lowered\t8b\t# forms: dict, external:array.of, lookup\n"
         ),
         "the not-lowered row is spelled out with its suggested step:\n{message}"
     );

@@ -456,11 +456,3 @@ fn hex_bytes(bytes: &[u8]) -> String {
     }
     output
 }
-
-/// Builds a graph from an immutable source snapshot.
-pub fn build_source_graph(
-    project: &DiscoveredProject,
-    snapshot: SourceSnapshot,
-) -> Result<SourceGraph, WorkspaceError> {
-    SourceGraph::build(project, snapshot)
-}

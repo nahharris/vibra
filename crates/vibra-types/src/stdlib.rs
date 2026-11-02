@@ -269,22 +269,10 @@ impl Stdlib {
         &self.host
     }
 
-    /// The `@compiler` symbols the modules may bind.
-    #[must_use]
-    pub fn compiler_symbols(&self) -> &[String] {
-        &self.compiler
-    }
-
     /// The native implementation symbols the modules may name.
     #[must_use]
     pub fn native_symbols(&self) -> &[String] {
         &self.native
-    }
-
-    /// The test-only assertion members.
-    #[must_use]
-    pub fn assertion_members(&self) -> &[String] {
-        &self.assertions
     }
 
     /// The admitted modules as the resolver's standard-library overlay.

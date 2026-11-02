@@ -1,10 +1,8 @@
-//! Primitive type checking and lowering for the M2 Step 7 profile.
+//! Type checking and lowering of the source AST.
 //!
-//! The checker consumes the syntax AST and returns an immutable checked IR.
-//! It admits primitive module values, direct local bindings, conditionals,
-//! sequences, function values, closures, and fixed/labelled calls. A parsed
-//! AST that contains a later-step form never crosses into `vibra-ir` or
-//! `vibra-interp`.
+//! The checker consumes the syntax AST and returns an immutable checked IR,
+//! with the diagnostics of the forms it rejects. A parsed AST that contains a
+//! form the checker rejects never crosses into `vibra-ir` or `vibra-interp`.
 
 #![cfg_attr(
     test,
@@ -143,8 +141,8 @@ impl CheckResult {
     }
 }
 
-/// Checks one `.vib` source document through the shared reader and lowers the
-/// Step 7 subset to controlled IR.
+/// Checks one `.vib` source document through the shared reader and lowers it
+/// to checked IR.
 pub fn check_source(source_id: impl AsRef<str>, source: &str) -> CheckResult {
     let source_id = source_id.as_ref();
     let document = match vibra_syntax::parse_source(Path::new(source_id), source) {
@@ -246,28 +244,6 @@ pub fn check_standard_library_source(
     }
 }
 
-/// Checks an already decoded source AST.  This is useful to workspace
-/// adapters that have already performed the reader phase.
-pub fn check_ast(
-    source_id: impl AsRef<str>,
-    ast: &SourceAst,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Option<CheckedProgram> {
-    check_ast_with_bindings(source_id, ast, diagnostics).0
-}
-
-/// Checks an already decoded source AST and returns semantic binding facts
-/// alongside the checked program.
-pub fn check_ast_with_bindings(
-    source_id: impl AsRef<str>,
-    ast: &SourceAst,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> (Option<CheckedProgram>, Vec<ApplicationBinding>) {
-    let (program, facts) =
-        check_ast_with_bindings_authority(source_id.as_ref(), ast, diagnostics, false);
-    (program, facts.bindings)
-}
-
 /// Checks one source module with the narrowly supported explicit `@std.text`
 /// import.  This adapter is capability-backed by [`Stdlib`]; a
 /// source file cannot manufacture that authority by copying declarations.
@@ -320,10 +296,7 @@ pub fn check_bootstrap_text_import(
             "the source must explicitly import `(import text @std.text)`",
         );
     };
-    let exact_import = import.alias().kind() == NameKind::Symbol
-        && import.alias().value() == "text"
-        && import.target().kind() == NameKind::Atom
-        && import.target().value() == "std.text";
+    let exact_import = is_text_import(import);
     if imports.len() != 1 || !exact_import {
         let rejected_import = if exact_import {
             imports.get(1).copied().unwrap_or(import)
@@ -397,6 +370,15 @@ pub fn check_bootstrap_text_import(
     } else {
         CheckResult::with_facts(program, diagnostics, facts)
     }
+}
+
+/// Whether `import` is exactly `(import text @std.text)`, the one bootstrap
+/// import.
+fn is_text_import(import: &vibra_syntax::ImportDeclaration) -> bool {
+    import.alias().kind() == NameKind::Symbol
+        && import.alias().value() == "text"
+        && import.target().kind() == NameKind::Atom
+        && import.target().value() == "std.text"
 }
 
 /// The embedded module source ID a single-source import of a
@@ -680,10 +662,7 @@ impl<'a> Checker<'a> {
         for declaration in self.ast.declarations() {
             if let Declaration::Import(import) = declaration
                 && self.text_import_authorized
-                && import.alias().kind() == NameKind::Symbol
-                && import.alias().value() == "text"
-                && import.target().kind() == NameKind::Atom
-                && import.target().value() == "std.text"
+                && is_text_import(import)
             {
                 if let Some(earlier) = self.module_names.get("text").copied() {
                     redeclaration(
@@ -1114,11 +1093,7 @@ impl<'a> Checker<'a> {
                     });
                 }
                 Declaration::Import(import)
-                    if self.text_import_authorized
-                        && import.alias().kind() == NameKind::Symbol
-                        && import.alias().value() == "text"
-                        && import.target().kind() == NameKind::Atom
-                        && import.target().value() == "std.text" =>
+                    if self.text_import_authorized && is_text_import(import) =>
                 {
                     // Introduced with the module values, before them.
                 }
@@ -5175,13 +5150,14 @@ fn check_form(
                         && !function_targets.has_closure)
                         .then(|| function_targets.known.iter().next().copied())
                         .flatten();
-                    Expr::indirect_tail_call_with_hint(
+                    Expr::indirect_call(
                         callee,
                         function_hint,
                         arguments,
                         result,
                         origin,
                     )
+                    .with_tail()
                 }
                 None => Expr::indirect_call(
                     callee,

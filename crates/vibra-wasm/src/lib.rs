@@ -7,33 +7,29 @@
 //! crate: a module names a native only by an import from the pure module whose
 //! name `vibra_ir::boundary` records.
 //!
-//! # Status
+//! # What is lowered
 //!
-//! Milestone 4 Step 5a built the memory layer of every module: the value arena,
-//! precise reference counting with a worklist release, the handle table, the
-//! instance state, and the host accessors ([`layout`] states the
-//! representation). Step 5b lowers the first checked source programs: the
-//! literals, sequences, `let`, `if`, and `return`; module values, evaluated
-//! lazily and once; functions with fixed and labelled parameters and the direct
-//! calls between them; and the nominal and structural data kinds with their
-//! constructors, projections, and the injection of a member into a union.
-//! Activations live in the arena and a call does not nest a WebAssembly call
-//! ([`layout`], "Activations and the dispatcher"). Step 6 lowers calls of every
-//! kind: function values and closures, a call through one, a tail call to every
-//! kind of callee (the callee replaces the current frame), omitted labelled
-//! operands, and generic functions and types, whose type arguments are passed to
-//! each activation at run time. Step 7 lowers patterns and typed failure:
-//! `match` with every pattern kind, destructuring in `let`, parameters, and
-//! lambdas, `let-else`, `as` narrowing, `try`, and `never`, by one recursive
-//! scheme over a table of what each kind of pattern asks of a value. Steps 8 to
-//! 10 lower collections, numbers and text, native bodies, interfaces, and the
-//! natives. Step 11 lowers the test assertions and the test module
-//! ([`emit_tests`]: `vibra_v1_test`, the failure exports, and the origin table of
-//! [`OriginTable`]), and the last forms: a result converted through an array, a
-//! dict, a record, or a union, and a `void` item of a builtin `option` iterator.
-//! No form of a checked program is named by [`NotLowered`] since; it reports only
-//! a program the checker cannot have produced, and never a module that omits part
-//! of the program.
+//! Every module has a memory layer: the value arena, precise reference
+//! counting with a worklist release, the handle table, the instance state, and
+//! the host accessors ([`layout`] states the representation). Checked source
+//! programs lower in full: literals, sequences, `let`, `if`, and `return`;
+//! module values, evaluated lazily and once; functions with fixed and labelled
+//! parameters; the nominal and structural data kinds with their constructors,
+//! projections, and the injection of a member into a union; calls of every
+//! kind (function values and closures, a call through one, a tail call to every
+//! kind of callee, omitted labelled operands, and generic functions and types,
+//! whose type arguments are passed to each activation at run time); patterns
+//! and typed failure (`match` with every pattern kind, destructuring in `let`,
+//! parameters, and lambdas, `let-else`, `as` narrowing, `try`, and `never`, by
+//! one recursive scheme over a table of what each kind of pattern asks of a
+//! value); collections, numbers and text, native bodies, and interfaces; and
+//! the test assertions and the test module ([`emit_tests`]: `vibra_v1_test`,
+//! the failure exports, and the origin table of [`OriginTable`]), including a
+//! result converted through an array, a dict, a record, or a union, and a
+//! `void` item of a builtin `option` iterator. Activations live in the arena
+//! and a call does not nest a WebAssembly call ([`layout`], "Activations and
+//! the dispatcher"). [`NotLowered`] reports only a program the checker cannot
+//! have produced, and never a module that omits part of the program.
 //!
 //! # The module
 //!

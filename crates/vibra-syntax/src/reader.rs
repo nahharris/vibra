@@ -42,12 +42,6 @@ impl DocumentMode {
         }
     }
 
-    /// Alias for [`Self::from_path`] for callers that describe mode selection
-    /// as a path lookup.
-    pub fn for_path(path: impl AsRef<Path>) -> Result<Self, DocumentModeError> {
-        Self::from_path(path)
-    }
-
     /// The canonical extension for this mode.
     #[must_use]
     pub const fn extension(self) -> &'static str {
@@ -214,12 +208,6 @@ impl Lexed {
     #[must_use]
     pub fn tokens(&self) -> &[Token] {
         &self.tokens
-    }
-
-    /// Consumes the lexed result and returns its tokens, including EOF.
-    #[must_use]
-    pub fn into_tokens(self) -> Vec<Token> {
-        self.tokens
     }
 
     /// Lexer diagnostics in source order.

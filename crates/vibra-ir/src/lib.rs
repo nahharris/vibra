@@ -905,15 +905,6 @@ impl Value {
         }
     }
 
-    /// Reads a binary64 value from its exact bits.
-    #[must_use]
-    pub fn as_f64(&self) -> Option<f64> {
-        match self {
-            Self::F64(bits) => Some(f64::from_bits(*bits)),
-            _ => None,
-        }
-    }
-
     /// The deterministic literal spelling used by result observations.
     #[must_use]
     pub fn canonical_vibon(&self) -> String {
@@ -1529,16 +1520,13 @@ impl Expr {
         result: Type,
         origin: SourceOrigin,
     ) -> Self {
-        Self::Call {
-            target: CallTarget::Direct(function),
-            arguments,
-            result,
-            tail: true,
-            origin,
-        }
+        Self::call(function, arguments, result, origin).with_tail()
     }
 
-    /// Creates an indirect call whose callee is evaluated exactly once.
+    /// Creates an indirect call whose callee is evaluated exactly once. The
+    /// optional hint is only a compact singleton observation; checked-program
+    /// validation derives the actual target set from the callee expression.
+    /// `with_tail` makes it a tail transfer.
     #[must_use]
     pub fn indirect_call(
         callee: Self,
@@ -1555,48 +1543,6 @@ impl Expr {
             arguments,
             result,
             tail: false,
-            origin,
-        }
-    }
-
-    /// Creates an indirect tail transfer with a statically known target.
-    #[must_use]
-    pub fn indirect_tail_call(
-        callee: Self,
-        function_hint: usize,
-        arguments: Vec<Self>,
-        result: Type,
-        origin: SourceOrigin,
-    ) -> Self {
-        Self::indirect_tail_call_with_hint(
-            callee,
-            Some(function_hint),
-            arguments,
-            result,
-            origin,
-        )
-    }
-
-    /// Creates an indirect tail transfer whose statically bounded target set
-    /// may contain more than one module function.  The optional hint is only
-    /// a compact singleton observation; checked-program validation derives
-    /// the actual target set from the callee expression.
-    #[must_use]
-    pub fn indirect_tail_call_with_hint(
-        callee: Self,
-        function_hint: Option<usize>,
-        arguments: Vec<Self>,
-        result: Type,
-        origin: SourceOrigin,
-    ) -> Self {
-        Self::Call {
-            target: CallTarget::Indirect {
-                callee: Box::new(callee),
-                hint: function_hint,
-            },
-            arguments,
-            result,
-            tail: true,
             origin,
         }
     }
@@ -3338,12 +3284,6 @@ impl CheckedModuleSet {
     #[must_use]
     pub fn types(&self) -> &[TypeDefinition] {
         &self.types
-    }
-
-    /// The definition of one declared type.
-    #[must_use]
-    pub fn type_definition(&self, id: &TypeId) -> Option<&TypeDefinition> {
-        self.types.iter().find(|definition| definition.id() == id)
     }
 
     /// Immutable module values in deterministic checked order.
@@ -6429,7 +6369,8 @@ mod tests {
         let caller = CheckedFunction::new(
             "caller",
             signature.clone(),
-            Expr::indirect_tail_call(callee, 0, Vec::new(), Type::I32, origin.clone()),
+            Expr::indirect_call(callee, Some(0), Vec::new(), Type::I32, origin.clone())
+                .with_tail(),
             origin,
         )
         .expect("caller shape");
@@ -6469,13 +6410,8 @@ mod tests {
         let caller = CheckedFunction::new(
             "caller",
             signature.clone(),
-            Expr::indirect_tail_call_with_hint(
-                callee,
-                None,
-                Vec::new(),
-                Type::I32,
-                origin.clone(),
-            ),
+            Expr::indirect_call(callee, None, Vec::new(), Type::I32, origin.clone())
+                .with_tail(),
             origin,
         )
         .expect("caller shape");
@@ -6509,7 +6445,8 @@ mod tests {
         let caller = CheckedFunction::new(
             "caller",
             target_signature.clone(),
-            Expr::indirect_tail_call(callee, 0, Vec::new(), Type::I32, origin.clone()),
+            Expr::indirect_call(callee, Some(0), Vec::new(), Type::I32, origin.clone())
+                .with_tail(),
             origin,
         )
         .expect("caller shape");

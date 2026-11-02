@@ -190,14 +190,6 @@ impl AuditEvent {
         let root = read_document(source_id, text)?;
         decode_event(source_id, &root).map_err(|diagnostic| vec![*diagnostic])
     }
-
-    /// Decodes an event from a decoded VIBON value, reporting a violation at it.
-    pub fn from_data(
-        source_id: &str,
-        node: &DataNode,
-    ) -> Result<Self, Box<Diagnostic>> {
-        decode_event(source_id, node)
-    }
 }
 
 /// The text of the audit trace record of `events`.
