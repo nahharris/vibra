@@ -3537,9 +3537,6 @@ pub enum IrError {
     RecursiveCall(String),
     /// A module initializer dependency graph contains a cycle.
     GlobalInitializerCycle(usize),
-    /// Indirect call-flow analysis reached its iteration bound without a
-    /// fixed point; its call and dependency sets would be unsound.
-    CallFlowDidNotConverge,
 }
 
 impl fmt::Display for IrError {
@@ -3576,9 +3573,6 @@ impl fmt::Display for IrError {
                     formatter,
                     "global initializer cycle involving global {global}"
                 )
-            }
-            Self::CallFlowDidNotConverge => {
-                formatter.write_str("indirect call-flow analysis did not converge")
             }
         }
     }
@@ -4300,8 +4294,11 @@ struct FlowTargetSummary {
     known: BTreeSet<usize>,
     unknown: bool,
     is_function: bool,
-    closures: Vec<FlowClosure>,
-    closure_defaults: Vec<Vec<bool>>,
+    /// The closure expressions a callable may denote, by identity. The domain
+    /// is the finite set of closure expressions of the program, so a summary
+    /// has no nesting and a worklist over summaries has finite height.
+    closures: BTreeMap<(usize, bool), FlowClosure>,
+    closure_defaults: BTreeSet<Vec<bool>>,
 }
 
 /// One closure value a callable summary may denote.
@@ -4311,14 +4308,19 @@ struct FlowClosure {
     /// body, which every copy of that expression shares. Summaries compare
     /// closures by this identity, never by walking the body.
     id: usize,
+    /// Whether the value stands for a closure that escaped to unknown code,
+    /// whose captured callables are themselves unknown. A closure that a
+    /// call site resolves precisely has `false`, and its captures are the
+    /// ones the analysis recorded for its expression.
+    escaping: bool,
     signature: FunctionSignature,
     body: Arc<Expr>,
-    captures: Vec<FlowTargetSummary>,
+    capture_count: usize,
 }
 
 impl PartialEq for FlowClosure {
     fn eq(&self, other: &Self) -> bool {
-        self.id == other.id && self.captures == other.captures
+        self.id == other.id && self.escaping == other.escaping
     }
 }
 
@@ -4340,8 +4342,8 @@ impl FlowTargetSummary {
             known: BTreeSet::from([function]),
             unknown: false,
             is_function: true,
-            closures: Vec::new(),
-            closure_defaults: Vec::new(),
+            closures: BTreeMap::new(),
+            closure_defaults: BTreeSet::new(),
         }
     }
 
@@ -4350,8 +4352,8 @@ impl FlowTargetSummary {
             known: BTreeSet::new(),
             unknown: true,
             is_function: true,
-            closures: Vec::new(),
-            closure_defaults: Vec::new(),
+            closures: BTreeMap::new(),
+            closure_defaults: BTreeSet::new(),
         }
     }
 
@@ -4359,26 +4361,11 @@ impl FlowTargetSummary {
         self.known.extend(&other.known);
         self.unknown |= other.unknown;
         self.is_function |= other.is_function;
-        for closure in &other.closures {
-            if let Some(existing) = self
-                .closures
-                .iter_mut()
-                .find(|existing| existing.id == closure.id)
-            {
-                for (capture, additional) in
-                    existing.captures.iter_mut().zip(&closure.captures)
-                {
-                    capture.union(additional);
-                }
-            } else {
-                self.closures.push(closure.clone());
-            }
+        for (key, closure) in &other.closures {
+            self.closures.entry(*key).or_insert_with(|| closure.clone());
         }
-        for defaults in &other.closure_defaults {
-            if !self.closure_defaults.contains(defaults) {
-                self.closure_defaults.push(defaults.clone());
-            }
-        }
+        self.closure_defaults
+            .extend(other.closure_defaults.iter().cloned());
     }
 }
 
@@ -4392,6 +4379,16 @@ struct CallFlow<'a> {
     dependencies: Vec<BTreeSet<DependencyNode>>,
     unresolved: BTreeSet<DependencyNode>,
     active_closures: BTreeSet<usize>,
+    /// What each closure expression captures, as one summary per capture,
+    /// joined over every place the analysis has seen the expression evaluated.
+    /// A call to a closure reads it, and a change to it re-analyzes the owners
+    /// that read it.
+    closure_captures: RefCell<BTreeMap<usize, Vec<FlowTargetSummary>>>,
+    /// The closure expressions whose captures the current owner read.
+    closure_reads: RefCell<BTreeSet<usize>>,
+    /// The closure expressions whose captures grew since the worklist last
+    /// looked.
+    closure_changed: RefCell<BTreeSet<usize>>,
     /// Return summaries read while analyzing the current owner:
     /// `Global(g)` for a global's value and `Function(f)` for a function's
     /// result. The worklist re-analyzes an owner when one of them changes.
@@ -4473,6 +4470,9 @@ fn analyze_call_flow_with_entry(
         dependencies: vec![BTreeSet::new(); globals.len() + functions.len()],
         unresolved: BTreeSet::new(),
         active_closures: BTreeSet::new(),
+        closure_captures: RefCell::new(BTreeMap::new()),
+        closure_reads: RefCell::new(BTreeSet::new()),
+        closure_changed: RefCell::new(BTreeSet::new()),
         reads: RefCell::new(BTreeSet::new()),
         widened_parameters: BTreeSet::new(),
         escaping: escaping_targets(globals, functions),
@@ -4520,18 +4520,15 @@ fn analyze_call_flow_with_entry(
         .collect::<Vec<_>>();
     let mut dirty = owners.iter().copied().collect::<BTreeSet<_>>();
     let mut readers = BTreeMap::<DependencyNode, BTreeSet<DependencyNode>>::new();
-    // Every re-analysis follows a strict widening of a finite summary; the
-    // budget only guards against a defect in that argument.
-    let mut budget = owners
-        .len()
-        .saturating_add(1)
-        .saturating_mul(owners.len().saturating_add(1))
-        .saturating_mul(8)
-        .saturating_add(64);
+    let mut closure_readers = BTreeMap::<usize, BTreeSet<DependencyNode>>::new();
+    // The analysis terminates without a budget. A summary is a set of
+    // function indices, a set of closure expressions, and three flags, all
+    // drawn from the finite program, and the summaries only grow; what a
+    // closure captures is one summary per closure expression, not a part of
+    // the closure's summary, so no summary nests. A re-analysis follows a
+    // strict growth of one of finitely many summaries, a newly reachable
+    // owner, or a newly reached parameter.
     while let Some(owner) = dirty.pop_first() {
-        budget = budget
-            .checked_sub(1)
-            .ok_or(IrError::CallFlowDidNotConverge)?;
         let (body, environment) = match owner {
             DependencyNode::Global(index) => (
                 globals.get(index).map(CheckedGlobal::initializer),
@@ -4549,6 +4546,7 @@ fn analyze_call_flow_with_entry(
         };
 
         flow.reads.borrow_mut().clear();
+        flow.closure_reads.borrow_mut().clear();
         let mut returned = flow.summary_expr(body, &environment, &[]);
         if returns_function_value(body) {
             returned.union(&FlowTargetSummary::unknown_function());
@@ -4566,6 +4564,7 @@ fn analyze_call_flow_with_entry(
         for read in flow.reads.take() {
             readers.entry(read).or_default().insert(owner);
         }
+        flow.note_closure_reads(owner, &mut closure_readers, &mut dirty);
 
         if matches!(owner, DependencyNode::Function(_)) && !reachable.contains(&owner) {
             continue;
@@ -4578,6 +4577,7 @@ fn analyze_call_flow_with_entry(
         for read in flow.reads.take() {
             readers.entry(read).or_default().insert(owner);
         }
+        flow.note_closure_reads(owner, &mut closure_readers, &mut dirty);
         dirty.extend(
             std::mem::take(&mut flow.widened_parameters)
                 .into_iter()
@@ -4662,6 +4662,56 @@ fn function_argument_environment(
 }
 
 impl<'a> CallFlow<'a> {
+    /// Records the closure expressions the owner just read, and re-queues
+    /// every owner that read one whose captures grew.
+    fn note_closure_reads(
+        &self,
+        owner: DependencyNode,
+        closure_readers: &mut BTreeMap<usize, BTreeSet<DependencyNode>>,
+        dirty: &mut BTreeSet<DependencyNode>,
+    ) {
+        for read in std::mem::take(&mut *self.closure_reads.borrow_mut()) {
+            closure_readers.entry(read).or_default().insert(owner);
+        }
+        for changed in std::mem::take(&mut *self.closure_changed.borrow_mut()) {
+            dirty.extend(closure_readers.get(&changed).into_iter().flatten().copied());
+        }
+    }
+
+    /// Joins what one evaluation of a closure expression captured into the
+    /// expression's record.
+    fn record_closure_captures(&self, id: usize, captured: Vec<FlowTargetSummary>) {
+        let mut table = self.closure_captures.borrow_mut();
+        let entry = table
+            .entry(id)
+            .or_insert_with(|| vec![FlowTargetSummary::default(); captured.len()]);
+        let mut grew = false;
+        for (slot, additional) in entry.iter_mut().zip(&captured) {
+            let before = slot.clone();
+            slot.union(additional);
+            grew |= *slot != before;
+        }
+        if grew {
+            self.closure_changed.borrow_mut().insert(id);
+        }
+    }
+
+    /// What the closure's captures denote when it is called: unknown for an
+    /// escaped closure, and the joined record of its expression otherwise.
+    fn captures_of(&self, closure: &FlowClosure) -> Vec<FlowTargetSummary> {
+        if closure.escaping {
+            return vec![FlowTargetSummary::unknown_function(); closure.capture_count];
+        }
+        self.closure_reads.borrow_mut().insert(closure.id);
+        self.closure_captures
+            .borrow()
+            .get(&closure.id)
+            .cloned()
+            .unwrap_or_else(|| {
+                vec![FlowTargetSummary::default(); closure.capture_count]
+            })
+    }
+
     fn parameter_environment(
         &self,
         function: usize,
@@ -4749,21 +4799,26 @@ impl<'a> CallFlow<'a> {
                         )
                     })
                     .collect::<Vec<_>>();
+                let id = closure_id(body);
+                let capture_count = closure_capture_summaries.len();
+                self.record_closure_captures(id, closure_capture_summaries);
                 FlowTargetSummary {
                     is_function: true,
-                    closures: vec![FlowClosure {
-                        id: closure_id(body),
-                        signature: signature.clone(),
-                        body: Arc::clone(body),
-                        captures: closure_capture_summaries,
-                    }],
-                    closure_defaults: vec![
-                        signature
-                            .labelled()
-                            .iter()
-                            .map(|parameter| parameter.default().is_some())
-                            .collect(),
-                    ],
+                    closures: BTreeMap::from([(
+                        (id, false),
+                        FlowClosure {
+                            id,
+                            escaping: false,
+                            signature: signature.clone(),
+                            body: Arc::clone(body),
+                            capture_count,
+                        },
+                    )]),
+                    closure_defaults: BTreeSet::from([signature
+                        .labelled()
+                        .iter()
+                        .map(|parameter| parameter.default().is_some())
+                        .collect()]),
                     ..FlowTargetSummary::default()
                 }
             }
@@ -4914,7 +4969,7 @@ impl<'a> CallFlow<'a> {
                         )
                     })
                     .collect::<Vec<_>>();
-                for closure in &targets.closures {
+                for closure in targets.closures.values() {
                     let closure_environment = function_argument_environment(
                         &closure.signature,
                         &argument_summaries,
@@ -4927,7 +4982,7 @@ impl<'a> CallFlow<'a> {
                     let mut returned = self.summary_expr_with_stack(
                         &closure.body,
                         &closure_environment,
-                        &closure.captures,
+                        &self.captures_of(closure),
                         visiting,
                     );
                     if returns_function_value(&closure.body) {
@@ -5158,7 +5213,7 @@ impl<'a> CallFlow<'a> {
                     .iter()
                     .map(|argument| self.summary_expr(argument, environment, captures))
                     .collect::<Vec<_>>();
-                for closure in &target_summary.closures {
+                for closure in target_summary.closures.values() {
                     let closure_id = closure.id;
                     // A closure already being walked on this path contributes
                     // its edges once; re-entering it adds none.
@@ -5173,7 +5228,7 @@ impl<'a> CallFlow<'a> {
                         &closure.body,
                         owner,
                         &closure_environment,
-                        &closure.captures,
+                        &self.captures_of(closure),
                     );
                     self.active_closures.remove(&closure_id);
                     closure_result?;
@@ -6138,17 +6193,16 @@ fn escaping_targets(
                 ..
             } => {
                 let id = closure_id(body);
-                if !summary.closures.iter().any(|closure| closure.id == id) {
-                    summary.closures.push(FlowClosure {
+                summary
+                    .closures
+                    .entry((id, true))
+                    .or_insert_with(|| FlowClosure {
                         id,
+                        escaping: true,
                         signature: signature.clone(),
                         body: Arc::clone(body),
-                        captures: vec![
-                            FlowTargetSummary::unknown_function();
-                            captures.len()
-                        ],
+                        capture_count: captures.len(),
                     });
-                }
             }
             _ => {}
         }

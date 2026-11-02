@@ -126,7 +126,7 @@ fn owning_step(owner: &str) -> Option<u8> {
 
 /// The guides of the Stage 4B steps (Step 13 wrote Steps 14-22; Step 16 is
 /// split in two). No step starts without its guide.
-const STAGE_4B_GUIDES: [&str; 11] = [
+const STAGE_4B_GUIDES: [&str; 12] = [
     "13-stage-4b-contracts.md",
     "14-effect-rows.md",
     "15-target-consent.md",
@@ -137,6 +137,7 @@ const STAGE_4B_GUIDES: [&str; 11] = [
     "19-entry-outcomes.md",
     "20-effect-metadata.md",
     "21-performance-baseline.md",
+    "21b-call-flow.md",
     "22-m4-exit.md",
 ];
 

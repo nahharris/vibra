@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-continuation-chain-mutual"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "Two functions that call each other, each wrapping the continuation it was given in a new closure of its own: ping's closures add one and pong's add two, so the chain mixes two closure expressions, and the whole loop runs in tail calls a hundred thousand rounds deep."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }
