@@ -33,6 +33,7 @@ pub use pattern::{MatchArm, Pattern};
 pub mod arena;
 pub mod boundary;
 pub mod external;
+pub mod vocabulary;
 
 /// One of the primitive types admitted by the M2 literal profile.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -102,6 +103,36 @@ pub enum Type {
 }
 
 impl Type {
+    /// Every primitive type, in the order of `vibra_syntax::PRIMITIVE_TYPES`,
+    /// which holds their spellings for the layers below the IR.
+    pub const PRIMITIVES: [Self; 17] = [
+        Self::Bool,
+        Self::Void,
+        Self::Never,
+        Self::Char,
+        Self::Str,
+        Self::Bytes,
+        Self::Atom,
+        Self::I8,
+        Self::I16,
+        Self::I32,
+        Self::I64,
+        Self::U8,
+        Self::U16,
+        Self::U32,
+        Self::U64,
+        Self::F32,
+        Self::F64,
+    ];
+
+    /// The primitive type spelled `name`.
+    #[must_use]
+    pub fn primitive(name: &str) -> Option<Self> {
+        Self::PRIMITIVES
+            .into_iter()
+            .find(|primitive| primitive.as_str() == name)
+    }
+
     /// The source spelling of a primitive or function type head.
     ///
     /// Declared and structural types have no single head word; they spell
@@ -753,6 +784,27 @@ impl TestAssertion {
         }
     }
 
+    /// The code a module returns from `vibra_v1_failure` after this assertion
+    /// failed: its place in [`Self::ALL`], counted from one.
+    #[must_use]
+    pub fn code(self) -> i32 {
+        Self::ALL
+            .into_iter()
+            .zip(1..)
+            .find_map(|(assertion, code)| (assertion == self).then_some(code))
+            .unwrap_or_default()
+    }
+
+    /// The assertion a failure code names, or `None` for a code outside the
+    /// table.
+    #[must_use]
+    pub fn from_code(code: i32) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .zip(1..)
+            .find_map(|(assertion, place)| (place == code).then_some(assertion))
+    }
+
     /// Canonical source-level assertion identity.
     #[must_use]
     pub fn symbol(self) -> String {
@@ -912,7 +964,7 @@ impl Value {
             Self::Bool(value) => value.to_string(),
             Self::Void => "void".to_owned(),
             Self::Char(value) => canonical_character(*value),
-            Self::Str(value) => quote(value),
+            Self::Str(value) => canonical_string(value),
             Self::Bytes(value) => {
                 let bytes = value
                     .iter()
@@ -5950,7 +6002,9 @@ fn canonical_labelled_array(signature: &FunctionSignature) -> String {
     canonical_array(&labelled)
 }
 
-fn canonical_array(values: &[String]) -> String {
+/// The canonical Vibon array of already-rendered `values`.
+#[must_use]
+pub fn canonical_array(values: &[String]) -> String {
     if values.is_empty() {
         "(array)".to_owned()
     } else {
@@ -5958,7 +6012,10 @@ fn canonical_array(values: &[String]) -> String {
     }
 }
 
-fn quote(value: &str) -> String {
+/// The canonical Vibon string literal of `value`: the quotes, the escapes of
+/// `\`, `"`, and every control character.
+#[must_use]
+pub fn canonical_string(value: &str) -> String {
     let mut output = String::with_capacity(value.len() + 2);
     output.push('"');
     for character in value.chars() {

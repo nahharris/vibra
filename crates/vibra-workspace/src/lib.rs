@@ -232,6 +232,7 @@ impl WorkspaceSnapshot {
         ]);
         let mut input = input
             .with_builtin_members(vibra_types::builtin_member_names())
+            .with_assertion_members(vibra_types::assertion_member_names())
             .with_role_types(
                 vibra_types::role_type_names()
                     .into_iter()

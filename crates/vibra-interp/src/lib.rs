@@ -30,7 +30,7 @@ use std::fmt;
 
 use vibra_ir::{
     CheckedProgram, ClosedContract, FunctionSignature, ObservedValue, Pattern,
-    SourceOrigin, Type, TypeId, Value,
+    SourceOrigin, Type, TypeId, Value, vocabulary,
 };
 
 use machine::{Halt, Machine};
@@ -1275,12 +1275,7 @@ fn closed_contract(
         }
         ClosedContract::KeyCompare => RuntimeValue::Enum {
             value_type: result.clone(),
-            variant: match order {
-                std::cmp::Ordering::Less => "less",
-                std::cmp::Ordering::Equal => "equal",
-                std::cmp::Ordering::Greater => "greater",
-            }
-            .to_owned(),
+            variant: vocabulary::ordering_variant(order).to_owned(),
             payload: None,
         },
     }
@@ -1350,7 +1345,7 @@ fn closed_next(iterator: &RuntimeValue, result: &Type) -> Option<RuntimeValue> {
             value_type,
             variant,
             payload,
-        } => (variant == "some").then(|| {
+        } => (variant == vocabulary::SOME).then(|| {
             (
                 payload
                     .as_ref()
@@ -1359,7 +1354,7 @@ fn closed_next(iterator: &RuntimeValue, result: &Type) -> Option<RuntimeValue> {
                     }),
                 RuntimeValue::Enum {
                     value_type: value_type.clone(),
-                    variant: "none".to_owned(),
+                    variant: vocabulary::NONE.to_owned(),
                     payload: None,
                 },
             )
@@ -1371,7 +1366,7 @@ fn closed_next(iterator: &RuntimeValue, result: &Type) -> Option<RuntimeValue> {
     };
     Some(RuntimeValue::Enum {
         value_type: result.clone(),
-        variant: if step.is_some() { "some" } else { "none" }.to_owned(),
+        variant: vocabulary::option_variant(step.is_some()).to_owned(),
         payload: step.map(|(item, remaining)| {
             value::Inner::new(RuntimeValue::Tuple {
                 value_type: arguments.first().cloned().unwrap_or(Type::Void),

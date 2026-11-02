@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::fmt::Write;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
+use vibra_ir::canonical_string;
 
 use crate::WorkspaceError;
 use crate::discovery::DiscoveredProject;
@@ -386,7 +387,7 @@ impl SourceGraph {
                     output,
                     "      (record path: {} source: {} bytes-hex: \"{}\")",
                     module.id.as_atom(),
-                    quoted(&module.source_id),
+                    canonical_string(&module.source_id),
                     hex_bytes(&module.bytes)
                 );
             }
@@ -406,9 +407,13 @@ impl SourceGraph {
                 DependencyKind::Git => "git",
             };
             let source = match &dependency.source {
-                DependencySource::Path(path) => quoted(path),
+                DependencySource::Path(path) => canonical_string(path),
                 DependencySource::Git { url, rev } => {
-                    format!("(record url: {} rev: {})", quoted(url), quoted(rev))
+                    format!(
+                        "(record url: {} rev: {})",
+                        canonical_string(url),
+                        canonical_string(rev)
+                    )
                 }
             };
             let target = dependency
@@ -422,7 +427,7 @@ impl SourceGraph {
                 kind,
                 source,
                 target,
-                quoted(&dependency.source_id),
+                canonical_string(&dependency.source_id),
                 dependency.span.start(),
                 dependency.span.end()
             );
@@ -430,23 +435,6 @@ impl SourceGraph {
         output.push_str("  )\n)\n");
         output
     }
-}
-
-fn quoted(value: &str) -> String {
-    let mut output = String::with_capacity(value.len() + 2);
-    output.push('"');
-    for character in value.chars() {
-        match character {
-            '\\' => output.push_str("\\\\"),
-            '"' => output.push_str("\\\""),
-            '\n' => output.push_str("\\n"),
-            '\r' => output.push_str("\\r"),
-            '\t' => output.push_str("\\t"),
-            character => output.push(character),
-        }
-    }
-    output.push('"');
-    output
 }
 
 fn hex_bytes(bytes: &[u8]) -> String {

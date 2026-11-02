@@ -811,18 +811,16 @@ pub fn check_resolved(
         }
     }
 
-    for declaration in snapshot.declarations().iter().filter(|declaration| {
-        selected.contains(declaration.source_id())
-            && is_verified_assertion_declaration(
-                snapshot,
-                declaration.id(),
-                verification,
-            )
-    }) {
-        let Some(assertion) = TestAssertion::from_member(declaration.id().name())
-        else {
-            continue;
-        };
+    for (declaration, assertion) in snapshot
+        .declarations()
+        .iter()
+        .filter(|declaration| selected.contains(declaration.source_id()))
+        .filter_map(|declaration| {
+            let assertion =
+                verified_assertion(snapshot, declaration.id(), verification)?;
+            Some((declaration, assertion))
+        })
+    {
         let index = functions.len();
         function_indices.insert(declaration.id().clone(), index);
         functions.push(FunctionHeader {
@@ -905,7 +903,7 @@ pub fn check_resolved(
         .filter(|reference| selected.contains(reference.source_id()))
     {
         let assertion_reference = reference.target().is_some_and(|target| {
-            is_verified_assertion_declaration(snapshot, target, verification)
+            verified_assertion(snapshot, target, verification).is_some()
         });
         let local_non_test_reference = snapshot
             .modules()
@@ -1634,39 +1632,34 @@ fn default_expression(value_type: &Type, origin: SourceOrigin) -> Option<Expr> {
     Some(Expr::literal(value, origin))
 }
 
-fn is_verified_assertion_declaration(
+/// The closed assertion `id` names when it is a member the verified standard
+/// library's `@std.assert` module declares.
+fn verified_assertion(
     snapshot: &ResolvedSnapshot,
     id: &DeclarationId,
     verification: Option<&crate::Stdlib>,
-) -> bool {
-    let Some(verification) = verification else {
-        return false;
-    };
+) -> Option<TestAssertion> {
+    let verification = verification?;
     if id.package() != verification.package()
         || id.unit() != "std"
         || id.module() != ["assert"]
         || id.kind() != vibra_resolve::EntityKind::Function
         || id.path().len() != 1
-        || TestAssertion::from_member(id.name()).is_none()
     {
-        return false;
+        return None;
     }
-    let Some(declaration) = snapshot
+    let assertion = TestAssertion::from_member(id.name())?;
+    let declaration = snapshot
         .declarations()
         .iter()
-        .find(|declaration| declaration.id() == id)
-    else {
-        return false;
-    };
-    let Some(module) = snapshot
+        .find(|declaration| declaration.id() == id)?;
+    let module = snapshot
         .modules()
         .iter()
-        .find(|module| module.source_id() == declaration.source_id())
-    else {
-        return false;
-    };
-    module.package() == verification.package()
+        .find(|module| module.source_id() == declaration.source_id())?;
+    (module.package() == verification.package()
         && module.unit() == "std"
         && module.segments() == ["assert"]
-        && verification.trusts_module(module)
+        && verification.trusts_module(module))
+    .then_some(assertion)
 }

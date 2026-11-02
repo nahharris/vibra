@@ -13,6 +13,7 @@ use std::fmt;
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
+use vibra_ir::TestAssertion;
 use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::external::host::{HostType, host_row};
 use vibra_syntax::{
@@ -408,6 +409,17 @@ pub fn load_stdlib_bytes(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibErro
                 "standard-library manifest lists `{symbol}` more than once"
             )));
         }
+    }
+    // The assertion list is the compiler's closed table, in its order.
+    let assertions = TestAssertion::ALL
+        .into_iter()
+        .map(|assertion| format!("assert.{}", assertion.member()))
+        .collect::<Vec<_>>();
+    if manifest.assertions != assertions {
+        return Err(StdlibError::new(format!(
+            "standard-library manifest lists the assertions {:?}, not {assertions:?}",
+            manifest.assertions
+        )));
     }
     let mut bound_host = Vec::new();
     let mut modules = Vec::with_capacity(manifest.modules.len());
@@ -1180,6 +1192,17 @@ mod tests {
                 "{error}"
             );
         }
+    }
+
+    #[test]
+    fn the_assertion_list_is_the_compilers_closed_table() {
+        let text = manifest().replace("    \"assert.equal\"", "");
+        let mut inputs = StdlibInputs::embedded();
+        inputs.manifest = text.as_bytes();
+        let error = load_stdlib_bytes(&inputs)
+            .expect_err("rejected")
+            .to_string();
+        assert!(error.contains("lists the assertions"), "{error}");
     }
 
     #[test]

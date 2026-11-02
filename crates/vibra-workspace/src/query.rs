@@ -15,7 +15,8 @@ use vibra_resolve::{DeclarationId, EntityKind, ResolvedReference, ResolvedSnapsh
 use vibra_syntax::{
     Application, Attribute, Declaration, Expression, ExpressionKind, FloatSuffix,
     FunctionDeclaration, GrammarCategory, IntegerSuffix, Literal, NameKind, Pattern,
-    PatternKind, SourceAst, StructuralQuery, TypeExpr, VariadicParameter,
+    PatternKind, PrimitiveClass, SourceAst, StructuralQuery, TypeExpr,
+    VariadicParameter, is_primitive_type_name, primitive_class,
 };
 use vibra_types::{
     EffectGraph, EffectNode, EffectNodeKind, WitnessCallee, check_source,
@@ -1918,9 +1919,8 @@ impl<'a> SemanticCollector<'a> {
     fn semantic_type_expr(&self, value: &TypeExpr) -> Option<SemanticType> {
         match value {
             TypeExpr::Void => Some(SemanticType::primitive("void")),
-            TypeExpr::Name(name) => {
-                primitive_name(name.value()).map(SemanticType::primitive)
-            }
+            TypeExpr::Name(name) => is_primitive_type_name(name.value())
+                .then(|| SemanticType::primitive(name.value())),
             TypeExpr::Function(function) => {
                 let parameters = function
                     .parameters()
@@ -2778,28 +2778,6 @@ fn query_identity(id: &DeclarationId) -> QueryIdentity {
     QueryIdentity::new(id.kind().as_str(), id.canonical())
 }
 
-fn primitive_name(value: &str) -> Option<&'static str> {
-    Some(match value {
-        "bool" => "bool",
-        "never" => "never",
-        "char" => "char",
-        "str" => "str",
-        "bytes" => "bytes",
-        "atom" => "atom",
-        "i8" => "i8",
-        "i16" => "i16",
-        "i32" => "i32",
-        "i64" => "i64",
-        "u8" => "u8",
-        "u16" => "u16",
-        "u32" => "u32",
-        "u64" => "u64",
-        "f32" => "f32",
-        "f64" => "f64",
-        _ => return None,
-    })
-}
-
 /// The query shape of a checked type.
 fn semantic_type(value: &Type) -> SemanticType {
     let all = |types: &[Type]| types.iter().map(semantic_type).collect::<Vec<_>>();
@@ -2931,15 +2909,13 @@ fn float_suffix_name(suffix: FloatSuffix) -> &'static str {
 }
 
 fn numeric_expected_name(value: &SemanticType) -> Option<&str> {
-    matches!(
-        value.name(),
-        "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64"
-    )
-    .then_some(value.name())
+    (primitive_class(value.name()) == Some(PrimitiveClass::Integer))
+        .then_some(value.name())
 }
 
 fn float_expected_name(value: &SemanticType) -> Option<&str> {
-    matches!(value.name(), "f32" | "f64").then_some(value.name())
+    (primitive_class(value.name()) == Some(PrimitiveClass::Float))
+        .then_some(value.name())
 }
 
 /// The text of every UTF-8 source of the snapshot, by source identity.

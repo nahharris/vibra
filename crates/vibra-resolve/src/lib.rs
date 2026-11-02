@@ -267,6 +267,7 @@ pub struct ResolveInput {
     reserved_import_paths: Vec<(String, Vec<String>)>,
     builtin_members: Vec<(String, String)>,
     role_types: Vec<String>,
+    assertion_members: Vec<String>,
 }
 
 /// A verified package whose source modules are overlaid on the local graph.
@@ -294,6 +295,7 @@ impl ResolveInput {
             reserved_import_paths: Vec::new(),
             builtin_members: Vec::new(),
             role_types: Vec::new(),
+            assertion_members: Vec::new(),
         }
     }
 
@@ -324,6 +326,17 @@ impl ResolveInput {
         members: impl IntoIterator<Item = (String, String)>,
     ) -> Self {
         self.builtin_members.extend(members);
+        self
+    }
+
+    /// Declares the members of the verified `@std.assert` module, which has no
+    /// declarations of its own: the checker's closed assertion table.
+    #[must_use]
+    pub fn with_assertion_members(
+        mut self,
+        members: impl IntoIterator<Item = String>,
+    ) -> Self {
+        self.assertion_members.extend(members);
         self
     }
 
@@ -1311,9 +1324,8 @@ impl Resolution {
             unit: "std".to_owned(),
             segments: vec!["assert".to_owned()],
         };
-        let names = ["true", "false", "equal"];
-        for name in names {
-            let path = vec![name.to_owned()];
+        for member in self.input.assertion_members.clone() {
+            let path = vec![member];
             let id = DeclarationId::with_package(
                 &overlay.package,
                 "std",

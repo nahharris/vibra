@@ -26,7 +26,7 @@ use std::sync::OnceLock;
 mod numbers;
 
 use super::{CompilerIntrinsic, IntegerOp, NumericType};
-use crate::{ObservedValue, Type, Value};
+use crate::{ObservedValue, Type, Value, vocabulary};
 
 /// What the specification says a row does on one sample.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -67,9 +67,11 @@ impl Outcome {
         };
         match self {
             Self::Value(value) => ObservedValue::Primitive(value.clone()),
-            Self::Ok(value) => {
-                variant(result, "ok", Some(ObservedValue::Primitive(value.clone())))
-            }
+            Self::Ok(value) => variant(
+                result,
+                vocabulary::OK,
+                Some(ObservedValue::Primitive(value.clone())),
+            ),
             Self::Err(error) => {
                 let error_type = match result {
                     Type::Applied(_, arguments) => {
@@ -77,14 +79,18 @@ impl Outcome {
                     }
                     _ => Type::Void,
                 };
-                variant(result, "err", Some(variant(&error_type, error, None)))
+                variant(
+                    result,
+                    vocabulary::ERR,
+                    Some(variant(&error_type, error, None)),
+                )
             }
             Self::Some(value) => variant(
                 result,
-                "some",
+                vocabulary::SOME,
                 Some(ObservedValue::Primitive(value.clone())),
             ),
-            Self::None => variant(result, "none", None),
+            Self::None => variant(result, vocabulary::NONE, None),
             Self::Order(order) => variant(result, order, None),
         }
     }
@@ -204,11 +210,7 @@ fn checked<T>(value: Option<T>, make: fn(T) -> Value) -> Outcome {
 }
 
 fn order(order: Ordering) -> &'static str {
-    match order {
-        Ordering::Less => "less",
-        Ordering::Equal => "equal",
-        Ordering::Greater => "greater",
-    }
+    vocabulary::ordering_variant(order)
 }
 
 /// The rows of one integer type, from the operations of the Rust type itself.
@@ -850,12 +852,12 @@ mod tests {
             example(
                 row(I32, IntegerOp::Compare),
                 vec![Value::I32(-1), Value::I32(1)],
-                Outcome::Order("less"),
+                Outcome::Order(vocabulary::LESS),
             ),
             example(
                 row(U64, IntegerOp::Compare),
                 vec![Value::U64(u64::MAX), Value::U64(0)],
-                Outcome::Order("greater"),
+                Outcome::Order(vocabulary::GREATER),
             ),
             // A conversion keeps the value or reports `out-of-range`.
             example(

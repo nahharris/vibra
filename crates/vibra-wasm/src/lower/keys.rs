@@ -22,7 +22,7 @@
 //! unit, and so is the order of a dict whose key type needs dispatch.
 
 use vibra_ir::external::CompilerIntrinsic;
-use vibra_ir::{ClosedContract, SourceOrigin, Type};
+use vibra_ir::{ClosedContract, SourceOrigin, Type, vocabulary};
 use wasm_encoder::Instruction as I;
 
 use super::dispatch::{Dispatch, is_interface};
@@ -424,9 +424,10 @@ impl Builder<'_, '_> {
             return Ok(());
         };
         let shape = self.shape(&ordering, origin)?;
-        let (Some(less), Some(greater)) =
-            (shape.variant("less"), shape.variant("greater"))
-        else {
+        let (Some(less), Some(greater)) = (
+            shape.variant(vocabulary::LESS),
+            shape.variant(vocabulary::GREATER),
+        ) else {
             self.answer(result, &[c32(0)]);
             return Ok(());
         };
@@ -509,9 +510,9 @@ impl Builder<'_, '_> {
                 self.store_word(selector, &[get(FRAME), ld32(at), I::I32Eqz]);
             }
             _ => {
-                let less = self.discriminant(result, "less", origin)?;
-                let equal = self.discriminant(result, "equal", origin)?;
-                let greater = self.discriminant(result, "greater", origin)?;
+                let less = self.discriminant(result, vocabulary::LESS, origin)?;
+                let equal = self.discriminant(result, vocabulary::EQUAL, origin)?;
+                let greater = self.discriminant(result, vocabulary::GREATER, origin)?;
                 self.store_word(
                     selector,
                     &[

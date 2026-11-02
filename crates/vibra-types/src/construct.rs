@@ -18,6 +18,7 @@ use vibra_syntax::{
 
 use crate::infer::Instantiation;
 use crate::nominal::{ConstructorTarget, declared_self_type};
+use crate::pattern::instantiated_body;
 use crate::{
     CheckEnvironment, ambiguous_generic, call_contract_error, check_expression,
     check_inferred_operand, check_operand, ensure_expected, start_instantiation,
@@ -493,7 +494,7 @@ pub(crate) fn tuple_components(
     match value_type {
         Type::Tuple(components) => Some(components.clone()),
         Type::Declared(_) | Type::Applied(_, _) => {
-            match instantiated_body(environment, value_type)? {
+            match instantiated_body(environment.types, value_type)? {
                 TypeBody::Tuple(components) => Some(components),
                 _ => None,
             }
@@ -633,23 +634,6 @@ pub(crate) fn check_lookup(
         value_type,
         expression,
     )
-}
-
-/// The body of a declared or applied type with its arguments substituted.
-fn instantiated_body(
-    environment: &CheckEnvironment<'_>,
-    value_type: &Type,
-) -> Option<TypeBody> {
-    let (id, arguments) = match value_type {
-        Type::Declared(id) => (id, &[][..]),
-        Type::Applied(id, arguments) => (id, arguments.as_slice()),
-        _ => return None,
-    };
-    let declared = environment.types.get(environment.types.index_of(id)?)?;
-    let body = declared.body.clone()?;
-    vibra_ir::TypeDefinition::new(declared.id.clone(), body)
-        .with_parameters(declared.parameters.clone())
-        .instantiate(arguments)
 }
 
 /// Checks `(enumof a: e)` against its written expected anonymous enum.

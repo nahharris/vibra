@@ -27,7 +27,7 @@
 //! reference interpreter does when it is not running a test: the trap
 //! `@runtime.invalid-checked-program`.
 
-use vibra_ir::boundary::{Failure, TrapCode};
+use vibra_ir::boundary::TrapCode;
 use vibra_ir::{Expr, SourceOrigin, TestAssertion, Type};
 use wasm_encoder::Instruction as I;
 
@@ -63,10 +63,10 @@ impl Builder<'_, '_> {
         }
         match (assertion, operands.as_slice()) {
             (TestAssertion::True, [actual]) => {
-                self.assert_bool(*actual, 1, Failure::True, origin);
+                self.assert_bool(*actual, 1, TestAssertion::True, origin);
             }
             (TestAssertion::False, [actual]) => {
-                self.assert_bool(*actual, 0, Failure::False, origin);
+                self.assert_bool(*actual, 0, TestAssertion::False, origin);
             }
             (TestAssertion::Equal, [expected, actual]) => {
                 let ty = arguments.first().map(Expr::result_type).ok_or_else(|| {
@@ -99,7 +99,7 @@ impl Builder<'_, '_> {
 
     /// Records a failed assertion at the origin ordinal and stops. The operands
     /// of an `assert.equal` are in their state fields already.
-    fn stop_failed(&mut self, failure: Failure, ordinal: u32) {
+    fn stop_failed(&mut self, failure: TestAssertion, ordinal: u32) {
         self.push(&[
             c32(0),
             c32(3),
@@ -120,7 +120,7 @@ impl Builder<'_, '_> {
         &mut self,
         actual: u32,
         required: i32,
-        failure: Failure,
+        failure: TestAssertion,
         origin: &SourceOrigin,
     ) {
         let ordinal = self.lowering.origin_ordinal(origin, None);
@@ -275,7 +275,7 @@ impl Builder<'_, '_> {
         self.start(fail);
         self.cross_operand(expected, ty, class, state::EXPECTED)?;
         self.cross_operand(actual, ty, class, state::ACTUAL)?;
-        self.stop_failed(Failure::Equal, ordinal);
+        self.stop_failed(TestAssertion::Equal, ordinal);
         self.goto(pass, pass);
 
         for object in owned {

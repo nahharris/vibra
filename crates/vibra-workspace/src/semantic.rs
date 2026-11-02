@@ -7,7 +7,7 @@ use vibra_host::{HostProvider, HostWorld, WorldProvider};
 use vibra_interp::{Execution, RuntimeError};
 use vibra_ir::CheckedProgram;
 use vibra_resolve::{EntityKind, ResolvedSnapshot};
-use vibra_syntax::{Declaration, NameKind, TypeExpr};
+use vibra_syntax::{Declaration, NameKind, TypeExpr, is_primitive_type_name};
 
 use crate::{
     WorkspaceSnapshot,
@@ -564,25 +564,10 @@ fn is_deferred_result_type(ty: &TypeExpr) -> bool {
     head.kind() == NameKind::Symbol
         && error_type.kind() == NameKind::Symbol
         && head.value() == "result"
-        && !matches!(
-            error_type.value(),
-            "bool"
-                | "void"
-                | "char"
-                | "str"
-                | "bytes"
-                | "atom"
-                | "i8"
-                | "i16"
-                | "i32"
-                | "i64"
-                | "u8"
-                | "u16"
-                | "u32"
-                | "u64"
-                | "f32"
-                | "f64"
-        )
+        // The error type is a declared type, not a primitive. `never` has never
+        // been refused here, and stays accepted.
+        && (error_type.value() == "never"
+            || !is_primitive_type_name(error_type.value()))
 }
 
 fn classify(diagnostics: &[Diagnostic]) -> CheckStatus {
