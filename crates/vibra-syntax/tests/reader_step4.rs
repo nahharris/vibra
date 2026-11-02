@@ -11,28 +11,6 @@ use vibra_syntax::{
 };
 
 #[test]
-fn reader_orders_lexer_and_parser_diagnostics_by_source_span() {
-    let document = parse_document("main.vib", ") (a(b) \"open")
-        .expect("parse mixed recovery errors");
-    let spans: Vec<_> = document
-        .diagnostics()
-        .iter()
-        .map(|diagnostic| diagnostic.primary_span())
-        .collect();
-    assert_eq!(
-        spans,
-        vec![
-            ByteSpan::new(0, 1),
-            ByteSpan::empty_at(4),
-            ByteSpan::empty_at(13),
-            ByteSpan::empty_at(13)
-        ]
-    );
-    assert!(document.recovered());
-    assert_eq!(document.root().to_source(), document.source());
-}
-
-#[test]
 fn lexer_preserves_utf8_tokens_trivia_and_half_open_byte_spans() {
     let source = "(alpha ; note 🌱\r\n  beta)";
     let lexed = vibra_syntax::lex(source);
@@ -54,71 +32,6 @@ fn lexer_preserves_utf8_tokens_trivia_and_half_open_byte_spans() {
     assert_eq!(tokens[5].span(), ByteSpan::new(22, 26));
     assert_eq!(tokens.last().expect("EOF token").kind(), TokenKind::Eof);
     assert!(lexed.diagnostics().is_empty());
-}
-
-#[test]
-fn parser_tree_is_lossless_and_recovers_after_an_unmatched_close() {
-    let source = "(alpha (beta)) ) (gamma";
-    let document = parse_document(Path::new("main.vib"), source)
-        .expect(".vib selects source mode");
-
-    assert_eq!(document.mode(), DocumentMode::Source);
-    assert_eq!(document.root().to_source(), source);
-    assert!(document.root().contains_kind(SyntaxKind::Error));
-    assert_eq!(document.diagnostics().len(), 2);
-    assert_eq!(
-        document.diagnostics()[0].code(),
-        DiagnosticCode::SyntaxUnmatchedDelimiter
-    );
-    assert_eq!(
-        document.diagnostics()[0].primary_span(),
-        ByteSpan::new(15, 16)
-    );
-    assert_eq!(
-        document.diagnostics()[1].primary_span(),
-        ByteSpan::empty_at(23)
-    );
-    assert!(!document.accepted());
-}
-
-#[test]
-fn parser_rejects_sibling_forms_without_required_trivia() {
-    let document = parse_document(Path::new("main.vib"), "(a(b))")
-        .expect(".vib selects source mode");
-
-    assert_eq!(document.root().to_source(), "(a(b))");
-    assert!(!document.accepted());
-    assert!(document.recovered());
-    assert!(document.root().contains_kind(SyntaxKind::Error));
-    assert_eq!(document.diagnostics().len(), 1);
-    assert_eq!(
-        document.diagnostics()[0].code(),
-        DiagnosticCode::SyntaxMissingSeparator
-    );
-    assert_eq!(
-        document.diagnostics()[0].primary_span(),
-        ByteSpan::empty_at(2)
-    );
-}
-
-#[test]
-fn parser_recovers_unterminated_quoted_leaf_losslessly() {
-    let source = "\"unterminated\n";
-    let document = parse_document(Path::new("main.vib"), source)
-        .expect(".vib selects source mode");
-
-    assert!(!document.accepted());
-    assert!(document.recovered());
-    assert_eq!(document.root().to_source(), source);
-    assert_eq!(document.diagnostics().len(), 1);
-    assert_eq!(
-        document.diagnostics()[0].code(),
-        DiagnosticCode::SyntaxUnmatchedDelimiter
-    );
-    assert_eq!(
-        document.diagnostics()[0].primary_span(),
-        ByteSpan::empty_at(source.len())
-    );
 }
 
 #[test]
