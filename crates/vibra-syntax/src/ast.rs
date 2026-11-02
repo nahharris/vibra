@@ -1,5 +1,5 @@
 //! Contextual declaration, type, expression, and pattern structure for the
-//! Step 8–9 source surface.
+//! source surface.
 //!
 //! This layer consumes the lossless reader CST without lowering declarations
 //! to applications or resolving names. Raw CST slices remain alongside the
@@ -67,7 +67,7 @@ impl Expression {
     }
 }
 
-/// Contextual expression variants implemented by Step 9.
+/// Contextual expression variants.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExpressionKind {
     /// A decoded literal value.
