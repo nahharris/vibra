@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-let-binds-in-order"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "One let binds several names in order, so a later name in the same let sees an earlier one, and the bindings stay for the rest of the body."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

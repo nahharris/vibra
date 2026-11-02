@@ -17,6 +17,7 @@ V1-RUNTIME-activation-depth	matched
 V1-RUNTIME-activation-exhaustion	matched
 V1-RUNTIME-anonymous-enum	matched
 V1-RUNTIME-anonymous-record	matched
+V1-RUNTIME-array-fold	matched
 V1-RUNTIME-atom-labelled-default	matched
 V1-RUNTIME-bindings	matched
 V1-RUNTIME-bounded-deftype-lambda	matched
@@ -44,6 +45,7 @@ V1-RUNTIME-generic-types	matched
 V1-RUNTIME-generic-void-payload	matched
 V1-RUNTIME-if-selected	matched
 V1-RUNTIME-inference-order	matched
+V1-RUNTIME-interface-containers	matched
 V1-RUNTIME-interface-dispatch	matched
 V1-RUNTIME-interface-values	matched
 V1-RUNTIME-interface-widening-positions	matched
@@ -58,6 +60,7 @@ V1-RUNTIME-iter-defaults	matched
 V1-RUNTIME-iter-next	matched
 V1-RUNTIME-iter-skip-filter-depth	matched
 V1-RUNTIME-key-contracts	matched
+V1-RUNTIME-let-binds-in-order	matched
 V1-RUNTIME-let-else	matched
 V1-RUNTIME-library-composites	matched
 V1-RUNTIME-library-dict	matched

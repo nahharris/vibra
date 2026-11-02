@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-array-fold"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "array.fold folds in order from the initial value: over an empty, a one-element, and a twenty-element array, with a closure that captures, with a module function, to an array and to a record accumulator, nested in a fold, in a thousand-round tail loop, and as the tail call of a loop whose step calls the loop again."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

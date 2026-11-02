@@ -1,0 +1,73 @@
+(defn main ()
+  (tuple str str str str str str (array i32) (array (array walker)) (option (tuple dog dog)))
+  (tupleof
+    (shape.twice (point x: 1i32))
+    (shape.twice 3i32)
+    (shape.twice (box item: "x"))
+    (shape.name ((holder item: 3i32) @item))
+    (pick ((array.of (as shape (point x: 1i32)) (as shape 2i32)) 1u64))
+    (pick ((dict.of "k" (as shape (point x: 0i32))) "k"))
+    (iter.collect (as (array i32) (array.of)))
+    (walker.nest (as walker (counter n: 1u32)))
+    (kept (array.of (dog n: 7u32)))))
+
+(import iter @std.iter.iter)
+
+; A default member calls a contract member at the receiver's own type, for a
+; record, a builtin, and a generic record.
+(defint shape
+  (defn name (value self) str)
+  (defn twice (value self) str
+    (shape.name value))
+  (impl i32
+    (defn name (value self) str "integer")))
+
+(deftype point (record x i32)
+  (impl shape
+    (defn name (value self) str "point")))
+
+(deftype box (record item t)
+  where: (t any)
+  (impl shape
+    (defn name (value self) str "box")))
+
+; Interface values stored in a record, an array, and a dict.
+(deftype holder (record item shape))
+
+(defn pick (found (option shape)) str
+  (match found
+    (option.some inner) (shape.name inner)
+    (option.none) "none"))
+
+; A result that names self is converted to the interface value at the depth of
+; an array of arrays.
+(defint walker
+  (defn nest (value self) (array (array self))))
+
+(deftype counter (record n u32)
+  (impl walker
+    (defn nest (value self) (array (array self))
+      (array.of (array.of value) (array.of)))))
+
+; An element that is not an interface value passes through a bare generic
+; parameter unchanged.
+(defint named
+  (defn name (value self) str))
+
+(deftype dog (record n u32)
+  (impl named
+    (defn name (value self) str "dog")))
+
+(defn keep (value u) (tuple u u)
+  where: (u any)
+  (tupleof value value))
+
+(defn again (value u) (tuple u u)
+  where: (u any)
+  (keep value))
+
+(defn kept (items (array t)) (option (tuple t t))
+  where: (t any)
+  (match (items 0u64)
+    (option.some first) (option.some (again first))
+    (option.none) (option.none)))
