@@ -13,7 +13,7 @@
       wasm:
       (record
         module-bytes:
-        104531u64
+        104656u64
         allocations:
         300015u64
         peak-live-bytes:
@@ -28,7 +28,7 @@
       wasm:
       (record
         module-bytes:
-        104531u64
+        104656u64
         allocations:
         300349u64
         peak-live-bytes:
@@ -148,13 +148,13 @@
       wasm:
       (record
         module-bytes:
-        65490u64
+        65640u64
         allocations:
         38u64
         peak-live-bytes:
         17312u64
         fuel:
-        17845u64)))
+        18111u64)))
   informational:
   (record
     environment:

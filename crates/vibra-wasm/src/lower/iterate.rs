@@ -135,6 +135,9 @@ impl Builder<'_, '_> {
             I::Call(stop),
         ]);
         self.goto(join, join);
+        // The descriptor was built for this call, and a form that widens the
+        // remainder took a count of its own.
+        self.discard(recv_desc, ValueClass::Dyn);
         Ok(())
     }
 
