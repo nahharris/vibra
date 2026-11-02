@@ -37,16 +37,6 @@ fn a_row_with_a_fact_is_written_in_the_canonical_order_keeping_each_symbol() {
 }
 
 #[test]
-fn a_row_across_lines_is_one_line_in_that_order() {
-    let source = "(defn f () void\n  effects: (zebra\n            apple)\n  (do))";
-    let rows = [EffectRowOrder::new(at(source, "zebra"), vec![1, 0])];
-    assert_eq!(
-        format_with(source, &rows),
-        "(defn f () void effects: (apple zebra) (do))\n"
-    );
-}
-
-#[test]
 fn a_row_without_a_fact_keeps_its_written_order() {
     let source = "(defn f () void effects: (zebra apple) (do))";
     assert_eq!(

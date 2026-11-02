@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-declaration-member-order"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "Declaration attributes are written before body forms in the order where, visibility, doc, a comment stays with the attribute before it, and a type's methods are written before its impl blocks."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

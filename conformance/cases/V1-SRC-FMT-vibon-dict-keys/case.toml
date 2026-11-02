@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-vibon-dict-keys"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "A VIBON dict is written with its keys sorted and its character escapes canonical."
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+accepted = true
+formatted = "formatted.vibon"
