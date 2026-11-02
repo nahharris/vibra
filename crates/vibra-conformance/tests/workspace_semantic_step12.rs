@@ -142,7 +142,7 @@ fn workspace_check_only_checks_and_workspace_run_records_the_pure_result() {
         .expect("workspace run handler");
     assert!(ran.accepted);
     assert!(ran.diagnostics.is_empty());
-    let execution = ran.interpreter.expect("pure execution observation");
+    let execution = ran.interpreter.expect("pure execution observation").outcome;
     assert_eq!(
         execution.result.as_deref(),
         Some("(record type: @void value: void)\n")
@@ -171,6 +171,7 @@ fn workspace_cases_cover_higher_order_entry_selection_and_library_cycles() {
     assert_eq!(
         ran.interpreter
             .expect("pure execution observation")
+            .outcome
             .result
             .as_deref(),
         Some("(record type: @void value: void)\n")

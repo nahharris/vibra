@@ -14,7 +14,7 @@ use vibra_ir::boundary::{TEST_EXPORT, TrapCode};
 use vibra_ir::{TestAssertion, Type, TypeDefinition, Value};
 
 use crate::{
-    Instance, LiveSizes, Outcome, ResultSlot, Runner, RunnerError, Started,
+    Inspect, Instance, LiveSizes, Outcome, ResultSlot, Runner, RunnerError, Started,
     export_error, interpret,
 };
 
@@ -103,15 +103,19 @@ impl Runner {
             heads,
             operand_of,
             Box::new(WorldProvider::new(&HostWorld::default())),
+            &mut |_| Ok(()),
         )
     }
 
     /// [`Self::run_test`] with `provider` as the test's host, a fresh one for
-    /// each test.
+    /// each test, and `inspect` looks at the instance once the test passed, for
+    /// a check that reads the module's memory. An `Err` ends the run as a defect
+    /// of the toolchain with that cause.
     ///
     /// # Errors
     ///
     /// A [`RunnerError`] when the module is not a v1 module or lacks an export.
+    #[allow(clippy::too_many_arguments)]
     pub fn run_test_with_host(
         &self,
         bytes: &[u8],
@@ -120,6 +124,7 @@ impl Runner {
         heads: &dyn Fn(u32) -> Option<Type>,
         operand_of: &dyn Fn(u32) -> Option<Type>,
         provider: Box<dyn HostProvider>,
+        inspect: Inspect<'_>,
     ) -> Result<TestRun, RunnerError> {
         let mut instance = match self.start_with_host(bytes, provider)? {
             Started::MemoryExhausted => return Ok(TestRun::MemoryExhausted),
@@ -130,14 +135,19 @@ impl Runner {
             Err(stop) => return Ok(stopped(stop)),
         };
         match instance.call_test(index)? {
-            Outcome::Completed { live_size, .. } => Ok(TestRun::Passed {
-                live: LiveSizes {
-                    start,
-                    with_result: live_size,
-                    end: live_size,
-                },
-                audit_trace: instance.audit_trace().to_vec(),
-            }),
+            Outcome::Completed { live_size, .. } => {
+                if let Err(cause) = inspect(&mut instance) {
+                    return Ok(TestRun::Defect { cause });
+                }
+                Ok(TestRun::Passed {
+                    live: LiveSizes {
+                        start,
+                        with_result: live_size,
+                        end: live_size,
+                    },
+                    audit_trace: instance.audit_trace().to_vec(),
+                })
+            }
             Outcome::AssertionFailed {
                 failure,
                 origin,

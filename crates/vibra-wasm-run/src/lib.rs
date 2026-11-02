@@ -47,7 +47,7 @@ use wasmtime::{
 
 pub use host::{Builders, Forged, Stop};
 pub use instance::{Instance, Started, ValueId};
-pub use observe::{LiveSizes, Observed};
+pub use observe::{Inspect, LiveSizes, Observed};
 pub use test_run::TestRun;
 pub use validate::{ModuleSummary, ValidationError, baseline_features, validate};
 

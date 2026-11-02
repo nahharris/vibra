@@ -64,10 +64,10 @@ pub use project::StaticV1ProjectHandler;
 pub use reader::ReaderV1Handler;
 pub use resolve::StaticV1ResolveHandler;
 pub use runner::{
-    BackendStatuses, CaseObservation, CaseReport, CaseStatus, ConformanceRunner,
-    DispatchResult, ExecutionObservation, HandlerError, INSTANCE_MEMORY_LIMIT_BYTES,
-    InterpreterCounts, ProfileDispatcher, ProfileHandler, QueryObservation, RunReport,
-    WasmCounts, WasmObservation, WasmStatus,
+    BackendObservation, BackendStatuses, CaseObservation, CaseReport, CaseStatus,
+    ConformanceRunner, DispatchResult, ExecutionObservation, HandlerError,
+    INSTANCE_MEMORY_LIMIT_BYTES, InterpreterCounts, ProfileDispatcher, ProfileHandler,
+    QueryObservation, RunReport, WasmCounts, WasmObservation, WasmStatus,
 };
 pub use standard::standard_dispatcher;
 pub use test_run::{
