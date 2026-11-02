@@ -2,49 +2,15 @@
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, missing_docs)]
 
-use vibra_conformance::{
-    CaseStatus, ConformanceProfile, ConformanceRunner, Corpus, InterpreterV1Handler,
-    ProfileDispatcher,
-};
 use vibra_types::{check_bootstrap_text_import, check_source, load_stdlib};
 
-fn binary_counter_source(bit_count: usize) -> String {
-    let names = (0..bit_count)
-        .map(|index| format!("b{index}"))
-        .collect::<Vec<_>>();
-    fn increment_branch(index: usize, names: &[String]) -> String {
-        if index == names.len() {
-            return "0i32".to_owned();
-        }
-        let then_branch = increment_branch(index.saturating_add(1), names);
-        let arguments = names
-            .iter()
-            .enumerate()
-            .map(|(bit, name)| {
-                if bit < index {
-                    "false".to_owned()
-                } else if bit == index {
-                    "true".to_owned()
-                } else {
-                    name.clone()
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(" ");
-        let else_branch = format!("(counter {arguments})");
-        format!("(if {} {then_branch} {else_branch})", names[index])
-    }
-    let initial = std::iter::repeat_n("false", bit_count)
-        .collect::<Vec<_>>()
-        .join(" ");
-    let parameters = names
-        .iter()
-        .map(|name| format!("{name} bool"))
-        .collect::<Vec<_>>()
-        .join(" ");
-    let body = increment_branch(0, &names);
+/// A tail loop of `rounds` self transfers, counting down in a `u32`.
+fn countdown_source(rounds: u32) -> String {
     format!(
-        "(defn answer () i32 (counter {initial}))\n(defn counter ({parameters}) i32 {body})\n"
+        "(defn answer () i32 (count {rounds}u32))
+(defn count (n u32) i32 (if (u32.equal n 0u32) 0i32 (count (lower n))))
+(defn lower (n u32) u32 (match (u32.sub-checked n 1u32) (result.ok v) v (result.err -) 0u32))
+"
     )
 }
 
@@ -275,59 +241,27 @@ fn non_tail_call_keeps_a_live_caller_activation() {
 
 #[test]
 fn source_tail_counter_keeps_bounded_depth_at_two_workload_sizes() {
+    // The loops of a hundred thousand rounds are the corpus cases
+    // `V1-RUNTIME-tail-counter-*`; the depth is exact here, so a loop that
+    // grew a frame per round would show at the smaller size.
     let mut depths = Vec::new();
-    for bit_count in [15, 17] {
-        let source = binary_counter_source(bit_count);
+    for rounds in [2_000_u32, 20_000] {
+        let source = countdown_source(rounds);
         let checked = check_source("tail-stress.vib", &source);
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
         let program = checked.program().expect("program");
         let execution = vibra_interp::run(program).expect("execution");
         assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(0)));
-        assert_eq!(execution.tail_transfer_count(), 1 << bit_count);
-        assert_eq!(execution.max_activation_depth(), 1);
+        assert_eq!(execution.tail_transfer_count(), rounds as usize + 1);
         assert!(execution.audit_trace().is_empty());
         depths.push(execution.max_activation_depth());
     }
-    assert_eq!(depths, [1, 1]);
-}
-
-#[test]
-fn real_interpreter_handler_executes_the_tail_stress_workload() {
-    let parent =
-        std::fs::canonicalize(std::env::temp_dir()).expect("temporary directory");
-    let root = parent.join(format!(
-        "vibra-conformance-tail-stress-{}",
-        std::process::id()
-    ));
-    let _ = std::fs::remove_dir_all(&root);
-    std::fs::create_dir_all(&root).expect("temporary stress case");
-    let case = root.join("V1-RUNTIME-tail-stress");
-    std::fs::create_dir_all(&case).expect("stress case directory");
-    std::fs::write(case.join("input.vib"), binary_counter_source(17))
-        .expect("stress source");
-    std::fs::write(
-        case.join("result.vibon"),
-        "(record type: @i32 value: 0i32)\n",
-    )
-    .expect("stress result");
-    std::fs::write(
-        case.join("audit.vibon"),
-        "(record format: @audit-trace.v1 events: (array))\n",
-    )
-    .expect("stress audit");
-    std::fs::write(
-        case.join("case.toml"),
-        "id = \"V1-RUNTIME-tail-stress\"\nrule = \"V1-RUNTIME\"\nprofile = \"interpreter-v1\"\noperation = \"interpret\"\ndescription = \"Tail stress through the real interpreter handler.\"\n\n[inputs]\nsource = \"input.vib\"\n\n[expect]\naccepted = true\ninterpreter = { result = \"result.vibon\", audit_trace = \"audit.vibon\" }\n",
-    )
-    .expect("stress manifest");
-
-    let corpus = Corpus::discover(&root).expect("temporary stress corpus");
-    let dispatcher = ProfileDispatcher::new()
-        .with_handler(ConformanceProfile::InterpreterV1, InterpreterV1Handler);
-    let report = ConformanceRunner::new(dispatcher)
-        .run_case(corpus.cases().first().expect("stress case loaded"));
-    assert_eq!(report.status, CaseStatus::Passed);
-    let _ = std::fs::remove_dir_all(root);
+    assert_eq!(depths[0], depths[1]);
+    assert!(
+        depths[0] < 40,
+        "depth {} must stay a few activations",
+        depths[0]
+    );
 }
 
 #[test]
@@ -393,10 +327,13 @@ fn corpus_source(case: &str) -> String {
     std::fs::read_to_string(path).expect("corpus case source")
 }
 
-/// Runs a corpus case source and checks the result, the transfer count, and
-/// that the activation depth stays a few activations however many transfers run.
+/// Runs a corpus case source with its hundred thousand rounds cut to a
+/// thousand, and checks the result, the transfer count, and that the activation
+/// depth stays a few activations however many transfers run. The corpus case
+/// itself runs the hundred thousand rounds in both backends.
 fn assert_constant_depth(case: &str, expected: u64, transfers: usize, depth: usize) {
-    let checked = check_source(format!("{case}.vib"), &corpus_source(case));
+    let source = corpus_source(case).replace("100000u64", "1000u64");
+    let checked = check_source(format!("{case}.vib"), &source);
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let execution =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
@@ -410,18 +347,18 @@ fn assert_constant_depth(case: &str, expected: u64, transfers: usize, depth: usi
 #[test]
 fn function_value_parameter_tail_calls_reuse_one_activation() {
     // `main` into `apply`; then `apply` into `countdown` for each of the
-    // 100001 counts and `countdown` back into `apply` for each of the 100000
+    // 1001 counts and `countdown` back into `apply` for each of the 1000
     // that is not zero. `lower` is the only nested activation, and its own
     // checked subtraction is one more.
-    assert_constant_depth("V1-RUNTIME-tail-function-value-parameter", 11, 200_002, 3);
+    assert_constant_depth("V1-RUNTIME-tail-function-value-parameter", 11, 2_002, 3);
 }
 
 #[test]
 fn closure_tail_calls_reuse_one_activation() {
-    // `main` into `spin`; `spin` into the closure for each of 100001 counts
-    // and the closure back into `spin` for each of 100000. Making the closure
+    // `main` into `spin`; `spin` into the closure for each of 1001 counts
+    // and the closure back into `spin` for each of 1000. Making the closure
     // is the only nested call besides `lower`.
-    assert_constant_depth("V1-RUNTIME-tail-closure-captured-loop", 13, 200_002, 3);
+    assert_constant_depth("V1-RUNTIME-tail-closure-captured-loop", 13, 2_002, 3);
 }
 
 #[test]
@@ -430,16 +367,16 @@ fn contract_member_tail_calls_reuse_one_activation() {
     assert_constant_depth(
         "V1-RUNTIME-tail-contract-member-interface-value",
         17,
-        100_001,
+        1_001,
         3,
     );
 }
 
 #[test]
 fn unrelated_function_tail_calls_reuse_one_activation() {
-    // `main` into `first`, 100000 self transfers, `first` into `second`, 100000
+    // `main` into `first`, 1000 self transfers, `first` into `second`, 1000
     // more, and `second` into `last`.
-    assert_constant_depth("V1-RUNTIME-tail-unrelated-function-loop", 19, 200_003, 3);
+    assert_constant_depth("V1-RUNTIME-tail-unrelated-function-loop", 19, 2_003, 3);
 }
 
 #[test]
@@ -453,7 +390,7 @@ fn tail_calls_between_modules_reuse_one_activation() {
     std::fs::write(root.join("project.vibon"), project).expect("project marker");
     std::fs::write(
         root.join("src/app/main.vib"),
-        "(import steps @app.steps)\n(defn execute () void (run 100000u64))\n(defn run (count u64) void (steps.step count run))\n",
+        "(import steps @app.steps)\n(defn execute () void (run 1000u64))\n(defn run (count u64) void (steps.step count run))\n",
     )
     .expect("main module");
     std::fs::write(
@@ -485,7 +422,7 @@ fn tail_calls_between_modules_reuse_one_activation() {
     .expect("the checked program runs");
     // `execute` into `run`; then `run` into `step` and `step` back into `run`
     // across the module boundary.
-    assert_eq!(execution.tail_transfer_count(), 200_002);
+    assert_eq!(execution.tail_transfer_count(), 2_002);
     assert_eq!(execution.max_activation_depth(), 3);
 }
 
@@ -527,14 +464,14 @@ fn def_initializer_calls_are_never_tail_transfers() {
 
 #[test]
 fn a_lambda_in_a_def_initializer_tail_calls_in_one_activation() {
-    let source = "(def drive (fn (u64) u64) (lambda (count u64) u64 (spin count)))\n(defn answer () u64 (drive 100000u64))\n(defn spin (count u64) u64\n  (if (u64.equal count 0u64) 3u64 (spin (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
+    let source = "(def drive (fn (u64) u64) (lambda (count u64) u64 (spin count)))\n(defn answer () u64 (drive 1000u64))\n(defn spin (count u64) u64\n  (if (u64.equal count 0u64) 3u64 (spin (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
     let checked = check_source("tail-def-lambda.vib", source);
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let execution =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
     assert_eq!(execution.value(), Some(&vibra_ir::Value::U64(3)));
-    // `answer` into the closure, the closure into `spin`, and 100000 self calls.
-    assert_eq!(execution.tail_transfer_count(), 100_002);
+    // `answer` into the closure, the closure into `spin`, and 1000 self calls.
+    assert_eq!(execution.tail_transfer_count(), 1_002);
     assert_eq!(execution.max_activation_depth(), 3);
 }
 

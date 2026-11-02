@@ -17,12 +17,16 @@ use vibra_syntax::parse_data;
 /// The one case `id`, discovered from its own directory and not from the whole
 /// corpus.
 fn case(id: &str) -> Case {
-    Corpus::discover(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases").join(id))
-        .expect("Step 5 case directory")
-        .cases()
-        .first()
-        .cloned()
-        .expect("Step 5 case")
+    Corpus::discover(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../conformance/cases")
+            .join(id),
+    )
+    .expect("Step 5 case directory")
+    .cases()
+    .first()
+    .cloned()
+    .expect("Step 5 case")
 }
 
 #[test]
