@@ -13,7 +13,7 @@
 //! interface value, it is widened with the descriptor of the iterator's type.
 
 use vibra_ir::external::CompilerIntrinsic;
-use vibra_ir::{SourceOrigin, Type};
+use vibra_ir::{SourceOrigin, Type, vocabulary};
 use wasm_encoder::Instruction as I;
 
 use super::dispatch::is_interface;
@@ -55,8 +55,8 @@ impl Builder<'_, '_> {
             return Err(unsupported());
         };
         let widen = is_interface(rest_type);
-        let some = self.discriminant(result, "some", origin)?;
-        let none = self.discriminant(result, "none", origin)?;
+        let some = self.discriminant(result, vocabulary::SOME, origin)?;
+        let none = self.discriminant(result, vocabulary::NONE, origin)?;
         let item_class = self.class(item_type, origin)?;
         let join = self.new_block();
 
@@ -365,8 +365,10 @@ impl Builder<'_, '_> {
             },
             vec![item_type.clone()],
         );
-        let present_variant = self.discriminant(&option_type, "some", origin)?;
-        let absent_variant = self.discriminant(&option_type, "none", origin)?;
+        let present_variant =
+            self.discriminant(&option_type, vocabulary::SOME, origin)?;
+        let absent_variant =
+            self.discriminant(&option_type, vocabulary::NONE, origin)?;
         self.push(&[
             get(FRAME),
             ld32(held),

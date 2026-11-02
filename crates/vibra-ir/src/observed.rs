@@ -9,7 +9,7 @@
 //! only by memory. Encoding and releasing one therefore walk an explicit
 //! worklist and use bounded host stack.
 
-use crate::{Type, TypeId, Value, canonical_type};
+use crate::{Type, TypeId, Value, canonical_type, vocabulary};
 
 /// A function-free value with a canonical encoding.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -75,7 +75,7 @@ impl ObservedValue {
     /// and an `err` of it is a program failure whatever the error holds.
     #[must_use]
     pub fn is_err_variant(&self) -> bool {
-        matches!(self, Self::Enum { variant, .. } if variant == "err")
+        matches!(self, Self::Enum { variant, .. } if variant == vocabulary::ERR)
     }
 
     /// The canonical value encoding.

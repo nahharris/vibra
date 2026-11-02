@@ -9,7 +9,7 @@
 
 use vibra_host::{HostEnum, HostRecord, HostValues, ReadError};
 use vibra_ir::external::host::{FS_KIND_VARIANTS, HostErrorType};
-use vibra_ir::{Type, TypeDefinition, Value};
+use vibra_ir::{Type, TypeDefinition, Value, vocabulary};
 
 use crate::value::RuntimeValue;
 
@@ -128,7 +128,7 @@ impl HostValues for Values<'_> {
         let (value_type, name) = match ty {
             HostEnum::Result => (
                 self.result.clone(),
-                if variant == 0 { "ok" } else { "err" }.to_owned(),
+                vocabulary::result_variant(variant == 0).to_owned(),
             ),
             HostEnum::FsKind => (
                 self.declared("std.fs.fs-kind"),

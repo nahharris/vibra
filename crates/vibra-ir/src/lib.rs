@@ -33,6 +33,7 @@ pub use pattern::{MatchArm, Pattern};
 pub mod arena;
 pub mod boundary;
 pub mod external;
+pub mod vocabulary;
 
 /// One of the primitive types admitted by the M2 literal profile.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -22,6 +22,7 @@ use std::path::Path;
 
 use serde_json::{Map, Value};
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
+use vibra_ir::vocabulary;
 use vibra_syntax::{DataNode, DataValue, Literal, canonical_data, parse_data};
 
 use crate::operation::{HostCall, HostOk, HostReply};
@@ -451,13 +452,13 @@ fn encode_reply(reply: &HostReply) -> String {
                 HostOk::Integer(value) => Some(format!("{value}i64")),
                 HostOk::Count(value) => Some(format!("{value}u64")),
             };
-            enum_value("std.result", "result", "ok", payload.as_deref())
+            enum_value("std.result", "result", vocabulary::OK, payload.as_deref())
         }
         Err(error) => {
             let ty = error.error_type();
             let payload =
                 enum_value(ty.module(), ty.name(), error.variant_name(), None);
-            enum_value("std.result", "result", "err", Some(&payload))
+            enum_value("std.result", "result", vocabulary::ERR, Some(&payload))
         }
     }
 }

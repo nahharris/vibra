@@ -129,7 +129,7 @@ use vibra_ir::external::{
 };
 use vibra_ir::{
     CallTarget, CheckedProgram, Constant, Expr, FunctionSignature, MatchArm,
-    SourceOrigin, Type, Value,
+    SourceOrigin, Type, Value, vocabulary,
 };
 use wasm_encoder::{BlockType, Instruction as I, ValType};
 
@@ -1243,8 +1243,8 @@ fn unlowered_row(row: &NativeRow, origin: &SourceOrigin) -> NotLowered {
 /// The variants of `option` and `result` that `try` continues with, and the ones
 /// it leaves the activation with, by name, as the reference interpreter reads
 /// them. The checker admits no other operand.
-const SUCCESS: [&str; 2] = ["some", "ok"];
-const FAILURE: [&str; 2] = ["none", "err"];
+const SUCCESS: [&str; 2] = [vocabulary::SOME, vocabulary::OK];
+const FAILURE: [&str; 2] = [vocabulary::NONE, vocabulary::ERR];
 
 /// The discriminant of an object that is being built.
 #[derive(Clone, Copy, Debug)]
@@ -3304,8 +3304,8 @@ impl<'l, 'a> Builder<'l, 'a> {
             return Err(classify::forms_of_type(value_type, origin));
         };
         let some = shape
-            .variant("some")
-            .zip(shape.variant("none"))
+            .variant(vocabulary::SOME)
+            .zip(shape.variant(vocabulary::NONE))
             .ok_or_else(|| classify::forms_of_type(value_type, origin))?;
         let slot_type = variants
             .get(some.0)
@@ -3456,9 +3456,10 @@ impl<'l, 'a> Builder<'l, 'a> {
                     .ok_or_else(|| NotLowered::single(crate::Form::ModuleSize))?;
                 let ordering = compare.signature().result();
                 let shape = self.shape(&ordering, origin)?;
-                let (Some(less), Some(greater)) =
-                    (shape.variant("less"), shape.variant("greater"))
-                else {
+                let (Some(less), Some(greater)) = (
+                    shape.variant(vocabulary::LESS),
+                    shape.variant(vocabulary::GREATER),
+                ) else {
                     return Err(unordered());
                 };
                 Ok(KeyOrder::User {
@@ -3962,8 +3963,8 @@ impl<'l, 'a> Builder<'l, 'a> {
             return Err(classify::forms_of_type(value_type, origin));
         };
         let (some, none) = shape
-            .variant("some")
-            .zip(shape.variant("none"))
+            .variant(vocabulary::SOME)
+            .zip(shape.variant(vocabulary::NONE))
             .ok_or_else(|| classify::forms_of_type(value_type, origin))?;
         let slot_type = variants
             .get(some)
@@ -4357,8 +4358,8 @@ impl<'l, 'a> Builder<'l, 'a> {
                     st64(kind_at),
                 ]);
                 self.set_byte(kind, CellClass::I32.code());
-                let ok = self.discriminant(result, "ok", origin)?;
-                let err = self.discriminant(result, "err", origin)?;
+                let ok = self.discriminant(result, vocabulary::OK, origin)?;
+                let err = self.discriminant(result, vocabulary::ERR, origin)?;
                 self.push(&[get(FRAME), ld32(status_at), I::I32Eqz]);
                 let (ok_block, err_block, join) =
                     (self.new_block(), self.new_block(), self.new_block());
@@ -4408,8 +4409,7 @@ impl<'l, 'a> Builder<'l, 'a> {
             }
             Answer::Order => {
                 let mut names = Names::default();
-                for (position, variant) in
-                    ["less", "equal", "greater"].into_iter().enumerate()
+                for (position, variant) in vocabulary::ORDERING.into_iter().enumerate()
                 {
                     let discriminant = self.discriminant(result, variant, origin)?;
                     if let Some(name) = names.order.get_mut(position) {
@@ -4486,9 +4486,9 @@ impl<'l, 'a> Builder<'l, 'a> {
                     }
                     Totality::Option | Totality::Conversion => {
                         let success = if totality == Totality::Option {
-                            "some"
+                            vocabulary::SOME
                         } else {
-                            "ok"
+                            vocabulary::OK
                         };
                         let success = self.discriminant(result, success, origin)?;
                         self.push(&[get(WR), c64(0), I::I64LtS]);
@@ -4511,7 +4511,8 @@ impl<'l, 'a> Builder<'l, 'a> {
                         );
                         self.goto(join, absent);
                         if totality == Totality::Option {
-                            let none = self.discriminant(result, "none", origin)?;
+                            let none =
+                                self.discriminant(result, vocabulary::NONE, origin)?;
                             self.build(Kind::Enum, none, &[], dest);
                         } else {
                             // The error is an enum of `void` variants, which the
@@ -4522,7 +4523,8 @@ impl<'l, 'a> Builder<'l, 'a> {
                                 "invalid-format",
                                 origin,
                             )?;
-                            let err = self.discriminant(result, "err", origin)?;
+                            let err =
+                                self.discriminant(result, vocabulary::ERR, origin)?;
                             let error = self.temp();
                             self.build(Kind::Enum, invalid, &[], error);
                             self.build(
@@ -4609,8 +4611,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         let mut names = Names::default();
         match plan.outcome() {
             primitive::Outcome::Ordering => {
-                for (position, variant) in
-                    ["less", "equal", "greater"].into_iter().enumerate()
+                for (position, variant) in vocabulary::ORDERING.into_iter().enumerate()
                 {
                     let discriminant = self.discriminant(result, variant, origin)?;
                     if let Some(name) = names.order.get_mut(position) {
@@ -4681,8 +4682,8 @@ impl<'l, 'a> Builder<'l, 'a> {
             primitive::Outcome::Checked(_) => {
                 let held = self.temp();
                 value(self, held);
-                let ok = self.discriminant(result, "ok", origin)?;
-                let err = self.discriminant(result, "err", origin)?;
+                let ok = self.discriminant(result, vocabulary::OK, origin)?;
+                let err = self.discriminant(result, vocabulary::ERR, origin)?;
                 self.push(&[get(FRAME), ld32(at), I::I32Eqz]);
                 let (ok_block, err_block, join) =
                     (self.new_block(), self.new_block(), self.new_block());
@@ -4725,8 +4726,8 @@ impl<'l, 'a> Builder<'l, 'a> {
                 self.goto(join, join);
             }
             primitive::Outcome::Option => {
-                let some = self.discriminant(result, "some", origin)?;
-                let none = self.discriminant(result, "none", origin)?;
+                let some = self.discriminant(result, vocabulary::SOME, origin)?;
+                let none = self.discriminant(result, vocabulary::NONE, origin)?;
                 self.push(&[get(FRAME), ld32(at)]);
                 let (some_block, none_block, join) =
                     (self.new_block(), self.new_block(), self.new_block());
@@ -4766,7 +4767,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         };
         variants
             .iter()
-            .find(|(name, _)| name == "err")
+            .find(|(name, _)| name == vocabulary::ERR)
             .map(|(_, ty)| ty.clone())
             .ok_or_else(|| classify::forms_of_type(result, origin))
     }
