@@ -259,71 +259,6 @@ impl FloatOp {
     }
 }
 
-/// The semantic operation implemented by a compiler intrinsic.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum SemanticIdentity {
-    /// One integer method, identical across integer types up to their range.
-    Integer(IntegerOp),
-    /// One IEEE 754 method, identical across widths up to their format.
-    Float(FloatOp),
-    /// An integer as another integer type: its value when the target holds
-    /// it, and `out-of-range` otherwise.
-    IntegerConversion,
-    /// A `char`'s Unicode scalar value.
-    CharToScalar,
-    /// The `char` of a Unicode scalar value, or `none`.
-    CharFromScalar,
-    /// Concatenate Unicode scalar sequences in order.
-    UnicodeScalarConcatenation,
-    /// Count Unicode scalars, rather than UTF-8 bytes.
-    UnicodeScalarLength,
-    /// Equal scalar sequences.
-    UnicodeScalarEquality,
-    /// Lexicographic order by scalar value.
-    UnicodeScalarOrder,
-    /// Scalars in a half-open range, or `none`.
-    UnicodeScalarSlice,
-    /// A string's scalars as an array.
-    UnicodeScalarsToArray,
-    /// A string of the scalars of an array.
-    UnicodeScalarsFromArray,
-    /// A string's UTF-8 encoding.
-    Utf8Encoding,
-    /// A string decoded from well-formed UTF-8.
-    Utf8Decoding,
-    /// Count bytes.
-    ByteLength,
-    /// Concatenate byte sequences in order.
-    ByteConcatenation,
-    /// Equal byte sequences.
-    ByteEquality,
-    /// Lexicographic order by byte.
-    ByteOrder,
-    /// Bytes in a half-open range, or `none`.
-    ByteSlice,
-    /// Bytes as an array of `u8`.
-    BytesToArray,
-    /// Bytes of an array of `u8`.
-    BytesFromArray,
-    /// Build an array from its packed variadic elements.
-    ArrayConstruction,
-    /// Build a dict from its packed variadic entries in canonical key order, a
-    /// later entry replacing an equal key.
-    DictConstruction,
-    /// A dict's entries as an array of key-value tuples, in key order.
-    DictEntries,
-    /// Count array elements.
-    ArrayLength,
-    /// A new array with one trailing element.
-    ArrayAppend,
-    /// A new array of the first array's elements, then the second's.
-    ArrayConcatenation,
-    /// Elements in a half-open range, or `none` when it is out of range.
-    ArraySlice,
-    /// A left fold of an array through a step function.
-    ArrayFold,
-}
-
 /// One pure, compiler-owned operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum CompilerIntrinsic {
@@ -495,48 +430,6 @@ impl CompilerIntrinsic {
         let (source_low, source_high) = source.range();
         let (target_low, target_high) = target.range();
         target_low <= source_low && source_high <= target_high
-    }
-
-    /// The closed registry version for this operation.
-    #[must_use]
-    pub const fn registry_version(self) -> &'static str {
-        REGISTRY_VERSION
-    }
-
-    /// The semantic contract implemented by this operation.
-    #[must_use]
-    pub const fn semantic_identity(self) -> SemanticIdentity {
-        match self {
-            Self::Integer(_, op) => SemanticIdentity::Integer(op),
-            Self::Float(_, op) => SemanticIdentity::Float(op),
-            Self::Convert(..) => SemanticIdentity::IntegerConversion,
-            Self::CharToU32 => SemanticIdentity::CharToScalar,
-            Self::CharFromU32 => SemanticIdentity::CharFromScalar,
-            Self::TextConcat => SemanticIdentity::UnicodeScalarConcatenation,
-            Self::TextLength => SemanticIdentity::UnicodeScalarLength,
-            Self::TextEqual => SemanticIdentity::UnicodeScalarEquality,
-            Self::TextCompare => SemanticIdentity::UnicodeScalarOrder,
-            Self::TextSlice => SemanticIdentity::UnicodeScalarSlice,
-            Self::TextToChars => SemanticIdentity::UnicodeScalarsToArray,
-            Self::TextFromChars => SemanticIdentity::UnicodeScalarsFromArray,
-            Self::TextToUtf8 => SemanticIdentity::Utf8Encoding,
-            Self::TextFromUtf8 => SemanticIdentity::Utf8Decoding,
-            Self::BytesLength => SemanticIdentity::ByteLength,
-            Self::BytesConcat => SemanticIdentity::ByteConcatenation,
-            Self::BytesEqual => SemanticIdentity::ByteEquality,
-            Self::BytesCompare => SemanticIdentity::ByteOrder,
-            Self::BytesSlice => SemanticIdentity::ByteSlice,
-            Self::BytesToArray => SemanticIdentity::BytesToArray,
-            Self::BytesFromArray => SemanticIdentity::BytesFromArray,
-            Self::ArrayOf => SemanticIdentity::ArrayConstruction,
-            Self::DictOf => SemanticIdentity::DictConstruction,
-            Self::DictEntries => SemanticIdentity::DictEntries,
-            Self::ArrayLength => SemanticIdentity::ArrayLength,
-            Self::ArrayAppend => SemanticIdentity::ArrayAppend,
-            Self::ArrayConcat => SemanticIdentity::ArrayConcatenation,
-            Self::ArraySlice => SemanticIdentity::ArraySlice,
-            Self::ArrayFold => SemanticIdentity::ArrayFold,
-        }
     }
 
     /// The stable registry symbol, such as `i32.add-checked` or
