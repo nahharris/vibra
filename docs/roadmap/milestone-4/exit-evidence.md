@@ -63,7 +63,7 @@ Every step is in the integration head by its merge, checked with `gh pr list
 | 19 | [#379](https://github.com/nahharris/vibra/pull/379), `461502e` | [41345121614](https://github.com/nahharris/vibra/actions/runs/41345121614) |
 | 20 | [#380](https://github.com/nahharris/vibra/pull/380), `be86296` | [41349533875](https://github.com/nahharris/vibra/actions/runs/41349533875) |
 | 21 | [#381](https://github.com/nahharris/vibra/pull/381), `40aec94` | [41444777087](https://github.com/nahharris/vibra/actions/runs/41444777087) |
-| 21b | [#382](https://github.com/nahharris/vibra/pull/382), `103f301` | [41453263351](https://github.com/nahharris/vibra/actions/runs/41453263351), CI_21B_STATE |
+| 21b | [#382](https://github.com/nahharris/vibra/pull/382), `103f301` | [41453263351](https://github.com/nahharris/vibra/actions/runs/41453263351), still in progress when this was captured; the pull request's own run [41449055836](https://github.com/nahharris/vibra/actions/runs/41449055836) passed every job on its head, and the merged tree is that head plus the merge commit. Re-read the merged run before merging `m4` |
 
 Each run above passed all its jobs (the archive boundary and the build and test
 jobs on Ubuntu, Windows, and macOS, and, from Step 4, the conformance corpus in
@@ -316,8 +316,36 @@ Closed by this gate: the Step 6 finding that the checker reported
 ## Commands
 
 Run from the repository root with the pinned toolchain (Rust 1.96.1),
-`CARGO_INCREMENTAL=0`, `--locked --offline`, on the final head. COMMANDS_TABLE
+`CARGO_INCREMENTAL=0`, `--locked --offline`, on the code head `eef3139` (the later commit changes only this document's table and one README link).
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `cargo fmt --all --check` | 0 | clean |
+| `cargo clippy --locked --offline --workspace --all-targets --all-features -- -D warnings` (`RUSTFLAGS=-D warnings`) | 0 | clean |
+| `cargo test --locked --offline --workspace --all-targets --all-features` | 0 | 1,444 passed, 0 failed |
+| `cargo doc --locked --offline --workspace --no-deps --all-features` (`RUSTDOCFLAGS=-D warnings`) | 0 | clean |
+| `cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases` | 0 | 572 passed, 0 failed, 0 unavailable; Wasm 168 matched, 0 failed, 0 not lowered |
+| `cargo test --locked --offline -p vibra-conformance --test evidence_step11 --test m4_contract_inventory --test m3_contract_inventory --test diagnostic_registry --test parity_inventory_m4_step4 --test architecture_boundary` | 0 | all pass |
+| `cargo run --locked --offline -p vibra-conformance --bin m1-fuzz -- --profile ci-smoke` | 0 | 6 targets, 96 cases pass |
+| `cargo run --locked --offline -p vibra-conformance --bin perf-baseline -- --check` | 0 | the exact metrics match `performance-baseline.vibon` |
+| `git diff --check origin/m4 HEAD` | 0 | clean |
+| `vibra check`, `vibra run src/app -- PATH` in `examples/m4-demo` | 0, 0 | `check accepted`; `> alpha`, `> beta` |
+
+A first run of the workspace tests stopped at `m4_contract_inventory`, which
+requires the README to link the Step 16b guide with a plain link; the rewritten
+README header had dropped it. The link is restored and the whole list above is
+the second run.
 
 ## Verdict
 
-VERDICT
+The M4 exit gate is met. The demo gate holds in both backends and through
+`vibra run`, with its rejections and witnesses; every exit-gate clause maps to
+cases, host tests, and ledger rows; every deliverable and each
+forward-compatibility obligation has evidence; every `@tool.unavailable` that
+remains is owned by a later milestone, a trust boundary, or a toolchain limit;
+and the corpus has 0 failed, 0 unavailable, and 0 not lowered over 168
+executable cases. The gate found one defect, a valid continuation-passing
+program that the checker refused, and it was fixed first as Step 21b rather than
+recorded as passing. The open items above are the maintainer's backlog. The
+Step 22 pull request is conditional on its merge, and the merge of `m4` into
+`main` is the maintainer's.

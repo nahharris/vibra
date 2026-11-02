@@ -6,7 +6,7 @@ Status: complete on `m4`; M4's exit gate is evidenced in the
 spine, is complete ([Stage 4A evidence](stage-4a-evidence.md), Step 12, PR #370).
 Stage 4B, static effects and host operations, has landed: Step 13 froze the
 contracts (PR #371), Steps 14 to 21 implemented them in both backends (PRs #372 to
-#381), and Step 21b (PR #382) fixed a defect that Step 22's demo sweep found in the
+#381; the host console is [Step 16b](16b-host-console.md)), and Step 21b (PR #382) fixed a defect that Step 22's demo sweep found in the
 indirect call-flow analysis before the gate was evidenced.
 
 Decision ledger: [decision-ledger.md](decision-ledger.md)
