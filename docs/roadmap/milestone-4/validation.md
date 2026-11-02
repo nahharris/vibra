@@ -140,8 +140,8 @@ rejects an unreviewed upgrade: `Cargo.lock` is committed and every command runs
 `--locked --offline`. Step 4's record is the README's
 [dependency evidence](README.md#dependency-evidence). The CI platforms prove
 the build: the `check` job compiles the workspace, Wasmtime included, on Ubuntu,
-Windows, and macOS, and the `conformance` job then runs the corpus in both
-backends on the same three.
+Windows, and macOS, and the `conformance` job, which runs in parallel with it,
+runs the corpus in both backends on the same three.
 
 ## Step handoff
 

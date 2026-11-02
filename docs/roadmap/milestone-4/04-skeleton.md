@@ -174,5 +174,5 @@ The step landed as proposed, with these choices, which the later steps build on.
   hand-built program (`wasm_skeleton_m4_step4`, `differential_m4_step4`).
 - **CI.** The `check` job builds and tests the workspace, Wasmtime included, on the
   three platforms, and the `conformance` job runs the corpus in both backends on
-  the same three after `check`, sharing its build cache per platform, so the
-  engine compiles once per platform and not twice.
+  the same three in parallel with it, restoring the same build cache per platform
+  (only `main` saves it), so the pipeline takes as long as the slower job.
