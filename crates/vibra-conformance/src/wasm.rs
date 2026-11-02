@@ -14,7 +14,6 @@ use std::sync::OnceLock;
 use vibra_diagnostics::DiagnosticCode;
 use vibra_host::{HostWorld, WorldProvider};
 use vibra_ir::CheckedProgram;
-use vibra_ir::boundary::Failure;
 use vibra_wasm_run::{Observed, Outcome, Runner, TestRun};
 use vibra_workspace::semantic::{TestItem, TestItemStatus};
 
@@ -272,15 +271,10 @@ fn observe_ran(
                         reason: "a failed assertion has no origin".to_owned(),
                     });
                 };
-                let member = match failure {
-                    Failure::True => "true",
-                    Failure::False => "false",
-                    Failure::Equal => "equal",
-                };
                 TestRow {
                     status: TestItemStatus::AssertionFailed.as_atom().to_owned(),
                     failure: Some(RowFailure {
-                        assertion: format!("@std.assert.{member}"),
+                        assertion: failure.symbol(),
                         expected,
                         actual,
                         origin,
@@ -338,7 +332,8 @@ fn stopped(outcome: &Outcome) -> WasmObservation {
     clippy::unwrap_used
 )]
 mod tests {
-    use vibra_ir::boundary::{Failure, TrapCode};
+    use vibra_ir::TestAssertion;
+    use vibra_ir::boundary::TrapCode;
 
     use super::*;
     use crate::runner::{INSTANCE_MEMORY_LIMIT_BYTES, interpreter_budget};
@@ -397,7 +392,7 @@ mod tests {
         assert!(reason.contains("@runtime.invalid-host-value"), "{reason}");
         assert!(matches!(
             stopped(&Outcome::AssertionFailed {
-                failure: Failure::True,
+                failure: TestAssertion::True,
                 origin: None,
                 operands: None
             }),

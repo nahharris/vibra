@@ -49,7 +49,7 @@ pub use resolved::{
     IndexedImplementation, IndexedMember, IndexedSignature, ResolvedCheckResult,
     check_resolved,
 };
-pub use standard::{builtin_member_names, role_type_names};
+pub use standard::{assertion_member_names, builtin_member_names, role_type_names};
 pub use stdlib::{
     STDLIB_ASSERT_SOURCE_ID, STDLIB_BOOL_SOURCE_ID, STDLIB_BUILTIN_SOURCE_ID,
     STDLIB_BYTES_SOURCE_ID, STDLIB_CORE_SOURCE_ID, STDLIB_OPTION_SOURCE_ID,

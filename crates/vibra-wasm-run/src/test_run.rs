@@ -10,8 +10,8 @@
 //! results use. A trap is status `1`, and the memory host event status `2`.
 
 use vibra_host::{AuditEvent, HostProvider, HostWorld, WorldProvider};
-use vibra_ir::boundary::{Failure, TEST_EXPORT, TrapCode};
-use vibra_ir::{Type, TypeDefinition, Value};
+use vibra_ir::boundary::{TEST_EXPORT, TrapCode};
+use vibra_ir::{TestAssertion, Type, TypeDefinition, Value};
 
 use crate::{
     Instance, LiveSizes, Outcome, ResultSlot, Runner, RunnerError, Started,
@@ -32,7 +32,7 @@ pub enum TestRun {
     /// An assertion was false, and stopped only this test.
     AssertionFailed {
         /// The assertion that failed.
-        failure: Failure,
+        failure: TestAssertion,
         /// The origin ordinal of the assertion call, `None` for none.
         origin: Option<u32>,
         /// The canonical encoding of the expected operand, or of the required
@@ -178,7 +178,7 @@ fn stopped(outcome: Outcome) -> TestRun {
 
 fn read_failure(
     instance: &mut Instance,
-    failure: Failure,
+    failure: TestAssertion,
     origin: Option<u32>,
     operands: Option<(u64, u64)>,
     types: &[TypeDefinition],
@@ -189,21 +189,21 @@ fn read_failure(
     let bool_text = |value: bool| Value::Bool(value).canonical_vibon();
     match failure {
         // A false `assert.true` required `true` and was given `false`.
-        Failure::True => TestRun::AssertionFailed {
+        TestAssertion::True => TestRun::AssertionFailed {
             failure,
             origin,
             expected: bool_text(true),
             actual: bool_text(false),
             audit_trace: Vec::new(),
         },
-        Failure::False => TestRun::AssertionFailed {
+        TestAssertion::False => TestRun::AssertionFailed {
             failure,
             origin,
             expected: bool_text(false),
             actual: bool_text(true),
             audit_trace: Vec::new(),
         },
-        Failure::Equal => {
+        TestAssertion::Equal => {
             let (Some((expected, actual)), Some(ordinal)) = (operands, origin) else {
                 return defect(
                     "a failed `assert.equal` recorded no operands".to_owned(),

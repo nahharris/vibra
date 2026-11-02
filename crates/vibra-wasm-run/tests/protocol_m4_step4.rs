@@ -15,7 +15,8 @@ mod common;
 use common::{
     GLOBAL_ACTUAL, GLOBAL_EXPECTED, GLOBAL_FAILURE, GLOBAL_RESULT, Spec, module, record,
 };
-use vibra_ir::boundary::{Failure, TrapCode};
+use vibra_ir::TestAssertion;
+use vibra_ir::boundary::TrapCode;
 use vibra_wasm_run::{MemoryLimit, Outcome, ResultSlot, Runner, RunnerError};
 use wasm_encoder::Instruction;
 
@@ -183,7 +184,7 @@ fn a_failed_assertion_is_read_with_its_operands() {
             ..Spec::default()
         }),
         Outcome::AssertionFailed {
-            failure: Failure::Equal,
+            failure: TestAssertion::Equal,
             origin: Some(4),
             operands: Some((11, u64::MAX)),
         }
@@ -201,7 +202,7 @@ fn a_failed_assertion_is_read_with_its_operands() {
             ..Spec::default()
         }),
         Outcome::AssertionFailed {
-            failure: Failure::True,
+            failure: TestAssertion::True,
             origin: Some(5),
             operands: None,
         }

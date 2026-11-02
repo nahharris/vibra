@@ -11,8 +11,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::OnceLock;
 
-use vibra_ir::Type;
 use vibra_ir::external::{CompilerIntrinsic, RoleTypes};
+use vibra_ir::{TestAssertion, Type};
 use vibra_syntax::{
     Declaration, DeftypeBody, DeftypeDeclaration, SourceAst, TypeMember,
 };
@@ -355,6 +355,16 @@ pub(crate) fn members_with_bodies(
     members
         .into_iter()
         .filter(|member| included.contains(&member.path()))
+        .collect()
+}
+
+/// The members of `@std.assert`, from the compiler's closed assertion table,
+/// for a resolver that declares the verified module's headers.
+#[must_use]
+pub fn assertion_member_names() -> Vec<String> {
+    TestAssertion::ALL
+        .into_iter()
+        .map(|assertion| assertion.member().to_owned())
         .collect()
 }
 

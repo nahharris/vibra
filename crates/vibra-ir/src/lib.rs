@@ -784,6 +784,27 @@ impl TestAssertion {
         }
     }
 
+    /// The code a module returns from `vibra_v1_failure` after this assertion
+    /// failed: its place in [`Self::ALL`], counted from one.
+    #[must_use]
+    pub fn code(self) -> i32 {
+        Self::ALL
+            .into_iter()
+            .zip(1..)
+            .find_map(|(assertion, code)| (assertion == self).then_some(code))
+            .unwrap_or_default()
+    }
+
+    /// The assertion a failure code names, or `None` for a code outside the
+    /// table.
+    #[must_use]
+    pub fn from_code(code: i32) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .zip(1..)
+            .find_map(|(assertion, place)| (place == code).then_some(assertion))
+    }
+
     /// Canonical source-level assertion identity.
     #[must_use]
     pub fn symbol(self) -> String {
