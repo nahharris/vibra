@@ -46,7 +46,7 @@ mod workspace_semantic;
 
 pub use corpus::{
     Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError, HostWorldError,
-    PARITY_INVENTORY_FILE_NAME,
+    PARITY_INVENTORY_FILE_NAME, corpus_root, workspace_root,
 };
 pub use format::ToolingV1FormatHandler;
 pub use graph::StaticV1SourceGraphHandler;

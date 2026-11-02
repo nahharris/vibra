@@ -97,7 +97,7 @@ where
     I: Iterator<Item = std::ffi::OsString>,
 {
     let Some(first) = arguments.next() else {
-        return Ok(PathBuf::from("conformance/cases"));
+        return Ok(vibra_conformance::corpus_root());
     };
     if first == "--root" {
         let Some(root) = arguments.next() else {

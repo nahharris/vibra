@@ -157,12 +157,10 @@ pub const PROGRAMS: [Program; 10] = [
     },
 ];
 
-/// The repository root, found from this crate's manifest.
+/// The repository root: the workspace root.
 #[must_use]
 pub fn repository_root() -> PathBuf {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let root = manifest.join("../..");
-    root.canonicalize().unwrap_or(root)
+    crate::workspace_root()
 }
 
 /// What the interpreter's counters reported for a program.
