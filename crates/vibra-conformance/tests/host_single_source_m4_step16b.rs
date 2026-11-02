@@ -7,9 +7,9 @@
 //! and never through `vibra_v1_memory`, and both build the audit event with the
 //! same code. This audit holds the interpreter, the emitter, and the runner to
 //! that: none implements an operation, none calls a provider method itself,
-//! none builds an event except by `AuditEvent::completed`, the emitter does not
-//! know the provider, and the runner's host path does not read the instance's
-//! memory.
+//! none builds an event except by `AuditEvent::completed`, and the runner's host
+//! path does not read the instance's memory. That the emitter does not know the
+//! provider is the dependency rule of `architecture_boundary`.
 
 #![allow(
     clippy::expect_used,
@@ -108,12 +108,12 @@ fn no_backend_calls_a_provider_method_or_implements_an_operation() {
                     "{path} calls the provider method `{method}`; only `vibra-host::perform` does"
                 );
             }
-            for algorithm in ["SplitMix64", "std::fs::", "std::env::", "SystemTime"] {
-                assert!(
-                    !code.contains(algorithm),
-                    "{path} names `{algorithm}`, which only `vibra-host` may"
-                );
-            }
+            // The ambient filesystem, environment, and clock are the audit of
+            // `ambient_reads_m4_step16`; the random algorithm is named here.
+            assert!(
+                !code.contains("SplitMix64"),
+                "{path} names `SplitMix64`, which only `vibra-host` may"
+            );
         }
     }
 }
@@ -143,16 +143,6 @@ fn every_event_is_built_by_the_one_function() {
         .into_iter()
         .any(|(_, code)| code.contains("AuditEvent::completed("));
     assert!(interpreter && runner, "both backends build the event");
-}
-
-#[test]
-fn the_emitter_does_not_know_the_provider() {
-    for (path, code) in crate_sources("vibra-wasm") {
-        assert!(
-            !code.contains("vibra_host"),
-            "{path} names the provider crate"
-        );
-    }
 }
 
 #[test]
