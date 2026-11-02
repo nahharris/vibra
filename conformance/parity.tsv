@@ -178,3 +178,6 @@ V1-RUNTIME-world-sets-env-args-clock-random	matched
 V1-RUNTIME-entry-outcome-own-err	matched
 V1-RUNTIME-entry-outcome-trap-holding-err	matched
 V1-RUNTIME-entry-outcome-memory-holding-err	matched
+V1-RUNTIME-continuation-chain	matched
+V1-RUNTIME-continuation-chain-non-tail	matched
+V1-RUNTIME-continuation-chain-mutual	matched

@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-continuation-chain"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A continuation-passing loop: each round passes a new closure that wraps the previous one, so the continuation is a chain a hundred thousand closures deep. The final call runs the chain through tail calls that reuse one activation, and releasing the chain uses bounded stack in both backends."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

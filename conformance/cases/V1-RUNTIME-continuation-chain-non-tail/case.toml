@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-continuation-chain-non-tail"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "The continuation chain of V1-RUNTIME-continuation-chain, with each closure calling the one it wraps in a non-tail position, so the final call holds a hundred thousand activations and a hundred thousand closures at once and ends in a result in both backends."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }
