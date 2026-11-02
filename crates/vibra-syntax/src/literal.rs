@@ -51,26 +51,6 @@ pub enum LiteralClassification {
     Opaque,
 }
 
-impl LiteralClassification {
-    /// The decoded literal, if classification succeeded.
-    #[must_use]
-    pub fn as_literal(&self) -> Option<&Literal> {
-        match self {
-            Self::Literal(literal) => Some(literal),
-            Self::Invalid(_) | Self::Opaque => None,
-        }
-    }
-
-    /// The invalid family, if this leaf is malformed literal syntax.
-    #[must_use]
-    pub const fn invalid_kind(&self) -> Option<InvalidLiteralKind> {
-        match self {
-            Self::Invalid(kind) => Some(*kind),
-            Self::Literal(_) | Self::Opaque => None,
-        }
-    }
-}
-
 /// One decoded literal with its exact source spelling.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Literal {

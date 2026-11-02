@@ -309,13 +309,6 @@ mod tests {
     }
 }
 
-/// Captures an already discovered project into an immutable source snapshot.
-pub fn capture_snapshot(
-    project: &DiscoveredProject,
-) -> Result<SourceSnapshot, WorkspaceError> {
-    SourceSnapshot::capture(project)
-}
-
 fn validate_source_roots(
     project: &DiscoveredProject,
 ) -> Result<(Vec<TargetRoot>, Option<TargetRoot>), WorkspaceError> {

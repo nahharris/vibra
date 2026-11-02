@@ -185,23 +185,6 @@ impl HostRow {
             self.error.name()
         )
     }
-
-    /// The module of the owner, such as `std.io`.
-    #[must_use]
-    pub fn owner_module(&self) -> &'static str {
-        let trimmed = self.owner.strip_prefix('@').unwrap_or(self.owner);
-        trimmed
-            .rsplit_once('.')
-            .map_or(trimmed, |(module, _)| module)
-    }
-
-    /// The root of the owner, such as `stdin`.
-    #[must_use]
-    pub fn owner_root(&self) -> &'static str {
-        self.owner
-            .rsplit_once('.')
-            .map_or(self.owner, |(_, root)| root)
-    }
 }
 
 const fn param(name: &'static str, ty: HostType) -> HostParameter {
@@ -386,20 +369,6 @@ pub const HOST_ROWS: [HostRow; 17] = [
 #[must_use]
 pub fn host_row(symbol: &str) -> Option<&'static HostRow> {
     HOST_ROWS.iter().find(|row| row.symbol == symbol)
-}
-
-/// The derived registry minor of a set of symbols: the greatest `since` among
-/// them, and `0` when the set is empty. A symbol outside the registry has no
-/// minor, so the answer is `None`.
-#[must_use]
-pub fn derived_registry_minor<'a>(
-    symbols: impl IntoIterator<Item = &'a str>,
-) -> Option<u32> {
-    let mut minor = 0;
-    for symbol in symbols {
-        minor = minor.max(host_row(symbol)?.since);
-    }
-    Some(minor)
 }
 
 /// The registry as the text of the checked-in snapshot.

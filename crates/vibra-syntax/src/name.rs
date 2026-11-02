@@ -101,12 +101,6 @@ impl NameClassification {
             Self::Invalid => None,
         }
     }
-
-    /// Whether this leaf is an invalid name candidate.
-    #[must_use]
-    pub const fn is_invalid(&self) -> bool {
-        matches!(self, Self::Invalid)
-    }
 }
 
 /// Classifies one nonliteral leaf using the shared name grammar.

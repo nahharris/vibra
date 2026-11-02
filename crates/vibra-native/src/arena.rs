@@ -16,8 +16,7 @@ use std::fmt;
 
 use vibra_ir::arena::{self, class, header, kind};
 use vibra_ir::external::{
-    Answer, CompilerIntrinsic, FloatOp, IntegerOp, NativeRow, NumericType, ObjectKind,
-    Operand,
+    Answer, CompilerIntrinsic, FloatOp, IntegerOp, NativeRow, NumericType, Operand,
 };
 
 use crate::number::Parsed;
@@ -890,14 +889,4 @@ fn build<K: Built>(
     }
     let length = sink.finish()?;
     i64::try_from(length).map_err(|_| Fault::Destination)
-}
-
-/// The kinds of object a row builds, for the module's allocation.
-#[must_use]
-pub const fn object_code(kind: ObjectKind) -> u8 {
-    match kind {
-        ObjectKind::Str => kind::STR,
-        ObjectKind::Bytes => kind::BYTES,
-        ObjectKind::Array => kind::ARRAY,
-    }
 }

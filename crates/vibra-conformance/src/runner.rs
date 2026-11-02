@@ -254,12 +254,6 @@ impl ProfileDispatcher {
         self
     }
 
-    /// Profiles that have a handler registered, in stable order.
-    #[must_use]
-    pub fn registered_profiles(&self) -> Vec<ConformanceProfile> {
-        self.handlers.keys().copied().collect()
-    }
-
     /// Dispatches one case to the closest capable handler.
     #[must_use]
     pub fn dispatch(&self, case: &Case) -> DispatchResult {

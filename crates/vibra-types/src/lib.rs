@@ -246,16 +246,6 @@ pub fn check_standard_library_source(
     }
 }
 
-/// Checks an already decoded source AST.  This is useful to workspace
-/// adapters that have already performed the reader phase.
-pub fn check_ast(
-    source_id: impl AsRef<str>,
-    ast: &SourceAst,
-    diagnostics: &mut Vec<Diagnostic>,
-) -> Option<CheckedProgram> {
-    check_ast_with_bindings(source_id, ast, diagnostics).0
-}
-
 /// Checks an already decoded source AST and returns semantic binding facts
 /// alongside the checked program.
 pub fn check_ast_with_bindings(
@@ -5175,13 +5165,14 @@ fn check_form(
                         && !function_targets.has_closure)
                         .then(|| function_targets.known.iter().next().copied())
                         .flatten();
-                    Expr::indirect_tail_call_with_hint(
+                    Expr::indirect_call(
                         callee,
                         function_hint,
                         arguments,
                         result,
                         origin,
                     )
+                    .with_tail()
                 }
                 None => Expr::indirect_call(
                     callee,
