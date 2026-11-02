@@ -42,6 +42,7 @@ pub fn module_with_entry(
         imports: Vec::new(),
         host_imports: Vec::new(),
         extra: Vec::new(),
+        measure: false,
     };
     // The one function is the entry, so the module always encodes.
     encode::module(&parts).unwrap_or_default()

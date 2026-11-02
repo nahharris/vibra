@@ -173,6 +173,10 @@ pub(crate) struct Machine<'a> {
     current_depth: usize,
     pub(crate) max_depth: usize,
     pub(crate) tail_transfers: usize,
+    /// Values built that the accounting counts, and expressions reduced: the
+    /// counters the performance baseline reads, with no effect on a run.
+    pub(crate) allocations: usize,
+    pub(crate) reductions: usize,
     test_mode: bool,
     limit: usize,
     /// Bytes of frames and continuations now live, counted exactly.
@@ -215,6 +219,8 @@ impl<'a> Machine<'a> {
             current_depth: 0,
             max_depth: 0,
             tail_transfers: 0,
+            allocations: 0,
+            reductions: 0,
             test_mode,
             limit: budget_bytes,
             stack_bytes: 0,
@@ -261,7 +267,10 @@ impl<'a> Machine<'a> {
         let mut step = start;
         loop {
             step = match step {
-                Step::Eval(expression) => self.eval(expression)?,
+                Step::Eval(expression) => {
+                    self.reductions = self.reductions.saturating_add(1);
+                    self.eval(expression)?
+                }
                 Step::Ret(value) => {
                     if self.konts.len() <= base {
                         return Ok(value);
@@ -481,6 +490,7 @@ impl<'a> Machine<'a> {
     fn fresh(&mut self, value: RuntimeValue) -> Result<Step<'a>, Halt> {
         let bytes = value.built_bytes();
         if bytes != 0 {
+            self.allocations = self.allocations.saturating_add(1);
             self.allocated = self.allocated.saturating_add(bytes);
             if self.allocated >= self.walk_after {
                 self.measure(Some(&value))?;

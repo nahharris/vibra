@@ -67,6 +67,8 @@ pub struct Instance {
     store: Store<Host>,
     instance: EngineInstance,
     tag: u64,
+    /// Whether the engine meters fuel.
+    fuel: bool,
 }
 
 impl fmt::Debug for Instance {
@@ -76,11 +78,16 @@ impl fmt::Debug for Instance {
 }
 
 impl Instance {
-    pub(crate) fn new(store: Store<Host>, instance: EngineInstance) -> Self {
+    pub(crate) fn new(
+        store: Store<Host>,
+        instance: EngineInstance,
+        fuel: bool,
+    ) -> Self {
         Self {
             store,
             instance,
             tag: NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed),
+            fuel,
         }
     }
 
@@ -143,6 +150,19 @@ impl Instance {
     pub fn live_size(&mut self) -> Result<u64, Outcome> {
         let size: i64 = self.call(LIVE_SIZE_EXPORT, ())?;
         Ok(u64::from_ne_bytes(size.to_ne_bytes()))
+    }
+
+    /// The fuel this instance has burned so far, for an instance of a runner
+    /// built by [`crate::Runner::with_fuel`]; `None` for any other runner.
+    #[must_use]
+    pub fn fuel_consumed(&self) -> Option<u64> {
+        if !self.fuel {
+            return None;
+        }
+        self.store
+            .get_fuel()
+            .ok()
+            .map(|left| u64::MAX.saturating_sub(left))
     }
 
     /// The variant index of an enum or the member index of a union.

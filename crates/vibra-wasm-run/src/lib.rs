@@ -20,7 +20,8 @@
 //! Cranelift is the only compiler. NaN canonicalization is on as a defence in
 //! depth (it is unobservable, because the specification canonicalizes NaN where
 //! it is observed). Every optional WebAssembly proposal is off, fuel and epoch
-//! interruption are unused, and a resource limiter applies the runner's memory
+//! interruption are unused (a runner built by [`Runner::with_fuel`] meters fuel
+//! for the performance baseline and for nothing else), and a resource limiter applies the runner's memory
 //! limit to every memory. The engine's own call stack is not part of the
 //! language: activations of a later step live in the module's arena.
 
@@ -253,6 +254,8 @@ impl From<ValidationError> for RunnerError {
 pub struct Runner {
     engine: Engine,
     pub(crate) limit: MemoryLimit,
+    /// Whether the engine meters fuel, which only the performance baseline asks for.
+    fuel: bool,
 }
 
 impl fmt::Debug for Runner {
@@ -271,7 +274,20 @@ impl Runner {
     ///
     /// [`RunnerError::Engine`] when the engine rejects the configuration.
     pub fn new(limit: MemoryLimit) -> Result<Self, RunnerError> {
-        Self::build(limit, None)
+        Self::build(limit, None, false)
+    }
+
+    /// Creates a runner like [`Runner::new`] whose engine also meters fuel, for the
+    /// performance baseline: every instance starts with the most fuel there is,
+    /// and [`Instance::fuel_consumed`] reports what its run burned. Fuel is
+    /// unused by every other runner, the conformance runner included, and it
+    /// changes nothing a module observes.
+    ///
+    /// # Errors
+    ///
+    /// [`RunnerError::Engine`] when the engine rejects the configuration.
+    pub fn with_fuel(limit: MemoryLimit) -> Result<Self, RunnerError> {
+        Self::build(limit, None, true)
     }
 
     /// Creates a runner like [`Runner::new`] whose engine allows a module no
@@ -287,16 +303,21 @@ impl Runner {
         limit: MemoryLimit,
         stack_bytes: usize,
     ) -> Result<Self, RunnerError> {
-        Self::build(limit, Some(stack_bytes))
+        Self::build(limit, Some(stack_bytes), false)
     }
 
     fn build(
         limit: MemoryLimit,
         stack_bytes: Option<usize>,
+        fuel: bool,
     ) -> Result<Self, RunnerError> {
-        let engine = Engine::new(&engine_config(stack_bytes))
+        let engine = Engine::new(&engine_config(stack_bytes, fuel))
             .map_err(|error| RunnerError::Engine(format!("{error:#}")))?;
-        Ok(Self { engine, limit })
+        Ok(Self {
+            engine,
+            limit,
+            fuel,
+        })
     }
 
     /// The limit applied to every instance.
@@ -400,6 +421,11 @@ impl Runner {
             },
         );
         store.limiter(|host| &mut host.limiter);
+        if self.fuel {
+            store
+                .set_fuel(u64::MAX)
+                .map_err(|error| RunnerError::Engine(format!("{error:#}")))?;
+        }
         for import in module.imports() {
             if linker.get_by_import(&mut store, &import).is_none() {
                 return Err(RunnerError::UnsuppliedImport {
@@ -416,7 +442,7 @@ impl Runner {
             }
             Err(error) => return Err(RunnerError::Instantiate(format!("{error:#}"))),
         };
-        Ok(Started::Ready(Instance::new(store, instance)))
+        Ok(Started::Ready(Instance::new(store, instance, self.fuel)))
     }
 }
 
@@ -427,7 +453,7 @@ impl Runner {
 /// proposals do not exist in this engine. The rest are turned off here, and
 /// [`validate`] refuses a module that uses any of them before it reaches the
 /// engine.
-fn engine_config(stack_bytes: Option<usize>) -> Config {
+fn engine_config(stack_bytes: Option<usize>, fuel: bool) -> Config {
     let mut config = Config::new();
     if let Some(stack_bytes) = stack_bytes {
         config.max_wasm_stack(stack_bytes);
@@ -435,7 +461,7 @@ fn engine_config(stack_bytes: Option<usize>) -> Config {
     config
         .strategy(Strategy::Cranelift)
         .cranelift_nan_canonicalization(true)
-        .consume_fuel(false)
+        .consume_fuel(fuel)
         .epoch_interruption(false)
         .wasm_multi_value(true)
         .wasm_bulk_memory(true)

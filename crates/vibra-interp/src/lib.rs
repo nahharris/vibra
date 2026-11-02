@@ -91,6 +91,8 @@ pub struct Execution {
     max_activation_depth: usize,
     tail_transfer_count: usize,
     peak_memory_bytes: usize,
+    allocation_count: usize,
+    reduction_count: usize,
 }
 
 impl Execution {
@@ -131,6 +133,22 @@ impl Execution {
         self.peak_memory_bytes
     }
 
+    /// How many values the run built that the memory accounting counts, which
+    /// is the interpreter's allocation count. This is host-side
+    /// instrumentation and is not part of a Vibra result.
+    #[must_use]
+    pub const fn allocation_count(&self) -> usize {
+        self.allocation_count
+    }
+
+    /// How many expressions the run reduced: the interpreter's measure of
+    /// work, as fuel is a module's. This is host-side instrumentation and is
+    /// not part of a Vibra result.
+    #[must_use]
+    pub const fn reduction_count(&self) -> usize {
+        self.reduction_count
+    }
+
     /// Whether the entry returned `err`. The run then ends as a program
     /// failure: `err` is a value the program returned, so it is neither a trap
     /// nor a diagnostic, and the error's content is not inspected.
@@ -153,6 +171,9 @@ pub struct TestExecution {
     audit_trace: Vec<AuditEvent>,
     max_activation_depth: usize,
     tail_transfer_count: usize,
+    peak_memory_bytes: usize,
+    allocation_count: usize,
+    reduction_count: usize,
 }
 
 impl TestExecution {
@@ -178,6 +199,24 @@ impl TestExecution {
     #[must_use]
     pub const fn tail_transfer_count(&self) -> usize {
         self.tail_transfer_count
+    }
+
+    /// The most memory the test held at once, as [`Execution::peak_memory_bytes`].
+    #[must_use]
+    pub const fn peak_memory_bytes(&self) -> usize {
+        self.peak_memory_bytes
+    }
+
+    /// How many values the test built, as [`Execution::allocation_count`].
+    #[must_use]
+    pub const fn allocation_count(&self) -> usize {
+        self.allocation_count
+    }
+
+    /// How many expressions the test reduced, as [`Execution::reduction_count`].
+    #[must_use]
+    pub const fn reduction_count(&self) -> usize {
+        self.reduction_count
     }
 }
 
@@ -374,6 +413,8 @@ impl Interpreter {
             max_activation_depth: machine.max_depth,
             tail_transfer_count: machine.tail_transfers,
             peak_memory_bytes,
+            allocation_count: machine.allocations,
+            reduction_count: machine.reductions,
             audit_trace: machine.audit,
         })
     }
@@ -426,11 +467,15 @@ impl Interpreter {
         {
             return Err(invalid());
         }
+        let peak_memory_bytes = machine.peak_memory_bytes();
         Ok(TestExecution {
             assertion_failure: machine.assertion_failure,
             audit_trace: machine.audit,
             max_activation_depth: machine.max_depth,
             tail_transfer_count: machine.tail_transfers,
+            peak_memory_bytes,
+            allocation_count: machine.allocations,
+            reduction_count: machine.reductions,
         })
     }
 }

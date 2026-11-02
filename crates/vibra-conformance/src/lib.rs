@@ -27,6 +27,7 @@
 //! WebAssembly backend when it lowers, against the case's one expectation,
 //! and the checked-in parity inventory records which cases do.
 
+pub mod baseline;
 mod corpus;
 mod format;
 mod graph;

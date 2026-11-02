@@ -110,6 +110,8 @@ pub(crate) struct Parts {
     pub(crate) host_imports: Vec<&'static HostRow>,
     /// Routines after the object constructor: the comparers of closed key shapes.
     pub(crate) extra: Vec<Routine>,
+    /// Whether the allocator counts (see [`Routines::measure`]).
+    pub(crate) measure: bool,
 }
 
 /// The routine indices of a module of `function_count` lowered functions.
@@ -125,7 +127,10 @@ pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
         .checked_add(u32::try_from(parts.host_imports.len()).ok()?)?;
     // The imports take the first function indices, so every defined function,
     // the runtime routines included, is numbered after them.
-    let fns = routines_for(import_count.checked_add(function_count)?);
+    let fns = Routines {
+        measure: parts.measure,
+        ..routines_for(import_count.checked_add(function_count)?)
+    };
 
     let mut types = Types::default();
     // The type of every function the dispatcher can reach.

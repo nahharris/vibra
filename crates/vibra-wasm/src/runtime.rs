@@ -111,6 +111,10 @@ pub struct Routines {
     /// object, with a count of one. It is the last routine and is present only
     /// when the module builds an object.
     pub new: u32,
+    /// Whether the allocator also counts, for the performance baseline: it adds
+    /// one to `alloc_count` and raises `live_peak` at every allocation. A module
+    /// built without it has neither instruction.
+    pub measure: bool,
 }
 
 /// The accessors in the order they are emitted and exported.
@@ -215,6 +219,7 @@ impl Routines {
             run: first_accessor + accessors + 3,
             reframe: first_accessor + accessors + 4,
             new: first_accessor + accessors + 5,
+            measure: false,
         }
     }
 }
@@ -528,6 +533,18 @@ fn alloc(fns: &Routines) -> Routine {
     push(&mut code, &[ZERO]);
     push(&mut code, &load_state64(state::LIVE_SIZE));
     push(&mut code, &[get(bytes), I::I64Add, st64(state::LIVE_SIZE)]);
+    if fns.measure {
+        // The performance baseline's counters: one more allocation, and a new
+        // peak when the live size passes the old one.
+        push(&mut code, &[ZERO]);
+        push(&mut code, &load_state64(state::ALLOC_COUNT));
+        push(&mut code, &[c64(1), I::I64Add, st64(state::ALLOC_COUNT)]);
+        push(&mut code, &load_state64(state::LIVE_SIZE));
+        push(&mut code, &load_state64(state::LIVE_PEAK));
+        push(&mut code, &[I::I64GtU, I::If(EMPTY), ZERO]);
+        push(&mut code, &load_state64(state::LIVE_SIZE));
+        push(&mut code, &[st64(state::LIVE_PEAK), I::End]);
+    }
     push(
         &mut code,
         &[
