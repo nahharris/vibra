@@ -546,8 +546,8 @@ pub fn measure_program(root: &Path, program: &Program) -> Result<Exact, String> 
     })
 }
 
-fn prepare_all(root: &Path) -> Result<Vec<Prepared>, String> {
-    PROGRAMS
+fn prepare_all(root: &Path, programs: &[Program]) -> Result<Vec<Prepared>, String> {
+    programs
         .iter()
         .map(|program| prepare(root, program))
         .collect()
@@ -606,12 +606,26 @@ fn median_micros(
 /// A message naming the program that failed, or that `runs` is below
 /// [`MIN_RUNS`].
 pub fn measure(root: &Path, runs: usize) -> Result<Baseline, String> {
+    measure_programs(root, &PROGRAMS, runs)
+}
+
+/// [`measure`] over `programs`, which a host test narrows to the cheap ones.
+///
+/// # Errors
+///
+/// A message naming the program that failed, or that `runs` is below
+/// [`MIN_RUNS`].
+pub fn measure_programs(
+    root: &Path,
+    programs: &[Program],
+    runs: usize,
+) -> Result<Baseline, String> {
     if runs < MIN_RUNS {
         return Err(format!(
             "a recorded median needs at least {MIN_RUNS} runs, not {runs}"
         ));
     }
-    let prepared = prepare_all(root)?;
+    let prepared = prepare_all(root, programs)?;
     let plain = Runner::new(wasm_memory_limit()).map_err(|error| error.to_string())?;
     let mut exact = Vec::new();
     let mut medians = Vec::new();

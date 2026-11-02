@@ -22,7 +22,8 @@ use std::time::{Duration, Instant};
 
 use vibra_conformance::baseline::{
     BASELINE_PATH, Baseline, Exact, InterpreterExact, MIN_RUNS, PROGRAMS, Program,
-    WasmExact, differences, measure_exact, measure_program, repository_root,
+    WasmExact, differences, measure_exact, measure_program, measure_programs,
+    repository_root,
 };
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -100,6 +101,32 @@ fn the_document_names_the_programs_of_the_list_in_order() {
     assert_eq!(exact, listed);
     assert_eq!(medians, listed);
     assert_eq!(listed.len(), 10);
+}
+
+#[test]
+fn a_measurement_of_the_cheap_programs_has_their_recorded_exact_metrics_and_round_trips()
+ {
+    // The whole list takes minutes at eleven runs; the generator is the same code.
+    let cheap = [PROGRAMS[7], PROGRAMS[9]];
+    assert_eq!(
+        cheap.map(|program| program.name),
+        ["float-to-str", "effectful-walk"]
+    );
+    let root = repository_root();
+    let error =
+        measure_programs(&root, &cheap, MIN_RUNS - 1).expect_err("too few runs");
+    assert!(error.contains("at least"), "{error}");
+
+    let measured = measure_programs(&root, &cheap, MIN_RUNS).expect("a measurement");
+    let recorded = recorded();
+    assert_eq!(
+        measured.exact,
+        [recorded.exact[7].clone(), recorded.exact[9].clone()]
+    );
+    assert_eq!(measured.informational.medians.len(), 2);
+    assert_eq!(usize::try_from(measured.informational.runs), Ok(MIN_RUNS));
+    let text = measured.render().expect("a rendering");
+    assert_eq!(Baseline::parse(&text).expect("it decodes"), measured);
 }
 
 #[test]
