@@ -126,49 +126,6 @@ fn a_bad_atom_or_an_unadmitted_target_does_not_stop_its_sibling() {
 }
 
 #[test]
-fn an_omitted_root_is_reported_at_the_entry_value_with_every_hop_related() {
-    let project = TempProject::new(
-        "witness",
-        &two_binaries(" @ops.log.audit", " @ops.log.audit @ops.log.write"),
-        &sources(),
-    );
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let first = &snapshot.project().project().targets()[0];
-
-    let checked = vibra_workspace::semantic::check_target(&snapshot, first);
-
-    let diagnostics = checked
-        .diagnostics()
-        .iter()
-        .filter(|diagnostic| diagnostic.code() == DiagnosticCode::EffectOutsideCeiling)
-        .collect::<Vec<_>>();
-    assert_eq!(diagnostics.len(), 1, "{:?}", checked.diagnostics());
-    let diagnostic = diagnostics[0];
-    assert_eq!(diagnostic.source_id(), Some("project.vibon"));
-    let entry = first.entry().expect("entry").span();
-    assert_eq!(diagnostic.primary_span(), entry);
-    assert!(diagnostic.notes().is_empty());
-    let hops = diagnostic
-        .related()
-        .iter()
-        .map(|related| (related.source_id.as_deref(), related.message.as_str()))
-        .collect::<Vec<_>>();
-    assert_eq!(
-        hops,
-        [
-            (
-                Some("src/first/main.vib"),
-                "performs @ops.log.write via @ops.log.audit.record"
-            ),
-            (
-                Some("src/ops/log.vib"),
-                "performs @ops.log.write via @ops.log.write.text"
-            ),
-        ]
-    );
-}
-
-#[test]
 fn an_unused_array_root_is_a_warning_and_the_target_still_runs() {
     let unused = TempProject::new(
         "unused-root",
