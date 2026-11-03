@@ -1,61 +1,14 @@
 //! Service-level conflict tests for project initialization plans.
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 #[cfg(windows)]
 use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use vibra_cli::{InitError, apply_init, plan_init};
 
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
-
-struct TempDir(PathBuf, Vec<PathBuf>);
-
-impl TempDir {
-    fn new() -> Self {
-        let nonce = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "vibra-init-plan-step11-{}-{nonce}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&path).expect("create test root");
-        Self(path, Vec::new())
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-
-    fn sibling_dir(&mut self, suffix: &str) -> PathBuf {
-        let name = self
-            .0
-            .file_name()
-            .expect("temporary root has a name")
-            .to_string_lossy();
-        let path = self.0.with_file_name(format!("{name}-{suffix}"));
-        fs::create_dir_all(&path).expect("create outside directory");
-        self.1.push(path.clone());
-        path
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-        for path in &self.1 {
-            let _ = fs::remove_dir_all(path);
-        }
-    }
-}
+use crate::support::TempDir;
 
 fn link_directory(link: &Path, target: &Path) -> io::Result<()> {
     #[cfg(unix)]
@@ -90,7 +43,7 @@ fn link_directory(link: &Path, target: &Path) -> io::Result<()> {
 
 #[test]
 fn init_plan_rechecks_a_race_created_destination_before_installing() {
-    let root = TempDir::new();
+    let root = TempDir::new("init-plan");
     let plan = plan_init(root.path(), Some(Path::new("created-later")))
         .expect("absent destination can be planned");
     let destination = root.path().join("created-later");
@@ -108,7 +61,7 @@ fn init_plan_rechecks_a_race_created_destination_before_installing() {
 
 #[test]
 fn init_plan_rejects_destinations_that_escape_the_workspace() {
-    let root = TempDir::new();
+    let root = TempDir::new("init-plan");
     let error = plan_init(root.path(), Some(Path::new("../outside")))
         .expect_err("parent traversal must be refused");
     assert!(matches!(error, InitError::InvalidInput(_)));
@@ -116,7 +69,7 @@ fn init_plan_rejects_destinations_that_escape_the_workspace() {
 
 #[test]
 fn init_rejects_a_parent_replaced_by_an_outside_directory_link() {
-    let mut root = TempDir::new();
+    let mut root = TempDir::new("init-plan");
     let parent = root.path().join("apps");
     fs::create_dir(&parent).expect("create destination parent");
     let outside = root.sibling_dir("outside");

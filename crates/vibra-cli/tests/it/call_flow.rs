@@ -5,14 +5,9 @@
 //! deeper summary for each wrap and the process aborted with a stack overflow,
 //! or reported `@tool.unavailable`. It now checks and runs.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing)]
+use std::process::Output;
 
-use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
-
-const PROJECT: &str = r#"(record format: @project.v1 package: (record name: "cps" version: "0.1.0") targets: (array (record name: @app kind: @bin root: "src/app" entry: @app.main.main effects: (array))) dependencies: (dict))
-"#;
+use crate::support::{TempDir, app_target, manifest, run_workspace};
 
 const MAIN: &str = r#"(defn main () void
   (let - (walk 100000u64 (lambda (total u64) u64 total)))
@@ -34,37 +29,20 @@ const MAIN: &str = r#"(defn main () void
     (result.err -) 0u64))
 "#;
 
-struct Scratch(PathBuf);
+struct Scratch(TempDir);
 
 impl Scratch {
     fn new() -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "vibra-callflow21b-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(path.join("src/app")).expect("project");
-        std::fs::write(path.join("project.vibon"), PROJECT).expect("manifest");
-        std::fs::write(path.join("src/app/main.vib"), MAIN).expect("source");
-        Self(path)
+        let manifest = manifest("cps", &app_target("main", ""), "(dict)");
+        Self(TempDir::project(
+            "callflow21b",
+            &manifest,
+            &[("src/app/main.vib", MAIN)],
+        ))
     }
 
     fn vibra(&self, arguments: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_vibra"))
-            .args(["--workspace", self.0.to_str().expect("utf-8")])
-            .args(arguments)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .expect("vibra binary")
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        run_workspace(self.0.path(), arguments, None)
     }
 }
 

@@ -1,54 +1,21 @@
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 //! Actual-binary regressions for the M2 review of PR 295: a relocated
 //! toolchain, human-mode test reports, memory exhaustion by deep recursion,
-//! `help`, and an initializer cycle through a closure-valued global.
+//! `help`, an initializer cycle through a closure-valued global, and an entry
+//! result that hides a function.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU64, Ordering};
 
-use jsonschema::Validator;
 use serde_json::Value;
 
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
-
-/// A fresh directory under the system temporary root, which is outside the
-/// repository checkout the binary was built from.
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(label: &str) -> Self {
-        let nonce = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "vibra-review-{label}-{}-{nonce}",
-            std::process::id()
-        ));
-        let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(&root).expect("create temporary directory");
-        Self(root)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
+use crate::support::{
+    TempDir, app_target, assert_envelope_schema, manifest, run_in, text,
+};
 
 /// A fresh `project init demo` workspace with `src/demo/main.vib` replaced.
 struct DemoProject {
-    _parent: TempDir,
+    parent: TempDir,
     root: PathBuf,
 }
 
@@ -58,10 +25,7 @@ impl DemoProject {
     }
 
     fn write(&self, relative: &str, content: &str) {
-        let path = self.root.join(relative);
-        fs::create_dir_all(path.parent().expect("fixture parent"))
-            .expect("create fixture directory");
-        fs::write(path, content).expect("write fixture");
+        self.parent.write(&format!("demo/{relative}"), content);
     }
 }
 
@@ -72,14 +36,14 @@ fn demo_project(label: &str, main: &str) -> DemoProject {
     assert_eq!(output.status.code(), Some(0), "{output:?}");
     let project = DemoProject {
         root: parent.path().join("demo"),
-        _parent: parent,
+        parent,
     };
     project.write("src/demo/main.vib", main);
     project
 }
 
 fn vibra(root: &Path, arguments: &[&str]) -> Output {
-    vibra_at(Path::new(env!("CARGO_BIN_EXE_vibra")), root, arguments)
+    run_in(arguments, root)
 }
 
 fn vibra_at(binary: &Path, root: &Path, arguments: &[&str]) -> Output {
@@ -94,17 +58,10 @@ fn json(output: &Output, exit: i32, command: &str, result: &str) -> Value {
     assert_eq!(output.status.code(), Some(exit), "{output:?}");
     let envelope: Value =
         serde_json::from_slice(&output.stdout).expect("stdout is one JSON document");
-    let schema: Value = serde_json::from_str(vibra_schema::COMMAND_RESULT_SCHEMA)
-        .expect("command-result schema is JSON");
-    let validator = Validator::new(&schema).expect("command-result schema compiles");
-    assert!(validator.is_valid(&envelope), "{envelope:#}");
+    assert_envelope_schema(&envelope);
     assert_eq!(envelope["command"], command);
     assert_eq!(envelope["result"], result);
     envelope
-}
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8(bytes.to_vec()).expect("utf-8 output")
 }
 
 const ASSERT_SUITE: &str = "(import assert @std.assert)\n(test \"passes\" (assert.true true))\n(test \"strings\" (assert.equal \"x\" \"y\"))\n(test \"negation\" (assert.false true))\n";
@@ -328,4 +285,43 @@ fn an_initializer_cycle_through_a_closure_global_is_rejected_before_running() {
             assert_eq!(envelope["payload"]["programResult"], Value::Null);
         }
     }
+}
+
+/// A function hidden behind `any` in the entry's result has no encoding to
+/// report: `run` ends with a coded trap, not an interpreter invariant
+/// failure (`docs/spec/06-runtime.md`, "Traps"). The deeply nested entry result
+/// is `an_error_nested_five_thousand_deep_is_reported_whole` of `entry_outcomes`.
+#[test]
+fn an_entry_result_hiding_a_function_is_a_coded_trap() {
+    let project = TempDir::project(
+        "hidden-function",
+        &manifest("demo", &app_target("execute", ""), "(dict)"),
+        &[(
+            "src/app/main.vib",
+            "(defn inc (x i32) i32 x)\n\n(defn execute () (result void any) (result.err inc))\n",
+        )],
+    );
+    let output = crate::support::vibra()
+        .args(["--format", "json", "--workspace"])
+        .arg(project.path())
+        .args(["run", "src/app"])
+        .output()
+        .expect("vibra binary");
+    assert_eq!(output.status.code(), Some(5), "{output:?}");
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("invariant"),
+        "{output:?}"
+    );
+    let envelope: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("json envelope");
+    assert_eq!(envelope["result"], "@command.trap");
+    assert_eq!(
+        envelope["diagnostics"][0]["code"],
+        "@runtime.unobservable-function"
+    );
+    assert_eq!(
+        envelope["payload"]["trap"]["trapCode"],
+        "@runtime.unobservable-function"
+    );
+    assert!(envelope["payload"]["trap"]["origin"].is_null());
 }

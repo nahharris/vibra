@@ -1,63 +1,13 @@
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 //! Process-level command contract tests for M2 Step 11.
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::Path;
 
-use jsonschema::Validator;
-use serde_json::Value;
 use vibra_syntax::parse_source;
 use vibra_types::check_source;
 use vibra_workspace::WorkspaceSnapshot;
 
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
-
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new(label: &str) -> Self {
-        let nonce = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "vibra-cli-step11-{label}-{}-{nonce}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&path).expect("create test root");
-        Self(path)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_vibra"))
-        .args(args)
-        .output()
-        .expect("run the built vibra binary")
-}
-
-fn run_in(args: &[&str], current_dir: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_vibra"))
-        .current_dir(current_dir)
-        .args(args)
-        .output()
-        .expect("run the built vibra binary in the requested directory")
-}
+use crate::support::{TempDir, assert_envelope_schema, json, run, run_in};
 
 #[cfg(unix)]
 fn directory_identity(path: &Path) -> (u64, u64) {
@@ -73,23 +23,8 @@ fn directory_identity(path: &Path) -> same_file::Handle {
 }
 
 #[cfg(not(any(unix, windows)))]
-fn directory_identity(path: &Path) -> PathBuf {
+fn directory_identity(path: &Path) -> std::path::PathBuf {
     path.canonicalize().expect("canonical workspace directory")
-}
-
-fn json(output: &Output) -> Value {
-    serde_json::from_slice(&output.stdout).expect("stdout is one JSON document")
-}
-
-fn assert_envelope_schema(envelope: &Value) {
-    let schema: Value = serde_json::from_str(vibra_schema::COMMAND_RESULT_SCHEMA)
-        .expect("checked-in command result schema is valid JSON");
-    let validator = Validator::new(&schema).expect("command result schema compiles");
-    assert!(
-        validator.is_valid(envelope),
-        "envelope violates command-result schema: {}",
-        serde_json::to_string_pretty(envelope).expect("envelope serializes")
-    );
 }
 
 #[test]

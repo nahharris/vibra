@@ -1,87 +1,23 @@
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 //! Process-level command contract tests for M2 Step 12.
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::Path;
+use std::process::{Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use jsonschema::Validator;
 use serde_json::Value;
 
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+use crate::support::{
+    TempDir, assert_envelope_schema, json, manifest, run, run_in, vibra,
+};
 
-struct TempProject(PathBuf);
-
-impl TempProject {
-    fn new(label: &str, targets: &str, sources: &[(&str, &str)]) -> Self {
-        let nonce = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "vibra-cli-step12-{label}-{}-{nonce}",
-            std::process::id()
-        ));
-        fs::create_dir_all(root.join("src/app")).expect("create project source root");
-        fs::write(
-            root.join("project.vibon"),
-            format!("(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array {targets}) dependencies: (dict))\n"),
-        )
-        .expect("write project marker");
-        for (path, source) in sources {
-            let path = root.join(path);
-            fs::create_dir_all(path.parent().expect("source parent"))
-                .expect("create module directory");
-            fs::write(path, source).expect("write module source");
-        }
-        Self(root)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempProject {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn run(args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_vibra"))
-        .args(args)
-        .output()
-        .expect("run the built vibra binary")
+fn demo_project(label: &str, targets: &str, sources: &[(&str, &str)]) -> TempDir {
+    TempDir::project(label, &manifest("demo", targets, "(dict)"), sources)
 }
 
 fn run_from(directory: &Path, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_vibra"))
-        .current_dir(directory)
-        .args(args)
-        .output()
-        .expect("run the built vibra binary from the selected directory")
-}
-
-fn json(output: &Output) -> Value {
-    serde_json::from_slice(&output.stdout).expect("stdout is one JSON document")
-}
-
-fn assert_envelope_schema(envelope: &Value) {
-    let schema: Value = serde_json::from_str(vibra_schema::COMMAND_RESULT_SCHEMA)
-        .expect("checked-in command result schema is valid JSON");
-    let validator = Validator::new(&schema).expect("command result schema compiles");
-    assert!(
-        validator.is_valid(envelope),
-        "envelope violates command-result schema: {}",
-        serde_json::to_string_pretty(envelope).expect("envelope serializes")
-    );
+    run_in(args, directory)
 }
 
 fn binary_target() -> &'static str {
@@ -90,7 +26,7 @@ fn binary_target() -> &'static str {
 
 #[test]
 fn check_accepts_a_selected_target_by_its_project_relative_root() {
-    let project = TempProject::new(
+    let project = demo_project(
         "check-selected",
         binary_target(),
         &[("src/app/main.vib", "(defn execute () void (do))\n")],
@@ -118,7 +54,7 @@ fn check_accepts_a_selected_target_by_its_project_relative_root() {
 
 #[test]
 fn run_emits_one_json_envelope_and_keeps_program_output_inside_it() {
-    let project = TempProject::new(
+    let project = demo_project(
         "run-json",
         binary_target(),
         &[("src/app/main.vib", "(defn execute () void (do))\n")],
@@ -150,7 +86,7 @@ fn run_emits_one_json_envelope_and_keeps_program_output_inside_it() {
 
 #[test]
 fn explicit_check_does_not_fail_on_an_unrelated_target() {
-    let project = TempProject::new(
+    let project = demo_project(
         "unrelated-error",
         &format!(
             "{} (record name: @other kind: @lib root: \"src/other\")",
@@ -189,7 +125,7 @@ fn explicit_check_does_not_fail_on_an_unrelated_target() {
 
 #[test]
 fn unknown_target_is_invalid_input_with_the_documented_exit() {
-    let project = TempProject::new(
+    let project = demo_project(
         "unknown-target",
         binary_target(),
         &[("src/app/main.vib", "(defn execute () void (do))\n")],
@@ -215,7 +151,7 @@ fn unknown_target_is_invalid_input_with_the_documented_exit() {
 
 #[test]
 fn selected_check_includes_every_declaration_in_the_transitive_import_closure() {
-    let project = TempProject::new(
+    let project = demo_project(
         "import-closure-error",
         &format!(
             "{} (record name: @util kind: @lib root: \"src/util\")",
@@ -276,7 +212,7 @@ fn selected_check_includes_every_declaration_in_the_transitive_import_closure() 
 
 #[test]
 fn run_rejects_a_library_target_as_invalid_input() {
-    let project = TempProject::new(
+    let project = demo_project(
         "run-library",
         &format!(
             "{} (record name: @util kind: @lib root: \"src/util\")",
@@ -310,7 +246,7 @@ fn run_rejects_a_library_target_as_invalid_input() {
 
 #[test]
 fn check_and_run_select_project_relative_targets_from_a_nested_cwd() {
-    let project = TempProject::new(
+    let project = demo_project(
         "nested-cwd-target",
         binary_target(),
         &[("src/app/main.vib", "(defn execute () void (do))\n")],
@@ -335,7 +271,7 @@ fn check_and_run_select_project_relative_targets_from_a_nested_cwd() {
 
 #[test]
 fn signed_stdlib_imports_cannot_be_rebound_by_a_local_std_target() {
-    let project = TempProject::new(
+    let project = demo_project(
         "reserved-stdlib-overlay",
         &format!(
             "{} (record name: @std kind: @lib root: \"src/std\")",
@@ -374,7 +310,7 @@ fn signed_stdlib_imports_cannot_be_rebound_by_a_local_std_target() {
 
 #[test]
 fn check_returns_without_interpreting_a_nonterminating_pure_entry() {
-    let project = TempProject::new(
+    let project = demo_project(
         "check-does-not-run",
         binary_target(),
         &[(
@@ -382,7 +318,7 @@ fn check_returns_without_interpreting_a_nonterminating_pure_entry() {
             "(defn spin () void (spin))\n(defn execute () void (spin))\n",
         )],
     );
-    let mut child = Command::new(env!("CARGO_BIN_EXE_vibra"))
+    let mut child = vibra()
         .current_dir(project.path())
         .args(["--format", "json", "check", "src/app"])
         .stdout(Stdio::piped())
@@ -414,7 +350,7 @@ fn check_returns_without_interpreting_a_nonterminating_pure_entry() {
 
 #[test]
 fn project_load_diagnostics_keep_their_source_line_and_column() {
-    let project = TempProject::new(
+    let project = demo_project(
         "project-load-location",
         binary_target(),
         &[("src/app/main.vib", "(defn execute () void (do))\n")],

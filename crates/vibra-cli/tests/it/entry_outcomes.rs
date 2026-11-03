@@ -7,58 +7,30 @@
 //! trap stays `@command.trap` (5), and memory exhaustion stays the host event
 //! `@command.operational-failure` (3), whatever the entry held.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing)]
+use std::process::Output;
 
-use std::io::Write as _;
-use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
-
-use jsonschema::Validator;
 use serde_json::Value;
 
-fn manifest(effects: &str) -> String {
-    format!(
-        "(record format: @project.v1 package: (record name: \"outcome-demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.main effects: (array {effects}))) dependencies: (dict))\n"
-    )
-}
+use crate::support::{
+    TempDir, app_target, assert_envelope_schema, manifest, run_workspace, text,
+};
 
 /// A fresh project under the system temporary directory, removed when dropped.
-struct Scratch(PathBuf);
+struct Scratch(TempDir);
 
 impl Scratch {
     fn new(label: &str, effects: &str, main: &str) -> Self {
-        // A counter, not the clock, makes the name unique within the process.
-        static NEXT: std::sync::atomic::AtomicU64 =
-            std::sync::atomic::AtomicU64::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "vibra-outcome19-{label}-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(path.join("src/app")).expect("project");
-        std::fs::write(path.join("project.vibon"), manifest(effects))
-            .expect("manifest");
-        std::fs::write(path.join("src/app/main.vib"), main).expect("source");
-        Self(path)
+        let manifest = manifest("outcome-demo", &app_target("main", effects), "(dict)");
+        Self(TempDir::project(
+            label,
+            &manifest,
+            &[("src/app/main.vib", main)],
+        ))
     }
 
     /// Runs the binary with `input` on its standard input.
     fn vibra(&self, arguments: &[&str], input: &[u8]) -> Output {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_vibra"))
-            .args(["--workspace", self.0.to_str().expect("utf-8")])
-            .args(arguments)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("vibra binary");
-        child
-            .stdin
-            .take()
-            .expect("stdin")
-            .write_all(input)
-            .expect("write input");
-        child.wait_with_output().expect("output")
+        run_workspace(self.0.path(), arguments, Some(input))
     }
 
     /// The JSON envelope of `run`, validated against the command-result schema.
@@ -66,10 +38,7 @@ impl Scratch {
         let output = self.vibra(&["--format", "json", "run", "src/app"], input);
         assert_eq!(output.status.code(), Some(code), "{output:?}");
         let envelope: Value = serde_json::from_slice(&output.stdout).expect("json");
-        let schema: Value = serde_json::from_str(vibra_schema::COMMAND_RESULT_SCHEMA)
-            .expect("command-result schema is JSON");
-        let validator = Validator::new(&schema).expect("schema compiles");
-        assert!(validator.is_valid(&envelope), "{envelope}");
+        assert_envelope_schema(&envelope);
         assert_eq!(envelope["result"], result, "{envelope}");
         envelope
     }
@@ -80,16 +49,6 @@ impl Scratch {
         assert_eq!(output.status.code(), Some(code), "{output:?}");
         output
     }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8(bytes.to_vec()).expect("utf-8")
 }
 
 const STDOUT: &str = "@std.io.stdout";

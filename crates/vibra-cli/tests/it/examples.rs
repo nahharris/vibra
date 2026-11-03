@@ -9,14 +9,12 @@
 //! runs, when its function ceiling omits a performed root; the same rejection by
 //! the target array is the corpus cases `V1-EFFECT-host-target-array-omits-*`.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing)]
-
-use std::io::Write as _;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::process::Output;
 
 use vibra_workspace::WorkspaceSnapshot;
+
+use crate::support::{TempDir, json, run_workspace, spelled};
 
 /// Each example and the tests it holds.
 const EXAMPLES: [(&str, u64); 4] = [
@@ -39,29 +37,11 @@ fn example(name: &str) -> PathBuf {
 
 /// Runs the binary over `workspace` with `input` on its standard input.
 fn vibra_in(workspace: &Path, arguments: &[&str], input: &str) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_vibra"))
-        .args(["--workspace", &workspace.to_string_lossy()])
-        .args(arguments)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("vibra binary");
-    child
-        .stdin
-        .take()
-        .expect("stdin")
-        .write_all(input.as_bytes())
-        .expect("write input");
-    child.wait_with_output().expect("output")
+    run_workspace(workspace, arguments, Some(input.as_bytes()))
 }
 
 fn vibra(workspace: &Path, arguments: &[&str]) -> Output {
     vibra_in(workspace, arguments, "")
-}
-
-fn json(output: &Output) -> serde_json::Value {
-    serde_json::from_slice(&output.stdout).expect("json envelope")
 }
 
 fn copy_directory(from: &Path, to: &Path) {
@@ -77,38 +57,11 @@ fn copy_directory(from: &Path, to: &Path) {
     }
 }
 
-/// A scratch directory under the system temporary directory, removed on drop.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new() -> Self {
-        // A counter, not the clock, makes the name unique within the process.
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "vibra-examples-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&path).expect("scratch");
-        Self(path)
-    }
-
-    /// A copy of the example `name` in this directory.
-    fn copy_of(&self, name: &str) -> PathBuf {
-        let project = self.0.join(name);
-        copy_directory(&example(name), &project);
-        project
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn spelled(path: &Path) -> String {
-    path.to_str().expect("utf-8 path").replace('\\', "/")
+/// A copy of the example `name` in `scratch`.
+fn copy_of(scratch: &TempDir, name: &str) -> PathBuf {
+    let project = scratch.path().join(name);
+    copy_directory(&example(name), &project);
+    project
 }
 
 /// Every `.vib` and `.vibon` file below `directory`, relative to `base`.
@@ -311,8 +264,8 @@ fn human_run_writes_the_programs_bytes_to_the_process() {
 
 #[test]
 fn the_demo_reads_the_path_it_is_given_and_writes_the_quoted_content() {
-    let scratch = Scratch::new();
-    let input = scratch.0.join("note.txt");
+    let scratch = TempDir::new("examples");
+    let input = scratch.path().join("note.txt");
     std::fs::write(&input, "alpha\nbeta\n").expect("input file");
     let at = spelled(&input);
     let demo = example("m4-demo");
@@ -342,7 +295,7 @@ fn the_demo_reads_the_path_it_is_given_and_writes_the_quoted_content() {
     );
 
     // Another argument reads another file with the same binary source.
-    let other = scratch.0.join("other.txt");
+    let other = scratch.path().join("other.txt");
     std::fs::write(&other, "one\n").expect("input file");
     let run = vibra(&demo, &["run", "src/app", "--", &spelled(&other)]);
     assert_eq!(run.status.code(), Some(0), "{run:?}");
@@ -368,8 +321,8 @@ fn a_function_ceiling_that_omits_a_performed_root_is_rejected_before_running() {
             "performs @std.io.stdout via @std.io.stdout.text",
         ),
     ] {
-        let scratch = Scratch::new();
-        let project = scratch.copy_of("m4-demo");
+        let scratch = TempDir::new("examples");
+        let project = copy_of(&scratch, "m4-demo");
         let path = project.join("src/app/main.vib");
         let text = std::fs::read_to_string(&path).expect("file");
         let from = "(env.read fs.read io.stdout)";

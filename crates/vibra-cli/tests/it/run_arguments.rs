@@ -3,13 +3,9 @@
 //! under the system provider, verbatim and in order; `--` is accepted only by
 //! `run`, only after `TARGET`, and only as the first `--` after it.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing)]
+use std::process::Output;
 
-use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
-
-const PROJECT: &str = r#"(record format: @project.v1 package: (record name: "args-demo" version: "0.1.0") targets: (array (record name: @app kind: @bin root: "src/app" entry: @app.main.main effects: (array @std.env.read @std.io.stdout))) dependencies: (dict))
-"#;
+use crate::support::{TempDir, app_target, manifest, run_workspace, text};
 
 /// Writes each argument on its own line, so the output shows the list.
 const MAIN: &str = r#"(import env @std.env)
@@ -27,45 +23,33 @@ const MAIN: &str = r#"(import env @std.env)
 "#;
 
 /// A fresh project under the system temporary directory, removed when dropped.
-struct Scratch(PathBuf);
+struct Scratch(TempDir);
 
 impl Scratch {
     fn new() -> Self {
-        // A counter, not the clock, makes the name unique within the process: the
-        // clock of some platforms is too coarse to tell two parallel tests apart.
-        static NEXT: std::sync::atomic::AtomicU64 =
-            std::sync::atomic::AtomicU64::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "vibra-args18-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(path.join("src/app")).expect("project");
-        std::fs::write(path.join("project.vibon"), PROJECT).expect("manifest");
-        std::fs::write(path.join("src/app/main.vib"), MAIN).expect("source");
-        Self(path)
+        let manifest = manifest(
+            "args-demo",
+            &app_target("main", "@std.env.read @std.io.stdout"),
+            "(dict)",
+        );
+        Self(TempDir::project(
+            "args18",
+            &manifest,
+            &[("src/app/main.vib", MAIN)],
+        ))
+    }
+
+    fn path(&self) -> &std::path::Path {
+        self.0.path()
     }
 
     fn vibra(&self, arguments: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_vibra"))
-            .args(["--workspace", self.0.to_str().expect("utf-8")])
-            .args(arguments)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .expect("vibra binary")
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+        run_workspace(self.path(), arguments, None)
     }
 }
 
 fn stdout(output: &Output) -> String {
-    String::from_utf8(output.stdout.clone()).expect("utf-8")
+    text(&output.stdout)
 }
 
 #[test]
@@ -120,7 +104,7 @@ fn ten_thousand_arguments_and_a_one_mebibyte_argument_arrive_verbatim() {
         let mut arguments = ["--format", "json", "--workspace"]
             .map(std::ffi::OsString::from)
             .to_vec();
-        arguments.push(scratch.0.clone().into_os_string());
+        arguments.push(scratch.path().to_path_buf().into_os_string());
         arguments.extend(["run", "src/app", "--"].map(std::ffi::OsString::from));
         arguments.extend(tail.into_iter().map(std::ffi::OsString::from));
         let mut out = Vec::new();
@@ -196,11 +180,11 @@ fn a_non_unicode_argument_is_not_unicode_at_the_operation_not_a_command_error() 
     use std::os::unix::ffi::OsStrExt;
     let scratch = Scratch::new();
     let bad = std::ffi::OsStr::from_bytes(&[b'a', 0xff]);
-    let output = Command::new(env!("CARGO_BIN_EXE_vibra"))
-        .args(["--workspace", scratch.0.to_str().expect("utf-8")])
+    let output = crate::support::vibra()
+        .args(["--workspace", scratch.path().to_str().expect("utf-8")])
         .args(["run", "src/app", "--"])
         .arg(bad)
-        .stdin(Stdio::null())
+        .stdin(std::process::Stdio::null())
         .output()
         .expect("vibra binary");
     assert_eq!(output.status.code(), Some(0), "{output:?}");

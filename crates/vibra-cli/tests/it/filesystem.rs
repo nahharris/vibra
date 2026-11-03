@@ -3,14 +3,9 @@
 //! transformed copy beside it, and prints the transformation. The files are in a
 //! fresh directory under the system temporary directory, removed afterwards.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing)]
+use std::process::Output;
 
-use std::io::Write as _;
-use std::path::PathBuf;
-use std::process::{Command, Output, Stdio};
-
-const PROJECT: &str = r#"(record format: @project.v1 package: (record name: "fs-demo" version: "0.1.0") targets: (array (record name: @app kind: @bin root: "src/app" entry: @app.main.main effects: (array @std.fs.read @std.fs.write @std.io.stdin @std.io.stdout))) dependencies: (dict))
-"#;
+use crate::support::{TempDir, app_target, manifest, run_workspace, spelled};
 
 const MAIN: &str = r#"(import fs @std.fs)
 (import io @std.io)
@@ -30,60 +25,42 @@ const MAIN: &str = r#"(import fs @std.fs)
 "#;
 
 /// A fresh directory that is removed when dropped.
-struct Scratch(PathBuf);
+struct Scratch(TempDir);
 
 impl Scratch {
     fn new() -> Self {
-        // A counter, not the clock, makes the name unique within the process: the
-        // clock of some platforms is too coarse to tell two parallel tests apart.
-        static NEXT: std::sync::atomic::AtomicU64 =
-            std::sync::atomic::AtomicU64::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "vibra-fs17-cli-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(path.join("project/src/app")).expect("project");
-        std::fs::create_dir_all(path.join("data")).expect("data");
-        std::fs::write(path.join("project/project.vibon"), PROJECT).expect("manifest");
-        std::fs::write(path.join("project/src/app/main.vib"), MAIN).expect("source");
-        Self(path)
+        let manifest = manifest(
+            "fs-demo",
+            &app_target(
+                "main",
+                "@std.fs.read @std.fs.write @std.io.stdin @std.io.stdout",
+            ),
+            "(dict)",
+        );
+        let scratch = TempDir::new("fs17");
+        scratch.write("project/project.vibon", &manifest);
+        scratch.write("project/src/app/main.vib", MAIN);
+        std::fs::create_dir_all(scratch.path().join("data")).expect("data");
+        Self(scratch)
     }
-}
 
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
+    fn path(&self) -> &std::path::Path {
+        self.0.path()
     }
 }
 
 fn vibra(scratch: &Scratch, arguments: &[&str], input: &str) -> Output {
-    let workspace = scratch.0.join("project").to_string_lossy().into_owned();
-    let mut child = Command::new(env!("CARGO_BIN_EXE_vibra"))
-        .args(["--workspace", &workspace])
-        .args(arguments)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("vibra binary");
-    child
-        .stdin
-        .take()
-        .expect("stdin")
-        .write_all(input.as_bytes())
-        .expect("write input");
-    child.wait_with_output().expect("output")
-}
-
-fn spelled(path: &std::path::Path) -> String {
-    path.to_str().expect("utf-8 path").replace('\\', "/")
+    run_workspace(
+        &scratch.path().join("project"),
+        arguments,
+        Some(input.as_bytes()),
+    )
 }
 
 #[test]
 fn a_program_reads_the_file_named_on_stdin_and_writes_beside_it() {
     let scratch = Scratch::new();
-    let input = scratch.0.join("data/note.txt");
+    let input = scratch.path().join("data/note.txt");
     std::fs::write(&input, "héllo\n").expect("input file");
     let at = spelled(&input);
     let run = vibra(
@@ -98,7 +75,8 @@ fn a_program_reads_the_file_named_on_stdin_and_writes_beside_it() {
     assert_eq!(envelope["payload"]["stdout"], "> héllo\n");
     // The write reached the real file, beside the input.
     assert_eq!(
-        std::fs::read_to_string(scratch.0.join("data/note.txt.out")).expect("output"),
+        std::fs::read_to_string(scratch.path().join("data/note.txt.out"))
+            .expect("output"),
         "> héllo\n"
     );
     let ops = envelope["payload"]["auditTrace"]
@@ -125,7 +103,7 @@ fn a_program_reads_the_file_named_on_stdin_and_writes_beside_it() {
 #[test]
 fn a_missing_file_is_the_err_of_its_call_the_entry_returns_and_no_trap() {
     let scratch = Scratch::new();
-    let missing = spelled(&scratch.0.join("data/absent.txt"));
+    let missing = spelled(&scratch.path().join("data/absent.txt"));
     let run = vibra(
         &scratch,
         &["--format", "json", "run", "src/app"],
@@ -148,5 +126,5 @@ fn a_missing_file_is_the_err_of_its_call_the_entry_returns_and_no_trap() {
             .contains("variant: @not-found"),
         "{envelope}"
     );
-    assert!(!scratch.0.join("data/absent.txt.out").exists());
+    assert!(!scratch.path().join("data/absent.txt.out").exists());
 }

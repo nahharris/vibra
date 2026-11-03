@@ -1,96 +1,44 @@
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 //! Process-level command contract tests for M2 Step 13.
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::process::Output;
 
-use jsonschema::Validator;
 use serde_json::Value;
 
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+use crate::support::{
+    TempDir, app_target, assert_envelope_schema, json, manifest, vibra,
+};
 
-struct TempProject(PathBuf);
-
-impl TempProject {
-    fn new(label: &str, tests: &[(&str, &str)]) -> Self {
-        let nonce = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "vibra-cli-step13-{label}-{}-{nonce}",
-            std::process::id()
-        ));
-        fs::create_dir_all(root.join("src/app")).expect("create target source root");
-        fs::write(
-            root.join("project.vibon"),
-            "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict))\n",
-        )
-        .expect("write project marker");
-        fs::write(
-            root.join("src/app/main.vib"),
-            "(defn execute () void void)\n",
-        )
-        .expect("write target source");
-        for (relative, source) in tests {
-            let path = root.join(relative);
-            fs::create_dir_all(path.parent().expect("test source parent"))
-                .expect("create test module directory");
-            fs::write(path, source).expect("write test source");
-        }
-        Self(root)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
+/// A project whose binary target compiles, plus the `tests` sources.
+fn test_project(label: &str, tests: &[(&str, &str)]) -> TempDir {
+    let mut sources = vec![("src/app/main.vib", "(defn execute () void void)\n")];
+    sources.extend_from_slice(tests);
+    TempDir::project(
+        label,
+        &manifest("demo", &app_target("execute", ""), "(dict)"),
+        &sources,
+    )
 }
 
-impl Drop for TempProject {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
-
-fn run(project: &TempProject, arguments: &[&str]) -> Output {
+fn run(project: &TempDir, arguments: &[&str]) -> Output {
     let mut command = Vec::with_capacity(arguments.len().saturating_add(1));
     command.push("test");
     command.extend_from_slice(arguments);
     run_command(project, &command)
 }
 
-fn run_command(project: &TempProject, arguments: &[&str]) -> Output {
+fn run_command(project: &TempDir, arguments: &[&str]) -> Output {
     let workspace = project.path().to_string_lossy().into_owned();
-    Command::new(env!("CARGO_BIN_EXE_vibra"))
+    vibra()
         .args(["--format", "json", "--workspace", &workspace])
         .args(arguments)
         .output()
         .expect("run the built vibra binary")
 }
 
-fn json(output: &Output) -> Value {
-    serde_json::from_slice(&output.stdout).expect("stdout is one JSON document")
-}
-
-fn assert_envelope_schema(envelope: &Value) {
-    let schema: Value = serde_json::from_str(vibra_schema::COMMAND_RESULT_SCHEMA)
-        .expect("checked-in command result schema is valid JSON");
-    let validator = Validator::new(&schema).expect("command result schema compiles");
-    assert!(
-        validator.is_valid(envelope),
-        "envelope violates command-result schema: {}",
-        serde_json::to_string_pretty(envelope).expect("envelope serializes")
-    );
-}
-
 #[test]
 fn test_runs_a_passing_test_and_emits_the_closed_json_item() {
-    let project = TempProject::new(
+    let project = test_project(
         "passing",
         &[(
             "tests/math.vib",
@@ -125,7 +73,7 @@ fn test_runs_a_passing_test_and_emits_the_closed_json_item() {
 
 #[test]
 fn failed_assertion_is_a_structured_test_failure_and_exit_one() {
-    let project = TempProject::new(
+    let project = test_project(
         "assertion-failure",
         &[(
             "tests/math.vib",
@@ -153,7 +101,7 @@ fn failed_assertion_is_a_structured_test_failure_and_exit_one() {
 
 #[test]
 fn missing_assertion_import_is_static_diagnostics_not_unavailable() {
-    let project = TempProject::new(
+    let project = test_project(
         "missing-import",
         &[("tests/math.vib", "(test \"missing-import\" void)\n")],
     );
@@ -178,7 +126,7 @@ fn missing_assertion_import_is_static_diagnostics_not_unavailable() {
 
 #[test]
 fn unavailable_test_form_stays_distinct_from_failure() {
-    let project = TempProject::new(
+    let project = test_project(
         "unavailable-assertion",
         &[
             (
@@ -206,7 +154,7 @@ fn unavailable_test_form_stays_distinct_from_failure() {
 
 #[test]
 fn selector_must_be_canonical_and_unknown_selector_is_invalid_input() {
-    let project = TempProject::new(
+    let project = test_project(
         "selector",
         &[(
             "tests/math.vib",
@@ -230,7 +178,7 @@ fn selector_must_be_canonical_and_unknown_selector_is_invalid_input() {
 
 #[test]
 fn canonical_selector_runs_only_its_exact_test() {
-    let project = TempProject::new(
+    let project = test_project(
         "selector-exact",
         &[(
             "tests/math.vib",
@@ -254,7 +202,7 @@ fn canonical_selector_runs_only_its_exact_test() {
 
 #[test]
 fn project_diagnostics_precede_an_unknown_selector_lookup() {
-    let project = TempProject::new("selector-precedence", &[]);
+    let project = test_project("selector-precedence", &[]);
     fs::write(
         project.path().join("project.vibon"),
         "(record format: @project.v1 package: (record name: \"demo\") targets: (array) dependencies: (dict))\n",
@@ -279,7 +227,7 @@ fn project_diagnostics_precede_an_unknown_selector_lookup() {
 
 #[test]
 fn discovered_modules_and_tests_use_canonical_process_order() {
-    let project = TempProject::new(
+    let project = test_project(
         "deterministic-order",
         &[
             (
@@ -316,7 +264,7 @@ fn discovered_modules_and_tests_use_canonical_process_order() {
 
 #[test]
 fn omitted_selector_accepts_an_empty_test_suite() {
-    let project = TempProject::new("empty-suite", &[]);
+    let project = test_project("empty-suite", &[]);
 
     let output = run(&project, &[]);
 
@@ -337,7 +285,7 @@ fn omitted_selector_accepts_an_empty_test_suite() {
 
 #[test]
 fn warnings_are_attributed_to_passing_items_without_blocking_execution() {
-    let project = TempProject::new(
+    let project = test_project(
         "warning-attribution",
         &[(
             "tests/math.vib",
@@ -377,7 +325,7 @@ fn warnings_are_attributed_to_passing_items_without_blocking_execution() {
 
 #[test]
 fn unavailability_takes_precedence_over_assertion_failure() {
-    let project = TempProject::new(
+    let project = test_project(
         "unavailable-precedence",
         &[
             (
@@ -412,7 +360,7 @@ fn unavailability_takes_precedence_over_assertion_failure() {
 
 #[test]
 fn reserved_v1_commands_are_unavailable_and_unknown_names_are_invalid() {
-    let project = TempProject::new("reserved-commands", &[]);
+    let project = test_project("reserved-commands", &[]);
     let commands: &[&[&str]] = &[
         &["lint"],
         &["build", "src/app"],

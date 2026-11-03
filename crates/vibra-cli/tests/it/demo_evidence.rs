@@ -1,65 +1,32 @@
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 //! Actual-binary M2 demo evidence. Repeat offline with:
-//! `cargo test --locked --offline -p vibra-cli --test process_step14`.
+//! `cargo test --locked --offline -p vibra-cli --test it demo_evidence`.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use jsonschema::Validator;
 use serde_json::Value;
 
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+use crate::support::{TempDir, assert_envelope_schema, vibra};
 
+/// A fresh `hello` workspace inside its own temporary parent.
 struct TempHello {
-    parent: PathBuf,
+    parent: TempDir,
     root: PathBuf,
 }
 
 impl TempHello {
     fn new(label: &str) -> Self {
-        for _ in 0..1024 {
-            let nonce = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-            let parent = std::env::temp_dir().join(format!(
-                "vibra-step14-{label}-{}-{nonce}",
-                std::process::id()
-            ));
-            match fs::create_dir(&parent) {
-                Ok(()) => {
-                    let root = parent.join("hello");
-                    if let Err(error) = fs::create_dir(&root) {
-                        let _ = fs::remove_dir(&parent);
-                        panic!("create a fresh hello workspace: {error}");
-                    }
-                    return Self { parent, root };
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(error) => panic!("create a unique temporary parent: {error}"),
-            }
-        }
-        panic!("could not create a unique temporary hello workspace");
+        let parent = TempDir::new(label);
+        let root = parent.path().join("hello");
+        fs::create_dir(&root).expect("create a fresh hello workspace");
+        Self { parent, root }
     }
 
     fn write(&self, relative: &str, content: &str) {
-        let path = self.root.join(relative);
-        fs::create_dir_all(path.parent().expect("fixture file has a parent"))
-            .expect("create fixture directory");
-        fs::write(path, content).expect("write fixture file");
-    }
-}
-
-impl Drop for TempHello {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.parent);
+        self.parent.write(&format!("hello/{relative}"), content);
     }
 }
 
@@ -70,7 +37,7 @@ fn run(root: &Path, arguments: &[&str]) -> Output {
 }
 
 fn command(root: &Path, arguments: &[&str]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_vibra"));
+    let mut command = vibra();
     command
         .current_dir(root)
         .args(["--format", "json"])
@@ -125,14 +92,7 @@ fn envelope(output: &Output, exit: i32, command: &str, result: &str) -> Value {
         "stdout has one JSON envelope only"
     );
 
-    let schema: Value = serde_json::from_str(vibra_schema::COMMAND_RESULT_SCHEMA)
-        .expect("checked-in command-result schema is valid JSON");
-    let validator = Validator::new(&schema).expect("command-result schema compiles");
-    assert!(
-        validator.is_valid(&document),
-        "envelope violates schema: {}",
-        serde_json::to_string_pretty(&document).expect("envelope serializes")
-    );
+    assert_envelope_schema(&document);
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stderr_lines = stderr.lines().collect::<Vec<_>>();
     let mut next_line = 0;
