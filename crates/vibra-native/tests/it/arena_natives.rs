@@ -7,52 +7,16 @@
 //! and refuses an operand that is not an object of the row, instead of reading
 //! outside the memory.
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::unwrap_used,
-    missing_docs
-)]
-
 use vibra_ir::arena::{self, class, kind};
-use vibra_ir::external::{CompilerIntrinsic, NATIVE_ROWS, NativeRow};
+use vibra_ir::external::{CompilerIntrinsic, NATIVE_ROWS};
 use vibra_native::arena::{Fault, call, memory};
 
-fn row(intrinsic: CompilerIntrinsic) -> NativeRow {
-    intrinsic.native_import().expect("a native row")
-}
-
-/// A memory of blocks that a test lays out by hand.
-struct Heap(Vec<u8>);
+use crate::support::{Heap, OUT};
 
 const A: usize = 256;
 const B: usize = 512;
-const OUT: usize = 1024;
 
 impl Heap {
-    fn new() -> Self {
-        Self(vec![0; 4096])
-    }
-
-    fn put(&mut self, at: usize, bytes: &[u8]) {
-        self.0[at..at + bytes.len()].copy_from_slice(bytes);
-    }
-
-    fn header(&mut self, at: usize, object_kind: u8, stride: u32, len: u32) {
-        self.put(at, &1_u32.to_le_bytes());
-        self.put(at + 4, &256_u32.to_le_bytes());
-        self.put(at + 8, &[object_kind, u8::try_from(stride).unwrap()]);
-        self.put(at + 12, &len.to_le_bytes());
-    }
-
-    fn text(&mut self, at: usize, text: &str) {
-        let scalars = text.chars().map(u32::from).collect::<Vec<_>>();
-        self.header(at, kind::STR, 4, u32::try_from(scalars.len()).unwrap());
-        for (index, scalar) in scalars.iter().enumerate() {
-            self.put(at + 24 + 4 * index, &scalar.to_le_bytes());
-        }
-    }
-
     fn bytes(&mut self, at: usize, bytes: &[u8]) {
         self.header(at, kind::BYTES, 1, u32::try_from(bytes.len()).unwrap());
         self.put(at + 24, bytes);
@@ -67,14 +31,6 @@ impl Heap {
             self.put(at + 24 + index, &[*class]);
             self.put(first + 8 * index, &bits.to_le_bytes());
         }
-    }
-
-    fn run(
-        &mut self,
-        intrinsic: CompilerIntrinsic,
-        scalars: &[i64],
-    ) -> Result<i64, Fault> {
-        call(&row(intrinsic), memory(&mut self.0), scalars)
     }
 
     fn scalars_of(&self, at: usize) -> Vec<u32> {
