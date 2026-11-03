@@ -5,8 +5,7 @@
 //! the six accessors the skeleton's modules export, and the entry's body is
 //! the test's choice.
 
-#![allow(dead_code)]
-
+use vibra_wasm_run::{MemoryLimit, Runner};
 use wasm_encoder::{
     CodeSection, ConstExpr, EntityType, ExportKind, ExportSection, Function,
     FunctionSection, GlobalSection, GlobalType, ImportSection, Instruction,
@@ -199,4 +198,9 @@ pub(crate) fn module(spec: &Spec<'_>) -> Vec<u8> {
     module.section(&exports);
     module.section(&code);
     module.finish()
+}
+
+/// A runner over the memory limit the tests share.
+pub(crate) fn runner() -> Runner {
+    Runner::new(MemoryLimit::new(64 * 1024 * 1024)).expect("the engine configures")
 }

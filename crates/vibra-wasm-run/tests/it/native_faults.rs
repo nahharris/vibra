@@ -11,26 +11,13 @@
 //! The modules here are forged: each calls the real import, by its registry name
 //! and signature, with an operand a checked program cannot produce.
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
-mod common;
-
-use common::{Spec, module};
+use crate::support::{Spec, module, runner};
 use vibra_ir::arena::{header, kind};
 use vibra_ir::boundary::TrapCode;
-use vibra_wasm_run::{MemoryLimit, Outcome, ResultSlot, Runner};
+use vibra_wasm_run::{Outcome, ResultSlot};
 use wasm_encoder::{Instruction, MemArg, ValType};
 
 const PAGE: i32 = 65_536;
-
-fn runner() -> Runner {
-    Runner::new(MemoryLimit::new(64 * 1024 * 1024)).expect("the engine configures")
-}
 
 fn store8(at: i32, value: i32) -> Vec<Instruction<'static>> {
     vec![

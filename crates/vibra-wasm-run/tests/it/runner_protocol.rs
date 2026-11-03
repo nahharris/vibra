@@ -3,17 +3,9 @@
 //! memory limit (`docs/spec/07-diagnostics-and-conformance.md`,
 //! "Differential execution").
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
-mod common;
-
-use common::{
-    GLOBAL_ACTUAL, GLOBAL_EXPECTED, GLOBAL_FAILURE, GLOBAL_RESULT, Spec, module, record,
+use crate::support::{
+    GLOBAL_ACTUAL, GLOBAL_EXPECTED, GLOBAL_FAILURE, GLOBAL_RESULT, Spec, module,
+    record, runner,
 };
 use vibra_ir::TestAssertion;
 use vibra_ir::boundary::TrapCode;
@@ -21,10 +13,6 @@ use vibra_wasm_run::{MemoryLimit, Outcome, ResultSlot, Runner, RunnerError};
 use wasm_encoder::Instruction;
 
 const PAGE: usize = 65_536;
-
-fn runner() -> Runner {
-    Runner::new(MemoryLimit::new(64 * 1024 * 1024)).expect("the engine configures")
-}
 
 fn run(spec: &Spec<'_>) -> Outcome {
     runner()

@@ -1,16 +1,7 @@
 //! Validation under exactly the v1 feature baseline
 //! (`docs/spec/06-runtime.md`, "WebAssembly boundary").
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
-mod common;
-
-use common::{Spec, module};
+use crate::support::{Spec, module};
 use vibra_wasm_run::{ValidationError, validate};
 use wasm_encoder::{
     AbstractHeapType, CodeSection, ConstExpr, CustomSection, ExportKind, ExportSection,
