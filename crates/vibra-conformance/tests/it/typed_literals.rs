@@ -8,7 +8,7 @@ use std::path::Path;
 
 use vibra_conformance::{
     BackendObservation, CaseObservation, ConformanceProfile, ConformanceRunner,
-    ProfileDispatcher, ProfileHandler, StaticV1TypeHandler,
+    ProfileDispatcher, ProfileHandler, StaticV1WorkspaceCheckHandler,
 };
 use vibra_ir::Value;
 use vibra_syntax::parse_data;
@@ -16,7 +16,9 @@ use vibra_syntax::parse_data;
 #[test]
 fn typed_program_observation_is_valid_vibon() {
     let case = corpus_case("V1-TYPE-INFER-primitives");
-    let observation = StaticV1TypeHandler.run(&case).expect("type handler");
+    let observation = StaticV1WorkspaceCheckHandler
+        .run(&case)
+        .expect("workspace-check handler");
     let types = observation.types.expect("typed program observation");
     let document =
         parse_data(Path::new("types.vibon"), &types).expect("typed observation loader");

@@ -505,6 +505,18 @@ accepted = true
 hashes = ["sha256:test"]
 "#,
         ),
+        (
+            "removed artifact table",
+            r#"
+id = "V1-DIAG-alias-artifact"
+rule = "V1-DIAG"
+profile = "reader-v1"
+[expect]
+accepted = true
+[expect.artifact]
+hashes = ["sha256:test"]
+"#,
+        ),
     ];
 
     for (name, text) in aliases {
@@ -575,25 +587,128 @@ wasm = { result = "result.vibon", audit_trace = "audit.vibon" }
     );
 }
 
-#[test]
-fn artifact_expectations_are_compared_only_when_declared() {
-    let case = TempCase::new(
-        "V1-DIAG-optional-artifact",
-        &valid_manifest("V1-DIAG-optional-artifact", "reader-v1"),
-    );
-    let report = ConformanceRunner::new(ProfileDispatcher::new().with_handler(
-        ConformanceProfile::ReaderV1,
-        FixedHandler {
-            observation: CaseObservation {
-                accepted: true,
-                artifact_hashes: vec!["sha256:produced".to_owned()],
-                ..CaseObservation::default()
-            },
-        },
-    ))
-    .run(&case.corpus());
+/// A `workspace-check` or `interpret` manifest with `expect`.
+fn typed_manifest(
+    operation: &str,
+    profile: &str,
+    inputs: &str,
+    expect: &str,
+) -> String {
+    format!(
+        "id = \"V1-TYPE-INFER-manifest\"
+rule = \"V1-TYPE-INFER\"
+profile = \"{profile}\"
+operation = \"{operation}\"
 
-    assert!(report.is_success());
+[inputs]
+{inputs}
+
+[expect]
+{expect}
+"
+    )
+}
+
+#[test]
+fn a_types_snapshot_belongs_to_an_accepted_workspace_check_case() {
+    let workspace = "project = \"tree/project.vibon\"
+tree = \"tree\"";
+    let manifest = CaseManifest::from_str(&typed_manifest(
+        "workspace-check",
+        "static-v1",
+        workspace,
+        "accepted = true
+types = \"types.vibon\"",
+    ))
+    .expect("an accepted workspace-check case declares a types snapshot");
+    assert_eq!(manifest.expectations.types.as_deref(), Some("types.vibon"));
+
+    let rejected = CaseManifest::from_str(&typed_manifest(
+        "workspace-check",
+        "static-v1",
+        workspace,
+        "accepted = false
+types = \"types.vibon\"
+
+[[expect.diagnostics]]
+code = \"@type.mismatch\"
+level = \"@error\"
+span = [0, 1]",
+    ))
+    .expect_err("a rejected workspace has no types");
+    assert!(
+        rejected.to_string().contains("types snapshot"),
+        "{rejected}"
+    );
+
+    let interpret = CaseManifest::from_str(&typed_manifest(
+        "interpret",
+        "interpreter-v1",
+        "source = \"input.vib\"",
+        "accepted = true
+types = \"types.vibon\"",
+    ))
+    .expect_err("only workspace-check has a types snapshot");
+    assert!(
+        interpret.to_string().contains("types snapshot"),
+        "{interpret}"
+    );
+}
+
+#[test]
+fn type_check_is_not_an_operation() {
+    let error = CaseManifest::from_str(&typed_manifest(
+        "type-check",
+        "static-v1",
+        "source = \"input.vib\"",
+        "accepted = true",
+    ))
+    .expect_err("the type-check operation was folded into workspace-check");
+    assert!(
+        error.to_string().contains("unknown conformance operation"),
+        "{error}"
+    );
+}
+
+#[test]
+fn a_query_expansion_is_a_boolean() {
+    let query = |expand: &str| {
+        format!(
+            "id = \"V1-TOOL-expand\"
+rule = \"V1-TOOL\"
+profile = \"tooling-v1\"
+operation = \"query\"
+
+[inputs]
+project = \"tree/project.vibon\"
+tree = \"tree\"
+
+[expect]
+accepted = true
+
+[[expect.queries]]
+input = \"tree/src/app/main.vib\"
+offset = 0
+{expand}snapshot = \"query.json\"
+"
+        )
+    };
+    let expanded = CaseManifest::from_str(&query(
+        "expand = true
+",
+    ))
+    .expect("expand");
+    assert!(expanded.expectations.queries[0].expand);
+    let plain = CaseManifest::from_str(&query("")).expect("no expansion");
+    assert!(!plain.expectations.queries[0].expand);
+    assert!(
+        CaseManifest::from_str(&query(
+            "expand = [\"effect-witnesses\"]
+"
+        ))
+        .is_err(),
+        "the expansion list spelling is gone"
+    );
 }
 
 #[test]

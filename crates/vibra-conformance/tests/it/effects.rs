@@ -2,9 +2,7 @@
 //! fact for each written effect row, and the formatter's idempotence over every
 //! corpus program that writes one.
 
-use crate::support::corpus_root;
-
-use std::fs;
+use crate::support::{corpus, single_source};
 
 use vibra_fmt::format_source_with_facts;
 use vibra_types::check_source;
@@ -12,18 +10,13 @@ use vibra_types::check_source;
 /// The source inputs of the cases that write an effect row.
 fn effect_inputs() -> Vec<(String, String)> {
     let mut inputs = Vec::new();
-    for entry in fs::read_dir(corpus_root()).expect("corpus directory") {
-        let directory = entry.expect("corpus entry").path();
-        let name = directory
-            .file_name()
-            .and_then(|name| name.to_str())
-            .expect("case name")
-            .to_owned();
+    for case in corpus().cases() {
+        let name = case.manifest().id();
         if !(name.starts_with("V1-EFFECT-") || name.starts_with("V1-RUNTIME-effect-")) {
             continue;
         }
-        if let Ok(source) = fs::read_to_string(directory.join("input.vib")) {
-            inputs.push((name, source));
+        if let Some(source) = single_source(case) {
+            inputs.push((name.to_owned(), source));
         }
     }
     inputs.sort();

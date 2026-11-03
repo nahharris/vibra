@@ -28,8 +28,8 @@ const INSTANCE_WORDS: &[&str] = &[
 const VALUE_ID_NAMES: &[&str] = &["id", "value-id", "value_id", "ref", "reference"];
 
 /// The canonical forms of every checked program reachable from a source
-/// document of an `interpret` or `type-check` case, in corpus order, checked
-/// afresh by this call.
+/// document of an `interpret` case or a one-module `workspace-check` case, in
+/// corpus order, checked afresh by this call.
 fn canonical_forms() -> Vec<(String, String)> {
     forms_of(&check_every_source())
 }

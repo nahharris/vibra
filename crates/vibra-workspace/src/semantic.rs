@@ -80,7 +80,9 @@ impl WorkspaceCheckResult {
     /// Absent when the scope is not accepted or declares no function.
     #[must_use]
     pub fn canonical_types(&self) -> Option<String> {
-        self.modules.as_deref().map(CheckedModuleSet::canonical_vibon)
+        self.modules
+            .as_deref()
+            .map(CheckedModuleSet::canonical_vibon)
     }
 
     /// Authoritative call binding facts for the checked applications of the

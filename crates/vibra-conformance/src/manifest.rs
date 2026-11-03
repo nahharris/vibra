@@ -574,9 +574,7 @@ const fn input_shape(
         ConformanceOperation::ProjectDecode => {
             [Forbidden, Required, Forbidden, Forbidden]
         }
-        ConformanceOperation::Interpret => {
-            [Forbidden, Forbidden, Required, Forbidden]
-        }
+        ConformanceOperation::Interpret => [Forbidden, Forbidden, Required, Forbidden],
         ConformanceOperation::SourceGraph | ConformanceOperation::Resolve => {
             [Required, Required, Free, Free]
         }

@@ -7,9 +7,8 @@ use vibra_conformance::{
     DispatchResult, HandlerError, InterpreterV1Handler,
     InterpreterV1WorkspaceRunHandler, InterpreterV1WorkspaceTestHandler,
     ProfileDispatcher, ProfileHandler, ReaderV1Handler, StaticV1ProjectHandler,
-    StaticV1ResolveHandler, StaticV1SourceGraphHandler, StaticV1TypeHandler,
-    StaticV1WorkspaceCheckHandler, ToolingV1FormatHandler, ToolingV1IndexHandler,
-    ToolingV1QueryHandler,
+    StaticV1ResolveHandler, StaticV1SourceGraphHandler, StaticV1WorkspaceCheckHandler,
+    ToolingV1FormatHandler, ToolingV1IndexHandler, ToolingV1QueryHandler,
 };
 
 /// A corpus holding only the `V1-PROJECT-*` cases of the repository's corpus,
@@ -55,7 +54,6 @@ fn static_project_cases_are_executed_by_the_real_handler() {
         );
     let dispatcher = dispatcher
         .with_additional_handler(ConformanceProfile::StaticV1, StaticV1ResolveHandler)
-        .with_additional_handler(ConformanceProfile::StaticV1, StaticV1TypeHandler)
         .with_additional_handler(
             ConformanceProfile::StaticV1,
             StaticV1WorkspaceCheckHandler,
