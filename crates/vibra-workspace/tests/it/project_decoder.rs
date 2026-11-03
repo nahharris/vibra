@@ -1,7 +1,5 @@
 //! Step 2 host tests for the typed `@project.v1` decoder.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
-
 use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};

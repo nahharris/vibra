@@ -1,11 +1,6 @@
 //! Workspace-level Step 12 checking and pure execution contracts.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
-
 use std::collections::BTreeMap;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 use vibra_workspace::{
@@ -13,52 +8,14 @@ use vibra_workspace::{
     semantic::{CheckStatus, RunOutcome},
 };
 
-static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
+use crate::support::TempDir;
 
-struct TempProject(PathBuf);
-
-impl TempProject {
-    fn new(label: &str, sources: &[(&str, &str)]) -> Self {
-        Self::with_project(
-            label,
-            "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict))\n",
-            sources,
-        )
-    }
-
-    fn with_project(label: &str, project: &str, sources: &[(&str, &str)]) -> Self {
-        let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let root = fs::canonicalize(std::env::temp_dir())
-            .expect("canonical temp directory")
-            .join(format!(
-                "vibra-step12-{label}-{}-{serial}",
-                std::process::id()
-            ));
-        fs::create_dir_all(&root).expect("create project root");
-        fs::write(root.join("project.vibon"), project).expect("write project marker");
-        for (path, source) in sources {
-            let destination = root.join(path);
-            fs::create_dir_all(destination.parent().expect("source parent"))
-                .expect("create module directory");
-            fs::write(destination, source).expect("write module source");
-        }
-        Self(root)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempProject {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
+/// A project with the one library target `util`.
+const UTIL_LIBRARY: &str = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n";
 
 #[test]
 fn resolves_imported_calls_and_constants_before_running_a_private_non_main_entry() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "multi-module",
         &[
             (
@@ -97,7 +54,7 @@ fn resolves_imported_calls_and_constants_before_running_a_private_non_main_entry
 
 #[test]
 fn higher_order_helper_before_the_entry_accepts_its_known_lambda_argument() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "higher-order-entry",
         &[(
             "src/app/main.vib",
@@ -125,7 +82,7 @@ fn higher_order_helper_before_the_entry_accepts_its_known_lambda_argument() {
 
 #[test]
 fn an_unused_imported_higher_order_helper_does_not_block_the_entry() {
-    let project = TempProject::with_project(
+    let project = TempDir::project(
         "unused-imported-higher-order-helper",
         "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n",
         &[
@@ -160,7 +117,7 @@ fn an_unused_imported_higher_order_helper_does_not_block_the_entry() {
 
 #[test]
 fn an_uninvoked_higher_order_closure_does_not_block_the_entry() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "uninvoked-higher-order-closure",
         &[(
             "src/app/main.vib",
@@ -188,7 +145,7 @@ fn an_uninvoked_higher_order_closure_does_not_block_the_entry() {
 
 #[test]
 fn an_invoked_higher_order_closure_uses_its_known_callback_argument() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "invoked-higher-order-closure",
         &[(
             "src/app/main.vib",
@@ -216,9 +173,9 @@ fn an_invoked_higher_order_closure_uses_its_known_callback_argument() {
 
 #[test]
 fn checking_a_library_without_an_entry_still_rejects_initializer_cycles() {
-    let project = TempProject::with_project(
+    let project = TempDir::project(
         "library-initializer-cycle",
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n",
+        UTIL_LIBRARY,
         &[(
             "src/util/main.vib",
             "(def first i32 second)\n(def second i32 first)\n",
@@ -244,7 +201,7 @@ fn checking_a_library_without_an_entry_still_rejects_initializer_cycles() {
 #[test]
 fn initializer_cycle_diagnostic_points_into_disjoint_cycle() {
     let source = "(def unrelated i32 1i32)\n(def first i32 second)\n(def second i32 first)\n(defn execute () void (do))\n";
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "initializer-cycle-span-after-acyclic-global",
         &[("src/app/main.vib", source)],
     );
@@ -277,7 +234,7 @@ fn initializer_cycle_diagnostic_points_into_disjoint_cycle() {
 
 #[test]
 fn global_initializer_may_call_a_terminating_recursive_helper() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "recursive-helper-global-initializer",
         &[(
             "src/app/main.vib",
@@ -312,9 +269,9 @@ fn global_initializer_may_call_a_terminating_recursive_helper() {
 
 #[test]
 fn library_initializer_cycles_flow_through_higher_order_helpers() {
-    let project = TempProject::with_project(
+    let project = TempDir::project(
         "library-higher-order-initializer-cycle",
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n",
+        UTIL_LIBRARY,
         &[(
             "src/util/main.vib",
             "(def value i32 (apply read))\n(defn apply (f (fn () i32)) i32 (f))\n(defn read () i32 value)\n",
@@ -339,9 +296,9 @@ fn library_initializer_cycles_flow_through_higher_order_helpers() {
 
 #[test]
 fn library_initializer_does_not_execute_an_uninvoked_closure_body() {
-    let project = TempProject::with_project(
+    let project = TempDir::project(
         "library-uninvoked-closure-initializer",
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n",
+        UTIL_LIBRARY,
         &[(
             "src/util/main.vib",
             "(def value i32 (do (let unused (lambda () i32 (read))) 0i32))\n(defn read () i32 value)\n",
@@ -367,9 +324,9 @@ fn library_initializer_does_not_execute_an_uninvoked_closure_body() {
 
 #[test]
 fn library_without_initializers_can_expose_a_higher_order_helper() {
-    let project = TempProject::with_project(
+    let project = TempDir::project(
         "library-higher-order-helper",
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n",
+        UTIL_LIBRARY,
         &[(
             "src/util/main.vib",
             "(defn apply (f (fn () i32)) i32 (f))\n",
@@ -391,7 +348,7 @@ fn library_without_initializers_can_expose_a_higher_order_helper() {
 
 #[test]
 fn an_error_in_an_unreachable_declaration_blocks_the_target_program() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "unreachable-error",
         &[(
             "src/app/main.vib",
@@ -422,7 +379,7 @@ fn an_error_in_an_unreachable_declaration_blocks_the_target_program() {
 
 #[test]
 fn checks_recursion_and_closures_in_every_module_without_running_check() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "recursion-closure",
         &[(
             "src/app/main.vib",
@@ -450,7 +407,7 @@ fn checks_recursion_and_closures_in_every_module_without_running_check() {
 #[test]
 fn selected_target_checks_its_import_closure_and_ignores_an_unrelated_target() {
     let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @util kind: @lib root: \"src/util\") (record name: @other kind: @bin root: \"src/other\" entry: @other.main.execute effects: (array))) dependencies: (dict))\n";
-    let project = TempProject::with_project(
+    let project = TempDir::project(
         "target-closure",
         project_text,
         &[
@@ -497,7 +454,7 @@ fn selected_target_checks_its_import_closure_and_ignores_an_unrelated_target() {
 #[test]
 fn an_error_in_a_transitively_imported_unit_blocks_execution() {
     let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n";
-    let project = TempProject::with_project(
+    let project = TempDir::project(
         "closure-error",
         project_text,
         &[
@@ -531,7 +488,7 @@ fn an_error_in_a_transitively_imported_unit_blocks_execution() {
 
 #[test]
 fn verified_bootstrap_imports_keep_package_identity_and_execute_through_checked_ir() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "verified-stdlib",
         &[(
             "src/app/main.vib",
@@ -580,7 +537,7 @@ fn verified_bootstrap_imports_keep_package_identity_and_execute_through_checked_
 #[test]
 fn bootstrap_overlay_rejects_a_duplicate_project_source_identity() {
     let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @local kind: @lib root: \"stdlib/src/std\")) dependencies: (dict))\n";
-    let project = TempProject::with_project(
+    let project = TempDir::project(
         "bootstrap-source-id-collision",
         project_text,
         &[
@@ -617,7 +574,7 @@ fn bootstrap_overlay_rejects_a_duplicate_project_source_identity() {
 
 #[test]
 fn bootstrap_spelling_without_verification_is_unavailable_and_never_runs() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "unverified-stdlib",
         &[(
             "src/app/main.vib",
@@ -644,7 +601,7 @@ fn bootstrap_spelling_without_verification_is_unavailable_and_never_runs() {
 
 #[test]
 fn result_entry_with_a_nominal_error_type_is_accepted() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "result-entry",
         &[(
             "src/app/main.vib",
@@ -673,7 +630,7 @@ fn result_entry_with_a_nominal_error_type_is_accepted() {
 fn imported_std_modules_keep_the_verified_package_and_local_std_units_resolve_locally()
 {
     let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @std kind: @lib root: \"src/std\")) dependencies: (dict))\n";
-    let project = TempProject::with_project(
+    let project = TempDir::project(
         "exact-stdlib-overlay",
         project_text,
         &[
@@ -730,7 +687,7 @@ fn imported_std_modules_keep_the_verified_package_and_local_std_units_resolve_lo
 #[test]
 fn an_exact_local_std_text_target_cannot_satisfy_the_reserved_bootstrap_import() {
     let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @std kind: @lib root: \"src/std\")) dependencies: (dict))\n";
-    let project = TempProject::with_project(
+    let project = TempDir::project(
         "local-std-text",
         project_text,
         &[
@@ -767,7 +724,7 @@ fn an_exact_local_std_text_target_cannot_satisfy_the_reserved_bootstrap_import()
 #[test]
 fn an_unrelated_reserved_bootstrap_import_blocks_an_explicit_target() {
     let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @other kind: @lib root: \"src/other\")) dependencies: (dict))\n";
-    let project = TempProject::with_project(
+    let project = TempDir::project(
         "global-bootstrap-requirement",
         project_text,
         &[
@@ -802,7 +759,7 @@ fn an_unrelated_reserved_bootstrap_import_blocks_an_explicit_target() {
 
 #[test]
 fn variadic_entry_parameter_is_rejected_at_the_entry_span() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "variadic-entry",
         &[(
             "src/app/main.vib",
@@ -829,7 +786,7 @@ fn variadic_entry_parameter_is_rejected_at_the_entry_span() {
 #[test]
 fn ordinary_dependency_diagnostics_apply_even_to_an_explicit_target() {
     let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict @remote (record kind: @git git: \"https://example.com/repo.git\" rev: \"0123456789abcdef0123456789abcdef01234567\")))\n";
-    let project = TempProject::with_project(
+    let project = TempDir::project(
         "global-dependency-diagnostic",
         project_text,
         &[("src/app/main.vib", "(defn execute () void (do))\n")],
@@ -853,7 +810,7 @@ fn ordinary_dependency_diagnostics_apply_even_to_an_explicit_target() {
 
 #[test]
 fn retired_syntax_and_unsupported_valid_declarations_keep_distinct_diagnostics() {
-    let retired = TempProject::new(
+    let retired = TempDir::demo(
         "retired-form",
         &[("src/app/main.vib", "(defn execute () void (while true))\n")],
     );
@@ -879,7 +836,7 @@ fn retired_syntax_and_unsupported_valid_declarations_keep_distinct_diagnostics()
             .any(|diagnostic| { diagnostic.code() == DiagnosticCode::ToolUnavailable })
     );
 
-    let unsupported = TempProject::new(
+    let unsupported = TempDir::demo(
         "unsupported-declaration",
         &[(
             "src/app/main.vib",
@@ -924,7 +881,7 @@ fn host_provider_outside_a_deffect_and_unknown_provider_are_rejected() {
             DiagnosticCode::ToolUnavailable,
         ),
     ] {
-        let project = TempProject::new(
+        let project = TempDir::demo(
             label,
             &[(
                 "src/app/main.vib",
@@ -953,7 +910,7 @@ fn host_provider_outside_a_deffect_and_unknown_provider_are_rejected() {
 
 #[test]
 fn initializer_cycles_keep_the_source_diagnostic() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "initializer-cycle",
         &[(
             "src/app/main.vib",

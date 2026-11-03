@@ -1,65 +1,13 @@
 //! Workspace scope boundaries for the Step 13 test unit.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
-
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use vibra_diagnostics::DiagnosticCode;
 use vibra_workspace::{WorkspaceSnapshot, semantic::CheckStatus};
 
-static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
-
-struct TempProject(PathBuf);
-
-impl TempProject {
-    fn new(label: &str, sources: &[(&str, &str)]) -> Self {
-        Self::with_project(
-            label,
-            "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict))\n",
-            sources,
-        )
-    }
-
-    fn with_project(
-        label: &str,
-        project_document: &str,
-        sources: &[(&str, &str)],
-    ) -> Self {
-        let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let root = fs::canonicalize(std::env::temp_dir())
-            .expect("canonical temp directory")
-            .join(format!(
-                "vibra-step13-{label}-{}-{serial}",
-                std::process::id()
-            ));
-        fs::create_dir_all(&root).expect("create project root");
-        fs::write(root.join("project.vibon"), project_document)
-            .expect("write project marker");
-        for (relative, source) in sources {
-            let destination = root.join(relative);
-            fs::create_dir_all(destination.parent().expect("source parent"))
-                .expect("create source parent");
-            fs::write(destination, source).expect("write source");
-        }
-        Self(root)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempProject {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
+use crate::support::TempDir;
 
 #[test]
 fn target_imports_cannot_resolve_reserved_test_modules() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "target-import",
         &[
             (
@@ -84,7 +32,7 @@ fn target_imports_cannot_resolve_reserved_test_modules() {
 
 #[test]
 fn target_check_ignores_unrelated_test_body_errors() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "check-scope",
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),
@@ -106,7 +54,7 @@ fn target_check_ignores_unrelated_test_body_errors() {
 
 #[test]
 fn target_may_import_assertion_module_without_referencing_it() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "target-assertion-import",
         &[(
             "src/app/main.vib",
@@ -151,7 +99,7 @@ fn target_may_import_assertion_module_without_referencing_it() {
 
 #[test]
 fn target_reference_to_assertion_is_unavailable_at_the_reference() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "target-assertion-reference",
         &[(
             "src/app/main.vib",
@@ -191,7 +139,7 @@ fn target_reference_to_assertion_is_unavailable_at_the_reference() {
 
 #[test]
 fn local_std_assert_functions_are_not_promoted_to_trusted_assertions() {
-    let project = TempProject::with_project(
+    let project = TempDir::project(
         "local-assert-spoof",
         "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @std kind: @bin root: \"src/std\" entry: @std.assert.execute effects: (array))) dependencies: (dict))\n",
         &[(
@@ -223,7 +171,7 @@ fn local_std_assert_functions_are_not_promoted_to_trusted_assertions() {
 
 #[test]
 fn test_declaration_outside_tests_is_unavailable_and_not_runnable() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "test-declaration-in-target",
         &[(
             "src/app/main.vib",
@@ -251,7 +199,7 @@ fn test_declaration_outside_tests_is_unavailable_and_not_runnable() {
 #[test]
 fn test_import_bootstrap_requires_verified_check_and_run_without_becoming_target_work()
 {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "test-import-requires-global-bootstrap",
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),

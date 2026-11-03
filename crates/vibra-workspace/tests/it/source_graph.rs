@@ -1,5 +1,3 @@
-#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
-
 //! Step 3 workspace discovery, snapshot, and graph tests.
 
 use std::fs;
@@ -9,46 +7,14 @@ use vibra_diagnostics::DiagnosticCode;
 use vibra_syntax::parse_data;
 use vibra_workspace::{WorkspaceSnapshot, source_graph::SourceGraph};
 
-fn project(targets: &str, dependencies: &str) -> String {
-    format!(
-        "(record format: @project.v1 package: (record name: \"hello\" version: \"0.1.0\") targets: (array {targets}) dependencies: (dict {dependencies}))"
-    )
-}
-
-fn target(name: &str, root: &str) -> String {
-    format!("(record name: @{name} kind: @lib root: \"{root}\")")
-}
-
-fn temporary_directory(label: &str) -> PathBuf {
-    // A counter, not the clock, makes the name unique within the process: the
-    // clock of some platforms is too coarse to tell two parallel tests apart.
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let stamp = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "vibra-step3-{label}-{}-{stamp}",
-        std::process::id()
-    ));
-    fs::create_dir_all(&path).expect("temporary directory");
-    path
-}
-
-fn write(path: &Path, contents: impl AsRef<[u8]>) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).expect("parent directory");
-    }
-    fs::write(path, contents).expect("fixture file");
-}
-
-fn cleanup(path: &Path) {
-    let _ = fs::remove_dir_all(path);
-}
+use crate::support::{cleanup, lib_project, lib_target, plain_directory, write};
 
 #[test]
 fn captures_sorted_exact_bytes_and_stable_module_ids() {
-    let root = temporary_directory("sorted");
+    let root = plain_directory("sorted");
     write(
         &root.join("project.vibon"),
-        project(&target("hello", "src"), ""),
+        lib_project(&lib_target("hello", "src"), ""),
     );
     write(&root.join("src/z.vib"), b"z\n");
     write(&root.join("src/nested/a.vib"), b"a\0\n");
@@ -89,10 +55,10 @@ fn captures_sorted_exact_bytes_and_stable_module_ids() {
 
 #[test]
 fn discovers_nearest_project_from_nested_directory_and_file() {
-    let root = temporary_directory("nested-discovery");
+    let root = plain_directory("nested-discovery");
     write(
         &root.join("project.vibon"),
-        project(&target("hello", "src"), ""),
+        lib_project(&lib_target("hello", "src"), ""),
     );
     write(&root.join("src/deep/input.txt"), b"ignored");
 
@@ -114,14 +80,14 @@ fn discovers_nearest_project_from_nested_directory_and_file() {
 
 #[test]
 fn missing_discovery_does_not_search_siblings_or_legacy_markers() {
-    let root = temporary_directory("not-found");
+    let root = plain_directory("not-found");
     write(
         &root.join("project.vib"),
-        project(&target("hello", "src"), ""),
+        lib_project(&lib_target("hello", "src"), ""),
     );
     write(
         &root.join("sibling/project.vibon"),
-        project(&target("hello", "src"), ""),
+        lib_project(&lib_target("hello", "src"), ""),
     );
     let error = WorkspaceSnapshot::load(root.join("missing"))
         .expect_err("missing discovery must stop");
@@ -134,10 +100,10 @@ fn missing_discovery_does_not_search_siblings_or_legacy_markers() {
 
 #[test]
 fn malformed_nearest_project_does_not_fall_back_to_an_ancestor() {
-    let root = temporary_directory("malformed-nearest");
+    let root = plain_directory("malformed-nearest");
     write(
         &root.join("project.vibon"),
-        project(&target("hello", "src"), ""),
+        lib_project(&lib_target("hello", "src"), ""),
     );
     write(&root.join("src/child/project.vibon"), b"(record broken");
     let error = WorkspaceSnapshot::load(root.join("src/child"))
@@ -152,9 +118,9 @@ fn malformed_nearest_project_does_not_fall_back_to_an_ancestor() {
 
 #[test]
 fn confined_loader_reports_io_for_a_non_directory_root() {
-    let root = temporary_directory("confined-io");
+    let root = plain_directory("confined-io");
     let marker = root.join("project.vibon");
-    write(&marker, project(&target("hello", "src"), ""));
+    write(&marker, lib_project(&lib_target("hello", "src"), ""));
     let error = WorkspaceSnapshot::load_confined(&marker)
         .expect_err("a regular file cannot be a confined root");
     assert_eq!(
@@ -163,10 +129,10 @@ fn confined_loader_reports_io_for_a_non_directory_root() {
     );
     cleanup(&root);
 
-    let root = temporary_directory("confined-no-ancestor");
+    let root = plain_directory("confined-no-ancestor");
     write(
         &root.join("project.vibon"),
-        project(&target("hello", "src"), ""),
+        lib_project(&lib_target("hello", "src"), ""),
     );
     fs::create_dir_all(root.join("tree/src")).expect("confined tree");
     let error = WorkspaceSnapshot::load_confined(root.join("tree"))
@@ -180,10 +146,10 @@ fn confined_loader_reports_io_for_a_non_directory_root() {
 
 #[test]
 fn rejects_invalid_source_segments_before_reading_source_bytes() {
-    let root = temporary_directory("invalid-segment");
+    let root = plain_directory("invalid-segment");
     write(
         &root.join("project.vibon"),
-        project(&target("hello", "src"), ""),
+        lib_project(&lib_target("hello", "src"), ""),
     );
     write(&root.join("src/Bad.vib"), b"(not valid source");
     let error = WorkspaceSnapshot::load(root.join("project.vibon"))
@@ -197,23 +163,26 @@ fn rejects_invalid_source_segments_before_reading_source_bytes() {
 
 #[test]
 fn sibling_prefix_roots_are_distinct_but_equal_and_reversed_nested_roots_fail() {
-    let sibling = temporary_directory("sibling-roots");
-    let sibling_targets =
-        format!("{} {}", target("short", "src"), target("long", "src-long"));
+    let sibling = plain_directory("sibling-roots");
+    let sibling_targets = format!(
+        "{} {}",
+        lib_target("short", "src"),
+        lib_target("long", "src-long")
+    );
     write(
         &sibling.join("project.vibon"),
-        project(&sibling_targets, ""),
+        lib_project(&sibling_targets, ""),
     );
     write(&sibling.join("src/main.vib"), b"main");
     write(&sibling.join("src-long/main.vib"), b"main");
     assert!(WorkspaceSnapshot::load(sibling.join("project.vibon")).is_ok());
     cleanup(&sibling);
 
-    let equal = temporary_directory("equal-roots");
+    let equal = plain_directory("equal-roots");
     write(
         &equal.join("project.vibon"),
-        project(
-            &format!("{} {}", target("one", "src"), target("two", "src")),
+        lib_project(
+            &format!("{} {}", lib_target("one", "src"), lib_target("two", "src")),
             "",
         ),
     );
@@ -226,11 +195,15 @@ fn sibling_prefix_roots_are_distinct_but_equal_and_reversed_nested_roots_fail() 
     );
     cleanup(&equal);
 
-    let reversed = temporary_directory("reversed-roots");
+    let reversed = plain_directory("reversed-roots");
     write(
         &reversed.join("project.vibon"),
-        project(
-            &format!("{} {}", target("inner", "src/sub"), target("outer", "src")),
+        lib_project(
+            &format!(
+                "{} {}",
+                lib_target("inner", "src/sub"),
+                lib_target("outer", "src")
+            ),
             "",
         ),
     );
@@ -246,10 +219,10 @@ fn sibling_prefix_roots_are_distinct_but_equal_and_reversed_nested_roots_fail() 
 
 #[test]
 fn interior_dot_target_roots_are_rejected_before_path_normalization() {
-    let root = temporary_directory("dot-root");
+    let root = plain_directory("dot-root");
     write(
         &root.join("project.vibon"),
-        project(&target("hello", "src/./nested"), ""),
+        lib_project(&lib_target("hello", "src/./nested"), ""),
     );
     write(&root.join("src/nested/main.vib"), b"main");
     let error = WorkspaceSnapshot::load(root.join("project.vibon"))
@@ -263,9 +236,9 @@ fn interior_dot_target_roots_are_rejected_before_path_normalization() {
 
 #[test]
 fn same_basename_modules_remain_distinct_across_units_and_no_index_is_implicit() {
-    let root = temporary_directory("units");
-    let targets = format!("{} {}", target("one", "one"), target("two", "two"));
-    write(&root.join("project.vibon"), project(&targets, ""));
+    let root = plain_directory("units");
+    let targets = format!("{} {}", lib_target("one", "one"), lib_target("two", "two"));
+    write(&root.join("project.vibon"), lib_project(&targets, ""));
     write(&root.join("one/main.vib"), b"one");
     write(&root.join("two/main.vib"), b"two");
     let first =
@@ -275,10 +248,10 @@ fn same_basename_modules_remain_distinct_across_units_and_no_index_is_implicit()
     assert!(graph.lookup("two", &["main"]).is_some());
     cleanup(&root);
 
-    let no_index = temporary_directory("no-index");
+    let no_index = plain_directory("no-index");
     write(
         &no_index.join("project.vibon"),
-        project(&target("hello", "src"), ""),
+        lib_project(&lib_target("hello", "src"), ""),
     );
     write(&no_index.join("src/lib/main.vib"), b"main");
     let snapshot =
@@ -293,12 +266,12 @@ fn same_basename_modules_remain_distinct_across_units_and_no_index_is_implicit()
 
 #[test]
 fn graph_rejects_a_project_from_another_snapshot() {
-    let first_root = temporary_directory("provenance-a");
-    let second_root = temporary_directory("provenance-b");
+    let first_root = plain_directory("provenance-a");
+    let second_root = plain_directory("provenance-b");
     for root in [&first_root, &second_root] {
         write(
             &root.join("project.vibon"),
-            project(&target("hello", "src"), ""),
+            lib_project(&lib_target("hello", "src"), ""),
         );
         write(&root.join("src/main.vib"), b"main");
     }
@@ -315,9 +288,13 @@ fn graph_rejects_a_project_from_another_snapshot() {
 
 #[test]
 fn rejects_overlapping_roots_before_reading_malformed_modules() {
-    let root = temporary_directory("overlap");
-    let targets = format!("{} {}", target("outer", "src"), target("inner", "src/sub"));
-    write(&root.join("project.vibon"), project(&targets, ""));
+    let root = plain_directory("overlap");
+    let targets = format!(
+        "{} {}",
+        lib_target("outer", "src"),
+        lib_target("inner", "src/sub")
+    );
+    write(&root.join("project.vibon"), lib_project(&targets, ""));
     write(&root.join("src/broken.vib"), b"(not valid source");
     write(&root.join("src/sub/also-broken.vib"), b"(not valid source");
 
@@ -332,10 +309,10 @@ fn rejects_overlapping_roots_before_reading_malformed_modules() {
 
 #[test]
 fn rejects_file_directory_collision_before_reading_malformed_modules() {
-    let root = temporary_directory("collision");
+    let root = plain_directory("collision");
     write(
         &root.join("project.vibon"),
-        project(&target("hello", "src"), ""),
+        lib_project(&lib_target("hello", "src"), ""),
     );
     write(&root.join("src/text.vib"), b"(not valid source");
     write(&root.join("src/text/other.vib"), b"(also not valid source");
@@ -351,11 +328,11 @@ fn rejects_file_directory_collision_before_reading_malformed_modules() {
 
 #[test]
 fn retains_dependencies_without_opening_or_resolving_them() {
-    let root = temporary_directory("dependency");
+    let root = plain_directory("dependency");
     let dependency = "@remote (record kind: @path path: \"../outside\" target: @core)";
     write(
         &root.join("project.vibon"),
-        project(&target("hello", "src"), dependency),
+        lib_project(&lib_target("hello", "src"), dependency),
     );
     write(&root.join("src/main.vib"), b"(defn main)");
 
@@ -376,10 +353,10 @@ fn retains_dependencies_without_opening_or_resolving_them() {
 
 #[test]
 fn rejects_missing_and_absolute_target_roots_with_root_diagnostics() {
-    let missing = temporary_directory("missing-root");
+    let missing = plain_directory("missing-root");
     write(
         &missing.join("project.vibon"),
-        project(&target("hello", "missing"), ""),
+        lib_project(&lib_target("hello", "missing"), ""),
     );
     let error = WorkspaceSnapshot::load(missing.join("project.vibon"))
         .expect_err("missing root");
@@ -389,7 +366,7 @@ fn rejects_missing_and_absolute_target_roots_with_root_diagnostics() {
     );
     cleanup(&missing);
 
-    let absolute = temporary_directory("absolute-root");
+    let absolute = plain_directory("absolute-root");
     let absolute_value = if cfg!(windows) {
         "C:/outside"
     } else {
@@ -397,7 +374,7 @@ fn rejects_missing_and_absolute_target_roots_with_root_diagnostics() {
     };
     write(
         &absolute.join("project.vibon"),
-        project(&target("hello", absolute_value), ""),
+        lib_project(&lib_target("hello", absolute_value), ""),
     );
     let error = WorkspaceSnapshot::load(absolute.join("project.vibon"))
         .expect_err("absolute root");
@@ -414,10 +391,10 @@ fn rejects_missing_and_absolute_target_roots_with_root_diagnostics() {
     ignore = "symlink privileges are unavailable on the ordinary Windows host"
 )]
 fn rejects_an_escaping_source_link_when_platform_fixture_is_available() {
-    let root = temporary_directory("symlink");
+    let root = plain_directory("symlink");
     write(
         &root.join("project.vibon"),
-        project(&target("hello", "src"), ""),
+        lib_project(&lib_target("hello", "src"), ""),
     );
     write(&root.join("outside.vib"), b"outside");
     fs::create_dir_all(root.join("src")).expect("source root");
@@ -452,10 +429,10 @@ fn rejects_an_escaping_source_link_when_platform_fixture_is_available() {
     ignore = "symlink privileges are unavailable on the ordinary Windows host"
 )]
 fn rejects_an_escaping_directory_link() {
-    let root = temporary_directory("directory-link-escape");
+    let root = plain_directory("directory-link-escape");
     write(
         &root.join("project.vibon"),
-        project(&target("hello", "src"), ""),
+        lib_project(&lib_target("hello", "src"), ""),
     );
     fs::create_dir_all(root.join("src")).expect("source root");
     fs::create_dir_all(root.join("outside")).expect("outside directory");
@@ -476,10 +453,10 @@ fn rejects_an_escaping_directory_link() {
     ignore = "symlink privileges are unavailable on the ordinary Windows host"
 )]
 fn in_root_directory_aliases_are_visited_once() {
-    let root = temporary_directory("directory-alias");
+    let root = plain_directory("directory-alias");
     write(
         &root.join("project.vibon"),
-        project(&target("hello", "src"), ""),
+        lib_project(&lib_target("hello", "src"), ""),
     );
     write(&root.join("src/real/main.vib"), b"main");
     let result = create_dir_symlink(root.join("src/real"), root.join("src/alias"));
@@ -498,10 +475,10 @@ fn in_root_directory_aliases_are_visited_once() {
     ignore = "symlink privileges are unavailable on the ordinary Windows host"
 )]
 fn in_root_directory_cycles_are_path_escape_diagnostics() {
-    let root = temporary_directory("directory-cycle");
+    let root = plain_directory("directory-cycle");
     write(
         &root.join("project.vibon"),
-        project(&target("hello", "src"), ""),
+        lib_project(&lib_target("hello", "src"), ""),
     );
     fs::create_dir_all(root.join("src/dir")).expect("source directory");
     let result = create_dir_symlink(root.join("src"), root.join("src/dir/cycle"));
@@ -521,10 +498,10 @@ fn in_root_directory_cycles_are_path_escape_diagnostics() {
     ignore = "symlink privileges are unavailable on the ordinary Windows host"
 )]
 fn aliased_file_claims_still_participate_in_layout_collision_checks() {
-    let root = temporary_directory("file-alias-collision");
+    let root = plain_directory("file-alias-collision");
     write(
         &root.join("project.vibon"),
-        project(&target("hello", "src"), ""),
+        lib_project(&lib_target("hello", "src"), ""),
     );
     write(&root.join("src/a.vib"), b"a");
     write(&root.join("src/z/other.vib"), b"other");

@@ -1,43 +1,19 @@
-#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
-
 //! Step 13 project-wide test-unit snapshot and graph contracts.
 
 use std::fs;
-use std::path::{Path, PathBuf};
 
 use vibra_diagnostics::DiagnosticCode;
 use vibra_workspace::WorkspaceSnapshot;
 
-fn temporary_directory(label: &str) -> PathBuf {
-    // A counter, not the clock, makes the name unique within the process: the
-    // clock of some platforms is too coarse to tell two parallel tests apart.
-    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let stamp = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!(
-        "vibra-step13-{label}-{}-{stamp}",
-        std::process::id()
-    ));
-    fs::create_dir_all(&path).expect("temporary directory");
-    path
-}
-
-fn write(path: &Path, contents: impl AsRef<[u8]>) {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).expect("parent directory");
-    }
-    fs::write(path, contents).expect("fixture file");
-}
-
-fn project(target_name: &str, target_root: &str, dependencies: &str) -> String {
-    format!(
-        "(record format: @project.v1 package: (record name: \"hello\" version: \"0.1.0\") targets: (array (record name: @{target_name} kind: @lib root: \"{target_root}\")) dependencies: (dict {dependencies}))"
-    )
-}
+use crate::support::{cleanup, lib_project, lib_target, plain_directory, write};
 
 #[test]
 fn absent_test_root_still_contributes_reserved_empty_tests_unit() {
-    let root = temporary_directory("empty-unit");
-    write(&root.join("project.vibon"), project("hello", "src", ""));
+    let root = plain_directory("empty-unit");
+    write(
+        &root.join("project.vibon"),
+        lib_project(&lib_target("hello", "src"), ""),
+    );
     fs::create_dir_all(root.join("src")).expect("target root");
 
     let snapshot = WorkspaceSnapshot::load(root.join("project.vibon"))
@@ -56,8 +32,11 @@ fn absent_test_root_still_contributes_reserved_empty_tests_unit() {
 
 #[test]
 fn test_root_modules_have_test_relative_ids_and_are_in_the_snapshot_revision() {
-    let root = temporary_directory("modules");
-    write(&root.join("project.vibon"), project("hello", "src", ""));
+    let root = plain_directory("modules");
+    write(
+        &root.join("project.vibon"),
+        lib_project(&lib_target("hello", "src"), ""),
+    );
     fs::create_dir_all(root.join("src")).expect("target root");
     write(&root.join("src/main.vib"), b"(defn main () void void)");
     let absent = WorkspaceSnapshot::load(root.join("project.vibon"))
@@ -94,8 +73,11 @@ fn test_root_modules_have_test_relative_ids_and_are_in_the_snapshot_revision() {
 
 #[test]
 fn non_directory_test_root_is_rejected_at_the_project_relative_root_span() {
-    let root = temporary_directory("root-file");
-    write(&root.join("project.vibon"), project("hello", "src", ""));
+    let root = plain_directory("root-file");
+    write(
+        &root.join("project.vibon"),
+        lib_project(&lib_target("hello", "src"), ""),
+    );
     fs::create_dir_all(root.join("src")).expect("target root");
     write(&root.join("tests"), b"not a directory");
 
@@ -111,8 +93,11 @@ fn non_directory_test_root_is_rejected_at_the_project_relative_root_span() {
 
 #[test]
 fn reserved_tests_target_name_is_rejected_before_source_capture() {
-    let root = temporary_directory("reserved-target");
-    write(&root.join("project.vibon"), project("tests", "src", ""));
+    let root = plain_directory("reserved-target");
+    write(
+        &root.join("project.vibon"),
+        lib_project(&lib_target("tests", "src"), ""),
+    );
     fs::create_dir_all(root.join("src")).expect("target root");
 
     let error = WorkspaceSnapshot::load(root.join("project.vibon"))
@@ -126,8 +111,11 @@ fn reserved_tests_target_name_is_rejected_before_source_capture() {
 
 #[test]
 fn test_root_equal_to_target_root_is_rejected_at_the_target_root_field() {
-    let root = temporary_directory("root-overlap");
-    write(&root.join("project.vibon"), project("hello", "tests", ""));
+    let root = plain_directory("root-overlap");
+    write(
+        &root.join("project.vibon"),
+        lib_project(&lib_target("hello", "tests"), ""),
+    );
     fs::create_dir_all(root.join("tests")).expect("shared root");
 
     let error = WorkspaceSnapshot::load(root.join("project.vibon"))
@@ -138,8 +126,4 @@ fn test_root_equal_to_target_root_is_rejected_at_the_target_root_field() {
     );
     assert_eq!(error.diagnostics()[0].source_id(), Some("project.vibon"));
     cleanup(&root);
-}
-
-fn cleanup(path: &Path) {
-    let _ = fs::remove_dir_all(path);
 }

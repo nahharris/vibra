@@ -4,52 +4,13 @@
 //! is admitted, a test is consent to its own row, and `fmt` writes the array in
 //! canonical order.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
-
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use vibra_diagnostics::{DiagnosticCode, Level};
 use vibra_workspace::{
     WorkspaceSnapshot,
     semantic::{CheckStatus, TestItemStatus, TestSuiteStatus, run_tests},
 };
 
-static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
-
-struct TempProject(PathBuf);
-
-impl TempProject {
-    fn new(label: &str, project: &str, sources: &[(&str, &str)]) -> Self {
-        let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let root = fs::canonicalize(std::env::temp_dir())
-            .expect("canonical temp directory")
-            .join(format!(
-                "vibra-step15-{label}-{}-{serial}",
-                std::process::id()
-            ));
-        fs::create_dir_all(&root).expect("create project root");
-        fs::write(root.join("project.vibon"), project).expect("write project marker");
-        for (relative, source) in sources {
-            let destination = root.join(relative);
-            fs::create_dir_all(destination.parent().expect("source parent"))
-                .expect("create source parent");
-            fs::write(destination, source).expect("write source");
-        }
-        Self(root)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempProject {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
+use crate::support::TempDir;
 
 const OPS: &str = "(deffect write\n  visibility: @public\n  (defn text (target str) void visibility: @public (do)))\n\n(deffect audit\n  visibility: @public\n  (defn record (target str) void\n    visibility: @public\n    effects: (write)\n    (write.text target)))\n";
 
@@ -71,7 +32,7 @@ fn sources() -> Vec<(&'static str, &'static str)> {
 
 #[test]
 fn a_bad_atom_or_an_unadmitted_target_does_not_stop_its_sibling() {
-    let project = TempProject::new(
+    let project = TempDir::project(
         "sibling",
         &two_binaries(
             " @ops.log.missing @ops.log.audit",
@@ -127,7 +88,7 @@ fn a_bad_atom_or_an_unadmitted_target_does_not_stop_its_sibling() {
 
 #[test]
 fn an_unused_array_root_is_a_warning_and_the_target_still_runs() {
-    let unused = TempProject::new(
+    let unused = TempDir::project(
         "unused-root",
         "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array @ops.log.write)) (record name: @ops kind: @lib root: \"src/ops\")) dependencies: (dict))\n",
         &[
@@ -156,7 +117,7 @@ fn an_unused_array_root_is_a_warning_and_the_target_still_runs() {
 
 #[test]
 fn a_test_is_consent_to_its_own_row_with_an_empty_target_array() {
-    let project = TempProject::new(
+    let project = TempDir::project(
         "test-consent",
         "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @ops kind: @lib root: \"src/ops\")) dependencies: (dict))\n",
         &[
@@ -195,7 +156,7 @@ fn a_test_is_consent_to_its_own_row_with_an_empty_target_array() {
 
 #[test]
 fn effectful_tests_with_complete_rows_run_under_an_empty_target_array() {
-    let project = TempProject::new(
+    let project = TempDir::project(
         "test-consent-ok",
         "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @ops kind: @lib root: \"src/ops\")) dependencies: (dict))\n",
         &[
@@ -231,7 +192,7 @@ fn effectful_tests_with_complete_rows_run_under_an_empty_target_array() {
 #[test]
 fn the_array_is_written_in_canonical_order_by_the_formatter() {
     let document = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record effects: (array @ops.log.write @ops.log.audit) entry: @app.main.execute root: \"src/app\" kind: @bin name: @app)) dependencies: (dict))\n";
-    let project = TempProject::new(
+    let project = TempDir::project(
         "fmt",
         document,
         &[("src/app/main.vib", "(defn execute () void void)\n")],

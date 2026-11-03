@@ -1,25 +1,11 @@
 //! Step 10 semantic workspace-query contracts.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
-
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::path::Path;
 
 use vibra_workspace::{WorkspaceSnapshot, query::SemanticFactStatus};
 
-static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
-
-fn temporary_directory(label: &str) -> PathBuf {
-    let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-    let parent = fs::canonicalize(std::env::temp_dir()).expect("canonical temp parent");
-    let root = parent.join(format!(
-        "vibra-step10-{label}-{serial}-{}",
-        std::process::id()
-    ));
-    fs::create_dir_all(&root).expect("temporary workspace");
-    root
-}
+use crate::support::temporary_directory;
 
 fn write_workspace(root: &Path, source: &str) {
     fs::create_dir_all(root.join("src")).expect("source directory");

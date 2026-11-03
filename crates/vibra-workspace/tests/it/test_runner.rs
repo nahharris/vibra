@@ -1,55 +1,12 @@
 //! Public workspace test-runner contracts for Step 13.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
-
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use vibra_types::load_stdlib;
 use vibra_workspace::{
     WorkspaceSnapshot,
     semantic::{TestItemStatus, TestSelector, TestSuiteStatus, run_tests},
 };
 
-static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
-
-struct TempProject(PathBuf);
-
-impl TempProject {
-    fn new(label: &str, sources: &[(&str, &str)]) -> Self {
-        let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let root = fs::canonicalize(std::env::temp_dir())
-            .expect("canonical temp directory")
-            .join(format!(
-                "vibra-step13-{label}-{}-{serial}",
-                std::process::id()
-            ));
-        fs::create_dir_all(&root).expect("create project root");
-        fs::write(
-            root.join("project.vibon"),
-            "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict))\n",
-        )
-        .expect("write project marker");
-        for (relative, source) in sources {
-            let destination = root.join(relative);
-            fs::create_dir_all(destination.parent().expect("source parent"))
-                .expect("create source parent");
-            fs::write(destination, source).expect("write source");
-        }
-        Self(root)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempProject {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
+use crate::support::TempDir;
 
 fn verified_bootstrap() -> vibra_types::Stdlib {
     load_stdlib().expect("embedded standard library")
@@ -57,7 +14,7 @@ fn verified_bootstrap() -> vibra_types::Stdlib {
 
 #[test]
 fn selected_tests_use_verified_assertions_and_record_structured_failure() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "assertions",
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),
@@ -97,7 +54,7 @@ fn selected_tests_use_verified_assertions_and_record_structured_failure() {
 
 #[test]
 fn unknown_explicit_selector_is_invalid_while_omitted_empty_suite_succeeds() {
-    let empty = TempProject::new(
+    let empty = TempDir::demo(
         "empty-suite",
         &[("src/app/main.vib", "(defn execute () void void)\n")],
     );
@@ -119,7 +76,7 @@ fn unknown_explicit_selector_is_invalid_while_omitted_empty_suite_succeeds() {
 
 #[test]
 fn duplicate_decoded_names_in_one_module_make_all_selected_items_invalid() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "duplicates",
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),
@@ -149,7 +106,7 @@ fn duplicate_decoded_names_in_one_module_make_all_selected_items_invalid() {
 
 #[test]
 fn unavailable_helper_is_attributed_only_to_tests_that_reference_it() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "dependency-scoped-unavailable",
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),
@@ -184,7 +141,7 @@ fn unavailable_helper_is_attributed_only_to_tests_that_reference_it() {
 
 #[test]
 fn unsupported_test_form_is_unavailable_at_its_reference() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "unsupported-form",
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),
@@ -212,7 +169,7 @@ fn unsupported_test_form_is_unavailable_at_its_reference() {
 
 #[test]
 fn missing_verified_assertion_bootstrap_is_unavailable_not_a_type_error() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "missing-assert-bootstrap",
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),
@@ -235,7 +192,7 @@ fn missing_verified_assertion_bootstrap_is_unavailable_not_a_type_error() {
 
 #[test]
 fn ordinary_type_errors_in_selected_import_closure_block_all_tests() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "static-type-error",
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),
@@ -265,7 +222,7 @@ fn ordinary_type_errors_in_selected_import_closure_block_all_tests() {
 
 #[test]
 fn tests_can_call_public_target_helpers_through_ordinary_imports() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "target-public-import",
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),
@@ -292,7 +249,7 @@ fn tests_can_call_public_target_helpers_through_ordinary_imports() {
 #[test]
 fn missing_required_assertion_import_is_an_ordinary_invalidating_error() {
     let source = "(test \"missing-import\" void)\n";
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "missing-required-assert-import",
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),
@@ -324,7 +281,7 @@ fn missing_required_assertion_import_is_an_ordinary_invalidating_error() {
 
 #[test]
 fn warnings_are_reported_without_blocking_test_execution() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "nonblocking-warning",
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),
@@ -355,7 +312,7 @@ fn warnings_are_reported_without_blocking_test_execution() {
 fn a_test_that_exhausts_its_budget_ends_the_run_with_the_host_event_and_no_counts() {
     use vibra_workspace::semantic::{MemoryBudget, run_tests_with_budget};
 
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "memory-exhausted",
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),
@@ -394,7 +351,7 @@ fn a_test_that_exhausts_its_budget_ends_the_run_with_the_host_event_and_no_count
     // following suite without the recursion runs normally in this process.
     let result = run_tests(&snapshot, None, Some(&verification));
     assert_eq!(result.status(), TestSuiteStatus::OperationalFailure);
-    let passing = TempProject::new(
+    let passing = TempDir::demo(
         "memory-recovered",
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),
@@ -412,7 +369,7 @@ fn a_test_that_exhausts_its_budget_ends_the_run_with_the_host_event_and_no_count
 
 #[test]
 fn a_test_body_ending_in_a_source_call_reuses_its_activation() {
-    let project = TempProject::new(
+    let project = TempDir::demo(
         "tail-test-body",
         &[
             ("src/app/main.vib", "(defn execute () void void)\n"),

@@ -3,12 +3,6 @@
 //! reported its diagnostics from. The enclosing, application, and target rows
 //! of a position, and the index rows, are asserted by the `V1-TOOL-*` cases.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
-
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
-
 use vibra_diagnostics::DiagnosticCode;
 use vibra_workspace::{
     WorkspaceSnapshot,
@@ -19,40 +13,7 @@ use vibra_workspace::{
     semantic::{CheckStatus, check_all},
 };
 
-static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
-
-struct TempProject(PathBuf);
-
-impl TempProject {
-    fn new(label: &str, project: &str, sources: &[(&str, &str)]) -> Self {
-        let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let root = fs::canonicalize(std::env::temp_dir())
-            .expect("canonical temp directory")
-            .join(format!(
-                "vibra-step20-{label}-{}-{serial}",
-                std::process::id()
-            ));
-        fs::create_dir_all(&root).expect("create project root");
-        fs::write(root.join("project.vibon"), project).expect("write project marker");
-        for (relative, source) in sources {
-            let destination = root.join(relative);
-            fs::create_dir_all(destination.parent().expect("source parent"))
-                .expect("create source parent");
-            fs::write(destination, source).expect("write source");
-        }
-        Self(root)
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempProject {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
-    }
-}
+use crate::support::TempDir;
 
 const OPS: &str = "(deffect write\n  visibility: @public\n  (defn text (target str) void\n    visibility: @public\n    (do)))\n\n(deffect audit\n  visibility: @public\n  (defn record (target str) void\n    visibility: @public\n    effects: (write)\n    (write.text target)))\n";
 
@@ -75,14 +36,17 @@ fn roots(row: &vibra_workspace::query::EffectRowFact) -> Vec<&str> {
     row.roots().iter().map(String::as_str).collect()
 }
 
+/// A project with the one library target `app`.
+const APP_LIBRARY: &str = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @lib root: \"src\")) dependencies: (dict))\n";
+
 #[test]
 fn the_witness_is_the_chain_the_checker_reports() {
     const HELPER: &str = "(deffect write\n  visibility: @public\n  (defn text (target str event str) void\n    visibility: @public\n    (do)))\n\n(deffect audit\n  visibility: @public\n  (defn record (target str event str) void\n    visibility: @public\n    effects: (write)\n    (write.text target event)))\n";
     // `handle-request` omits `write`, which the chapter's example reports.
     const MAIN_OMITS: &str = "(import helper @app.helper)\n\n(defn handle-request (target str summary str) void\n  effects: (helper.audit)\n  (helper.audit.record target summary))\n";
-    let project = TempProject::new(
+    let project = TempDir::project(
         "witness",
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @lib root: \"src\")) dependencies: (dict))\n",
+        APP_LIBRARY,
         &[("src/helper.vib", HELPER), ("src/main.vib", MAIN_OMITS)],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
@@ -164,7 +128,7 @@ fn the_witness_is_the_chain_the_checker_reports() {
 
 #[test]
 fn a_target_that_sorts_first_owns_a_source_both_reach() {
-    let project = TempProject::new(
+    let project = TempDir::project(
         "two-targets",
         "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @zeta kind: @bin root: \"src/zeta\" entry: @zeta.main.execute effects: (array @ops.log.audit @ops.log.write)) (record name: @alpha kind: @bin root: \"src/alpha\" entry: @alpha.main.execute effects: (array @ops.log.audit)) (record name: @ops kind: @lib root: \"src/ops\")) dependencies: (dict))\n",
         &[
@@ -200,9 +164,9 @@ fn a_target_that_sorts_first_owns_a_source_both_reach() {
 fn a_broken_neighbour_does_not_change_an_exact_row_elsewhere() {
     const GOOD: &str = "(deffect audit\n  visibility: @public\n  (defn record (target str) void\n    visibility: @public\n    (do)))\n\n(defn log-it (target str) void\n  visibility: @public\n  effects: (audit)\n  (audit.record target))\n";
     const BROKEN: &str = "(import good @app.good)\n\n(defn mistyped () i32 \"text\")\n\n(defn half-checked () void\n  effects: (good.audit)\n  (do\n    (good.audit.record \"x\")\n    (missing-name)))\n\n(defn after-broken () void\n  effects: (good.audit)\n  (half-checked))\n";
-    let project = TempProject::new(
+    let project = TempDir::project(
         "recovery",
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @lib root: \"src\")) dependencies: (dict))\n",
+        APP_LIBRARY,
         &[("src/good.vib", GOOD), ("src/broken.vib", BROKEN)],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
@@ -257,9 +221,9 @@ fn a_broken_neighbour_does_not_change_an_exact_row_elsewhere() {
 
 #[test]
 fn a_rejected_external_binding_is_kept_while_the_checked_facts_are_omitted() {
-    let project = TempProject::new(
+    let project = TempDir::project(
         "external",
-        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @lib root: \"src\")) dependencies: (dict))\n",
+        APP_LIBRARY,
         &[(
             "src/main.vib",
             "(deffect audit\n  (defn record (message str) void\n    external: @host\n    symbol: \"audit.record\"))\n\n(defn broken () i32 (missing-name))\n",
