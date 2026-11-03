@@ -808,11 +808,14 @@ pub fn check_resolved(
             &plan_modules,
             &mut functions,
             &|module_index, span| {
-                let module = modules.get(module_index)?;
-                module
-                    .declarations
-                    .get(&(module.record.source_id().to_owned(), span))
-                    .map(DeclarationId::canonical)
+                modules
+                    .get(module_index)
+                    .and_then(|module| {
+                        module
+                            .declarations
+                            .get(&(module.record.source_id().to_owned(), span))
+                    })
+                    .map_or_else(String::new, DeclarationId::canonical)
             },
             &mut diagnostics,
         );

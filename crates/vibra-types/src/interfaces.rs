@@ -1334,12 +1334,12 @@ pub(crate) fn check_bounds(
 /// Lowers every contract of `modules`, then appends one function header per
 /// interface default and per member written in an `impl` block, and records
 /// each block as an implementation. `name` gives a header's program name from
-/// its module index and the member's span, when the caller has one.
+/// its module index and the member's span.
 pub(crate) fn materialize(
     types: &mut TypeNames,
     modules: &[PlanModule<'_>],
     functions: &mut Vec<crate::FunctionHeader>,
-    name: &dyn Fn(usize, ByteSpan) -> Option<String>,
+    name: &dyn Fn(usize, ByteSpan) -> String,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     for (index, declaration) in types.standard_contracts() {
@@ -1394,9 +1394,7 @@ pub(crate) fn materialize(
                     declaration_index,
                     module_index,
                     source_id: module.source_id.to_owned(),
-                    name: name(module_index, member.span).unwrap_or_else(|| {
-                        format!("{}.{}", interface.name, member.name)
-                    }),
+                    name: name(module_index, member.span),
                     signature: member.signature.clone(),
                     external: None,
                     external_declared: false,
@@ -1436,11 +1434,9 @@ pub(crate) fn materialize(
         let Some(module) = modules.get(plan.module_index) else {
             continue;
         };
-        let (owner, members) = match module.declarations.get(plan.declaration_index) {
-            Some(Declaration::Deftype(value)) => {
-                (value.name().value(), value.members())
-            }
-            Some(Declaration::Defint(value)) => (value.name().value(), value.members()),
+        let members = match module.declarations.get(plan.declaration_index) {
+            Some(Declaration::Deftype(value)) => value.members(),
+            Some(Declaration::Defint(value)) => value.members(),
             _ => continue,
         };
         let Some(TypeMember::Implementation(block)) = members.get(plan.member_index)
@@ -1510,9 +1506,7 @@ pub(crate) fn materialize(
                 declaration_index: plan.declaration_index,
                 module_index: plan.module_index,
                 source_id: plan.source_id.clone(),
-                name: name(plan.module_index, method.span()).unwrap_or_else(|| {
-                    format!("{owner}.impl-{}.{member_name}", plan.member_index)
-                }),
+                name: name(plan.module_index, method.span()),
                 signature,
                 external: None,
                 external_declared: false,

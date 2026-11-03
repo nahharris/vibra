@@ -215,37 +215,12 @@ impl WorkspaceSnapshot {
                     .with_effects(effects)
             })
             .collect();
-        let input = vibra_resolve::ResolveInput::new(
+        let input = vibra_types::standard_resolve_input(
             package.name().value(),
             package.version().value(),
             units,
-        )
-        .with_reserved_import_paths([
-            ("std".to_owned(), vec!["text".to_owned()]),
-            ("std".to_owned(), vec!["option".to_owned()]),
-            ("std".to_owned(), vec!["result".to_owned()]),
-            ("std".to_owned(), vec!["core".to_owned()]),
-            ("std".to_owned(), vec!["bool".to_owned()]),
-            ("std".to_owned(), vec!["char".to_owned()]),
-            ("std".to_owned(), vec!["bytes".to_owned()]),
-            ("std".to_owned(), vec!["assert".to_owned()]),
-        ]);
-        let mut input = input
-            .with_builtin_members(vibra_types::builtin_member_names())
-            .with_assertion_members(vibra_types::assertion_member_names())
-            .with_role_types(
-                vibra_types::role_type_names()
-                    .into_iter()
-                    .map(|(_, name)| name),
-            );
-        if let Some(verification) = verification {
-            let (overlay_package, modules) = verification.resolver_overlay();
-            input = input.with_verified_overlay(
-                overlay_package.name(),
-                overlay_package.version(),
-                modules,
-            );
-        }
+            verification,
+        );
         Ok(vibra_resolve::Resolver::resolve(input))
     }
 
