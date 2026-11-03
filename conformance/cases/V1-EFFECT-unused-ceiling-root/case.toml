@@ -2,7 +2,7 @@ id = "V1-EFFECT-unused-ceiling-root"
 rule = "V1-EFFECT"
 profile = "static-v1"
 operation = "type-check"
-description = "A root written in a ceiling that the body never performs is a warning at that entry, because it weakens local reasoning."
+description = "A root written in a ceiling that the body never performs is a warning at that entry, because it weakens local reasoning. Each unused root of a ceiling is its own warning, and a lambda row that is never performed warns at its entry."
 
 [inputs]
 source = "input.vib"
@@ -15,3 +15,21 @@ code = "@contract.unused-effect"
 level = "@warning"
 source = "input.vib"
 span = [85, 90]
+
+[[expect.diagnostics]]
+code = "@contract.unused-effect"
+level = "@warning"
+source = "input.vib"
+span = [232, 237]
+
+[[expect.diagnostics]]
+code = "@contract.unused-effect"
+level = "@warning"
+source = "input.vib"
+span = [238, 243]
+
+[[expect.diagnostics]]
+code = "@contract.unused-effect"
+level = "@warning"
+source = "input.vib"
+span = [345, 350]

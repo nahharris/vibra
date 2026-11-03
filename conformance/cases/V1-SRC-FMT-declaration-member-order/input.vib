@@ -1,0 +1,6 @@
+(defn f () i32 doc: "docs" visibility: @public where: (t any) 0i32)
+
+(defn g () i32 doc: "docs" ; doc comment
+ visibility: @public where: (t any) 0i32)
+
+(deftype box void (impl (box i32) (defn make () box 0i32)) (defn map (value box) box value))

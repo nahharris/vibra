@@ -2,7 +2,7 @@ id = "V1-TYPE-CONTROL-match-non-exhaustive"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
 operation = "type-check"
-description = "Non-exhaustive enum, bool, tuple, atom, str, and integer matches name their first uncovered shape."
+description = "Non-exhaustive enum, bool, tuple, atom, str, and integer matches name their first uncovered shape. A partly covered earlier variant is named before a later variant, an option payload is spelled inside its constructor, and a str is spelled with its type name."
 
 [inputs]
 source = "input.vib"
@@ -51,3 +51,24 @@ level = "@error"
 source = "input.vib"
 span = [446, 469]
 notes = ["`-` is not covered"]
+
+[[expect.diagnostics]]
+code = "@pattern.non-exhaustive"
+level = "@error"
+source = "input.vib"
+span = [562, 602]
+notes = ["`(partial-enum.a false)` is not covered"]
+
+[[expect.diagnostics]]
+code = "@pattern.non-exhaustive"
+level = "@error"
+source = "input.vib"
+span = [645, 682]
+notes = ["`(option.some false)` is not covered"]
+
+[[expect.diagnostics]]
+code = "@pattern.non-exhaustive"
+level = "@error"
+source = "input.vib"
+span = [718, 750]
+notes = ["`(str (array -))` is not covered"]

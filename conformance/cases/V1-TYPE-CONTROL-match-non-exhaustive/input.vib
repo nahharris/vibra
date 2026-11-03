@@ -12,3 +12,11 @@
 (defn words (value str) i32 (match value "a" 1i32))
 
 (defn numbers (value i32) i32 (match value 0i32 1i32))
+
+(deftype partial-enum (enum a bool b void c void))
+
+(defn partly (value partial-enum) i32 (match value (partial-enum.a true) 0i32))
+
+(defn wrapped (value (option bool)) i32 (match value (option.some true) 0i32))
+
+(defn text-array (value str) i32 (match value (str (array)) 0i32))

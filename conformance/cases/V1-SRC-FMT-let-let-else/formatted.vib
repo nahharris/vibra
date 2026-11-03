@@ -19,3 +19,7 @@
     (choose-entry-by-key-and-priority entry key (priority-of-entry entry))
     (return (result.err (lookup-error.missing key))))
   (result.ok summary))
+
+(defn one-line () i32 (let a 1i32) a)
+
+(defn early () i32 (if true (return (some-call a b)) void) 1i32)

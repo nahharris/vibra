@@ -13,3 +13,19 @@
 (defn refutable-site (flag bool) bool
   (let true flag)
   flag)
+
+(defn labelled-true () i32
+  labelled: (true i32 0i32)
+  0i32)
+
+(defn variadic-false () i32
+  variadic: (false (array i32))
+  0i32)
+
+(defn lambda-labelled-true () i32
+  (let g (lambda () i32 labelled: (true i32 0i32) 0i32))
+  0i32)
+
+(defn lambda-labelled-false () i32
+  (let g (lambda () i32 labelled: (false i32 0i32) 0i32))
+  0i32)

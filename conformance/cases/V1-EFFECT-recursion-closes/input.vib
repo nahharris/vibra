@@ -9,3 +9,13 @@
 (defn pong (n u32) void
   effects: (write)
   (ping n))
+
+(defn spin (n u32) void (spin n))
+
+(defn silent-ping (n u32) void
+  effects: (write)
+  (write.text "ping")
+  (silent-pong n))
+
+(defn silent-pong (n u32) void
+  (silent-ping n))

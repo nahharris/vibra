@@ -1,7 +1,7 @@
 id = "V1-SRC-READER-literal-characters"
 rule = "V1-SRC-READER"
 profile = "reader-v1"
-description = "Character names, Unicode escapes, direct scalars, and delimiter characters share one literal surface."
+description = "Character names, Unicode escapes, direct scalars, and delimiter characters share one literal surface. A scalar escape of a named or delimiter character is rewritten to its canonical spelling."
 
 [inputs]
 source = "input.vib"

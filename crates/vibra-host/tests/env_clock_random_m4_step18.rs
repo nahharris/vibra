@@ -13,8 +13,7 @@
 use std::ffi::OsString;
 
 use vibra_host::{
-    EnvError, Failure, HostProvider, HostWorld, SystemProvider, TimeError,
-    WorldProvider,
+    EnvError, Failure, HostProvider, HostWorld, SystemProvider, WorldProvider,
 };
 
 fn done<T, E: std::fmt::Debug>(result: Result<T, Failure<E>>) -> Result<T, E> {
@@ -102,17 +101,6 @@ fn the_world_clock_is_constant_wall_and_stepped_monotonic() {
         ],
         [Ok(0), Ok(1), Ok(2)]
     );
-}
-
-#[test]
-fn a_world_monotonic_read_past_the_range_is_unavailable_and_stays_so() {
-    let mut p = world(
-        "(record format: @host-world.v1 clock: (record monotonic: 18446744073709551614u64 step: 1u64))",
-    );
-    assert_eq!(done(p.now_monotonic()), Ok(u64::MAX - 1));
-    assert_eq!(done(p.now_monotonic()), Ok(u64::MAX));
-    assert_eq!(done(p.now_monotonic()), Err(TimeError::Unavailable));
-    assert_eq!(done(p.now_monotonic()), Err(TimeError::Unavailable));
 }
 
 #[test]

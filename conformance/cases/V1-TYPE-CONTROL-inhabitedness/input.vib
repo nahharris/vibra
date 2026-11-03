@@ -19,3 +19,7 @@
 (defn option-of-never (v (option never)) i32 (match v - 0i32))
 
 (defn function-to-never (v (fn () never)) i32 (match v - 0i32))
+
+(deftype tree (record kids (array tree)))
+
+(defn recursive-type (v tree) i32 (match v - 0i32))

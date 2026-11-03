@@ -1,0 +1,27 @@
+(deffect write
+  (defn text (target str) void (do)))
+
+(deffect marker
+  (defn mark () i32 1i32))
+
+(defn call-it (f (fn (t) t) value t) t
+  where: (t any)
+  (f value))
+
+(defn wrote (value str) str
+  effects: (write)
+  (write.text value)
+  value)
+
+(defn mismatched () str
+  effects: (write)
+  (call-it wrote "x"))
+
+(defn apply (f (fn (t) t effects: (marker)) value t) t
+  where: (t any)
+  effects: (marker)
+  (f value))
+
+(defn matched () i32
+  effects: (marker)
+  (apply (lambda (x i32) i32 effects: (marker) (marker.mark)) 3i32))

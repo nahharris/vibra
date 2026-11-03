@@ -1,7 +1,7 @@
 //! M4 Step 20: the effect metadata of the query surfaces. The position
-//! envelope reads the enclosing, application, and target rows and the witness
-//! of each root from the one graph the checker reported its diagnostics from,
-//! and the index records the ceiling and performed row of every declaration.
+//! envelope reads the witness of each root from the one graph the checker
+//! reported its diagnostics from. The enclosing, application, and target rows
+//! of a position, and the index rows, are asserted by the `V1-TOOL-*` cases.
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
 
@@ -54,29 +54,9 @@ impl Drop for TempProject {
     }
 }
 
-const PROJECT: &str = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array @ops.log.audit @ops.log.write)) (record name: @ops kind: @lib root: \"src/ops\") (record name: @solo kind: @lib root: \"src/solo\")) dependencies: (dict))\n";
-
 const OPS: &str = "(deffect write\n  visibility: @public\n  (defn text (target str) void\n    visibility: @public\n    (do)))\n\n(deffect audit\n  visibility: @public\n  (defn record (target str) void\n    visibility: @public\n    effects: (write)\n    (write.text target)))\n";
 
-const MAIN: &str = "(import log @ops.log)\n\n(defn record-it (target str) void\n  effects: (log.audit log.write)\n  (log.audit.record target))\n\n(defn run-twice () void\n  effects: (log.audit log.write)\n  (let again (lambda () void effects: (log.audit log.write) (record-it \"again\")))\n  (record-it \"first\")\n  (again))\n\n(defn execute () void\n  effects: (log.audit log.write)\n  (run-twice))\n";
-
-const SOLO: &str = "(defn lone () i32 7i32)";
-
 const AUDIT: &str = "@demo@0.1.0/ops.log.audit";
-const WRITE: &str = "@demo@0.1.0/ops.log.write";
-
-fn project() -> TempProject {
-    TempProject::new(
-        "workspace",
-        PROJECT,
-        &[
-            ("src/app/main.vib", MAIN),
-            ("src/ops/log.vib", OPS),
-            ("src/solo/lone.vib", SOLO),
-        ],
-    )
-}
-
 fn effects_at(
     snapshot: &WorkspaceSnapshot,
     source_id: &str,
@@ -93,144 +73,6 @@ fn effects_at(
 
 fn roots(row: &vibra_workspace::query::EffectRowFact) -> Vec<&str> {
     row.roots().iter().map(String::as_str).collect()
-}
-
-#[test]
-fn a_call_reports_its_enclosing_body_its_complete_row_and_its_target() {
-    let project = project();
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let (status, value) = effects_at(
-        &snapshot,
-        "src/app/main.vib",
-        MAIN,
-        "(log.audit.record target)",
-        PositionExpansion::default(),
-    );
-    assert_eq!(status, SemanticFactStatus::Exact);
-    let value = value.expect("effects value");
-    let enclosing = value.enclosing().expect("enclosing");
-    assert_eq!(enclosing.kind(), "function");
-    assert_eq!(
-        enclosing.identity().expect("identity").canonical(),
-        "@demo@0.1.0/app.main.record-it"
-    );
-    assert_eq!(roots(enclosing.ceiling()), [AUDIT, WRITE]);
-    assert_eq!(roots(enclosing.performed()), [AUDIT, WRITE]);
-    // The operation's complete row: the owner together with the additive row.
-    assert_eq!(
-        roots(value.application().expect("application")),
-        [AUDIT, WRITE]
-    );
-    let target = value.target().expect("target");
-    assert_eq!(target.entry().canonical(), "@demo@0.1.0/app.main.execute");
-    assert_eq!(roots(target.effects()), [AUDIT, WRITE]);
-    assert!(
-        value.witnesses().is_none(),
-        "a compact query omits witnesses"
-    );
-}
-
-#[test]
-fn a_lambda_is_its_own_enclosing_body_and_has_no_identity() {
-    let project = project();
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let (_, value) = effects_at(
-        &snapshot,
-        "src/app/main.vib",
-        MAIN,
-        "(record-it \"again\")",
-        PositionExpansion::default(),
-    );
-    let value = value.expect("effects value");
-    let enclosing = value.enclosing().expect("enclosing");
-    assert_eq!(enclosing.kind(), "lambda");
-    assert!(enclosing.identity().is_none());
-    assert_eq!(roots(enclosing.ceiling()), [AUDIT, WRITE]);
-    // The callee's complete row is its performed row, not its ceiling.
-    assert_eq!(
-        roots(value.application().expect("application")),
-        [AUDIT, WRITE]
-    );
-}
-
-#[test]
-fn an_operation_body_reports_the_complete_row_as_its_ceiling() {
-    let project = project();
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let (_, value) = effects_at(
-        &snapshot,
-        "src/ops/log.vib",
-        OPS,
-        "(write.text target)",
-        PositionExpansion::default(),
-    );
-    let value = value.expect("effects value");
-    let enclosing = value.enclosing().expect("enclosing");
-    assert_eq!(enclosing.kind(), "operation");
-    assert_eq!(
-        enclosing.identity().expect("identity").canonical(),
-        "@demo@0.1.0/ops.log.audit.record"
-    );
-    assert_eq!(roots(enclosing.ceiling()), [AUDIT, WRITE]);
-    assert_eq!(roots(enclosing.performed()), [WRITE]);
-    assert_eq!(roots(value.application().expect("application")), [WRITE]);
-    // The library is reached through the binary target that imports it.
-    assert!(value.target().is_some());
-}
-
-#[test]
-fn a_position_outside_every_function_or_in_an_unreached_source_has_nulls() {
-    let project = project();
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let (status, value) = effects_at(
-        &snapshot,
-        "src/app/main.vib",
-        MAIN,
-        "(import log @ops.log)",
-        PositionExpansion {
-            effect_witnesses: true,
-        },
-    );
-    assert_eq!(status, SemanticFactStatus::Exact);
-    let value = value.expect("effects value");
-    assert!(value.enclosing().is_none());
-    assert!(value.application().is_none());
-    assert!(value.target().is_some());
-    assert_eq!(value.witnesses().expect("expanded").len(), 0);
-
-    let (_, solo) = effects_at(
-        &snapshot,
-        "src/solo/lone.vib",
-        SOLO,
-        "7i32",
-        PositionExpansion::default(),
-    );
-    let solo = solo.expect("effects value");
-    assert_eq!(solo.enclosing().expect("enclosing").kind(), "function");
-    assert!(solo.target().is_none(), "no entry reaches the source");
-}
-
-#[test]
-fn a_position_at_end_of_file_belongs_to_the_declaration_that_ends_there() {
-    let project = project();
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let query = query_position_expanded(
-        &snapshot,
-        "src/solo/lone.vib",
-        SOLO.len(),
-        None,
-        PositionExpansion::default(),
-    )
-    .expect("query at end of file");
-    let value = query.effects().value().expect("effects value");
-    assert_eq!(
-        value
-            .enclosing()
-            .expect("enclosing")
-            .identity()
-            .map(|id| id.canonical()),
-        Some("@demo@0.1.0/solo.lone.lone")
-    );
 }
 
 #[test]
@@ -411,46 +253,6 @@ fn a_broken_neighbour_does_not_change_an_exact_row_elsewhere() {
         PositionExpansion::default(),
     );
     assert_eq!(status, SemanticFactStatus::Recovered);
-}
-
-#[test]
-fn the_index_holds_the_ceiling_the_performed_row_and_the_external_binding() {
-    let project = project();
-    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
-    let document = index(&snapshot, None).expect("index");
-    let find = |id: &str| {
-        document
-            .declarations()
-            .iter()
-            .find(|declaration| declaration.id() == id)
-            .unwrap_or_else(|| panic!("record {id}"))
-    };
-    let record = find("app.main.record-it");
-    let facts = record.facts().expect("facts");
-    assert_eq!(facts.ceiling(), ["ops.log.audit", "ops.log.write"]);
-    assert_eq!(facts.effects(), ["ops.log.audit", "ops.log.write"]);
-    assert!(record.external().is_none());
-
-    let root = find("ops.log.audit");
-    assert_eq!(root.kind(), "effect-root");
-    let facts = root.facts().expect("an effect root is indexed with facts");
-    assert!(facts.ceiling().is_empty() && facts.effects().is_empty());
-
-    let operation = find("ops.log.audit.record");
-    assert_eq!(operation.kind(), "operation");
-    assert_eq!(operation.owner(), Some("ops.log.audit"));
-    let facts = operation.facts().expect("facts");
-    // The complete row is the owner root with the additive row; the body
-    // performs the additive root only.
-    assert_eq!(facts.ceiling(), ["ops.log.audit", "ops.log.write"]);
-    assert_eq!(facts.effects(), ["ops.log.write"]);
-
-    let vibon = document.canonical_vibon();
-    assert!(
-        vibon
-            .contains("ceiling: (record roots: (array @ops.log.audit @ops.log.write))")
-    );
-    assert!(vibon.contains("external: void"));
 }
 
 #[test]

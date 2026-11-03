@@ -1,0 +1,35 @@
+id = "V1-EFFECT-witness-chain-ends"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "type-check"
+description = "A witness can end at a function value or at a contract member deep in the chain: the call of a function whose body applies a function value, or a contract member, names that application with its own explanation."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [375, 396]
+notes = ["performs @write via @through-value"]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [216, 225]
+  message = "performs @write via a function value of type (fn (str) void effects: (write))"
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "input.vib"
+span = [441, 464]
+notes = ["performs @write via @through-member"]
+
+  [[expect.diagnostics.related]]
+  source = "input.vib"
+  span = [291, 310]
+  message = "performs @write via contract member @logger.log"

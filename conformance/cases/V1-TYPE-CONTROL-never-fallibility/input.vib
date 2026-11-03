@@ -11,3 +11,5 @@
 (defn ignored-never-ok () i32 (attempt-never-ok) 1i32)
 
 (defn try-same () (result void never) (try (attempt-never)) (result.ok))
+
+(defn try-in-plain () i32 (try (attempt-never)))

@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-literal-character-nested-column"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "The canonical width of a character spelling is checked at the nested indentation: a nested list that is 88 columns with the canonical spelling stays inline, and one column more expands."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"
