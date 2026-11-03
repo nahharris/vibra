@@ -20,9 +20,9 @@ use crate::workspace_semantic::{
 /// The `interpreter-v1` handlers also run the WebAssembly backend on each
 /// accepted executable case, because both backends receive the one checked
 /// program (`docs/spec/07-diagnostics-and-conformance.md`, "Differential
-/// execution"). The `vibra-conformance` binary and the host tests that hold the
-/// corpus to the parity inventory build the same dispatcher, so the two cannot
-/// disagree about which handlers exist.
+/// execution"). The `vibra-conformance` binary and the host tests that run the
+/// corpus build the same dispatcher, so the two cannot disagree about which
+/// handlers exist.
 #[must_use]
 pub fn standard_dispatcher() -> ProfileDispatcher {
     ProfileDispatcher::new()

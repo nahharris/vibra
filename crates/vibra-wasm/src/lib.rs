@@ -28,7 +28,7 @@
 //! result converted through an array, a dict, a record, or a union, and a
 //! `void` item of a builtin `option` iterator. Activations live in the arena
 //! and a call does not nest a WebAssembly call ([`layout`], "Activations and
-//! the dispatcher"). [`NotLowered`] reports only a program the checker cannot
+//! the dispatcher"). [`EmitError`] reports only a program the checker cannot
 //! have produced, and never a module that omits part of the program.
 //!
 //! # The module
@@ -42,10 +42,10 @@
 
 mod canon;
 mod canon_typed;
-mod classify;
+
 mod desc;
 mod encode;
-mod form;
+mod error;
 mod host;
 mod key;
 pub mod layout;
@@ -59,7 +59,7 @@ mod types;
 use vibra_ir::{CheckedProgram, SourceOrigin, Type};
 
 pub use desc::DescriptorTable;
-pub use form::{Form, NotLowered, UnloweredForm};
+pub use error::EmitError;
 
 /// The origin table the toolchain produces beside a module.
 ///
@@ -148,9 +148,10 @@ impl EmittedModule {
 ///
 /// # Errors
 ///
-/// [`NotLowered`] names every form the program uses that this step does not
-/// lower. No module is produced for such a program.
-pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
+/// [`EmitError`] when the program is not one the checker could have produced:
+/// it exceeds the module size limits, its entry takes a parameter, or a checked
+/// shape breaks an invariant. No module is produced for such a program.
+pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, EmitError> {
     build(program, None, false)
 }
 
@@ -162,8 +163,8 @@ pub fn emit(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
 ///
 /// # Errors
 ///
-/// [`NotLowered`] as for [`emit`].
-pub fn emit_measured(program: &CheckedProgram) -> Result<EmittedModule, NotLowered> {
+/// [`EmitError`] as for [`emit`].
+pub fn emit_measured(program: &CheckedProgram) -> Result<EmittedModule, EmitError> {
     build(program, None, true)
 }
 
@@ -176,11 +177,11 @@ pub fn emit_measured(program: &CheckedProgram) -> Result<EmittedModule, NotLower
 ///
 /// # Errors
 ///
-/// [`NotLowered`] as for [`emit`].
+/// [`EmitError`] as for [`emit`].
 pub fn emit_tests(
     program: &CheckedProgram,
     entries: &[usize],
-) -> Result<EmittedModule, NotLowered> {
+) -> Result<EmittedModule, EmitError> {
     build(program, Some(entries), false)
 }
 
@@ -189,11 +190,11 @@ pub fn emit_tests(
 ///
 /// # Errors
 ///
-/// [`NotLowered`] as for [`emit`].
+/// [`EmitError`] as for [`emit`].
 pub fn emit_tests_measured(
     program: &CheckedProgram,
     entries: &[usize],
-) -> Result<EmittedModule, NotLowered> {
+) -> Result<EmittedModule, EmitError> {
     build(program, Some(entries), true)
 }
 
@@ -202,7 +203,7 @@ fn build(
     program: &CheckedProgram,
     tests: Option<&[usize]>,
     measure: bool,
-) -> Result<EmittedModule, NotLowered> {
+) -> Result<EmittedModule, EmitError> {
     // A module indexes its functions with 32 bits. A count that does not fit is
     // reported, never wrapped.
     let counts = u32::try_from(program.functions().len())
@@ -213,27 +214,19 @@ fn build(
         });
     let entry = u32::try_from(program.entry_index()).ok();
     let Some(((_, globals, total), entry)) = counts.zip(entry) else {
-        return Err(NotLowered::single(Form::ModuleSize));
+        return Err(EmitError::ModuleSize);
     };
-    if let Some(not_lowered) = NotLowered::from_uses(classify::unlowered(program)) {
-        return Err(not_lowered);
-    }
     let mut class = runtime::ValueClass::Void;
     if tests.is_none() {
         let entry_function = program.entry();
         if !entry_function.signature().slot_types().is_empty() {
-            return Err(NotLowered::from_uses(vec![
-                form::UnloweredForm::new(
-                    Form::Parameters,
-                    Some(entry_function.origin().clone()),
-                )
-                .with_detail("entry"),
-            ])
-            .unwrap_or_else(|| NotLowered::single(Form::Parameters)));
+            return Err(EmitError::EntryParameters {
+                origin: entry_function.origin().clone(),
+            });
         }
         class =
             types::class_of(&entry_function.signature().result()).map_err(|kind| {
-                NotLowered::type_of(kind, Some(entry_function.origin().clone()))
+                EmitError::malformed(kind, Some(entry_function.origin().clone()))
             })?;
     }
 
@@ -243,13 +236,11 @@ fn build(
     let total = u32::try_from(lambdas.len())
         .ok()
         .and_then(|lambdas| total.checked_add(lambdas))
-        .ok_or_else(|| NotLowered::single(Form::ModuleSize))?;
+        .ok_or(EmitError::ModuleSize)?;
     // The key unit, the language function that orders keys by the descriptor of
     // their type, follows the lambdas in a module that calls it.
     let total = if lower::needs_key_unit(program) {
-        total
-            .checked_add(1)
-            .ok_or_else(|| NotLowered::single(Form::ModuleSize))?
+        total.checked_add(1).ok_or(EmitError::ModuleSize)?
     } else {
         total
     };
@@ -283,11 +274,11 @@ fn build(
         .collect::<Vec<_>>();
     let host_imports = first.used_host_rows();
     let import_count = u32::try_from(imports.len() + host_imports.len())
-        .map_err(|_| NotLowered::single(Form::ModuleSize))?;
+        .map_err(|_| EmitError::ModuleSize)?;
     let fns = encode::routines_for(
         total
             .checked_add(import_count)
-            .ok_or_else(|| NotLowered::single(Form::ModuleSize))?,
+            .ok_or(EmitError::ModuleSize)?,
     );
     let mut lowering = lower::Lowering::new(
         &fns,
@@ -306,7 +297,7 @@ fn build(
     let entry_slots = sizes
         .get(entry as usize)
         .copied()
-        .ok_or_else(|| NotLowered::single(Form::ModuleSize))?;
+        .ok_or(EmitError::ModuleSize)?;
     let include_new =
         lowering.built_object() || globals != 0 || !host_imports.is_empty();
     let extra = lowering.comparer_routines();
@@ -351,8 +342,7 @@ fn build(
         extra,
         measure,
     };
-    let bytes =
-        encode::module(&parts).ok_or_else(|| NotLowered::single(Form::ModuleSize))?;
+    let bytes = encode::module(&parts).ok_or(EmitError::ModuleSize)?;
     Ok(EmittedModule {
         bytes,
         origins,
@@ -366,7 +356,7 @@ fn build(
 /// arithmetic, equality, and order rows. The rows that loop are native imports
 /// (`CompilerIntrinsic::native_import`), and `vibra_ir::external::CompilerIntrinsic::vectors`
 /// holds both kinds to samples. A row it lowers neither way is reported by
-/// [`emit`] as [`Form::Malformed`].
+/// [`emit`] as [`EmitError::Malformed`].
 #[must_use]
 pub fn lowers_primitive(intrinsic: vibra_ir::external::CompilerIntrinsic) -> bool {
     primitive::plan(intrinsic).is_some()

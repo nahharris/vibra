@@ -32,7 +32,7 @@ use vibra_ir::{Expr, SourceOrigin, TestAssertion, Type};
 use wasm_encoder::Instruction as I;
 
 use super::{Builder, ByteSource, FRAME, Kind, Part, Term};
-use crate::form::NotLowered;
+use crate::error::EmitError;
 use crate::layout::{header, state};
 use crate::runtime::{ValueClass, c32, get, ld32, ld64, st32, st64};
 
@@ -45,7 +45,7 @@ impl Builder<'_, '_> {
         arguments: &[Expr],
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let mark = self.next_temp;
         let mut operands = Vec::with_capacity(arguments.len());
         for argument in arguments {
@@ -70,11 +70,11 @@ impl Builder<'_, '_> {
             }
             (TestAssertion::Equal, [expected, actual]) => {
                 let ty = arguments.first().map(Expr::result_type).ok_or_else(|| {
-                    NotLowered::type_of("shape", Some(origin.clone()))
+                    EmitError::malformed("shape", Some(origin.clone()))
                 })?;
                 self.assert_equal(*expected, *actual, &ty, origin)?;
             }
-            _ => return Err(NotLowered::type_of("shape", Some(origin.clone()))),
+            _ => return Err(EmitError::malformed("shape", Some(origin.clone()))),
         }
         self.store_bits(dest, 0, ValueClass::Void);
         self.release_to(mark);
@@ -153,7 +153,7 @@ impl Builder<'_, '_> {
         ty: &Type,
         class: ValueClass,
         field: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let new_id = self.lowering.fns.new_id;
         if ty.has_params() {
             let pair = self.temp();
@@ -204,7 +204,7 @@ impl Builder<'_, '_> {
         actual: u32,
         ty: &Type,
         origin: &SourceOrigin,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let class = self.class(ty, origin)?;
         let recorded = if ty.has_params() {
             Type::Any

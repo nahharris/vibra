@@ -21,16 +21,14 @@
 //! observations, the filesystem-free resolver observation and its
 //! `@resolved.v1` artifact, and the tooling-profile snapshot-backed formatter
 //! observation. A profile with no handler reports its cases unavailable. Each
-//! accepted executable case also runs in the WebAssembly backend when it
-//! lowers, against the case's one expectation, and the checked-in parity
-//! inventory records which cases do.
+//! accepted executable case also runs in the WebAssembly backend, against the
+//! case's one expectation, and a case on which either backend disagrees fails.
 
 pub mod baseline;
 mod corpus;
 mod format;
 mod graph;
 mod manifest;
-mod parity;
 mod profile;
 mod project;
 mod reader;
@@ -46,7 +44,7 @@ mod workspace_semantic;
 
 pub use corpus::{
     Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError, HostWorldError,
-    PARITY_INVENTORY_FILE_NAME, corpus_root, workspace_root,
+    corpus_root, workspace_root,
 };
 pub use format::ToolingV1FormatHandler;
 pub use graph::StaticV1SourceGraphHandler;
@@ -54,10 +52,6 @@ pub use manifest::{
     CaseExpectations, CaseInputs, CaseManifest, ConformanceOperation,
     ExpectedDiagnostic, ExpectedExecution, ExpectedFix, ExpectedQuery,
     ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError, NORMATIVE_SECTION_IDS,
-};
-pub use parity::{
-    Disposition, Findings, MissingRow, OWNING_STEPS, Observed, ParityError,
-    ParityInventory,
 };
 pub use profile::{ConformanceProfile, UnknownProfile};
 pub use project::StaticV1ProjectHandler;

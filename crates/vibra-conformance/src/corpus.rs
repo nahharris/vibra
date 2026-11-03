@@ -9,9 +9,6 @@ use vibra_diagnostics::Diagnostic;
 use vibra_host::HostWorld;
 use vibra_syntax::DocumentMode;
 
-/// The name of the parity inventory file, beside the corpus root.
-pub const PARITY_INVENTORY_FILE_NAME: &str = "parity.tsv";
-
 /// The workspace root, found from this crate's manifest.
 #[must_use]
 pub fn workspace_root() -> PathBuf {
@@ -311,14 +308,6 @@ impl Corpus {
     #[must_use]
     pub fn cases(&self) -> &[Case] {
         &self.cases
-    }
-
-    /// Where this corpus's parity inventory is: `parity.tsv` beside the corpus
-    /// root, so that `conformance/cases` has `conformance/parity.tsv`. The
-    /// file need not exist, because a synthetic corpus has no inventory.
-    #[must_use]
-    pub fn parity_inventory_path(&self) -> Option<PathBuf> {
-        Some(self.root.parent()?.join(PARITY_INVENTORY_FILE_NAME))
     }
 
     /// Number of loaded cases.

@@ -5,8 +5,8 @@ Implementation status: reader, static, interpreter, and tooling observations
 have conformance coverage for the complete pure language through M3 and the
 pre-M4 binding revision; the current counts are recorded in the milestone
 exit evidence. The host-event expectation is implemented in both backends, and
-the differential execution and the parity inventory run over every executable
-case since M4 Step 11, which lowers every form of a checked program. Milestone 4
+the differential execution runs over every executable case since M4 Step 11,
+which lowers every form of a checked program. Milestone 4
 Step 13 closes the Stage 4B contracts of this chapter, the effect and host
 diagnostics, the host-world corpus input, the audit-event snapshots, and the
 registry invariants, and implements none of them; Steps 14 to 20 do.
@@ -920,20 +920,14 @@ whether it does.
 
 The runner reports, besides the counts by required profile, one count line per
 backend over the executable cases: the interpreter backend as passed, failed,
-and unavailable, and the Wasm backend as matched, failed, and not lowered. A
-**not lowered** case is one whose parity-inventory disposition says the Wasm
-backend does not implement a form it uses yet: the runner runs only the
-interpreter on it, counts it as not lowered, and neither passes nor fails the
-Wasm backend on it. A not-lowered case does not fail a run. The Stage 4A
-sub-gate and the `full-v1` claim require a count of zero.
-
-The **parity inventory** is a checked-in table with one row for every executable
-case, giving its disposition: `matched`, or `not lowered` with the owning
-implementation step. A host test fails when an executable case has no row,
-when a row names no case, when a `not lowered` row names no step, and when the
-runner's result for a case disagrees with its disposition, including a
-`matched` case on which the Wasm backend disagrees. A step moves rows toward
-`matched` and never back, so the set of matched cases only grows.
+and unavailable, and the Wasm backend as matched and failed. A checked program
+has no form the Wasm backend leaves out, so a Wasm emit failure on an
+executable case is a toolchain defect and fails that case, with the emitter's
+error as the failure reason, exactly as a disagreement does. A case has no
+third disposition and no table names cases the Wasm backend skips; a runner
+with no Wasm execution handler runs the interpreter alone and reports no Wasm
+count. The Stage 4A
+sub-gate and the `full-v1` claim require only that no case fails.
 
 The native-implementation harness joins the same differential. For every sample
 input of every native symbol, the interpreter calling the native code, the

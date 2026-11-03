@@ -37,7 +37,7 @@ use super::{
     Builder, ByteSource, Callee, FRAME, Move, Part, Place, SCRATCH, Term, UNRESOLVED,
 };
 use crate::desc::{CLASS_MASK, class};
-use crate::form::NotLowered;
+use crate::error::EmitError;
 use crate::layout::{CellClass, Kind, frame, header};
 use crate::runtime::{ValueClass, c32, get, ld8, ld32, ld64, set, st8, st64};
 use crate::types::Shape;
@@ -206,7 +206,7 @@ impl Builder<'_, '_> {
         &mut self,
         value: &Expr,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let from = value.result_type();
         let mark = self.next_temp;
         let slot = self.temp();
@@ -225,7 +225,7 @@ impl Builder<'_, '_> {
         slot: u32,
         from: &Type,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         match from {
             Type::Interface(..) | Type::Any => self.move_slot(dest, slot),
             Type::Param(name) => {
@@ -366,7 +366,7 @@ impl Builder<'_, '_> {
         place: Place,
         fail: u32,
         binds: &mut Binds,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         match pattern {
             Type::Param(name) => self.bind_descriptor(name, place, fail, binds),
             Type::Interface(..) | Type::Any => Ok(()),
@@ -456,9 +456,9 @@ impl Builder<'_, '_> {
         place: Place,
         fail: u32,
         binds: &mut Binds,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let Some(slot) = binds.slots.get(name).copied() else {
-            return Err(NotLowered::single(crate::Form::Malformed));
+            return Err(EmitError::malformed("binding", None));
         };
         if !binds.seen.insert(name.to_owned()) {
             let equal = self.lowering.desc_equal();
@@ -522,7 +522,7 @@ impl Builder<'_, '_> {
         tail: bool,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let CallTarget::Contract {
             interface,
             member,
@@ -670,12 +670,9 @@ impl Builder<'_, '_> {
     /// Tries the candidates in order. The block that is current when it
     /// returns is the one no candidate held in; every candidate that holds ends
     /// its own block with a call.
-    pub(super) fn try_candidates(
-        &mut self,
-        d: &Dispatch<'_>,
-    ) -> Result<(), NotLowered> {
+    pub(super) fn try_candidates(&mut self, d: &Dispatch<'_>) -> Result<(), EmitError> {
         let program = self.lowering.program;
-        let module_size = || NotLowered::single(crate::Form::ModuleSize);
+        let module_size = || EmitError::ModuleSize;
         let first = self.new_block();
         self.goto(first, first);
         for candidate in self.candidates(d.interface, d.member) {
@@ -765,16 +762,9 @@ impl Builder<'_, '_> {
         Ok(())
     }
 
-    /// The form that reports a call the lowering cannot make.
-    fn forms_of_call(&self, origin: &SourceOrigin) -> NotLowered {
-        NotLowered::from_uses(vec![
-            crate::form::UnloweredForm::new(
-                crate::Form::Malformed,
-                Some(origin.clone()),
-            )
-            .with_detail("contract"),
-        ])
-        .unwrap_or_else(|| NotLowered::single(crate::Form::Malformed))
+    /// The error that reports a call the lowering cannot make.
+    fn forms_of_call(&self, origin: &SourceOrigin) -> EmitError {
+        EmitError::malformed("contract", Some(origin.clone()))
     }
 
     /// Calls candidate `candidate`: the type arguments of its parameters, the
@@ -788,9 +778,9 @@ impl Builder<'_, '_> {
         member_types: &[Type],
         operands: &mut [u32],
         commit: &Commit<'_>,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let program = self.lowering.program;
-        let module_size = || NotLowered::single(crate::Form::ModuleSize);
+        let module_size = || EmitError::ModuleSize;
         let function = program.functions().get(candidate).ok_or_else(module_size)?;
         let Some(implements) = function.implements() else {
             return Err(module_size());
@@ -953,7 +943,7 @@ impl Builder<'_, '_> {
         to: &Type,
         bound: &BTreeMap<String, TypeSource>,
         origin: &SourceOrigin,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         self.convert(
             slot,
             from,
@@ -990,23 +980,15 @@ impl Builder<'_, '_> {
         from: &Type,
         to: &Type,
         ctx: &Convert<'_>,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         if !conversion_needed(from, to) {
             return Ok(());
         }
         if is_interface(to) {
             return self.convert_leaf(slot, from, ctx);
         }
-        let unsupported = || {
-            NotLowered::from_uses(vec![
-                crate::form::UnloweredForm::new(
-                    crate::Form::Malformed,
-                    Some(ctx.origin.clone()),
-                )
-                .with_detail("conversion"),
-            ])
-            .unwrap_or_else(|| NotLowered::single(crate::Form::Malformed))
-        };
+        let unsupported =
+            || EmitError::malformed("conversion", Some(ctx.origin.clone()));
         match (from, to) {
             // An array converts each element, and a dict each value: its keys
             // are admissible keys, and an interface type is not one, so a key
@@ -1095,7 +1077,7 @@ impl Builder<'_, '_> {
         from_parts: &[Type],
         to_parts: &[Type],
         ctx: &Convert<'_>,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let mark = self.next_temp;
         let mut parts = Vec::with_capacity(from_parts.len());
         let len = u32::try_from(from_parts.len()).unwrap_or(u32::MAX);
@@ -1129,7 +1111,7 @@ impl Builder<'_, '_> {
         to_payloads: &[Type],
         payload_may_be_void: bool,
         ctx: &Convert<'_>,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let join = self.new_block();
         for (discriminant, (from_payload, to_payload)) in
             (0_u32..).zip(from_payloads.iter().zip(to_payloads))
@@ -1189,7 +1171,7 @@ impl Builder<'_, '_> {
         from_element: &Type,
         to_element: &Type,
         ctx: &Convert<'_>,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let mark = self.next_temp;
         let (index, count, out) = (self.temp(), self.temp(), self.temp());
         self.store_word(index, &[c32(0)]);
@@ -1261,10 +1243,10 @@ impl Builder<'_, '_> {
         slot: u32,
         from: &Type,
         ctx: &Convert<'_>,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let mark = self.next_temp;
         let desc = self.temp();
-        let described = |this: &mut Self| -> Result<(), NotLowered> {
+        let described = |this: &mut Self| -> Result<(), EmitError> {
             if let (Some(receiver), Some(recv_desc)) = (ctx.receiver, ctx.recv_desc)
                 && from == receiver
             {

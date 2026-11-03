@@ -28,7 +28,7 @@ use wasm_encoder::Instruction as I;
 use super::dispatch::{Dispatch, is_interface};
 use super::{Builder, ByteSource, Callee, FRAME, KeyAt, Move, SCRATCH, Term, Variant};
 use crate::desc::{CLASS_MASK, class};
-use crate::form::NotLowered;
+use crate::error::EmitError;
 use crate::layout::{CellClass, Kind, frame, header};
 use crate::runtime::{Ins, ValueClass, c32, get, ld8, ld32, ld64, set, st64};
 
@@ -122,7 +122,7 @@ impl Builder<'_, '_> {
 
     /// The body of the key unit.
     #[allow(clippy::too_many_lines)]
-    pub(super) fn key_unit(&mut self) -> Result<(), NotLowered> {
+    pub(super) fn key_unit(&mut self) -> Result<(), EmitError> {
         let program = self.lowering.program;
         let origin = program.entry().origin().clone();
         let result = self.temp();
@@ -405,7 +405,7 @@ impl Builder<'_, '_> {
         &mut self,
         result: u32,
         origin: &SourceOrigin,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let program = self.lowering.program;
         let Some(interface) = self.lowering.ordered_interface() else {
             self.answer(result, &[c32(0)]);
@@ -489,7 +489,7 @@ impl Builder<'_, '_> {
         result: &Type,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let (Some(a), Some(b)) = (operands.first().copied(), operands.get(1).copied())
         else {
             return Err(self.closed_error(origin));
@@ -544,8 +544,8 @@ impl Builder<'_, '_> {
         Ok(())
     }
 
-    fn closed_error(&self, origin: &SourceOrigin) -> NotLowered {
-        NotLowered::type_of("shape", Some(origin.clone()))
+    fn closed_error(&self, origin: &SourceOrigin) -> EmitError {
+        EmitError::malformed("shape", Some(origin.clone()))
     }
 
     /// Orders two keys of a dict by the key unit, where the order of the key
@@ -557,11 +557,11 @@ impl Builder<'_, '_> {
         a: KeyAt,
         b: KeyAt,
         out: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let key_class = if is_interface(key) {
             ValueClass::Ref
         } else {
-            super::class_of(key).map_err(|kind| NotLowered::type_of(kind, None))?
+            super::class_of(key).map_err(|kind| EmitError::malformed(kind, None))?
         };
         let (left, right) = (self.temp(), self.temp());
         for (at, slot) in [(a, left), (b, right)] {

@@ -75,8 +75,8 @@ fn run() -> Result<(), String> {
     );
     let wasm = report.wasm_counts();
     println!(
-        "wasm backend: {} matched, {} failed, {} not lowered",
-        wasm.matched, wasm.failed, wasm.not_lowered
+        "wasm backend: {} matched, {} failed",
+        wasm.matched, wasm.failed
     );
     println!(
         "conformance total: {} passed, {} failed, {} unavailable",
