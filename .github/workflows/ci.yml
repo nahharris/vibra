@@ -86,7 +86,7 @@ jobs:
   # build that `main` saved under the shared key. This job never saves that
   # cache, because it builds less than `check` does and its smaller build must
   # not take the key from the fuller one. The host tests of the emitter, the
-  # runner, the parity inventory, deterministic emission, and the specification
+  # runner, deterministic emission, and the specification
   # inventory run in `check`, whose workspace test run includes them on every
   # platform, so this job does not repeat them.
   conformance:
