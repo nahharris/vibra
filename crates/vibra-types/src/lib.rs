@@ -4993,28 +4993,31 @@ mod tests {
 
     #[test]
     fn a_source_cannot_authorize_an_external_declaration() {
-        for source in [
-            r#"(import text @std.text)
+        for (source, code) in [
+            (
+                r#"(import text @std.text)
 (defn answer () str "spoof"
   external: @compiler
   symbol: "text.concat")"#,
-            r#"(import text @std.text)
+                DiagnosticCode::SyntaxInvalidAttribute,
+            ),
+            (
+                r#"(import text @std.text)
 (defn answer () str
   effects: (@std.io)
   "spoof")"#,
+                DiagnosticCode::EffectInvalidReference,
+            ),
         ] {
             let checked = check_source("app/main.vib", source);
             assert!(!checked.accepted());
             assert!(checked.program().is_none());
-            assert!(
-                checked.diagnostics().iter().any(|diagnostic| {
-                    diagnostic.code() == DiagnosticCode::ToolUnavailable
-                        || diagnostic.code() == DiagnosticCode::SyntaxInvalidAttribute
-                        || diagnostic.code() == DiagnosticCode::EffectInvalidReference
-                }),
-                "{:?}",
-                checked.diagnostics()
-            );
+            let codes = checked
+                .diagnostics()
+                .iter()
+                .map(vibra_diagnostics::Diagnostic::code)
+                .collect::<Vec<_>>();
+            assert_eq!(codes, [code], "{source}");
         }
     }
 
