@@ -22,10 +22,55 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
+fn copy_directory(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).expect("directory");
+    for entry in std::fs::read_dir(from).expect("a directory") {
+        let entry = entry.expect("an entry");
+        let target = to.join(entry.file_name());
+        if entry.file_type().expect("a type").is_dir() {
+            copy_directory(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).expect("copy");
+        }
+    }
+}
+
+/// A corpus holding only the `V1-PROJECT-*` cases of the repository's corpus,
+/// copied under the system temporary directory and removed on drop. The whole
+/// corpus is the job of the conformance gate; this binary runs the project cases
+/// through a dispatcher it builds itself.
+struct ProjectCorpus(PathBuf);
+
+impl ProjectCorpus {
+    fn new() -> Self {
+        let root = std::env::temp_dir()
+            .join(format!("vibra-project-step2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let source = workspace_root().join("conformance/cases");
+        for entry in std::fs::read_dir(&source).expect("the corpus") {
+            let entry = entry.expect("an entry");
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("V1-PROJECT-")
+            {
+                copy_directory(&entry.path(), &root.join(entry.file_name()));
+            }
+        }
+        Self(root)
+    }
+}
+
+impl Drop for ProjectCorpus {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 #[test]
 fn static_project_cases_are_executed_by_the_real_handler() {
-    let corpus = Corpus::discover(workspace_root().join("conformance/cases"))
-        .expect("workspace corpus");
+    let project_cases = ProjectCorpus::new();
+    let corpus = Corpus::discover(&project_cases.0).expect("project corpus");
     let static_cases = corpus
         .cases()
         .iter()

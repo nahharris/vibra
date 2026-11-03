@@ -1,7 +1,10 @@
 //! Contract-member forms through the real checker and interpreter
 //! (`docs/spec/02-type-system.md`, "Generics" and "Interfaces and methods";
 //! `docs/spec/06-runtime.md`, "Generic instantiation" and "Tail calls"; M4
-//! Step 2).
+//! Step 2). The generic, labelled, dict-tail, and function-value forms are the
+//! corpus cases `V1-RUNTIME-contract-member-*`; what remains here is what a
+//! case cannot state: the order of an implementation's own generics, the
+//! activation depth of tail calls through each form, and the formatter's rewrite.
 
 #![allow(clippy::expect_used, clippy::indexing_slicing, missing_docs)]
 
@@ -70,34 +73,6 @@ fn value(source: &str) -> String {
         .split_once(" value: ")
         .expect("a canonical result");
     value.strip_suffix(')').expect("closing").to_owned()
-}
-
-const MAPPER: &str = "\
-(defint mapper
-  (defn map-to (value self f (fn (self) u)) (array u)
-    where: (u any)))
-(deftype box (record n i32)
-  (impl mapper
-    (defn map-to (value self f (fn (self) u)) (array u)
-      where: (u any)
-      (array.of (f value) (f value)))))
-(deftype pair (record left t right t)
-  where: (t any)
-  (impl mapper
-    (defn map-to (value self f (fn (self) u)) (array u)
-      where: (u any)
-      (array.of (f value)))))
-";
-
-#[test]
-fn an_abstract_generic_member_runs_at_the_arguments_inference_fixes() {
-    let source = format!(
-        "{MAPPER}(defn main () (tuple (array str) (array u64))\n  (tupleof\n    (mapper.map-to (box n: 3i32) (lambda (b box) str \"boxed\"))\n    (mapper.map-to (pair left: 1i32 right: 2i32) (lambda (p (pair i32)) u64 5u64))))"
-    );
-    assert_eq!(
-        value(&source),
-        "(record kind: @tuple values: (array (record kind: @array values: (array \"boxed\" \"boxed\")) (record kind: @array values: (array 5u64))))"
-    );
 }
 
 #[test]
@@ -194,156 +169,6 @@ fn many_own_generics_keep_the_contracts_order_whatever_an_implementation_writes(
             "types: ({types})"
         );
     }
-}
-
-#[test]
-fn a_written_types_list_fixes_the_argument_and_agrees_with_inference() {
-    let source = format!(
-        "{MAPPER}(defn main () (array i32)\n  (mapper.map-to types: (i32) (box n: 4i32) (lambda (b box) i32 9i32)))"
-    );
-    assert_eq!(
-        value(&source),
-        "(record kind: @array values: (array 9i32 9i32))"
-    );
-}
-
-#[test]
-fn a_type_argument_only_types_can_fix_reaches_the_implementation() {
-    // `u` appears in no signature slot, so the run time can only know it from
-    // the call, and the body dispatches on it.
-    let source = |argument: &str| {
-        format!(
-            "\
-(defn main () str (probing.probe types: ({argument}) (holder 0i32)))
-(defint maker
-  (defn make () self)
-  (defn tag (value self) str))
-(deftype red i32
-  (impl maker
-    (defn make () self (red 1i32))
-    (defn tag (value self) str \"red\")))
-(deftype blue i32
-  (impl maker
-    (defn make () self (blue 2i32))
-    (defn tag (value self) str \"blue\")))
-(defint probing
-  (defn probe (value self) str
-    where: (u maker)))
-(deftype holder i32
-  (impl probing
-    (defn probe (value self) str
-      where: (u maker)
-      (maker.tag (as u (maker.make))))))"
-        )
-    };
-    assert_eq!(value(&source("red")), "\"red\"");
-    assert_eq!(value(&source("blue")), "\"blue\"");
-}
-
-#[test]
-fn a_generic_interface_takes_its_arguments_then_the_members() {
-    let source = "\
-(defn main () (tuple (tuple str bool) (tuple i64 bool) crate)
-  (tupleof
-    (as (tuple str bool) (tagged.tag-with (crate n: 1i32) true))
-    (tagged.tag-with types: (i64 bool) (crate n: 1i32) false)
-    (builder.build \"seed\")))
-(defint tagged
-  where: (t any)
-  (defn tag-with (value self other u) (tuple t u)
-    where: (u any)))
-(defint builder
-  (defn build (seed u) self
-    where: (u any)))
-(deftype crate (record n i32)
-  (impl (tagged str)
-    (defn tag-with (value self other u) (tuple str u)
-      where: (u any)
-      (tupleof \"s\" other)))
-  (impl (tagged i64)
-    (defn tag-with (value self other u) (tuple i64 u)
-      where: (u any)
-      (tupleof 7i64 other)))
-  (impl builder
-    (defn build (seed u) self
-      where: (u any)
-      (crate n: 9i32))))";
-    assert_eq!(
-        value(source),
-        "(record kind: @tuple values: (array (record kind: @tuple values: (array \"s\" true)) (record kind: @tuple values: (array 7i64 false)) (record kind: @record type: @crate fields: (record n: 9i32))))"
-    );
-}
-
-const SCALER: &str = "\
-(defint scaler
-  (defn scale (value self) (tuple i32 i32)
-    labelled: (by i32 2i32 offset i32 0i32)))
-(defint collector
-  (defn collect (value self) (dict str i32)
-    variadic: (entries (dict str i32))))
-(deftype gauge (record base i32)
-  (impl scaler
-    (defn scale (value self) (tuple i32 i32)
-      labelled: (by i32 2i32 offset i32 0i32)
-      (tupleof by offset)))
-  (impl collector
-    (defn collect (value self) (dict str i32)
-      variadic: (entries (dict str i32))
-      entries)))
-";
-
-#[test]
-fn labelled_operands_bind_by_name_and_omitted_ones_take_the_contract_default() {
-    let source = format!(
-        "{SCALER}(defn main () (tuple (tuple i32 i32) (tuple i32 i32) (tuple i32 i32) (tuple i32 i32) (tuple i32 i32))\n  (tupleof\n    (scaler.scale (gauge base: 1i32))\n    (scaler.scale (gauge base: 1i32) offset: 7i32 by: 3i32)\n    (scaler.scale (gauge base: 1i32) by: 5i32)\n    (through (gauge base: 1i32))\n    (via-value (as scaler (gauge base: 1i32)))))\n(defn through (value t) (tuple i32 i32)\n  where: (t scaler)\n  (scaler.scale value offset: 4i32))\n(defn via-value (value scaler) (tuple i32 i32)\n  (scaler.scale value by: 8i32))"
-    );
-    let tuple = |left: i32, right: i32| {
-        format!("(record kind: @tuple values: (array {left}i32 {right}i32))")
-    };
-    assert_eq!(
-        value(&source),
-        format!(
-            "(record kind: @tuple values: (array {} {} {} {} {}))",
-            tuple(2, 0),
-            tuple(3, 7),
-            tuple(5, 0),
-            tuple(2, 4),
-            tuple(8, 0)
-        )
-    );
-}
-
-#[test]
-fn a_dict_tail_collects_pairs_in_key_order_and_may_be_empty() {
-    let source = format!(
-        "{SCALER}(defn main () (tuple (dict str i32) (dict str i32) (dict str i32))\n  (tupleof\n    (collector.collect (gauge base: 1i32) \"b\" 2i32 \"a\" 1i32)\n    (collector.collect (gauge base: 1i32))\n    (via-value (as collector (gauge base: 1i32)))))\n(defn via-value (value collector) (dict str i32)\n  (collector.collect value \"z\" 26i32))"
-    );
-    assert_eq!(
-        value(&source),
-        "(record kind: @tuple values: (array (record kind: @dict entries: (array (tuple \"a\" 1i32) (tuple \"b\" 2i32))) (record kind: @dict entries: (array)) (record kind: @dict entries: (array (tuple \"z\" 26i32)))))"
-    );
-}
-
-#[test]
-fn each_form_is_a_function_value_at_a_written_fn_type() {
-    let source = format!(
-        "{MAPPER}{SCALER}\
-(defn main () (tuple (array str) (tuple i32 i32) (dict str i32))
-  (tupleof
-    (run-map mapper.map-to (box n: 1i32))
-    (run-scale scaler.scale (gauge base: 1i32))
-    (run-collect collector.collect (gauge base: 1i32))))
-(defn run-map (f (fn (box (fn (box) str)) (array str)) b box) (array str)
-  (f b (lambda (x box) str \"v\")))
-(defn run-scale (f (fn (gauge) (tuple i32 i32) labelled: (by i32 offset i32)) g gauge) (tuple i32 i32)
-  (f g by: 1i32 offset: 2i32))
-(defn run-collect (f (fn (gauge) (dict str i32) variadic: (dict str i32)) g gauge) (dict str i32)
-  (f g \"k\" 3i32))"
-    );
-    assert_eq!(
-        value(&source),
-        "(record kind: @tuple values: (array (record kind: @array values: (array \"v\" \"v\")) (record kind: @tuple values: (array 1i32 2i32)) (record kind: @dict entries: (array (tuple \"k\" 3i32)))))"
-    );
 }
 
 const STEPPER: &str = "\

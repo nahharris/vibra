@@ -1,13 +1,11 @@
-//! The host boundary in both backends (milestone 4 Step 16b-1).
+//! The host boundary in both backends, for what a corpus case cannot state.
 //!
-//! No source can call a host operation yet: the checker keeps `@host`
-//! unavailable until the `io` operations arrive in 16b-2. The plumbing is
-//! therefore proved with hand-built checked IR, as Steps 4 and 5a proved their
-//! layers: a program whose functions are the registry rows of `io` is built from
-//! IR constructors, run by the reference interpreter over a provider and by the
-//! Wasm runner over another provider of the same world, and held to one result
-//! and one audit trace. The expectations are written from the specification's
-//! canonical value encoding and its audit-event shape, not copied from a run.
+//! The operations themselves (non-ASCII text, bytes, standard input read once,
+//! invalid text) are the corpus cases `V1-RUNTIME-io-*`, which the conformance
+//! gate runs in both backends. What remains is proved with hand-built checked IR
+//! whose functions are the registry rows of `io`: a one-mebibyte input and a
+//! million-byte output cross the boundary, and a provider that exhausts the
+//! host's memory is the host event in both backends.
 
 #![allow(
     clippy::expect_used,
@@ -20,7 +18,6 @@
 use vibra_diagnostics::ByteSpan;
 use vibra_host::{
     AuditEvent, Done, Failure, HostProvider, HostWorld, IoError, WorldProvider,
-    trace_to_vibon,
 };
 use vibra_interp::{Interpreter, MemoryBudget, RuntimeError};
 use vibra_ir::external::host::{HostRow, host_row};
@@ -226,111 +223,6 @@ fn agree(program: &CheckedProgram, world: &HostWorld) -> Seen {
         "the traces differ"
     );
     oracle
-}
-
-const OK_VOID: &str = "(record type: (record type: @std.result.result arguments: (array @void @std.io.io-error)) value: (record kind: @enum type: @std.result.result variant: @ok))\n";
-
-fn ok_str(payload: &str) -> String {
-    format!(
-        "(record type: (record type: @std.result.result arguments: (array @str @std.io.io-error)) value: (record kind: @enum type: @std.result.result variant: @ok payload: {payload}))\n"
-    )
-}
-
-// -- the operations -------------------------------------------------------------
-
-#[test]
-fn writing_text_with_non_ascii_scalars_completes_and_is_one_event() {
-    let seen = agree(
-        &program(&[("io.stdout-text", vec![text("h\u{e9}llo \u{1f600}")])]),
-        &world("\"\""),
-    );
-    assert_eq!(seen.result, OK_VOID);
-    assert_eq!(
-        trace_to_vibon(&seen.trace),
-        "(record format: @audit-trace.v1 events: (array (record kind: @host op: \"io.stdout-text\" args: (array \"h\u{e9}llo \u{1f600}\") result: (record kind: @enum type: @std.result.result variant: @ok))))"
-    );
-}
-
-#[test]
-fn writing_arbitrary_bytes_to_standard_output_and_error() {
-    let seen = agree(
-        &program(&[
-            ("io.stdout-bytes", vec![bytes(&[0, 255, 104])]),
-            ("io.stderr-bytes", vec![bytes(&[])]),
-            ("io.stderr-text", vec![text("e")]),
-        ]),
-        &world("\"\""),
-    );
-    assert_eq!(seen.result, OK_VOID);
-    let events = seen
-        .trace
-        .iter()
-        .map(AuditEvent::to_vibon)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        events,
-        [
-            "(record kind: @host op: \"io.stdout-bytes\" args: (array (record kind: @bytes values: (array 0u8 255u8 104u8))) result: (record kind: @enum type: @std.result.result variant: @ok))",
-            "(record kind: @host op: \"io.stderr-bytes\" args: (array (record kind: @bytes values: (array))) result: (record kind: @enum type: @std.result.result variant: @ok))",
-            "(record kind: @host op: \"io.stderr-text\" args: (array \"e\") result: (record kind: @enum type: @std.result.result variant: @ok))",
-        ]
-    );
-}
-
-#[test]
-fn whole_standard_input_is_read_once_and_the_second_read_is_empty() {
-    let program = program(&[("io.stdin-text", vec![]), ("io.stdin-text", vec![])]);
-    let seen = agree(&program, &world("\"line one\\nline two\""));
-    assert_eq!(seen.result, ok_str("\"\""));
-    let events = seen
-        .trace
-        .iter()
-        .map(AuditEvent::to_vibon)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        events,
-        [
-            "(record kind: @host op: \"io.stdin-text\" args: (array) result: (record kind: @enum type: @std.result.result variant: @ok payload: \"line one\\nline two\"))",
-            "(record kind: @host op: \"io.stdin-text\" args: (array) result: (record kind: @enum type: @std.result.result variant: @ok payload: \"\"))",
-        ]
-    );
-}
-
-#[test]
-fn standard_input_as_bytes_is_the_encoding_of_the_text() {
-    let seen = agree(
-        &program(&[("io.stdin-bytes", vec![])]),
-        &world("\"h\u{e9}\""),
-    );
-    assert_eq!(
-        seen.result,
-        "(record type: (record type: @std.result.result arguments: (array @bytes @std.io.io-error)) value: (record kind: @enum type: @std.result.result variant: @ok payload: (record kind: @bytes values: (array 104u8 195u8 169u8))))\n"
-    );
-}
-
-#[test]
-fn input_that_is_not_utf8_is_invalid_text_and_the_program_continues() {
-    let program = program(&[
-        ("io.stdin-text", vec![]),
-        ("io.stdout-text", vec![text("after")]),
-    ]);
-    let world = HostWorld::decode(
-        "world.vibon",
-        "(record format: @host-world.v1 stdin: (record kind: @bytes values: (array 255u8)))\n",
-    )
-    .expect("a world");
-    let seen = agree(&program, &world);
-    assert_eq!(seen.result, OK_VOID);
-    let events = seen
-        .trace
-        .iter()
-        .map(AuditEvent::to_vibon)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        events[0],
-        "(record kind: @host op: \"io.stdin-text\" args: (array) result: (record kind: @enum type: @std.result.result variant: @err payload: (record kind: @enum type: @std.io.io-error variant: @invalid-text)))"
-    );
-    assert_eq!(events.len(), 2);
 }
 
 #[test]

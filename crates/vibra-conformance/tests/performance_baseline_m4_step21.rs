@@ -17,13 +17,13 @@
 )]
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use vibra_conformance::baseline::{
-    BASELINE_PATH, Baseline, Exact, MIN_RUNS, PROGRAMS, Program, differences,
-    measure_exact, measure_program, repository_root,
+    BASELINE_PATH, Baseline, Exact, InterpreterExact, MIN_RUNS, PROGRAMS, Program,
+    WasmExact, differences, measure_exact, measure_program, measure_programs,
+    repository_root,
 };
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
@@ -36,28 +36,48 @@ fn recorded() -> Baseline {
         .unwrap_or_else(|message| panic!("{BASELINE_PATH}: {message}"))
 }
 
-/// One measurement of every program, shared by the tests that need one.
-fn measured() -> &'static Vec<Exact> {
-    static MEASURED: OnceLock<Vec<Exact>> = OnceLock::new();
-    MEASURED.get_or_init(|| {
-        measure_exact(&repository_root()).unwrap_or_else(|message| panic!("{message}"))
-    })
+/// Synthetic metrics for every program of the list, one distinct number per
+/// metric, so the comparison tests regenerate nothing.
+fn synthetic() -> Vec<Exact> {
+    PROGRAMS
+        .iter()
+        .zip(1_u64..)
+        .map(|(program, seed)| Exact {
+            program: program.name.to_owned(),
+            interpreter: InterpreterExact {
+                allocations: seed * 10,
+                peak_bytes: seed * 100,
+                reductions: seed * 1_000,
+            },
+            wasm: WasmExact {
+                module_bytes: seed * 20,
+                allocations: seed * 30,
+                peak_live_bytes: seed * 40,
+                fuel: seed * 50,
+            },
+        })
+        .collect()
 }
 
+/// The one regeneration of every program, which is the whole cost of this file.
+/// It runs twice, at once, to show that two measurements agree.
 #[test]
-fn the_checked_in_exact_metrics_equal_a_regeneration() {
-    let found = differences(&recorded().exact, measured());
+fn the_checked_in_exact_metrics_equal_a_regeneration_and_a_second_one() {
+    let root = repository_root();
+    let (first, second) = std::thread::scope(|scope| {
+        let other = scope.spawn(|| measure_exact(&root));
+        let first = measure_exact(&root);
+        (first, other.join().expect("the second measurement ran"))
+    });
+    let first = first.unwrap_or_else(|message| panic!("{message}"));
+    let second = second.expect("a second measurement");
+    assert_eq!(second, first, "two measurements differ");
+    let found = differences(&recorded().exact, &first);
     assert!(
         found.is_empty(),
         "the exact metrics moved:\n  {}\nregenerate {BASELINE_PATH} in the same change with `cargo run --release -p vibra-conformance --bin perf-baseline -- --write`",
         found.join("\n  ")
     );
-}
-
-#[test]
-fn two_consecutive_measurements_give_identical_exact_metrics() {
-    let second = measure_exact(&repository_root()).expect("a second measurement");
-    assert_eq!(&second, measured());
 }
 
 #[test]
@@ -81,6 +101,32 @@ fn the_document_names_the_programs_of_the_list_in_order() {
     assert_eq!(exact, listed);
     assert_eq!(medians, listed);
     assert_eq!(listed.len(), 10);
+}
+
+#[test]
+fn a_measurement_of_the_cheap_programs_has_their_recorded_exact_metrics_and_round_trips()
+ {
+    // The whole list takes minutes at eleven runs; the generator is the same code.
+    let cheap = [PROGRAMS[7], PROGRAMS[9]];
+    assert_eq!(
+        cheap.map(|program| program.name),
+        ["float-to-str", "effectful-walk"]
+    );
+    let root = repository_root();
+    let error =
+        measure_programs(&root, &cheap, MIN_RUNS - 1).expect_err("too few runs");
+    assert!(error.contains("at least"), "{error}");
+
+    let measured = measure_programs(&root, &cheap, MIN_RUNS).expect("a measurement");
+    let recorded = recorded();
+    assert_eq!(
+        measured.exact,
+        [recorded.exact[7].clone(), recorded.exact[9].clone()]
+    );
+    assert_eq!(measured.informational.medians.len(), 2);
+    assert_eq!(usize::try_from(measured.informational.runs), Ok(MIN_RUNS));
+    let text = measured.render().expect("a rendering");
+    assert_eq!(Baseline::parse(&text).expect("it decodes"), measured);
 }
 
 #[test]
@@ -119,25 +165,28 @@ fn the_document_is_canonical_vibon_and_the_decoder_round_trips_it() {
 
 #[test]
 fn a_moved_metric_is_reported_with_the_program_and_the_metric() {
-    let mut moved = measured().clone();
+    let baseline = synthetic();
+    let mut moved = baseline.clone();
     moved[3].wasm.fuel += 1;
-    let found = differences(&recorded().exact, &moved);
+    let found = differences(&baseline, &moved);
     assert_eq!(
         found,
         vec![
             "program `tail-loop`: wasm fuel: recorded ".to_owned()
-                + &recorded().exact[3].wasm.fuel.to_string()
+                + &baseline[3].wasm.fuel.to_string()
                 + ", measured "
                 + &moved[3].wasm.fuel.to_string()
         ]
     );
+    assert!(differences(&baseline, &baseline).is_empty());
 }
 
 #[test]
 fn a_missing_or_extra_program_fails() {
-    let mut fewer = measured().clone();
+    let baseline = synthetic();
+    let mut fewer = baseline.clone();
     let gone = fewer.remove(4);
-    let found = differences(&recorded().exact, &fewer);
+    let found = differences(&baseline, &fewer);
     assert_eq!(
         found,
         vec![format!(
@@ -145,9 +194,9 @@ fn a_missing_or_extra_program_fails() {
             gone.program
         )]
     );
-    let mut recorded_short = recorded().exact;
+    let mut recorded_short = baseline.clone();
     recorded_short.remove(4);
-    let found = differences(&recorded_short, measured());
+    let found = differences(&recorded_short, &baseline);
     assert_eq!(
         found,
         vec![format!(
@@ -192,9 +241,10 @@ fn a_changed_program_moves_its_metrics_and_the_comparison_names_them() {
         Scratch::with("tail-loop.vib", &original.replace("1000000u64", "1000u64"));
     let program = Program::source("tail-loop", "perturbed", "tail-loop.vib");
     let changed = measure_program(&scratch.root, &program).expect("the program runs");
-    let mut after = measured().clone();
+    let baseline = recorded().exact;
+    let mut after = baseline.clone();
     after[3] = changed;
-    let found = differences(&recorded().exact, &after);
+    let found = differences(&baseline, &after);
     assert!(found.len() >= 6, "{found:?}");
     for metric in [
         "interpreter allocations",
