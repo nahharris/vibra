@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, LineIndex, Position};
 
 /// A diagnostic could not be rendered because a related span names a source
@@ -49,8 +49,8 @@ pub const REGISTRY_ENTRY_SCHEMA: &str =
     include_str!("../schemas/v1/diagnostic-registry-entry.json");
 
 /// A one-based display position.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PositionDocument {
     /// One-based line number.
     pub line: usize,
@@ -74,8 +74,8 @@ impl From<Position> for PositionDocument {
 /// needs the bytes; a consumer that shows text to a person needs the
 /// positions. Deriving one from the other requires the document, which a JSON
 /// consumer may not have.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SpanDocument {
     /// The case-relative or workspace-relative source identity owning the span.
     pub source_id: Option<String>,
@@ -114,8 +114,8 @@ impl SpanDocument {
 }
 
 /// An additional span that explains a diagnostic.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RelatedSpanDocument {
     /// Where the related construct is.
     pub span: SpanDocument,
@@ -124,8 +124,8 @@ pub struct RelatedSpanDocument {
 }
 
 /// A fix offered for a diagnostic.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FixDocument {
     /// What the fix does.
     pub description: String,
@@ -136,8 +136,8 @@ pub struct FixDocument {
 }
 
 /// One diagnostic as sent to a tool.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DiagnosticDocument {
     /// Major version of this contract.
     pub schema_version: u32,
@@ -238,8 +238,8 @@ impl DiagnosticDocument {
 }
 
 /// One registry entry, as returned for a diagnostic-code query subject.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RegistryEntryDocument {
     /// Major version of this contract.
     pub schema_version: u32,

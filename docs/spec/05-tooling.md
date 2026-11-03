@@ -827,6 +827,12 @@ Persistent project, lock, and build-data record schemas are
 defined as VIBON data contracts and tested through their typed decoders, not
 duplicated as normative JSON files.
 
+The published JSON Schema is the contract a consumer reads against. The
+implementation renders these documents and never decodes them, so a producer
+test validates each rendered document against its schema, and a rule that
+crosses fields, which a schema cannot express (for example a node identifier
+against its span), is asserted on the produced value.
+
 Schema IDs and major versions are contracts. Unknown fields are rejected in
 inputs and ignored only where an output schema explicitly permits forward
 extension. Diagnostic and result atoms are serialized to JSON with their exact

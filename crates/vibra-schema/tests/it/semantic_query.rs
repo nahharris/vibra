@@ -1,4 +1,8 @@
-//! Producer and consumer tests for the semantic workspace-position schema.
+//! Producer tests for the semantic workspace-position schema: every rendered
+//! document validates against the published JSON Schema, the rules a schema
+//! cannot express are asserted directly on the produced value, and the schema
+//! rejects a malformed instance. `vibra-schema` renders these documents and
+//! never reads them back, so the schema is the consumer contract.
 
 use std::fs;
 use std::path::PathBuf;
@@ -6,13 +10,106 @@ use std::path::PathBuf;
 use jsonschema::Validator;
 use serde_json::{Value, json};
 use vibra_diagnostics::LineIndex;
-use vibra_schema::{WORKSPACE_POSITION_QUERY_SCHEMA, WorkspacePositionQueryDocument};
+use vibra_schema::{
+    SpanDocument, WORKSPACE_POSITION_QUERY_SCHEMA, WorkspacePositionQueryDocument,
+};
 use vibra_workspace::WorkspaceSnapshot;
+use vibra_workspace::query::WorkspacePositionQuery;
 
 use crate::support::{self, assert_valid, temporary_directory};
 
 fn validator() -> Validator {
     support::validator(WORKSPACE_POSITION_QUERY_SCHEMA)
+}
+
+/// A span's own rules: a forward range with one-based positions, carrying
+/// `owner` as its source identity when the span has one to match, and never an
+/// empty identity.
+fn assert_span(span: &SpanDocument, owner: Option<&str>, what: &str) {
+    assert!(span.start <= span.end, "{what}: span start exceeds end");
+    for position in [&span.start_position, &span.end_position] {
+        assert!(
+            position.line >= 1 && position.column >= 1,
+            "{what}: span positions are one-based"
+        );
+    }
+    if let Some(owner) = owner {
+        assert_eq!(
+            span.source_id.as_deref(),
+            Some(owner),
+            "{what}: the span's sourceId is its owner's"
+        );
+    }
+    assert!(
+        span.source_id.as_deref() != Some(""),
+        "{what}: sourceId cannot be empty"
+    );
+}
+
+/// The rules that cross fields of one produced document. The JSON Schema
+/// checks each field's own shape; it cannot relate `offset`, `nodeId`,
+/// `sourceId`, the structural result, spans, and witnesses to one another, so
+/// these are asserted on the value the producer built.
+fn assert_cross_field_rules(document: &WorkspacePositionQueryDocument) {
+    let source_id = document.source_id.as_str();
+    let structural = &document.structural;
+    assert_eq!(structural.schema_version, document.schema_version);
+    assert_eq!(structural.offset, document.offset, "structural offset");
+    assert_eq!(structural.source_id.as_deref(), Some(source_id));
+    assert_span(&structural.span, Some(source_id), "structural span");
+    assert_eq!(
+        document.node_id,
+        format!(
+            "{source_id}#{}-{}",
+            structural.span.start, structural.span.end
+        ),
+        "nodeId identifies the structural span exactly"
+    );
+
+    if let Some(imports) = &document.visible_imports.value {
+        for import in imports {
+            assert_span(&import.span, Some(&import.source_id), "import span");
+        }
+    }
+
+    if let Some(effects) = &document.effects.value
+        && let Some(witnesses) = &effects.witnesses
+    {
+        let performed: Vec<&str> = effects
+            .enclosing
+            .as_ref()
+            .map(|enclosing| {
+                enclosing
+                    .performed
+                    .roots
+                    .iter()
+                    .map(String::as_str)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let roots: Vec<&str> = witnesses
+            .iter()
+            .map(|witness| witness.root.as_str())
+            .collect();
+        assert_eq!(roots, performed, "one witness per performed root, in order");
+        for hop in witnesses.iter().flat_map(|witness| &witness.hops) {
+            assert_span(&hop.span, None, "hop span");
+            assert!(hop.span.source_id.is_some(), "a hop span names its source");
+        }
+    }
+}
+
+/// Renders `query` and asserts the cross-field rules of what was produced.
+fn render(
+    query: &WorkspacePositionQuery,
+    source: &str,
+) -> WorkspacePositionQueryDocument {
+    let document = WorkspacePositionQueryDocument::render_with_source(
+        query,
+        &LineIndex::new(source),
+    );
+    assert_cross_field_rules(&document);
+    document
 }
 
 fn fixture() -> (PathBuf, WorkspaceSnapshot, String) {
@@ -30,73 +127,90 @@ fn fixture() -> (PathBuf, WorkspaceSnapshot, String) {
     (root, workspace, source.to_owned())
 }
 
-#[test]
-fn a_rendered_semantic_query_validates_and_round_trips() {
-    let (root, workspace, source) = fixture();
-    let offset = source.find("1i32").expect("literal");
-    let query = workspace
-        .query_position("src/main.vib", offset)
-        .expect("workspace query");
-    let index = LineIndex::new(&source);
-    let rendered = WorkspacePositionQueryDocument::render_with_source(&query, &index);
-    let text = serde_json::to_string(&rendered).expect("query serializes");
-    let instance: Value = serde_json::from_str(&text).expect("query JSON");
-    assert_valid(&validator(), &instance);
-    assert_eq!(instance["sourceId"], json!("src/main.vib"));
-    assert_eq!(instance["role"]["value"], json!("@literal"));
-    assert_eq!(instance["expectedType"]["value"]["name"], json!("i32"));
-    let parsed: WorkspacePositionQueryDocument =
-        serde_json::from_str(&text).expect("query reads back");
-    assert_eq!(parsed, rendered);
-    let _ = fs::remove_dir_all(root);
-}
-
-#[test]
-fn semantic_fact_statuses_are_independent_and_closed() {
+/// The rendered document of the fixture's literal, as JSON.
+fn fixture_instance() -> Value {
     let (root, workspace, source) = fixture();
     let query = workspace
         .query_position("src/main.vib", source.find("1i32").expect("literal"))
         .expect("workspace query");
-    let rendered = WorkspacePositionQueryDocument::render_with_source(
-        &query,
-        &LineIndex::new(&source),
-    );
-    let mut unknown: Value = serde_json::to_value(&rendered).expect("query JSON");
-    unknown["role"]["futureField"] = json!(true);
-    assert!(validator().iter_errors(&unknown).next().is_some());
-    assert!(serde_json::from_value::<WorkspacePositionQueryDocument>(unknown).is_err());
+    let instance = serde_json::to_value(render(&query, &source)).expect("query JSON");
+    let _ = fs::remove_dir_all(root);
+    instance
+}
 
-    let mut unavailable_with_value: Value =
-        serde_json::to_value(&rendered).expect("query JSON");
+/// Asserts that the schema refuses `instance`, saying `why` when it does not.
+fn assert_rejected(validator: &Validator, instance: &Value, why: &str) {
+    assert!(validator.iter_errors(instance).next().is_some(), "{why}");
+}
+
+#[test]
+fn a_rendered_semantic_query_validates() {
+    let instance = fixture_instance();
+    assert_valid(&validator(), &instance);
+    assert_eq!(instance["sourceId"], json!("src/main.vib"));
+    assert_eq!(instance["role"]["value"], json!("@literal"));
+    assert_eq!(instance["expectedType"]["value"]["name"], json!("i32"));
+}
+
+/// The cross-field assertions must fail on a document that breaks a rule, or a
+/// passing test proves nothing.
+#[test]
+fn the_cross_field_rules_reject_an_inconsistent_document() {
+    let (root, workspace, source) = fixture();
+    let query = workspace
+        .query_position("src/main.vib", source.find("1i32").expect("literal"))
+        .expect("workspace query");
+    let rendered = render(&query, &source);
+    let _ = fs::remove_dir_all(root);
+    let fails = |document: &WorkspacePositionQueryDocument| {
+        std::panic::catch_unwind(|| assert_cross_field_rules(document)).is_err()
+    };
+
+    let mut offset = rendered.clone();
+    offset.structural.offset = rendered.offset + 1;
+    assert!(
+        fails(&offset),
+        "a structural offset that differs from the envelope"
+    );
+
+    let mut node = rendered.clone();
+    node.node_id = "src/main.vib#0-1".to_owned();
+    assert!(fails(&node), "a nodeId that is not the structural span");
+
+    let mut source_id = rendered.clone();
+    source_id.structural.source_id = Some("src/other.vib".to_owned());
+    assert!(fails(&source_id), "a structural sourceId that differs");
+
+    let mut backwards = rendered;
+    backwards.structural.span.start = backwards.structural.span.end + 1;
+    assert!(fails(&backwards), "a span whose start exceeds its end");
+}
+
+#[test]
+fn semantic_fact_statuses_are_independent_and_closed() {
+    let validator = validator();
+    let rendered = fixture_instance();
+
+    let mut unknown = rendered.clone();
+    unknown["role"]["futureField"] = json!(true);
+    assert_rejected(&validator, &unknown, "an unknown field in a fact");
+
+    let mut unavailable_with_value = rendered.clone();
     unavailable_with_value["role"] =
         json!({"status": "unavailable", "value": "@literal"});
-    assert!(
-        validator()
-            .iter_errors(&unavailable_with_value)
-            .next()
-            .is_some()
-    );
-    assert!(
-        serde_json::from_value::<WorkspacePositionQueryDocument>(
-            unavailable_with_value
-        )
-        .is_err()
+    assert_rejected(
+        &validator,
+        &unavailable_with_value,
+        "an unavailable fact with a value",
     );
 
-    let mut exact_without_value: Value =
-        serde_json::to_value(&rendered).expect("query JSON");
+    let mut exact_without_value = rendered;
     exact_without_value["expectedType"] = json!({"status": "exact", "value": null});
-    assert!(
-        validator()
-            .iter_errors(&exact_without_value)
-            .next()
-            .is_some()
+    assert_rejected(
+        &validator,
+        &exact_without_value,
+        "an exact fact without a value",
     );
-    assert!(
-        serde_json::from_value::<WorkspacePositionQueryDocument>(exact_without_value)
-            .is_err()
-    );
-    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
@@ -110,40 +224,25 @@ fn schema_identifier_is_stable() {
 }
 
 #[test]
-fn consumer_rejects_missing_values_and_closed_vocabularies() {
-    let (root, workspace, source) = fixture();
-    let query = workspace
-        .query_position("src/main.vib", source.find("1i32").expect("literal"))
-        .expect("workspace query");
-    let rendered = WorkspacePositionQueryDocument::render_with_source(
-        &query,
-        &LineIndex::new(&source),
-    );
+fn the_schema_rejects_missing_values_and_closed_vocabularies() {
+    let validator = validator();
+    let rendered = fixture_instance();
 
-    let mut missing_value: Value = serde_json::to_value(&rendered).expect("query JSON");
+    let mut missing_value = rendered.clone();
     missing_value["role"]
         .as_object_mut()
         .expect("role object")
         .remove("value");
-    assert!(validator().iter_errors(&missing_value).next().is_some());
-    assert!(
-        serde_json::from_value::<WorkspacePositionQueryDocument>(missing_value)
-            .is_err()
-    );
+    assert_rejected(&validator, &missing_value, "a fact without a value field");
 
-    let mut invalid_identity: Value =
-        serde_json::to_value(&rendered).expect("query JSON");
+    let mut invalid_identity = rendered.clone();
     invalid_identity["identity"] = json!({
         "status": "exact",
         "value": {"kind": "future", "canonical": "hello"}
     });
-    assert!(validator().iter_errors(&invalid_identity).next().is_some());
-    assert!(
-        serde_json::from_value::<WorkspacePositionQueryDocument>(invalid_identity)
-            .is_err()
-    );
+    assert_rejected(&validator, &invalid_identity, "an unknown identity kind");
 
-    let mut invalid_type: Value = serde_json::to_value(&rendered).expect("query JSON");
+    let mut invalid_type = rendered.clone();
     invalid_type["expectedType"] = json!({
         "status": "exact",
         "value": {
@@ -154,13 +253,9 @@ fn consumer_rejects_missing_values_and_closed_vocabularies() {
             "labelled": []
         }
     });
-    assert!(validator().iter_errors(&invalid_type).next().is_some());
-    assert!(
-        serde_json::from_value::<WorkspacePositionQueryDocument>(invalid_type).is_err()
-    );
+    assert_rejected(&validator, &invalid_type, "an unknown type kind");
 
-    let mut invalid_application: Value =
-        serde_json::to_value(&rendered).expect("query JSON");
+    let mut invalid_application = rendered.clone();
     invalid_application["application"] = json!({
         "status": "exact",
         "value": {
@@ -178,84 +273,34 @@ fn consumer_rejects_missing_values_and_closed_vocabularies() {
             }
         }
     });
-    assert!(
-        validator()
-            .iter_errors(&invalid_application)
-            .next()
-            .is_some()
-    );
-    assert!(
-        serde_json::from_value::<WorkspacePositionQueryDocument>(invalid_application)
-            .is_err()
-    );
+    assert_rejected(&validator, &invalid_application, "an unknown application");
 
-    let mut invalid_revision: Value =
-        serde_json::to_value(&rendered).expect("query JSON");
+    let mut invalid_revision = rendered;
     invalid_revision["workspaceRevision"] = json!("revision");
-    assert!(validator().iter_errors(&invalid_revision).next().is_some());
-    assert!(
-        serde_json::from_value::<WorkspacePositionQueryDocument>(invalid_revision)
-            .is_err()
-    );
-    let _ = fs::remove_dir_all(root);
+    assert_rejected(&validator, &invalid_revision, "a malformed revision");
 }
 
 #[test]
-fn consumer_rejects_inconsistent_structure_and_invalid_scope_records() {
-    let (root, workspace, source) = fixture();
-    let query = workspace
-        .query_position("src/main.vib", source.find("1i32").expect("literal"))
-        .expect("workspace query");
-    let rendered = WorkspacePositionQueryDocument::render_with_source(
-        &query,
-        &LineIndex::new(&source),
-    );
+fn the_schema_rejects_inconsistent_structure_and_invalid_scope_records() {
+    let validator = validator();
+    let rendered = fixture_instance();
 
-    let mut invalid_structural: Value =
-        serde_json::to_value(&rendered).expect("query JSON");
+    let mut invalid_structural = rendered.clone();
     invalid_structural["structural"]["schemaVersion"] = json!(99);
-    assert!(
-        validator()
-            .iter_errors(&invalid_structural)
-            .next()
-            .is_some()
-    );
-    assert!(
-        serde_json::from_value::<WorkspacePositionQueryDocument>(invalid_structural)
-            .is_err()
+    assert_rejected(
+        &validator,
+        &invalid_structural,
+        "a structural result of another major version",
     );
 
-    let mut mismatched_offset: Value =
-        serde_json::to_value(&rendered).expect("query JSON");
-    mismatched_offset["structural"]["offset"] = json!(0);
-    assert!(validator().iter_errors(&mismatched_offset).next().is_none());
-    assert!(
-        serde_json::from_value::<WorkspacePositionQueryDocument>(mismatched_offset)
-            .is_err()
-    );
-
-    let mut mismatched_node: Value =
-        serde_json::to_value(&rendered).expect("query JSON");
-    mismatched_node["nodeId"] = json!("src/main.vib#0-1");
-    assert!(validator().iter_errors(&mismatched_node).next().is_none());
-    assert!(
-        serde_json::from_value::<WorkspacePositionQueryDocument>(mismatched_node)
-            .is_err()
-    );
-
-    let mut invalid_local: Value = serde_json::to_value(&rendered).expect("query JSON");
+    let mut invalid_local = rendered.clone();
     invalid_local["visibleLocals"] = json!({
         "status": "exact",
         "value": [{"name": "", "identity": "garbage"}]
     });
-    assert!(validator().iter_errors(&invalid_local).next().is_some());
-    assert!(
-        serde_json::from_value::<WorkspacePositionQueryDocument>(invalid_local)
-            .is_err()
-    );
+    assert_rejected(&validator, &invalid_local, "a malformed local binding");
 
-    let mut invalid_import: Value =
-        serde_json::to_value(&rendered).expect("query JSON");
+    let mut invalid_import = rendered;
     invalid_import["visibleImports"] = json!({
         "status": "exact",
         "value": [{
@@ -271,12 +316,7 @@ fn consumer_rejects_inconsistent_structure_and_invalid_scope_records() {
             }
         }]
     });
-    assert!(validator().iter_errors(&invalid_import).next().is_some());
-    assert!(
-        serde_json::from_value::<WorkspacePositionQueryDocument>(invalid_import)
-            .is_err()
-    );
-    let _ = fs::remove_dir_all(root);
+    assert_rejected(&validator, &invalid_import, "a malformed import alias");
 }
 
 /// One query of the type-metadata corpus project, at the first `needle`.
@@ -291,11 +331,11 @@ fn typed(needle: &str) -> WorkspacePositionQueryDocument {
             source.find(needle).expect("needle"),
         )
         .expect("workspace query");
-    WorkspacePositionQueryDocument::render_with_source(&query, &LineIndex::new(&source))
+    render(&query, &source)
 }
 
 #[test]
-fn type_metadata_validates_round_trips_and_reads_back() {
+fn type_metadata_validates_and_names_what_it_resolved() {
     let validator = validator();
     for needle in [
         "(point x: 0i32",
@@ -309,13 +349,8 @@ fn type_metadata_validates_round_trips_and_reads_back() {
         "(from.convert value))\n\n(defn main",
         "(from.convert value)",
     ] {
-        let rendered = typed(needle);
-        let text = serde_json::to_string(&rendered).expect("query serializes");
-        let instance: Value = serde_json::from_str(&text).expect("query JSON");
+        let instance = serde_json::to_value(typed(needle)).expect("query JSON");
         assert_valid(&validator, &instance);
-        let parsed: WorkspacePositionQueryDocument =
-            serde_json::from_str(&text).expect("query reads back");
-        assert_eq!(parsed, rendered, "{needle}");
     }
 
     // A constructor's contract is the declared type's fields.
@@ -354,14 +389,10 @@ fn type_metadata_validates_round_trips_and_reads_back() {
 }
 
 #[test]
-fn consumer_rejects_malformed_type_metadata() {
+fn the_schema_rejects_malformed_type_metadata() {
     let validator = validator();
     let rejected = |instance: Value, what: &str| {
-        assert!(validator.iter_errors(&instance).next().is_some(), "{what}");
-        assert!(
-            serde_json::from_value::<WorkspacePositionQueryDocument>(instance).is_err(),
-            "{what}"
-        );
+        assert_rejected(&validator, &instance, what);
     };
     let contract = serde_json::to_value(typed("(shape.label value)")).expect("JSON");
 
@@ -439,11 +470,11 @@ fn effects_query(
         },
     )
     .expect("workspace query");
-    WorkspacePositionQueryDocument::render_with_source(&query, &LineIndex::new(&source))
+    render(&query, &source)
 }
 
 #[test]
-fn the_effects_fact_validates_round_trips_and_reads_back() {
+fn the_effects_fact_validates_with_and_without_witnesses() {
     let validator = validator();
     for witnesses in [false, true] {
         let rendered = effects_query(
@@ -452,12 +483,8 @@ fn the_effects_fact_validates_round_trips_and_reads_back() {
             "(three))",
             witnesses,
         );
-        let text = serde_json::to_string(&rendered).expect("query serializes");
-        let instance: Value = serde_json::from_str(&text).expect("query JSON");
+        let instance = serde_json::to_value(&rendered).expect("query JSON");
         assert_valid(&validator, &instance);
-        let parsed: WorkspacePositionQueryDocument =
-            serde_json::from_str(&text).expect("query reads back");
-        assert_eq!(parsed, rendered);
         let value = &instance["effects"]["value"];
         assert_eq!(value["witnesses"].is_array(), witnesses);
         assert_eq!(
@@ -466,7 +493,48 @@ fn the_effects_fact_validates_round_trips_and_reads_back() {
                 .map(Vec::len),
             Some(2)
         );
+        // The witness rule `render` asserted is not vacuous here: one record
+        // for each performed root, in the order of the row.
+        if witnesses {
+            let effects = rendered.effects.value.expect("effects");
+            assert_eq!(effects.witnesses.expect("witnesses").len(), 2);
+        }
     }
+}
+
+/// Witnesses that omit or reorder a performed root are a cross-field fault the
+/// schema cannot see; the producer-side assertion must catch them.
+#[test]
+fn the_cross_field_rules_reject_witnesses_that_do_not_match_the_performed_row() {
+    let rendered = effects_query(
+        "V1-TOOL-workspace-position-effect-witnesses",
+        "src/main.vib",
+        "(three))",
+        true,
+    );
+    let fails = |document: &WorkspacePositionQueryDocument| {
+        std::panic::catch_unwind(|| assert_cross_field_rules(document)).is_err()
+    };
+
+    let mut omitted = rendered.clone();
+    omitted
+        .effects
+        .value
+        .as_mut()
+        .and_then(|effects| effects.witnesses.as_mut())
+        .expect("witnesses")
+        .pop();
+    assert!(fails(&omitted), "witnesses that omit a performed root");
+
+    let mut reordered = rendered;
+    reordered
+        .effects
+        .value
+        .as_mut()
+        .and_then(|effects| effects.witnesses.as_mut())
+        .expect("witnesses")
+        .reverse();
+    assert!(fails(&reordered), "witnesses out of the row's order");
 }
 
 #[test]
@@ -479,16 +547,8 @@ fn the_schema_rejects_a_malformed_effects_fact_or_function_row() {
         true,
     ))
     .expect("JSON");
-    let rejected = |instance: Value, why: &str| {
-        assert!(
-            validator.iter_errors(&instance).next().is_some(),
-            "schema: {why}"
-        );
-        assert!(
-            serde_json::from_value::<WorkspacePositionQueryDocument>(instance).is_err(),
-            "reader: {why}"
-        );
-    };
+    let rejected =
+        |instance: Value, why: &str| assert_rejected(&validator, &instance, why);
 
     let mut unknown_row = base.clone();
     unknown_row["effects"]["value"]["enclosing"]["ceiling"]["tail"] = json!(null);
@@ -510,13 +570,10 @@ fn the_schema_rejects_a_malformed_effects_fact_or_function_row() {
     lambda["effects"]["value"]["enclosing"]["kind"] = json!("lambda");
     rejected(lambda, "a lambda with an identity");
 
-    let mut hops = base.clone();
-    hops["effects"]["value"]["witnesses"] = json!([]);
-    // The count is a cross-field rule only the consumer checks.
-    assert!(
-        serde_json::from_value::<WorkspacePositionQueryDocument>(hops).is_err(),
-        "reader: witnesses that omit a performed root"
-    );
+    let mut duplicate = base.clone();
+    duplicate["effects"]["value"]["enclosing"]["performed"]["roots"] =
+        json!(["app.main.audit", "app.main.audit"]);
+    rejected(duplicate, "a row with a duplicate root");
 
     let mut callee = base.clone();
     callee["effects"]["value"]["witnesses"][0]["hops"][0]["callee"]["kind"] =

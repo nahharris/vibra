@@ -1,4 +1,4 @@
-//! Producer and consumer tests for the Step 10 query schema.
+//! Producer tests for the Step 10 query schema.
 
 use std::path::Path;
 
@@ -12,7 +12,7 @@ use vibra_syntax::{FactStatus, parse_source};
 use crate::support::{assert_valid, validator};
 
 #[test]
-fn rendered_queries_validate_and_round_trip_deterministically() {
+fn rendered_queries_validate_and_are_deterministic() {
     let source = "; 🌱\n(defn f (value str) str value)";
     let document = parse_source(Path::new("query.vib"), source).expect("source loader");
     let index = LineIndex::new(source);
@@ -28,9 +28,6 @@ fn rendered_queries_validate_and_round_trip_deterministically() {
 
     let instance = serde_json::to_value(&rendered).expect("query becomes JSON");
     assert_valid(&validator(SOURCE_POSITION_QUERY_SCHEMA), &instance);
-    let parsed: SourcePositionQueryDocument =
-        serde_json::from_str(&first).expect("query reads back");
-    assert_eq!(parsed, rendered);
 }
 
 #[test]
@@ -57,7 +54,7 @@ fn null_and_empty_continuation_facts_are_distinct_on_the_wire() {
 }
 
 #[test]
-fn unknown_query_fields_are_rejected_by_schema_and_consumer() {
+fn unknown_query_fields_are_rejected_by_the_schema() {
     let source = "(defn f (value str) str value)";
     let document = parse_source(Path::new("query.vib"), source).expect("source loader");
     let index = LineIndex::new(source);
@@ -72,7 +69,6 @@ fn unknown_query_fields_are_rejected_by_schema_and_consumer() {
             .next()
             .is_some()
     );
-    assert!(serde_json::from_value::<SourcePositionQueryDocument>(instance).is_err());
 }
 
 #[test]

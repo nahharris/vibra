@@ -973,7 +973,7 @@ validation, documentation examples, interpreter/Wasm differential tests, and
 deterministic rebuilds are mandatory CI jobs.
 
 Fuzzing covers the reader, formatter round trips, project/lock/build data
-decoders, CLI/MCP schema decoders, external-registry boundary, and typed IR
+decoders, CLI/MCP input decoders, external-registry boundary, and typed IR
 deserialization. A fuzz finding is not closed until reduced into a regression
 case.
 
@@ -984,8 +984,11 @@ The `full-v1` claim requires:
 - every roadmap milestone complete with linked evidence;
 - no unresolved contradiction or placeholder marker in normative documents;
 - all normative examples classified and tested;
-- all CLI and MCP JSON schemas versioned and validated by producer/consumer
-  tests;
+- all CLI and MCP JSON schemas versioned, with every document a producer
+  renders validated against its published JSON Schema by producer tests, and
+  the cross-field rules a schema cannot express asserted on the produced
+  value (the published schema is the consumer contract: Vibra ships no reader
+  for its own output documents);
 - all persistent `.vibon` data formats validated and canonically round-tripped;
 - both suites green on every supported platform;
 - reference interpreter and Wasm parity across the executable corpus;
