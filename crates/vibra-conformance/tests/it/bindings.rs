@@ -11,14 +11,18 @@ use crate::support::corpus_case;
 
 use std::path::Path;
 
-use vibra_conformance::{ProfileHandler, StaticV1TypeHandler};
 use vibra_syntax::parse_data;
 
 #[test]
 fn checked_binding_observation_is_valid_vibon() {
     let case = corpus_case("V1-RUNTIME-bindings");
-    let observation = StaticV1TypeHandler.run(&case).expect("type handler");
-    let types = observation.types.expect("typed program observation");
+    let source_id = case.manifest().inputs.source.as_deref().expect("a source");
+    let source = case.read_file(source_id).expect("the source reads");
+    let checked = vibra_types::check_source(source_id, &source);
+    let types = checked
+        .program()
+        .expect("an accepted program")
+        .canonical_vibon();
     let document = parse_data(Path::new("types.vibon"), &types)
         .expect("typed binding observation loader");
     assert!(document.accepted(), "{:?}", document.diagnostics());

@@ -1,11 +1,12 @@
 id = "V1-TYPE-NOMINAL-union-member-overlap"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Union members that some substitution makes equal overlap, even when the generic name carries a bound."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,11 +14,11 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.union-member-overlap"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [15, 44]
 
 [[expect.diagnostics]]
 code = "@type.union-member-overlap"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [83, 98]

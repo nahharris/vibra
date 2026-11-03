@@ -47,6 +47,7 @@ impl ProfileHandler for StaticV1WorkspaceCheckHandler {
             accepted: checked.status()
                 == vibra_workspace::semantic::CheckStatus::Accepted,
             diagnostics: checked.diagnostics().to_vec(),
+            types: checked.canonical_types(),
             ..CaseObservation::default()
         })
     }

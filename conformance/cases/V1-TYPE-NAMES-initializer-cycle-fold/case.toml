@@ -1,11 +1,12 @@
 id = "V1-TYPE-NAMES-initializer-cycle-fold"
 rule = "V1-TYPE-NAMES"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A module-value cycle through the step function of array.fold is detected."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.initializer-cycle"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [0, 96]

@@ -1,11 +1,12 @@
 id = "V1-TYPE-NOMINAL-union-declarations"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Declared and anonymous unions of concrete, non-unifiable members are accepted; anonymous union identity ignores written order."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

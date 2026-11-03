@@ -199,7 +199,10 @@ impl ResolvedCheckResult {
         self.modules.as_deref()
     }
 
-    pub(crate) const fn module_set(&self) -> Option<&Arc<CheckedModuleSet>> {
+    /// The validated module set of the selected modules, shared: what
+    /// [`Self::modules`] borrows.
+    #[must_use]
+    pub const fn module_set(&self) -> Option<&Arc<CheckedModuleSet>> {
         self.modules.as_ref()
     }
 

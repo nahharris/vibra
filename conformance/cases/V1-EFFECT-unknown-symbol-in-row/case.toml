@@ -1,11 +1,12 @@
 id = "V1-EFFECT-unknown-symbol-in-row"
 rule = "V1-EFFECT"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A row entry that names nothing, and one that names a function and not an effect root, are each an invalid reference at that entry."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,11 +14,11 @@ accepted = false
 [[expect.diagnostics]]
 code = "@effect.invalid-reference"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [56, 63]
 
 [[expect.diagnostics]]
 code = "@effect.invalid-reference"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [64, 70]

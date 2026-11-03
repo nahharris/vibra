@@ -9,8 +9,7 @@
 //! so the domain is finite and the analysis cannot fail to converge on a
 //! checked program.
 
-use crate::support::corpus_root;
-use std::path::PathBuf;
+use crate::support::corpus_source;
 
 use vibra_types::check_source;
 
@@ -18,9 +17,7 @@ use vibra_types::check_source;
 const SMALL_STACK: usize = 768 * 1024;
 
 fn case_input(case: &str) -> String {
-    let path: PathBuf = corpus_root().join(case).join("input.vib");
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+    corpus_source(case)
 }
 
 /// Checks `source` on a thread with `stack` bytes and reports whether it was

@@ -1,11 +1,12 @@
 id = "V1-TYPE-CONTROL-return-outside-function"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A return in a def initializer has no function body to exit."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.invalid-return"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [21, 34]

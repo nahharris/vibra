@@ -1,11 +1,12 @@
 id = "V1-TYPE-NOMINAL-union-no-lifting"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A union lifts no member method from its members, and it is not a dict key without its own implementations."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,11 +14,11 @@ accepted = false
 [[expect.diagnostics]]
 code = "@name.unknown-symbol"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [70, 88]
 
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [131, 137]

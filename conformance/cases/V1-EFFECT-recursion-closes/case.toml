@@ -1,11 +1,12 @@
 id = "V1-EFFECT-recursion-closes"
 rule = "V1-EFFECT"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Mutual recursion closes the performed row to a fixed point: each of two functions that call each other lists the root that only one of them performs. A function that reaches the root only through a recursive partner is outside an empty ceiling, and a self-recursive function with no effect of its own performs none."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,9 +14,9 @@ accepted = false
 [[expect.diagnostics]]
 code = "@effect.outside-ceiling"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [348, 363]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [275, 294]

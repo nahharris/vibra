@@ -1,11 +1,12 @@
 id = "V1-TYPE-CONTROL-binding-forms"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A let has type void, needs an irrefutable pattern, fixes no literal type, and consumes a fallible value that it binds or discards."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,23 +14,23 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [197, 209]
 
 [[expect.diagnostics]]
 code = "@pattern.refutable-binding"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [251, 267]
 
 [[expect.diagnostics]]
 code = "@type.ambiguous-inference"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [305, 306]
 
 [[expect.diagnostics]]
 code = "@type.unhandled-fallible"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [410, 419]

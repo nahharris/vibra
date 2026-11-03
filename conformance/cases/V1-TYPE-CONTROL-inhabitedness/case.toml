@@ -1,11 +1,12 @@
 id = "V1-TYPE-CONTROL-inhabitedness"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A type is uninhabited when it is never, a tuple, record, or wrapper with an uninhabited component, or an enum or union of only such members; arrays, options, function types, and enums with a payloadless variant are inhabited. A recursive declared type is examined without a fixed-point search."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,23 +14,23 @@ accepted = false
 [[expect.diagnostics]]
 code = "@pattern.unreachable-arm"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [236, 237]
 
 [[expect.diagnostics]]
 code = "@pattern.unreachable-arm"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [290, 291]
 
 [[expect.diagnostics]]
 code = "@pattern.unreachable-arm"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [341, 342]
 
 [[expect.diagnostics]]
 code = "@pattern.unreachable-arm"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [393, 394]

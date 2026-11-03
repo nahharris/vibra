@@ -1,11 +1,12 @@
 id = "V1-EFFECT-root-not-value-or-type"
 rule = "V1-EFFECT"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "An effect root is not a type: writing it as a parameter type is @name.wrong-entity-kind."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@name.wrong-entity-kind"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [59, 71]

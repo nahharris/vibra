@@ -1,11 +1,12 @@
 id = "V1-TYPE-NAMES-binding-constant-only"
 rule = "V1-TYPE-NAMES"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A module containing only an immutable primitive value is accepted without an executable entry function."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

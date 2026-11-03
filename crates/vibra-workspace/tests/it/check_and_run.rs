@@ -199,6 +199,83 @@ fn checking_a_library_without_an_entry_still_rejects_initializer_cycles() {
 }
 
 #[test]
+fn a_library_whose_function_reads_a_cyclic_value_is_rejected_by_check_all() {
+    // The shape of a one-module `workspace-check` case: no entry anywhere, and
+    // the cycle is reached from a function body.
+    let project = TempDir::project(
+        "library-initializer-cycle-through-a-function",
+        UTIL_LIBRARY,
+        &[(
+            "src/util/main.vib",
+            "(def first i32 second)
+(def second i32 first)
+(defn answer () i32 first)
+",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+
+    let checked = vibra_workspace::semantic::check_all(&snapshot);
+
+    assert_eq!(checked.status(), CheckStatus::Diagnostics);
+    assert_eq!(
+        checked
+            .diagnostics()
+            .iter()
+            .filter(
+                |diagnostic| diagnostic.code() == DiagnosticCode::TypeInitializerCycle
+            )
+            .count(),
+        1,
+        "{:?}",
+        checked.diagnostics()
+    );
+    assert_eq!(checked.canonical_types(), None);
+}
+
+#[test]
+fn an_accepted_library_has_a_canonical_types_observation_and_a_rejected_one_has_none() {
+    let accepted = TempDir::project(
+        "library-types-observation",
+        UTIL_LIBRARY,
+        &[(
+            "src/util/main.vib",
+            "(def base i32 7i32)
+(defn answer () i32 base)
+",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(accepted.path()).expect("snapshot");
+    let checked = vibra_workspace::semantic::check_all(&snapshot);
+    assert_eq!(checked.status(), CheckStatus::Accepted);
+    let types = checked.canonical_types().expect("an accepted library");
+    assert!(
+        types.starts_with(
+            "(record
+  format: @types.v1
+"
+        ),
+        "{types}"
+    );
+    assert!(types.contains("name: @util.main.base"), "{types}");
+    assert!(types.contains("name: @util.main.answer"), "{types}");
+
+    let rejected = TempDir::project(
+        "library-types-observation-rejected",
+        UTIL_LIBRARY,
+        &[(
+            "src/util/main.vib",
+            "(defn answer () i32 \"text\")
+",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(rejected.path()).expect("snapshot");
+    let checked = vibra_workspace::semantic::check_all(&snapshot);
+    assert_eq!(checked.status(), CheckStatus::Diagnostics);
+    assert_eq!(checked.canonical_types(), None);
+}
+
+#[test]
 fn initializer_cycle_diagnostic_points_into_disjoint_cycle() {
     let source = "(def unrelated i32 1i32)\n(def first i32 second)\n(def second i32 first)\n(defn execute () void (do))\n";
     let project = TempDir::demo(

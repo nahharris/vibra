@@ -1,11 +1,12 @@
 id = "V1-TYPE-NAMES-library-attributes"
 rule = "V1-TYPE-NAMES"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "role: and native: are admissible only in the embedded standard library."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,11 +14,11 @@ accepted = false
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [0, 44]
 
 [[expect.diagnostics]]
 code = "@tool.unavailable"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [46, 106]

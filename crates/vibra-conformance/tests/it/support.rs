@@ -170,6 +170,36 @@ pub(crate) fn corpus_case(id: &str) -> Case {
         .expect("a corpus case")
 }
 
+/// The text of the one source document of a case: the source of an `interpret`
+/// case, or the only module of the one-module workspace of a `workspace-check`
+/// case, which is `src/app/main.vib` of its tree. `None` for any other case,
+/// and for a workspace of several modules.
+pub(crate) fn single_source(case: &Case) -> Option<String> {
+    match case.manifest().operation() {
+        ConformanceOperation::Interpret => {
+            let source_id = case.manifest().inputs.source.as_deref()?;
+            Some(case.read_file(source_id).expect("the source reads"))
+        }
+        ConformanceOperation::WorkspaceCheck => {
+            let files = case.tree_files().expect("the tree reads");
+            let mut modules =
+                files.iter().filter(|file| file.source_id.ends_with(".vib"));
+            let module = modules.next()?;
+            if modules.next().is_some() || module.source_id != "tree/src/app/main.vib" {
+                return None;
+            }
+            Some(String::from_utf8(module.bytes.clone()).expect("a UTF-8 source"))
+        }
+        _ => None,
+    }
+}
+
+/// The source of the one-source corpus case `id`, so that a host test and its
+/// case cannot drift.
+pub(crate) fn corpus_source(id: &str) -> String {
+    single_source(&corpus_case(id)).unwrap_or_else(|| panic!("{id} has no one source"))
+}
+
 /// A source program of the corpus and the canonical form of what the
 /// checker made of it.
 #[derive(Debug)]
@@ -180,23 +210,16 @@ pub(crate) struct CheckedSource {
     pub(crate) canonical: Option<String>,
 }
 
-/// Checks the source document of every `interpret` or `type-check` case, in
-/// corpus order. This is the whole-corpus check; most callers want
+/// Checks the source document of every `interpret` case and the module of every
+/// one-module `workspace-check` case, in corpus order. This is the whole-corpus check; most callers want
 /// [`checked_sources`], which does it once.
 pub(crate) fn check_every_source() -> Vec<CheckedSource> {
     let mut forms = Vec::new();
     for case in corpus().cases() {
-        if !matches!(
-            case.manifest().operation(),
-            ConformanceOperation::Interpret | ConformanceOperation::TypeCheck
-        ) {
-            continue;
-        }
-        let Some(source_id) = case.manifest().inputs.source.as_deref() else {
+        let Some(source) = single_source(case) else {
             continue;
         };
-        let source = case.read_file(source_id).expect("the source reads");
-        let result = check_source(source_id, &source);
+        let result = check_source("input.vib", &source);
         forms.push(CheckedSource {
             case_id: case.manifest().id.clone(),
             canonical: result.program().map(CheckedProgram::canonical_vibon),

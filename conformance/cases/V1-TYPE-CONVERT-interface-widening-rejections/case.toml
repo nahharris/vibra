@@ -1,11 +1,12 @@
 id = "V1-TYPE-CONVERT-interface-widening-rejections"
 rule = "V1-TYPE-CONVERT"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Widening to an interface value does not chain and is never structural: a union member where only its union implements the interface, an atom singleton where any is expected, a type that does not conform, an array of a conforming type, and an ascription to an interface the operand does not implement are all rejected."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,29 +14,29 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [398, 402]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [437, 440]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [479, 485]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [539, 545]
 
 [[expect.diagnostics]]
 code = "@type.invalid-ascription"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [575, 592]

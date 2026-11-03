@@ -1,11 +1,12 @@
 id = "V1-TYPE-GENERIC-lambda"
 rule = "V1-TYPE-GENERIC"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A generic lambda outside a let binding or callee position is instantiated from its expected type, and its bound calls check each instantiation."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,17 +14,17 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.ambiguous-inference"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [28, 85]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [225, 228]
 
 [[expect.diagnostics]]
 code = "@type.type-argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [341, 353]

@@ -7,7 +7,7 @@ use crate::project::StaticV1ProjectHandler;
 use crate::reader::ReaderV1Handler;
 use crate::resolve::StaticV1ResolveHandler;
 use crate::runner::ProfileDispatcher;
-use crate::types::{InterpreterV1Handler, StaticV1TypeHandler};
+use crate::types::InterpreterV1Handler;
 use crate::workspace_index::ToolingV1IndexHandler;
 use crate::workspace_query::ToolingV1QueryHandler;
 use crate::workspace_semantic::{
@@ -33,7 +33,6 @@ pub fn standard_dispatcher() -> ProfileDispatcher {
             StaticV1SourceGraphHandler,
         )
         .with_additional_handler(ConformanceProfile::StaticV1, StaticV1ResolveHandler)
-        .with_additional_handler(ConformanceProfile::StaticV1, StaticV1TypeHandler)
         .with_additional_handler(
             ConformanceProfile::StaticV1,
             StaticV1WorkspaceCheckHandler,

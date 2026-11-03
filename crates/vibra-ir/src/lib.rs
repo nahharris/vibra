@@ -3225,6 +3225,49 @@ pub struct CheckedModuleSet {
 }
 
 impl CheckedModuleSet {
+    /// The canonical `@types.v1` observation of the checked globals and
+    /// functions, in deterministic checked order.
+    #[must_use]
+    pub fn canonical_vibon(&self) -> String {
+        let mut output = String::from("(record\n  format: @types.v1\n");
+        if !self.globals.is_empty() {
+            output.push_str("  globals: (array\n");
+            for global in &self.globals {
+                output.push_str(&format!(
+                    "    (record name: @{} type: {} body: {})\n",
+                    declaration_path(&global.name),
+                    canonical_type(&global.value_type),
+                    canonical_expr(global.initializer()),
+                ));
+            }
+            output.push_str("  )\n");
+        }
+        output.push_str("  functions: (array\n");
+        for function in &self.functions {
+            let parameters = function
+                .signature
+                .parameters()
+                .iter()
+                .map(canonical_type)
+                .collect::<Vec<_>>();
+            let body = canonical_expr(function.body());
+            let native = function.native_body().map_or_else(String::new, |body| {
+                format!(" native-body: {}", canonical_expr(body))
+            });
+            output.push_str(&format!(
+                "    (record name: @{} params: {} result: {}{} body: {}{})\n",
+                declaration_path(&function.name),
+                canonical_array(&parameters),
+                canonical_type(&function.signature.result()),
+                canonical_labelled_field(&function.signature),
+                body,
+                native
+            ));
+        }
+        output.push_str("  )\n)\n");
+        output
+    }
+
     /// Validates a complete set of checked globals and functions.
     pub fn try_new(
         globals: Vec<CheckedGlobal>,
@@ -3451,46 +3494,12 @@ impl CheckedProgram {
         &self.set.functions[self.entry]
     }
 
-    /// Canonical typed-program observation used by static-v1.
+    /// Canonical typed-program observation used by static-v1: the observation
+    /// of the module set the entry selects from, which does not depend on the
+    /// entry.
     #[must_use]
     pub fn canonical_vibon(&self) -> String {
-        let mut output = String::from("(record\n  format: @types.v1\n");
-        if !self.set.globals.is_empty() {
-            output.push_str("  globals: (array\n");
-            for global in &self.set.globals {
-                output.push_str(&format!(
-                    "    (record name: @{} type: {} body: {})\n",
-                    declaration_path(&global.name),
-                    canonical_type(&global.value_type),
-                    canonical_expr(global.initializer()),
-                ));
-            }
-            output.push_str("  )\n");
-        }
-        output.push_str("  functions: (array\n");
-        for function in &self.set.functions {
-            let parameters = function
-                .signature
-                .parameters()
-                .iter()
-                .map(canonical_type)
-                .collect::<Vec<_>>();
-            let body = canonical_expr(function.body());
-            let native = function.native_body().map_or_else(String::new, |body| {
-                format!(" native-body: {}", canonical_expr(body))
-            });
-            output.push_str(&format!(
-                "    (record name: @{} params: {} result: {}{} body: {}{})\n",
-                declaration_path(&function.name),
-                canonical_array(&parameters),
-                canonical_type(&function.signature.result()),
-                canonical_labelled_field(&function.signature),
-                body,
-                native
-            ));
-        }
-        output.push_str("  )\n)\n");
-        output
+        self.set.canonical_vibon()
     }
 }
 

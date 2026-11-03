@@ -1,11 +1,12 @@
 id = "V1-TYPE-INFER-bootstrap-extra-import"
 rule = "V1-TYPE-INFER"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A source may import several standard-library modules: it is a module of a workspace with the standard library."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

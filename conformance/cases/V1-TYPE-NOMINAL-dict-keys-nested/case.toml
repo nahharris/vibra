@@ -1,11 +1,12 @@
 id = "V1-TYPE-NOMINAL-dict-keys-nested"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A single-precision float key and a function nested in a tuple key are rejected like their double-precision and bare forms."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,11 +14,11 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [28, 31]
 
 [[expect.diagnostics]]
 code = "@type.function-not-equatable"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [81, 104]

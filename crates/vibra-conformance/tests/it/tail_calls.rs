@@ -1,6 +1,6 @@
 //! Focused host and conformance checks for M2 Step 9 tail execution.
 
-use crate::support::{TempDir, corpus_root, tail_calls};
+use crate::support::{TempDir, corpus_source, tail_calls};
 use vibra_types::check_source;
 
 /// A tail loop of `rounds` self transfers, counting down in a `u32`.
@@ -299,12 +299,6 @@ fn callable_return_and_unused_initializer_boundaries_remain_valid() {
             "tail-unused-initializer.vib"
         ) > 0
     );
-}
-
-/// The source of a corpus case, so a host test and its case cannot drift.
-fn corpus_source(case: &str) -> String {
-    let path = corpus_root().join(case).join("input.vib");
-    std::fs::read_to_string(path).expect("corpus case source")
 }
 
 /// Runs a corpus case source with its hundred thousand rounds cut to a

@@ -1,11 +1,12 @@
 id = "V1-SRC-EXPR-let-pairs"
 rule = "V1-SRC-EXPR"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A let binds one or more pattern/value pairs, later pairs see earlier ones, and the bindings reach the later elements of the sequence."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

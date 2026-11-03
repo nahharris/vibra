@@ -1,11 +1,12 @@
 id = "V1-TYPE-GENERIC-contract-member-redeclaration"
 rule = "V1-TYPE-GENERIC"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A contract member's own generic parameter MUST NOT reuse a name its interface declares: the member redeclares an inherited generic and each generic name keeps one declaration site. A member whose generic is named differently is not a redeclaration."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@name.generic-redeclaration"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [94, 95]

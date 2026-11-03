@@ -1,11 +1,12 @@
 id = "V1-EFFECT-witness-equal-chains"
 rule = "V1-EFFECT"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Among chains of equal length the witness takes the one whose call sites come first in source order, not the one whose callee is declared first."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,21 +14,21 @@ accepted = false
 [[expect.diagnostics]]
 code = "@effect.outside-ceiling"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [432, 440]
 notes = ["performs @app.main.write via @app.main.middle"]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [374, 381]
   message = "performs @app.main.write via @app.main.right"
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [297, 323]
   message = "performs @app.main.write via @app.main.audit.record"
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [147, 172]
   message = "performs @app.main.write via @app.main.write.text"

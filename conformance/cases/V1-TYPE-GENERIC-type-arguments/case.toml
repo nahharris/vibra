@@ -1,11 +1,12 @@
 id = "V1-TYPE-GENERIC-type-arguments"
 rule = "V1-TYPE-GENERIC"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A types: list must match the complete parameter list and agree with the operands; a non-generic callee takes none."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,29 +14,29 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.type-argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [86, 102]
 
 [[expect.diagnostics]]
 code = "@type.type-argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [159, 162]
 
 [[expect.diagnostics]]
 code = "@type.type-argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [202, 214]
 
 [[expect.diagnostics]]
 code = "@type.type-argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [255, 267]
 
 [[expect.diagnostics]]
 code = "@type.type-argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [350, 353]

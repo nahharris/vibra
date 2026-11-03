@@ -19,7 +19,7 @@ planning. A tool may render the result differently; it may not reimplement the
 language or maintain a second symbol index.
 
 There is one checker. A source document that no project holds, as the
-conformance corpus checks for a `type-check` or `interpret` case, is the only
+conformance corpus runs for an `interpret` case, is the only
 module of a one-module workspace with the embedded standard library, resolved
 and checked exactly as a module of a project is. It keeps the source ID it was given. It can import the standard
 library and nothing else, because no other module is in that workspace, and the
@@ -711,7 +711,7 @@ witnesses are the contract of Milestone 4 Step 20, which added the field, its
 schema entry, and its producer in one change and replaced the M3 envelope in
 place. They are a library projection, as the envelope is: the library requests
 the `effect-witnesses` expansion with `PositionExpansion`, and the corpus
-`query` operation declares `expand = ["effect-witnesses"]` on an expected query.
+`query` operation declares `expand = true` on an expected query.
 An application fact is available for a call of any module-level function or
 effect operation whose type the checker holds, including one with a nonempty
 effect row, and its `calleeType` is the checked function type with its ceiling as

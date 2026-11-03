@@ -337,7 +337,7 @@ specification rule, not compiler module. Each case records:
 
 - normative rule ID;
 - a closed operation selector (`reader`, `project-decode`, `source-graph`,
-  `resolve`, `type-check`, `interpret`, `query`, `format`, `workspace-check`,
+  `resolve`, `interpret`, `query`, `format`, `workspace-check`,
   `workspace-run`, or `workspace-test`);
   `project-decode` requires exactly one project input, and a
   `source-graph` case requires one confined `tree` directory and a `project`
@@ -352,7 +352,13 @@ specification rule, not compiler module. Each case records:
   source snapshot;
   `workspace-check` requires the static profile, one confined tree, and its
   exact `<tree>/project.vibon` input, with no source input; it checks the whole
-  workspace snapshot through the workspace semantic API;
+  workspace snapshot through the workspace semantic API. A source that is only
+  to be checked is a one-module workspace: a library target whose single module
+  is the case's source, so that the verdict, the diagnostics, and the spans
+  are those of the workspace check of that module. A `workspace-check` case MAY
+  declare a `types` snapshot, which an accepted workspace compares with the
+  canonical `@types.v1` observation of its checked module values and functions;
+  no other operation has one;
   `workspace-run` requires the interpreter profile, the same project/tree
   binding and no source input; it requires exactly one binary target and
   compares its checked execution with the required result and VIBON audit
@@ -362,10 +368,14 @@ specification rule, not compiler module. Each case records:
   host world of the case, and compares one canonical
   `@test-run.v1` observation. The observation contains a separate
   `@audit-trace.v1` record for each test;
-  `type-check` and `interpret` take one `.vib` source input and check it as the
-  only module of a one-module workspace with the embedded standard library,
-  under the source ID the input names, so the verdict and diagnostics of a case
-  are those the workspace check reports for that module;
+  `interpret` takes one `.vib` source input and checks it as the only module of
+  a one-module workspace with the embedded standard library, under the source
+  ID the input names, so the verdict and diagnostics of a case are those the
+  workspace check reports for that module; it then runs the first function the
+  source declares, which need not be an entry signature, and compares the
+  canonical encoding of the value it returns. It is the one operation that
+  observes the value of a function whose result is not `void` or `result void
+  e`, and so the one that covers the canonical value encoding of every type.
   `interpret` is pure and has no host world, so it takes no `host-world` input;
   non-reader case with multiple input kinds must state its operation;
 - source/project/data inputs and an optional confined tree directory;
@@ -407,7 +417,10 @@ specification rule, not compiler module. Each case records:
   runner; expected text is never reparsed by the implementation under test;
 - expected acceptance or diagnostics;
 - expected canonical formatting;
-- expected resolved identities, types, and effects where relevant;
+- expected resolved identities, types, and effects where relevant; the `types`
+  snapshot of a `workspace-check` case is the canonical `@types.v1` record of
+  its accepted workspace: its module values and then its functions, each by
+  declaration path, with its checked types and body, in checked order;
 - interpreter result and ordered audit trace where the operation exposes a
   separate trace; the expected
   audit trace is a `.vibon` snapshot whose canonical root is
@@ -423,8 +436,7 @@ specification rule, not compiler module. Each case records:
   snapshots, so that a case never records a value for a run that has none (a
   `workspace-test` case that ends in a host event is `@command.operational-failure`
   with zero selected, passed, and failed tests, as the tooling chapter states,
-  and records no `@test-run.v1` snapshot); and
-- deterministic build hashes for artifact cases.
+  and records no `@test-run.v1` snapshot).
 
 An executable case has no Wasm snapshot of its own: **Differential execution**
 below runs it in a second backend against the same expectation.

@@ -1,11 +1,12 @@
 id = "V1-EFFECT-additive-root-accepted"
 rule = "V1-EFFECT"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "An operation with a Vibra body and an additive row is an ordinary node of the call graph: a caller that lists the owner and the additive root is within its ceiling, and so is the caller of that caller."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

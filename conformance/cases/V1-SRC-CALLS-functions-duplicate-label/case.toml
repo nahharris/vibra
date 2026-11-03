@@ -1,11 +1,12 @@
 id = "V1-SRC-CALLS-functions-duplicate-label"
 rule = "V1-SRC-CALLS"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Duplicate labelled operands are rejected before an application is lowered."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [20, 57]

@@ -1,11 +1,12 @@
 id = "V1-SRC-CALLS-variadic-dict-application"
 rule = "V1-SRC-CALLS"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Dict-variadic declarations accept empty and nonempty key/value tails, packed into one dict argument."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

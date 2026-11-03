@@ -14,8 +14,7 @@
 //! That the corpus runs without a failing case in the Wasm backend is held by
 //! the conformance run itself, which fails a case whose module is not emitted.
 
-use crate::support::corpus_root;
-use std::path::Path;
+use crate::support::{corpus, single_source};
 
 use vibra_ir::external::CompilerIntrinsic;
 use vibra_wasm::{EmitError, lowers_primitive};
@@ -37,24 +36,26 @@ fn every_registry_row_has_a_lowering() {
     );
 }
 
-fn sources(directory: &Path, found: &mut Vec<String>) {
-    for entry in std::fs::read_dir(directory).expect("a directory") {
-        let path = entry.expect("an entry").path();
-        if path.is_dir() {
-            sources(&path, found);
-        } else if path.extension().is_some_and(|extension| extension == "vib")
-            && path.file_name().is_some_and(|name| name == "input.vib")
-        {
-            found.push(std::fs::read_to_string(&path).expect("a source"));
-        }
-    }
-}
-
 #[test]
 fn every_program_the_corpus_checks_lowers() {
-    let root = corpus_root();
-    let mut found = Vec::new();
-    sources(&root, &mut found);
+    // Every source document of the corpus: the one module of an `interpret` or
+    // one-module `workspace-check` case, and the `input.vib` of any other case
+    // (the reader cases, whose sources the checker sees too).
+    let found = corpus()
+        .cases()
+        .iter()
+        .filter_map(|case| {
+            single_source(case).or_else(|| {
+                let source_id = case
+                    .manifest()
+                    .inputs
+                    .source
+                    .as_deref()
+                    .filter(|id| id.ends_with("input.vib"))?;
+                Some(case.read_file(source_id).expect("the source reads"))
+            })
+        })
+        .collect::<Vec<_>>();
     assert!(found.len() > 100, "{} sources", found.len());
     let mut lowered = 0_usize;
     for source in &found {

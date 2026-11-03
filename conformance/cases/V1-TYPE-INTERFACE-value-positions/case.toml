@@ -1,11 +1,12 @@
 id = "V1-TYPE-INTERFACE-value-positions"
 rule = "V1-TYPE-INTERFACE"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "An interface value is not a concrete type: it cannot be a union member, key a dict, or be the target of an impl nested in a defint."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,23 +14,23 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.union-member-not-concrete"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [63, 80]
 
 [[expect.diagnostics]]
 code = "@type.union-member-not-concrete"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [101, 116]
 
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [146, 151]
 
 [[expect.diagnostics]]
 code = "@name.wrong-entity-kind"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [217, 267]

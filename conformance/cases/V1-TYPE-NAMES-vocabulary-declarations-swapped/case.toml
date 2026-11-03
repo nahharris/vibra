@@ -1,11 +1,12 @@
 id = "V1-TYPE-NAMES-vocabulary-declarations-swapped"
 rule = "V1-TYPE-NAMES"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "The reservation of a closed-vocabulary value does not depend on the kind of declaration: a user module value spelled false and a function spelled true are @name.reserved-value-spelling, the other way round from V1-TYPE-NAMES-vocabulary-declarations."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,11 +14,11 @@ accepted = false
 [[expect.diagnostics]]
 code = "@name.reserved-value-spelling"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [0, 29]
 
 [[expect.diagnostics]]
 code = "@name.reserved-value-spelling"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [30, 61]

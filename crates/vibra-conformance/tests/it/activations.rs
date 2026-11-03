@@ -3,7 +3,7 @@
 //! `@runtime.memory-exhausted` (`docs/spec/06-runtime.md`, "Activations and
 //! memory" and "Reclamation").
 
-use crate::support::{FixedHandler, TempDir, corpus_root};
+use crate::support::{FixedHandler, TempDir};
 
 use vibra_conformance::{
     CaseManifest, CaseObservation, ConformanceProfile, ConformanceRunner, Corpus,
@@ -286,7 +286,7 @@ fn manifest(operation: &str, expect: &str) -> String {
     };
     let profile = match operation {
         "reader" => "reader-v1",
-        "type-check" | "workspace-check" => "static-v1",
+        "workspace-check" => "static-v1",
         "format" => "tooling-v1",
         _ => "interpreter-v1",
     };
@@ -313,7 +313,7 @@ fn host_event_is_valid_on_interpret_workspace_run_and_workspace_test() {
 
 #[test]
 fn host_event_is_rejected_where_no_host_event_can_end_the_case() {
-    for operation in ["reader", "type-check", "workspace-check"] {
+    for operation in ["reader", "workspace-check"] {
         let error = CaseManifest::from_str(&manifest(
             operation,
             "accepted = true\nhost_event = \"@runtime.memory-exhausted\"",
@@ -384,9 +384,7 @@ fn a_case_that_ends_in_a_host_event_is_accepted_by_the_checker() {
 
 /// The corpus source with the nesting depth replaced.
 fn compare_nesting_source(depth: u64) -> String {
-    let path = corpus_root().join("V1-RUNTIME-dict-compare-nesting/input.vib");
-    std::fs::read_to_string(path)
-        .expect("corpus source")
+    crate::support::corpus_source("V1-RUNTIME-dict-compare-nesting")
         .replace("300u64", &format!("{depth}u64"))
         .replace("301u64", &format!("{}u64", depth + 1))
 }

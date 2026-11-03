@@ -1,11 +1,12 @@
 id = "V1-EFFECT-root-redeclaration"
 rule = "V1-EFFECT"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Effect roots share the module namespace: two roots of one spelling, and a root and a function of one spelling, are @name.redeclaration."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,19 +14,19 @@ accepted = false
 [[expect.diagnostics]]
 code = "@name.redeclaration"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [44, 86]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [0, 42]
 
 [[expect.diagnostics]]
 code = "@name.redeclaration"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [133, 164]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [88, 131]

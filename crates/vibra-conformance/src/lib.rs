@@ -67,7 +67,7 @@ pub use standard::standard_dispatcher;
 pub use test_run::{
     RowFailure, RowOrigin, RowTrap, TestRow, command_result, format_test_run,
 };
-pub use types::{InterpreterV1Handler, StaticV1TypeHandler};
+pub use types::InterpreterV1Handler;
 pub use wasm::{
     TestsObserved, observe as observe_wasm, observe_tests as observe_wasm_tests,
 };

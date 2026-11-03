@@ -1,11 +1,12 @@
 id = "V1-TYPE-GENERIC-stage-3b-types"
 rule = "V1-TYPE-GENERIC"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "any in type position is the empty interface value: a parameter of it takes a value and passes it along."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

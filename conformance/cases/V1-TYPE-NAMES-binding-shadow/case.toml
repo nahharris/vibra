@@ -1,11 +1,12 @@
 id = "V1-TYPE-NAMES-binding-shadow"
 rule = "V1-TYPE-NAMES"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A positional parameter or let binder that names a module value that is not a compile-time constant is the shadowing binder it would otherwise be: @name.redeclaration at the name, relating the module value."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,19 +14,19 @@ accepted = false
 [[expect.diagnostics]]
 code = "@name.redeclaration"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [67, 72]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [23, 44]
 
 [[expect.diagnostics]]
 code = "@name.redeclaration"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [115, 120]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [23, 44]

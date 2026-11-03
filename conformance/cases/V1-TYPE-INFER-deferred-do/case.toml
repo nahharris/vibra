@@ -1,11 +1,12 @@
 id = "V1-TYPE-INFER-deferred-do"
 rule = "V1-TYPE-INFER"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Explicit do expressions lower as checked left-to-right sequences in Step 6."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

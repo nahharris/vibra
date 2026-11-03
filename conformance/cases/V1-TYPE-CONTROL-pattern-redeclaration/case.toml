@@ -1,11 +1,12 @@
 id = "V1-TYPE-CONTROL-pattern-redeclaration"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Pattern binders may neither shadow a visible name nor repeat within one pattern."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,19 +14,19 @@ accepted = false
 [[expect.diagnostics]]
 code = "@name.redeclaration"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [63, 68]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [14, 19]
 
 [[expect.diagnostics]]
 code = "@name.redeclaration"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [139, 143]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [134, 138]

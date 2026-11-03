@@ -1,11 +1,12 @@
 id = "V1-TYPE-INTERFACE-selected-value-rejections"
 rule = "V1-TYPE-INTERFACE"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A contract member as a value is rejected when no implementation has the written fn type, for a source the destination does not convert from or a destination that implements nothing; a member with labelled parameters is a value at a receiver that implements it, with the labelled slot in the written fn type."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,11 +14,11 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [255, 267]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [311, 323]

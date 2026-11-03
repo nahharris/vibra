@@ -1,11 +1,12 @@
 id = "V1-TYPE-NOMINAL-variadic-function-value"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A builtin static method with a variadic tail keeps the tail in its function type: array.of is accepted where a function type with a variadic array tail is written and is an argument mismatch where a fixed function type with one array parameter is."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [287, 295]

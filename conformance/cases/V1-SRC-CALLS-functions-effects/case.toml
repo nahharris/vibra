@@ -1,11 +1,12 @@
 id = "V1-SRC-CALLS-functions-effects"
 rule = "V1-SRC-CALLS"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A function ceiling that names a symbol resolving to no effect root is an invalid reference at that entry, and the function's body is not checked against it."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@effect.invalid-reference"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [32, 41]

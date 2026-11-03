@@ -1,11 +1,12 @@
 id = "V1-TYPE-CONTROL-never-fallibility"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A result whose error type is uninhabited is not fallible; any other result still is, and try is unchanged for it. A try of such a result still needs a result-returning function."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,21 +14,21 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.unhandled-fallible"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [255, 268]
 
 [[expect.diagnostics]]
 code = "@type.unhandled-fallible"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [306, 324]
 
 [[expect.diagnostics]]
 code = "@type.invalid-try"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [432, 453]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [428, 431]
