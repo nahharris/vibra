@@ -131,8 +131,6 @@ pub struct CaseObservation {
     /// executable case sets it for every program it runs. A rejected program
     /// is no executable case, so a handler leaves it unset.
     pub wasm: Option<BackendObservation<WasmObservation>>,
-    /// Deterministic artifact hashes.
-    pub artifact_hashes: Vec<String>,
 }
 
 impl CaseObservation {
@@ -895,14 +893,6 @@ impl CaseExpectations {
                 .as_ref()
                 .map(|backend| &backend.outcome),
         )?;
-        if let Some(expected_hashes) = &self.artifact_hashes
-            && expected_hashes != &observation.artifact_hashes
-        {
-            return Err(format!(
-                "artifact hash mismatch: expected {:?}, got {:?}",
-                expected_hashes, observation.artifact_hashes
-            ));
-        }
         Ok(())
     }
 }

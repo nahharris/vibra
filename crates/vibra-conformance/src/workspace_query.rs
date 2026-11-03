@@ -82,10 +82,7 @@ impl ProfileHandler for ToolingV1QueryHandler {
                 HandlerError::new(format!("query source `{source_id}` is not UTF-8"))
             })?;
             let expansion = vibra_workspace::query::PositionExpansion {
-                effect_witnesses: expected
-                    .expand
-                    .iter()
-                    .any(|expansion| expansion == "effect-witnesses"),
+                effect_witnesses: expected.expand,
             };
             let query = vibra_workspace::query::query_position_expanded(
                 &workspace,

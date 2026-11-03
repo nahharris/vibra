@@ -230,8 +230,9 @@ pub struct ExpectedQuery {
     pub offset: usize,
     /// A case-relative JSON snapshot rendered by the schema adapter.
     pub snapshot: String,
-    /// The expansions requested, as `--expand` values: `effect-witnesses`.
-    pub expand: Vec<String>,
+    /// Whether the query requests the `effect-witnesses` expansion, the one
+    /// `--expand` value a position query has.
+    pub expand: bool,
 }
 
 /// Expected execution-independent outputs of a case.
@@ -262,9 +263,6 @@ pub struct CaseExpectations {
     /// replaces the result and audit-trace snapshots because such a run has
     /// neither.
     pub host_event: Option<String>,
-    /// Expected deterministic artifact hashes, when the case covers an
-    /// artifact-producing backend.
-    pub artifact_hashes: Option<Vec<String>>,
 }
 
 /// The decoded, validated neutral case manifest.
@@ -491,16 +489,6 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
             if operation == ConformanceOperation::Query {
                 let tree = inputs.tree.as_deref().unwrap_or_default();
                 validate_query_input(tree, &query.input)?;
-            }
-            if let Some(unknown) = query
-                .expand
-                .iter()
-                .find(|expansion| expansion.as_str() != "effect-witnesses")
-            {
-                return Err(ManifestError::Invalid(format!(
-                    "query expectation expansion `{unknown}` is not `effect-witnesses` in case `{}`",
-                    raw.id
-                )));
             }
         }
 
@@ -884,7 +872,6 @@ fn decode_expectations(
             ));
         }
     }
-    let artifact_hashes = raw.artifact.map(|artifact| artifact.hashes);
 
     Ok(CaseExpectations {
         accepted,
@@ -907,7 +894,6 @@ fn decode_expectations(
             .collect(),
         interpreter,
         host_event,
-        artifact_hashes,
     })
 }
 
@@ -1068,8 +1054,6 @@ pub(crate) struct RawExpectations {
     pub(crate) interpreter: Option<RawExecution>,
     #[serde(default)]
     pub(crate) host_event: Option<String>,
-    #[serde(default)]
-    pub(crate) artifact: Option<RawArtifact>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1129,17 +1113,10 @@ pub(crate) struct RawExecution {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct RawArtifact {
-    #[serde(default)]
-    pub(crate) hashes: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub(crate) struct RawQuery {
     pub(crate) input: String,
     pub(crate) offset: usize,
     pub(crate) snapshot: String,
     #[serde(default)]
-    pub(crate) expand: Vec<String>,
+    pub(crate) expand: bool,
 }
