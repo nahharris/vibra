@@ -115,22 +115,16 @@ impl Constant {
                 variant,
                 payload,
                 ..
-            } => {
-                // A `bool` variant is the literal of its representation.
-                if *value_type == Type::Bool && payload.is_none() {
-                    return Some(Self::Primitive(Value::Bool(variant == "true")));
-                }
-                Self::Variant {
-                    value_type: value_type.clone(),
-                    variant: variant.clone(),
-                    payload: match payload {
-                        Some(payload) => {
-                            Some(Box::new(Self::from_expr_with(payload, global)?))
-                        }
-                        None => None,
-                    },
-                }
-            }
+            } => Self::Variant {
+                value_type: value_type.clone(),
+                variant: variant.clone(),
+                payload: match payload {
+                    Some(payload) => {
+                        Some(Box::new(Self::from_expr_with(payload, global)?))
+                    }
+                    None => None,
+                },
+            },
             Expr::Wrap {
                 value_type, value, ..
             } => Self::Wrap {

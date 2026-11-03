@@ -590,25 +590,10 @@ impl<'a> Machine<'a> {
             Expr::Match {
                 scrutinee, arms, ..
             } => self.then(scrutinee, Kont::Match { arms }),
-            Expr::Variant {
-                value_type,
-                variant,
-                payload,
-                ..
-            } => {
-                // `bool` is represented directly.
-                if *value_type == Type::Bool {
-                    return Ok(Step::Ret(RuntimeValue::Primitive(Value::Bool(
-                        variant == "true",
-                    ))));
-                }
-                match payload {
-                    Some(payload) => {
-                        self.then(payload, Kont::Unary { node: expression })
-                    }
-                    None => self.variant(expression, None),
-                }
-            }
+            Expr::Variant { payload, .. } => match payload {
+                Some(payload) => self.then(payload, Kont::Unary { node: expression }),
+                None => self.variant(expression, None),
+            },
             Expr::Wrap { value, .. }
             | Expr::Widen { value, .. }
             | Expr::Try { value, .. }

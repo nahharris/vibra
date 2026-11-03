@@ -2243,10 +2243,6 @@ impl Expr {
                     .unwrap_or(Type::Void);
                 match value_type {
                     Type::Declared(_) | Type::Applied(_, _) => {}
-                    // `bool` is represented directly; its variants are its values.
-                    Type::Bool
-                        if payload.is_none()
-                            && matches!(variant.as_str(), "false" | "true") => {}
                     Type::Enum(variants) => {
                         let declared = variants
                             .iter()
