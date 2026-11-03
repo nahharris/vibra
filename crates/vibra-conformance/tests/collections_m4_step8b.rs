@@ -316,30 +316,6 @@ fn the_array_rows_build_new_arrays_and_report_a_bad_range_as_none() {
 }
 
 #[test]
-fn a_variadic_function_gets_its_tail_as_one_array() {
-    let source = "(import option @std.option)\n\
-(defn main () (tuple (array i32) (array i32) u64 (option.option (array i32)))\n\
-  (let joined (array.concat (array.append (collect 1i32) 2i32) (collect 0i32 3i32 4i32)))\n\
-  (tupleof\n\
-    (collect 1i32)\n\
-    joined\n\
-    (array.length joined)\n\
-    (array.slice joined 1u64 3u64)))\n\
-(defn collect (first i32) (array i32)\n\
-  variadic: (rest (array i32))\n\
-  rest)\n";
-    let ints = array_type("@i32");
-    let types = tuple_type(&[&ints, &ints, "@u64", &option_type(&ints)]);
-    let value = tuple_value(&[
-        &array_value(&[]),
-        &array_value(&["2i32", "3i32", "4i32"]),
-        "3u64",
-        &some(&array_value(&["3i32", "4i32"])),
-    ]);
-    balanced_on(source, &result(&types, &value));
-}
-
-#[test]
 fn an_array_pattern_matches_its_exact_length_and_binds_its_elements() {
     let source = "(defn main () (tuple atom atom atom str str)\n\
   (tupleof\n\

@@ -79,19 +79,28 @@ fn a_wrapping_closure_that_captures_a_function_value_checks() {
     }
 }
 
-/// Runs the case in the reference interpreter on a thread with `stack` bytes
-/// and returns its canonical result.
+/// The chain cases build a chain of a hundred thousand closures (a hundred and
+/// fifty thousand for the mutual one). The corpus runs them at that size in both
+/// backends; here the size is cut by a factor of seventeen and the stack by the
+/// same, so a release that recursed on the host stack would overflow at the
+/// same number of bytes a level.
+const ROUNDS: u64 = 6_000;
+const INTERPRETER_STACK: usize = 32 * 1024;
+
+/// Runs the case, with its rounds cut to [`ROUNDS`], in the reference
+/// interpreter on a thread with `stack` bytes and returns its canonical result.
+/// The case is checked on this thread, which has the stack the checker needs.
 fn interpret_on_small_stack(case: &str, stack: usize) -> String {
-    let source = case_input(case);
+    let source = case_input(case).replace("100000u64", &format!("{ROUNDS}u64"));
+    let checked = check_source("input.vib", &source);
+    let program = checked.program().expect("a checked program").clone();
     std::thread::Builder::new()
         .stack_size(stack)
         .spawn(move || {
-            let checked = check_source("input.vib", &source);
-            let program = checked.program().expect("a checked program");
             let world = vibra_host::HostWorld::default();
             let mut host = vibra_host::WorldProvider::new(&world);
             vibra_interp::Interpreter::run_with_host(
-                program,
+                &program,
                 vibra_interp::MemoryBudget::new(
                     vibra_conformance::INSTANCE_MEMORY_LIMIT_BYTES,
                 ),
@@ -106,13 +115,16 @@ fn interpret_on_small_stack(case: &str, stack: usize) -> String {
 }
 
 #[test]
-fn a_hundred_thousand_closure_chain_runs_and_is_released_on_a_small_stack() {
+fn a_long_closure_chain_runs_and_is_released_on_a_small_stack() {
     for (case, expected) in [
-        ("V1-RUNTIME-continuation-chain", "100000u64"),
-        ("V1-RUNTIME-continuation-chain-non-tail", "100000u64"),
-        ("V1-RUNTIME-continuation-chain-mutual", "150000u64"),
+        ("V1-RUNTIME-continuation-chain", ROUNDS),
+        ("V1-RUNTIME-continuation-chain-non-tail", ROUNDS),
+        ("V1-RUNTIME-continuation-chain-mutual", ROUNDS * 3 / 2),
     ] {
-        let result = interpret_on_small_stack(case, SMALL_STACK);
-        assert!(result.contains(expected), "{case}: {result}");
+        let result = interpret_on_small_stack(case, INTERPRETER_STACK);
+        assert!(
+            result.contains(&format!("{expected}u64")),
+            "{case}: {result}"
+        );
     }
 }

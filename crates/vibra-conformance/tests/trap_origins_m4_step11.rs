@@ -3,11 +3,12 @@
 //!
 //! `docs/spec/06-runtime.md`, "Traps": both backends MUST report the same code
 //! and the same origin for every registered trap. The interpreter is the
-//! oracle for `@runtime.invalid-checked-program` and
-//! `@runtime.unobservable-function`; `@runtime.invalid-host-value` is raised by
-//! the accessors of a module, which the interpreter has none of. The same
-//! `@runtime.unobservable-function` in a test, at its assertion call, is held
-//! by `tests_traps_m4_step11` and by the corpus case
+//! oracle for `@runtime.invalid-checked-program`; `@runtime.invalid-host-value`
+//! is raised by the accessors of a module, which the interpreter has none of.
+//! `@runtime.unobservable-function` with no origin, for a function in the
+//! entry's result, is held in both backends by the corpus case
+//! `V1-RUNTIME-entry-outcome-trap-holding-err`, and in a test, at its assertion
+//! call, by `tests_traps_m4_step11` and by the corpus case
 //! `V1-RUNTIME-workspace-test-hidden-function`.
 
 #![allow(
@@ -23,7 +24,7 @@ use vibra_ir::{
     CallTarget, CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin,
     TestAssertion, Type, Value,
 };
-use vibra_wasm_run::{MemoryLimit, Observed, Outcome, Runner, Started, TestRun};
+use vibra_wasm_run::{MemoryLimit, Outcome, Runner, Started, TestRun};
 
 fn origin() -> SourceOrigin {
     SourceOrigin::new("trap.vib", vibra_diagnostics::ByteSpan::new(0, 1))
@@ -100,36 +101,6 @@ fn a_test_entry_that_is_not_void_is_the_invalid_checked_program_in_both_backends
             code: TrapCode::InvalidCheckedProgram,
             origin: None
         }
-    );
-}
-
-#[test]
-fn a_function_in_the_entry_result_is_the_unobservable_function_with_no_origin() {
-    let result = vibra_types::check_source(
-        "input.vib",
-        "(defn main () any (as any (lambda (x i32) i32 x)))",
-    );
-    let program = result.program().expect("an accepted program");
-    let error = vibra_interp::run(program).expect_err("the interpreter stops");
-    let (code, origin) = error.program_trap().expect("a registered trap");
-    assert_eq!(code, TrapCode::UnobservableFunction.diagnostic_code());
-    assert!(origin.is_none());
-    let module = vibra_wasm::emit(program).expect("a module");
-    let heads = |head: u32| module.descriptors().type_of(head).cloned();
-    let observed = runner()
-        .run_observed_with(
-            module.bytes(),
-            &program.entry().signature().result(),
-            program.types(),
-            &heads,
-        )
-        .expect("the module runs");
-    assert_eq!(
-        observed,
-        Observed::Stopped(Outcome::Trapped {
-            code: TrapCode::UnobservableFunction,
-            origin: None
-        })
     );
 }
 

@@ -2,10 +2,10 @@
 //! through the memory layer and observed through the accessors, held to the
 //! reference interpreter byte for byte.
 //!
-//! No checked source program lowers yet, because every one carries the prelude's
-//! module values, so the programs here are built from IR constructors, as Step
-//! 4's are. The memory layer's own tests, which build values no lowered form
-//! builds yet, are in `arena_runtime_m4_step5a.rs`.
+//! The programs are built from IR constructors, because a literal that has no
+//! source spelling (an infinity, or a NaN of any sign or payload) can only be
+//! built there. The memory layer's own tests, which build values no lowered form
+//! builds, are in `arena_runtime_m4_step5a.rs`.
 
 #![allow(
     clippy::expect_used,
