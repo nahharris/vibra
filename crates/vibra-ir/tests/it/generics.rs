@@ -2,19 +2,14 @@
 //! and the validation that checks each construction against its instantiated
 //! definition.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing)]
-
 use std::collections::BTreeMap;
 
-use vibra_diagnostics::ByteSpan;
 use vibra_ir::{
-    CheckedFunction, CheckedProgram, Expr, FunctionSignature, IrError, SourceOrigin,
-    Type, TypeBody, TypeDefinition, TypeId, Value, canonical_type,
+    CheckedFunction, CheckedProgram, Expr, FunctionSignature, IrError, Type, TypeBody,
+    TypeDefinition, TypeId, Value, canonical_type,
 };
 
-fn origin() -> SourceOrigin {
-    SourceOrigin::new("case.vib", ByteSpan::new(0, 1))
-}
+use crate::support::origin;
 
 fn holder_id() -> TypeId {
     TypeId::new("@demo@1.0.0/app.main.holder", "app.main.holder")

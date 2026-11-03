@@ -2,17 +2,12 @@
 //! the call carries the member's type arguments, each implementation declares
 //! one slot per generic parameter, and the canonical form shows the list.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing)]
-
-use vibra_diagnostics::ByteSpan;
 use vibra_ir::{
     CallTarget, CheckedFunction, CheckedProgram, Expr, FunctionSignature, Implements,
-    IrError, SourceOrigin, Type, TypeId, Value,
+    IrError, Type, TypeId, Value,
 };
 
-fn origin() -> SourceOrigin {
-    SourceOrigin::new("case.vib", ByteSpan::new(0, 1))
-}
+use crate::support::origin;
 
 fn interface() -> TypeId {
     TypeId::new("@demo@1.0.0/app.main.shape", "app.main.shape")

@@ -3,30 +3,11 @@
 //! deterministic. These tests cover what the earlier provider tests do not: the
 //! rows through `HostCall`, the boundaries of the matrix, and the platform cases.
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 use std::ffi::OsString;
 
-use vibra_host::{
-    EnvError, Failure, HostProvider, HostWorld, SystemProvider, WorldProvider,
-};
+use vibra_host::{EnvError, HostProvider, SystemProvider};
 
-fn done<T, E: std::fmt::Debug>(result: Result<T, Failure<E>>) -> Result<T, E> {
-    match result {
-        Ok(value) => Ok(value),
-        Err(Failure::Error(error)) => Err(error),
-        Err(Failure::MemoryExhausted) => panic!("memory exhausted"),
-    }
-}
-
-fn world(text: &str) -> WorldProvider {
-    WorldProvider::new(&HostWorld::decode("world.vibon", text).expect("a world"))
-}
+use crate::support::{done, provider};
 
 #[test]
 fn the_system_environment_is_the_process_environment() {
@@ -45,7 +26,7 @@ fn the_system_environment_is_the_process_environment() {
             "{name:?}"
         );
         assert_eq!(
-            done(world("(record format: @host-world.v1)").env_var(name)),
+            done(provider("(record format: @host-world.v1)").env_var(name)),
             Err(EnvError::NotPresent),
             "{name:?}"
         );
@@ -83,7 +64,7 @@ fn a_non_unicode_argument_is_not_unicode() {
 
 #[test]
 fn the_world_clock_is_constant_wall_and_stepped_monotonic() {
-    let mut p = world(
+    let mut p = provider(
         "(record format: @host-world.v1 clock: (record wall: -5i64 monotonic: 7u64 step: 0u64))",
     );
     assert_eq!(done(p.now_wall()), Ok(-5));
@@ -91,7 +72,7 @@ fn the_world_clock_is_constant_wall_and_stepped_monotonic() {
     // A step of zero keeps the clock where it is, and it never goes back.
     assert_eq!(done(p.now_monotonic()), Ok(7));
     assert_eq!(done(p.now_monotonic()), Ok(7));
-    let mut p = world("(record format: @host-world.v1)");
+    let mut p = provider("(record format: @host-world.v1)");
     assert_eq!(done(p.now_wall()), Ok(0));
     assert_eq!(
         [
@@ -121,12 +102,12 @@ fn the_system_clocks_are_sane_and_the_monotonic_clock_never_decreases() {
 
 #[test]
 fn random_counts_of_zero_and_one_mebibyte_and_the_system_generator() {
-    let mut p = world("(record format: @host-world.v1)");
+    let mut p = provider("(record format: @host-world.v1)");
     assert_eq!(done(p.random_bytes(0)), Ok(Vec::new()));
     let big = done(p.random_bytes(1024 * 1024)).expect("bytes");
     assert_eq!(big.len(), 1024 * 1024);
     // The same seed gives the same bytes in a fresh copy.
-    let mut again = world("(record format: @host-world.v1)");
+    let mut again = provider("(record format: @host-world.v1)");
     assert_eq!(done(again.random_bytes(1024 * 1024)), Ok(big));
     let mut system = SystemProvider::new();
     assert_eq!(done(system.random_bytes(0)), Ok(Vec::new()));

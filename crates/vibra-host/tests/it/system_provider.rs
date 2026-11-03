@@ -4,64 +4,17 @@
 //! The directory they use is a fresh one under the system temporary directory.
 //! Standard input is the test harness's and is not read here.
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 use std::ffi::OsString;
-use std::path::PathBuf;
 
 use vibra_host::{
     EnvError, Failure, FsError, FsKind, HostProvider, Metadata, SystemProvider,
 };
 
-fn done<T, E: std::fmt::Debug>(result: Result<T, Failure<E>>) -> Result<T, E> {
-    match result {
-        Ok(value) => Ok(value),
-        Err(Failure::Error(error)) => Err(error),
-        Err(Failure::MemoryExhausted) => panic!("memory exhausted"),
-    }
-}
-
-/// A fresh directory that is removed when dropped.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new(name: &str) -> Self {
-        // A counter, not the clock, makes the name unique within the process: the
-        // clock of some platforms is too coarse to tell two parallel tests apart.
-        static NEXT: std::sync::atomic::AtomicU64 =
-            std::sync::atomic::AtomicU64::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "vibra-host-{name}-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&path).expect("scratch directory");
-        Self(path)
-    }
-
-    fn at(&self, relative: &str) -> String {
-        self.0
-            .join(relative)
-            .to_str()
-            .expect("utf-8 path")
-            .to_owned()
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
+use crate::support::{TempDir, done};
 
 #[test]
 fn files_round_trip_and_directories_list_sorted() {
-    let scratch = Scratch::new("files");
+    let scratch = TempDir::new("files");
     let mut provider = SystemProvider::new();
     assert_eq!(
         done(provider.write_text(&scratch.at("b.txt"), "caf\u{e9}")),
@@ -85,7 +38,7 @@ fn files_round_trip_and_directories_list_sorted() {
         Err(FsError::InvalidText)
     );
     assert_eq!(
-        done(provider.read_entries(scratch.0.to_str().unwrap())),
+        done(provider.read_entries(scratch.path().to_str().unwrap())),
         Ok(vec!["B.bin".to_owned(), "a".to_owned(), "b.txt".to_owned()])
     );
     // A write replaces the whole contents.
@@ -98,7 +51,7 @@ fn files_round_trip_and_directories_list_sorted() {
 
 #[test]
 fn metadata_has_a_size_that_is_zero_for_non_files() {
-    let scratch = Scratch::new("stat");
+    let scratch = TempDir::new("stat");
     let mut provider = SystemProvider::new();
     done(provider.write_text(&scratch.at("f"), "abc")).unwrap();
     assert_eq!(
@@ -109,7 +62,7 @@ fn metadata_has_a_size_that_is_zero_for_non_files() {
         })
     );
     assert_eq!(
-        done(provider.stat(scratch.0.to_str().unwrap())),
+        done(provider.stat(scratch.path().to_str().unwrap())),
         Ok(Metadata {
             kind: FsKind::Directory,
             size: 0
@@ -119,10 +72,10 @@ fn metadata_has_a_size_that_is_zero_for_non_files() {
 
 #[test]
 fn filesystem_errors_are_the_registry_errors() {
-    let scratch = Scratch::new("errors");
+    let scratch = TempDir::new("errors");
     let mut provider = SystemProvider::new();
     done(provider.write_text(&scratch.at("f"), "abc")).unwrap();
-    let directory = scratch.0.to_str().unwrap().to_owned();
+    let directory = scratch.path().to_str().unwrap().to_owned();
     assert_eq!(
         done(provider.read_file(&scratch.at("missing"))),
         Err(FsError::NotFound)

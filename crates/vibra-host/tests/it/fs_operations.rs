@@ -9,93 +9,12 @@
 //! the same reply from both for every call whose meaning is the same on every
 //! host.
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
-use std::path::PathBuf;
-
 use vibra_host::{
-    HostCall, HostEnum, HostProvider, HostRecord, HostValues, HostWorld, ReadError,
-    SystemProvider, WorldProvider, build_reply, perform,
+    HostCall, HostEnum, HostProvider, HostRecord, HostWorld, SystemProvider,
+    WorldProvider, build_reply, perform,
 };
 
-/// The reference implementation of the value-access trait: a plain tree.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum Tree {
-    Void,
-    Text(String),
-    Path(String),
-    Bytes(Vec<u8>),
-    I64(i64),
-    U64(u64),
-    Array(Vec<Tree>),
-    Enum(HostEnum, u32, Option<Box<Tree>>),
-    Record(HostRecord, Vec<Tree>),
-}
-
-struct Plain;
-
-impl HostValues for Plain {
-    type Value = Tree;
-
-    fn read_text(&mut self, value: &Tree) -> Result<String, ReadError> {
-        match value {
-            Tree::Text(text) => Ok(text.clone()),
-            _ => Err(ReadError::Value),
-        }
-    }
-    fn read_bytes(&mut self, value: &Tree) -> Result<Vec<u8>, ReadError> {
-        match value {
-            Tree::Bytes(bytes) => Ok(bytes.clone()),
-            _ => Err(ReadError::Value),
-        }
-    }
-    fn read_path(&mut self, value: &Tree) -> Result<String, ReadError> {
-        match value {
-            Tree::Path(text) => Ok(text.clone()),
-            _ => Err(ReadError::Value),
-        }
-    }
-    fn read_u64(&mut self, value: &Tree) -> Result<u64, ReadError> {
-        match value {
-            Tree::U64(number) => Ok(*number),
-            _ => Err(ReadError::Value),
-        }
-    }
-    fn build_void(&mut self) -> Tree {
-        Tree::Void
-    }
-    fn build_text(&mut self, text: &str) -> Tree {
-        Tree::Text(text.to_owned())
-    }
-    fn build_bytes(&mut self, bytes: &[u8]) -> Tree {
-        Tree::Bytes(bytes.to_vec())
-    }
-    fn build_i64(&mut self, value: i64) -> Tree {
-        Tree::I64(value)
-    }
-    fn build_u64(&mut self, value: u64) -> Tree {
-        Tree::U64(value)
-    }
-    fn build_array(&mut self, elements: Vec<Tree>) -> Tree {
-        Tree::Array(elements)
-    }
-    fn build_enum(
-        &mut self,
-        ty: HostEnum,
-        variant: u32,
-        payload: Option<Tree>,
-    ) -> Tree {
-        Tree::Enum(ty, variant, payload.map(Box::new))
-    }
-    fn build_record(&mut self, ty: HostRecord, fields: Vec<Tree>) -> Tree {
-        Tree::Record(ty, fields)
-    }
-}
+use crate::support::{Plain, TempDir, Tree};
 
 const OK: u32 = 0;
 const ERR: u32 = 1;
@@ -163,40 +82,10 @@ fn path(at: &str) -> Tree {
     Tree::Path(at.to_owned())
 }
 
-/// A fresh directory that is removed when dropped.
-struct Scratch(PathBuf);
-
-impl Scratch {
-    fn new(name: &str) -> Self {
-        // A counter, not the clock, makes the name unique within the process: the
-        // clock of some platforms is too coarse to tell two parallel tests apart.
-        static NEXT: std::sync::atomic::AtomicU64 =
-            std::sync::atomic::AtomicU64::new(0);
-        let path = std::env::temp_dir().join(format!(
-            "vibra-fs17-{name}-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&path).expect("scratch directory");
-        Self(path)
-    }
-
-    /// The directory's own spelling, with `/` separators.
-    fn root(&self) -> String {
-        self.0.to_str().expect("utf-8 path").replace('\\', "/")
-    }
-}
-
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 /// The two providers over the same tree: the real temporary directory, and a
 /// world whose root holds the same entries. `at` takes a path below the tree.
 struct Pair {
-    scratch: Scratch,
+    scratch: TempDir,
     system: SystemProvider,
     world: WorldProvider,
 }
@@ -205,7 +94,7 @@ impl Pair {
     fn new(name: &str, world: &str) -> Self {
         let world = HostWorld::decode("world.vibon", world).expect("a world");
         Self {
-            scratch: Scratch::new(name),
+            scratch: TempDir::new(name),
             system: SystemProvider::new(),
             world: WorldProvider::new(&world),
         }
@@ -214,7 +103,7 @@ impl Pair {
     /// Seeds the real directory with `files` (`None` for a directory).
     fn seed(&self, entries: &[(&str, Option<&[u8]>)]) {
         for (relative, contents) in entries {
-            let target = self.scratch.0.join(relative);
+            let target = self.scratch.path().join(relative);
             match contents {
                 Some(contents) => {
                     if let Some(parent) = target.parent() {
@@ -471,14 +360,14 @@ fn a_write_creates_or_replaces_the_whole_file_and_a_failed_write_leaves_the_prio
     // The system provider wrote to the real directory, and the world did not:
     // the two trees are separate, and the world never reaches the real files.
     assert_eq!(
-        std::fs::read(pair.scratch.0.join("log.txt")).expect("real file"),
+        std::fs::read(pair.scratch.path().join("log.txt")).expect("real file"),
         [0, 255]
     );
 }
 
 #[test]
 fn a_four_mebibyte_file_and_a_path_of_a_thousand_components() {
-    let scratch = Scratch::new("bounds");
+    let scratch = TempDir::new("bounds");
     let root = scratch.root();
     let mut system = SystemProvider::new();
     let mut world = WorldProvider::new(&HostWorld::default());
@@ -530,15 +419,15 @@ fn a_four_mebibyte_file_and_a_path_of_a_thousand_components() {
 
 #[test]
 fn a_directory_of_ten_thousand_entries_lists_sorted_in_both_providers() {
-    let scratch = Scratch::new("many");
+    let scratch = TempDir::new("many");
     let root = scratch.root();
     let mut system = SystemProvider::new();
-    std::fs::create_dir_all(scratch.0.join("many")).expect("directory");
+    std::fs::create_dir_all(scratch.path().join("many")).expect("directory");
     let mut world_text = String::from("(record format: @host-world.v1 files: (dict");
     let mut expected = Vec::new();
     for number in 0..10_000_u32 {
         let name = format!("f{number:05}");
-        std::fs::write(scratch.0.join("many").join(&name), []).expect("entry");
+        std::fs::write(scratch.path().join("many").join(&name), []).expect("entry");
         world_text.push_str(&format!(" \"/many/{name}\" \"\""));
         expected.push(name);
     }
@@ -567,13 +456,13 @@ fn a_directory_of_ten_thousand_entries_lists_sorted_in_both_providers() {
 #[test]
 fn a_name_that_is_not_unicode_is_invalid_text() {
     use std::os::unix::ffi::OsStrExt;
-    let scratch = Scratch::new("names");
+    let scratch = TempDir::new("names");
     let name = std::ffi::OsStr::from_bytes(&[b'f', 0xff, b'g']);
     // Whether a name that is not Unicode can exist is a property of the volume:
     // macOS APFS refuses it, and so may a Linux filesystem. When the volume
     // cannot hold the name the condition cannot arise, so there is nothing to
     // assert; gating on the operating system would skip volumes that accept it.
-    if std::fs::write(scratch.0.join(name), b"x").is_err() {
+    if std::fs::write(scratch.path().join(name), b"x").is_err() {
         return;
     }
     let mut system = SystemProvider::new();
@@ -597,8 +486,8 @@ fn a_device_is_the_other_kind_with_size_zero() {
 #[test]
 fn a_refusal_by_the_host_is_permission_denied() {
     use std::os::unix::fs::PermissionsExt;
-    let scratch = Scratch::new("denied");
-    let file = scratch.0.join("secret");
+    let scratch = TempDir::new("denied");
+    let file = scratch.path().join("secret");
     std::fs::write(&file, b"x").expect("file");
     std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000))
         .expect("chmod");

@@ -7,14 +7,12 @@
 //! passes only with a snapshot update and a `since` greater than the previous
 //! minor.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
-
 use vibra_ir::external::host::{
     HOST_REGISTRY_MINOR, HOST_ROWS, HostErrorType, HostType, host_row,
     registry_snapshot, snapshot_violations,
 };
 
-const SNAPSHOT: &str = include_str!("../host-registry.snapshot");
+const SNAPSHOT: &str = include_str!("../../host-registry.snapshot");
 
 #[test]
 fn the_registry_has_the_seventeen_rows_of_the_runtime_chapter() {

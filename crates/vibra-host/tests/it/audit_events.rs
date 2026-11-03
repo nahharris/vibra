@@ -5,97 +5,17 @@
 //! the command-result schema test of Step 13
 //! (`the_audit_trace_is_an_array_of_event_records_and_keeps_an_unknown_kind`).
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 use serde_json::json;
 use vibra_diagnostics::DiagnosticCode;
 use vibra_host::{
     AuditEvent, EnvError, FsError, FsKind, HostCall, HostEnum, HostEvent, HostOk,
-    HostRecord, HostReply, HostValues, HostWorld, IoError, Metadata, OpaqueEvent,
-    OperationError, RandomError, ReadError, TimeError, WorldProvider, build_reply,
-    decode_trace, perform, trace_to_vibon,
+    HostRecord, HostReply, HostWorld, IoError, Metadata, OpaqueEvent, OperationError,
+    RandomError, ReadError, TimeError, WorldProvider, build_reply, decode_trace,
+    perform, trace_to_vibon,
 };
 use vibra_ir::external::host::{HOST_ROWS, HostErrorType, HostType};
 
-/// The reference implementation of the value-access trait: a plain tree.
-#[derive(Clone, Debug, PartialEq, Eq)]
-enum Tree {
-    Void,
-    Text(String),
-    Path(String),
-    Bytes(Vec<u8>),
-    I64(i64),
-    U64(u64),
-    Array(Vec<Tree>),
-    Enum(HostEnum, u32, Option<Box<Tree>>),
-    Record(HostRecord, Vec<Tree>),
-}
-
-#[derive(Default)]
-struct Plain;
-
-impl HostValues for Plain {
-    type Value = Tree;
-
-    fn read_text(&mut self, value: &Tree) -> Result<String, ReadError> {
-        match value {
-            Tree::Text(text) => Ok(text.clone()),
-            _ => Err(ReadError::Value),
-        }
-    }
-    fn read_bytes(&mut self, value: &Tree) -> Result<Vec<u8>, ReadError> {
-        match value {
-            Tree::Bytes(bytes) => Ok(bytes.clone()),
-            _ => Err(ReadError::Value),
-        }
-    }
-    fn read_path(&mut self, value: &Tree) -> Result<String, ReadError> {
-        match value {
-            Tree::Path(text) => Ok(text.clone()),
-            _ => Err(ReadError::Value),
-        }
-    }
-    fn read_u64(&mut self, value: &Tree) -> Result<u64, ReadError> {
-        match value {
-            Tree::U64(number) => Ok(*number),
-            _ => Err(ReadError::Value),
-        }
-    }
-    fn build_void(&mut self) -> Tree {
-        Tree::Void
-    }
-    fn build_text(&mut self, text: &str) -> Tree {
-        Tree::Text(text.to_owned())
-    }
-    fn build_bytes(&mut self, bytes: &[u8]) -> Tree {
-        Tree::Bytes(bytes.to_vec())
-    }
-    fn build_i64(&mut self, value: i64) -> Tree {
-        Tree::I64(value)
-    }
-    fn build_u64(&mut self, value: u64) -> Tree {
-        Tree::U64(value)
-    }
-    fn build_array(&mut self, elements: Vec<Tree>) -> Tree {
-        Tree::Array(elements)
-    }
-    fn build_enum(
-        &mut self,
-        ty: HostEnum,
-        variant: u32,
-        payload: Option<Tree>,
-    ) -> Tree {
-        Tree::Enum(ty, variant, payload.map(Box::new))
-    }
-    fn build_record(&mut self, ty: HostRecord, fields: Vec<Tree>) -> Tree {
-        Tree::Record(ty, fields)
-    }
-}
+use crate::support::{Plain, Tree};
 
 fn host(op: &str, args: &[&str], result: &str) -> AuditEvent {
     AuditEvent::Host(HostEvent {

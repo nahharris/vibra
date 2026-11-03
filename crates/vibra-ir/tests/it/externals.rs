@@ -1,7 +1,5 @@
 //! Closed compiler registry contract.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing)]
-
 use vibra_diagnostics::ByteSpan;
 use vibra_ir::external::{CompilerIntrinsic, REGISTRY_VERSION, RoleTypes};
 use vibra_ir::{

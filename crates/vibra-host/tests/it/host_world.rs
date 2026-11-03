@@ -3,39 +3,15 @@
 //!
 //! `docs/spec/06-runtime.md`, "The host world".
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 use vibra_diagnostics::DiagnosticCode;
 use vibra_host::{
-    EnvError, Failure, FsError, FsKind, HostProvider, HostWorld, IoError, Metadata,
-    TimeError, WorldProvider,
+    EnvError, FsError, FsKind, HostProvider, HostWorld, IoError, Metadata, TimeError,
+    WorldProvider,
 };
 
+use crate::support::{done, provider, world};
+
 const DEFAULT_WORLD: &str = "(record format: @host-world.v1)\n";
-
-fn world(text: &str) -> HostWorld {
-    match HostWorld::decode("world.vibon", text) {
-        Ok(world) => world,
-        Err(diagnostics) => panic!("{diagnostics:?}"),
-    }
-}
-
-fn provider(text: &str) -> WorldProvider {
-    WorldProvider::new(&world(text))
-}
-
-fn done<T, E: std::fmt::Debug>(result: Result<T, Failure<E>>) -> Result<T, E> {
-    match result {
-        Ok(value) => Ok(value),
-        Err(Failure::Error(error)) => Err(error),
-        Err(Failure::MemoryExhausted) => panic!("memory exhausted"),
-    }
-}
 
 fn codes(text: &str) -> Vec<DiagnosticCode> {
     match HostWorld::decode("world.vibon", text) {

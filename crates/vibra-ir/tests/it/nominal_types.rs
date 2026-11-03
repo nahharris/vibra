@@ -1,18 +1,12 @@
 //! M3 Step 2 declared-type IR: definitions, construction, projection, and the
 //! checked-program validation that rejects IR a checker must never produce.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing)]
-
-use vibra_diagnostics::ByteSpan;
 use vibra_ir::{
     CheckedFunction, CheckedProgram, Expr, FunctionSignature, IrError, ObservedValue,
-    SourceOrigin, Type, TypeBody, TypeDefinition, TypeId, Value, canonical_members,
-    canonical_type,
+    Type, TypeBody, TypeDefinition, TypeId, Value, canonical_members, canonical_type,
 };
 
-fn origin() -> SourceOrigin {
-    SourceOrigin::new("case.vib", ByteSpan::new(0, 1))
-}
+use crate::support::origin;
 
 fn point_id() -> TypeId {
     TypeId::new("@demo@1.0.0/app.main.point", "app.main.point")
