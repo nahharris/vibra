@@ -1,5 +1,5 @@
 //! The emitter's skeleton (milestone 4 Step 4): it lowers the empty `void`
-//! entry, names every other form, and never produces a module that omits part
+//! entry and then every other form, and never produces a module that omits part
 //! of a program.
 
 #![allow(
@@ -14,7 +14,7 @@ use vibra_ir::{
     CallTarget, CheckedFunction, CheckedGlobal, CheckedProgram, Expr,
     FunctionSignature, SourceOrigin, TestAssertion, Type, Value,
 };
-use vibra_wasm::{NotLowered, emit};
+use vibra_wasm::{EmitError, emit};
 
 fn origin() -> SourceOrigin {
     SourceOrigin::new("skeleton.vib", ByteSpan::new(0, 1))
@@ -45,18 +45,6 @@ fn empty_function(name: &str) -> CheckedFunction {
 
 fn program(functions: Vec<CheckedFunction>, entry: usize) -> CheckedProgram {
     CheckedProgram::try_new(functions, entry).expect("a checked program")
-}
-
-fn not_lowered(program: &CheckedProgram) -> NotLowered {
-    emit(program).expect_err("the program is not lowered")
-}
-
-fn forms(error: &NotLowered) -> Vec<&'static str> {
-    error
-        .forms()
-        .iter()
-        .map(|used| used.form().name())
-        .collect()
 }
 
 #[test]
@@ -274,17 +262,17 @@ fn a_module_value_lowers_since_step_5b() {
 }
 
 #[test]
-fn the_error_lists_each_distinct_form_once_in_form_order() {
-    // Two entries-that-take-a-parameter are one use of a form, named once, with
-    // the origin of the first. No checked source program has one.
+fn an_entry_with_a_parameter_is_an_error_naming_its_origin() {
+    // No checked source program has an entry that takes a parameter.
     let with_parameter =
         |name| function(name, vec![Type::U64], Type::Void, void_literal());
-    let error = not_lowered(&program(vec![with_parameter("entry")], 0));
-    assert_eq!(forms(&error), ["parameters"]);
-    assert_eq!(
-        error.forms()[0].origin().map(SourceOrigin::source_id),
-        Some("skeleton.vib")
-    );
+    let error = emit(&program(vec![with_parameter("entry")], 0))
+        .expect_err("an entry with a parameter emits no module");
+    let EmitError::EntryParameters { origin } = &error else {
+        panic!("expected EntryParameters, found {error:?}");
+    };
+    assert_eq!(origin.source_id(), "skeleton.vib");
+    assert!(error.to_string().contains("skeleton.vib"), "{error}");
 }
 
 #[test]

@@ -15,7 +15,7 @@ use std::sync::OnceLock;
 use vibra_diagnostics::DiagnosticCode;
 use vibra_host::{HostWorld, WorldProvider};
 use vibra_ir::CheckedProgram;
-use vibra_wasm::NotLowered;
+use vibra_wasm::EmitError;
 use vibra_wasm::layout::{CellClass, STRIDE_CELLS, cells_offset, header, state};
 use vibra_wasm_run::{Instance, Observed, Outcome, Runner, TestRun};
 use vibra_workspace::semantic::{TestItem, TestItemStatus};
@@ -59,9 +59,7 @@ pub(crate) fn observe_entry(
     let mut program_failed = None;
     let module = match vibra_wasm::emit(program) {
         Ok(module) => module,
-        Err(not_lowered) => {
-            return BackendObservation::new(not_lowered_observation(&not_lowered));
-        }
+        Err(error) => return BackendObservation::new(emit_failure(&error)),
     };
     let runner = match runner() {
         Ok(runner) => runner,
@@ -124,18 +122,11 @@ pub(crate) fn observe_entry(
     }
 }
 
-/// What the emitter named when it could not lower a program, as the runner
-/// counts it.
-fn not_lowered_observation(not_lowered: &NotLowered) -> WasmObservation {
-    WasmObservation::NotLowered {
-        forms: not_lowered
-            .forms()
-            .iter()
-            .map(|used| match used.detail() {
-                Some(detail) => format!("{}:{detail}", used.form().name()),
-                None => used.form().name().to_owned(),
-            })
-            .collect(),
+/// What the runner observes when the emitter produced no module: a failure of
+/// the backend, with the emitter's error as its reason.
+fn emit_failure(error: &EmitError) -> WasmObservation {
+    WasmObservation::Failed {
+        reason: error.to_string(),
     }
 }
 
@@ -276,9 +267,7 @@ fn observe_ran(
         .collect::<Vec<_>>();
     let module = match vibra_wasm::emit_tests(first, &entries) {
         Ok(module) => module,
-        Err(not_lowered) => {
-            return TestsObserved::Stopped(not_lowered_observation(&not_lowered));
-        }
+        Err(error) => return TestsObserved::Stopped(emit_failure(&error)),
     };
     let runner = match runner() {
         Ok(runner) => runner,

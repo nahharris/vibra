@@ -208,8 +208,7 @@ fn a_checked_program_carries_the_prelude_values_and_lowers_since_step_5b() {
 
 #[test]
 fn a_program_that_is_not_a_checked_entry_has_no_module() {
-    // No form of a checked source program is named by `NotLowered` since
-    // Step 11. The error remains for a program the checker could not have
+    // A checked source program always emits. `EmitError` remains for a program the checker could not have
     // produced: here an entry that takes a parameter.
     let origin = vibra_ir::SourceOrigin::new(
         "input.vib",
@@ -227,10 +226,8 @@ fn a_program_that_is_not_a_checked_entry_has_no_module() {
     .expect("a checked function");
     let program = vibra_ir::CheckedProgram::try_new(vec![entry], 0).expect("a program");
     let error = vibra_wasm::emit(&program).expect_err("an entry with a parameter");
-    let names = error
-        .forms()
-        .iter()
-        .map(|used| used.form().name())
-        .collect::<Vec<_>>();
-    assert_eq!(names, ["parameters"], "{names:?}");
+    assert!(
+        matches!(error, vibra_wasm::EmitError::EntryParameters { .. }),
+        "{error:?}"
+    );
 }

@@ -198,7 +198,7 @@ fn a_workspace_test_case_is_counted_in_both_backend_lines() {
     let report = runner.run(&corpus.corpus());
     assert!(report.is_success());
     let wasm = report.wasm_counts();
-    assert_eq!((wasm.matched, wasm.failed, wasm.not_lowered), (1, 0, 0));
+    assert_eq!((wasm.matched, wasm.failed), (1, 0));
     let interpreter = report.interpreter_counts();
     assert_eq!(
         (
@@ -344,37 +344,46 @@ fn a_wasm_backend_failure_fails_the_case() {
 }
 
 #[test]
-fn a_not_lowered_observation_is_recovered_and_counted() {
-    let report = run_with(
-        &void_case(),
-        FixedHandler::new(expected_observation(
-            Some(void_execution()),
-            Some(WasmObservation::NotLowered {
-                forms: vec!["array".to_owned()],
-            }),
-        )),
-    );
-    assert_eq!(report.status, CaseStatus::Passed);
-    assert_eq!(
-        backends(&report).1,
-        &WasmStatus::NotLowered {
-            forms: vec!["array".to_owned()]
-        }
-    );
-}
-
-#[test]
-fn a_missing_wasm_observation_on_an_accepted_case_is_not_lowered() {
-    // No Wasm execution handler took part: nothing is lowered, and the case
-    // still passes on the interpreter side.
+fn a_missing_wasm_observation_leaves_the_case_to_the_interpreter() {
+    // No Wasm execution handler took part: the interpreter judges the case, and
+    // the report has no Wasm status to count.
     let report = run_with(
         &void_case(),
         FixedHandler::new(expected_observation(Some(void_execution()), None)),
     );
     assert_eq!(report.status, CaseStatus::Passed);
-    assert_eq!(
-        backends(&report).1,
-        &WasmStatus::NotLowered { forms: Vec::new() }
+    let backends = report.backends.as_ref().expect("an executable case");
+    assert_eq!(backends.interpreter, CaseStatus::Passed);
+    assert_eq!(backends.wasm, None);
+}
+
+#[test]
+fn an_emit_failure_fails_the_case_with_the_emitters_error() {
+    // An entry that takes a parameter is a program the checker cannot produce,
+    // and the emitter refuses it.
+    let origin = SourceOrigin::new("input.vib", ByteSpan::new(0, 1));
+    let entry = CheckedFunction::new(
+        "main",
+        FunctionSignature::new(vec![Type::U64], Type::Void),
+        Expr::literal(Value::Void, origin.clone()),
+        origin,
+    )
+    .expect("a checked function");
+    let program = CheckedProgram::try_new(vec![entry], 0).expect("a program");
+    let observation = observe_wasm(&program, &vibra_host::HostWorld::default());
+    let report = run_with(
+        &void_case(),
+        FixedHandler::new(expected_observation(
+            Some(void_execution()),
+            Some(observation),
+        )),
+    );
+    let CaseStatus::Failed { reason } = &report.status else {
+        panic!("the case must fail");
+    };
+    assert!(
+        reason.contains("wasm backend: cannot emit: the entry takes parameters"),
+        "{reason}"
     );
 }
 
@@ -482,7 +491,7 @@ fn the_report_prints_both_backend_lines() {
         "{stdout}"
     );
     assert!(
-        stdout.contains("wasm backend: 2 matched, 0 failed, 0 not lowered\n"),
+        stdout.contains("wasm backend: 2 matched, 0 failed\n"),
         "{stdout}"
     );
     assert!(

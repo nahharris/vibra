@@ -368,7 +368,7 @@ fn run_both(source: &str) -> Ran {
         .expect("execution")
         .canonical_result();
     let module = vibra_wasm::emit(program)
-        .unwrap_or_else(|error| panic!("{source}\nnot lowered: {error}"));
+        .unwrap_or_else(|error| panic!("{source}\nemit failed: {error}"));
     let ty = program.entry().signature().result();
     let runner = runner();
     let wasm = match runner

@@ -1,36 +1,24 @@
-//! After Step 11 the emitter names no form of a checked program as unlowered
-//! (milestone 4 Step 11).
+//! The emitter lowers every form of a checked program (milestone 4 Step 11).
 //!
-//! `Form` has three kinds, and none stands for a construct a checked program
-//! can contain: a program past the 32-bit indices of a module, an entry that
-//! takes a parameter, and a checked-IR shape the checker rules out. These
-//! tests hold the classifier and the lowering to that:
+//! `EmitError` has three kinds, and none stands for a construct a checked
+//! program can contain: a program past the 32-bit indices of a module, an entry
+//! that takes a parameter, and a checked-IR shape the checker rules out. These
+//! tests hold the lowering to that:
 //!
 //! - every registry row has a lowering, inline or as a native import, or is a
 //!   native that runs its checked body;
-//! - every program the corpus checks lowers, or is refused only for an entry
+//! - every program the corpus checks emits, or is refused only for an entry
 //!   with parameters, which `check_source` admits and no executable case has;
 //! - emission of each of those programs is byte-identical.
 //!
-//! That the corpus reports no case as not lowered is held by
-//! `parity_inventory`, whose table has only `matched` rows.
+//! That the corpus runs without a failing case in the Wasm backend is held by
+//! the conformance run itself, which fails a case whose module is not emitted.
 
 use crate::support::corpus_root;
 use std::path::Path;
 
 use vibra_ir::external::CompilerIntrinsic;
-use vibra_wasm::{Form, lowers_primitive};
-
-#[test]
-fn the_form_kinds_are_the_three_that_no_valid_program_contains() {
-    let names = [Form::ModuleSize, Form::Parameters, Form::Malformed].map(Form::name);
-    assert_eq!(names, ["module-size", "parameters", "malformed"]);
-    // A new kind must be added here on purpose: a `match` without a wildcard.
-    let witness = |form: Form| match form {
-        Form::ModuleSize | Form::Parameters | Form::Malformed => (),
-    };
-    witness(Form::Malformed);
-}
+use vibra_wasm::{EmitError, lowers_primitive};
 
 #[test]
 fn every_registry_row_has_a_lowering() {
@@ -84,18 +72,10 @@ fn every_program_the_corpus_checks_lowers() {
                 );
                 lowered += 1;
             }
-            Err(error) => {
-                let names = error
-                    .forms()
-                    .iter()
-                    .map(|used| (used.form(), used.detail()))
-                    .collect::<Vec<_>>();
-                assert_eq!(
-                    names,
-                    [(Form::Parameters, Some("entry"))],
-                    "a checked program is refused for more than its entry:\n{source}\n{error}"
-                );
-            }
+            Err(error) => assert!(
+                matches!(error, EmitError::EntryParameters { .. }),
+                "a checked program is refused for more than its entry:\n{source}\n{error}"
+            ),
         }
     }
     assert!(lowered > 100, "{lowered} programs lowered");

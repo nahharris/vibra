@@ -319,8 +319,6 @@ fn the_host_holds_exactly_the_result_until_it_releases_it() {
     assert!(live.end > 0, "the module values the program keeps");
 }
 
-// -- negative: what is still not lowered ----------------------------------------
-
 // -- determinism -------------------------------------------------------------------
 
 // -- exhaustion ----------------------------------------------------------------

@@ -924,7 +924,9 @@ and unavailable, and the Wasm backend as matched and failed. A checked program
 has no form the Wasm backend leaves out, so a Wasm emit failure on an
 executable case is a toolchain defect and fails that case, with the emitter's
 error as the failure reason, exactly as a disagreement does. A case has no
-third disposition and no table names cases the Wasm backend skips. The Stage 4A
+third disposition and no table names cases the Wasm backend skips; a runner
+with no Wasm execution handler runs the interpreter alone and reports no Wasm
+count. The Stage 4A
 sub-gate and the `full-v1` claim require only that no case fails.
 
 The native-implementation harness joins the same differential. For every sample

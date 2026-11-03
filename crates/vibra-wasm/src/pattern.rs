@@ -31,9 +31,9 @@
 use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::{Pattern, SourceOrigin, Type, Value};
 
-use crate::form::NotLowered;
+use crate::error::EmitError;
 use crate::runtime::ValueClass;
-use crate::types::{Shape, TypeEnv, class_of};
+use crate::types::{Shape, TypeEnv};
 
 /// What a test of a value in place asks.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -179,10 +179,8 @@ pub(crate) fn decompose<'p>(
     pattern: &'p Pattern,
     ty: &Type,
     origin: &SourceOrigin,
-) -> Result<Node<'p>, NotLowered> {
-    let unshaped = || {
-        NotLowered::type_of(class_of(ty).err().unwrap_or("shape"), Some(origin.clone()))
-    };
+) -> Result<Node<'p>, EmitError> {
+    let unshaped = || EmitError::of_type(ty, origin);
     let shape = || env.shape(ty).ok_or_else(unshaped);
     let position = |index: usize| u32::try_from(index).unwrap_or(u32::MAX);
     Ok(match pattern {

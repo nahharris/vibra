@@ -47,7 +47,6 @@ mod native_bodies;
 mod native_differential;
 mod natives;
 mod numbers;
-mod parity_inventory;
 mod patterns;
 mod performance_baseline;
 mod primitives;

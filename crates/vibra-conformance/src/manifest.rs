@@ -291,8 +291,7 @@ impl CaseManifest {
     /// `docs/spec/07-diagnostics-and-conformance.md`, "Differential
     /// execution": its operation executes a program and its expectation is
     /// accepted, because a rejected program reaches no backend. Both backends
-    /// run such a case against its one expectation, and only such a case has a
-    /// parity row.
+    /// run such a case against its one expectation.
     #[must_use]
     pub fn is_executable(&self) -> bool {
         self.operation.executes_programs() && self.expectations.accepted
