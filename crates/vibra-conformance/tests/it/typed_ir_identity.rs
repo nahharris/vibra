@@ -14,7 +14,9 @@
 
 use std::collections::BTreeSet;
 
-use crate::support::{CheckedSource, check_every_source, run_ignored_child};
+use crate::support::{
+    CheckedSource, check_every_source, checked_sources, run_ignored_child,
+};
 
 /// A field name that contains one of these denotes a place in an instance.
 const INSTANCE_WORDS: &[&str] = &[
@@ -109,7 +111,7 @@ fn written_names(source: &str) -> BTreeSet<String> {
 fn no_field_of_the_canonical_form_denotes_a_place_in_an_instance() {
     let mut programs = 0_usize;
     let mut structural = BTreeSet::new();
-    for checked in &check_every_source() {
+    for checked in checked_sources() {
         let Some(canonical) = &checked.canonical else {
             continue;
         };
@@ -186,9 +188,11 @@ fn the_canonical_form_is_identical_across_processes() {
             .to_owned()
     };
 
+    // This process's side is the shared whole-corpus check; the other process
+    // checked the corpus on its own.
     assert_eq!(
         digest_of(&first),
-        digest(&forms_of(&check_every_source())),
+        digest(&forms_of(checked_sources())),
         "another process produced another canonical form"
     );
 }

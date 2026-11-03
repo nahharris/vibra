@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use vibra_conformance::{
@@ -153,9 +154,10 @@ pub(crate) fn crate_sources(name: &str) -> Vec<(String, String)> {
 
 // -- the corpus ---------------------------------------------------------------
 
-/// The repository corpus.
-pub(crate) fn corpus() -> Corpus {
-    Corpus::discover(corpus_root()).expect("the corpus loads")
+/// The repository corpus, loaded once for the whole test binary.
+pub(crate) fn corpus() -> &'static Corpus {
+    static CORPUS: OnceLock<Corpus> = OnceLock::new();
+    CORPUS.get_or_init(|| Corpus::discover(corpus_root()).expect("the corpus loads"))
 }
 
 /// The one case of the corpus directory `id`.
@@ -179,7 +181,8 @@ pub(crate) struct CheckedSource {
 }
 
 /// Checks the source document of every `interpret` or `type-check` case, in
-/// corpus order.
+/// corpus order. This is the whole-corpus check; most callers want
+/// [`checked_sources`], which does it once.
 pub(crate) fn check_every_source() -> Vec<CheckedSource> {
     let mut forms = Vec::new();
     for case in corpus().cases() {
@@ -201,6 +204,12 @@ pub(crate) fn check_every_source() -> Vec<CheckedSource> {
         });
     }
     forms
+}
+
+/// [`check_every_source`], computed once for the whole test binary.
+pub(crate) fn checked_sources() -> &'static [CheckedSource] {
+    static CHECKED: OnceLock<Vec<CheckedSource>> = OnceLock::new();
+    CHECKED.get_or_init(check_every_source)
 }
 
 /// A handler that reports one fixed observation for every case.
