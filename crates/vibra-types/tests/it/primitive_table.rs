@@ -1,8 +1,6 @@
 //! The primitive type table: the spellings below the IR and the IR's own
 //! enumeration of primitive types list the same types in the same order.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, missing_docs)]
-
 use vibra_ir::Type;
 use vibra_syntax::PRIMITIVE_TYPES;
 

@@ -1,24 +1,16 @@
 //! M3 Step 2 declared-type checking through the single-source checker.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing)]
-
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 use vibra_types::check_source;
 
-fn codes(source: &str) -> Vec<(DiagnosticCode, ByteSpan)> {
-    check_source("case.vib", source)
-        .diagnostics()
-        .iter()
-        .map(|diagnostic| (diagnostic.code(), diagnostic.primary_span()))
-        .collect()
-}
+use crate::support::diagnostics;
 
 #[test]
 fn a_type_naming_an_unavailable_type_is_unavailable_at_its_declaration_and_uses() {
     let source = "(deftype number (intrinsic-type @number))\n\
                   (deftype wrapper (record value number))\n\
                   (defn read (value wrapper) i32 0i32)";
-    let codes = codes(source);
+    let codes = diagnostics(source);
     // The intrinsic type, then the record that names it, then the parameter
     // naming the record.
     assert_eq!(
@@ -33,7 +25,7 @@ fn a_type_naming_an_unavailable_type_is_unavailable_at_its_declaration_and_uses(
 
 #[test]
 fn impl_blocks_target_a_visible_interface() {
-    let with_impl = codes(
+    let with_impl = diagnostics(
         "(deftype user (record name str)\n  (impl printable (defn render (value self) str \"u\")))",
     );
     assert!(
@@ -45,7 +37,8 @@ fn impl_blocks_target_a_visible_interface() {
 
 #[test]
 fn a_repeated_type_name_is_one_redeclaration() {
-    let codes = codes("(deftype point (record x i32))\n(deftype point (record y i32))");
+    let codes =
+        diagnostics("(deftype point (record x i32))\n(deftype point (record y i32))");
     assert_eq!(
         codes
             .iter()

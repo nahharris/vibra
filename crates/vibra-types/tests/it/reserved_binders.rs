@@ -2,18 +2,9 @@
 //! checker (`docs/spec/01-source-language.md`, "Reader"; M4 ledger D14.1). The
 //! resolver reports the same rule for a workspace.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, missing_docs)]
-
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
-use vibra_types::check_source;
 
-fn diagnostics(source: &str) -> Vec<(DiagnosticCode, ByteSpan)> {
-    check_source("reserved.vib", source)
-        .diagnostics()
-        .iter()
-        .map(|diagnostic| (diagnostic.code(), diagnostic.primary_span()))
-        .collect()
-}
+use crate::support::diagnostics;
 
 /// `source` reports exactly one diagnostic, `@name.reserved-declaration` at
 /// `binder` inside the first `anchor`, and nothing else cascades from it.

@@ -3,10 +3,10 @@
 //! values (`docs/spec/02-type-system.md`, "Generics", "Interfaces and methods",
 //! and "Functions as values"; M4 Step 2).
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, missing_docs)]
-
 use vibra_diagnostics::{ByteSpan, DiagnosticCode as C, Level};
 use vibra_types::check_source;
+
+use crate::support;
 
 /// Interfaces and implementations the cases below call.
 const PRELUDE: &str = "\
@@ -67,7 +67,7 @@ fn report(source: &str) -> Vec<(C, Level)> {
 }
 
 fn codes(source: &str) -> Vec<C> {
-    report(source).into_iter().map(|(code, _)| code).collect()
+    support::codes(&format!("{PRELUDE}{source}"))
 }
 
 fn ok(source: &str) {

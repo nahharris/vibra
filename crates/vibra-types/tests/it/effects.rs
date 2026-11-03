@@ -3,8 +3,6 @@
 //! performed rows, and the witness of `@effect.outside-ceiling` are asserted
 //! by the `V1-EFFECT-*` conformance cases.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, missing_docs)]
-
 use vibra_types::check_source;
 
 #[test]

@@ -1,10 +1,10 @@
 //! M3 Step 3 `any`-bounded generics through the single-source checker:
 //! call-site inference, `types:` agreement, ambiguity, and the style warning.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing)]
-
 use vibra_diagnostics::DiagnosticCode;
 use vibra_types::check_source;
+
+use crate::support;
 
 const PRELUDE: &str = "(defn identity (value t) t\n  where: (t any)\n  value)\n\
                        (deftype pair (record left a right b)\n  where: (a any b any)\n  \
@@ -12,12 +12,7 @@ const PRELUDE: &str = "(defn identity (value t) t\n  where: (t any)\n  value)\n\
                        (pair left: (value @left) right: right)))\n";
 
 fn codes(body: &str) -> Vec<DiagnosticCode> {
-    let source = format!("{PRELUDE}{body}");
-    check_source("case.vib", &source)
-        .diagnostics()
-        .iter()
-        .map(|diagnostic| diagnostic.code())
-        .collect()
+    support::codes(&format!("{PRELUDE}{body}"))
 }
 
 #[test]
