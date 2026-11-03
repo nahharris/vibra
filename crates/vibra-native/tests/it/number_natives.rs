@@ -1,7 +1,7 @@
 //! The number-text natives over linear memory (milestone 4 Step 8c), without an
 //! engine.
 //!
-//! Like `arena_m4_step8b`, these tests lay arena objects out by hand and call
+//! Like `arena_natives`, these tests lay arena objects out by hand and call
 //! each native as the runner does. A `to-str` row builds a `str`, so it measures
 //! with no destination and fills the one it is given; a `parse` row reads a `str`
 //! and writes the number into the 8-byte cell it is given, answering a status. No
