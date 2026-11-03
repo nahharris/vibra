@@ -1,5 +1,3 @@
-#![allow(clippy::expect_used, clippy::indexing_slicing, missing_docs)]
-
 use vibra_diagnostics::{DiagnosticCode, Level};
 use vibra_resolve::{DeclarationId, EntityKind, ResolveInput, Resolver};
 use vibra_syntax::parse_data;
@@ -93,25 +91,25 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
                 "std",
                 ["text"],
                 "stdlib/src/std/text.vib",
-                include_bytes!("../../../stdlib/src/std/text.vib"),
+                include_bytes!("../../../../stdlib/src/std/text.vib"),
             ),
             vibra_resolve::SourceModule::new(
                 "std",
                 ["core"],
                 "stdlib/src/std/core.vib",
-                include_bytes!("../../../stdlib/src/std/core.vib"),
+                include_bytes!("../../../../stdlib/src/std/core.vib"),
             ),
             vibra_resolve::SourceModule::new(
                 "std",
                 ["char"],
                 "stdlib/src/std/char.vib",
-                include_bytes!("../../../stdlib/src/std/char.vib"),
+                include_bytes!("../../../../stdlib/src/std/char.vib"),
             ),
             vibra_resolve::SourceModule::new(
                 "std",
                 ["bool"],
                 "stdlib/src/std/bool.vib",
-                include_bytes!("../../../stdlib/src/std/bool.vib"),
+                include_bytes!("../../../../stdlib/src/std/bool.vib"),
             ),
         ],
     );
@@ -182,25 +180,25 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
                 "std",
                 ["text"],
                 "stdlib/src/std/text.vib",
-                include_bytes!("../../../stdlib/src/std/text.vib"),
+                include_bytes!("../../../../stdlib/src/std/text.vib"),
             ),
             vibra_resolve::SourceModule::new(
                 "std",
                 ["core"],
                 "stdlib/src/std/core.vib",
-                include_bytes!("../../../stdlib/src/std/core.vib"),
+                include_bytes!("../../../../stdlib/src/std/core.vib"),
             ),
             vibra_resolve::SourceModule::new(
                 "std",
                 ["char"],
                 "stdlib/src/std/char.vib",
-                include_bytes!("../../../stdlib/src/std/char.vib"),
+                include_bytes!("../../../../stdlib/src/std/char.vib"),
             ),
             vibra_resolve::SourceModule::new(
                 "std",
                 ["bool"],
                 "stdlib/src/std/bool.vib",
-                include_bytes!("../../../stdlib/src/std/bool.vib"),
+                include_bytes!("../../../../stdlib/src/std/bool.vib"),
             ),
         ],
     );
@@ -827,7 +825,7 @@ fn import_cycle_related_span_comes_from_the_traversed_cycle_edge() {
 /// The `(type, member)` names `@std.builtin` declares, which the standard
 /// library's own bodies call.
 fn builtin_members() -> Vec<(String, String)> {
-    let source = include_str!("../../../stdlib/src/std/builtin.vib");
+    let source = include_str!("../../../../stdlib/src/std/builtin.vib");
     let document =
         vibra_syntax::parse_source(std::path::Path::new("builtin.vib"), source)
             .expect("builtin module");

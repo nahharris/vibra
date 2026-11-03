@@ -3,46 +3,9 @@
 //! Step 2b). `true` and `false` are names no binder may take. A pattern site
 //! never binds them: the name is a constant pattern there.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, missing_docs)]
-
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
-use vibra_resolve::{ResolveInput, Resolver};
 
-fn diagnostics(source: &str) -> Vec<(DiagnosticCode, ByteSpan)> {
-    Resolver::resolve(ResolveInput::single_module(
-        "demo",
-        "1.0.0",
-        "app",
-        "main",
-        source.as_bytes(),
-    ))
-    .diagnostics()
-    .iter()
-    .map(|diagnostic| (diagnostic.code(), diagnostic.primary_span()))
-    .collect()
-}
-
-/// The one diagnostic `source` reports, which must be
-/// `@name.reserved-declaration` at `binder` inside the first `anchor`.
-fn rejected(source: &str, anchor: &str, binder: &str) {
-    // The binder is the first spelling that is not a qualified path's head.
-    fn binder_offset(anchor: &str, binder: &str) -> usize {
-        anchor
-            .match_indices(binder)
-            .map(|(index, _)| index)
-            .find(|index| !anchor[index + binder.len()..].starts_with('.'))
-            .expect("binder")
-    }
-    let start = source.find(anchor).expect("anchor") + binder_offset(anchor, binder);
-    assert_eq!(
-        diagnostics(source),
-        vec![(
-            DiagnosticCode::NameReservedDeclaration,
-            ByteSpan::new(start, start + binder.len())
-        )],
-        "{source}"
-    );
-}
+use crate::support::{diagnostics, rejected};
 
 #[test]
 fn a_vocabulary_value_is_rejected_as_a_pure_name_binder() {

@@ -1,25 +1,10 @@
 //! Scope of `let` and `let-else` bindings (`docs/roadmap/pre-m4/01-bindings-return-never.md`,
 //! section B).
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, missing_docs)]
-
 use vibra_diagnostics::DiagnosticCode;
 use vibra_resolve::{ResolveInput, Resolver};
 
-fn codes(source: &str) -> Vec<DiagnosticCode> {
-    let snapshot = Resolver::resolve(ResolveInput::single_module(
-        "demo",
-        "1.0.0",
-        "app",
-        "main",
-        source.as_bytes(),
-    ));
-    snapshot
-        .diagnostics()
-        .iter()
-        .map(vibra_diagnostics::Diagnostic::code)
-        .collect()
-}
+use crate::support::codes;
 
 fn unknown() -> Vec<DiagnosticCode> {
     vec![DiagnosticCode::NameUnknownSymbol]
