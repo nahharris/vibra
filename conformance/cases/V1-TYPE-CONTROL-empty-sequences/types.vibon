@@ -1,8 +1,8 @@
 (record
   format: @types.v1
   globals: (array
-    (record name: @true type: @bool body: (record kind: @variant type: @bool variant: @true))
-    (record name: @false type: @bool body: (record kind: @variant type: @bool variant: @false))
+    (record name: @true type: @bool body: (record kind: @literal type: @bool value: true))
+    (record name: @false type: @bool body: (record kind: @literal type: @bool value: false))
   )
   functions: (array
     (record name: @empty params: (array) result: @void body: (record kind: @sequence type: @void values: (array (record kind: @literal type: @void value: void))))

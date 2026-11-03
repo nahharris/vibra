@@ -3035,11 +3035,6 @@ impl<'l, 'a> Builder<'l, 'a> {
         dest: u32,
     ) -> Result<(), EmitError> {
         let mark = self.next_temp;
-        if *value_type == Type::Bool {
-            let discriminant = u32::from(variant == "true");
-            self.build(Kind::Enum, discriminant, &[], dest);
-            return Ok(());
-        }
         let shape = self.shape(value_type, origin)?;
         let Shape::Enum(variants) = &shape else {
             return Err(EmitError::of_type(value_type, origin));

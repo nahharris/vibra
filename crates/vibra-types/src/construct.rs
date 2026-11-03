@@ -11,7 +11,7 @@
 use std::collections::BTreeSet;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_ir::{Expr, SourceOrigin, Type, TypeBody};
+use vibra_ir::{Expr, SourceOrigin, Type, TypeBody, Value};
 use vibra_syntax::{
     Application, BindingFacts, CallArgument, Expression, ExpressionKind, NameKind,
 };
@@ -214,16 +214,19 @@ pub(crate) fn check_constructor(
                 }
                 Some(Box::new(checked))
             };
-            Expr::Variant {
-                value_type: instantiated(
-                    environment,
-                    application,
-                    &instantiation,
-                    &pattern,
-                )?,
-                variant: variant.to_owned(),
-                payload,
-                origin,
+            let value_type =
+                instantiated(environment, application, &instantiation, &pattern)?;
+            // A `bool` variant is the literal of its representation, as it is
+            // in a pattern.
+            if value_type == Type::Bool && payload.is_none() {
+                Expr::literal(Value::Bool(variant == "true"), origin)
+            } else {
+                Expr::Variant {
+                    value_type,
+                    variant: variant.to_owned(),
+                    payload,
+                    origin,
+                }
             }
         }
         (TypeBody::Union(members), None) => {

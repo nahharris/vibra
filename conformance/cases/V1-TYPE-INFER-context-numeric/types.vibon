@@ -1,8 +1,8 @@
 (record
   format: @types.v1
   globals: (array
-    (record name: @true type: @bool body: (record kind: @variant type: @bool variant: @true))
-    (record name: @false type: @bool body: (record kind: @variant type: @bool variant: @false))
+    (record name: @true type: @bool body: (record kind: @literal type: @bool value: true))
+    (record name: @false type: @bool body: (record kind: @literal type: @bool value: false))
   )
   functions: (array
     (record name: @small params: (array) result: @i16 body: (record kind: @sequence type: @i16 values: (array (record kind: @literal type: @i16 value: 32767i16))))
