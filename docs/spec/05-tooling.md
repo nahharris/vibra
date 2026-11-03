@@ -18,6 +18,14 @@ engine for parsing, resolution, types, effects, diagnostics, queries, and edit
 planning. A tool may render the result differently; it may not reimplement the
 language or maintain a second symbol index.
 
+There is one checker. A source document that no project holds, as the
+conformance corpus runs for an `interpret` case, is the only
+module of a one-module workspace with the embedded standard library, resolved
+and checked exactly as a module of a project is. It keeps the source ID it was given. It can import the standard
+library and nothing else, because no other module is in that workspace, and the
+verdict, diagnostics, and spans for a source are those the workspace check
+reports for the same module.
+
 Every machine response has a schema version and is deterministic for one
 workspace snapshot. JSON is the general CLI and MCP interchange format. Vibra
 owns no persistent JSON file: project, lock, and build data use the canonical
@@ -188,8 +196,12 @@ returned. A recovered document is preserved byte-for-byte. The formatter may
 reorder labelled arguments only when an accepted checker result for that exact
 source in the captured workspace snapshot supplies their binding facts; absent
 facts never authorize an inferred reorder.
-If the single-source checker reports `@tool.unavailable`, `fmt` discards that
-incomplete check result and continues with syntax-only formatting. It uses no
+The source is checked as the module it is of the captured workspace, with the
+candidate text in place of its captured bytes and every other module as
+captured, by the check `vibra check` runs. A source that is not a module of the
+workspace is not checked. If there is no check, or the check reports
+`@tool.unavailable`, `fmt` discards the check result and continues with
+syntax-only formatting. It uses no
 binding facts and must preserve labelled argument order; the unavailable
 semantic check does not make formatting unavailable. Parser and formatter
 diagnostics still apply to preview and write. The layouts that `fmt` writes for
@@ -699,7 +711,7 @@ witnesses are the contract of Milestone 4 Step 20, which added the field, its
 schema entry, and its producer in one change and replaced the M3 envelope in
 place. They are a library projection, as the envelope is: the library requests
 the `effect-witnesses` expansion with `PositionExpansion`, and the corpus
-`query` operation declares `expand = ["effect-witnesses"]` on an expected query.
+`query` operation declares `expand = true` on an expected query.
 An application fact is available for a call of any module-level function or
 effect operation whose type the checker holds, including one with a nonempty
 effect row, and its `calleeType` is the checked function type with its ceiling as
@@ -826,6 +838,12 @@ plans/results, test reports, external-registry inspection, and MCP envelopes.
 Persistent project, lock, and build-data record schemas are
 defined as VIBON data contracts and tested through their typed decoders, not
 duplicated as normative JSON files.
+
+The published JSON Schema is the contract a consumer reads against. The
+implementation renders these documents and never decodes them, so a producer
+test validates each rendered document against its schema, and a rule that
+crosses fields, which a schema cannot express (for example a node identifier
+against its span), is asserted on the produced value.
 
 Schema IDs and major versions are contracts. Unknown fields are rejected in
 inputs and ignored only where an output schema explicitly permits forward

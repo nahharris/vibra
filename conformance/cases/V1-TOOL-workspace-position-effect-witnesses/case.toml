@@ -14,31 +14,31 @@ accepted = true
 [[expect.queries]]
 input = "tree/src/main.vib"
 offset = 316
-expand = ["effect-witnesses"]
+expand = true
 snapshot = "many-hops.json"
 
 [[expect.queries]]
 input = "tree/src/main.vib"
 offset = 425
-expand = ["effect-witnesses"]
+expand = true
 snapshot = "function-value.json"
 
 [[expect.queries]]
 input = "tree/src/main.vib"
 offset = 723
-expand = ["effect-witnesses"]
+expand = true
 snapshot = "contract-member.json"
 
 [[expect.queries]]
 input = "tree/src/main.vib"
 offset = 629
-expand = ["effect-witnesses"]
+expand = true
 snapshot = "impl-member.json"
 
 [[expect.queries]]
 input = "tree/src/main.vib"
 offset = 769
-expand = ["effect-witnesses"]
+expand = true
 snapshot = "pure-body.json"
 
 [[expect.queries]]

@@ -173,7 +173,7 @@ where
     let mut iterations = DEFAULT_ITERATIONS;
     let mut seed = DEFAULT_SEED;
     let mut deep_limit = DEFAULT_DEEP_LIMIT;
-    let mut corpus_root = PathBuf::from("conformance/cases");
+    let mut corpus_root = vibra_conformance::corpus_root();
     let mut smoke = false;
 
     while let Some(argument) = args.next() {

@@ -1,0 +1,337 @@
+//! Producer tests for the published diagnostic contracts.
+//!
+//! `docs/spec/07-diagnostics-and-conformance.md` makes producer validation of
+//! every published interchange schema a release-gate requirement. These tests
+//! assert that what the implementation emits validates against the published
+//! schema, and that the schema rejects what it forbids. `vibra-schema` renders
+//! these documents and never reads them back, so the schema is the consumer
+//! contract.
+
+use std::collections::BTreeMap;
+
+use jsonschema::Validator;
+use serde_json::{Value, json};
+use vibra_diagnostics::{
+    ByteSpan, Diagnostic, DiagnosticCode, DocumentRevision, Fix, LineIndex,
+};
+use vibra_schema::{
+    DIAGNOSTIC_SCHEMA, DiagnosticDocument, REGISTRY_ENTRY_SCHEMA,
+    RegistryEntryDocument, SCHEMA_VERSION,
+};
+
+use crate::support::{assert_valid, validator};
+
+fn diagnostic_validator() -> Validator {
+    validator(DIAGNOSTIC_SCHEMA)
+}
+
+fn registry_entry_validator() -> Validator {
+    validator(REGISTRY_ENTRY_SCHEMA)
+}
+
+/// A diagnostic exercising every optional part of the contract.
+fn rich_diagnostic() -> (String, Diagnostic) {
+    // Unicode before the span, so the derived columns differ from the bytes.
+    let source = "(defn 🌱 →)\n  (b\n";
+    let diagnostic = Diagnostic::new(
+        DiagnosticCode::SyntaxUnmatchedDelimiter,
+        ByteSpan::new(16, 18),
+        "this list is never closed",
+    )
+    .with_related(ByteSpan::new(0, 1), "the enclosing form starts here")
+    .with_note("a list must be closed before the end of the document")
+    .with_fix(Fix::safe(
+        "insert the closing delimiter",
+        DocumentRevision::new("sha256:0f1e"),
+    ));
+
+    (source.to_owned(), diagnostic)
+}
+
+#[test]
+fn a_rendered_diagnostic_validates_against_the_published_schema() {
+    let (source, diagnostic) = rich_diagnostic();
+    let index = LineIndex::new(&source);
+    let document = DiagnosticDocument::render(&diagnostic, &index)
+        .expect("the diagnostic has all required source indexes");
+
+    let instance = serde_json::to_value(&document).expect("the document serializes");
+    assert_valid(&diagnostic_validator(), &instance);
+}
+
+#[test]
+fn a_minimal_diagnostic_validates_against_the_published_schema() {
+    // Empty related, notes, and fixes are the common shape and must not be
+    // omitted: the schema requires all three keys.
+    let index = LineIndex::new("");
+    let document = DiagnosticDocument::render(
+        &Diagnostic::new(
+            DiagnosticCode::SyntaxRetiredForm,
+            ByteSpan::empty_at(0),
+            "`while` was retired",
+        ),
+        &index,
+    )
+    .expect("the diagnostic has all required source indexes");
+
+    let instance = serde_json::to_value(&document).expect("the document serializes");
+    assert_valid(&diagnostic_validator(), &instance);
+
+    assert_eq!(instance["related"], json!([]));
+    assert_eq!(instance["notes"], json!([]));
+    assert_eq!(instance["fixes"], json!([]));
+}
+
+#[test]
+fn every_registered_code_renders_a_valid_registry_entry() {
+    // The producer side of the whole registry, not just a sample.
+    let validator = registry_entry_validator();
+    for code in DiagnosticCode::ALL {
+        let entry = RegistryEntryDocument::render(*code);
+        let instance = serde_json::to_value(&entry).expect("the entry serializes");
+        assert_valid(&validator, &instance);
+    }
+}
+
+#[test]
+fn atoms_are_serialized_with_their_exact_spelling() {
+    let entry = RegistryEntryDocument::render(DiagnosticCode::TypeArgumentMismatch);
+    let instance = serde_json::to_value(&entry).expect("the entry serializes");
+
+    assert_eq!(instance["code"], json!("@type.argument-mismatch"));
+    assert_eq!(instance["level"], json!("@error"));
+    assert_eq!(instance["domain"], json!("type"));
+    assert_eq!(instance["fixCapability"], json!("@none"));
+}
+
+#[test]
+fn the_not_constant_code_is_an_error_with_no_fix() {
+    let validator = registry_entry_validator();
+    let entry = RegistryEntryDocument::render(DiagnosticCode::TypeNotConstant);
+    let instance = serde_json::to_value(&entry).expect("the entry serializes");
+
+    assert_valid(&validator, &instance);
+    assert_eq!(instance["code"], json!("@type.not-constant"));
+    assert_eq!(instance["level"], json!("@error"));
+    assert_eq!(instance["domain"], json!("type"));
+    assert_eq!(instance["fixCapability"], json!("@none"));
+}
+
+#[test]
+fn the_stage_4b_effect_codes_are_errors_with_no_fix() {
+    // Milestone 4 Step 13 (`docs/spec/07-diagnostics-and-conformance.md`,
+    // "Effect and host diagnostics"): a repeated target effect root and a host
+    // registry entry owned by another root.
+    let validator = registry_entry_validator();
+    for (code, atom, domain) in [
+        (
+            DiagnosticCode::EffectDuplicateRoot,
+            "@effect.duplicate-root",
+            "effect",
+        ),
+        (
+            DiagnosticCode::ExternalOwnerMismatch,
+            "@external.owner-mismatch",
+            "external",
+        ),
+    ] {
+        let instance = serde_json::to_value(RegistryEntryDocument::render(code))
+            .expect("the entry serializes");
+        assert_valid(&validator, &instance);
+        assert_eq!(instance["code"], json!(atom));
+        assert_eq!(instance["level"], json!("@error"));
+        assert_eq!(instance["domain"], json!(domain));
+        assert_eq!(instance["fixCapability"], json!("@none"));
+    }
+}
+
+#[test]
+fn a_span_carries_both_bytes_and_derived_positions() {
+    // "🌱" is four bytes and one column, so a consumer cannot compute one
+    // representation from the other without the document. Both are sent.
+    let source = "🌱ab";
+    let index = LineIndex::new(source);
+    let document = DiagnosticDocument::render(
+        &Diagnostic::new(
+            DiagnosticCode::NameUnknownSymbol,
+            ByteSpan::new(4, 6),
+            "unknown symbol",
+        ),
+        &index,
+    )
+    .expect("the diagnostic has all required source indexes");
+
+    assert_eq!(document.primary_span.start, 4);
+    assert_eq!(document.primary_span.end, 6);
+    assert_eq!(document.primary_span.start_position.line, 1);
+    assert_eq!(document.primary_span.start_position.column, 2);
+    assert_eq!(document.primary_span.end_position.column, 4);
+}
+
+#[test]
+fn a_related_span_uses_the_index_for_its_source_document() {
+    let primary_source = "one\n";
+    let related_source = "a\nb\n";
+    let diagnostic = Diagnostic::new(
+        DiagnosticCode::NameUnknownSymbol,
+        ByteSpan::new(0, 1),
+        "unknown symbol",
+    )
+    .with_source_id("one.vib")
+    .with_related_source("two.vib", ByteSpan::new(2, 3), "declaration");
+    let primary_index = LineIndex::new(primary_source);
+    let mut source_indexes = BTreeMap::new();
+    source_indexes.insert("two.vib".to_owned(), LineIndex::new(related_source));
+
+    let document = DiagnosticDocument::render_with_source_indexes(
+        &diagnostic,
+        &primary_index,
+        &source_indexes,
+    )
+    .expect("the related source index is supplied");
+
+    assert!(
+        DiagnosticDocument::render(&diagnostic, &primary_index).is_err(),
+        "a foreign related source must not use the primary document's positions"
+    );
+
+    assert_eq!(document.primary_span.source_id.as_deref(), Some("one.vib"));
+    assert_eq!(
+        document.related[0].span.source_id.as_deref(),
+        Some("two.vib")
+    );
+    assert_eq!(document.related[0].span.start_position.line, 2);
+    assert_eq!(document.related[0].span.start_position.column, 1);
+}
+
+#[test]
+fn an_unknown_field_is_rejected_by_the_schema() {
+    // The tooling chapter permits ignoring an unknown field only where an
+    // output schema explicitly allows forward extension. Neither of these
+    // does, so the schema must refuse it.
+    let (source, diagnostic) = rich_diagnostic();
+    let index = LineIndex::new(&source);
+    let mut instance = serde_json::to_value(
+        DiagnosticDocument::render(&diagnostic, &index)
+            .expect("the diagnostic has all required source indexes"),
+    )
+    .expect("the document serializes");
+    instance["severity"] = json!("fatal");
+
+    assert!(
+        diagnostic_validator()
+            .iter_errors(&instance)
+            .next()
+            .is_some(),
+        "the schema must reject an unknown field"
+    );
+}
+
+#[test]
+fn a_missing_required_field_is_rejected_by_the_schema() {
+    let (source, diagnostic) = rich_diagnostic();
+    let index = LineIndex::new(&source);
+    let mut instance = serde_json::to_value(
+        DiagnosticDocument::render(&diagnostic, &index)
+            .expect("the diagnostic has all required source indexes"),
+    )
+    .expect("the document serializes");
+    instance
+        .as_object_mut()
+        .expect("an object")
+        .remove("notes")
+        .expect("notes was present");
+
+    assert!(
+        diagnostic_validator()
+            .iter_errors(&instance)
+            .next()
+            .is_some(),
+        "the schema must require notes even when empty"
+    );
+}
+
+#[test]
+fn an_unsupported_schema_version_is_rejected_by_the_schema() {
+    // A consumer validating against the schema rejects a newer major version
+    // rather than guessing.
+    let (source, diagnostic) = rich_diagnostic();
+    let index = LineIndex::new(&source);
+    let mut instance = serde_json::to_value(
+        DiagnosticDocument::render(&diagnostic, &index)
+            .expect("the diagnostic has all required source indexes"),
+    )
+    .expect("the document serializes");
+    instance["schemaVersion"] = json!(SCHEMA_VERSION + 1);
+
+    assert!(
+        diagnostic_validator()
+            .iter_errors(&instance)
+            .next()
+            .is_some(),
+        "the schema pins its own major version"
+    );
+}
+
+#[test]
+fn an_unregistered_level_is_rejected_by_the_schema() {
+    let (source, diagnostic) = rich_diagnostic();
+    let index = LineIndex::new(&source);
+    let mut instance = serde_json::to_value(
+        DiagnosticDocument::render(&diagnostic, &index)
+            .expect("the diagnostic has all required source indexes"),
+    )
+    .expect("the document serializes");
+    instance["level"] = json!("@info");
+
+    assert!(
+        diagnostic_validator()
+            .iter_errors(&instance)
+            .next()
+            .is_some(),
+        "the level vocabulary is closed at @error and @warning"
+    );
+}
+
+#[test]
+fn a_malformed_code_spelling_is_rejected_by_the_schema() {
+    let validator = registry_entry_validator();
+    for spelling in [
+        "type.argument-mismatch",  // missing the leading @
+        "@Type.argument-mismatch", // not lowercase
+        "@type",                   // no thing component
+        "@type.argument.mismatch", // three components
+        "@type.",                  // empty thing
+        "@type.argument_mismatch", // underscore is not kebab-case
+    ] {
+        let mut instance = serde_json::to_value(RegistryEntryDocument::render(
+            DiagnosticCode::TypeNotApplicable,
+        ))
+        .expect("the entry serializes");
+        instance["code"] = json!(spelling);
+
+        assert!(
+            validator.iter_errors(&instance).next().is_some(),
+            "{spelling} must not validate as a diagnostic code"
+        );
+    }
+}
+
+#[test]
+fn both_published_schemas_declare_a_stable_identifier() {
+    for (text, expected) in [
+        (DIAGNOSTIC_SCHEMA, "urn:vibra:schema:v1:diagnostic"),
+        (
+            REGISTRY_ENTRY_SCHEMA,
+            "urn:vibra:schema:v1:diagnostic-registry-entry",
+        ),
+    ] {
+        let schema: Value =
+            serde_json::from_str(text).expect("the schema is valid JSON");
+        assert_eq!(
+            schema["$id"],
+            json!(expected),
+            "schema identifiers are contracts and must not drift"
+        );
+    }
+}

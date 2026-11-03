@@ -15,7 +15,8 @@ use vibra_resolve::{DeclarationId, EntityKind, ResolvedReference, ResolvedSnapsh
 use vibra_syntax::{
     Application, Attribute, Declaration, Expression, ExpressionKind, FloatSuffix,
     FunctionDeclaration, GrammarCategory, IntegerSuffix, Literal, NameKind, Pattern,
-    PatternKind, SourceAst, StructuralQuery, TypeExpr, VariadicParameter,
+    PatternKind, PrimitiveClass, SourceAst, StructuralQuery, TypeExpr,
+    VariadicParameter, is_primitive_type_name, primitive_class,
 };
 use vibra_types::{
     EffectGraph, EffectNode, EffectNodeKind, WitnessCallee, check_source,
@@ -982,33 +983,6 @@ impl fmt::Display for WorkspaceQueryError {
 
 impl std::error::Error for WorkspaceQueryError {}
 
-/// Queries one captured source module without touching the filesystem.
-pub fn query_position(
-    workspace: &WorkspaceSnapshot,
-    source_id: &str,
-    offset: usize,
-) -> Result<WorkspacePositionQuery, WorkspaceQueryError> {
-    query_position_with_bootstrap(workspace, source_id, offset, None)
-}
-
-/// Queries one captured source module with an optional already verified
-/// bootstrap package, so a module that imports the standard library keeps its
-/// checked facts. No filesystem access occurs in this function.
-pub fn query_position_with_bootstrap(
-    workspace: &WorkspaceSnapshot,
-    source_id: &str,
-    offset: usize,
-    verification: Option<&vibra_types::Stdlib>,
-) -> Result<WorkspacePositionQuery, WorkspaceQueryError> {
-    query_position_expanded(
-        workspace,
-        source_id,
-        offset,
-        verification,
-        PositionExpansion::default(),
-    )
-}
-
 /// Queries one captured source module with the requested expansions
 /// (`--expand` in the tooling chapter). A compact query omits every
 /// expansion, and an expansion never changes the underlying metadata.
@@ -1945,9 +1919,8 @@ impl<'a> SemanticCollector<'a> {
     fn semantic_type_expr(&self, value: &TypeExpr) -> Option<SemanticType> {
         match value {
             TypeExpr::Void => Some(SemanticType::primitive("void")),
-            TypeExpr::Name(name) => {
-                primitive_name(name.value()).map(SemanticType::primitive)
-            }
+            TypeExpr::Name(name) => is_primitive_type_name(name.value())
+                .then(|| SemanticType::primitive(name.value())),
             TypeExpr::Function(function) => {
                 let parameters = function
                     .parameters()
@@ -2036,7 +2009,7 @@ impl<'a> SemanticCollector<'a> {
                 self.ir_expected_sites.push(IrExpectedSite {
                     source_id: argument.origin().source_id().to_owned(),
                     span: argument.origin().span(),
-                    expected_type: semantic_type_primitive(&expected_type),
+                    expected_type: semantic_type(&expected_type),
                 });
             }
         }
@@ -2138,7 +2111,7 @@ impl<'a> SemanticCollector<'a> {
         self.ir_sites.push(IrSite {
             source_id: expression.origin().source_id().to_owned(),
             span: expression.origin().span(),
-            ty: semantic_type_primitive(&expression.result_type()),
+            ty: semantic_type(&expression.result_type()),
             application,
         });
     }
@@ -2294,7 +2267,7 @@ impl<'a> SemanticCollector<'a> {
         {
             ir_observation
                 .as_ref()
-                .and_then(|(ty, _)| ty.clone())
+                .map(|(ty, _)| ty.clone())
                 .or_else(|| {
                     self.best_expression(structural.offset())
                         .and_then(|site| site.observed_type.clone())
@@ -2775,7 +2748,7 @@ impl<'a> SemanticCollector<'a> {
                     && contains(site.span, offset, self.source_length)
             })
             .min_by_key(|site| site.span.len())
-            .and_then(|site| site.expected_type.clone())
+            .map(|site| site.expected_type.clone())
     }
 }
 
@@ -2783,7 +2756,7 @@ impl<'a> SemanticCollector<'a> {
 struct IrSite {
     source_id: String,
     span: ByteSpan,
-    ty: Option<SemanticType>,
+    ty: SemanticType,
     application: Option<ApplicationContract>,
 }
 
@@ -2791,7 +2764,7 @@ struct IrSite {
 struct IrExpectedSite {
     source_id: String,
     span: ByteSpan,
-    expected_type: Option<SemanticType>,
+    expected_type: SemanticType,
 }
 
 fn contains(span: ByteSpan, offset: usize, source_length: usize) -> bool {
@@ -2803,32 +2776,6 @@ fn contains(span: ByteSpan, offset: usize, source_length: usize) -> bool {
 
 fn query_identity(id: &DeclarationId) -> QueryIdentity {
     QueryIdentity::new(id.kind().as_str(), id.canonical())
-}
-
-fn primitive_name(value: &str) -> Option<&'static str> {
-    Some(match value {
-        "bool" => "bool",
-        "never" => "never",
-        "char" => "char",
-        "str" => "str",
-        "bytes" => "bytes",
-        "atom" => "atom",
-        "i8" => "i8",
-        "i16" => "i16",
-        "i32" => "i32",
-        "i64" => "i64",
-        "u8" => "u8",
-        "u16" => "u16",
-        "u32" => "u32",
-        "u64" => "u64",
-        "f32" => "f32",
-        "f64" => "f64",
-        _ => return None,
-    })
-}
-
-fn semantic_type_primitive(value: &Type) -> Option<SemanticType> {
-    Some(semantic_type(value))
 }
 
 /// The query shape of a checked type.
@@ -2907,24 +2854,12 @@ fn semantic_type_signature(signature: &FunctionSignature) -> SemanticType {
         .labelled()
         .iter()
         .map(|parameter| {
-            LabelledType::new(
-                parameter.name(),
-                semantic_type_primitive(&parameter.value_type())
-                    .unwrap_or_else(|| SemanticType::primitive("void")),
-            )
+            LabelledType::new(parameter.name(), semantic_type(&parameter.value_type()))
         })
         .collect();
     SemanticType::function(
-        signature
-            .parameters()
-            .iter()
-            .map(|parameter| {
-                semantic_type_primitive(parameter)
-                    .unwrap_or_else(|| SemanticType::primitive("void"))
-            })
-            .collect(),
-        semantic_type_primitive(&signature.result())
-            .unwrap_or_else(|| SemanticType::primitive("void")),
+        signature.parameters().iter().map(semantic_type).collect(),
+        semantic_type(&signature.result()),
         labelled,
         EffectRowFact::from_row(signature.effects()),
     )
@@ -2974,15 +2909,13 @@ fn float_suffix_name(suffix: FloatSuffix) -> &'static str {
 }
 
 fn numeric_expected_name(value: &SemanticType) -> Option<&str> {
-    matches!(
-        value.name(),
-        "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64"
-    )
-    .then_some(value.name())
+    (primitive_class(value.name()) == Some(PrimitiveClass::Integer))
+        .then_some(value.name())
 }
 
 fn float_expected_name(value: &SemanticType) -> Option<&str> {
-    matches!(value.name(), "f32" | "f64").then_some(value.name())
+    (primitive_class(value.name()) == Some(PrimitiveClass::Float))
+        .then_some(value.name())
 }
 
 /// The text of every UTF-8 source of the snapshot, by source identity.
@@ -3036,29 +2969,14 @@ fn ir_application_contract(expression: &Expr) -> Option<ApplicationContract> {
         return None;
     };
     let callee_type = semantic_type_signature(signature.as_ref());
+    let positional = callee_type.parameters().to_vec();
+    let labelled = callee_type.labelled().to_vec();
+    let result = callee_type.result()?.clone();
     Some(ApplicationContract::new(
         None,
         Some(callee_type),
-        signature
-            .parameters()
-            .iter()
-            .map(|parameter| {
-                semantic_type_primitive(parameter)
-                    .unwrap_or_else(|| SemanticType::primitive("void"))
-            })
-            .collect(),
-        signature
-            .labelled()
-            .iter()
-            .map(|parameter| {
-                LabelledType::new(
-                    parameter.name(),
-                    semantic_type_primitive(&parameter.value_type())
-                        .unwrap_or_else(|| SemanticType::primitive("void")),
-                )
-            })
-            .collect(),
-        semantic_type_primitive(&signature.result())
-            .unwrap_or_else(|| SemanticType::primitive("void")),
+        positional,
+        labelled,
+        result,
     ))
 }

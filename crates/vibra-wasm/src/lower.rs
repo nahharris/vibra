@@ -129,14 +129,13 @@ use vibra_ir::external::{
 };
 use vibra_ir::{
     CallTarget, CheckedProgram, Constant, Expr, FunctionSignature, MatchArm,
-    SourceOrigin, Type, Value,
+    SourceOrigin, Type, Value, vocabulary,
 };
 use wasm_encoder::{BlockType, Instruction as I, ValType};
 
-use crate::classify;
 use crate::desc::{self, DescriptorTable};
 use crate::encode::FunctionCode;
-use crate::form::NotLowered;
+use crate::error::EmitError;
 use crate::host::{HOST_ADOPT, HOST_ROUTINES};
 use crate::key::{self, Calls, KeyShape, Order};
 use crate::layout::{self, CellClass, Kind, frame, header, state};
@@ -991,11 +990,11 @@ impl<'a> Lowering<'a> {
     /// # Errors
     ///
     /// The forms the unit uses that this step does not lower.
-    pub(crate) fn function(&mut self, index: usize) -> Result<Lowered, NotLowered> {
+    pub(crate) fn function(&mut self, index: usize) -> Result<Lowered, EmitError> {
         let program = self.program;
         let known = self.sizes.get(index).copied().unwrap_or(0);
         let functions = self.function_count();
-        let module_size = || NotLowered::single(crate::Form::ModuleSize);
+        let module_size = || EmitError::ModuleSize;
         if self.has_unit() && index == self.unit_index() {
             let shape = Shape1 {
                 arity: 2,
@@ -1231,20 +1230,16 @@ enum Access {
     Bytes,
 }
 
-/// The form that reports a registry row used where the emitter cannot lower it.
-fn unlowered_row(row: &NativeRow, origin: &SourceOrigin) -> NotLowered {
-    NotLowered::from_uses(vec![
-        crate::form::UnloweredForm::new(crate::Form::Malformed, Some(origin.clone()))
-            .with_detail(row.name()),
-    ])
-    .unwrap_or_else(|| NotLowered::single(crate::Form::Malformed))
+/// The error that reports a registry row used where the emitter cannot lower it.
+fn unknown_row(row: &NativeRow, origin: &SourceOrigin) -> EmitError {
+    EmitError::malformed(row.name(), Some(origin.clone()))
 }
 
 /// The variants of `option` and `result` that `try` continues with, and the ones
 /// it leaves the activation with, by name, as the reference interpreter reads
 /// them. The checker admits no other operand.
-const SUCCESS: [&str; 2] = ["some", "ok"];
-const FAILURE: [&str; 2] = ["none", "err"];
+const SUCCESS: [&str; 2] = [vocabulary::SOME, vocabulary::OK];
+const FAILURE: [&str; 2] = [vocabulary::NONE, vocabulary::ERR];
 
 /// The discriminant of an object that is being built.
 #[derive(Clone, Copy, Debug)]
@@ -1368,9 +1363,8 @@ impl<'l, 'a> Builder<'l, 'a> {
     }
 
     /// The frame slot of slot `slot` of the checked IR.
-    fn ir_slot(&self, slot: usize) -> Result<u32, NotLowered> {
-        let slot = u32::try_from(slot)
-            .map_err(|_| NotLowered::single(crate::Form::ModuleSize))?;
+    fn ir_slot(&self, slot: usize) -> Result<u32, EmitError> {
+        let slot = u32::try_from(slot).map_err(|_| EmitError::ModuleSize)?;
         Ok(if slot < self.shape.arity {
             slot
         } else {
@@ -1382,9 +1376,9 @@ impl<'l, 'a> Builder<'l, 'a> {
         self.code.extend_from_slice(instructions);
     }
 
-    /// The forms of `expr` that the emitter does not lower.
-    fn forms_of(&self, expr: &Expr) -> NotLowered {
-        classify::forms_of(&self.lowering.env, expr)
+    /// The error for an `expr` the lowering has no row for.
+    fn malformed(&self, expr: &Expr) -> EmitError {
+        EmitError::malformed("expression", Some(expr.origin().clone()))
     }
 
     /// The `i32` offset in `slot`, a reference.
@@ -1459,12 +1453,8 @@ impl<'l, 'a> Builder<'l, 'a> {
     }
 
     /// The class of a value of `ty`, or the form that reports it.
-    fn class(
-        &self,
-        ty: &Type,
-        origin: &SourceOrigin,
-    ) -> Result<ValueClass, NotLowered> {
-        class_of(ty).map_err(|kind| NotLowered::type_of(kind, Some(origin.clone())))
+    fn class(&self, ty: &Type, origin: &SourceOrigin) -> Result<ValueClass, EmitError> {
+        class_of(ty).map_err(|kind| EmitError::malformed(kind, Some(origin.clone())))
     }
 
     /// Takes the count and the class of the copy of a cell that was just made
@@ -1540,7 +1530,7 @@ impl<'l, 'a> Builder<'l, 'a> {
 
     /// Evaluates `expr` into `dest`, which then owns the value if it is a
     /// reference. An expression of type `never` writes nothing.
-    fn expr(&mut self, expr: &Expr, dest: u32) -> Result<(), NotLowered> {
+    fn expr(&mut self, expr: &Expr, dest: u32) -> Result<(), EmitError> {
         match expr {
             Expr::Literal { value, .. } => {
                 self.literal(value, dest);
@@ -1689,14 +1679,14 @@ impl<'l, 'a> Builder<'l, 'a> {
                 expr.origin(),
                 dest,
             ),
-            other => Err(self.forms_of(other)),
+            other => Err(self.malformed(other)),
         }
     }
 
     /// A sequence evaluates each expression but the last for its effects and
     /// drops the value, and the last into the destination. An empty sequence is
     /// `void`.
-    fn sequence(&mut self, expressions: &[Expr], dest: u32) -> Result<(), NotLowered> {
+    fn sequence(&mut self, expressions: &[Expr], dest: u32) -> Result<(), EmitError> {
         let Some((last, leading)) = expressions.split_last() else {
             self.store_bits(dest, 0, ValueClass::Void);
             return Ok(());
@@ -1720,7 +1710,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         value: &Expr,
         body: &Expr,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let class = self.class(&value.result_type(), value.origin())?;
         match slot {
             Some(slot) => {
@@ -1749,7 +1739,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         then_branch: &Expr,
         else_branch: &Expr,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let mark = self.next_temp;
         let test = self.temp();
         self.expr(condition, test)?;
@@ -1792,7 +1782,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         arms: &[MatchArm],
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let subject_type = scrutinee.result_type();
         let class = self.class(&subject_type, origin)?;
         let mark = self.next_temp;
@@ -1920,7 +1910,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         place: Place,
         fail: u32,
         origin: &SourceOrigin,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         match node.test {
             Test::Always => {}
             Test::Cell { wide, bits } => {
@@ -1991,7 +1981,10 @@ impl<'l, 'a> Builder<'l, 'a> {
                 // A part that may have no cell can be bound and nothing else.
                 Presence::Never | Presence::Runtime => {
                     if !sub.only_binds() {
-                        return Err(NotLowered::type_of("shape", Some(origin.clone())));
+                        return Err(EmitError::malformed(
+                            "shape",
+                            Some(origin.clone()),
+                        ));
                     }
                 }
             }
@@ -2007,7 +2000,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         node: &Node<'_>,
         place: Place,
         origin: &SourceOrigin,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         if let Some((slot, ty)) = node.binder {
             let class = self.class(ty, origin)?;
             let to = self.ir_slot(slot)?;
@@ -2035,7 +2028,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                     .get(&pattern_key(child.pattern))
                     .copied()
                     .ok_or_else(|| {
-                        NotLowered::type_of("shape", Some(origin.clone()))
+                        EmitError::malformed("shape", Some(origin.clone()))
                     })?;
                 self.bind_node(&sub, Place::Slot(part), origin)?;
                 continue;
@@ -2053,7 +2046,10 @@ impl<'l, 'a> Builder<'l, 'a> {
                 |this| {
                     // No cell: the value is `void`.
                     if !sub.only_binds() {
-                        return Err(NotLowered::type_of("shape", Some(origin.clone())));
+                        return Err(EmitError::malformed(
+                            "shape",
+                            Some(origin.clone()),
+                        ));
                     }
                     if let Some((slot, _)) = sub.binder {
                         let to = this.ir_slot(slot)?;
@@ -2075,9 +2071,9 @@ impl<'l, 'a> Builder<'l, 'a> {
         &mut self,
         object: u32,
         presence: Presence,
-        present: impl FnOnce(&mut Self) -> Result<(), NotLowered>,
-        absent: impl FnOnce(&mut Self) -> Result<(), NotLowered>,
-    ) -> Result<(), NotLowered> {
+        present: impl FnOnce(&mut Self) -> Result<(), EmitError>,
+        absent: impl FnOnce(&mut Self) -> Result<(), EmitError>,
+    ) -> Result<(), EmitError> {
         match presence {
             Presence::Always => present(self),
             Presence::Never => absent(self),
@@ -2112,13 +2108,13 @@ impl<'l, 'a> Builder<'l, 'a> {
         exit_type: &Type,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let operand_type = value.result_type();
         let (Shape::Enum(variants), Shape::Enum(exits)) = (
             self.shape(&operand_type, origin)?,
             self.shape(exit_type, origin)?,
         ) else {
-            return Err(classify::forms_of_type(&operand_type, origin));
+            return Err(EmitError::of_type(&operand_type, origin));
         };
         let find = |names: &[&str]| {
             variants
@@ -2131,13 +2127,13 @@ impl<'l, 'a> Builder<'l, 'a> {
             Some((_, (failure_name, failure_type))),
         ) = (find(&SUCCESS), find(&FAILURE))
         else {
-            return Err(classify::forms_of_type(&operand_type, origin));
+            return Err(EmitError::of_type(&operand_type, origin));
         };
         let exit_discriminant = exits
             .iter()
             .position(|(name, _)| name == failure_name)
             .and_then(|position| u32::try_from(position).ok())
-            .ok_or_else(|| classify::forms_of_type(exit_type, origin))?;
+            .ok_or_else(|| EmitError::of_type(exit_type, origin))?;
         let success = u32::try_from(success).unwrap_or(u32::MAX);
 
         let mark = self.next_temp;
@@ -2241,7 +2237,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         tail: bool,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let program = self.lowering.program;
         if let CallTarget::Direct(function) = target
             && let Some(assertion) = program
@@ -2260,14 +2256,13 @@ impl<'l, 'a> Builder<'l, 'a> {
                     let callee = program
                         .functions()
                         .get(*function)
-                        .ok_or_else(|| NotLowered::single(crate::Form::ModuleSize))?;
+                        .ok_or(EmitError::ModuleSize)?;
                     let slots =
                         self.lowering.sizes.get(*function).copied().unwrap_or(0);
                     (
                         Callee::Named {
-                            function: u32::try_from(*function).map_err(|_| {
-                                NotLowered::single(crate::Form::ModuleSize)
-                            })?,
+                            function: u32::try_from(*function)
+                                .map_err(|_| EmitError::ModuleSize)?,
                             slots,
                         },
                         callee.signature().clone(),
@@ -2276,7 +2271,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 }
                 CallTarget::Indirect { callee, .. } => {
                     let Type::Function(signature) = callee.result_type() else {
-                        return Err(self.forms_of(callee));
+                        return Err(self.malformed(callee));
                     };
                     let slot = self.temp();
                     self.expr(callee, slot)?;
@@ -2306,7 +2301,7 @@ impl<'l, 'a> Builder<'l, 'a> {
             if matches!(argument, Expr::Default { .. }) {
                 let labelled = position
                     .checked_sub(positional)
-                    .ok_or_else(|| self.forms_of(argument))?;
+                    .ok_or_else(|| self.malformed(argument))?;
                 self.default_operand(&callee, &signature, labelled, argument, slot)?;
             } else {
                 self.expr(argument, slot)?;
@@ -2362,8 +2357,8 @@ impl<'l, 'a> Builder<'l, 'a> {
                 only_below: None,
             });
         }
-        let arity = u32::try_from(arguments.len())
-            .map_err(|_| NotLowered::single(crate::Form::ModuleSize))?;
+        let arity =
+            u32::try_from(arguments.len()).map_err(|_| EmitError::ModuleSize)?;
         if let Callee::Value { slot } = callee {
             moves.push(Move {
                 from: slot,
@@ -2442,21 +2437,20 @@ impl<'l, 'a> Builder<'l, 'a> {
         labelled: usize,
         argument: &Expr,
         slot: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         match callee {
             Callee::Named { .. } => {
                 let constant = signature
                     .labelled()
                     .get(labelled)
                     .and_then(|parameter| parameter.default())
-                    .ok_or_else(|| self.forms_of(argument))?;
+                    .ok_or_else(|| self.malformed(argument))?;
                 self.constant(constant, argument.origin(), slot)
             }
             Callee::Value { slot: value } => {
                 let class = self.class(&argument.result_type(), argument.origin())?;
                 let position = fv::DEFAULTS
-                    + u32::try_from(labelled)
-                        .map_err(|_| NotLowered::single(crate::Form::ModuleSize))?;
+                    + u32::try_from(labelled).map_err(|_| EmitError::ModuleSize)?;
                 self.load_value(*value);
                 self.push(&[
                     get(FRAME),
@@ -2476,7 +2470,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         constant: &Constant,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let expr = constant.to_expr(origin);
         self.expr(&expr, dest)
     }
@@ -2524,23 +2518,20 @@ impl<'l, 'a> Builder<'l, 'a> {
     /// A function value: an object of the function and its frame size, the
     /// defaults of its labelled parameters, what it captured, and the type
     /// arguments of the activation that made it.
-    fn function_value(&mut self, expr: &Expr, dest: u32) -> Result<(), NotLowered> {
+    fn function_value(&mut self, expr: &Expr, dest: u32) -> Result<(), EmitError> {
         let lowering = &*self.lowering;
         let id = lowering
             .lambdas
             .by_node
             .get(&node(expr))
             .copied()
-            .ok_or_else(|| self.forms_of(expr))?;
+            .ok_or_else(|| self.malformed(expr))?;
         let lambdas = lowering.lambdas;
-        let lambda = lambdas
-            .list
-            .get(id)
-            .ok_or_else(|| NotLowered::single(crate::Form::ModuleSize))?;
+        let lambda = lambdas.list.get(id).ok_or(EmitError::ModuleSize)?;
         let unit = lowering.lambda_base() + id;
         let program = lowering.program;
         let slots = lowering.sizes.get(unit).copied().unwrap_or(0);
-        let module_size = || NotLowered::single(crate::Form::ModuleSize);
+        let module_size = || EmitError::ModuleSize;
         let mark = self.next_temp;
         let mut parts: Vec<Part> = Vec::new();
         let (arity, defaults, captures): (usize, Vec<Option<Constant>>, &[Expr]) =
@@ -2571,7 +2562,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                         &[],
                     )
                 }
-                _ => return Err(self.forms_of(expr)),
+                _ => return Err(self.malformed(expr)),
             };
         let own = u32::try_from(lambda.own.len()).map_err(|_| module_size())?;
         for bits in [
@@ -2623,11 +2614,10 @@ impl<'l, 'a> Builder<'l, 'a> {
         capture: usize,
         class: ValueClass,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let position = fv::DEFAULTS
             + self.shape.labelled
-            + u32::try_from(capture)
-                .map_err(|_| NotLowered::single(crate::Form::ModuleSize))?;
+            + u32::try_from(capture).map_err(|_| EmitError::ModuleSize)?;
         let env = self.shape.env_slot();
         let at = layout::cells_offset(self.shape.env_len()) + 8 * position;
         let to = self.cell(dest);
@@ -2694,7 +2684,7 @@ impl<'l, 'a> Builder<'l, 'a> {
     /// Builds the descriptor of `ty` into `dest`: a parameter is the argument
     /// the activation holds for it, and any other type is a new tuple of its
     /// constructor's number and the descriptors of its arguments.
-    fn build_type(&mut self, ty: &Type, dest: u32) -> Result<(), NotLowered> {
+    fn build_type(&mut self, ty: &Type, dest: u32) -> Result<(), EmitError> {
         if let Type::Param(name) = ty {
             self.type_argument(name, dest);
             return Ok(());
@@ -2725,11 +2715,10 @@ impl<'l, 'a> Builder<'l, 'a> {
         global: usize,
         class: ValueClass,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let values = u32::try_from(self.lowering.program.globals().len())
-            .map_err(|_| NotLowered::single(crate::Form::ModuleSize))?;
-        let global = u32::try_from(global)
-            .map_err(|_| NotLowered::single(crate::Form::ModuleSize))?;
+            .map_err(|_| EmitError::ModuleSize)?;
+        let global = u32::try_from(global).map_err(|_| EmitError::ModuleSize)?;
         let base = layout::cells_offset(values.saturating_mul(2));
         let flag = base + 16 * global;
         let value = flag + 8;
@@ -2767,9 +2756,8 @@ impl<'l, 'a> Builder<'l, 'a> {
 
         // First read: the initializer is an activation like any other.
         let functions = self.lowering.function_count();
-        let function = u32::try_from(functions)
-            .map_err(|_| NotLowered::single(crate::Form::ModuleSize))?
-            + global;
+        let function =
+            u32::try_from(functions).map_err(|_| EmitError::ModuleSize)? + global;
         let slots = self
             .lowering
             .sizes
@@ -2898,7 +2886,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         operands: &[&Expr],
         types: &[Type],
         origin: &SourceOrigin,
-    ) -> Result<Vec<Part>, NotLowered> {
+    ) -> Result<Vec<Part>, EmitError> {
         let mut parts = Vec::with_capacity(operands.len());
         for (operand, component) in operands.iter().zip(types) {
             let class = self.class(component, origin)?;
@@ -2972,11 +2960,11 @@ impl<'l, 'a> Builder<'l, 'a> {
         self.store_object(dest);
     }
 
-    fn shape(&self, ty: &Type, origin: &SourceOrigin) -> Result<Shape, NotLowered> {
+    fn shape(&self, ty: &Type, origin: &SourceOrigin) -> Result<Shape, EmitError> {
         self.lowering
             .env
             .shape(ty)
-            .ok_or_else(|| classify::forms_of_type(ty, origin))
+            .ok_or_else(|| EmitError::of_type(ty, origin))
     }
 
     /// A declared or anonymous record: the operands are evaluated in the order
@@ -2987,7 +2975,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         fields: &[(String, Expr)],
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let shape = self.shape(value_type, origin)?;
         let types = shape.components();
         let mark = self.next_temp;
@@ -2995,10 +2983,10 @@ impl<'l, 'a> Builder<'l, 'a> {
         for (name, operand) in fields {
             let position = shape
                 .field(name)
-                .ok_or_else(|| classify::forms_of_type(value_type, origin))?;
+                .ok_or_else(|| EmitError::of_type(value_type, origin))?;
             let component = types
                 .get(position)
-                .ok_or_else(|| classify::forms_of_type(value_type, origin))?;
+                .ok_or_else(|| EmitError::of_type(value_type, origin))?;
             let class = self.class(component, origin)?;
             let slot = self.temp();
             self.expr(operand, slot)?;
@@ -3022,7 +3010,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         components: &[Expr],
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let shape = self.shape(value_type, origin)?;
         let types = shape.components();
         let mark = self.next_temp;
@@ -3045,25 +3033,20 @@ impl<'l, 'a> Builder<'l, 'a> {
         payload: Option<&Expr>,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let mark = self.next_temp;
-        if *value_type == Type::Bool {
-            let discriminant = u32::from(variant == "true");
-            self.build(Kind::Enum, discriminant, &[], dest);
-            return Ok(());
-        }
         let shape = self.shape(value_type, origin)?;
         let Shape::Enum(variants) = &shape else {
-            return Err(classify::forms_of_type(value_type, origin));
+            return Err(EmitError::of_type(value_type, origin));
         };
         let discriminant = shape
             .variant(variant)
-            .ok_or_else(|| classify::forms_of_type(value_type, origin))?;
+            .ok_or_else(|| EmitError::of_type(value_type, origin))?;
         let discriminant_word = u32::try_from(discriminant).unwrap_or(u32::MAX);
         let slot_type = variants
             .get(discriminant)
             .map(|(_, ty)| ty.clone())
-            .ok_or_else(|| classify::forms_of_type(value_type, origin))?;
+            .ok_or_else(|| EmitError::of_type(value_type, origin))?;
         let class = self.class(&slot_type, origin)?;
         let Some(payload) = payload else {
             self.build(Kind::Enum, discriminant_word, &[], dest);
@@ -3160,7 +3143,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         value: &Expr,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let conversion = match value_type {
             Type::Str => Some(CompilerIntrinsic::TextFromChars),
             Type::Bytes => Some(CompilerIntrinsic::BytesFromArray),
@@ -3194,7 +3177,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         member: Option<usize>,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let Some(member) = member else {
             if dispatch::is_interface(value_type) {
                 return self.widen_interface(value, dest);
@@ -3205,7 +3188,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         let types = shape.components();
         let member_type = types
             .get(member)
-            .ok_or_else(|| classify::forms_of_type(value_type, origin))?;
+            .ok_or_else(|| EmitError::of_type(value_type, origin))?;
         let mark = self.next_temp;
         let parts = self.parts(&[value], std::slice::from_ref(member_type), origin)?;
         self.build(
@@ -3228,19 +3211,19 @@ impl<'l, 'a> Builder<'l, 'a> {
         value_type: &Type,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let aggregate_type = aggregate.result_type();
         let shape = self.shape(&aggregate_type, origin)?;
         let types = shape.components();
         let position = match selector {
             Projection::Field(name) => shape
                 .field(name)
-                .ok_or_else(|| classify::forms_of_type(&aggregate_type, origin))?,
+                .ok_or_else(|| EmitError::of_type(&aggregate_type, origin))?,
             Projection::Index(index) => index,
         };
         let component = types
             .get(position)
-            .ok_or_else(|| classify::forms_of_type(&aggregate_type, origin))?;
+            .ok_or_else(|| EmitError::of_type(&aggregate_type, origin))?;
         let class = self.class(component, origin)?;
         debug_assert!(
             class_of(value_type).is_ok(),
@@ -3267,9 +3250,9 @@ impl<'l, 'a> Builder<'l, 'a> {
         elements: &[Expr],
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let Type::Array(element) = value_type else {
-            return Err(classify::forms_of_type(value_type, origin));
+            return Err(EmitError::of_type(value_type, origin));
         };
         let mark = self.next_temp;
         let operands = elements.iter().collect::<Vec<_>>();
@@ -3290,27 +3273,27 @@ impl<'l, 'a> Builder<'l, 'a> {
         value_type: &Type,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let collection_type = collection.result_type();
         let (element, access) = match &collection_type {
             Type::Array(element) => (element.as_ref().clone(), Access::Cells),
             Type::Str => (Type::Char, Access::Chars),
             Type::Bytes => (Type::U8, Access::Bytes),
-            _ => return Err(self.forms_of(collection)),
+            _ => return Err(self.malformed(collection)),
         };
         let class = self.class(&element, origin)?;
         let shape = self.shape(value_type, origin)?;
         let Shape::Enum(variants) = &shape else {
-            return Err(classify::forms_of_type(value_type, origin));
+            return Err(EmitError::of_type(value_type, origin));
         };
         let some = shape
-            .variant("some")
-            .zip(shape.variant("none"))
-            .ok_or_else(|| classify::forms_of_type(value_type, origin))?;
+            .variant(vocabulary::SOME)
+            .zip(shape.variant(vocabulary::NONE))
+            .ok_or_else(|| EmitError::of_type(value_type, origin))?;
         let slot_type = variants
             .get(some.0)
             .map(|(_, ty)| ty.clone())
-            .ok_or_else(|| classify::forms_of_type(value_type, origin))?;
+            .ok_or_else(|| EmitError::of_type(value_type, origin))?;
         let (some, none) = (
             u32::try_from(some.0).unwrap_or(u32::MAX),
             u32::try_from(some.1).unwrap_or(u32::MAX),
@@ -3426,17 +3409,8 @@ impl<'l, 'a> Builder<'l, 'a> {
         key: &Type,
         key_order: Option<&vibra_ir::TypeId>,
         origin: &SourceOrigin,
-    ) -> Result<KeyOrder, NotLowered> {
-        let unordered = || {
-            NotLowered::from_uses(vec![
-                crate::form::UnloweredForm::new(
-                    crate::Form::Malformed,
-                    Some(origin.clone()),
-                )
-                .with_detail("user-key"),
-            ])
-            .unwrap_or_else(|| NotLowered::single(crate::Form::Malformed))
-        };
+    ) -> Result<KeyOrder, EmitError> {
+        let unordered = || EmitError::malformed("user-key", Some(origin.clone()));
         let Some(order) = key::order_of(&self.lowering.env, key, key_order) else {
             // Any other key is ordered by dispatch from its run-time type.
             if key_order.is_some() || key::shape(key).is_none() {
@@ -3453,17 +3427,18 @@ impl<'l, 'a> Builder<'l, 'a> {
                 let compare = program
                     .functions()
                     .get(function)
-                    .ok_or_else(|| NotLowered::single(crate::Form::ModuleSize))?;
+                    .ok_or(EmitError::ModuleSize)?;
                 let ordering = compare.signature().result();
                 let shape = self.shape(&ordering, origin)?;
-                let (Some(less), Some(greater)) =
-                    (shape.variant("less"), shape.variant("greater"))
-                else {
+                let (Some(less), Some(greater)) = (
+                    shape.variant(vocabulary::LESS),
+                    shape.variant(vocabulary::GREATER),
+                ) else {
                     return Err(unordered());
                 };
                 Ok(KeyOrder::User {
                     function: u32::try_from(function)
-                        .map_err(|_| NotLowered::single(crate::Form::ModuleSize))?,
+                        .map_err(|_| EmitError::ModuleSize)?,
                     slots: self.lowering.sizes.get(function).copied().unwrap_or(0),
                     less: u32::try_from(less).unwrap_or(u32::MAX),
                     greater: u32::try_from(greater).unwrap_or(u32::MAX),
@@ -3525,7 +3500,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         a: KeyAt,
         b: KeyAt,
         out: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let at = self.cell(out);
         match *order {
             KeyOrder::Dispatched { ref key } => {
@@ -3625,9 +3600,9 @@ impl<'l, 'a> Builder<'l, 'a> {
         key_order: Option<&vibra_ir::TypeId>,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let Type::Dict(key, value) = value_type else {
-            return Err(classify::forms_of_type(value_type, origin));
+            return Err(EmitError::of_type(value_type, origin));
         };
         let order = self.key_order(key, key_order, origin)?;
         let (key_class, value_class) =
@@ -3660,8 +3635,8 @@ impl<'l, 'a> Builder<'l, 'a> {
             self.release_to(mark);
             return Ok(());
         }
-        let capacity = u32::try_from(tuples.len())
-            .map_err(|_| NotLowered::single(crate::Form::ModuleSize))?;
+        let capacity =
+            u32::try_from(tuples.len()).map_err(|_| EmitError::ModuleSize)?;
         let scratch = self.temp();
         self.build(Kind::Array, 0, &vec![Part::Zero; tuples.len()], scratch);
         let [count, low, high, mid, answer] = [
@@ -3755,7 +3730,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         scratch: u32,
         capacity: u32,
         [count, low, high, mid, answer]: [u32; 5],
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         self.store_word(low, &[c32(0)]);
         let upper = self.word(count);
         self.store_word(high, &upper);
@@ -3950,25 +3925,25 @@ impl<'l, 'a> Builder<'l, 'a> {
         value_type: &Type,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let Type::Dict(key_type, element) = collection.result_type() else {
-            return Err(self.forms_of(collection));
+            return Err(self.malformed(collection));
         };
         let order = self.key_order(&key_type, key_order, origin)?;
         let class = self.class(&element, origin)?;
         let key_class = self.class(&key_type, origin)?;
         let shape = self.shape(value_type, origin)?;
         let Shape::Enum(variants) = &shape else {
-            return Err(classify::forms_of_type(value_type, origin));
+            return Err(EmitError::of_type(value_type, origin));
         };
         let (some, none) = shape
-            .variant("some")
-            .zip(shape.variant("none"))
-            .ok_or_else(|| classify::forms_of_type(value_type, origin))?;
+            .variant(vocabulary::SOME)
+            .zip(shape.variant(vocabulary::NONE))
+            .ok_or_else(|| EmitError::of_type(value_type, origin))?;
         let slot_type = variants
             .get(some)
             .map(|(_, ty)| ty.clone())
-            .ok_or_else(|| classify::forms_of_type(value_type, origin))?;
+            .ok_or_else(|| EmitError::of_type(value_type, origin))?;
         let (some, none) = (
             u32::try_from(some).unwrap_or(u32::MAX),
             u32::try_from(none).unwrap_or(u32::MAX),
@@ -4103,12 +4078,12 @@ impl<'l, 'a> Builder<'l, 'a> {
     /// module releases afterwards, and each scalar crosses as itself. The import
     /// answers one ID of the owned `(result t e)` value, which the module adopts
     /// as the value of the call.
-    fn host(&mut self, expr: &Expr, dest: u32) -> Result<(), NotLowered> {
+    fn host(&mut self, expr: &Expr, dest: u32) -> Result<(), EmitError> {
         let Expr::Host { row, arguments, .. } = expr else {
-            return Err(self.forms_of(expr));
+            return Err(self.malformed(expr));
         };
         if arguments.len() != row.parameters.len() {
-            return Err(self.forms_of(expr));
+            return Err(self.malformed(expr));
         }
         let import = self.lowering.host_import(row);
         let adopt = self.lowering.adopt_routine();
@@ -4153,7 +4128,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 (Some(_) | None, ValueClass::Ref | ValueClass::I64) => {
                     self.push(&[get(FRAME), ld64(cell)]);
                 }
-                _ => return Err(self.forms_of(expr)),
+                _ => return Err(self.malformed(expr)),
             }
         }
         self.push(&[I::Call(import), I::Call(adopt), I::I64ExtendI32U, st64(at)]);
@@ -4178,10 +4153,10 @@ impl<'l, 'a> Builder<'l, 'a> {
         intrinsic: CompilerIntrinsic,
         from: u32,
         origin: &SourceOrigin,
-    ) -> Result<u32, NotLowered> {
+    ) -> Result<u32, EmitError> {
         let row = intrinsic
             .native_import()
-            .ok_or_else(|| NotLowered::type_of("shape", Some(origin.clone())))?;
+            .ok_or_else(|| EmitError::malformed("shape", Some(origin.clone())))?;
         let part = self.temp();
         // The slot owns nothing until the conversion has made the part, so an
         // arm that fails before it does not drop what the slot held before.
@@ -4208,9 +4183,9 @@ impl<'l, 'a> Builder<'l, 'a> {
         result: &Type,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         if arguments.len() != row.operands.len() {
-            return Err(unlowered_row(&row, origin));
+            return Err(unknown_row(&row, origin));
         }
         let mark = self.next_temp;
         let mut slots = Vec::with_capacity(arguments.len());
@@ -4272,7 +4247,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         origin: &SourceOrigin,
         consume: bool,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let import = self.lowering.import(row.intrinsic);
         let release = |this: &mut Self| {
             if consume {
@@ -4317,7 +4292,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 let numeric = match row.intrinsic {
                     CompilerIntrinsic::Integer(numeric, _)
                     | CompilerIntrinsic::Float(numeric, _) => numeric,
-                    _ => return Err(unlowered_row(&row, origin)),
+                    _ => return Err(unknown_row(&row, origin)),
                 };
                 let class = self.class(&numeric.to_type(), origin)?;
                 let held = self.temp();
@@ -4357,8 +4332,8 @@ impl<'l, 'a> Builder<'l, 'a> {
                     st64(kind_at),
                 ]);
                 self.set_byte(kind, CellClass::I32.code());
-                let ok = self.discriminant(result, "ok", origin)?;
-                let err = self.discriminant(result, "err", origin)?;
+                let ok = self.discriminant(result, vocabulary::OK, origin)?;
+                let err = self.discriminant(result, vocabulary::ERR, origin)?;
                 self.push(&[get(FRAME), ld32(status_at), I::I32Eqz]);
                 let (ok_block, err_block, join) =
                     (self.new_block(), self.new_block(), self.new_block());
@@ -4408,8 +4383,7 @@ impl<'l, 'a> Builder<'l, 'a> {
             }
             Answer::Order => {
                 let mut names = Names::default();
-                for (position, variant) in
-                    ["less", "equal", "greater"].into_iter().enumerate()
+                for (position, variant) in vocabulary::ORDERING.into_iter().enumerate()
                 {
                     let discriminant = self.discriminant(result, variant, origin)?;
                     if let Some(name) = names.order.get_mut(position) {
@@ -4486,9 +4460,9 @@ impl<'l, 'a> Builder<'l, 'a> {
                     }
                     Totality::Option | Totality::Conversion => {
                         let success = if totality == Totality::Option {
-                            "some"
+                            vocabulary::SOME
                         } else {
-                            "ok"
+                            vocabulary::OK
                         };
                         let success = self.discriminant(result, success, origin)?;
                         self.push(&[get(WR), c64(0), I::I64LtS]);
@@ -4511,7 +4485,8 @@ impl<'l, 'a> Builder<'l, 'a> {
                         );
                         self.goto(join, absent);
                         if totality == Totality::Option {
-                            let none = self.discriminant(result, "none", origin)?;
+                            let none =
+                                self.discriminant(result, vocabulary::NONE, origin)?;
                             self.build(Kind::Enum, none, &[], dest);
                         } else {
                             // The error is an enum of `void` variants, which the
@@ -4522,7 +4497,8 @@ impl<'l, 'a> Builder<'l, 'a> {
                                 "invalid-format",
                                 origin,
                             )?;
-                            let err = self.discriminant(result, "err", origin)?;
+                            let err =
+                                self.discriminant(result, vocabulary::ERR, origin)?;
                             let error = self.temp();
                             self.build(Kind::Enum, invalid, &[], error);
                             self.build(
@@ -4553,11 +4529,11 @@ impl<'l, 'a> Builder<'l, 'a> {
         ty: &Type,
         variant: &str,
         origin: &SourceOrigin,
-    ) -> Result<u32, NotLowered> {
+    ) -> Result<u32, EmitError> {
         self.shape(ty, origin)?
             .variant(variant)
             .and_then(|position| u32::try_from(position).ok())
-            .ok_or_else(|| classify::forms_of_type(ty, origin))
+            .ok_or_else(|| EmitError::of_type(ty, origin))
     }
 
     /// A call of a registry row that is a few instructions, lowered inline by
@@ -4572,7 +4548,7 @@ impl<'l, 'a> Builder<'l, 'a> {
     /// and `option` is `some` of the operand when the selector is set. Every
     /// reference built is moved into the object that holds it, so the counts
     /// balance on the `ok` path and on the error path alike.
-    fn primitive(&mut self, expr: &Expr, dest: u32) -> Result<(), NotLowered> {
+    fn primitive(&mut self, expr: &Expr, dest: u32) -> Result<(), EmitError> {
         let Expr::External {
             intrinsic,
             arguments,
@@ -4580,17 +4556,17 @@ impl<'l, 'a> Builder<'l, 'a> {
             origin,
         } = expr
         else {
-            return Err(self.forms_of(expr));
+            return Err(self.malformed(expr));
         };
         // A row that is not a few inline instructions is a native import.
         let Some(plan) = primitive::plan(*intrinsic) else {
             return match intrinsic.native_import() {
                 Some(row) => self.native(row, arguments, result, origin, dest),
-                None => Err(self.forms_of(expr)),
+                None => Err(self.malformed(expr)),
             };
         };
         if arguments.len() != plan.operands().len() {
-            return Err(self.forms_of(expr));
+            return Err(self.malformed(expr));
         }
         let mark = self.next_temp;
         let mut slots = Vec::with_capacity(arguments.len());
@@ -4609,8 +4585,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         let mut names = Names::default();
         match plan.outcome() {
             primitive::Outcome::Ordering => {
-                for (position, variant) in
-                    ["less", "equal", "greater"].into_iter().enumerate()
+                for (position, variant) in vocabulary::ORDERING.into_iter().enumerate()
                 {
                     let discriminant = self.discriminant(result, variant, origin)?;
                     if let Some(name) = names.order.get_mut(position) {
@@ -4681,8 +4656,8 @@ impl<'l, 'a> Builder<'l, 'a> {
             primitive::Outcome::Checked(_) => {
                 let held = self.temp();
                 value(self, held);
-                let ok = self.discriminant(result, "ok", origin)?;
-                let err = self.discriminant(result, "err", origin)?;
+                let ok = self.discriminant(result, vocabulary::OK, origin)?;
+                let err = self.discriminant(result, vocabulary::ERR, origin)?;
                 self.push(&[get(FRAME), ld32(at), I::I32Eqz]);
                 let (ok_block, err_block, join) =
                     (self.new_block(), self.new_block(), self.new_block());
@@ -4725,8 +4700,8 @@ impl<'l, 'a> Builder<'l, 'a> {
                 self.goto(join, join);
             }
             primitive::Outcome::Option => {
-                let some = self.discriminant(result, "some", origin)?;
-                let none = self.discriminant(result, "none", origin)?;
+                let some = self.discriminant(result, vocabulary::SOME, origin)?;
+                let none = self.discriminant(result, vocabulary::NONE, origin)?;
                 self.push(&[get(FRAME), ld32(at)]);
                 let (some_block, none_block, join) =
                     (self.new_block(), self.new_block(), self.new_block());
@@ -4759,16 +4734,16 @@ impl<'l, 'a> Builder<'l, 'a> {
         &self,
         result: &Type,
         origin: &SourceOrigin,
-    ) -> Result<Type, NotLowered> {
+    ) -> Result<Type, EmitError> {
         let shape = self.shape(result, origin)?;
         let Shape::Enum(variants) = &shape else {
-            return Err(classify::forms_of_type(result, origin));
+            return Err(EmitError::of_type(result, origin));
         };
         variants
             .iter()
-            .find(|(name, _)| name == "err")
+            .find(|(name, _)| name == vocabulary::ERR)
             .map(|(_, ty)| ty.clone())
-            .ok_or_else(|| classify::forms_of_type(result, origin))
+            .ok_or_else(|| EmitError::of_type(result, origin))
     }
 
     // -- the function ---------------------------------------------------------

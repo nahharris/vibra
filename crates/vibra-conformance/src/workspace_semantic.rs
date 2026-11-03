@@ -8,8 +8,8 @@ use vibra_workspace::{WorkspaceSnapshot, project::TargetKind};
 use crate::corpus::{Case, HostWorldError};
 use crate::manifest::ConformanceOperation;
 use crate::runner::{
-    CaseObservation, ExecutionObservation, HandlerError, ProfileHandler,
-    WasmObservation,
+    BackendObservation, CaseObservation, ExecutionObservation, HandlerError,
+    ProfileHandler, WasmObservation,
 };
 use crate::test_run::{TestRow, format_test_run};
 
@@ -47,6 +47,7 @@ impl ProfileHandler for StaticV1WorkspaceCheckHandler {
             accepted: checked.status()
                 == vibra_workspace::semantic::CheckStatus::Accepted,
             diagnostics: checked.diagnostics().to_vec(),
+            types: checked.canonical_types(),
             ..CaseObservation::default()
         })
     }
@@ -98,26 +99,24 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             result.check().status() == vibra_workspace::semantic::CheckStatus::Accepted;
         let mut host_event = None;
         // Both backends run the one checked program of the target.
-        let (wasm, wasm_program_failed) = if accepted {
+        let wasm = if accepted {
             result
                 .check()
                 .program_for_target(target)
                 .map(|program| crate::wasm::observe_entry(program, &world))
-                .map_or((None, None), |(observation, failed)| {
-                    (Some(observation), failed)
-                })
         } else {
-            (None, None)
+            None
         };
-        let mut program_failed = None;
         let mut trap_diagnostics = Vec::new();
         let interpreter = if accepted {
             match result.outcome() {
                 Some(vibra_workspace::semantic::RunOutcome::Program(execution)) => {
-                    program_failed = Some(execution.program_failed());
-                    Some(ExecutionObservation {
-                        result: Some(execution.canonical_result()),
-                        audit_trace: execution.audit_trace().to_vec(),
+                    Some(BackendObservation {
+                        outcome: ExecutionObservation {
+                            result: Some(execution.canonical_result()),
+                            audit_trace: execution.audit_trace().to_vec(),
+                        },
+                        program_failed: Some(execution.program_failed()),
                     })
                 }
                 // A host event ends the run with no result and no trace.
@@ -165,8 +164,6 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             interpreter,
             host_event,
             wasm,
-            program_failed,
-            wasm_program_failed,
             ..CaseObservation::default()
         })
     }
@@ -184,30 +181,12 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
     fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
         let world = match load_host_world(case)? {
             Ok(world) => world,
-            Err(diagnostics) => {
-                return Ok(CaseObservation {
-                    accepted: false,
-                    diagnostics,
-                    interpreter: Some(ExecutionObservation {
-                        result: Some(format_test_run("@command.diagnostics", &[])),
-                        audit_trace: Vec::new(),
-                    }),
-                    ..CaseObservation::default()
-                });
-            }
+            Err(diagnostics) => return Ok(rejected_suite(diagnostics)),
         };
         let snapshot = match load_workspace(case)? {
             WorkspaceLoad::Snapshot(snapshot) => snapshot,
             WorkspaceLoad::Diagnostics(diagnostics) => {
-                return Ok(CaseObservation {
-                    accepted: false,
-                    diagnostics,
-                    interpreter: Some(ExecutionObservation {
-                        result: Some(format_test_run("@command.diagnostics", &[])),
-                        audit_trace: Vec::new(),
-                    }),
-                    ..CaseObservation::default()
-                });
+                return Ok(rejected_suite(diagnostics));
             }
         };
         let verification = verified_bootstrap()?;
@@ -251,9 +230,11 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
                 return Ok(CaseObservation {
                     accepted: true,
                     host_event: Some(event),
-                    wasm: Some(crate::wasm::observe_stopped_tests(
-                        result.stopped_programs(),
-                        &world,
+                    wasm: Some(BackendObservation::new(
+                        crate::wasm::observe_stopped_tests(
+                            result.stopped_programs(),
+                            &world,
+                        ),
                     )),
                     ..CaseObservation::default()
                 });
@@ -262,7 +243,7 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
         Ok(CaseObservation {
             accepted,
             diagnostics: result.diagnostics().to_vec(),
-            interpreter: Some(ExecutionObservation {
+            interpreter: Some(BackendObservation::new(ExecutionObservation {
                 result: Some(format_test_run(
                     command_result,
                     &result
@@ -272,24 +253,40 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
                         .collect::<Vec<_>>(),
                 )),
                 audit_trace: Vec::new(),
-            }),
+            })),
             // Both backends run the tests of the one workspace.
             wasm: accepted.then(|| {
-                match crate::wasm::observe_tests(result.items(), &world) {
-                    crate::wasm::TestsObserved::Rows(rows) => {
-                        WasmObservation::Completed(ExecutionObservation {
-                            result: Some(format_test_run(
-                                crate::test_run::command_result(&rows),
-                                &rows,
-                            )),
-                            audit_trace: Vec::new(),
-                        })
-                    }
-                    crate::wasm::TestsObserved::Stopped(observation) => observation,
-                }
+                BackendObservation::new(
+                    match crate::wasm::observe_tests(result.items(), &world) {
+                        crate::wasm::TestsObserved::Rows(rows) => {
+                            WasmObservation::Completed(ExecutionObservation {
+                                result: Some(format_test_run(
+                                    crate::test_run::command_result(&rows),
+                                    &rows,
+                                )),
+                                audit_trace: Vec::new(),
+                            })
+                        }
+                        crate::wasm::TestsObserved::Stopped(observation) => observation,
+                    },
+                )
             }),
             ..CaseObservation::default()
         })
+    }
+}
+
+/// The observation of a test suite that never ran: the command ends in its
+/// diagnostics, with no rows.
+fn rejected_suite(diagnostics: Vec<Diagnostic>) -> CaseObservation {
+    CaseObservation {
+        accepted: false,
+        diagnostics,
+        interpreter: Some(BackendObservation::new(ExecutionObservation {
+            result: Some(format_test_run("@command.diagnostics", &[])),
+            audit_trace: Vec::new(),
+        })),
+        ..CaseObservation::default()
     }
 }
 

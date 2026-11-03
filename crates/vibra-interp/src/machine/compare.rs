@@ -14,7 +14,7 @@
 
 use std::cmp::Ordering;
 
-use vibra_ir::{ClosedContract, Type, TypeId};
+use vibra_ir::{ClosedContract, Type, TypeId, vocabulary};
 
 use super::{Halt, Kont, Machine, Step};
 use crate::closed_contract;
@@ -214,11 +214,8 @@ impl<'a> Machine<'a> {
         let RuntimeValue::Enum { variant, .. } = &answer else {
             return Err(Halt::Invalid);
         };
-        let order = match variant.as_str() {
-            "less" => Ordering::Less,
-            "equal" => Ordering::Equal,
-            "greater" => Ordering::Greater,
-            _ => return Err(Halt::Invalid),
+        let Some(order) = vocabulary::ordering_from_variant(variant) else {
+            return Err(Halt::Invalid);
         };
         self.advance(state, None, Some(order))
     }
@@ -367,7 +364,7 @@ impl<'a> Machine<'a> {
         };
         let entry = RuntimeValue::Enum {
             value_type: value_type.clone(),
-            variant: if found.is_some() { "some" } else { "none" }.to_owned(),
+            variant: vocabulary::option_variant(found.is_some()).to_owned(),
             payload: found.and_then(present_payload),
         };
         self.fresh(entry)

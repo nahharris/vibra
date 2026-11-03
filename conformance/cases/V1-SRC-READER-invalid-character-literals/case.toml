@@ -51,3 +51,11 @@ level = "@error"
 [expect.diagnostics.span]
 start = 42
 end = 43
+
+[[expect.diagnostics]]
+code = "@syntax.invalid-character-literal"
+level = "@error"
+
+[expect.diagnostics.span]
+start = 52
+end = 57

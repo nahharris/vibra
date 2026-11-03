@@ -2,7 +2,8 @@ name: CI
 
 # The roadmap requires both suites to run from a clean checkout without
 # network access after dependencies are synced. The conformance job below is
-# an internal corpus entrypoint, independent of the Rust host-language tests.
+# an internal corpus entrypoint, independent of the Rust host-language tests,
+# and runs in parallel with them: the two jobs share no step and no result.
 
 # Checks run on pull requests. A milestone integration branch keeps a standing
 # draft pull request into main, so pushes to it are already covered and need no
@@ -20,6 +21,10 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # No CI step opens a debugger and no test reads debuginfo, so skipping it
+  # shortens every compile and link, Wasmtime included. Local builds keep the
+  # default profile.
+  CARGO_PROFILE_DEV_DEBUG: 0
 
 jobs:
   check:
@@ -37,25 +42,37 @@ jobs:
         run: rustup toolchain install
 
       # The cache key is shared with the conformance job of the same operating
-      # system, which runs after this job and so restores the build this job
-      # saves, Wasmtime included, instead of compiling the engine a second time.
+      # system, and both restore it, Wasmtime included. Only `main` saves it,
+      # and only this job does: this job builds the whole workspace with every
+      # test target, a superset of what the conformance job builds, and a pull
+      # request run would save a cache that nothing restores.
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: workspace-${{ matrix.os }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Fetch locked dependencies
         run: cargo fetch --locked
 
+      # Formatting and documentation do not depend on the platform, so one
+      # operating system checks them.
       - name: Formatting
+        if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all --check
 
+      # The workspace has no `cfg(target_os = "macos")` code. Its `cfg(unix)`
+      # code is linted on Ubuntu and its `cfg(windows)` code on Windows, so
+      # macOS adds no lint coverage. macOS still builds and tests below. A
+      # macOS-specific item would need this condition changed.
       - name: Lints
+        if: matrix.os != 'macos-latest'
         run: cargo clippy --locked --offline --workspace --all-targets --all-features -- -D warnings
 
       - name: Tests
         run: cargo test --locked --offline --workspace --all-targets --all-features
 
       - name: Documentation
+        if: matrix.os == 'ubuntu-latest'
         run: cargo doc --locked --offline --workspace --no-deps --all-features
         env:
           RUSTDOCFLAGS: -D warnings
@@ -63,13 +80,17 @@ jobs:
   # The conformance corpus is a separate job from the host-language tests, and
   # since milestone 4 Step 4 it also runs every executable case in the
   # WebAssembly backend, so it runs on the three platforms the engine must build
-  # on. It needs `check`, which compiles the workspace on each platform and
-  # saves the build under the shared cache key, so this job restores Wasmtime
-  # rather than compiling it again. The cost of the engine is one compile per
-  # platform, in `check`.
+  # on. It does not wait for `check`: the two jobs run in parallel, so the
+  # pipeline takes as long as the slower of them and not the sum. On a cold
+  # cache each job compiles Wasmtime for itself; on a warm one both restore the
+  # build that `main` saved under the shared key. This job never saves that
+  # cache, because it builds less than `check` does and its smaller build must
+  # not take the key from the fuller one. The host tests of the emitter, the
+  # runner, deterministic emission, and the specification
+  # inventory run in `check`, whose workspace test run includes them on every
+  # platform, so this job does not repeat them.
   conformance:
     name: conformance corpus (${{ matrix.os }})
-    needs: check
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -84,6 +105,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: workspace-${{ matrix.os }}
+          save-if: false
 
       - name: Fetch locked dependencies
         run: cargo fetch --locked
@@ -94,16 +116,6 @@ jobs:
       # unavailable case. It prints the counts by profile and by backend.
       - name: Run the corpus in both backends
         run: cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
-
-      - name: Test the emitter and the runner
-        run: cargo test --locked --offline -p vibra-wasm -p vibra-wasm-run
-
-      - name: Test the parity inventory and deterministic emission
-        run: cargo test --locked --offline -p vibra-conformance --test parity_inventory_m4_step4 --test wasm_skeleton_m4_step4 --test differential_m4_step4
-
-      - name: Run specification inventory
-        if: matrix.os == 'ubuntu-latest'
-        run: cargo test --locked --offline -p vibra-conformance --test evidence_step11
 
       - name: Run fuzz smoke
         if: matrix.os == 'ubuntu-latest'

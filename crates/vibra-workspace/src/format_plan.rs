@@ -9,10 +9,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use sha2::{Digest, Sha256};
 use vibra_diagnostics::{Diagnostic, DiagnosticCode, DocumentRevision};
 use vibra_fmt::format_source_with_facts;
-use vibra_syntax::{DocumentMode, parse_data, parse_source};
-use vibra_types::check_source;
+use vibra_syntax::{
+    ApplicationBinding, DocumentMode, EffectRowOrder, parse_data, parse_source,
+};
 
 use crate::confined_fs::ConfinedDir;
+use crate::semantic::check_document;
 use crate::{WorkspaceError, WorkspaceSnapshot};
 
 static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
@@ -91,7 +93,6 @@ pub struct FormatPlan {
     mode: DocumentMode,
     source_was_checked: bool,
     source_checker_unavailable: bool,
-    snapshot_bindings_authorized: bool,
 }
 
 impl FormatPlan {
@@ -188,20 +189,25 @@ pub fn plan_format(
         .cloned()
         .map(|diagnostic| diagnostic.with_source_id(&relative_path))
         .collect::<Vec<_>>();
-    let source_check =
-        (mode == DocumentMode::Source).then(|| check_source(&relative_path, text));
-    let source_checker_unavailable = source_check.as_ref().is_some_and(|checked| {
-        checked
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
-    });
+    let source_check = (mode == DocumentMode::Source)
+        .then(|| check_in_workspace(&workspace, &relative_path, text))
+        .flatten();
+    // A source that is not a module of the workspace is not checked, and a
+    // check that reports `@tool.unavailable` is incomplete: either way the
+    // document is formatted syntax-only.
+    let source_checker_unavailable = mode == DocumentMode::Source
+        && source_check.as_ref().is_none_or(|checked| {
+            checked
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+        });
     // Incomplete standalone checking cannot authorize reordering or block a
     // syntax-only format; its cascaded semantic diagnostics are not facts.
     if !source_checker_unavailable {
         diagnostics.extend(source_check.iter().flat_map(|checked| {
             checked
-                .diagnostics()
+                .diagnostics
                 .iter()
                 .cloned()
                 .map(|diagnostic| diagnostic.with_source_id(&relative_path))
@@ -209,16 +215,15 @@ pub fn plan_format(
     }
     let source_was_checked = source_check
         .as_ref()
-        .is_some_and(|checked| checked.accepted());
-    let snapshot_bindings_authorized = snapshot_document.is_some();
+        .is_some_and(|checked| checked.accepted);
     let bindings = source_check
         .as_ref()
-        .filter(|checked| checked.accepted() && snapshot_bindings_authorized)
-        .map_or(&[][..], |checked| checked.application_bindings());
+        .filter(|checked| checked.accepted)
+        .map_or(&[][..], |checked| checked.bindings.as_slice());
     let effect_rows = source_check
         .as_ref()
-        .filter(|checked| checked.accepted() && snapshot_bindings_authorized)
-        .map_or(&[][..], |checked| checked.effect_row_orders());
+        .filter(|checked| checked.accepted)
+        .map_or(&[][..], |checked| checked.effect_rows.as_slice());
     let formatted =
         format_source_with_facts(&relative_path, text, bindings, effect_rows)
             .map_err(|error| FormatPlanError::Format(error.to_string()))?;
@@ -227,7 +232,7 @@ pub fn plan_format(
             == DiagnosticCode::StyleArgumentOrder
             && !source_checker_unavailable
             && source_check.as_ref().is_some_and(|checked| {
-                checked.diagnostics().iter().any(|checked_diagnostic| {
+                checked.diagnostics.iter().any(|checked_diagnostic| {
                     checked_diagnostic.code() == diagnostic.code()
                         && checked_diagnostic.primary_span()
                             == diagnostic.primary_span()
@@ -241,12 +246,12 @@ pub fn plan_format(
     let original_text = text.to_owned();
 
     validate_postcondition(
+        &workspace,
         &relative_path,
         text,
         formatted.text(),
         mode,
         source_was_checked,
-        snapshot_bindings_authorized,
         false,
     )?;
 
@@ -266,7 +271,6 @@ pub fn plan_format(
         mode,
         source_was_checked,
         source_checker_unavailable,
-        snapshot_bindings_authorized,
     })
 }
 
@@ -303,13 +307,13 @@ pub fn apply_format(plan: &FormatPlan) -> Result<(), FormatPlanError> {
         return Ok(());
     }
     validate_postcondition(
+        &current_workspace,
         &plan.relative_path,
         std::str::from_utf8(&plan.original_bytes)
             .map_err(|error| FormatPlanError::InvalidUtf8(error.to_string()))?,
         &plan.formatted_text,
         plan.mode,
         plan.source_was_checked,
-        plan.snapshot_bindings_authorized,
         !plan.source_checker_unavailable,
     )?;
 
@@ -489,12 +493,12 @@ fn parse_by_mode(
 }
 
 fn validate_postcondition(
+    workspace: &WorkspaceSnapshot,
     path: &str,
     original: &str,
     formatted: &str,
     mode: DocumentMode,
     source_was_checked: bool,
-    snapshot_bindings_authorized: bool,
     require_accepted_source: bool,
 ) -> Result<(), FormatPlanError> {
     let original_document = parse_by_mode(path, original, mode)?;
@@ -512,9 +516,11 @@ fn validate_postcondition(
             "formatted document did not reparse cleanly".to_owned(),
         ));
     }
-    let checked = (mode == DocumentMode::Source).then(|| check_source(path, formatted));
+    let checked = (mode == DocumentMode::Source)
+        .then(|| check_in_workspace(workspace, path, formatted))
+        .flatten();
     let formatted_source_accepted =
-        checked.as_ref().is_some_and(|value| value.accepted());
+        checked.as_ref().is_some_and(|value| value.accepted);
     if mode == DocumentMode::Source
         && ((require_accepted_source && !source_was_checked)
             || (source_was_checked && !formatted_source_accepted))
@@ -525,12 +531,12 @@ fn validate_postcondition(
     }
     let bindings = checked
         .as_ref()
-        .filter(|value| value.accepted() && snapshot_bindings_authorized)
-        .map_or(&[][..], |value| value.application_bindings());
+        .filter(|value| value.accepted)
+        .map_or(&[][..], |value| value.bindings.as_slice());
     let effect_rows = checked
         .as_ref()
-        .filter(|value| value.accepted() && snapshot_bindings_authorized)
-        .map_or(&[][..], |value| value.effect_row_orders());
+        .filter(|value| value.accepted)
+        .map_or(&[][..], |value| value.effect_rows.as_slice());
     let idempotent =
         format_source_with_facts(path, formatted, bindings, effect_rows)
             .map_err(|error| FormatPlanError::Postcondition(error.to_string()))?;
@@ -680,6 +686,40 @@ fn stale_document(
         expected: workspace_revision.as_str().to_owned(),
         actual: document_revision(bytes).as_str().to_owned(),
     }
+}
+
+/// What checking one source in its workspace gives the formatter.
+struct SourceCheck {
+    diagnostics: Vec<Diagnostic>,
+    accepted: bool,
+    bindings: Vec<ApplicationBinding>,
+    effect_rows: Vec<EffectRowOrder>,
+}
+
+/// Checks the module `source_id` as `text` writes it, in the workspace that
+/// holds it, through the check `vibra check` runs. `None` when the source is
+/// not a module of the workspace or the workspace cannot be checked.
+fn check_in_workspace(
+    workspace: &WorkspaceSnapshot,
+    source_id: &str,
+    text: &str,
+) -> Option<SourceCheck> {
+    let stdlib = vibra_types::load_stdlib().ok()?;
+    let checked = check_document(workspace, source_id, text, &stdlib)?;
+    let diagnostics = checked
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.source_id() == Some(source_id))
+        .cloned()
+        .collect::<Vec<_>>();
+    Some(SourceCheck {
+        accepted: diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic.level() != vibra_diagnostics::Level::Error),
+        bindings: checked.application_bindings(source_id).to_vec(),
+        effect_rows: checked.effect_row_orders(source_id).to_vec(),
+        diagnostics,
+    })
 }
 
 #[cfg(test)]

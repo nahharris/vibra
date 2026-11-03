@@ -186,6 +186,25 @@ impl SourceSnapshot {
         })
     }
 
+    /// This snapshot with the bytes of the module `source_id` replaced, or
+    /// `None` when the snapshot holds no such module. The revision is not
+    /// recomputed: the result is a view for checking, not a capture.
+    pub(crate) fn with_module_bytes(
+        &self,
+        source_id: &str,
+        bytes: &[u8],
+    ) -> Option<Self> {
+        let mut edited = self.clone();
+        let document = edited
+            .units
+            .iter_mut()
+            .flat_map(|unit| unit.modules.iter_mut())
+            .chain(edited.test_modules.iter_mut())
+            .find(|document| document.source_id == source_id)?;
+        document.bytes = bytes.to_vec();
+        Some(edited)
+    }
+
     /// Canonical project root used for this snapshot.
     #[must_use]
     pub fn project_root(&self) -> &Path {
@@ -307,13 +326,6 @@ mod tests {
             compute_revision(b"project", &changed_units, &[])
         );
     }
-}
-
-/// Captures an already discovered project into an immutable source snapshot.
-pub fn capture_snapshot(
-    project: &DiscoveredProject,
-) -> Result<SourceSnapshot, WorkspaceError> {
-    SourceSnapshot::capture(project)
 }
 
 fn validate_source_roots(

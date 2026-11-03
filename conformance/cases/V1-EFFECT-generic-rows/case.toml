@@ -1,0 +1,18 @@
+id = "V1-EFFECT-generic-rows"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "A generic callback unifies only at its exact row: a function of one root is not accepted where (fn (t) t) with the empty row is written, and a generic function that writes a row accepts a callback of that row."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = [300, 305]

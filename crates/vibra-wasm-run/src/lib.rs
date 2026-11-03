@@ -35,10 +35,10 @@ mod validate;
 use std::fmt;
 
 use vibra_host::{AuditEvent, HostProvider, HostWorld, WorldProvider};
+use vibra_ir::TestAssertion;
 use vibra_ir::boundary::{
-    FAILURE_ACTUAL_EXPORT, FAILURE_EXPECTED_EXPORT, FAILURE_EXPORT, Failure,
-    LIVE_SIZE_EXPORT, ORIGIN_EXPORT, RESULT_EXPORT, STATUS_EXPORT, Status,
-    TRAP_CODE_EXPORT, TrapCode,
+    FAILURE_ACTUAL_EXPORT, FAILURE_EXPECTED_EXPORT, FAILURE_EXPORT, LIVE_SIZE_EXPORT,
+    ORIGIN_EXPORT, RESULT_EXPORT, STATUS_EXPORT, Status, TRAP_CODE_EXPORT, TrapCode,
 };
 use wasmtime::{
     Config, Engine, Instance as EngineInstance, Linker, Module, ResourceLimiter, Store,
@@ -47,7 +47,7 @@ use wasmtime::{
 
 pub use host::{Builders, Forged, Stop};
 pub use instance::{Instance, Started, ValueId};
-pub use observe::{LiveSizes, Observed};
+pub use observe::{Inspect, LiveSizes, Observed};
 pub use test_run::TestRun;
 pub use validate::{ModuleSummary, ValidationError, baseline_features, validate};
 
@@ -142,7 +142,7 @@ pub enum Outcome {
     /// The module recorded a failed assertion before it stopped.
     AssertionFailed {
         /// The assertion that failed.
-        failure: Failure,
+        failure: TestAssertion,
         /// The origin ordinal of the assertion call.
         origin: Option<u32>,
         /// The expected and actual operands of a failed `assert.equal`, as
@@ -567,12 +567,12 @@ pub(crate) fn interpret(
         }
         (Some(_), Status::FailedAssertion) => {
             let code = call_i32(store, instance, FAILURE_EXPORT)?;
-            let Some(failure) = Failure::from_code(code) else {
+            let Some(failure) = TestAssertion::from_code(code) else {
                 return Ok(Outcome::Defect {
                     cause: format!("`{FAILURE_EXPORT}` returned the code {code}"),
                 });
             };
-            let operands = if failure == Failure::Equal {
+            let operands = if failure == TestAssertion::Equal {
                 let expected = call_i64(store, instance, FAILURE_EXPECTED_EXPORT)?;
                 let actual = call_i64(store, instance, FAILURE_ACTUAL_EXPORT)?;
                 Some((

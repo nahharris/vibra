@@ -1,0 +1,7 @@
+(deffect first-root (defn a () void (do)))
+
+(deffect first-root (defn b () void (do)))
+
+(deffect second-root (defn a () void (do)))
+
+(defn second-root () void (do))

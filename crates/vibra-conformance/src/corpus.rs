@@ -9,8 +9,18 @@ use vibra_diagnostics::Diagnostic;
 use vibra_host::HostWorld;
 use vibra_syntax::DocumentMode;
 
-/// The name of the parity inventory file, beside the corpus root.
-pub const PARITY_INVENTORY_FILE_NAME: &str = "parity.tsv";
+/// The workspace root, found from this crate's manifest.
+#[must_use]
+pub fn workspace_root() -> PathBuf {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    root.canonicalize().unwrap_or(root)
+}
+
+/// The conformance corpus of the workspace: `conformance/cases`.
+#[must_use]
+pub fn corpus_root() -> PathBuf {
+    workspace_root().join("conformance/cases")
+}
 
 /// One immutable document supplied to a profile handler.
 ///
@@ -74,16 +84,6 @@ impl Case {
         let path = self.file(relative)?;
         std::fs::read_to_string(&path)
             .map_err(|source| CorpusError::Io { path, source })
-    }
-
-    /// Reads the optional source input as UTF-8.
-    pub fn read_source(&self) -> Result<Option<String>, CorpusError> {
-        self.manifest
-            .inputs
-            .source
-            .as_deref()
-            .map(|path| self.read_file(path))
-            .transpose()
     }
 
     /// Loads every declared input as an explicit, source-identified document.
@@ -298,14 +298,6 @@ impl Corpus {
     #[must_use]
     pub fn cases(&self) -> &[Case] {
         &self.cases
-    }
-
-    /// Where this corpus's parity inventory is: `parity.tsv` beside the corpus
-    /// root, so that `conformance/cases` has `conformance/parity.tsv`. The
-    /// file need not exist, because a synthetic corpus has no inventory.
-    #[must_use]
-    pub fn parity_inventory_path(&self) -> Option<PathBuf> {
-        Some(self.root.parent()?.join(PARITY_INVENTORY_FILE_NAME))
     }
 
     /// Number of loaded cases.

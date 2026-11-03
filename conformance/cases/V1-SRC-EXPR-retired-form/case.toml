@@ -1,7 +1,7 @@
 id = "V1-SRC-EXPR-retired-form"
 rule = "V1-SRC-EXPR"
 profile = "reader-v1"
-description = "Retired executable wrappers emit the explicit retired-form diagnostic."
+description = "Each retired executable wrapper, while, for, break, and continue, emits the explicit retired-form diagnostic at its head."
 
 [inputs]
 source = "input.vib"
@@ -15,3 +15,24 @@ level = "@error"
 [expect.diagnostics.span]
 start = 19
 end = 24
+
+[[expect.diagnostics]]
+code = "@syntax.retired-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 55
+end = 58
+
+[[expect.diagnostics]]
+code = "@syntax.retired-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 91
+end = 96
+
+[[expect.diagnostics]]
+code = "@syntax.retired-form"
+level = "@error"
+[expect.diagnostics.span]
+start = 132
+end = 140

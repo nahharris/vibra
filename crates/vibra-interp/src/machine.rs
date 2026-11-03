@@ -36,7 +36,7 @@ use vibra_host::{AuditEvent, HostCall, HostProvider, build_reply, perform};
 use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::{
     CallTarget, CheckedProgram, ClosedContract, Expr, FunctionSignature, MatchArm,
-    SourceOrigin, TestAssertion, Type, TypeId, Value,
+    SourceOrigin, TestAssertion, Type, TypeId, Value, vocabulary,
 };
 
 use crate::value::{Callable, Elements, Inner, LambdaId, RuntimeValue, TypeMap};
@@ -590,25 +590,10 @@ impl<'a> Machine<'a> {
             Expr::Match {
                 scrutinee, arms, ..
             } => self.then(scrutinee, Kont::Match { arms }),
-            Expr::Variant {
-                value_type,
-                variant,
-                payload,
-                ..
-            } => {
-                // `bool` is represented directly.
-                if *value_type == Type::Bool {
-                    return Ok(Step::Ret(RuntimeValue::Primitive(Value::Bool(
-                        variant == "true",
-                    ))));
-                }
-                match payload {
-                    Some(payload) => {
-                        self.then(payload, Kont::Unary { node: expression })
-                    }
-                    None => self.variant(expression, None),
-                }
-            }
+            Expr::Variant { payload, .. } => match payload {
+                Some(payload) => self.then(payload, Kont::Unary { node: expression }),
+                None => self.variant(expression, None),
+            },
             Expr::Wrap { value, .. }
             | Expr::Widen { value, .. }
             | Expr::Try { value, .. }
@@ -909,11 +894,11 @@ impl<'a> Machine<'a> {
                 };
                 match variant.as_str() {
                     // A nullary success carries the `void` value.
-                    "some" | "ok" => Ok(Step::Ret(payload.map_or(
+                    vocabulary::SOME | vocabulary::OK => Ok(Step::Ret(payload.map_or(
                         RuntimeValue::Primitive(Value::Void),
                         Inner::into_value,
                     ))),
-                    "none" | "err" => {
+                    vocabulary::NONE | vocabulary::ERR => {
                         let early = RuntimeValue::Enum {
                             value_type: exit_type,
                             variant,
@@ -1156,7 +1141,7 @@ impl<'a> Machine<'a> {
         let found = lookup(&collection, &key);
         let entry = RuntimeValue::Enum {
             value_type: self.concrete(value_type),
-            variant: if found.is_some() { "some" } else { "none" }.to_owned(),
+            variant: vocabulary::option_variant(found.is_some()).to_owned(),
             payload: found.and_then(present_payload),
         };
         self.fresh(entry)

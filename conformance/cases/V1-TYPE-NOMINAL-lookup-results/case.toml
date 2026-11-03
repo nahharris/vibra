@@ -1,0 +1,18 @@
+id = "V1-TYPE-NOMINAL-lookup-results"
+rule = "V1-TYPE-NOMINAL"
+profile = "static-v1"
+operation = "workspace-check"
+description = "An array, a dict, a str, and a bytes value answer a lookup with the standard option of the element, and a dict lookup takes exactly the key type."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = [311, 315]

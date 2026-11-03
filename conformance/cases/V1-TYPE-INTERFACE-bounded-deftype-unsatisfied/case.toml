@@ -1,11 +1,12 @@
 id = "V1-TYPE-INTERFACE-bounded-deftype-unsatisfied"
 rule = "V1-TYPE-INTERFACE"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A bounded deftype is applied only at arguments satisfying its bound: in a signature, a constructor, a body annotation, and a module value; a bounded lambda likewise at each application."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,29 +14,29 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
-source = "input.vib"
-span = [296, 343]
-
-[[expect.diagnostics]]
-code = "@type.unsatisfied-bound"
-level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [111, 129]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [183, 204]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [256, 274]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
+span = [296, 343]
+
+[[expect.diagnostics]]
+code = "@type.unsatisfied-bound"
+level = "@error"
+source = "src/app/main.vib"
 span = [445, 458]

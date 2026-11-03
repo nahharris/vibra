@@ -9,18 +9,22 @@
 //! execution"). One front end feeds both backends, so no backend re-checks a
 //! program.
 
+use std::collections::BTreeSet;
 use std::sync::OnceLock;
 
 use vibra_diagnostics::DiagnosticCode;
 use vibra_host::{HostWorld, WorldProvider};
 use vibra_ir::CheckedProgram;
-use vibra_ir::boundary::Failure;
-use vibra_wasm_run::{Observed, Outcome, Runner, TestRun};
+use vibra_wasm::EmitError;
+use vibra_wasm::layout::{CellClass, STRIDE_CELLS, cells_offset, header, state};
+use vibra_wasm_run::{Instance, Observed, Outcome, Runner, TestRun};
 use vibra_workspace::semantic::{TestItem, TestItemStatus};
 
 use crate::test_run::{RowFailure, RowOrigin, RowTrap, TestRow};
 
-use crate::runner::{ExecutionObservation, WasmObservation, wasm_memory_limit};
+use crate::runner::{
+    BackendObservation, ExecutionObservation, WasmObservation, wasm_memory_limit,
+};
 
 /// The one runner every case shares: an engine is costly to build and holds no
 /// state between instances.
@@ -39,64 +43,64 @@ fn runner() -> Result<&'static Runner, String> {
 /// on each program they run; it is public so that a host test can run a
 /// hand-built program through the same path.
 pub fn observe(program: &CheckedProgram, world: &HostWorld) -> WasmObservation {
-    observe_entry(program, world).0
+    observe_entry(program, world).outcome
 }
 
 /// [`observe`], and whether the entry returned `err` when the run completed:
 /// the module's result slot, read by the entry's result type, is classified
 /// by its variant, as the interpreter classifies its own.
+///
+/// A run that completes is also held to the arena's balance
+/// ([`assert_balanced`]); a run that does not balance fails the backend.
 pub(crate) fn observe_entry(
     program: &CheckedProgram,
     world: &HostWorld,
-) -> (WasmObservation, Option<bool>) {
+) -> BackendObservation<WasmObservation> {
     let mut program_failed = None;
-    let observation = observe_with_flag(program, world, &mut program_failed);
-    (observation, program_failed)
-}
-
-fn observe_with_flag(
-    program: &CheckedProgram,
-    world: &HostWorld,
-    program_failed: &mut Option<bool>,
-) -> WasmObservation {
     let module = match vibra_wasm::emit(program) {
         Ok(module) => module,
-        Err(not_lowered) => {
-            return WasmObservation::NotLowered {
-                forms: not_lowered
-                    .forms()
-                    .iter()
-                    .map(|used| match used.detail() {
-                        Some(detail) => format!("{}:{detail}", used.form().name()),
-                        None => used.form().name().to_owned(),
-                    })
-                    .collect(),
-            };
-        }
+        Err(error) => return BackendObservation::new(emit_failure(&error)),
     };
     let runner = match runner() {
         Ok(runner) => runner,
-        Err(reason) => return WasmObservation::Failed { reason },
+        Err(reason) => {
+            return BackendObservation::new(WasmObservation::Failed { reason });
+        }
     };
     // The entry's result type says how the host reads the result slot.
     let Some(entry) = program.functions().get(program.entry_index()) else {
-        return WasmObservation::Failed {
+        return BackendObservation::new(WasmObservation::Failed {
             reason: "the program's entry is not one of its functions".to_owned(),
-        };
+        });
     };
     let result = entry.signature().result();
     let heads = |head: u32| module.descriptors().type_of(head).cloned();
-    match runner.run_observed_with_host(
+    // The entry runs twice on the instance, and each run must balance: the
+    // second run starts from the module values the first one left.
+    let mut balanced_twice = |instance: &mut Instance| {
+        assert_balanced(instance)?;
+        let Ok(Outcome::Completed { result: slot, .. }) = instance.call_entry() else {
+            return Ok(());
+        };
+        instance
+            .observe_with(slot, &result, program.types(), &heads)
+            .map_err(|stop| {
+                format!("the second run's result is unreadable: {stop:?}")
+            })?;
+        assert_balanced(instance)
+    };
+    let outcome = match runner.run_observed_inspected(
         module.bytes(),
         &result,
         program.types(),
         &heads,
         Box::new(WorldProvider::new(world)),
+        &mut balanced_twice,
     ) {
         Ok(Observed::Completed {
             value, audit_trace, ..
         }) => {
-            *program_failed = Some(value.is_err_variant());
+            program_failed = Some(value.is_err_variant());
             WasmObservation::Completed(ExecutionObservation {
                 result: Some(value.canonical_observation(&result)),
                 audit_trace,
@@ -111,7 +115,88 @@ fn observe_with_flag(
         Err(error) => WasmObservation::Failed {
             reason: error.to_string(),
         },
+    };
+    BackendObservation {
+        outcome,
+        program_failed,
     }
+}
+
+/// What the runner observes when the emitter produced no module: a failure of
+/// the backend, with the emitter's error as its reason.
+fn emit_failure(error: &EmitError) -> WasmObservation {
+    WasmObservation::Failed {
+        reason: error.to_string(),
+    }
+}
+
+/// The arena's balance after a run that completed and whose result the host
+/// released: the live size is exactly the bytes the module values reach, the
+/// table's own block included, which an instance keeps for its life. Anything
+/// else is an allocation no reference accounts for, or a block released twice.
+/// A run that did not complete has no balance to check, since its activations
+/// and the values they hold are abandoned with the instance.
+fn assert_balanced(instance: &mut Instance) -> Result<(), String> {
+    let live = instance
+        .live_size()
+        .map_err(|stop| format!("the live size is unreadable: {stop:?}"))?;
+    let kept = module_values_bytes(instance)?;
+    if live == kept {
+        Ok(())
+    } else {
+        Err(format!(
+            "the arena is not balanced: {live} bytes are live after the run, but the module values keep {kept}"
+        ))
+    }
+}
+
+/// The bytes of every block the instance's module-value table reaches, the
+/// table's own block included.
+fn module_values_bytes(instance: &mut Instance) -> Result<u64, String> {
+    let table = word(instance, state::MODULE_VALUES)?;
+    if table == 0 {
+        return Ok(0);
+    }
+    let mut seen = BTreeSet::new();
+    let mut pending = vec![table];
+    let mut bytes = 0_u64;
+    while let Some(block) = pending.pop() {
+        if !seen.insert(block) {
+            continue;
+        }
+        bytes += u64::from(word(instance, block + header::BLOCK_SIZE)?);
+        let stride = (word(instance, block + header::KIND)? >> 8) & 0xFF;
+        if stride != STRIDE_CELLS {
+            continue;
+        }
+        let len = word(instance, block + header::LEN)?;
+        let classes = read(instance, block + header::SIZE, len as usize)?;
+        let cells = block + cells_offset(len);
+        for (position, class) in (0_u32..).zip(classes) {
+            if class == CellClass::Ref.code() {
+                pending.push(word(instance, cells + 8 * position)?);
+            }
+        }
+    }
+    Ok(bytes)
+}
+
+/// The little-endian word at `address` of the instance's memory.
+fn word(instance: &mut Instance, address: u32) -> Result<u32, String> {
+    let bytes = read(instance, address, 4)?;
+    <[u8; 4]>::try_from(bytes.as_slice())
+        .map(u32::from_le_bytes)
+        .map_err(|_| format!("a short read at {address}"))
+}
+
+fn read(
+    instance: &mut Instance,
+    address: u32,
+    length: usize,
+) -> Result<Vec<u8>, String> {
+    instance
+        .read_memory_for_tests(address, length)
+        .map_err(|stop| format!("the memory at {address} is unreadable: {stop:?}"))
 }
 
 /// The Wasm backend's rows for the tests of a workspace, or what stopped the
@@ -182,18 +267,7 @@ fn observe_ran(
         .collect::<Vec<_>>();
     let module = match vibra_wasm::emit_tests(first, &entries) {
         Ok(module) => module,
-        Err(not_lowered) => {
-            return TestsObserved::Stopped(WasmObservation::NotLowered {
-                forms: not_lowered
-                    .forms()
-                    .iter()
-                    .map(|used| match used.detail() {
-                        Some(detail) => format!("{}:{detail}", used.form().name()),
-                        None => used.form().name().to_owned(),
-                    })
-                    .collect(),
-            });
-        }
+        Err(error) => return TestsObserved::Stopped(emit_failure(&error)),
     };
     let runner = match runner() {
         Ok(runner) => runner,
@@ -223,6 +297,7 @@ fn observe_ran(
             &heads,
             &operand_of,
             Box::new(WorldProvider::new(world)),
+            &mut assert_balanced,
         );
         let row = match run {
             Err(error) => {
@@ -272,15 +347,10 @@ fn observe_ran(
                         reason: "a failed assertion has no origin".to_owned(),
                     });
                 };
-                let member = match failure {
-                    Failure::True => "true",
-                    Failure::False => "false",
-                    Failure::Equal => "equal",
-                };
                 TestRow {
                     status: TestItemStatus::AssertionFailed.as_atom().to_owned(),
                     failure: Some(RowFailure {
-                        assertion: format!("@std.assert.{member}"),
+                        assertion: failure.symbol(),
                         expected,
                         actual,
                         origin,
@@ -338,7 +408,8 @@ fn stopped(outcome: &Outcome) -> WasmObservation {
     clippy::unwrap_used
 )]
 mod tests {
-    use vibra_ir::boundary::{Failure, TrapCode};
+    use vibra_ir::TestAssertion;
+    use vibra_ir::boundary::TrapCode;
 
     use super::*;
     use crate::runner::{INSTANCE_MEMORY_LIMIT_BYTES, interpreter_budget};
@@ -352,6 +423,50 @@ mod tests {
             runner().expect("the engine configures").limit().bytes(),
             INSTANCE_MEMORY_LIMIT_BYTES
         );
+    }
+
+    /// A started instance of `source` that has run its entry, and the slot of
+    /// the result the host still holds.
+    fn ran(source: &str) -> (Instance, vibra_wasm_run::ResultSlot, CheckedProgram) {
+        let checked = vibra_types::check_source("input.vib", source);
+        let program = checked.program().expect("an accepted program").clone();
+        let module = vibra_wasm::emit(&program).expect("the program lowers");
+        let vibra_wasm_run::Started::Ready(mut instance) = runner()
+            .expect("the engine configures")
+            .start(module.bytes())
+            .expect("a v1 module")
+        else {
+            panic!("the module's own memory exceeds the limit");
+        };
+        let Outcome::Completed { result, .. } = instance.call_entry().expect("runs")
+        else {
+            panic!("the entry did not complete");
+        };
+        (instance, result, program)
+    }
+
+    #[test]
+    fn a_result_the_host_keeps_is_an_unbalanced_arena() {
+        let (mut instance, slot, program) = ran("(defn main () str \"abc\")");
+        let error = assert_balanced(&mut instance).expect_err("the result is held");
+        assert!(error.starts_with("the arena is not balanced"), "{error}");
+        // Releasing what the host held restores the balance.
+        let ty = program.entry().signature().result();
+        instance
+            .observe(slot, &ty, program.types())
+            .expect("the host reads the result");
+        assert_balanced(&mut instance).expect("nothing is held");
+    }
+
+    #[test]
+    fn module_values_are_kept_and_balanced() {
+        let (mut instance, slot, program) = ran("(defn main () i32 1i32)");
+        let ty = program.entry().signature().result();
+        instance
+            .observe(slot, &ty, program.types())
+            .expect("the host reads the result");
+        assert!(module_values_bytes(&mut instance).expect("readable") > 0);
+        assert_balanced(&mut instance).expect("the module values are all that is live");
     }
 
     #[test]
@@ -397,7 +512,7 @@ mod tests {
         assert!(reason.contains("@runtime.invalid-host-value"), "{reason}");
         assert!(matches!(
             stopped(&Outcome::AssertionFailed {
-                failure: Failure::True,
+                failure: TestAssertion::True,
                 origin: None,
                 operands: None
             }),

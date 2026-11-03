@@ -27,12 +27,12 @@
 //! reference interpreter does when it is not running a test: the trap
 //! `@runtime.invalid-checked-program`.
 
-use vibra_ir::boundary::{Failure, TrapCode};
+use vibra_ir::boundary::TrapCode;
 use vibra_ir::{Expr, SourceOrigin, TestAssertion, Type};
 use wasm_encoder::Instruction as I;
 
 use super::{Builder, ByteSource, FRAME, Kind, Part, Term};
-use crate::form::NotLowered;
+use crate::error::EmitError;
 use crate::layout::{header, state};
 use crate::runtime::{ValueClass, c32, get, ld32, ld64, st32, st64};
 
@@ -45,7 +45,7 @@ impl Builder<'_, '_> {
         arguments: &[Expr],
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let mark = self.next_temp;
         let mut operands = Vec::with_capacity(arguments.len());
         for argument in arguments {
@@ -63,18 +63,18 @@ impl Builder<'_, '_> {
         }
         match (assertion, operands.as_slice()) {
             (TestAssertion::True, [actual]) => {
-                self.assert_bool(*actual, 1, Failure::True, origin);
+                self.assert_bool(*actual, 1, TestAssertion::True, origin);
             }
             (TestAssertion::False, [actual]) => {
-                self.assert_bool(*actual, 0, Failure::False, origin);
+                self.assert_bool(*actual, 0, TestAssertion::False, origin);
             }
             (TestAssertion::Equal, [expected, actual]) => {
                 let ty = arguments.first().map(Expr::result_type).ok_or_else(|| {
-                    NotLowered::type_of("shape", Some(origin.clone()))
+                    EmitError::malformed("shape", Some(origin.clone()))
                 })?;
                 self.assert_equal(*expected, *actual, &ty, origin)?;
             }
-            _ => return Err(NotLowered::type_of("shape", Some(origin.clone()))),
+            _ => return Err(EmitError::malformed("shape", Some(origin.clone()))),
         }
         self.store_bits(dest, 0, ValueClass::Void);
         self.release_to(mark);
@@ -99,7 +99,7 @@ impl Builder<'_, '_> {
 
     /// Records a failed assertion at the origin ordinal and stops. The operands
     /// of an `assert.equal` are in their state fields already.
-    fn stop_failed(&mut self, failure: Failure, ordinal: u32) {
+    fn stop_failed(&mut self, failure: TestAssertion, ordinal: u32) {
         self.push(&[
             c32(0),
             c32(3),
@@ -120,7 +120,7 @@ impl Builder<'_, '_> {
         &mut self,
         actual: u32,
         required: i32,
-        failure: Failure,
+        failure: TestAssertion,
         origin: &SourceOrigin,
     ) {
         let ordinal = self.lowering.origin_ordinal(origin, None);
@@ -153,7 +153,7 @@ impl Builder<'_, '_> {
         ty: &Type,
         class: ValueClass,
         field: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let new_id = self.lowering.fns.new_id;
         if ty.has_params() {
             let pair = self.temp();
@@ -204,7 +204,7 @@ impl Builder<'_, '_> {
         actual: u32,
         ty: &Type,
         origin: &SourceOrigin,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let class = self.class(ty, origin)?;
         let recorded = if ty.has_params() {
             Type::Any
@@ -275,7 +275,7 @@ impl Builder<'_, '_> {
         self.start(fail);
         self.cross_operand(expected, ty, class, state::EXPECTED)?;
         self.cross_operand(actual, ty, class, state::ACTUAL)?;
-        self.stop_failed(Failure::Equal, ordinal);
+        self.stop_failed(TestAssertion::Equal, ordinal);
         self.goto(pass, pass);
 
         for object in owned {

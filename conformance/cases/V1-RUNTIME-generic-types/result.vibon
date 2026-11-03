@@ -1,1 +1,1 @@
-(record type: (record type: @maybe arguments: (array (record type: @boxed arguments: (array @i32)))) value: (record kind: @enum type: @maybe variant: @some payload: (record kind: @wrapper type: @boxed value: 5i32)))
+(record type: (record type: @app.main.maybe arguments: (array (record type: @app.main.boxed arguments: (array @i32)))) value: (record kind: @enum type: @app.main.maybe variant: @some payload: (record kind: @wrapper type: @app.main.boxed value: 5i32)))

@@ -1,11 +1,12 @@
 id = "V1-TYPE-CONTROL-invalid-try"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "try is invalid against a different error type, over a non-container, against a different container, and outside any function."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,35 +14,35 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.invalid-try"
 level = "@error"
-source = "input.vib"
-span = [281, 305]
-
-[[expect.diagnostics]]
-code = "@type.invalid-try"
-level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [102, 116]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [73, 90]
 
 [[expect.diagnostics]]
 code = "@type.invalid-try"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [180, 191]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [154, 166]
 
 [[expect.diagnostics]]
 code = "@type.invalid-try"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [246, 260]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [220, 232]
+
+[[expect.diagnostics]]
+code = "@type.invalid-try"
+level = "@error"
+source = "src/app/main.vib"
+span = [281, 305]

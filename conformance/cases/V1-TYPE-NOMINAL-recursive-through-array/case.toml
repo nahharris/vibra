@@ -1,11 +1,12 @@
 id = "V1-TYPE-NOMINAL-recursive-through-array"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A record that contains itself through an array has finite size and is accepted."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

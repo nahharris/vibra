@@ -9,7 +9,7 @@
 use std::cmp::Ordering;
 
 use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp, NumericType};
-use vibra_ir::{Type, Value};
+use vibra_ir::{Type, Value, vocabulary};
 
 use crate::RuntimeValue;
 
@@ -67,7 +67,7 @@ pub(crate) fn primitive(value: Value) -> RuntimeValue {
 pub(crate) fn option(result: &Type, value: Option<RuntimeValue>) -> RuntimeValue {
     RuntimeValue::Enum {
         value_type: result.clone(),
-        variant: if value.is_some() { "some" } else { "none" }.to_owned(),
+        variant: vocabulary::option_variant(value.is_some()).to_owned(),
         payload: value.and_then(crate::present_payload),
     }
 }
@@ -76,7 +76,7 @@ pub(crate) fn option(result: &Type, value: Option<RuntimeValue>) -> RuntimeValue
 pub(crate) fn ok(result: &Type, value: RuntimeValue) -> RuntimeValue {
     RuntimeValue::Enum {
         value_type: result.clone(),
-        variant: "ok".to_owned(),
+        variant: vocabulary::OK.to_owned(),
         payload: crate::present_payload(value),
     }
 }
@@ -90,7 +90,7 @@ pub(crate) fn err(result: &Type, error: &str) -> RuntimeValue {
     };
     RuntimeValue::Enum {
         value_type: result.clone(),
-        variant: "err".to_owned(),
+        variant: vocabulary::ERR.to_owned(),
         payload: Some(crate::value::Inner::new(RuntimeValue::Enum {
             value_type: error_type,
             variant: error.to_owned(),
@@ -103,12 +103,7 @@ pub(crate) fn err(result: &Type, error: &str) -> RuntimeValue {
 pub(crate) fn ordering(result: &Type, order: Ordering) -> RuntimeValue {
     RuntimeValue::Enum {
         value_type: result.clone(),
-        variant: match order {
-            Ordering::Less => "less",
-            Ordering::Equal => "equal",
-            Ordering::Greater => "greater",
-        }
-        .to_owned(),
+        variant: vocabulary::ordering_variant(order).to_owned(),
         payload: None,
     }
 }

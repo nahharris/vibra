@@ -1,11 +1,12 @@
 id = "V1-TYPE-CONTROL-witness-record-fields"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A record witness names only the fields that fix the uncovered shape: a field that only a discard covers is omitted, as a record pattern may omit it, and a record whose every field is one is spelled as a discard."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,13 +14,13 @@ accepted = false
 [[expect.diagnostics]]
 code = "@pattern.non-exhaustive"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [57, 110]
 notes = ["`(recordof flag: false)` is not covered"]
 
 [[expect.diagnostics]]
 code = "@pattern.non-exhaustive"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [166, 221]
 notes = ["`-` is not covered"]

@@ -1,0 +1,20 @@
+(deffect write
+  (defn text (target str) void (do)))
+
+(defint logger
+  (defn log (value self) void
+    effects: (write)))
+
+(defn through-value (f (fn (str) void effects: (write)) value str) void
+  effects: (write)
+  (f value))
+
+(defn through-member (target logger) void
+  effects: (write)
+  (logger.log target))
+
+(defn outer-value (f (fn (str) void effects: (write))) void
+  (through-value f "x"))
+
+(defn outer-member (target logger) void
+  (through-member target))

@@ -1,11 +1,12 @@
 id = "V1-TYPE-NOMINAL-dict-keys"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Floats, void, arrays, and declared types are not dict keys, a function key is not equatable, and an inferred key type is checked at its application."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,35 +14,35 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [56, 59]
 
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [98, 102]
 
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [142, 153]
 
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [192, 196]
 
 [[expect.diagnostics]]
 code = "@type.function-not-equatable"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [239, 250]
 
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [297, 318]

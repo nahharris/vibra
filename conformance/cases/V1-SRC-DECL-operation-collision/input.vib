@@ -1,0 +1,1 @@
+(deffect flat (defn a () void (do)) (defn a () void (do)))

@@ -5,8 +5,8 @@ Implementation status: reader, static, interpreter, and tooling observations
 have conformance coverage for the complete pure language through M3 and the
 pre-M4 binding revision; the current counts are recorded in the milestone
 exit evidence. The host-event expectation is implemented in both backends, and
-the differential execution and the parity inventory run over every executable
-case since M4 Step 11, which lowers every form of a checked program. Milestone 4
+the differential execution runs over every executable case since M4 Step 11,
+which lowers every form of a checked program. Milestone 4
 Step 13 closes the Stage 4B contracts of this chapter, the effect and host
 diagnostics, the host-world corpus input, the audit-event snapshots, and the
 registry invariants, and implements none of them; Steps 14 to 20 do.
@@ -238,10 +238,8 @@ import-alias, lexical binding, or decoded module-local test name is
 The later span is primary and the earlier declaration or edge is a related
 span when available. Each repeated introduction has exactly one owning
 diagnostic: resolution owns lexical redeclaration, and later checking stages
-MUST NOT report the same introduction again. The single-source and workspace
-check paths report identical primary and related spans for it, as
-`02-type-system.md` states. Diagnostics are deterministic by source ID, primary span,
-and registry order. Resolution consumes only an explicit immutable source
+MUST NOT report the same introduction again. Diagnostics are deterministic by
+source ID, primary span, and registry order. Resolution consumes only an explicit immutable source
 graph and performs no filesystem, dependency, lock, cache, or network access.
 
 A resolver graph uses source IDs as document identities, so one source ID MUST
@@ -339,7 +337,7 @@ specification rule, not compiler module. Each case records:
 
 - normative rule ID;
 - a closed operation selector (`reader`, `project-decode`, `source-graph`,
-  `resolve`, `type-check`, `interpret`, `query`, `format`, `workspace-check`,
+  `resolve`, `interpret`, `query`, `format`, `workspace-check`,
   `workspace-run`, or `workspace-test`);
   `project-decode` requires exactly one project input, and a
   `source-graph` case requires one confined `tree` directory and a `project`
@@ -354,7 +352,13 @@ specification rule, not compiler module. Each case records:
   source snapshot;
   `workspace-check` requires the static profile, one confined tree, and its
   exact `<tree>/project.vibon` input, with no source input; it checks the whole
-  workspace snapshot through the workspace semantic API;
+  workspace snapshot through the workspace semantic API. A source that is only
+  to be checked is a one-module workspace: a library target whose single module
+  is the case's source, so that the verdict, the diagnostics, and the spans
+  are those of the workspace check of that module. A `workspace-check` case MAY
+  declare a `types` snapshot, which an accepted workspace compares with the
+  canonical `@types.v1` observation of its checked module values and functions;
+  no other operation has one;
   `workspace-run` requires the interpreter profile, the same project/tree
   binding and no source input; it requires exactly one binary target and
   compares its checked execution with the required result and VIBON audit
@@ -364,6 +368,14 @@ specification rule, not compiler module. Each case records:
   host world of the case, and compares one canonical
   `@test-run.v1` observation. The observation contains a separate
   `@audit-trace.v1` record for each test;
+  `interpret` takes one `.vib` source input and checks it as the only module of
+  a one-module workspace with the embedded standard library, under the source
+  ID the input names, so the verdict and diagnostics of a case are those the
+  workspace check reports for that module; it then runs the first function the
+  source declares, which need not be an entry signature, and compares the
+  canonical encoding of the value it returns. It is the one operation that
+  observes the value of a function whose result is not `void` or `result void
+  e`, and so the one that covers the canonical value encoding of every type.
   `interpret` is pure and has no host world, so it takes no `host-world` input;
   non-reader case with multiple input kinds must state its operation;
 - source/project/data inputs and an optional confined tree directory;
@@ -405,7 +417,10 @@ specification rule, not compiler module. Each case records:
   runner; expected text is never reparsed by the implementation under test;
 - expected acceptance or diagnostics;
 - expected canonical formatting;
-- expected resolved identities, types, and effects where relevant;
+- expected resolved identities, types, and effects where relevant; the `types`
+  snapshot of a `workspace-check` case is the canonical `@types.v1` record of
+  its accepted workspace: its module values and then its functions, each by
+  declaration path, with its checked types and body, in checked order;
 - interpreter result and ordered audit trace where the operation exposes a
   separate trace; the expected
   audit trace is a `.vibon` snapshot whose canonical root is
@@ -421,8 +436,7 @@ specification rule, not compiler module. Each case records:
   snapshots, so that a case never records a value for a run that has none (a
   `workspace-test` case that ends in a host event is `@command.operational-failure`
   with zero selected, passed, and failed tests, as the tooling chapter states,
-  and records no `@test-run.v1` snapshot); and
-- deterministic build hashes for artifact cases.
+  and records no `@test-run.v1` snapshot).
 
 An executable case has no Wasm snapshot of its own: **Differential execution**
 below runs it in a second backend against the same expectation.
@@ -794,7 +808,7 @@ prelude name at a plain-name site (a labelled or variadic parameter, or a
 `let-else` binder spelled `option`) is `@name.reserved-declaration`, that a
 `let` pattern spelled `true` is `@pattern.refutable-binding`, and that a module
 value or function spelled `true` or `false` is
-`@name.reserved-value-spelling` in a single source and in a workspace. Constant-default coverage proves that a labelled default is a constant expression in any form and of any type, a literal, `true`, a user constant, a constant defined by another constant, an inline constructor, a record, an enum variant with a payload, and a tuple, that a contract and an implementation whose defaults denote the same value keep one default however each is spelled, and, as rejections, that a call, a function, a module value with a call initializer, and an inline call are each `@type.not-constant`, relating the module value when one is named.
+`@name.reserved-value-spelling`. Constant-default coverage proves that a labelled default is a constant expression in any form and of any type, a literal, `true`, a user constant, a constant defined by another constant, an inline constructor, a record, an enum variant with a payload, and a tuple, that a contract and an implementation whose defaults denote the same value keep one default however each is spelled, and, as rejections, that a call, a function, a module value with a call initializer, and an inline call are each `@type.not-constant`, relating the module value when one is named.
 
 Unification coverage fixes the bound-agnostic reading: a union whose members are
 `(array t)` and `(array i32)` where `t` is bound by an interface `i32` does not
@@ -920,20 +934,14 @@ whether it does.
 
 The runner reports, besides the counts by required profile, one count line per
 backend over the executable cases: the interpreter backend as passed, failed,
-and unavailable, and the Wasm backend as matched, failed, and not lowered. A
-**not lowered** case is one whose parity-inventory disposition says the Wasm
-backend does not implement a form it uses yet: the runner runs only the
-interpreter on it, counts it as not lowered, and neither passes nor fails the
-Wasm backend on it. A not-lowered case does not fail a run. The Stage 4A
-sub-gate and the `full-v1` claim require a count of zero.
-
-The **parity inventory** is a checked-in table with one row for every executable
-case, giving its disposition: `matched`, or `not lowered` with the owning
-implementation step. A host test fails when an executable case has no row,
-when a row names no case, when a `not lowered` row names no step, and when the
-runner's result for a case disagrees with its disposition, including a
-`matched` case on which the Wasm backend disagrees. A step moves rows toward
-`matched` and never back, so the set of matched cases only grows.
+and unavailable, and the Wasm backend as matched and failed. A checked program
+has no form the Wasm backend leaves out, so a Wasm emit failure on an
+executable case is a toolchain defect and fails that case, with the emitter's
+error as the failure reason, exactly as a disagreement does. A case has no
+third disposition and no table names cases the Wasm backend skips; a runner
+with no Wasm execution handler runs the interpreter alone and reports no Wasm
+count. The Stage 4A
+sub-gate and the `full-v1` claim require only that no case fails.
 
 The native-implementation harness joins the same differential. For every sample
 input of every native symbol, the interpreter calling the native code, the
@@ -973,7 +981,7 @@ validation, documentation examples, interpreter/Wasm differential tests, and
 deterministic rebuilds are mandatory CI jobs.
 
 Fuzzing covers the reader, formatter round trips, project/lock/build data
-decoders, CLI/MCP schema decoders, external-registry boundary, and typed IR
+decoders, CLI/MCP input decoders, external-registry boundary, and typed IR
 deserialization. A fuzz finding is not closed until reduced into a regression
 case.
 
@@ -984,8 +992,11 @@ The `full-v1` claim requires:
 - every roadmap milestone complete with linked evidence;
 - no unresolved contradiction or placeholder marker in normative documents;
 - all normative examples classified and tested;
-- all CLI and MCP JSON schemas versioned and validated by producer/consumer
-  tests;
+- all CLI and MCP JSON schemas versioned, with every document a producer
+  renders validated against its published JSON Schema by producer tests, and
+  the cross-field rules a schema cannot express asserted on the produced
+  value (the published schema is the consumer contract: Vibra ships no reader
+  for its own output documents);
 - all persistent `.vibon` data formats validated and canonically round-tripped;
 - both suites green on every supported platform;
 - reference interpreter and Wasm parity across the executable corpus;

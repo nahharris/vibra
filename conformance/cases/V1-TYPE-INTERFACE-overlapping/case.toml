@@ -1,11 +1,12 @@
 id = "V1-TYPE-INTERFACE-overlapping"
 rule = "V1-TYPE-INTERFACE"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Two implementations of one interface whose applied targets unify overlap."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,8 +14,8 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.overlapping-implementation"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [202, 278]
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [127, 199]

@@ -47,14 +47,6 @@ pub struct ExecutionObservation {
 /// observation the interpreter does, and the runner compares them with it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WasmObservation {
-    /// The program uses forms the backend does not lower yet, named by the
-    /// emitter. The runner counts the case as not lowered and neither passes
-    /// nor fails the backend on it.
-    NotLowered {
-        /// The names of the forms, empty when no Wasm execution handler took
-        /// part in the case.
-        forms: Vec<String>,
-    },
     /// The module ran to completion.
     Completed(ExecutionObservation),
     /// The instance ended in a host event: the atom of its unlocated
@@ -64,13 +56,38 @@ pub enum WasmObservation {
     /// `@runtime.unobservable-function`. The case expects that code as its one
     /// runtime error diagnostic.
     Trapped(String),
-    /// The backend failed on a program it lowered: the module did not
-    /// validate, the engine refused it, or the run stopped some way the
-    /// interpreter did not. It fails the Wasm backend on the case.
+    /// The backend failed on the program: the emitter produced no module (a
+    /// toolchain defect, since a checked program has every form lowered), the
+    /// module did not validate, the engine refused it, or the run stopped some
+    /// way the interpreter did not. It fails the Wasm backend on the case.
     Failed {
         /// What went wrong.
         reason: String,
     },
+}
+
+/// What one backend observed of an executable case: its outcome, and whether
+/// the entry returned `err` when the run completed. The command outcome follows
+/// from the result, so a case records no field for it; the harness holds the
+/// backends to the same one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BackendObservation<T> {
+    /// What the backend did with the case.
+    pub outcome: T,
+    /// Whether the entry returned `err`, for a run that completed and whose
+    /// handler reports it.
+    pub program_failed: Option<bool>,
+}
+
+impl<T> BackendObservation<T> {
+    /// An observation that does not say whether the entry returned `err`.
+    #[must_use]
+    pub const fn new(outcome: T) -> Self {
+        Self {
+            outcome,
+            program_failed: None,
+        }
+    }
 }
 
 /// One structural query result returned by a profile handler.
@@ -106,23 +123,14 @@ pub struct CaseObservation {
     /// Structural source-position query observations.
     pub queries: Vec<QueryObservation>,
     /// Reference-interpreter observation.
-    pub interpreter: Option<ExecutionObservation>,
+    pub interpreter: Option<BackendObservation<ExecutionObservation>>,
     /// The host event that ended execution, instead of a result: the atom of
     /// the unlocated diagnostic, such as `@runtime.memory-exhausted`.
     pub host_event: Option<String>,
     /// What the WebAssembly backend did with the case. A handler that runs an
     /// executable case sets it for every program it runs. A rejected program
     /// is no executable case, so a handler leaves it unset.
-    pub wasm: Option<WasmObservation>,
-    /// Whether the interpreter's entry returned `err`, for a run that
-    /// completed. The command outcome follows from the result, so a case
-    /// records no field for it; the harness holds the backends to the same one.
-    pub program_failed: Option<bool>,
-    /// Whether the Wasm backend's entry returned `err`, for a run that
-    /// completed.
-    pub wasm_program_failed: Option<bool>,
-    /// Deterministic artifact hashes.
-    pub artifact_hashes: Vec<String>,
+    pub wasm: Option<BackendObservation<WasmObservation>>,
 }
 
 impl CaseObservation {
@@ -252,12 +260,6 @@ impl ProfileDispatcher {
     {
         self.register_additional(profile, handler);
         self
-    }
-
-    /// Profiles that have a handler registered, in stable order.
-    #[must_use]
-    pub fn registered_profiles(&self) -> Vec<ConformanceProfile> {
-        self.handlers.keys().copied().collect()
     }
 
     /// Dispatches one case to the closest capable handler.
@@ -397,13 +399,6 @@ pub enum WasmStatus {
         /// A stable, actionable mismatch explanation.
         reason: String,
     },
-    /// The program uses forms the backend does not lower yet. The case runs
-    /// in the interpreter only, and the backend neither passes nor fails it.
-    NotLowered {
-        /// The names of the forms, empty when no Wasm execution handler took
-        /// part in the case.
-        forms: Vec<String>,
-    },
 }
 
 /// The status of each backend on one executable case.
@@ -412,8 +407,9 @@ pub struct BackendStatuses {
     /// The reference interpreter's status: the case's expectations compared
     /// with what the interpreter handler observed.
     pub interpreter: CaseStatus,
-    /// The WebAssembly backend's status, or `None` when the case never
-    /// reached a backend because its handler failed or was unavailable.
+    /// The WebAssembly backend's status, or `None` when no Wasm execution
+    /// handler took part in the case, or the case never reached a backend
+    /// because its handler failed or was unavailable.
     pub wasm: Option<WasmStatus>,
 }
 
@@ -513,7 +509,6 @@ impl RunReport {
             match status {
                 WasmStatus::Matched => counts.matched += 1,
                 WasmStatus::Failed { .. } => counts.failed += 1,
-                WasmStatus::NotLowered { .. } => counts.not_lowered += 1,
             }
         }
         counts
@@ -538,8 +533,6 @@ pub struct WasmCounts {
     pub matched: usize,
     /// Cases on which the backend disagreed with the expectation.
     pub failed: usize,
-    /// Cases whose program uses forms the backend does not lower yet.
-    pub not_lowered: usize,
 }
 
 /// The internal backend-independent conformance runner.
@@ -649,11 +642,8 @@ impl ConformanceRunner {
                     case_id,
                     required_profile: required,
                     provided_profile: Some(provided),
-                    status: differential_status(&interpreter, &wasm),
-                    backends: Some(BackendStatuses {
-                        interpreter,
-                        wasm: Some(wasm),
-                    }),
+                    status: differential_status(&interpreter, wasm.as_ref()),
+                    backends: Some(BackendStatuses { interpreter, wasm }),
                 }
             }
             DispatchResult::Unavailable { required, reason } => {
@@ -898,31 +888,31 @@ impl CaseExpectations {
             case,
             "interpreter",
             self.interpreter.as_ref(),
-            observation.interpreter.as_ref(),
+            observation
+                .interpreter
+                .as_ref()
+                .map(|backend| &backend.outcome),
         )?;
-        if let Some(expected_hashes) = &self.artifact_hashes
-            && expected_hashes != &observation.artifact_hashes
-        {
-            return Err(format!(
-                "artifact hash mismatch: expected {:?}, got {:?}",
-                expected_hashes, observation.artifact_hashes
-            ));
-        }
         Ok(())
     }
 }
 
 /// The WebAssembly backend's status on an executable case, against the one
-/// expectation the case has.
-fn wasm_status(case: &Case, observation: &CaseObservation) -> WasmStatus {
+/// expectation the case has, or `None` when no Wasm execution handler took part
+/// in the case, so that only the interpreter judges it.
+fn wasm_status(case: &Case, observation: &CaseObservation) -> Option<WasmStatus> {
+    let wasm = observation.wasm.as_ref()?;
+    Some(wasm_outcome_status(case, observation, wasm))
+}
+
+fn wasm_outcome_status(
+    case: &Case,
+    observation: &CaseObservation,
+    wasm: &BackendObservation<WasmObservation>,
+) -> WasmStatus {
     let expectations = &case.manifest().expectations;
-    match &observation.wasm {
-        // No Wasm execution handler took part, so nothing is lowered.
-        None => WasmStatus::NotLowered { forms: Vec::new() },
-        Some(WasmObservation::NotLowered { forms }) => WasmStatus::NotLowered {
-            forms: forms.clone(),
-        },
-        Some(WasmObservation::Completed(actual)) => {
+    match &wasm.outcome {
+        WasmObservation::Completed(actual) => {
             if let Some(event) = &expectations.host_event {
                 return WasmStatus::Failed {
                     reason: format!(
@@ -943,9 +933,13 @@ fn wasm_status(case: &Case, observation: &CaseObservation) -> WasmStatus {
                     ),
                 };
             }
-            if let (Some(interpreter), Some(wasm)) =
-                (observation.program_failed, observation.wasm_program_failed)
-                && interpreter != wasm
+            if let (Some(interpreter), Some(wasm)) = (
+                observation
+                    .interpreter
+                    .as_ref()
+                    .and_then(|backend| backend.program_failed),
+                wasm.program_failed,
+            ) && interpreter != wasm
             {
                 return WasmStatus::Failed {
                     reason: format!(
@@ -970,10 +964,10 @@ fn wasm_status(case: &Case, observation: &CaseObservation) -> WasmStatus {
                 |()| WasmStatus::Matched,
             )
         }
-        Some(WasmObservation::Failed { reason }) => WasmStatus::Failed {
+        WasmObservation::Failed { reason } => WasmStatus::Failed {
             reason: reason.clone(),
         },
-        Some(WasmObservation::Trapped(code)) => {
+        WasmObservation::Trapped(code) => {
             if expectations
                 .diagnostics
                 .iter()
@@ -988,7 +982,7 @@ fn wasm_status(case: &Case, observation: &CaseObservation) -> WasmStatus {
                 }
             }
         }
-        Some(WasmObservation::HostEvent(event)) => {
+        WasmObservation::HostEvent(event) => {
             if expectations.host_event.as_deref() == Some(event.as_str()) {
                 WasmStatus::Matched
             } else {
@@ -1005,7 +999,10 @@ fn wasm_status(case: &Case, observation: &CaseObservation) -> WasmStatus {
 
 /// The status of an executable case: it passes only when both backends do,
 /// and a failure names the backend that disagreed.
-fn differential_status(interpreter: &CaseStatus, wasm: &WasmStatus) -> CaseStatus {
+fn differential_status(
+    interpreter: &CaseStatus,
+    wasm: Option<&WasmStatus>,
+) -> CaseStatus {
     let mut reasons = Vec::new();
     match interpreter {
         CaseStatus::Passed => {}
@@ -1018,7 +1015,7 @@ fn differential_status(interpreter: &CaseStatus, wasm: &WasmStatus) -> CaseStatu
             };
         }
     }
-    if let WasmStatus::Failed { reason } = wasm {
+    if let Some(WasmStatus::Failed { reason }) = wasm {
         reasons.push(format!("wasm backend: {reason}"));
     }
     if reasons.is_empty() {

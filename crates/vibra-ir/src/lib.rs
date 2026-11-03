@@ -33,6 +33,7 @@ pub use pattern::{MatchArm, Pattern};
 pub mod arena;
 pub mod boundary;
 pub mod external;
+pub mod vocabulary;
 
 /// One of the primitive types admitted by the M2 literal profile.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -102,6 +103,36 @@ pub enum Type {
 }
 
 impl Type {
+    /// Every primitive type, in the order of `vibra_syntax::PRIMITIVE_TYPES`,
+    /// which holds their spellings for the layers below the IR.
+    pub const PRIMITIVES: [Self; 17] = [
+        Self::Bool,
+        Self::Void,
+        Self::Never,
+        Self::Char,
+        Self::Str,
+        Self::Bytes,
+        Self::Atom,
+        Self::I8,
+        Self::I16,
+        Self::I32,
+        Self::I64,
+        Self::U8,
+        Self::U16,
+        Self::U32,
+        Self::U64,
+        Self::F32,
+        Self::F64,
+    ];
+
+    /// The primitive type spelled `name`.
+    #[must_use]
+    pub fn primitive(name: &str) -> Option<Self> {
+        Self::PRIMITIVES
+            .into_iter()
+            .find(|primitive| primitive.as_str() == name)
+    }
+
     /// The source spelling of a primitive or function type head.
     ///
     /// Declared and structural types have no single head word; they spell
@@ -753,6 +784,27 @@ impl TestAssertion {
         }
     }
 
+    /// The code a module returns from `vibra_v1_failure` after this assertion
+    /// failed: its place in [`Self::ALL`], counted from one.
+    #[must_use]
+    pub fn code(self) -> i32 {
+        Self::ALL
+            .into_iter()
+            .zip(1..)
+            .find_map(|(assertion, code)| (assertion == self).then_some(code))
+            .unwrap_or_default()
+    }
+
+    /// The assertion a failure code names, or `None` for a code outside the
+    /// table.
+    #[must_use]
+    pub fn from_code(code: i32) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .zip(1..)
+            .find_map(|(assertion, place)| (place == code).then_some(assertion))
+    }
+
     /// Canonical source-level assertion identity.
     #[must_use]
     pub fn symbol(self) -> String {
@@ -905,15 +957,6 @@ impl Value {
         }
     }
 
-    /// Reads a binary64 value from its exact bits.
-    #[must_use]
-    pub fn as_f64(&self) -> Option<f64> {
-        match self {
-            Self::F64(bits) => Some(f64::from_bits(*bits)),
-            _ => None,
-        }
-    }
-
     /// The deterministic literal spelling used by result observations.
     #[must_use]
     pub fn canonical_vibon(&self) -> String {
@@ -921,7 +964,7 @@ impl Value {
             Self::Bool(value) => value.to_string(),
             Self::Void => "void".to_owned(),
             Self::Char(value) => canonical_character(*value),
-            Self::Str(value) => quote(value),
+            Self::Str(value) => canonical_string(value),
             Self::Bytes(value) => {
                 let bytes = value
                     .iter()
@@ -1529,16 +1572,13 @@ impl Expr {
         result: Type,
         origin: SourceOrigin,
     ) -> Self {
-        Self::Call {
-            target: CallTarget::Direct(function),
-            arguments,
-            result,
-            tail: true,
-            origin,
-        }
+        Self::call(function, arguments, result, origin).with_tail()
     }
 
-    /// Creates an indirect call whose callee is evaluated exactly once.
+    /// Creates an indirect call whose callee is evaluated exactly once. The
+    /// optional hint is only a compact singleton observation; checked-program
+    /// validation derives the actual target set from the callee expression.
+    /// `with_tail` makes it a tail transfer.
     #[must_use]
     pub fn indirect_call(
         callee: Self,
@@ -1555,48 +1595,6 @@ impl Expr {
             arguments,
             result,
             tail: false,
-            origin,
-        }
-    }
-
-    /// Creates an indirect tail transfer with a statically known target.
-    #[must_use]
-    pub fn indirect_tail_call(
-        callee: Self,
-        function_hint: usize,
-        arguments: Vec<Self>,
-        result: Type,
-        origin: SourceOrigin,
-    ) -> Self {
-        Self::indirect_tail_call_with_hint(
-            callee,
-            Some(function_hint),
-            arguments,
-            result,
-            origin,
-        )
-    }
-
-    /// Creates an indirect tail transfer whose statically bounded target set
-    /// may contain more than one module function.  The optional hint is only
-    /// a compact singleton observation; checked-program validation derives
-    /// the actual target set from the callee expression.
-    #[must_use]
-    pub fn indirect_tail_call_with_hint(
-        callee: Self,
-        function_hint: Option<usize>,
-        arguments: Vec<Self>,
-        result: Type,
-        origin: SourceOrigin,
-    ) -> Self {
-        Self::Call {
-            target: CallTarget::Indirect {
-                callee: Box::new(callee),
-                hint: function_hint,
-            },
-            arguments,
-            result,
-            tail: true,
             origin,
         }
     }
@@ -2245,10 +2243,6 @@ impl Expr {
                     .unwrap_or(Type::Void);
                 match value_type {
                     Type::Declared(_) | Type::Applied(_, _) => {}
-                    // `bool` is represented directly; its variants are its values.
-                    Type::Bool
-                        if payload.is_none()
-                            && matches!(variant.as_str(), "false" | "true") => {}
                     Type::Enum(variants) => {
                         let declared = variants
                             .iter()
@@ -3231,6 +3225,49 @@ pub struct CheckedModuleSet {
 }
 
 impl CheckedModuleSet {
+    /// The canonical `@types.v1` observation of the checked globals and
+    /// functions, in deterministic checked order.
+    #[must_use]
+    pub fn canonical_vibon(&self) -> String {
+        let mut output = String::from("(record\n  format: @types.v1\n");
+        if !self.globals.is_empty() {
+            output.push_str("  globals: (array\n");
+            for global in &self.globals {
+                output.push_str(&format!(
+                    "    (record name: @{} type: {} body: {})\n",
+                    declaration_path(&global.name),
+                    canonical_type(&global.value_type),
+                    canonical_expr(global.initializer()),
+                ));
+            }
+            output.push_str("  )\n");
+        }
+        output.push_str("  functions: (array\n");
+        for function in &self.functions {
+            let parameters = function
+                .signature
+                .parameters()
+                .iter()
+                .map(canonical_type)
+                .collect::<Vec<_>>();
+            let body = canonical_expr(function.body());
+            let native = function.native_body().map_or_else(String::new, |body| {
+                format!(" native-body: {}", canonical_expr(body))
+            });
+            output.push_str(&format!(
+                "    (record name: @{} params: {} result: {}{} body: {}{})\n",
+                declaration_path(&function.name),
+                canonical_array(&parameters),
+                canonical_type(&function.signature.result()),
+                canonical_labelled_field(&function.signature),
+                body,
+                native
+            ));
+        }
+        output.push_str("  )\n)\n");
+        output
+    }
+
     /// Validates a complete set of checked globals and functions.
     pub fn try_new(
         globals: Vec<CheckedGlobal>,
@@ -3338,12 +3375,6 @@ impl CheckedModuleSet {
     #[must_use]
     pub fn types(&self) -> &[TypeDefinition] {
         &self.types
-    }
-
-    /// The definition of one declared type.
-    #[must_use]
-    pub fn type_definition(&self, id: &TypeId) -> Option<&TypeDefinition> {
-        self.types.iter().find(|definition| definition.id() == id)
     }
 
     /// Immutable module values in deterministic checked order.
@@ -3463,46 +3494,22 @@ impl CheckedProgram {
         &self.set.functions[self.entry]
     }
 
-    /// Canonical typed-program observation used by static-v1.
+    /// Canonical typed-program observation used by static-v1: the observation
+    /// of the module set the entry selects from, which does not depend on the
+    /// entry.
     #[must_use]
     pub fn canonical_vibon(&self) -> String {
-        let mut output = String::from("(record\n  format: @types.v1\n");
-        if !self.set.globals.is_empty() {
-            output.push_str("  globals: (array\n");
-            for global in &self.set.globals {
-                output.push_str(&format!(
-                    "    (record name: @{} type: {} body: {})\n",
-                    global.name,
-                    canonical_type(&global.value_type),
-                    canonical_expr(global.initializer()),
-                ));
-            }
-            output.push_str("  )\n");
-        }
-        output.push_str("  functions: (array\n");
-        for function in &self.set.functions {
-            let parameters = function
-                .signature
-                .parameters()
-                .iter()
-                .map(canonical_type)
-                .collect::<Vec<_>>();
-            let body = canonical_expr(function.body());
-            let native = function.native_body().map_or_else(String::new, |body| {
-                format!(" native-body: {}", canonical_expr(body))
-            });
-            output.push_str(&format!(
-                "    (record name: @{} params: {} result: {}{} body: {}{})\n",
-                function.name,
-                canonical_array(&parameters),
-                canonical_type(&function.signature.result()),
-                canonical_labelled_field(&function.signature),
-                body,
-                native
-            ));
-        }
-        output.push_str("  )\n)\n");
-        output
+        self.set.canonical_vibon()
+    }
+}
+
+/// The dotted path of a declaration identity, as a declared type's identity
+/// prints: `app.main.answer` for `@source@0.0.0/app.main.answer`. The package
+/// is the checking scope's, so it is not part of what an observation names.
+fn declaration_path(name: &str) -> &str {
+    match name.strip_prefix('@') {
+        Some(identity) => identity.split_once('/').map_or(name, |(_, path)| path),
+        None => name,
     }
 }
 
@@ -6010,7 +6017,9 @@ fn canonical_labelled_array(signature: &FunctionSignature) -> String {
     canonical_array(&labelled)
 }
 
-fn canonical_array(values: &[String]) -> String {
+/// The canonical Vibon array of already-rendered `values`.
+#[must_use]
+pub fn canonical_array(values: &[String]) -> String {
     if values.is_empty() {
         "(array)".to_owned()
     } else {
@@ -6018,7 +6027,10 @@ fn canonical_array(values: &[String]) -> String {
     }
 }
 
-fn quote(value: &str) -> String {
+/// The canonical Vibon string literal of `value`: the quotes, the escapes of
+/// `\`, `"`, and every control character.
+#[must_use]
+pub fn canonical_string(value: &str) -> String {
     let mut output = String::with_capacity(value.len() + 2);
     output.push('"');
     for character in value.chars() {
@@ -6429,7 +6441,8 @@ mod tests {
         let caller = CheckedFunction::new(
             "caller",
             signature.clone(),
-            Expr::indirect_tail_call(callee, 0, Vec::new(), Type::I32, origin.clone()),
+            Expr::indirect_call(callee, Some(0), Vec::new(), Type::I32, origin.clone())
+                .with_tail(),
             origin,
         )
         .expect("caller shape");
@@ -6469,13 +6482,8 @@ mod tests {
         let caller = CheckedFunction::new(
             "caller",
             signature.clone(),
-            Expr::indirect_tail_call_with_hint(
-                callee,
-                None,
-                Vec::new(),
-                Type::I32,
-                origin.clone(),
-            ),
+            Expr::indirect_call(callee, None, Vec::new(), Type::I32, origin.clone())
+                .with_tail(),
             origin,
         )
         .expect("caller shape");
@@ -6509,7 +6517,8 @@ mod tests {
         let caller = CheckedFunction::new(
             "caller",
             target_signature.clone(),
-            Expr::indirect_tail_call(callee, 0, Vec::new(), Type::I32, origin.clone()),
+            Expr::indirect_call(callee, Some(0), Vec::new(), Type::I32, origin.clone())
+                .with_tail(),
             origin,
         )
         .expect("caller shape");

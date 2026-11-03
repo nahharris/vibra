@@ -51,26 +51,6 @@ pub enum LiteralClassification {
     Opaque,
 }
 
-impl LiteralClassification {
-    /// The decoded literal, if classification succeeded.
-    #[must_use]
-    pub fn as_literal(&self) -> Option<&Literal> {
-        match self {
-            Self::Literal(literal) => Some(literal),
-            Self::Invalid(_) | Self::Opaque => None,
-        }
-    }
-
-    /// The invalid family, if this leaf is malformed literal syntax.
-    #[must_use]
-    pub const fn invalid_kind(&self) -> Option<InvalidLiteralKind> {
-        match self {
-            Self::Invalid(kind) => Some(*kind),
-            Self::Literal(_) | Self::Opaque => None,
-        }
-    }
-}
-
 /// One decoded literal with its exact source spelling.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Literal {
@@ -392,6 +372,31 @@ pub fn canonical_character_spelling(value: char) -> String {
             spelling
         }
     }
+}
+
+/// Renders one decoded string using the canonical spelling of
+/// `docs/spec/04-programs-and-packages.md`: double quoted, `\"`, `\\`, `\n`,
+/// `\r`, and `\t` escaped, any other C0 control or DEL as `\u{hex}` in
+/// lowercase digits without a leading zero, and every other scalar literal.
+#[must_use]
+pub fn canonical_string_spelling(value: &str) -> String {
+    let mut output = String::with_capacity(value.len() + 2);
+    output.push('"');
+    for character in value.chars() {
+        match character {
+            '\\' => output.push_str("\\\\"),
+            '"' => output.push_str("\\\""),
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            control if control <= '\u{1f}' || control == '\u{7f}' => {
+                output.push_str(&format!("\\u{{{:x}}}", u32::from(control)));
+            }
+            character => output.push(character),
+        }
+    }
+    output.push('"');
+    output
 }
 
 fn classify_string(text: &str) -> LiteralClassification {

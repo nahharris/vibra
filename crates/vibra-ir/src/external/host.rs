@@ -185,23 +185,6 @@ impl HostRow {
             self.error.name()
         )
     }
-
-    /// The module of the owner, such as `std.io`.
-    #[must_use]
-    pub fn owner_module(&self) -> &'static str {
-        let trimmed = self.owner.strip_prefix('@').unwrap_or(self.owner);
-        trimmed
-            .rsplit_once('.')
-            .map_or(trimmed, |(module, _)| module)
-    }
-
-    /// The root of the owner, such as `stdin`.
-    #[must_use]
-    pub fn owner_root(&self) -> &'static str {
-        self.owner
-            .rsplit_once('.')
-            .map_or(self.owner, |(_, root)| root)
-    }
 }
 
 const fn param(name: &'static str, ty: HostType) -> HostParameter {

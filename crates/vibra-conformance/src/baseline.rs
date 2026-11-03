@@ -24,12 +24,12 @@
 //! hand.
 
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
 use vibra_host::{HostWorld, WorldProvider};
-use vibra_ir::CheckedProgram;
+use vibra_ir::{CheckedProgram, canonical_string};
 use vibra_syntax::{DataNode, DataValue, Literal};
 use vibra_wasm::layout::state;
 use vibra_wasm_run::{Instance, Outcome, Runner, Started};
@@ -157,14 +157,6 @@ pub const PROGRAMS: [Program; 10] = [
     },
 ];
 
-/// The repository root, found from this crate's manifest.
-#[must_use]
-pub fn repository_root() -> PathBuf {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let root = manifest.join("../..");
-    root.canonicalize().unwrap_or(root)
-}
-
 /// What the interpreter's counters reported for a program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InterpreterExact {
@@ -278,13 +270,7 @@ fn prepare(root: &Path, program: &Program) -> Result<Prepared, String> {
         Kind::Source(path) => {
             let text = std::fs::read_to_string(root.join(path))
                 .map_err(|error| fail(format!("{path}: {error}")))?;
-            // The one import a single source may carry is the bootstrap text module,
-            // checked as the corpus checks it.
-            let checked = if text.contains("(import text @std.text)") {
-                vibra_types::check_bootstrap_text_import(&stdlib, "input.vib", &text)
-            } else {
-                vibra_types::check_source("input.vib", &text)
-            };
+            let checked = vibra_types::check_source("input.vib", &text);
             let Some(checked_program) =
                 checked.program().filter(|_| checked.accepted())
             else {
@@ -548,30 +534,38 @@ pub fn measure_program(root: &Path, program: &Program) -> Result<Exact, String> 
     })
 }
 
-fn prepare_all(root: &Path) -> Result<Vec<Prepared>, String> {
-    PROGRAMS
+fn prepare_all(root: &Path, programs: &[Program]) -> Result<Vec<Prepared>, String> {
+    programs
         .iter()
         .map(|program| prepare(root, program))
         .collect()
 }
 
-/// Runs every program in both backends and returns the exact metrics. Two calls
-/// give the same result.
+/// Runs every program in both backends and returns the exact metrics, in the
+/// order of [`PROGRAMS`]. Two calls give the same result. The programs are
+/// independent, so each runs on a thread of its own and the call takes as long as
+/// the slowest one.
 ///
 /// # Errors
 ///
 /// A message naming the program that did not check, lower, complete, or pass.
 pub fn measure_exact(root: &Path) -> Result<Vec<Exact>, String> {
-    prepare_all(root)?
-        .iter()
-        .map(|prepared| {
-            Ok(Exact {
-                program: prepared.name.to_owned(),
-                interpreter: run_interpreter(prepared)?,
-                wasm: run_wasm_exact(prepared)?,
+    std::thread::scope(|scope| {
+        let handles = PROGRAMS
+            .iter()
+            .map(|program| {
+                (program, scope.spawn(move || measure_program(root, program)))
             })
-        })
-        .collect()
+            .collect::<Vec<_>>();
+        handles
+            .into_iter()
+            .map(|(program, handle)| {
+                handle.join().unwrap_or_else(|_| {
+                    Err(format!("program `{}`: panicked", program.name))
+                })
+            })
+            .collect()
+    })
 }
 
 fn median_micros(
@@ -600,12 +594,26 @@ fn median_micros(
 /// A message naming the program that failed, or that `runs` is below
 /// [`MIN_RUNS`].
 pub fn measure(root: &Path, runs: usize) -> Result<Baseline, String> {
+    measure_programs(root, &PROGRAMS, runs)
+}
+
+/// [`measure`] over `programs`, which a host test narrows to the cheap ones.
+///
+/// # Errors
+///
+/// A message naming the program that failed, or that `runs` is below
+/// [`MIN_RUNS`].
+pub fn measure_programs(
+    root: &Path,
+    programs: &[Program],
+    runs: usize,
+) -> Result<Baseline, String> {
     if runs < MIN_RUNS {
         return Err(format!(
             "a recorded median needs at least {MIN_RUNS} runs, not {runs}"
         ));
     }
-    let prepared = prepare_all(root)?;
+    let prepared = prepare_all(root, programs)?;
     let plain = Runner::new(wasm_memory_limit()).map_err(|error| error.to_string())?;
     let mut exact = Vec::new();
     let mut medians = Vec::new();
@@ -711,20 +719,6 @@ fn environment(root: &Path) -> Environment {
 
 // -- The document ------------------------------------------------------------
 
-fn string_literal(text: &str) -> String {
-    let mut quoted = String::from("\"");
-    for character in text.chars() {
-        match character {
-            '"' => quoted.push_str("\\\""),
-            '\\' => quoted.push_str("\\\\"),
-            '\n' => quoted.push_str("\\n"),
-            other => quoted.push(other),
-        }
-    }
-    quoted.push('"');
-    quoted
-}
-
 impl Baseline {
     /// The canonical `@perf-baseline.v1` text: written by the tool, formatted by
     /// the repository's formatter, never edited by hand.
@@ -757,13 +751,13 @@ impl Baseline {
         let _ = write!(
             text,
             ") informational: (record environment: (record os: {} os-version: {} arch: {} cpu: {} logical-cpus: {}u32 rust: {} wasmtime: {} profile: @{}) runs: {}u32 median-microseconds: (array",
-            string_literal(&env.os),
-            string_literal(&env.os_version),
-            string_literal(&env.arch),
-            string_literal(&env.cpu),
+            canonical_string(&env.os),
+            canonical_string(&env.os_version),
+            canonical_string(&env.arch),
+            canonical_string(&env.cpu),
             env.logical_cpus,
-            string_literal(&env.rust),
-            string_literal(&env.wasmtime),
+            canonical_string(&env.rust),
+            canonical_string(&env.wasmtime),
             env.profile,
             info.runs,
         );

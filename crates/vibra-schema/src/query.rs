@@ -1,6 +1,6 @@
 //! The JSON contract for structural source-position facts.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use vibra_diagnostics::LineIndex;
 use vibra_syntax::{FactStatus, GrammarCategory, StructuralQuery, SyntaxKind};
 
@@ -11,8 +11,8 @@ pub const SOURCE_POSITION_QUERY_SCHEMA: &str =
     include_str!("../schemas/v1/source-position-query.json");
 
 /// One structural source-position result rendered for a tooling consumer.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SourcePositionQueryDocument {
     /// Major version of this contract.
     pub schema_version: u32,

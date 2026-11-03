@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-nested-multiline-lists"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "A comment-free multiline list shares both delimiters with its inline edge forms and never hangs its opening delimiter, and a multiline list nested in a multiline list is not indented twice: the outer closing delimiter stacks onto the inner list's closing line."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

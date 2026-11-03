@@ -1,11 +1,12 @@
 id = "V1-EFFECT-let-else-return-rows"
 rule = "V1-EFFECT"
 profile = "static-v1"
-operation = "type-check"
-description = "The rows of a let value, a let-else fallback, and a return operand join the body that holds them, so each performs outside an empty ceiling."
+operation = "workspace-check"
+description = "The rows of a let value, a let-else fallback, and a return operand join the body that holds them, so each performs outside an empty ceiling. The scrutinee of a let-else joins the row too, and each of the four is within a ceiling that writes the root."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,35 +14,45 @@ accepted = false
 [[expect.diagnostics]]
 code = "@effect.outside-ceiling"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [173, 178]
-notes = ["performs @write via @see"]
+notes = ["performs @app.main.write via @app.main.see"]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [101, 117]
-  message = "performs @write via @write.text"
+  message = "performs @app.main.write via @app.main.write.text"
 
 [[expect.diagnostics]]
 code = "@effect.outside-ceiling"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [262, 267]
-notes = ["performs @write via @see"]
+notes = ["performs @app.main.write via @app.main.see"]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [101, 117]
-  message = "performs @write via @write.text"
+  message = "performs @app.main.write via @app.main.write.text"
 
 [[expect.diagnostics]]
 code = "@effect.outside-ceiling"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [346, 351]
-notes = ["performs @write via @see"]
+notes = ["performs @app.main.write via @app.main.see"]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [101, 117]
-  message = "performs @write via @write.text"
+  message = "performs @app.main.write via @app.main.write.text"
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "src/app/main.vib"
+span = [448, 453]
+
+  [[expect.diagnostics.related]]
+  source = "src/app/main.vib"
+  span = [101, 117]

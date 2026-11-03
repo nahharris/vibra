@@ -1,11 +1,12 @@
 id = "V1-TYPE-CONTROL-never-functions"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
-operation = "type-check"
-description = "A function declared never needs a final expression of type never; any other final expression, and an empty body, is a mismatch."
+operation = "workspace-check"
+description = "A function declared never needs a final expression of type never; any other final expression, and an empty body, is a mismatch. A final return of a non-never operand is also a redundant return."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,11 +14,23 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [56, 60]
 
 [[expect.diagnostics]]
 code = "@type.mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [63, 89]
+
+[[expect.diagnostics]]
+code = "@type.redundant-return"
+level = "@error"
+source = "src/app/main.vib"
+span = [119, 132]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = [127, 131]

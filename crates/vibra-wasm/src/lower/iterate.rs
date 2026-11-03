@@ -13,13 +13,13 @@
 //! interface value, it is widened with the descriptor of the iterator's type.
 
 use vibra_ir::external::CompilerIntrinsic;
-use vibra_ir::{SourceOrigin, Type};
+use vibra_ir::{SourceOrigin, Type, vocabulary};
 use wasm_encoder::Instruction as I;
 
 use super::dispatch::is_interface;
 use super::{Builder, FRAME, Kind, Part, Term};
 use crate::desc::class;
-use crate::form::NotLowered;
+use crate::error::EmitError;
 use crate::layout::{CellClass, header};
 use crate::runtime::{ValueClass, c32, get, ld32, st8, st64};
 
@@ -35,8 +35,8 @@ impl Builder<'_, '_> {
         result: &Type,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
-        let unsupported = || NotLowered::type_of("shape", Some(origin.clone()));
+    ) -> Result<(), EmitError> {
+        let unsupported = || EmitError::malformed("shape", Some(origin.clone()));
         let [iterator] = operands else {
             return Err(unsupported());
         };
@@ -55,8 +55,8 @@ impl Builder<'_, '_> {
             return Err(unsupported());
         };
         let widen = is_interface(rest_type);
-        let some = self.discriminant(result, "some", origin)?;
-        let none = self.discriminant(result, "none", origin)?;
+        let some = self.discriminant(result, vocabulary::SOME, origin)?;
+        let none = self.discriminant(result, vocabulary::NONE, origin)?;
         let item_class = self.class(item_type, origin)?;
         let join = self.new_block();
 
@@ -135,6 +135,9 @@ impl Builder<'_, '_> {
             I::Call(stop),
         ]);
         self.goto(join, join);
+        // The descriptor was built for this call, and a form that widens the
+        // remainder took a count of its own.
+        self.discard(recv_desc, ValueClass::Dyn);
         Ok(())
     }
 
@@ -215,7 +218,7 @@ impl Builder<'_, '_> {
         option: &vibra_ir::TypeId,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let mark = self.next_temp;
         let held = self.cell(iterator);
         self.push(&[get(FRAME), ld32(held), ld32(header::LEN)]);
@@ -239,7 +242,7 @@ impl Builder<'_, '_> {
         self.store_length(length, iterator);
         let row = CompilerIntrinsic::ArraySlice
             .native_import()
-            .ok_or_else(|| NotLowered::type_of("shape", Some(origin.clone())))?;
+            .ok_or_else(|| EmitError::malformed("shape", Some(origin.clone())))?;
         let sliced =
             Type::Applied(option.clone(), vec![Type::Array(Box::new(Type::Void))]);
         self.native_on(
@@ -286,7 +289,7 @@ impl Builder<'_, '_> {
         result: &Type,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let _ = result;
         let mark = self.next_temp;
         let held = self.cell(iterator);
@@ -318,7 +321,7 @@ impl Builder<'_, '_> {
         self.store_length(length, iterator);
         let row = CompilerIntrinsic::TextSlice
             .native_import()
-            .ok_or_else(|| NotLowered::type_of("shape", Some(origin.clone())))?;
+            .ok_or_else(|| EmitError::malformed("shape", Some(origin.clone())))?;
         let sliced = Type::Applied(option.clone(), vec![Type::Str]);
         self.native_on(
             row,
@@ -352,7 +355,7 @@ impl Builder<'_, '_> {
         result: &Type,
         origin: &SourceOrigin,
         dest: u32,
-    ) -> Result<(), NotLowered> {
+    ) -> Result<(), EmitError> {
         let _ = result;
         let mark = self.next_temp;
         // The iterator is an `option` of the item type, whose `some` carries the
@@ -361,12 +364,14 @@ impl Builder<'_, '_> {
         let option_type = Type::Applied(
             match result {
                 Type::Applied(option, _) => option.clone(),
-                _ => return Err(NotLowered::type_of("shape", Some(origin.clone()))),
+                _ => return Err(EmitError::malformed("shape", Some(origin.clone()))),
             },
             vec![item_type.clone()],
         );
-        let present_variant = self.discriminant(&option_type, "some", origin)?;
-        let absent_variant = self.discriminant(&option_type, "none", origin)?;
+        let present_variant =
+            self.discriminant(&option_type, vocabulary::SOME, origin)?;
+        let absent_variant =
+            self.discriminant(&option_type, vocabulary::NONE, origin)?;
         self.push(&[
             get(FRAME),
             ld32(held),

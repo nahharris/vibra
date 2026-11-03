@@ -13,6 +13,7 @@ use std::fmt;
 use std::path::Path;
 
 use sha2::{Digest, Sha256};
+use vibra_ir::TestAssertion;
 use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::external::host::{HostType, host_row};
 use vibra_syntax::{
@@ -116,28 +117,6 @@ const EMBEDDED_MODULES: &[(&str, &[u8])] = &[
         include_bytes!("../../../stdlib/src/std/assert.vib"),
     ),
 ];
-
-/// The identity a single source gives its declaration `name`: the standard
-/// identity when `source_id` is a module of the embedded library, so that a
-/// library module checked on its own declares the types and interfaces every
-/// run knows; otherwise the source's own.
-pub(crate) fn source_type_id(source_id: &str, name: &str) -> vibra_ir::TypeId {
-    let module = source_id
-        .strip_prefix("stdlib/src/std/")
-        .and_then(|path| path.strip_suffix(".vib"));
-    match module {
-        Some(module) => stdlib_type_id(&module.split('/').collect::<Vec<_>>(), name),
-        None => vibra_ir::TypeId::new(format!("{source_id}:{name}"), name),
-    }
-}
-
-/// The identity a single source gives its effect root `name`, as
-/// [`source_type_id`] gives a type: a single source has no package, so a
-/// root's path is its name.
-pub(crate) fn source_effect_root(source_id: &str, name: &str) -> vibra_ir::EffectRoot {
-    let id = source_type_id(source_id, name);
-    vibra_ir::EffectRoot::new(id.id(), id.path())
-}
 
 /// The identity of the declared type `name` in the standard-library module
 /// `@std.<module…>`: the identity the resolver gives every declaration of the
@@ -269,22 +248,10 @@ impl Stdlib {
         &self.host
     }
 
-    /// The `@compiler` symbols the modules may bind.
-    #[must_use]
-    pub fn compiler_symbols(&self) -> &[String] {
-        &self.compiler
-    }
-
     /// The native implementation symbols the modules may name.
     #[must_use]
     pub fn native_symbols(&self) -> &[String] {
         &self.native
-    }
-
-    /// The test-only assertion members.
-    #[must_use]
-    pub fn assertion_members(&self) -> &[String] {
-        &self.assertions
     }
 
     /// The admitted modules as the resolver's standard-library overlay.
@@ -312,13 +279,6 @@ impl Stdlib {
                 })
                 .collect(),
         )
-    }
-
-    /// Whether the manifest maps `atom` to the module at `source_id`.
-    pub(crate) fn maps(&self, atom: &str, source_id: &str) -> bool {
-        self.modules
-            .iter()
-            .any(|module| module.atom == atom && module.source_id == source_id)
     }
 
     /// Whether `module` is exactly an admitted standard-library module.
@@ -420,6 +380,17 @@ pub fn load_stdlib_bytes(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibErro
                 "standard-library manifest lists `{symbol}` more than once"
             )));
         }
+    }
+    // The assertion list is the compiler's closed table, in its order.
+    let assertions = TestAssertion::ALL
+        .into_iter()
+        .map(|assertion| format!("assert.{}", assertion.member()))
+        .collect::<Vec<_>>();
+    if manifest.assertions != assertions {
+        return Err(StdlibError::new(format!(
+            "standard-library manifest lists the assertions {:?}, not {assertions:?}",
+            manifest.assertions
+        )));
     }
     let mut bound_host = Vec::new();
     let mut modules = Vec::with_capacity(manifest.modules.len());
@@ -919,14 +890,26 @@ mod tests {
             stdlib.package(),
             &vibra_resolve::PackageId::new("vibra-stdlib", "0.3.0")
         );
-        assert!(stdlib.maps("std.text", super::STDLIB_TEXT_SOURCE_ID));
-        assert!(stdlib.maps("std.option", super::STDLIB_OPTION_SOURCE_ID));
+        assert!(
+            stdlib.module("std.text").is_some_and(
+                |module| module.source_id() == super::STDLIB_TEXT_SOURCE_ID
+            )
+        );
+        assert!(
+            stdlib.module("std.option").is_some_and(
+                |module| module.source_id() == super::STDLIB_OPTION_SOURCE_ID
+            )
+        );
         assert!(
             stdlib
                 .module("std.assert")
                 .is_some_and(|module| module.is_test_registry())
         );
-        assert!(!stdlib.maps("std.text", super::STDLIB_ASSERT_SOURCE_ID));
+        assert!(
+            stdlib.module("std.text").is_some_and(
+                |module| module.source_id() != super::STDLIB_ASSERT_SOURCE_ID
+            )
+        );
     }
 
     #[test]
@@ -1192,6 +1175,17 @@ mod tests {
                 "{error}"
             );
         }
+    }
+
+    #[test]
+    fn the_assertion_list_is_the_compilers_closed_table() {
+        let text = manifest().replace("    \"assert.equal\"", "");
+        let mut inputs = StdlibInputs::embedded();
+        inputs.manifest = text.as_bytes();
+        let error = load_stdlib_bytes(&inputs)
+            .expect_err("rejected")
+            .to_string();
+        assert!(error.contains("lists the assertions"), "{error}");
     }
 
     #[test]

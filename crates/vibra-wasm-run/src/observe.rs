@@ -36,6 +36,10 @@ pub struct LiveSizes {
     pub end: u64,
 }
 
+/// A check of an instance after a run, which reads its memory: `Err` is what
+/// the check found wrong.
+pub type Inspect<'a> = &'a mut dyn FnMut(&mut Instance) -> Result<(), String>;
+
 /// A run, observed.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Observed {
@@ -110,6 +114,29 @@ impl Runner {
         heads: &dyn Fn(u32) -> Option<Type>,
         provider: Box<dyn HostProvider>,
     ) -> Result<Observed, RunnerError> {
+        self.run_observed_inspected(bytes, result, types, heads, provider, &mut |_| {
+            Ok(())
+        })
+    }
+
+    /// [`Self::run_observed_with_host`], and `inspect` looks at the instance
+    /// once the entry completed and the host released the result, for a check
+    /// that reads the module's memory, such as the conformance runner's arena
+    /// balance. An `Err` ends the run as a defect of the toolchain with that
+    /// cause.
+    ///
+    /// # Errors
+    ///
+    /// A [`RunnerError`] when the module is not a v1 module or lacks an export.
+    pub fn run_observed_inspected(
+        &self,
+        bytes: &[u8],
+        result: &Type,
+        types: &[TypeDefinition],
+        heads: &dyn Fn(u32) -> Option<Type>,
+        provider: Box<dyn HostProvider>,
+        inspect: Inspect<'_>,
+    ) -> Result<Observed, RunnerError> {
         let mut instance = match self.start_with_host(bytes, provider)? {
             Started::MemoryExhausted => {
                 return Ok(Observed::Stopped(Outcome::MemoryExhausted));
@@ -132,6 +159,10 @@ impl Runner {
             Ok(end) => end,
             Err(stop) => return Ok(Observed::Stopped(stop)),
         };
+        let audit_trace = instance.audit_trace().to_vec();
+        if let Err(cause) = inspect(&mut instance) {
+            return Ok(Observed::Stopped(Outcome::Defect { cause }));
+        }
         Ok(Observed::Completed {
             value,
             live: LiveSizes {
@@ -139,7 +170,7 @@ impl Runner {
                 with_result,
                 end,
             },
-            audit_trace: instance.audit_trace().to_vec(),
+            audit_trace,
         })
     }
 }

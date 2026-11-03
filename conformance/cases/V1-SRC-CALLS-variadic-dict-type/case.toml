@@ -1,11 +1,12 @@
 id = "V1-SRC-CALLS-variadic-dict-type"
 rule = "V1-SRC-CALLS"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A dict-variadic function type binds a key/value tail at a call through its value."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

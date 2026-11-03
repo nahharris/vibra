@@ -1,1 +1,1 @@
-(record type: @celsius value: (record kind: @wrapper type: @celsius value: 21.5f64))
+(record type: @app.main.celsius value: (record kind: @wrapper type: @app.main.celsius value: 21.5f64))

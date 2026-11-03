@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-interface-containers"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "A default member calls a contract member at the receiver type of a record, a builtin, and a generic record; interface values are stored in a record, an array, and a dict; a result that names self converts at the depth of an array of arrays; and an element that is not an interface value passes through a bare generic parameter unchanged."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

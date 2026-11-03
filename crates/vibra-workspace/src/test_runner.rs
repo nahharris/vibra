@@ -8,7 +8,7 @@ use vibra_host::{AuditEvent, HostWorld, WorldProvider};
 use vibra_interp::MemoryBudget;
 use vibra_ir::{CheckedProgram, SourceOrigin};
 use vibra_resolve::{DeclarationId, EntityKind, ResolvedSnapshot};
-use vibra_syntax::{Declaration, Literal};
+use vibra_syntax::{Declaration, Literal, canonical_string_spelling};
 
 use crate::WorkspaceSnapshot;
 
@@ -42,7 +42,7 @@ impl TestSelector {
         let Literal::String(name) = test.name() else {
             return None;
         };
-        if canonical_string_literal(name.value()) != literal {
+        if canonical_string_spelling(name.value()) != literal {
             return None;
         }
         Some(Self {
@@ -66,7 +66,7 @@ impl TestSelector {
     /// Full canonical selector spelling.
     #[must_use]
     pub fn canonical(&self) -> String {
-        format!("{}::{}", self.module, canonical_string_literal(&self.name))
+        format!("{}::{}", self.module, canonical_string_spelling(&self.name))
     }
 }
 
@@ -98,26 +98,6 @@ fn canonical_test_module(module: &str) -> bool {
             .first()
             .is_some_and(|unit| unit == "tests")
         && !path.is_empty()
-}
-
-fn canonical_string_literal(value: &str) -> String {
-    let mut output = String::with_capacity(value.len().saturating_add(2));
-    output.push('"');
-    for character in value.chars() {
-        match character {
-            '"' => output.push_str("\\\""),
-            '\\' => output.push_str("\\\\"),
-            '\n' => output.push_str("\\n"),
-            '\r' => output.push_str("\\r"),
-            '\t' => output.push_str("\\t"),
-            control if control <= '\u{1f}' || control == '\u{7f}' => {
-                output.push_str(&format!("\\u{{{:x}}}", control as u32));
-            }
-            other => output.push(other),
-        }
-    }
-    output.push('"');
-    output
 }
 
 /// Outcome of one selected test item.
@@ -1087,7 +1067,7 @@ fn test_name(test: &TestRef<'_>) -> String {
     format!(
         "{}::{}",
         module_atom(test.module),
-        canonical_string_literal(name.value())
+        canonical_string_spelling(name.value())
     )
 }
 

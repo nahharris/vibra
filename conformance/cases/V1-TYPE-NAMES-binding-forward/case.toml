@@ -1,11 +1,12 @@
 id = "V1-TYPE-NAMES-binding-forward"
 rule = "V1-TYPE-NAMES"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A module value may refer forward to a later immutable value without using execution for type inference."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

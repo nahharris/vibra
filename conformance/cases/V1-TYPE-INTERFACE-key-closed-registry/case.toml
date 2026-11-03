@@ -1,11 +1,12 @@
 id = "V1-TYPE-INTERFACE-key-closed-registry"
 rule = "V1-TYPE-INTERFACE"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Floats and arrays are outside the closed key registry, so they satisfy neither ordered nor equatable."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,11 +14,11 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [166, 189]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [211, 226]

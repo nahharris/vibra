@@ -1,0 +1,165 @@
+//! Static-v1 project corpus coverage.
+
+use crate::support::{TempDir, copy_directory, corpus, corpus_root};
+
+use vibra_conformance::{
+    Case, CaseObservation, ConformanceProfile, ConformanceRunner, Corpus,
+    DispatchResult, HandlerError, InterpreterV1Handler,
+    InterpreterV1WorkspaceRunHandler, InterpreterV1WorkspaceTestHandler,
+    ProfileDispatcher, ProfileHandler, ReaderV1Handler, StaticV1ProjectHandler,
+    StaticV1ResolveHandler, StaticV1SourceGraphHandler, StaticV1WorkspaceCheckHandler,
+    ToolingV1FormatHandler, ToolingV1IndexHandler, ToolingV1QueryHandler,
+};
+
+/// A corpus holding only the `V1-PROJECT-*` cases of the repository's corpus,
+/// copied under the system temporary directory and removed on drop. The whole
+/// corpus is the job of the conformance gate; this binary runs the project cases
+/// through a dispatcher it builds itself.
+struct ProjectCorpus(TempDir);
+
+impl ProjectCorpus {
+    fn new() -> Self {
+        let root = TempDir::new("project");
+        for entry in std::fs::read_dir(corpus_root()).expect("the corpus") {
+            let entry = entry.expect("an entry");
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("V1-PROJECT-")
+            {
+                copy_directory(&entry.path(), &root.join(entry.file_name()));
+            }
+        }
+        Self(root)
+    }
+}
+
+#[test]
+fn static_project_cases_are_executed_by_the_real_handler() {
+    let project_cases = ProjectCorpus::new();
+    let corpus = Corpus::discover(project_cases.0.path()).expect("project corpus");
+    let static_cases = corpus
+        .cases()
+        .iter()
+        .filter(|case| case.manifest().profile() == ConformanceProfile::StaticV1)
+        .collect::<Vec<_>>();
+    assert!(static_cases.len() >= 5);
+
+    let dispatcher = ProfileDispatcher::new()
+        .with_handler(ConformanceProfile::ReaderV1, ReaderV1Handler)
+        .with_handler(ConformanceProfile::StaticV1, StaticV1ProjectHandler)
+        .with_additional_handler(
+            ConformanceProfile::StaticV1,
+            StaticV1SourceGraphHandler,
+        );
+    let dispatcher = dispatcher
+        .with_additional_handler(ConformanceProfile::StaticV1, StaticV1ResolveHandler)
+        .with_additional_handler(
+            ConformanceProfile::StaticV1,
+            StaticV1WorkspaceCheckHandler,
+        );
+    let dispatcher = dispatcher
+        .with_handler(ConformanceProfile::InterpreterV1, InterpreterV1Handler)
+        .with_additional_handler(
+            ConformanceProfile::InterpreterV1,
+            InterpreterV1WorkspaceRunHandler,
+        )
+        .with_additional_handler(
+            ConformanceProfile::InterpreterV1,
+            InterpreterV1WorkspaceTestHandler,
+        );
+    let dispatcher = dispatcher
+        .with_handler(ConformanceProfile::ToolingV1, ToolingV1QueryHandler)
+        .with_additional_handler(ConformanceProfile::ToolingV1, ToolingV1FormatHandler)
+        .with_additional_handler(ConformanceProfile::ToolingV1, ToolingV1IndexHandler);
+    let report = ConformanceRunner::new(dispatcher).run(&corpus);
+    assert_eq!(report.failed(), 0, "static project cases must pass");
+    assert_eq!(report.unavailable(), 0);
+}
+
+#[test]
+fn valid_project_observation_keeps_source_identity_and_schema_order() {
+    let corpus = corpus();
+    let case = corpus
+        .cases()
+        .iter()
+        .find(|case| case.manifest().id() == "V1-PROJECT-static-schema-order")
+        .expect("schema-order case");
+    let observation = StaticV1ProjectHandler
+        .run(case)
+        .expect("static project handler");
+    assert!(observation.accepted);
+    assert!(observation.diagnostics.is_empty());
+    let formatted = observation.formatted.expect("canonical observation");
+    assert!(formatted.contains("; project comment"));
+    assert!(
+        formatted.find("format:").expect("format")
+            < formatted.find("package:").expect("package")
+    );
+}
+
+#[derive(Clone, Copy, Debug)]
+struct NeverProjectHandler;
+
+impl ProfileHandler for NeverProjectHandler {
+    fn can_run(&self, _case: &Case) -> bool {
+        false
+    }
+
+    fn run(&self, _case: &Case) -> Result<CaseObservation, HandlerError> {
+        Err(HandlerError::new("the non-project slice must not run"))
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ClaimingProjectHandler;
+
+impl ProfileHandler for ClaimingProjectHandler {
+    fn run(&self, _case: &Case) -> Result<CaseObservation, HandlerError> {
+        Ok(CaseObservation::new(true))
+    }
+}
+
+#[test]
+fn static_project_handler_composes_with_future_static_slices() {
+    let corpus = corpus();
+    let case = corpus
+        .cases()
+        .iter()
+        .find(|case| case.manifest().id() == "V1-PROJECT-static-schema-order")
+        .expect("schema-order case");
+    let dispatcher = ProfileDispatcher::new()
+        .with_handler(ConformanceProfile::StaticV1, StaticV1ProjectHandler)
+        .with_additional_handler(ConformanceProfile::StaticV1, NeverProjectHandler);
+
+    let result = dispatcher.dispatch(case);
+    let DispatchResult::Executed {
+        provided,
+        observation,
+        ..
+    } = result
+    else {
+        panic!("project handler was replaced by the additional static slice");
+    };
+    assert_eq!(provided, ConformanceProfile::StaticV1);
+    assert!(observation.accepted);
+}
+
+#[test]
+fn static_dispatch_rejects_ambiguous_same_profile_handlers() {
+    let corpus = corpus();
+    let case = corpus
+        .cases()
+        .iter()
+        .find(|case| case.manifest().id() == "V1-PROJECT-static-schema-order")
+        .expect("schema-order case");
+    let dispatcher = ProfileDispatcher::new()
+        .with_handler(ConformanceProfile::StaticV1, StaticV1ProjectHandler)
+        .with_additional_handler(ConformanceProfile::StaticV1, ClaimingProjectHandler);
+
+    let result = dispatcher.dispatch(case);
+    let DispatchResult::Failed { error, .. } = result else {
+        panic!("overlapping handlers must be rejected");
+    };
+    assert!(error.message().contains("multiple handlers"));
+}

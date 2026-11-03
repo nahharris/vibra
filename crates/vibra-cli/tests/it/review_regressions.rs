@@ -1,0 +1,327 @@
+//! Actual-binary regressions for the M2 review of PR 295: a relocated
+//! toolchain, human-mode test reports, memory exhaustion by deep recursion,
+//! `help`, an initializer cycle through a closure-valued global, and an entry
+//! result that hides a function.
+
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
+
+use serde_json::Value;
+
+use crate::support::{
+    TempDir, app_target, assert_envelope_schema, manifest, run_in, text,
+};
+
+/// A fresh `project init demo` workspace with `src/demo/main.vib` replaced.
+struct DemoProject {
+    parent: TempDir,
+    root: PathBuf,
+}
+
+impl DemoProject {
+    fn path(&self) -> &Path {
+        &self.root
+    }
+
+    fn write(&self, relative: &str, content: &str) {
+        self.parent.write(&format!("demo/{relative}"), content);
+    }
+}
+
+fn demo_project(label: &str, main: &str) -> DemoProject {
+    let parent = TempDir::new(label);
+    fs::create_dir(parent.path().join("demo")).expect("create destination");
+    let output = vibra(parent.path(), &["project", "init", "demo"]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let project = DemoProject {
+        root: parent.path().join("demo"),
+        parent,
+    };
+    project.write("src/demo/main.vib", main);
+    project
+}
+
+fn vibra(root: &Path, arguments: &[&str]) -> Output {
+    run_in(arguments, root)
+}
+
+fn vibra_at(binary: &Path, root: &Path, arguments: &[&str]) -> Output {
+    Command::new(binary)
+        .current_dir(root)
+        .args(arguments)
+        .output()
+        .expect("run the vibra binary")
+}
+
+fn json(output: &Output, exit: i32, command: &str, result: &str) -> Value {
+    assert_eq!(output.status.code(), Some(exit), "{output:?}");
+    let envelope: Value =
+        serde_json::from_slice(&output.stdout).expect("stdout is one JSON document");
+    assert_envelope_schema(&envelope);
+    assert_eq!(envelope["command"], command);
+    assert_eq!(envelope["result"], result);
+    envelope
+}
+
+const ASSERT_SUITE: &str = "(import assert @std.assert)\n(test \"passes\" (assert.true true))\n(test \"strings\" (assert.equal \"x\" \"y\"))\n(test \"negation\" (assert.false true))\n";
+
+#[test]
+fn a_relocated_binary_verifies_its_embedded_bootstrap() {
+    let installation = TempDir::new("installation");
+    let binary = installation.path().join(
+        Path::new(env!("CARGO_BIN_EXE_vibra"))
+            .file_name()
+            .expect("binary name"),
+    );
+    fs::copy(env!("CARGO_BIN_EXE_vibra"), &binary).expect("copy the built binary");
+    let project = demo_project(
+        "relocated",
+        "(import text @std.text)\n(defn main () void (let - (text.length \"A😀\")) (do))\n",
+    );
+    project.write(
+        "tests/math.vib",
+        "(import assert @std.assert)\n(test \"works\" (assert.equal 2u64 2u64))\n",
+    );
+
+    for arguments in [&["check"][..], &["run", "src/demo"], &["test"]] {
+        let output = vibra_at(&binary, project.path(), arguments);
+        assert_eq!(output.status.code(), Some(0), "{arguments:?}: {output:?}");
+        assert!(output.stderr.is_empty(), "{arguments:?}: {output:?}");
+    }
+    let mut arguments = vec!["--format", "json", "test"];
+    let output = vibra_at(&binary, project.path(), &arguments);
+    let envelope = json(&output, 0, "test", "@command.ok");
+    assert_eq!(envelope["payload"]["passed"], 1);
+    arguments.truncate(2);
+    arguments.extend(["run", "src/demo"]);
+    let output = vibra_at(&binary, project.path(), &arguments);
+    json(&output, 0, "run", "@command.ok");
+}
+
+#[test]
+fn human_test_reports_each_failure_and_a_summary() {
+    let project = demo_project("human-failures", "(defn main () void (do))\n");
+    project.write("tests/t.vib", ASSERT_SUITE);
+
+    let output = vibra(project.path(), &["test"]);
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(
+        text(&output.stdout),
+        "FAIL @tests.t::\"strings\" @test.assertion-failed\n  assertion @std.assert.equal expected=\"x\" actual=\"y\" at tests/t.vib:3:17\nFAIL @tests.t::\"negation\" @test.assertion-failed\n  assertion @std.assert.false expected=false actual=true at tests/t.vib:4:18\ntest suite @command.test-failed: 1 passed, 2 failed, 3 selected\n"
+    );
+    assert!(output.stderr.is_empty(), "{output:?}");
+}
+
+#[test]
+fn human_test_reports_unavailable_items_and_their_diagnostics() {
+    let project = demo_project("human-unavailable", "(defn main () void (do))\n");
+    // A native: declaration outside the embedded standard library is unavailable, and
+    // a test that applies it is unavailable at that reference.
+    project.write(
+        "tests/helpers.vib",
+        "(deffect host\n  visibility: @public\n  (defn call () i32 visibility: @public native: \"audit.call\" 1i32))\n",
+    );
+    project.write(
+        "tests/t.vib",
+        "(import assert @std.assert)\n(import helpers @tests.helpers)\n(test \"generic\" effects: (helpers.host) (let - (helpers.host.call)) (assert.true true))\n",
+    );
+
+    let output = vibra(project.path(), &["test"]);
+
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    assert_eq!(
+        text(&output.stdout),
+        "FAIL @tests.t::\"generic\" @test.unavailable\ntest suite @command.unavailable: 0 passed, 1 failed, 1 selected\n"
+    );
+    assert!(
+        text(&output.stderr).contains("@tool.unavailable"),
+        "{output:?}"
+    );
+}
+
+#[test]
+fn human_test_success_keeps_its_single_line() {
+    let project = demo_project("human-pass", "(defn main () void (do))\n");
+    project.write(
+        "tests/t.vib",
+        "(import assert @std.assert)\n(test \"passes\" (assert.true true))\n",
+    );
+
+    let output = vibra(project.path(), &["test"]);
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(text(&output.stdout), "test suite passed: 1 test(s)\n");
+}
+
+const DEEP_RECURSION: &str =
+    "(defn f () i32 (let v (f)) v)\n(defn main () void (let - (f)) (do))\n";
+
+#[test]
+fn deep_non_tail_recursion_is_an_operational_failure_not_an_abort() {
+    let project = demo_project("deep-recursion", DEEP_RECURSION);
+
+    let human = vibra(project.path(), &["run", "src/demo"]);
+    assert_eq!(human.status.code(), Some(3), "{human:?}");
+    assert!(human.stdout.is_empty(), "{human:?}");
+    assert!(
+        text(&human.stderr).contains("@runtime.memory-exhausted"),
+        "{human:?}"
+    );
+
+    let output = vibra(project.path(), &["--format", "json", "run", "src/demo"]);
+    let envelope = json(&output, 3, "run", "@command.operational-failure");
+    assert_eq!(envelope["payload"]["programResult"], Value::Null);
+    assert_eq!(envelope["payload"]["trap"], Value::Null);
+    assert_eq!(
+        envelope["diagnostics"][0]["code"],
+        "@runtime.memory-exhausted"
+    );
+    assert_eq!(envelope["diagnostics"][0]["primarySpan"]["start"], 0);
+    assert_eq!(envelope["diagnostics"][0]["primarySpan"]["end"], 0);
+    assert_eq!(
+        envelope["diagnostics"][0]["primarySpan"]["sourceId"],
+        Value::Null
+    );
+}
+
+#[test]
+fn deep_non_tail_recursion_in_a_test_stops_the_suite() {
+    let project = demo_project("deep-recursion-test", "(defn main () void (do))\n");
+    project.write(
+        "tests/t.vib",
+        "(import assert @std.assert)\n(defn f () i32 (let v (f)) v)\n(test \"deep\" (assert.equal (f) 0i32))\n",
+    );
+
+    let output = vibra(project.path(), &["--format", "json", "test"]);
+
+    let envelope = json(&output, 3, "test", "@command.operational-failure");
+    assert_eq!(envelope["payload"]["selected"], 0);
+    assert_eq!(envelope["payload"]["tests"], serde_json::json!([]));
+    assert_eq!(
+        envelope["diagnostics"][0]["code"],
+        "@runtime.memory-exhausted"
+    );
+}
+
+/// Non-tail recursion a hundred thousand activations deep, with a base case:
+/// `n + 1` activations are live at the bottom.
+const DEEP_WITH_BASE_CASE: &str = "(defn depth (remaining u64) u64\n  (if (u64.equal remaining 0u64)\n    0u64\n    (match (u64.add-checked (depth (lower remaining)) 1u64)\n      (result.ok total) total\n      (result.err -) 0u64)))\n\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
+
+#[test]
+fn deep_non_tail_recursion_with_a_base_case_completes_in_run_and_in_test() {
+    let project = demo_project(
+        "deep-recursion-completes",
+        &format!(
+            "{DEEP_WITH_BASE_CASE}\n(defn main () void (let - (depth 100000u64)) (do))\n"
+        ),
+    );
+
+    let output = vibra(project.path(), &["--format", "json", "run", "src/demo"]);
+    let envelope = json(&output, 0, "run", "@command.ok");
+    assert_eq!(
+        envelope["payload"]["programResult"],
+        "(record type: @void value: void)\n"
+    );
+    assert_eq!(envelope["payload"]["trap"], Value::Null);
+
+    project.write(
+        "tests/t.vib",
+        &format!(
+            "(import assert @std.assert)\n{DEEP_WITH_BASE_CASE}\n(test \"deep\" (assert.equal (depth 100000u64) 100000u64))\n"
+        ),
+    );
+    let output = vibra(project.path(), &["--format", "json", "test"]);
+    let envelope = json(&output, 0, "test", "@command.ok");
+    assert_eq!(envelope["payload"]["selected"], 1);
+    assert_eq!(envelope["payload"]["passed"], 1);
+}
+
+#[test]
+fn help_prints_the_closed_grammar() {
+    let directory = TempDir::new("help");
+    for spelling in ["help", "--help", "-h"] {
+        let output = vibra(directory.path(), &[spelling]);
+        assert_eq!(output.status.code(), Some(0), "{spelling}: {output:?}");
+        let usage = text(&output.stdout);
+        assert!(usage.starts_with("usage:\n"), "{usage}");
+        assert!(usage.contains("test [TEST]"), "{usage}");
+        assert!(output.stderr.is_empty());
+    }
+    let output = vibra(directory.path(), &["--format", "json", "--help"]);
+    let envelope = json(&output, 0, "help", "@command.ok");
+    assert!(
+        envelope["payload"]["usage"]
+            .as_str()
+            .is_some_and(|usage| usage.contains("project init [DEST]"))
+    );
+
+    let output = vibra(directory.path(), &["--format", "json", "help", "run"]);
+    json(&output, 2, "invalid", "@command.invalid-input");
+    let output = vibra(directory.path(), &[]);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert!(text(&output.stderr).contains("vibra help"), "{output:?}");
+}
+
+#[test]
+fn an_initializer_cycle_through_a_closure_global_is_rejected_before_running() {
+    let project = demo_project(
+        "closure-cycle",
+        "(def h (fn () i32) (lambda () i32 x))\n(def x i32 (h))\n(defn main () void (let - x) (do))\n",
+    );
+
+    for command in [&["check"][..], &["run", "src/demo"]] {
+        let mut arguments = vec!["--format", "json"];
+        arguments.extend_from_slice(command);
+        let output = vibra(project.path(), &arguments);
+        let envelope = json(&output, 1, command[0], "@command.diagnostics");
+        assert_eq!(
+            envelope["diagnostics"][0]["code"],
+            "@type.initializer-cycle"
+        );
+        assert_eq!(envelope["diagnostics"][0]["primarySpan"]["start"], 38);
+        if command[0] == "run" {
+            assert_eq!(envelope["payload"]["programResult"], Value::Null);
+        }
+    }
+}
+
+/// A function hidden behind `any` in the entry's result has no encoding to
+/// report: `run` ends with a coded trap, not an interpreter invariant
+/// failure (`docs/spec/06-runtime.md`, "Traps"). The deeply nested entry result
+/// is `an_error_nested_five_thousand_deep_is_reported_whole` of `entry_outcomes`.
+#[test]
+fn an_entry_result_hiding_a_function_is_a_coded_trap() {
+    let project = TempDir::project(
+        "hidden-function",
+        &manifest("demo", &app_target("execute", ""), "(dict)"),
+        &[(
+            "src/app/main.vib",
+            "(defn inc (x i32) i32 x)\n\n(defn execute () (result void any) (result.err inc))\n",
+        )],
+    );
+    let output = crate::support::vibra()
+        .args(["--format", "json", "--workspace"])
+        .arg(project.path())
+        .args(["run", "src/app"])
+        .output()
+        .expect("vibra binary");
+    assert_eq!(output.status.code(), Some(5), "{output:?}");
+    assert!(
+        !String::from_utf8_lossy(&output.stderr).contains("invariant"),
+        "{output:?}"
+    );
+    let envelope: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("json envelope");
+    assert_eq!(envelope["result"], "@command.trap");
+    assert_eq!(
+        envelope["diagnostics"][0]["code"],
+        "@runtime.unobservable-function"
+    );
+    assert_eq!(
+        envelope["payload"]["trap"]["trapCode"],
+        "@runtime.unobservable-function"
+    );
+    assert!(envelope["payload"]["trap"]["origin"].is_null());
+}

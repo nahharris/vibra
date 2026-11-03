@@ -35,12 +35,13 @@ pub use ast::{
     EffectReference, EffectRow, EffectRowOrder, Expression, ExpressionKind,
     FunctionAttributes, FunctionDeclaration, FunctionType, GenericBinding,
     ImplDeclaration, ImportDeclaration, LabelledDefault, LabelledParameter,
-    LambdaExpression, LetBinding, MatchArm, PRELUDE_VALUES, Parameter, Pattern,
-    PatternArgument, PatternKind, RawNode, SourceAst, SourceDecode, TestDeclaration,
-    TypeAttributes, TypeExpr, TypeField, TypeMember, TypeSlot, VariadicBinding,
-    VariadicParameter, VariadicType, contains_declaration_head, decode_source_root,
-    is_prelude_type_spelling, is_prelude_value_spelling, is_reserved_binder_spelling,
-    is_reserved_value_spelling, is_vocabulary_name,
+    LambdaExpression, LetBinding, MatchArm, PRELUDE_VALUES, PRIMITIVE_TYPES, Parameter,
+    Pattern, PatternArgument, PatternKind, PrimitiveClass, RawNode, SourceAst,
+    SourceDecode, TestDeclaration, TypeAttributes, TypeExpr, TypeField, TypeMember,
+    TypeSlot, VariadicBinding, VariadicParameter, VariadicType,
+    contains_declaration_head, decode_source_root, is_prelude_type_spelling,
+    is_prelude_value_spelling, is_primitive_type_name, is_reserved_binder_spelling,
+    is_reserved_value_spelling, is_vocabulary_name, primitive_class,
 };
 pub use data::{
     AtomRole, DataDecode, DataField, DataNode, DataValue, TypedDataSchema,
@@ -49,8 +50,8 @@ pub use data::{
 pub use literal::{
     BooleanLiteral, CharacterLiteral, FloatLiteral, FloatSuffix, IntegerLiteral,
     IntegerSuffix, InvalidLiteralKind, Literal, LiteralClassification, LiteralKind,
-    StringLiteral, VoidLiteral, canonical_character_spelling, classify,
-    classify_literal,
+    StringLiteral, VoidLiteral, canonical_character_spelling,
+    canonical_string_spelling, classify, classify_literal,
 };
 pub use name::{Name, NameClassification, NameKind, classify_name};
 pub use query::{

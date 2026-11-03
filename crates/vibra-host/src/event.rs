@@ -22,6 +22,7 @@ use std::path::Path;
 
 use serde_json::{Map, Value};
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
+use vibra_ir::{canonical_array, canonical_string, vocabulary};
 use vibra_syntax::{DataNode, DataValue, Literal, canonical_data, parse_data};
 
 use crate::operation::{HostCall, HostOk, HostReply};
@@ -84,8 +85,8 @@ impl AuditEvent {
         match self {
             Self::Host(event) => format!(
                 "(record kind: @host op: {} args: {} result: {})",
-                quote(&event.op),
-                array(&event.args),
+                canonical_string(&event.op),
+                canonical_array(&event.args),
                 event.result
             ),
             Self::Opaque(event) => {
@@ -190,14 +191,6 @@ impl AuditEvent {
         let root = read_document(source_id, text)?;
         decode_event(source_id, &root).map_err(|diagnostic| vec![*diagnostic])
     }
-
-    /// Decodes an event from a decoded VIBON value, reporting a violation at it.
-    pub fn from_data(
-        source_id: &str,
-        node: &DataNode,
-    ) -> Result<Self, Box<Diagnostic>> {
-        decode_event(source_id, node)
-    }
 }
 
 /// The text of the audit trace record of `events`.
@@ -206,7 +199,7 @@ pub fn trace_to_vibon(events: &[AuditEvent]) -> String {
     let events = events.iter().map(AuditEvent::to_vibon).collect::<Vec<_>>();
     format!(
         "(record format: @{TRACE_FORMAT} events: {})",
-        array(&events)
+        canonical_array(&events)
     )
 }
 
@@ -355,46 +348,18 @@ fn decode_event(
 
 // --- canonical encodings of the values of the registry -----------------------
 
-fn quote(text: &str) -> String {
-    let mut output = String::with_capacity(text.len().saturating_add(2));
-    output.push('"');
-    for character in text.chars() {
-        match character {
-            '\\' => output.push_str("\\\\"),
-            '"' => output.push_str("\\\""),
-            '\n' => output.push_str("\\n"),
-            '\r' => output.push_str("\\r"),
-            '\t' => output.push_str("\\t"),
-            control if control <= '\u{1f}' || control == '\u{7f}' => {
-                output.push_str(&format!("\\u{{{:x}}}", u32::from(control)));
-            }
-            character => output.push(character),
-        }
-    }
-    output.push('"');
-    output
-}
-
-fn array(items: &[String]) -> String {
-    if items.is_empty() {
-        "(array)".to_owned()
-    } else {
-        format!("(array {})", items.join(" "))
-    }
-}
-
 fn bytes(bytes: &[u8]) -> String {
     let values = bytes
         .iter()
         .map(|byte| format!("{byte}u8"))
         .collect::<Vec<_>>();
-    format!("(record kind: @bytes values: {})", array(&values))
+    format!("(record kind: @bytes values: {})", canonical_array(&values))
 }
 
 fn path(text: &str) -> String {
     format!(
         "(record kind: @wrapper type: @std.fs.path value: {})",
-        quote(text)
+        canonical_string(text)
     )
 }
 
@@ -414,8 +379,11 @@ fn enum_value(
 }
 
 fn strings(items: &[String]) -> String {
-    let values = items.iter().map(|item| quote(item)).collect::<Vec<_>>();
-    format!("(record kind: @array values: {})", array(&values))
+    let values = items
+        .iter()
+        .map(|item| canonical_string(item))
+        .collect::<Vec<_>>();
+    format!("(record kind: @array values: {})", canonical_array(&values))
 }
 
 /// The canonical encoding of each argument of `call`, in parameter order.
@@ -428,7 +396,7 @@ fn call_arguments(call: &HostCall) -> Vec<String> {
         | HostCall::NowMonotonic => Vec::new(),
         HostCall::StdoutText(value)
         | HostCall::StderrText(value)
-        | HostCall::EnvVar(value) => vec![quote(value)],
+        | HostCall::EnvVar(value) => vec![canonical_string(value)],
         HostCall::StdoutBytes(value) | HostCall::StderrBytes(value) => {
             vec![bytes(value)]
         }
@@ -437,7 +405,7 @@ fn call_arguments(call: &HostCall) -> Vec<String> {
         | HostCall::ReadEntries(at)
         | HostCall::Stat(at) => vec![path(at)],
         HostCall::WriteFile(at, contents) => vec![path(at), bytes(contents)],
-        HostCall::WriteText(at, contents) => vec![path(at), quote(contents)],
+        HostCall::WriteText(at, contents) => vec![path(at), canonical_string(contents)],
         HostCall::RandomBytes(count) => vec![format!("{count}u64")],
     }
 }
@@ -448,7 +416,7 @@ fn encode_reply(reply: &HostReply) -> String {
         Ok(ok) => {
             let payload = match ok {
                 HostOk::Void => None,
-                HostOk::Text(text) => Some(quote(text)),
+                HostOk::Text(text) => Some(canonical_string(text)),
                 HostOk::Bytes(value) => Some(bytes(value)),
                 HostOk::Entries(names) => Some(strings(names)),
                 HostOk::Metadata(metadata) => Some(format!(
@@ -459,13 +427,13 @@ fn encode_reply(reply: &HostReply) -> String {
                 HostOk::Integer(value) => Some(format!("{value}i64")),
                 HostOk::Count(value) => Some(format!("{value}u64")),
             };
-            enum_value("std.result", "result", "ok", payload.as_deref())
+            enum_value("std.result", "result", vocabulary::OK, payload.as_deref())
         }
         Err(error) => {
             let ty = error.error_type();
             let payload =
                 enum_value(ty.module(), ty.name(), error.variant_name(), None);
-            enum_value("std.result", "result", "err", Some(&payload))
+            enum_value("std.result", "result", vocabulary::ERR, Some(&payload))
         }
     }
 }

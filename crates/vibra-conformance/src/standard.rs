@@ -7,7 +7,7 @@ use crate::project::StaticV1ProjectHandler;
 use crate::reader::ReaderV1Handler;
 use crate::resolve::StaticV1ResolveHandler;
 use crate::runner::ProfileDispatcher;
-use crate::types::{InterpreterV1Handler, StaticV1TypeHandler};
+use crate::types::InterpreterV1Handler;
 use crate::workspace_index::ToolingV1IndexHandler;
 use crate::workspace_query::ToolingV1QueryHandler;
 use crate::workspace_semantic::{
@@ -20,9 +20,9 @@ use crate::workspace_semantic::{
 /// The `interpreter-v1` handlers also run the WebAssembly backend on each
 /// accepted executable case, because both backends receive the one checked
 /// program (`docs/spec/07-diagnostics-and-conformance.md`, "Differential
-/// execution"). The `vibra-conformance` binary and the host tests that hold the
-/// corpus to the parity inventory build the same dispatcher, so the two cannot
-/// disagree about which handlers exist.
+/// execution"). The `vibra-conformance` binary and the host tests that run the
+/// corpus build the same dispatcher, so the two cannot disagree about which
+/// handlers exist.
 #[must_use]
 pub fn standard_dispatcher() -> ProfileDispatcher {
     ProfileDispatcher::new()
@@ -33,7 +33,6 @@ pub fn standard_dispatcher() -> ProfileDispatcher {
             StaticV1SourceGraphHandler,
         )
         .with_additional_handler(ConformanceProfile::StaticV1, StaticV1ResolveHandler)
-        .with_additional_handler(ConformanceProfile::StaticV1, StaticV1TypeHandler)
         .with_additional_handler(
             ConformanceProfile::StaticV1,
             StaticV1WorkspaceCheckHandler,

@@ -1,0 +1,405 @@
+//! Process-level command contract tests for M2 Step 13.
+
+use std::fs;
+use std::process::Output;
+
+use serde_json::Value;
+
+use crate::support::{
+    TempDir, app_target, assert_envelope_schema, json, manifest, vibra,
+};
+
+/// A project whose binary target compiles, plus the `tests` sources.
+fn test_project(label: &str, tests: &[(&str, &str)]) -> TempDir {
+    let mut sources = vec![("src/app/main.vib", "(defn execute () void void)\n")];
+    sources.extend_from_slice(tests);
+    TempDir::project(
+        label,
+        &manifest("demo", &app_target("execute", ""), "(dict)"),
+        &sources,
+    )
+}
+
+fn run(project: &TempDir, arguments: &[&str]) -> Output {
+    let mut command = Vec::with_capacity(arguments.len().saturating_add(1));
+    command.push("test");
+    command.extend_from_slice(arguments);
+    run_command(project, &command)
+}
+
+fn run_command(project: &TempDir, arguments: &[&str]) -> Output {
+    let workspace = project.path().to_string_lossy().into_owned();
+    vibra()
+        .args(["--format", "json", "--workspace", &workspace])
+        .args(arguments)
+        .output()
+        .expect("run the built vibra binary")
+}
+
+#[test]
+fn test_runs_a_passing_test_and_emits_the_closed_json_item() {
+    let project = test_project(
+        "passing",
+        &[(
+            "tests/math.vib",
+            "(import assert @std.assert)\n(test \"works\" (assert.true true))\n",
+        )],
+    );
+
+    let output = run(&project, &[]);
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert!(output.stderr.is_empty());
+    let envelope = json(&output);
+    assert_envelope_schema(&envelope);
+    assert_eq!(envelope["command"], "test");
+    assert_eq!(envelope["result"], "@command.ok");
+    assert_eq!(envelope["diagnostics"], serde_json::json!([]));
+    assert_eq!(envelope["payload"]["selected"], 1);
+    assert_eq!(envelope["payload"]["passed"], 1);
+    assert_eq!(envelope["payload"]["failed"], 0);
+    assert_eq!(
+        envelope["payload"]["tests"][0],
+        serde_json::json!({
+            "name": "@tests.math::\"works\"",
+            "result": "@test.passed",
+            "failure": null,
+            "trap": null,
+            "auditTrace": [],
+            "diagnostics": []
+        })
+    );
+}
+
+#[test]
+fn failed_assertion_is_a_structured_test_failure_and_exit_one() {
+    let project = test_project(
+        "assertion-failure",
+        &[(
+            "tests/math.vib",
+            "(import assert @std.assert)\n(test \"fails\" (assert.equal 4i32 5i32))\n",
+        )],
+    );
+
+    let output = run(&project, &[]);
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let envelope = json(&output);
+    assert_envelope_schema(&envelope);
+    assert_eq!(envelope["result"], "@command.test-failed");
+    assert_eq!(envelope["payload"]["passed"], 0);
+    assert_eq!(envelope["payload"]["failed"], 1);
+    let item = &envelope["payload"]["tests"][0];
+    assert_eq!(item["result"], "@test.assertion-failed");
+    assert_eq!(item["failure"]["assertion"], "@std.assert.equal");
+    assert_eq!(item["failure"]["expected"], "4i32");
+    assert_eq!(item["failure"]["actual"], "5i32");
+    assert_eq!(item["failure"]["primarySpan"]["sourceId"], "tests/math.vib");
+    assert_eq!(item["trap"], Value::Null);
+    assert_eq!(item["auditTrace"], serde_json::json!([]));
+}
+
+#[test]
+fn missing_assertion_import_is_static_diagnostics_not_unavailable() {
+    let project = test_project(
+        "missing-import",
+        &[("tests/math.vib", "(test \"missing-import\" void)\n")],
+    );
+
+    let output = run(&project, &[]);
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let envelope = json(&output);
+    assert_envelope_schema(&envelope);
+    assert_eq!(envelope["result"], "@command.diagnostics");
+    assert_eq!(envelope["payload"]["tests"][0]["result"], "@test.invalid");
+    assert!(
+        envelope["diagnostics"]
+            .as_array()
+            .is_some_and(|diagnostics| {
+                diagnostics.iter().any(|diagnostic| {
+                    diagnostic["code"] == "@module.missing-required-import"
+                })
+            })
+    );
+}
+
+#[test]
+fn unavailable_test_form_stays_distinct_from_failure() {
+    let project = test_project(
+        "unavailable-assertion",
+        &[
+            (
+                "tests/helpers.vib",
+                "(deffect host\n  visibility: @public\n  (defn call () i32 visibility: @public native: \"audit.call\" 1i32))\n",
+            ),
+            (
+                "tests/math.vib",
+                "(import assert @std.assert)\n(import helpers @tests.helpers)\n(test \"generic\" effects: (helpers.host) (let - (helpers.host.call)) (assert.true true))\n",
+            ),
+        ],
+    );
+
+    let output = run(&project, &[]);
+
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    let envelope = json(&output);
+    assert_envelope_schema(&envelope);
+    assert_eq!(envelope["result"], "@command.unavailable");
+    assert_eq!(
+        envelope["payload"]["tests"][0]["result"],
+        "@test.unavailable"
+    );
+}
+
+#[test]
+fn selector_must_be_canonical_and_unknown_selector_is_invalid_input() {
+    let project = test_project(
+        "selector",
+        &[(
+            "tests/math.vib",
+            "(import assert @std.assert)\n(test \"works\" (assert.true true))\n",
+        )],
+    );
+
+    for selector in ["@tests.math::works", "@tests.math::\"missing\""] {
+        let output = run(&project, &[selector]);
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "selector {selector}: {output:?}"
+        );
+        let envelope = json(&output);
+        assert_envelope_schema(&envelope);
+        assert_eq!(envelope["result"], "@command.invalid-input");
+        assert_eq!(envelope["diagnostics"], serde_json::json!([]));
+    }
+}
+
+#[test]
+fn canonical_selector_runs_only_its_exact_test() {
+    let project = test_project(
+        "selector-exact",
+        &[(
+            "tests/math.vib",
+            "(import assert @std.assert)\n(test \"selected\" (assert.true true))\n(test \"not-selected\" (assert.false true))\n",
+        )],
+    );
+
+    let output = run(&project, &["@tests.math::\"selected\""]);
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let envelope = json(&output);
+    assert_envelope_schema(&envelope);
+    assert_eq!(envelope["result"], "@command.ok");
+    assert_eq!(envelope["payload"]["selected"], 1);
+    assert_eq!(envelope["payload"]["passed"], 1);
+    assert_eq!(
+        envelope["payload"]["tests"][0]["name"],
+        "@tests.math::\"selected\""
+    );
+}
+
+#[test]
+fn project_diagnostics_precede_an_unknown_selector_lookup() {
+    let project = test_project("selector-precedence", &[]);
+    fs::write(
+        project.path().join("project.vibon"),
+        "(record format: @project.v1 package: (record name: \"demo\") targets: (array) dependencies: (dict))\n",
+    )
+    .expect("write a project with a schema diagnostic");
+
+    let output = run(&project, &["@tests.math::\"missing\""]);
+
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    let envelope = json(&output);
+    assert_envelope_schema(&envelope);
+    assert_eq!(envelope["result"], "@command.diagnostics");
+    assert_eq!(envelope["payload"]["selected"], 0);
+    assert_eq!(envelope["payload"]["tests"], serde_json::json!([]));
+    assert!(
+        !envelope["diagnostics"]
+            .as_array()
+            .expect("diagnostics")
+            .is_empty()
+    );
+}
+
+#[test]
+fn discovered_modules_and_tests_use_canonical_process_order() {
+    let project = test_project(
+        "deterministic-order",
+        &[
+            (
+                "tests/z.vib",
+                "(import assert @std.assert)\n(test \"z\" (assert.true true))\n",
+            ),
+            (
+                "tests/a.vib",
+                "(import assert @std.assert)\n(test \"a-first\" (assert.true true))\n(test \"a-second\" (assert.true true))\n",
+            ),
+        ],
+    );
+
+    let output = run(&project, &[]);
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let envelope = json(&output);
+    assert_envelope_schema(&envelope);
+    let names = envelope["payload"]["tests"]
+        .as_array()
+        .expect("test records")
+        .iter()
+        .map(|item| item["name"].as_str().expect("canonical selector"))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        names,
+        [
+            "@tests.a::\"a-first\"",
+            "@tests.a::\"a-second\"",
+            "@tests.z::\"z\"",
+        ]
+    );
+}
+
+#[test]
+fn omitted_selector_accepts_an_empty_test_suite() {
+    let project = test_project("empty-suite", &[]);
+
+    let output = run(&project, &[]);
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let envelope = json(&output);
+    assert_envelope_schema(&envelope);
+    assert_eq!(envelope["result"], "@command.ok");
+    assert_eq!(
+        envelope["payload"],
+        serde_json::json!({
+            "selected": 0,
+            "passed": 0,
+            "failed": 0,
+            "tests": []
+        })
+    );
+}
+
+#[test]
+fn warnings_are_attributed_to_passing_items_without_blocking_execution() {
+    let project = test_project(
+        "warning-attribution",
+        &[(
+            "tests/math.vib",
+            "(import assert @std.assert)\n(defn choose (fallback i32) i32 labelled: (first i32 7i32 second i32 8i32) first)\n(test \"warning-still-runs\" (assert.equal (choose 3i32 second: 11i32 first: 9i32) 9i32))\n",
+        )],
+    );
+
+    let output = run(&project, &[]);
+
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    let envelope = json(&output);
+    assert_envelope_schema(&envelope);
+    assert_eq!(envelope["result"], "@command.ok");
+    assert!(
+        envelope["diagnostics"]
+            .as_array()
+            .is_some_and(|diagnostics| {
+                diagnostics.iter().any(|diagnostic| {
+                    diagnostic["code"] == "@style.argument-order"
+                        && diagnostic["level"] == "@warning"
+                })
+            })
+    );
+    assert!(
+        envelope["payload"]["tests"][0]["diagnostics"]
+            .as_array()
+            .is_some_and(|diagnostics| diagnostics.iter().any(|diagnostic| {
+                diagnostic["code"] == "@style.argument-order"
+                    && diagnostic["level"] == "@warning"
+            }))
+    );
+    assert_eq!(
+        envelope["payload"]["tests"][0]["auditTrace"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
+fn unavailability_takes_precedence_over_assertion_failure() {
+    let project = test_project(
+        "unavailable-precedence",
+        &[
+            (
+                "tests/helpers.vib",
+                "(deffect host\n  visibility: @public\n  (defn call () i32 visibility: @public native: \"audit.call\" 1i32))\n",
+            ),
+            (
+                "tests/math.vib",
+                "(import assert @std.assert)\n(import helpers @tests.helpers)\n(test \"fails\" (assert.false true))\n(test \"unavailable\" effects: (helpers.host) (let - (helpers.host.call)) (assert.true true))\n",
+            ),
+        ],
+    );
+
+    let output = run(&project, &[]);
+
+    assert_eq!(output.status.code(), Some(4), "{output:?}");
+    let envelope = json(&output);
+    assert_envelope_schema(&envelope);
+    assert_eq!(envelope["result"], "@command.unavailable");
+    assert_eq!(envelope["payload"]["selected"], 2);
+    assert_eq!(envelope["payload"]["passed"], 0);
+    assert_eq!(envelope["payload"]["failed"], 2);
+    assert_eq!(
+        envelope["payload"]["tests"][0]["result"],
+        "@test.assertion-failed"
+    );
+    assert_eq!(
+        envelope["payload"]["tests"][1]["result"],
+        "@test.unavailable"
+    );
+}
+
+#[test]
+fn reserved_v1_commands_are_unavailable_and_unknown_names_are_invalid() {
+    let project = test_project("reserved-commands", &[]);
+    let commands: &[&[&str]] = &[
+        &["lint"],
+        &["build", "src/app"],
+        &["query", "@workspace"],
+        &["edit", "fix"],
+        &["mcp"],
+        &["project", "inspect"],
+        &["project", "add"],
+        &["project", "remove"],
+        &["project", "sync"],
+    ];
+
+    for arguments in commands {
+        let output = run_command(&project, arguments);
+
+        assert_eq!(output.status.code(), Some(4), "{arguments:?}: {output:?}");
+        let envelope = json(&output);
+        assert_envelope_schema(&envelope);
+        let expected_command = if arguments[0] == "project" {
+            arguments[1]
+        } else {
+            arguments[0]
+        };
+        assert_eq!(envelope["command"], expected_command);
+        assert_eq!(envelope["result"], "@command.unavailable");
+        assert_eq!(
+            envelope["diagnostics"][0]["code"], "@tool.unavailable",
+            "{arguments:?}"
+        );
+        assert_eq!(envelope["diagnostics"][0]["level"], "@error");
+        assert_eq!(envelope["diagnostics"][0]["span"], Value::Null);
+    }
+
+    let unknown = run_command(&project, &["unknown-command"]);
+
+    assert_eq!(unknown.status.code(), Some(2), "{unknown:?}");
+    let envelope = json(&unknown);
+    assert_envelope_schema(&envelope);
+    assert_eq!(envelope["command"], "invalid");
+    assert_eq!(envelope["result"], "@command.invalid-input");
+    assert_eq!(envelope["diagnostics"], serde_json::json!([]));
+}

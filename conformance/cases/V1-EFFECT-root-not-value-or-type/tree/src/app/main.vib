@@ -1,0 +1,4 @@
+(deffect marker
+  (defn mark () i32 1i32))
+
+(defn as-type (value marker) void (do))

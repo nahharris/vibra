@@ -1,11 +1,12 @@
 id = "V1-TYPE-GENERIC-infinite-size"
 rule = "V1-TYPE-GENERIC"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "An applied type counts toward size through the parameters its declaration stores directly, but not through a function."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,19 +14,19 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.infinite-size"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [0, 62]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [30, 43]
 
 [[expect.diagnostics]]
 code = "@type.infinite-size"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [116, 163]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [140, 161]

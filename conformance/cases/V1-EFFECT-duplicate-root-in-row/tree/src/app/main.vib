@@ -1,0 +1,19 @@
+(deffect write
+  (defn text (target str) void (do)))
+
+(defn twice (target str) void
+  effects: (write write)
+  (write.text target))
+
+(defn typed (callback (fn (str) void effects: (write write))) void (do))
+
+(deffect more
+  (defn g () void effects: (write write) (write.text "a")))
+
+(defn in-result () (fn () void effects: (write write))
+  (lambda () void effects: (write) (write.text "a")))
+
+(defn in-lambda () void
+  effects: (write)
+  (let - (lambda () void effects: (write write) (write.text "a")))
+  (write.text "a"))

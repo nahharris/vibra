@@ -1,11 +1,12 @@
 id = "V1-TYPE-CONVERT-ascription-constructor-components"
 rule = "V1-TYPE-CONVERT"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "An anonymous constructor under as checks each component at the target component type, so a component of another type is the failed ascription; without as it is an ordinary mismatch at the component."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,17 +14,17 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.invalid-ascription"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [32, 72]
 
 [[expect.diagnostics]]
 code = "@type.invalid-ascription"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [107, 144]
 
 [[expect.diagnostics]]
 code = "@type.mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [194, 198]

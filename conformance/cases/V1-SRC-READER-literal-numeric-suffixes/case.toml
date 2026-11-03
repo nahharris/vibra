@@ -1,7 +1,7 @@
 id = "V1-SRC-READER-literal-numeric-suffixes"
 rule = "V1-SRC-READER"
 profile = "reader-v1"
-description = "All fixed-width numeric suffixes and unbounded lexical spellings are retained exactly."
+description = "All fixed-width numeric suffixes and unbounded lexical spellings are retained exactly. Leading and trailing zeros are kept."
 
 [inputs]
 source = "input.vib"

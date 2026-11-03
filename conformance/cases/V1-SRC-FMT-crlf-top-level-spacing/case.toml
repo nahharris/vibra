@@ -1,0 +1,11 @@
+id = "V1-SRC-FMT-crlf-top-level-spacing"
+rule = "V1-SRC-FMT"
+profile = "reader-v1"
+description = "CRLF endings become LF, a single line break between top-level forms becomes one blank line, and trailing spaces and trailing blank lines at the end of the file are dropped."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+formatted = "formatted.vib"

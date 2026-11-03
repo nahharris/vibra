@@ -13,7 +13,7 @@
       wasm:
       (record
         module-bytes:
-        104531u64
+        104656u64
         allocations:
         300015u64
         peak-live-bytes:
@@ -28,7 +28,7 @@
       wasm:
       (record
         module-bytes:
-        104531u64
+        104656u64
         allocations:
         300349u64
         peak-live-bytes:
@@ -43,7 +43,7 @@
       wasm:
       (record
         module-bytes:
-        5425u64
+        7775u64
         allocations:
         302703u64
         peak-live-bytes:
@@ -58,7 +58,7 @@
       wasm:
       (record
         module-bytes:
-        5668u64
+        8018u64
         allocations:
         3000003u64
         peak-live-bytes:
@@ -73,7 +73,7 @@
       wasm:
       (record
         module-bytes:
-        35469u64
+        37819u64
         allocations:
         4008u64
         peak-live-bytes:
@@ -88,7 +88,7 @@
       wasm:
       (record
         module-bytes:
-        145990u64
+        148340u64
         allocations:
         212u64
         peak-live-bytes:
@@ -103,7 +103,7 @@
       wasm:
       (record
         module-bytes:
-        5586u64
+        56504u64
         allocations:
         8004u64
         peak-live-bytes:
@@ -118,7 +118,7 @@
       wasm:
       (record
         module-bytes:
-        7062u64
+        57746u64
         allocations:
         4003u64
         peak-live-bytes:
@@ -148,13 +148,13 @@
       wasm:
       (record
         module-bytes:
-        65490u64
+        65640u64
         allocations:
         38u64
         peak-live-bytes:
         17312u64
         fuel:
-        17845u64)))
+        18111u64)))
   informational:
   (record
     environment:

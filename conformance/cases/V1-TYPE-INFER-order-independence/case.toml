@@ -1,11 +1,12 @@
 id = "V1-TYPE-INFER-order-independence"
 rule = "V1-TYPE-INFER"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "No sibling fixes a widening or a destination: match arms are checked like if branches, a parameter type fixed by another operand is inferred and not written, and an unsuffixed literal cannot choose among conversion sources. Each rejection holds in either order."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,65 +14,65 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [228, 232]
 
 [[expect.diagnostics]]
 code = "@type.mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [319, 327]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [402, 406]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [470, 486]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [559, 563]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [628, 641]
 
 [[expect.diagnostics]]
 code = "@type.ambiguous-destination"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [732, 750]
 
 [[expect.diagnostics]]
 code = "@type.ambiguous-destination"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [817, 835]
 
 [[expect.diagnostics]]
 code = "@type.ambiguous-destination"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [898, 916]
 
 [[expect.diagnostics]]
 code = "@type.ambiguous-implementation"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [968, 984]
 
 [[expect.diagnostics]]
 code = "@type.ambiguous-implementation"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [1019, 1036]

@@ -1249,7 +1249,7 @@ impl TypeNames {
         match value {
             TypeExpr::Void => Ok(Type::Void),
             TypeExpr::Name(name) => {
-                if let Some(primitive) = primitive_type(name.value()) {
+                if let Some(primitive) = Type::primitive(name.value()) {
                     return Ok(primitive);
                 }
                 if name.value() == "self" {
@@ -1940,29 +1940,6 @@ fn member_span(declaration: &DeftypeDeclaration, member: &str) -> Option<ByteSpa
         DeftypeBody::Type(_) => Some(declaration.body_span()),
         DeftypeBody::Intrinsic(_) => None,
     }
-}
-
-/// The IR type of a primitive type name.
-pub(crate) fn primitive_type(name: &str) -> Option<Type> {
-    Some(match name {
-        "bool" => Type::Bool,
-        "char" => Type::Char,
-        "str" => Type::Str,
-        "bytes" => Type::Bytes,
-        "never" => Type::Never,
-        "atom" => Type::Atom,
-        "i8" => Type::I8,
-        "i16" => Type::I16,
-        "i32" => Type::I32,
-        "i64" => Type::I64,
-        "u8" => Type::U8,
-        "u16" => Type::U16,
-        "u32" => Type::U32,
-        "u64" => Type::U64,
-        "f32" => Type::F32,
-        "f64" => Type::F64,
-        _ => return None,
-    })
 }
 
 /// Reports a lowering failure at the owning `span`.

@@ -40,38 +40,6 @@ fn program(assertion: TestAssertion, operands: Vec<Value>) -> CheckedProgram {
 }
 
 #[test]
-fn passing_assertion_is_a_void_test_completion() {
-    let execution = Interpreter::run_test(&program(
-        TestAssertion::Equal,
-        vec![Value::I32(7), Value::I32(7)],
-    ))
-    .expect("test execution");
-
-    assert!(execution.assertion_failure().is_none());
-    assert!(execution.audit_trace().is_empty());
-}
-
-#[test]
-fn false_assertion_is_structured_and_carries_the_call_origin() {
-    let execution = Interpreter::run_test(&program(
-        TestAssertion::Equal,
-        vec![
-            Value::Str("expected".to_owned()),
-            Value::Str("actual".to_owned()),
-        ],
-    ))
-    .expect("test execution");
-    let failure = execution.assertion_failure().expect("assertion failure");
-
-    assert_eq!(failure.assertion(), "@std.assert.equal");
-    assert_eq!(failure.expected(), "\"expected\"");
-    assert_eq!(failure.actual(), "\"actual\"");
-    assert_eq!(failure.origin().source_id(), "tests/assertions.vib");
-    assert_eq!(failure.origin().span(), ByteSpan::new(10, 25));
-    assert!(execution.audit_trace().is_empty());
-}
-
-#[test]
 fn ordinary_run_rejects_invoking_test_assertions() {
     let checked = program(TestAssertion::True, vec![Value::Bool(true)]);
 

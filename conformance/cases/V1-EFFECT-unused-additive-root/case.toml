@@ -1,0 +1,32 @@
+id = "V1-EFFECT-unused-additive-root"
+rule = "V1-EFFECT"
+profile = "static-v1"
+operation = "workspace-check"
+description = "An unused additive root of an operation is a warning at that entry and still reaches callers: the caller of an operation whose body performs nothing still performs the owner root and the additive root."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = false
+
+[[expect.diagnostics]]
+code = "@contract.unused-effect"
+level = "@warning"
+source = "src/app/main.vib"
+span = [102, 107]
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "src/app/main.vib"
+span = [138, 152]
+notes = ["performs @app.main.lazy via @app.main.lazy.nothing"]
+
+[[expect.diagnostics]]
+code = "@effect.outside-ceiling"
+level = "@error"
+source = "src/app/main.vib"
+span = [138, 152]
+notes = ["performs @app.main.write via @app.main.lazy.nothing"]

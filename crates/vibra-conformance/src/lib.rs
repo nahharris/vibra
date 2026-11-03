@@ -13,26 +13,22 @@
 //! such as the dependency-direction test in `tests/`, which no single
 //! language crate can check from the inside.
 //!
-//! # Status
+//! # Handlers
 //!
-//! Milestone 1 step 3 supplies the corpus layout, neutral manifest decoder,
-//! profile dispatcher, and backend-independent runner. Step 4 registers the
-//! real syntax/formatter handler and internal reader-v1 entrypoint; step 10
-//! adds structural query snapshots to that same neutral path. M2 Step 3 adds
-//! confined source-graph observations, and M2 Step 4 adds the filesystem-free
-//! resolver observation and its `@resolved.v1` artifact. Later language
-//! backends remain unavailable until their milestones land. M2 Step 11 adds
-//! the tooling-profile snapshot-backed formatter observation. M4 Step 4 adds
-//! the differential harness: each accepted executable case also runs in the
-//! WebAssembly backend when it lowers, against the case's one expectation,
-//! and the checked-in parity inventory records which cases do.
+//! The corpus layout, neutral manifest decoder, profile dispatcher, and
+//! backend-independent runner are the common path. Handlers register on it for
+//! the syntax and formatter, structural query snapshots, confined source-graph
+//! observations, the filesystem-free resolver observation and its
+//! `@resolved.v1` artifact, and the tooling-profile snapshot-backed formatter
+//! observation. A profile with no handler reports its cases unavailable. Each
+//! accepted executable case also runs in the WebAssembly backend, against the
+//! case's one expectation, and a case on which either backend disagrees fails.
 
 pub mod baseline;
 mod corpus;
 mod format;
 mod graph;
 mod manifest;
-mod parity;
 mod profile;
 mod project;
 mod reader;
@@ -48,7 +44,7 @@ mod workspace_semantic;
 
 pub use corpus::{
     Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError, HostWorldError,
-    PARITY_INVENTORY_FILE_NAME,
+    corpus_root, workspace_root,
 };
 pub use format::ToolingV1FormatHandler;
 pub use graph::StaticV1SourceGraphHandler;
@@ -57,25 +53,21 @@ pub use manifest::{
     ExpectedDiagnostic, ExpectedExecution, ExpectedFix, ExpectedQuery,
     ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError, NORMATIVE_SECTION_IDS,
 };
-pub use parity::{
-    Disposition, Findings, MissingRow, OWNING_STEPS, Observed, ParityError,
-    ParityInventory,
-};
 pub use profile::{ConformanceProfile, UnknownProfile};
 pub use project::StaticV1ProjectHandler;
 pub use reader::ReaderV1Handler;
 pub use resolve::StaticV1ResolveHandler;
 pub use runner::{
-    BackendStatuses, CaseObservation, CaseReport, CaseStatus, ConformanceRunner,
-    DispatchResult, ExecutionObservation, HandlerError, INSTANCE_MEMORY_LIMIT_BYTES,
-    InterpreterCounts, ProfileDispatcher, ProfileHandler, QueryObservation, RunReport,
-    WasmCounts, WasmObservation, WasmStatus,
+    BackendObservation, BackendStatuses, CaseObservation, CaseReport, CaseStatus,
+    ConformanceRunner, DispatchResult, ExecutionObservation, HandlerError,
+    INSTANCE_MEMORY_LIMIT_BYTES, InterpreterCounts, ProfileDispatcher, ProfileHandler,
+    QueryObservation, RunReport, WasmCounts, WasmObservation, WasmStatus,
 };
 pub use standard::standard_dispatcher;
 pub use test_run::{
     RowFailure, RowOrigin, RowTrap, TestRow, command_result, format_test_run,
 };
-pub use types::{InterpreterV1Handler, StaticV1TypeHandler};
+pub use types::InterpreterV1Handler;
 pub use wasm::{
     TestsObserved, observe as observe_wasm, observe_tests as observe_wasm_tests,
 };

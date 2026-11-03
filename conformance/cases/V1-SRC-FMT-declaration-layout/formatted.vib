@@ -20,3 +20,15 @@
   (defn above (value self limit u64) bool
     visibility: @public
     (above-limit (priced.cents value) limit (priced.cents value) limit)))
+
+(defint priced
+  (defn cents (value self) u64)
+  (defn above (value self limit u64) bool
+    visibility: @public
+    (above-limit (priced.cents value) limit (priced.cents value) limit)))
+
+(defn commented
+  ; about the parameter
+  (value i32)
+  i32
+  0i32)

@@ -1,11 +1,12 @@
 id = "V1-TYPE-NOMINAL-collection-construction"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
-operation = "type-check"
-description = "An odd dict.of tail and a heterogeneous array.of are argument mismatches, an empty array.of needs an expected type, and a tuple index must name a component."
+operation = "workspace-check"
+description = "An odd dict.of tail and a heterogeneous array.of are argument mismatches, an empty array.of needs an expected type, and a tuple index must name a component. A tuple index is a canonical literal without a suffix, and a builtin type has no method it does not declare."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,29 +14,53 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [28, 50]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [95, 98]
 
 [[expect.diagnostics]]
 code = "@type.ambiguous-inference"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [132, 142]
 
 [[expect.diagnostics]]
 code = "@type.invalid-tuple-index"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [192, 193]
 
 [[expect.diagnostics]]
 code = "@type.invalid-tuple-index"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [237, 239]
+
+[[expect.diagnostics]]
+code = "@type.invalid-tuple-index"
+level = "@error"
+source = "src/app/main.vib"
+span = [332, 334]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = [360, 385]
+
+[[expect.diagnostics]]
+code = "@type.argument-mismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = [426, 439]
+
+[[expect.diagnostics]]
+code = "@name.unknown-symbol"
+level = "@error"
+source = "src/app/main.vib"
+span = [475, 488]

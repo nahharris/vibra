@@ -1,11 +1,12 @@
 id = "V1-TYPE-INTERFACE-redundant-implementation"
 rule = "V1-TYPE-INTERFACE"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A defint cannot implement itself for a type declared in the same module; the deftype carries the block."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.redundant-implementation"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [83, 138]

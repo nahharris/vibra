@@ -1,1 +1,1 @@
-(record type: (record type: @maybe arguments: (array @void)) value: (record kind: @enum type: @maybe variant: @some))
+(record type: (record type: @app.main.maybe arguments: (array @void)) value: (record kind: @enum type: @app.main.maybe variant: @some))

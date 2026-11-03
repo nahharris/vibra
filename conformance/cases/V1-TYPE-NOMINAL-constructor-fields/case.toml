@@ -1,11 +1,12 @@
 id = "V1-TYPE-NOMINAL-constructor-fields"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A record constructor takes exactly its closed set of labelled fields: missing, duplicate, unknown, and positional operands are argument mismatches."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -15,29 +16,29 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [60, 75]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [101, 132]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [157, 188]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [216, 233]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [266, 271]

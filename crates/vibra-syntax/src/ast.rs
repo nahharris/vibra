@@ -1,5 +1,5 @@
 //! Contextual declaration, type, expression, and pattern structure for the
-//! Step 8–9 source surface.
+//! source surface.
 //!
 //! This layer consumes the lossless reader CST without lowering declarations
 //! to applications or resolving names. Raw CST slices remain alongside the
@@ -16,11 +16,59 @@ use crate::reader::{CstNode, SyntaxKind};
 /// Type-expression heads that are never an applied type name.
 const RESERVED_TYPE_HEADS: &[&str] =
     &["tuple", "record", "enum", "union", "intrinsic-type", "fn"];
-/// Builtin type names; only an `intrinsic-type` declaration may use one.
-const BUILTIN_TYPE_NAMES: &[&str] = &[
-    "bool", "void", "char", "str", "bytes", "atom", "i8", "i16", "i32", "i64", "u8",
-    "u16", "u32", "u64", "f32", "f64", "never", "array", "dict",
+/// The kind of a primitive type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PrimitiveClass {
+    /// A signed or unsigned integer type.
+    Integer,
+    /// A floating-point type.
+    Float,
+    /// Any other primitive type.
+    Other,
+}
+
+/// The primitive type names of the type chapter, with their class. Every layer
+/// that spells a primitive reads this one table.
+pub const PRIMITIVE_TYPES: &[(&str, PrimitiveClass)] = &[
+    ("bool", PrimitiveClass::Other),
+    ("void", PrimitiveClass::Other),
+    ("never", PrimitiveClass::Other),
+    ("char", PrimitiveClass::Other),
+    ("str", PrimitiveClass::Other),
+    ("bytes", PrimitiveClass::Other),
+    ("atom", PrimitiveClass::Other),
+    ("i8", PrimitiveClass::Integer),
+    ("i16", PrimitiveClass::Integer),
+    ("i32", PrimitiveClass::Integer),
+    ("i64", PrimitiveClass::Integer),
+    ("u8", PrimitiveClass::Integer),
+    ("u16", PrimitiveClass::Integer),
+    ("u32", PrimitiveClass::Integer),
+    ("u64", PrimitiveClass::Integer),
+    ("f32", PrimitiveClass::Float),
+    ("f64", PrimitiveClass::Float),
 ];
+/// Builtin type constructors that are not primitives.
+const BUILTIN_CONSTRUCTOR_NAMES: &[&str] = &["array", "dict"];
+
+/// The class of the primitive type spelled `name`, if it is one.
+#[must_use]
+pub fn primitive_class(name: &str) -> Option<PrimitiveClass> {
+    PRIMITIVE_TYPES
+        .iter()
+        .find_map(|(primitive, class)| (*primitive == name).then_some(*class))
+}
+
+/// Whether `name` spells a primitive type.
+#[must_use]
+pub fn is_primitive_type_name(name: &str) -> bool {
+    primitive_class(name).is_some()
+}
+
+/// Builtin type names; only an `intrinsic-type` declaration may use one.
+fn is_builtin_type_name(name: &str) -> bool {
+    is_primitive_type_name(name) || BUILTIN_CONSTRUCTOR_NAMES.contains(&name)
+}
 /// The names of the types that play a language role and are named without an
 /// import; only the declaration that claims the role may use one.
 const ROLE_TYPE_NAMES: &[&str] = &["option", "result", "iter"];
@@ -67,7 +115,7 @@ impl Expression {
     }
 }
 
-/// Contextual expression variants implemented by Step 9.
+/// Contextual expression variants.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ExpressionKind {
     /// A decoded literal value.
@@ -3533,7 +3581,7 @@ impl AstParser {
             let name =
                 self.local_name(pair[0], "generic names must be unqualified symbols")?;
             if RESERVED_TYPE_HEADS.contains(&name.value())
-                || BUILTIN_TYPE_NAMES.contains(&name.value())
+                || is_builtin_type_name(name.value())
                 || is_prelude_value_spelling(name.value())
                 || matches!(name.value(), "any" | "self")
             {
@@ -3717,7 +3765,7 @@ impl AstParser {
             || is_prelude_value_spelling(name.value())
             || RESERVED_TYPE_HEADS.contains(&name.value())
             || (!allow_builtin
-                && (BUILTIN_TYPE_NAMES.contains(&name.value())
+                && (is_builtin_type_name(name.value())
                     || ROLE_TYPE_NAMES.contains(&name.value())))
         {
             self.error(
@@ -3920,11 +3968,6 @@ const BINDER_KEYWORDS: &[&str] = &[
     "do", "let", "let-else", "if", "match", "return", "as", "try", "lambda", "tupleof",
     "recordof", "enumof",
 ];
-/// The primitive type names of the type chapter.
-const PRIMITIVE_TYPE_NAMES: &[&str] = &[
-    "bool", "void", "never", "char", "str", "bytes", "atom", "i8", "i16", "i32", "i64",
-    "u8", "u16", "u32", "u64", "f32", "f64",
-];
 
 /// The values of the closed import-free vocabulary that `@std.bool` declares.
 /// Every module sees them without an import, and nothing can shadow them
@@ -3943,7 +3986,7 @@ pub fn is_prelude_value_spelling(spelling: &str) -> bool {
 pub fn is_vocabulary_name(spelling: &str) -> bool {
     is_prelude_value_spelling(spelling)
         || ROLE_TYPE_NAMES.contains(&spelling)
-        || BUILTIN_TYPE_NAMES.contains(&spelling)
+        || is_builtin_type_name(spelling)
 }
 
 /// Whether a lexical binder may not be spelled `spelling`: a keyword, `any`,
@@ -3954,7 +3997,6 @@ pub fn is_vocabulary_name(spelling: &str) -> bool {
 pub fn is_reserved_binder_spelling(spelling: &str) -> bool {
     spelling == "any"
         || BINDER_KEYWORDS.contains(&spelling)
-        || PRIMITIVE_TYPE_NAMES.contains(&spelling)
         || is_vocabulary_name(spelling)
 }
 
@@ -3962,7 +4004,7 @@ pub fn is_reserved_binder_spelling(spelling: &str) -> bool {
 /// type, whose static methods are reached by the same dotted path.
 #[must_use]
 pub fn is_reserved_value_spelling(spelling: &str) -> bool {
-    spelling == "tuple" || BUILTIN_TYPE_NAMES.contains(&spelling)
+    spelling == "tuple" || is_builtin_type_name(spelling)
 }
 
 /// Whether `spelling` names a type that plays a language role, a name of the

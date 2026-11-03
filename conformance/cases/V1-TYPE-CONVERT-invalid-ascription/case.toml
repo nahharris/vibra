@@ -1,11 +1,12 @@
 id = "V1-TYPE-CONVERT-invalid-ascription"
 rule = "V1-TYPE-CONVERT"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Ascription never converts a numeric type and never narrows a union."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,11 +14,11 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.invalid-ascription"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [53, 66]
 
 [[expect.diagnostics]]
 code = "@type.invalid-ascription"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [107, 127]

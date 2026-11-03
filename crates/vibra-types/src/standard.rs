@@ -11,8 +11,8 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::OnceLock;
 
-use vibra_ir::Type;
 use vibra_ir::external::{CompilerIntrinsic, RoleTypes};
+use vibra_ir::{TestAssertion, Type};
 use vibra_syntax::{
     Declaration, DeftypeBody, DeftypeDeclaration, SourceAst, TypeMember,
 };
@@ -51,48 +51,6 @@ fn type_modules() -> &'static [(&'static str, &'static str, SourceAst)] {
             })
             .collect()
     })
-}
-
-/// The standard-library module whose functions join a single-source run that
-/// imports it: `@std.iter`, whose default members and adapter types are
-/// Vibra a program calls. Its source identity and declarations.
-pub(crate) fn library_module(
-    source: &SourceAst,
-) -> Option<(&'static str, &'static SourceAst)> {
-    let imported = source.declarations().iter().any(|declaration| {
-        matches!(declaration, Declaration::Import(import)
-            if import.target().value() == "std.iter"
-                || import.target().value().starts_with("std.iter."))
-    });
-    if !imported {
-        return None;
-    }
-    type_modules()
-        .iter()
-        .find(|(source_id, _, _)| *source_id == STDLIB_ITER_SOURCE_ID)
-        .map(|(source_id, _, ast)| (*source_id, ast))
-}
-
-/// The values of the closed import-free vocabulary, declared by `@std.bool`:
-/// its `def`s that the vocabulary names. Every run sees them, so a run that
-/// does not hold the module declares them from the embedded one, as
-/// [`declare_standard_types`] does for the vocabulary's types.
-pub(crate) fn prelude_definitions() -> Vec<&'static vibra_syntax::DefDeclaration> {
-    type_modules()
-        .iter()
-        .filter(|(source_id, _, _)| *source_id == STDLIB_BOOL_SOURCE_ID)
-        .flat_map(|(_, _, ast)| ast.declarations())
-        .filter_map(|declaration| match declaration {
-            Declaration::Def(definition)
-                if vibra_syntax::is_prelude_value_spelling(
-                    definition.name().value(),
-                ) =>
-            {
-                Some(definition)
-            }
-            _ => None,
-        })
-        .collect()
 }
 
 /// Declares every type of `@std.option`, `@std.result`, and `@std.core` that
@@ -355,6 +313,16 @@ pub(crate) fn members_with_bodies(
     members
         .into_iter()
         .filter(|member| included.contains(&member.path()))
+        .collect()
+}
+
+/// The members of `@std.assert`, from the compiler's closed assertion table,
+/// for a resolver that declares the verified module's headers.
+#[must_use]
+pub fn assertion_member_names() -> Vec<String> {
+    TestAssertion::ALL
+        .into_iter()
+        .map(|assertion| assertion.member().to_owned())
         .collect()
 }
 

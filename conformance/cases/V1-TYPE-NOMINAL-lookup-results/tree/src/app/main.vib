@@ -1,0 +1,11 @@
+(import option @std.option)
+
+(defn items (a (array i32)) (option.option i32) (a 0u64))
+
+(defn table (m (dict str i32)) (option.option i32) (m "k"))
+
+(defn scalar (s str) (option.option char) (s 0u64))
+
+(defn byte (b bytes) (option.option u8) (b 0u64))
+
+(defn wrong-key (m (dict str i32)) (option.option i32) (m 1i32))

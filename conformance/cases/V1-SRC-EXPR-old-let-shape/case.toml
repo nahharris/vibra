@@ -1,11 +1,12 @@
 id = "V1-SRC-EXPR-old-let-shape"
 rule = "V1-SRC-EXPR"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "The old let shape with a body has no compatibility spelling: its trailing form is read as an unpaired operand."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@syntax.invalid-form"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [22, 44]

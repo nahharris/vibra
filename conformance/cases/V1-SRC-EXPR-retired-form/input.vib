@@ -1,1 +1,4 @@
 (defn bad () void (while true))
+(defn bad-for () void (for true))
+(defn bad-break () void (break true))
+(defn bad-continue () void (continue true))

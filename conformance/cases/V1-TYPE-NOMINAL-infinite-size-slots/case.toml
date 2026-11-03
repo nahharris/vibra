@@ -1,11 +1,12 @@
 id = "V1-TYPE-NOMINAL-infinite-size-slots"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "An infinite expansion that repeats through a tuple component or a wrapper's representation relates that component or representation, as one through a record field or enum payload relates the field."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,19 +14,19 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.infinite-size"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [0, 32]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [25, 30]
 
 [[expect.diagnostics]]
 code = "@type.infinite-size"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [78, 99]
 
   [[expect.diagnostics.related]]
-  source = "input.vib"
+  source = "src/app/main.vib"
   span = [91, 98]

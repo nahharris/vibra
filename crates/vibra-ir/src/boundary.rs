@@ -32,7 +32,7 @@ pub const STATUS_EXPORT: &str = "vibra_v1_status";
 pub const TRAP_CODE_EXPORT: &str = "vibra_v1_trap_code";
 /// `() -> i32`: after a trap or a failed assertion, the origin ordinal.
 pub const ORIGIN_EXPORT: &str = "vibra_v1_origin";
-/// `() -> i32`: after a failed assertion, its [`Failure`] code.
+/// `() -> i32`: after a failed assertion, its [`crate::TestAssertion`] code.
 pub const FAILURE_EXPORT: &str = "vibra_v1_failure";
 /// `() -> i64`: after a failed `assert.equal`, the expected operand.
 pub const FAILURE_EXPECTED_EXPORT: &str = "vibra_v1_failure_expected";
@@ -120,7 +120,7 @@ pub enum Status {
     Trap,
     /// The memory host event of "Activations and memory".
     MemoryExhausted,
-    /// A failed assertion, with a [`Failure`] and an origin.
+    /// A failed assertion, with a [`crate::TestAssertion`] and an origin.
     FailedAssertion,
 }
 
@@ -193,43 +193,10 @@ impl TrapCode {
     }
 }
 
-/// The failed assertion a module recorded.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Failure {
-    /// `assert.true`.
-    True,
-    /// `assert.false`.
-    False,
-    /// `assert.equal`.
-    Equal,
-}
-
-impl Failure {
-    /// The code a module returns from `vibra_v1_failure`.
-    #[must_use]
-    pub const fn code(self) -> i32 {
-        match self {
-            Self::True => 1,
-            Self::False => 2,
-            Self::Equal => 3,
-        }
-    }
-
-    /// The assertion a code names, or `None` for a code outside the table.
-    #[must_use]
-    pub const fn from_code(code: i32) -> Option<Self> {
-        match code {
-            1 => Some(Self::True),
-            2 => Some(Self::False),
-            3 => Some(Self::Equal),
-            _ => None,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TestAssertion;
 
     #[test]
     fn codes_round_trip() {
@@ -248,12 +215,17 @@ mod tests {
         ] {
             assert_eq!(TrapCode::from_code(trap.code()), Some(trap));
         }
-        for failure in [Failure::True, Failure::False, Failure::Equal] {
-            assert_eq!(Failure::from_code(failure.code()), Some(failure));
+        for failure in TestAssertion::ALL {
+            assert_eq!(TestAssertion::from_code(failure.code()), Some(failure));
         }
+        assert_eq!(
+            TestAssertion::ALL.map(TestAssertion::code),
+            [1, 2, 3],
+            "the failure codes are part of the module boundary"
+        );
         assert_eq!(Status::from_code(4), None);
         assert_eq!(TrapCode::from_code(0), None);
-        assert_eq!(Failure::from_code(0), None);
+        assert_eq!(TestAssertion::from_code(0), None);
     }
 
     #[test]

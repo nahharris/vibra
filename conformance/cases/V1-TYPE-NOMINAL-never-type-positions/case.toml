@@ -1,11 +1,12 @@
 id = "V1-TYPE-NOMINAL-never-type-positions"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "never is writable wherever a type is: a parameter, a result, a generic argument, an array element, a function result, an ascription, and a types: list."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

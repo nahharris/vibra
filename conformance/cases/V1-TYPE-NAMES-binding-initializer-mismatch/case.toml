@@ -1,11 +1,12 @@
 id = "V1-TYPE-NAMES-binding-initializer-mismatch"
 rule = "V1-TYPE-NAMES"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "An immutable value initializer must satisfy its written primitive type."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [15, 22]

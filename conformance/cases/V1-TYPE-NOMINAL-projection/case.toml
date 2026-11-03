@@ -1,11 +1,12 @@
 id = "V1-TYPE-NOMINAL-projection"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A record projection takes one atom selector naming a field; enum values are not applicable."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -15,17 +16,17 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.unknown-record-field"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [123, 125]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [181, 185]
 
 [[expect.diagnostics]]
 code = "@type.not-applicable"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [213, 232]

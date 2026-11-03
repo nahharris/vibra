@@ -1,11 +1,12 @@
 id = "V1-TYPE-INTERFACE-anonymous-target"
 rule = "V1-TYPE-INTERFACE"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "An anonymous type has no owner to carry an implementation."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@name.wrong-entity-kind"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [48, 111]
