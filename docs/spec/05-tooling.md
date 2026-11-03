@@ -18,6 +18,15 @@ engine for parsing, resolution, types, effects, diagnostics, queries, and edit
 planning. A tool may render the result differently; it may not reimplement the
 language or maintain a second symbol index.
 
+There is one checker. A source document that a tool checks on its own, as `fmt`
+does for the document it formats and the conformance corpus does for a
+`type-check` or `interpret` case, is the only module of a one-module workspace
+with the embedded standard library, resolved and checked exactly as a module of
+a project is. It keeps the source ID it was given. It can import the standard
+library and nothing else, because no other module is in that workspace, and the
+verdict, diagnostics, and spans for a source are those the workspace check
+reports for the same module.
+
 Every machine response has a schema version and is deterministic for one
 workspace snapshot. JSON is the general CLI and MCP interchange format. Vibra
 owns no persistent JSON file: project, lock, and build data use the canonical
@@ -188,8 +197,10 @@ returned. A recovered document is preserved byte-for-byte. The formatter may
 reorder labelled arguments only when an accepted checker result for that exact
 source in the captured workspace snapshot supplies their binding facts; absent
 facts never authorize an inferred reorder.
-If the single-source checker reports `@tool.unavailable`, `fmt` discards that
-incomplete check result and continues with syntax-only formatting. It uses no
+If the one-module check of the document is incomplete, because it reports
+`@tool.unavailable` or because an import names a module outside the embedded
+standard library, which that workspace does not contain, `fmt` discards that
+check result and continues with syntax-only formatting. It uses no
 binding facts and must preserve labelled argument order; the unavailable
 semantic check does not make formatting unavailable. Parser and formatter
 diagnostics still apply to preview and write. The layouts that `fmt` writes for
