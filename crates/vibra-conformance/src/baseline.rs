@@ -270,13 +270,7 @@ fn prepare(root: &Path, program: &Program) -> Result<Prepared, String> {
         Kind::Source(path) => {
             let text = std::fs::read_to_string(root.join(path))
                 .map_err(|error| fail(format!("{path}: {error}")))?;
-            // The one import a single source may carry is the bootstrap text module,
-            // checked as the corpus checks it.
-            let checked = if text.contains("(import text @std.text)") {
-                vibra_types::check_bootstrap_text_import(&stdlib, "input.vib", &text)
-            } else {
-                vibra_types::check_source("input.vib", &text)
-            };
+            let checked = vibra_types::check_source("input.vib", &text);
             let Some(checked_program) =
                 checked.program().filter(|_| checked.accepted())
             else {

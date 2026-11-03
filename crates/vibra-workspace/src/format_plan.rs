@@ -190,11 +190,16 @@ pub fn plan_format(
         .collect::<Vec<_>>();
     let source_check =
         (mode == DocumentMode::Source).then(|| check_source(&relative_path, text));
+    // The document is checked as the only module of a one-module workspace, so
+    // an import of any module outside the standard library is unresolved and
+    // the check is incomplete, not a verdict on the document.
     let source_checker_unavailable = source_check.as_ref().is_some_and(|checked| {
-        checked
-            .diagnostics()
-            .iter()
-            .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+        checked.diagnostics().iter().any(|diagnostic| {
+            matches!(
+                diagnostic.code(),
+                DiagnosticCode::ToolUnavailable | DiagnosticCode::ModuleUnknownPath
+            )
+        })
     });
     // Incomplete standalone checking cannot authorize reordering or block a
     // syntax-only format; its cascaded semantic diagnostics are not facts.

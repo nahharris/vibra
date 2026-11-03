@@ -3460,7 +3460,7 @@ impl CheckedProgram {
             for global in &self.set.globals {
                 output.push_str(&format!(
                     "    (record name: @{} type: {} body: {})\n",
-                    global.name,
+                    declaration_path(&global.name),
                     canonical_type(&global.value_type),
                     canonical_expr(global.initializer()),
                 ));
@@ -3481,7 +3481,7 @@ impl CheckedProgram {
             });
             output.push_str(&format!(
                 "    (record name: @{} params: {} result: {}{} body: {}{})\n",
-                function.name,
+                declaration_path(&function.name),
                 canonical_array(&parameters),
                 canonical_type(&function.signature.result()),
                 canonical_labelled_field(&function.signature),
@@ -3491,6 +3491,16 @@ impl CheckedProgram {
         }
         output.push_str("  )\n)\n");
         output
+    }
+}
+
+/// The dotted path of a declaration identity, as a declared type's identity
+/// prints: `app.main.answer` for `@source@0.0.0/app.main.answer`. The package
+/// is the checking scope's, so it is not part of what an observation names.
+fn declaration_path(name: &str) -> &str {
+    match name.strip_prefix('@') {
+        Some(identity) => identity.split_once('/').map_or(name, |(_, path)| path),
+        None => name,
     }
 }
 

@@ -10,7 +10,7 @@
 
 use std::collections::BTreeMap;
 
-use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
+use vibra_diagnostics::{ByteSpan, Diagnostic};
 use vibra_syntax::{
     Attribute, Declaration, Expression, ExpressionKind, FunctionDeclaration,
     LabelledDefault, LabelledParameter, NameKind, SourceAst, TypeMember,
@@ -21,21 +21,17 @@ use crate::{
     CheckEnvironment, GlobalHeader, ResolvedReferenceTarget, walk_expressions,
 };
 
-/// How a default's names reach module values.
-pub(crate) enum DefaultNames<'a> {
-    /// A single source: the names of its own module values.
-    Source(&'a BTreeMap<String, usize>),
-    /// A workspace: the resolver's references, keyed by source identity and
-    /// span, which already reported an unknown name.
-    Resolved(&'a BTreeMap<(String, usize, usize), ResolvedReferenceTarget>),
-}
+/// The resolver's references, keyed by source identity and span, which already
+/// reported an unknown name: how a default's names reach module values.
+pub(crate) type DefaultNames<'a> =
+    &'a BTreeMap<(String, usize, usize), ResolvedReferenceTarget>;
 
 /// What every labelled default written as an expression in `sources` denotes.
 pub(crate) fn decide(
     types: &TypeNames,
     sources: &[(&str, &SourceAst)],
     globals: &[GlobalHeader],
-    names: &DefaultNames<'_>,
+    names: DefaultNames<'_>,
     module_names: &BTreeMap<String, ByteSpan>,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> BTreeMap<(String, usize, usize), DefaultConstant> {
@@ -46,16 +42,6 @@ pub(crate) fn decide(
         for declaration in ast.declarations() {
             collect_declaration(declaration, &mut defaults);
         }
-        // A function of the module is a name that is not a constant, and the
-        // module's functions are declared after its values.
-        let functions = ast
-            .declarations()
-            .iter()
-            .filter_map(|declaration| match declaration {
-                Declaration::Defn(function) => Some(function.name().value().to_owned()),
-                _ => None,
-            })
-            .collect::<std::collections::BTreeSet<_>>();
         for entry in defaults {
             let LabelledDefault::Expression { expression, .. } = entry.default() else {
                 continue;
@@ -68,14 +54,10 @@ pub(crate) fn decide(
                 &mut Vec::new(),
             );
             let mut bindings = Vec::new();
-            let indices = match names {
-                DefaultNames::Source(indices) => *indices,
-                DefaultNames::Resolved(_) => &empty,
-            };
             let mut environment = CheckEnvironment::new(
                 source_id,
                 diagnostics,
-                indices,
+                &empty,
                 globals,
                 &[],
                 &empty,
@@ -83,11 +65,8 @@ pub(crate) fn decide(
                 &mut bindings,
                 types,
             );
-            if let DefaultNames::Resolved(references) = names {
-                environment.resolved_targets = Some(references);
-            }
-            let constant =
-                decide_one(&mut environment, names, &functions, expression, expected);
+            environment.resolved_targets = Some(names);
+            let constant = decide_one(&mut environment, names, expression, expected);
             decided.insert(
                 (
                     (*source_id).to_owned(),
@@ -112,8 +91,7 @@ enum Shape {
 
 fn decide_one(
     environment: &mut CheckEnvironment<'_>,
-    names: &DefaultNames<'_>,
-    functions: &std::collections::BTreeSet<String>,
+    names: DefaultNames<'_>,
     expression: &Expression,
     expected: Option<vibra_ir::Type>,
 ) -> DefaultConstant {
@@ -124,18 +102,6 @@ fn decide_one(
         && name.kind() == NameKind::Symbol
         && named.is_none()
     {
-        if matches!(names, DefaultNames::Source(_)) && !functions.contains(name.value())
-        {
-            environment.diagnostics.push(
-                Diagnostic::new(
-                    DiagnosticCode::NameUnknownSymbol,
-                    expression.span(),
-                    "symbol does not resolve to a declaration",
-                )
-                .with_source_id(environment.source_id),
-            );
-            return DefaultConstant::Failed;
-        }
         return DefaultConstant::NotConstant(None);
     }
     if matches!(shape(environment, expression), Shape::Other) {
@@ -159,7 +125,7 @@ fn decide_one(
 /// The module value a bare name denotes, when it denotes one.
 fn global_of(
     environment: &CheckEnvironment<'_>,
-    names: &DefaultNames<'_>,
+    names: DefaultNames<'_>,
     expression: &Expression,
 ) -> Option<usize> {
     let ExpressionKind::Name(name) = expression.kind() else {
@@ -168,18 +134,13 @@ fn global_of(
     if name.kind() != NameKind::Symbol {
         return None;
     }
-    match names {
-        DefaultNames::Source(indices) => (name.segments().len() == 1)
-            .then(|| indices.get(name.value()).copied())
-            .flatten(),
-        DefaultNames::Resolved(references) => match references.get(&(
-            environment.source_id.to_owned(),
-            expression.span().start(),
-            expression.span().end(),
-        )) {
-            Some(ResolvedReferenceTarget::Global(index)) => Some(*index),
-            _ => None,
-        },
+    match names.get(&(
+        environment.source_id.to_owned(),
+        expression.span().start(),
+        expression.span().end(),
+    )) {
+        Some(ResolvedReferenceTarget::Global(index)) => Some(*index),
+        _ => None,
     }
 }
 

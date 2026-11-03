@@ -23,7 +23,8 @@ use crate::{
 pub struct ResolvedCheckResult {
     programs: BTreeMap<DeclarationId, CheckedProgram>,
     diagnostics: Vec<Diagnostic>,
-    bindings: Vec<ApplicationBinding>,
+    bindings: BTreeMap<String, Vec<ApplicationBinding>>,
+    effect_rows: BTreeMap<String, Vec<vibra_syntax::EffectRowOrder>>,
     function_indices: BTreeMap<DeclarationId, usize>,
     signatures: BTreeMap<DeclarationId, IndexedSignature>,
     implementations: Vec<IndexedImplementation>,
@@ -146,10 +147,24 @@ impl ResolvedCheckResult {
         &self.diagnostics
     }
 
-    /// Authoritative call binding facts for checked applications.
+    /// Authoritative call binding facts for the checked applications of the
+    /// module with `source_id`.
     #[must_use]
-    pub fn application_bindings(&self) -> &[ApplicationBinding] {
-        &self.bindings
+    pub fn application_bindings(&self, source_id: &str) -> &[ApplicationBinding] {
+        self.bindings.get(source_id).map_or(&[][..], Vec::as_slice)
+    }
+
+    /// The canonical order of every effect row the module with `source_id`
+    /// writes, sorted by resolved root identity. The formatter reorders a row by
+    /// it and keeps each lexical reference the row's imports require.
+    #[must_use]
+    pub fn effect_row_orders(
+        &self,
+        source_id: &str,
+    ) -> &[vibra_syntax::EffectRowOrder] {
+        self.effect_rows
+            .get(source_id)
+            .map_or(&[][..], Vec::as_slice)
     }
 
     /// Whether the selected modules crossed the checker boundary.
@@ -184,6 +199,10 @@ impl ResolvedCheckResult {
         self.modules.as_deref()
     }
 
+    pub(crate) const fn module_set(&self) -> Option<&Arc<CheckedModuleSet>> {
+        self.modules.as_ref()
+    }
+
     /// The function-call graph and performed rows of the selected modules:
     /// the one result the effect diagnostics were reported from.
     #[must_use]
@@ -209,7 +228,7 @@ struct Module<'a> {
     record: &'a vibra_resolve::ModuleRecord,
     ast: &'a SourceAst,
     declarations: BTreeMap<(String, ByteSpan), DeclarationId>,
-    trusted_bootstrap: bool,
+    trusted: bool,
 }
 
 /// Checks the selected source modules in one already-resolved immutable graph.
@@ -263,7 +282,8 @@ pub fn check_resolved(
                     .with_source_id(source_id)
                 })
                 .collect(),
-            bindings: Vec::new(),
+            bindings: BTreeMap::new(),
+            effect_rows: BTreeMap::new(),
             function_indices: BTreeMap::new(),
             signatures: BTreeMap::new(),
             implementations: Vec::new(),
@@ -292,7 +312,7 @@ pub fn check_resolved(
                 record,
                 ast,
                 declarations,
-                trusted_bootstrap: verification
+                trusted: verification
                     .is_some_and(|verification| verification.trusts_module(record)),
             })
         })
@@ -441,7 +461,6 @@ pub fn check_resolved(
                 span: definition.span(),
                 source_id: module.record.source_id().to_owned(),
                 module_index,
-                function_index: None,
                 function_targets,
             });
         }
@@ -475,7 +494,7 @@ pub fn check_resolved(
             &types,
             &sources,
             &globals,
-            &crate::defaults::DefaultNames::Resolved(&default_targets),
+            &default_targets,
             &BTreeMap::new(),
             &mut diagnostics,
         );
@@ -526,7 +545,7 @@ pub fn check_resolved(
                             module.record.source_id(),
                             function,
                             &mut diagnostics,
-                            module.trusted_bootstrap,
+                            module.trusted,
                             &signature,
                             &crate::standard::role_types(&types),
                         ),
@@ -743,7 +762,7 @@ pub fn check_resolved(
                                 module.record.source_id(),
                                 member,
                                 &mut diagnostics,
-                                module.trusted_bootstrap,
+                                module.trusted,
                                 &signature,
                                 &crate::standard::role_types(&types),
                             ),
@@ -946,7 +965,7 @@ pub fn check_resolved(
 
     let empty_indices = BTreeMap::new();
     let empty_names = BTreeMap::new();
-    let mut bindings = Vec::new();
+    let mut bindings = BTreeMap::<String, Vec<ApplicationBinding>>::new();
     let mut checked_globals = vec![None; globals.len()];
     for (index, header) in globals.iter().cloned().enumerate() {
         let Some(module) = modules.get(header.module_index) else {
@@ -960,7 +979,7 @@ pub fn check_resolved(
             &functions,
             &empty_indices,
             &empty_names,
-            &mut bindings,
+            bindings.entry(header.source_id.clone()).or_default(),
             &types,
         );
         environment.resolved_targets = Some(&resolved_targets);
@@ -1083,7 +1102,7 @@ pub fn check_resolved(
                 &functions,
                 &empty_indices,
                 &empty_names,
-                &mut bindings,
+                bindings.entry(header.source_id.clone()).or_default(),
                 &types,
             );
             environment.exit = Some((Type::Void, None));
@@ -1194,7 +1213,7 @@ pub fn check_resolved(
             &functions,
             &empty_indices,
             &empty_names,
-            &mut bindings,
+            bindings.entry(header.source_id.clone()).or_default(),
             &types,
         );
         environment.resolved_targets = Some(&resolved_targets);
@@ -1573,10 +1592,19 @@ pub fn check_resolved(
             diagnostic.code(),
         )
     });
+    let effect_rows = modules
+        .iter()
+        .map(|module| module.record.source_id())
+        .filter_map(|source_id| {
+            let rows = types.effect_row_orders(source_id);
+            (!rows.is_empty()).then(|| (source_id.to_owned(), rows))
+        })
+        .collect();
     ResolvedCheckResult {
         programs,
         diagnostics,
         bindings,
+        effect_rows,
         function_indices,
         signatures,
         implementations,

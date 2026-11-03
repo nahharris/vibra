@@ -309,9 +309,8 @@ fn check_literal_pattern(
 }
 
 /// The module-level value a pattern name denotes, when it denotes one: a
-/// name no lexical binder introduced that resolves to a `def`. A workspace
-/// run reads the resolver's reference; a single source reads its own module
-/// values, which include the closed import-free vocabulary's.
+/// name no lexical binder introduced that resolves to a `def`, by the
+/// resolver's reference.
 pub(crate) fn pattern_value_global(
     environment: &CheckEnvironment<'_>,
     name: &vibra_syntax::Name,
@@ -1338,33 +1337,4 @@ pub(crate) fn spell(types: &TypeNames, pattern: &Pattern, value_type: &Type) -> 
 
 fn literal_spelling(value: &Value) -> String {
     value.canonical_vibon()
-}
-
-/// Every named binder a written pattern introduces.
-pub(crate) fn binder_names(pattern: &vibra_syntax::Pattern) -> Vec<String> {
-    let mut names = Vec::new();
-    collect_binder_names(pattern, &mut names);
-    names
-}
-
-fn collect_binder_names(pattern: &vibra_syntax::Pattern, names: &mut Vec<String>) {
-    match pattern.kind() {
-        PatternKind::Binding(name) if !name.is_discard() => {
-            names.push(name.value().to_owned())
-        }
-        PatternKind::Constructor { arguments, .. }
-        | PatternKind::RecordOf(arguments) => {
-            for argument in arguments {
-                collect_binder_names(argument.pattern(), names);
-            }
-        }
-        PatternKind::Tuple(items) | PatternKind::Array(items) => {
-            for item in items {
-                collect_binder_names(item, names);
-            }
-        }
-        PatternKind::EnumOf(variant) => collect_binder_names(variant.pattern(), names),
-        PatternKind::As { pattern, .. } => collect_binder_names(pattern, names),
-        PatternKind::Binding(_) | PatternKind::Literal(_) | PatternKind::Atom(_) => {}
-    }
 }
