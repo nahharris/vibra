@@ -1,0 +1,940 @@
+//! Workspace-level Step 12 checking and pure execution contracts.
+
+use std::collections::BTreeMap;
+
+use vibra_diagnostics::{ByteSpan, DiagnosticCode};
+use vibra_workspace::{
+    WorkspaceSnapshot,
+    semantic::{CheckStatus, RunOutcome},
+};
+
+use crate::support::TempDir;
+
+/// A project with the one library target `util`.
+const UTIL_LIBRARY: &str = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n";
+
+#[test]
+fn resolves_imported_calls_and_constants_before_running_a_private_non_main_entry() {
+    let project = TempDir::demo(
+        "multi-module",
+        &[
+            (
+                "src/app/main.vib",
+                "(import util @app.util)\n(defn execute () void (let - util.base) (util.perform))\n",
+            ),
+            (
+                "src/app/util.vib",
+                "(def base i32 7i32 visibility: @public)\n(defn perform () void visibility: @public (do))\n",
+            ),
+        ],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+
+    let checked = vibra_workspace::semantic::check_all(&snapshot);
+
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("binary target");
+
+    assert_eq!(
+        checked.status(),
+        CheckStatus::Accepted,
+        "{:?}",
+        checked.diagnostics()
+    );
+    assert!(checked.diagnostics().is_empty());
+    assert!(checked.program_for_target(target).is_some());
+    let run = vibra_workspace::semantic::run_target(&snapshot, target);
+    assert_eq!(run.check().status(), CheckStatus::Accepted);
+    assert!(matches!(run.outcome(), Some(RunOutcome::Program(_))));
+}
+
+#[test]
+fn higher_order_helper_before_the_entry_accepts_its_known_lambda_argument() {
+    let project = TempDir::demo(
+        "higher-order-entry",
+        &[(
+            "src/app/main.vib",
+            "(defn invoke (callback (fn () void)) void (callback))\n(defn execute () void (invoke (lambda () void (do))))\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("binary target");
+
+    let run = vibra_workspace::semantic::run_target(&snapshot, target);
+
+    assert_eq!(
+        run.check().status(),
+        CheckStatus::Accepted,
+        "{:?}",
+        run.check().diagnostics()
+    );
+    assert!(matches!(run.outcome(), Some(RunOutcome::Program(_))));
+}
+
+#[test]
+fn an_unused_imported_higher_order_helper_does_not_block_the_entry() {
+    let project = TempDir::project(
+        "unused-imported-higher-order-helper",
+        "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n",
+        &[
+            (
+                "src/app/main.vib",
+                "(import util @util.api)\n(defn execute () void (do))\n",
+            ),
+            (
+                "src/util/api.vib",
+                "(defn apply (callback (fn () i32)) i32 visibility: @public (callback))\n(defn dead (callback (fn () i32)) i32 (apply callback))\n",
+            ),
+        ],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("binary target");
+
+    let run = vibra_workspace::semantic::run_target(&snapshot, target);
+
+    assert_eq!(
+        run.check().status(),
+        CheckStatus::Accepted,
+        "{:?}",
+        run.check().diagnostics()
+    );
+    assert!(matches!(run.outcome(), Some(RunOutcome::Program(_))));
+}
+
+#[test]
+fn an_uninvoked_higher_order_closure_does_not_block_the_entry() {
+    let project = TempDir::demo(
+        "uninvoked-higher-order-closure",
+        &[(
+            "src/app/main.vib",
+            "(defn execute () void (let unused (lambda (f (fn () void)) void (f))) (do))\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("binary target");
+
+    let run = vibra_workspace::semantic::run_target(&snapshot, target);
+
+    assert_eq!(
+        run.check().status(),
+        CheckStatus::Accepted,
+        "{:?}",
+        run.check().diagnostics()
+    );
+    assert!(matches!(run.outcome(), Some(RunOutcome::Program(_))));
+}
+
+#[test]
+fn an_invoked_higher_order_closure_uses_its_known_callback_argument() {
+    let project = TempDir::demo(
+        "invoked-higher-order-closure",
+        &[(
+            "src/app/main.vib",
+            "(defn execute () void (let invoke (lambda (callback (fn () void)) void (callback))) (invoke (lambda () void (do))))\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("binary target");
+
+    let run = vibra_workspace::semantic::run_target(&snapshot, target);
+
+    assert_eq!(
+        run.check().status(),
+        CheckStatus::Accepted,
+        "{:?}",
+        run.check().diagnostics()
+    );
+    assert!(matches!(run.outcome(), Some(RunOutcome::Program(_))));
+}
+
+#[test]
+fn checking_a_library_without_an_entry_still_rejects_initializer_cycles() {
+    let project = TempDir::project(
+        "library-initializer-cycle",
+        UTIL_LIBRARY,
+        &[(
+            "src/util/main.vib",
+            "(def first i32 second)\n(def second i32 first)\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("library target");
+
+    let checked = vibra_workspace::semantic::check_target(&snapshot, target);
+
+    assert_eq!(checked.status(), CheckStatus::Diagnostics);
+    assert!(checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::TypeInitializerCycle
+            && diagnostic.source_id() == Some("src/util/main.vib")
+    }));
+}
+
+#[test]
+fn initializer_cycle_diagnostic_points_into_disjoint_cycle() {
+    let source = "(def unrelated i32 1i32)\n(def first i32 second)\n(def second i32 first)\n(defn execute () void (do))\n";
+    let project = TempDir::demo(
+        "initializer-cycle-span-after-acyclic-global",
+        &[("src/app/main.vib", source)],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("binary target");
+
+    let checked = vibra_workspace::semantic::check_target(&snapshot, target);
+    let diagnostic = checked
+        .diagnostics()
+        .iter()
+        .find(|diagnostic| diagnostic.code() == DiagnosticCode::TypeInitializerCycle)
+        .expect("initializer-cycle diagnostic");
+    let cycle_start = source.find("(def first").expect("first cycle declaration");
+    let cycle_end = source[cycle_start..]
+        .find('\n')
+        .map(|offset| cycle_start + offset)
+        .expect("cycle declaration end");
+
+    assert_eq!(diagnostic.source_id(), Some("src/app/main.vib"));
+    assert_eq!(
+        diagnostic.primary_span(),
+        ByteSpan::new(cycle_start, cycle_end)
+    );
+}
+
+#[test]
+fn global_initializer_may_call_a_terminating_recursive_helper() {
+    let project = TempDir::demo(
+        "recursive-helper-global-initializer",
+        &[(
+            "src/app/main.vib",
+            "(def value i32 (helper false))\n(defn helper (again bool) i32 (if again (helper false) 1i32))\n(defn execute () void (let - value) (do))\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("binary target");
+
+    // `false` is a value of the closed import-free vocabulary, which the
+    // verified standard library declares.
+    let stdlib = vibra_types::load_stdlib().expect("embedded standard library");
+    let run = vibra_workspace::semantic::run_target_with_bootstrap(
+        &snapshot,
+        target,
+        Some(&stdlib),
+    );
+
+    assert_eq!(
+        run.check().status(),
+        CheckStatus::Accepted,
+        "{:?}",
+        run.check().diagnostics()
+    );
+    assert!(matches!(run.outcome(), Some(RunOutcome::Program(_))));
+}
+
+#[test]
+fn library_initializer_cycles_flow_through_higher_order_helpers() {
+    let project = TempDir::project(
+        "library-higher-order-initializer-cycle",
+        UTIL_LIBRARY,
+        &[(
+            "src/util/main.vib",
+            "(def value i32 (apply read))\n(defn apply (f (fn () i32)) i32 (f))\n(defn read () i32 value)\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("library target");
+
+    let checked = vibra_workspace::semantic::check_target(&snapshot, target);
+
+    assert_eq!(checked.status(), CheckStatus::Diagnostics);
+    assert!(checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::TypeInitializerCycle
+            && diagnostic.source_id() == Some("src/util/main.vib")
+    }));
+}
+
+#[test]
+fn library_initializer_does_not_execute_an_uninvoked_closure_body() {
+    let project = TempDir::project(
+        "library-uninvoked-closure-initializer",
+        UTIL_LIBRARY,
+        &[(
+            "src/util/main.vib",
+            "(def value i32 (do (let unused (lambda () i32 (read))) 0i32))\n(defn read () i32 value)\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("library target");
+
+    let checked = vibra_workspace::semantic::check_target(&snapshot, target);
+
+    assert_eq!(
+        checked.status(),
+        CheckStatus::Accepted,
+        "{:?}",
+        checked.diagnostics()
+    );
+}
+
+#[test]
+fn library_without_initializers_can_expose_a_higher_order_helper() {
+    let project = TempDir::project(
+        "library-higher-order-helper",
+        UTIL_LIBRARY,
+        &[(
+            "src/util/main.vib",
+            "(defn apply (f (fn () i32)) i32 (f))\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("library target");
+
+    let checked = vibra_workspace::semantic::check_target(&snapshot, target);
+
+    assert_eq!(checked.status(), CheckStatus::Accepted);
+    assert!(checked.diagnostics().is_empty());
+}
+
+#[test]
+fn an_error_in_an_unreachable_declaration_blocks_the_target_program() {
+    let project = TempDir::demo(
+        "unreachable-error",
+        &[(
+            "src/app/main.vib",
+            "(defn execute () void (do))\n(defn unused () i32 \"wrong type\")\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+
+    let checked = vibra_workspace::semantic::check_all(&snapshot);
+
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("binary target");
+
+    assert_eq!(checked.status(), CheckStatus::Diagnostics);
+    assert!(checked.program_for_target(target).is_none());
+    assert!(checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::TypeMismatch
+            && diagnostic.source_id() == Some("src/app/main.vib")
+    }));
+    let run = vibra_workspace::semantic::run_target(&snapshot, target);
+    assert!(run.outcome().is_none());
+    assert_eq!(run.check().status(), CheckStatus::Diagnostics);
+}
+
+#[test]
+fn checks_recursion_and_closures_in_every_module_without_running_check() {
+    let project = TempDir::demo(
+        "recursion-closure",
+        &[(
+            "src/app/main.vib",
+            "(defn first () i32 (second))\n(defn second () i32 (first))\n(defn execute () void (let captured 9i32) (let callback (lambda () i32 captured)) (let - (callback)) (do))\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("target");
+    let checked = vibra_workspace::semantic::check_target(&snapshot, target);
+
+    assert_eq!(
+        checked.status(),
+        CheckStatus::Accepted,
+        "{:?}",
+        checked.diagnostics()
+    );
+    assert!(checked.program_for_target(target).is_some());
+}
+
+#[test]
+fn selected_target_checks_its_import_closure_and_ignores_an_unrelated_target() {
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @util kind: @lib root: \"src/util\") (record name: @other kind: @bin root: \"src/other\" entry: @other.main.execute effects: (array))) dependencies: (dict))\n";
+    let project = TempDir::project(
+        "target-closure",
+        project_text,
+        &[
+            (
+                "src/app/main.vib",
+                "(import util @util.helpers)\n(defn execute () void (util.perform))\n",
+            ),
+            (
+                "src/util/helpers.vib",
+                "(defn perform () void visibility: @public (do))\n",
+            ),
+            (
+                "src/other/main.vib",
+                "(defn execute () void (do))\n(defn unreachable () i32 \"bad\")\n",
+            ),
+        ],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let app = snapshot
+        .project()
+        .project()
+        .targets()
+        .iter()
+        .find(|target| target.name().atom().value() == "app")
+        .expect("app target");
+
+    let selected = vibra_workspace::semantic::check_target(&snapshot, app);
+    assert_eq!(
+        selected.status(),
+        CheckStatus::Accepted,
+        "{:?}",
+        selected.diagnostics()
+    );
+    assert!(selected.program_for_target(app).is_some());
+
+    let all = vibra_workspace::semantic::check_all(&snapshot);
+    assert_eq!(all.status(), CheckStatus::Diagnostics);
+    assert!(all.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::TypeMismatch
+            && diagnostic.source_id() == Some("src/other/main.vib")
+    }));
+}
+
+#[test]
+fn an_error_in_a_transitively_imported_unit_blocks_execution() {
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @util kind: @lib root: \"src/util\")) dependencies: (dict))\n";
+    let project = TempDir::project(
+        "closure-error",
+        project_text,
+        &[
+            (
+                "src/app/main.vib",
+                "(import util @util.helpers)\n(defn execute () void (util.perform))\n",
+            ),
+            (
+                "src/util/helpers.vib",
+                "(defn perform () void visibility: @public (do))\n(defn unused () i32 \"bad\")\n",
+            ),
+        ],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let app = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("app target");
+
+    let run = vibra_workspace::semantic::run_target(&snapshot, app);
+
+    assert_eq!(run.check().status(), CheckStatus::Diagnostics);
+    assert!(run.outcome().is_none());
+    assert!(run.check().diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::TypeMismatch
+            && diagnostic.source_id() == Some("src/util/helpers.vib")
+    }));
+}
+
+#[test]
+fn verified_bootstrap_imports_keep_package_identity_and_execute_through_checked_ir() {
+    let project = TempDir::demo(
+        "verified-stdlib",
+        &[(
+            "src/app/main.vib",
+            "(import text @std.text)\n(defn execute () void (let - (text.length (text.concat \"a\" \"b\"))) (do))\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("target");
+    let verification = vibra_types::load_stdlib().expect("bootstrap verification");
+
+    let checked = vibra_workspace::semantic::check_target_with_bootstrap(
+        &snapshot,
+        target,
+        Some(&verification),
+    );
+    assert_eq!(
+        checked.status(),
+        CheckStatus::Accepted,
+        "{:?}",
+        checked.diagnostics()
+    );
+    let run = vibra_workspace::semantic::run_target_with_bootstrap(
+        &snapshot,
+        target,
+        Some(&verification),
+    );
+    assert!(matches!(run.outcome(), Some(RunOutcome::Program(_))));
+
+    let resolved = snapshot
+        .resolve_with_bootstrap(&verification)
+        .expect("resolved snapshot");
+    let module = resolved
+        .modules()
+        .iter()
+        .find(|module| module.source_id() == vibra_types::STDLIB_TEXT_SOURCE_ID)
+        .expect("verified text module");
+    assert_eq!(module.package().name(), "vibra-stdlib");
+    assert_eq!(module.package().version(), "0.3.0");
+}
+
+#[test]
+fn bootstrap_overlay_rejects_a_duplicate_project_source_identity() {
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @local kind: @lib root: \"stdlib/src/std\")) dependencies: (dict))\n";
+    let project = TempDir::project(
+        "bootstrap-source-id-collision",
+        project_text,
+        &[
+            (
+                "src/app/main.vib",
+                "(import text @std.text)\n(defn execute () void (let - (text.length \"x\")) (do))\n",
+            ),
+            (
+                "stdlib/src/std/text.vib",
+                "(defn local () i32 \"wrong type\")\n",
+            ),
+        ],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("binary target");
+    let verification = vibra_types::load_stdlib().expect("bootstrap verification");
+
+    let checked = vibra_workspace::semantic::check_target_with_bootstrap(
+        &snapshot,
+        target,
+        Some(&verification),
+    );
+
+    assert_ne!(checked.status(), CheckStatus::Accepted);
+    assert!(checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code().as_atom() == "@module.source-id-collision"
+    }));
+}
+
+#[test]
+fn bootstrap_spelling_without_verification_is_unavailable_and_never_runs() {
+    let project = TempDir::demo(
+        "unverified-stdlib",
+        &[(
+            "src/app/main.vib",
+            "(import text @std.text)\n(defn execute () void (let - (text.length \"spoof\")) (do))\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("target");
+
+    let run = vibra_workspace::semantic::run_target(&snapshot, target);
+
+    assert_eq!(run.check().status(), CheckStatus::Unavailable);
+    assert!(run.outcome().is_none());
+    assert!(run.check().diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::ToolUnavailable
+            && diagnostic.source_id() == Some("src/app/main.vib")
+    }));
+}
+
+#[test]
+fn result_entry_with_a_nominal_error_type_is_accepted() {
+    let project = TempDir::demo(
+        "result-entry",
+        &[(
+            "src/app/main.vib",
+            "(deftype failure (enum bad void))\n(defn execute () (result void failure) (result.ok))\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("target");
+
+    let checked = vibra_workspace::semantic::check_target(&snapshot, target);
+
+    assert_eq!(
+        checked.status(),
+        CheckStatus::Accepted,
+        "{:?}",
+        checked.diagnostics()
+    );
+}
+
+#[test]
+fn imported_std_modules_keep_the_verified_package_and_local_std_units_resolve_locally()
+{
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @std kind: @lib root: \"src/std\")) dependencies: (dict))\n";
+    let project = TempDir::project(
+        "exact-stdlib-overlay",
+        project_text,
+        &[
+            (
+                "src/app/main.vib",
+                "(import text @std.text)\n(import assertions @std.assert)\n(import extra @std.extra)\n(defn execute () void (let - (text.length (extra.suffix \"a\"))) (do))\n",
+            ),
+            (
+                "src/std/extra.vib",
+                "(defn suffix (value str) str visibility: @public value)\n",
+            ),
+        ],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("target");
+    let verification = vibra_types::load_stdlib().expect("bootstrap verification");
+
+    let checked = vibra_workspace::semantic::check_target_with_bootstrap(
+        &snapshot,
+        target,
+        Some(&verification),
+    );
+
+    assert_eq!(
+        checked.status(),
+        CheckStatus::Accepted,
+        "{:?}",
+        checked.diagnostics()
+    );
+    let resolved = snapshot
+        .resolve_with_bootstrap(&verification)
+        .expect("resolved snapshot");
+    let imports = resolved
+        .imports()
+        .iter()
+        .filter(|import| import.source_id() == "src/app/main.vib")
+        .map(|import| {
+            (
+                import.written(),
+                import.module().expect("resolved import").package().name(),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(imports.get("std.text"), Some(&"vibra-stdlib"));
+    assert_eq!(imports.get("std.assert"), Some(&"vibra-stdlib"));
+    assert_eq!(imports.get("std.extra"), Some(&"demo"));
+}
+
+#[test]
+fn an_exact_local_std_text_target_cannot_satisfy_the_reserved_bootstrap_import() {
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @std kind: @lib root: \"src/std\")) dependencies: (dict))\n";
+    let project = TempDir::project(
+        "local-std-text",
+        project_text,
+        &[
+            (
+                "src/app/main.vib",
+                "(import text @std.text)\n(defn execute () void (let - (text.length \"local\")) (do))\n",
+            ),
+            (
+                "src/std/text.vib",
+                "(defn length (value str) u64 visibility: @public 5u64)\n",
+            ),
+        ],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("target");
+    let resolved = snapshot.resolve().expect("resolved snapshot");
+    assert!(resolved.imports()[0].module().is_none());
+
+    let checked = vibra_workspace::semantic::check_target(&snapshot, target);
+
+    assert_eq!(checked.status(), CheckStatus::Unavailable);
+    assert!(checked.program_for_target(target).is_none());
+    assert!(checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::ToolUnavailable
+            && diagnostic.source_id() == Some("src/app/main.vib")
+    }));
+}
+
+#[test]
+fn an_unrelated_reserved_bootstrap_import_blocks_an_explicit_target() {
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array)) (record name: @other kind: @lib root: \"src/other\")) dependencies: (dict))\n";
+    let project = TempDir::project(
+        "global-bootstrap-requirement",
+        project_text,
+        &[
+            ("src/app/main.vib", "(defn execute () void (do))\n"),
+            (
+                "src/other/module.vib",
+                "(import text @std.text)\n(defn broken () i32 \"wrong type\")\n",
+            ),
+        ],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .iter()
+        .find(|target| target.name().atom().value() == "app")
+        .expect("app target");
+
+    let checked = vibra_workspace::semantic::check_target(&snapshot, target);
+
+    assert_eq!(checked.status(), CheckStatus::Unavailable);
+    assert!(checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::ToolUnavailable
+            && diagnostic.source_id() == Some("src/other/module.vib")
+    }));
+    assert!(!checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::TypeMismatch
+            && diagnostic.source_id() == Some("src/other/module.vib")
+    }));
+}
+
+#[test]
+fn variadic_entry_parameter_is_rejected_at_the_entry_span() {
+    let project = TempDir::demo(
+        "variadic-entry",
+        &[(
+            "src/app/main.vib",
+            "(defn execute () void variadic: (rest (array i32)) (do))\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("target");
+
+    let checked = vibra_workspace::semantic::check_target(&snapshot, target);
+
+    assert!(checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::ProjectInvalidEntrySignature
+            && diagnostic.source_id() == Some("project.vibon")
+            && diagnostic.primary_span() == target.entry().expect("entry").span()
+    }));
+}
+
+#[test]
+fn ordinary_dependency_diagnostics_apply_even_to_an_explicit_target() {
+    let project_text = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict @remote (record kind: @git git: \"https://example.com/repo.git\" rev: \"0123456789abcdef0123456789abcdef01234567\")))\n";
+    let project = TempDir::project(
+        "global-dependency-diagnostic",
+        project_text,
+        &[("src/app/main.vib", "(defn execute () void (do))\n")],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("target");
+
+    let checked = vibra_workspace::semantic::check_target(&snapshot, target);
+
+    assert_eq!(checked.status(), CheckStatus::Unavailable);
+    assert!(checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::ToolUnavailable
+            && diagnostic.source_id() == Some("project.vibon")
+    }));
+}
+
+#[test]
+fn retired_syntax_and_unsupported_valid_declarations_keep_distinct_diagnostics() {
+    let retired = TempDir::demo(
+        "retired-form",
+        &[("src/app/main.vib", "(defn execute () void (while true))\n")],
+    );
+    let retired_snapshot =
+        WorkspaceSnapshot::load(retired.path()).expect("retired snapshot");
+    let target = retired_snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("target");
+    let checked = vibra_workspace::semantic::check_target(&retired_snapshot, target);
+    assert_eq!(checked.status(), CheckStatus::Diagnostics);
+    assert!(
+        checked.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code() == DiagnosticCode::SyntaxRetiredForm
+        })
+    );
+    assert!(
+        !checked
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::ToolUnavailable })
+    );
+
+    let unsupported = TempDir::demo(
+        "unsupported-declaration",
+        &[(
+            "src/app/main.vib",
+            // A declared record is supported from M3 Step 2; `intrinsic-type`
+            // stays unavailable outside the embedded standard library.
+            "(deftype box (intrinsic-type @box))\n(defn execute () void (do))\n",
+        )],
+    );
+    let unsupported_snapshot =
+        WorkspaceSnapshot::load(unsupported.path()).expect("unsupported snapshot");
+    let target = unsupported_snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("target");
+    let checked =
+        vibra_workspace::semantic::check_target(&unsupported_snapshot, target);
+    assert_eq!(checked.status(), CheckStatus::Unavailable);
+    assert!(checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::ToolUnavailable
+            && diagnostic.source_id() == Some("src/app/main.vib")
+    }));
+}
+
+#[test]
+fn host_provider_outside_a_deffect_and_unknown_provider_are_rejected() {
+    for (label, provider, expected) in [
+        (
+            "host-provider",
+            "host",
+            DiagnosticCode::SyntaxInvalidAttribute,
+        ),
+        (
+            "unknown-provider",
+            "wasm",
+            DiagnosticCode::ExternalUnknownSymbol,
+        ),
+        (
+            "copied-compiler-provider",
+            "compiler",
+            DiagnosticCode::ToolUnavailable,
+        ),
+    ] {
+        let project = TempDir::demo(
+            label,
+            &[(
+                "src/app/main.vib",
+                &format!(
+                    "(defn execute () void external: @{} symbol: \"sample.operation\")\n",
+                    provider
+                ),
+            )],
+        );
+        let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+        let target = snapshot
+            .project()
+            .project()
+            .targets()
+            .first()
+            .expect("target");
+
+        let checked = vibra_workspace::semantic::check_target(&snapshot, target);
+
+        assert!(checked.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code() == expected
+                && diagnostic.source_id() == Some("src/app/main.vib")
+        }));
+    }
+}
+
+#[test]
+fn initializer_cycles_keep_the_source_diagnostic() {
+    let project = TempDir::demo(
+        "initializer-cycle",
+        &[(
+            "src/app/main.vib",
+            "(def first i32 second)\n(def second i32 first)\n(defn execute () void (do))\n",
+        )],
+    );
+    let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
+    let target = snapshot
+        .project()
+        .project()
+        .targets()
+        .first()
+        .expect("target");
+
+    let checked = vibra_workspace::semantic::check_target(&snapshot, target);
+
+    assert_eq!(checked.status(), CheckStatus::Diagnostics);
+    assert!(checked.diagnostics().iter().any(|diagnostic| {
+        diagnostic.code() == DiagnosticCode::TypeInitializerCycle
+    }));
+    assert!(
+        !checked
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| { diagnostic.code() == DiagnosticCode::ToolUnavailable })
+    );
+}

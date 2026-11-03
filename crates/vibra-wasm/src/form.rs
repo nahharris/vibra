@@ -9,7 +9,9 @@
 //! a pattern over a type that has no shape, a contract call with no receiver,
 //! or a registry row the closed tables do not know. A hand-built program can
 //! contain those; a program the checker accepts never does, and the tests of
-//! `tests/lowers_every_form_m4_step11.rs` hold the classifier to that.
+//! the `lowers_every_form` module of the `vibra-conformance` test target
+//! (`crates/vibra-conformance/tests/it/lowers_every_form.rs`) hold the
+//! classifier to that.
 
 use std::fmt;
 
