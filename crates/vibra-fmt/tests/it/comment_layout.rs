@@ -2,8 +2,6 @@
 //! comment-free ones: the header shares the opening line, and a closing
 //! delimiter stands alone only after a comment.
 
-#![allow(clippy::expect_used)]
-
 use std::path::Path;
 
 use vibra_fmt::format_source;

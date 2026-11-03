@@ -2,8 +2,6 @@
 //! order, and comments are asserted by the `V1-SRC-FMT-vibon-*` conformance
 //! cases; the bytes of a document the data loader rejects are here.
 
-#![allow(clippy::expect_used)]
-
 use vibra_fmt::format_source;
 
 #[test]

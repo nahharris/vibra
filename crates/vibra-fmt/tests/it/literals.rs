@@ -3,8 +3,6 @@
 //! spellings are asserted by the `V1-SRC-READER-literal-*` and
 //! `V1-SRC-FMT-literal-character-*` conformance cases.
 
-#![allow(clippy::expect_used)]
-
 use vibra_fmt::format_source;
 
 #[test]

@@ -2,8 +2,6 @@
 //! behavior is asserted by the `V1-SRC-FMT` and `V1-SRC-READER` conformance
 //! cases; only the stack-depth guarantee, which a case cannot state, is here.
 
-#![allow(clippy::expect_used)]
-
 use std::path::Path;
 
 use vibra_fmt::format_source;

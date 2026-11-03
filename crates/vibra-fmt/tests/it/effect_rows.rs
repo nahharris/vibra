@@ -3,13 +3,6 @@
 //! never resolves a symbol, so it reorders a row only for the checker's fact
 //! and keeps every lexical symbol as written.
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 use vibra_diagnostics::ByteSpan;
 use vibra_fmt::{format_source, format_source_with_facts};
 use vibra_syntax::EffectRowOrder;
