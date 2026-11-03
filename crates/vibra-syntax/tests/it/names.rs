@@ -1,12 +1,5 @@
 //! Step 6 name-surface conformance tests.
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};

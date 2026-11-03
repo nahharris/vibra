@@ -3,8 +3,6 @@
 //! `V1-SRC-READER-*` conformance cases; the decoded values and classification
 //! of the valid forms are here.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::panic)]
-
 use vibra_syntax::{
     IntegerSuffix, Literal, LiteralClassification, TokenKind, classify, lex,
 };

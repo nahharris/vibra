@@ -1,7 +1,5 @@
 //! Step 4 reader-spine conformance tests.
 
-#![allow(clippy::expect_used, clippy::indexing_slicing, clippy::unwrap_used)]
-
 use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};

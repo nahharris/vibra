@@ -1,12 +1,5 @@
 //! Step 7 generic VIBON data tests.
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 use std::path::Path;
 
 use vibra_diagnostics::DiagnosticCode;
