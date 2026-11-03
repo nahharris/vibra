@@ -114,9 +114,9 @@ pub enum ConformanceOperation {
     SourceGraph,
     /// Resolve declarations/imports from a confined source graph.
     Resolve,
-    /// Check one source document into typed IR.
-    TypeCheck,
-    /// Execute one checked source document through the reference interpreter.
+    /// Check one source document as the only module of a one-module workspace
+    /// and execute it through the reference interpreter, observing the
+    /// canonical encoding of the value its first function returns.
     Interpret,
     /// Render semantic facts from one immutable workspace snapshot.
     Query,
@@ -141,7 +141,6 @@ impl ConformanceOperation {
             Self::ProjectDecode => "project-decode",
             Self::SourceGraph => "source-graph",
             Self::Resolve => "resolve",
-            Self::TypeCheck => "type-check",
             Self::Interpret => "interpret",
             Self::Query => "query",
             Self::Index => "index",
@@ -248,7 +247,8 @@ pub struct CaseExpectations {
     pub graph: Option<String>,
     /// A relative path to resolved-identity output.
     pub resolved: Option<String>,
-    /// A relative path to type output.
+    /// A relative path to the `@types.v1` observation of the accepted
+    /// workspace, which `workspace-check` cases may declare.
     pub types: Option<String>,
     /// A relative path to effect output.
     pub effects: Option<String>,
@@ -386,6 +386,14 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
         if expectations.host_event.is_some() && !operation.executes_programs() {
             return Err(ManifestError::Invalid(format!(
                 "host_event is valid only on interpret, workspace-run, and workspace-test cases, not {operation}"
+            )));
+        }
+        if expectations.types.is_some()
+            && (operation != ConformanceOperation::WorkspaceCheck
+                || !expectations.accepted)
+        {
+            return Err(ManifestError::Invalid(format!(
+                "a types snapshot is valid only on an accepted workspace-check case, not {operation}"
             )));
         }
         if operation == ConformanceOperation::Index && expectations.index.is_none() {
@@ -527,7 +535,6 @@ fn decode_operation(
         Some("project-decode") => ConformanceOperation::ProjectDecode,
         Some("source-graph") => ConformanceOperation::SourceGraph,
         Some("resolve") => ConformanceOperation::Resolve,
-        Some("type-check") => ConformanceOperation::TypeCheck,
         Some("interpret") => ConformanceOperation::Interpret,
         Some("query") => ConformanceOperation::Query,
         Some("index") => ConformanceOperation::Index,
@@ -579,7 +586,7 @@ const fn input_shape(
         ConformanceOperation::ProjectDecode => {
             [Forbidden, Required, Forbidden, Forbidden]
         }
-        ConformanceOperation::TypeCheck | ConformanceOperation::Interpret => {
+        ConformanceOperation::Interpret => {
             [Forbidden, Forbidden, Required, Forbidden]
         }
         ConformanceOperation::SourceGraph | ConformanceOperation::Resolve => {

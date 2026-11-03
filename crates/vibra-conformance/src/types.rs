@@ -1,4 +1,4 @@
-//! Static and interpreter conformance adapters for the M2 primitive/binding path.
+//! The interpreter conformance adapter for one source document.
 
 use crate::corpus::Case;
 use crate::manifest::ConformanceOperation;
@@ -14,35 +14,6 @@ pub(crate) fn host_event_atom(error: &vibra_interp::RuntimeError) -> Option<Stri
     error
         .host_diagnostic()
         .map(|diagnostic| diagnostic.code().as_atom().to_owned())
-}
-
-/// Runs source type checking and returns the canonical checked-program
-/// observation.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct StaticV1TypeHandler;
-
-impl ProfileHandler for StaticV1TypeHandler {
-    fn can_run(&self, case: &Case) -> bool {
-        case.manifest().operation == ConformanceOperation::TypeCheck
-    }
-
-    fn run(&self, case: &Case) -> Result<CaseObservation, HandlerError> {
-        let source_id =
-            case.manifest().inputs.source.as_deref().ok_or_else(|| {
-                HandlerError::new("type-check case needs a source input")
-            })?;
-        let source = case
-            .read_file(source_id)
-            .map_err(|error| HandlerError::new(error.to_string()))?;
-        let checked = check_source(source_id, &source);
-        let accepted = checked.accepted();
-        Ok(CaseObservation {
-            accepted,
-            diagnostics: checked.diagnostics().to_vec(),
-            types: checked.program().map(|program| program.canonical_vibon()),
-            ..CaseObservation::default()
-        })
-    }
 }
 
 /// Checks and executes one source document through the M2 reference

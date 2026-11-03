@@ -1,11 +1,12 @@
 //! Workspace checking and pure execution over a captured project snapshot.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 use vibra_host::{HostProvider, HostWorld, WorldProvider};
 use vibra_interp::{Execution, RuntimeError};
-use vibra_ir::CheckedProgram;
+use vibra_ir::{CheckedModuleSet, CheckedProgram};
 use vibra_resolve::{EntityKind, ResolvedSnapshot};
 use vibra_syntax::{
     ApplicationBinding, Declaration, EffectRowOrder, NameKind, TypeExpr,
@@ -50,6 +51,7 @@ pub struct WorkspaceCheckResult {
     status: CheckStatus,
     diagnostics: Vec<Diagnostic>,
     programs: BTreeMap<String, CheckedProgram>,
+    modules: Option<Arc<CheckedModuleSet>>,
     bindings: BTreeMap<String, Vec<ApplicationBinding>>,
     effect_rows: BTreeMap<String, Vec<EffectRowOrder>>,
 }
@@ -71,6 +73,14 @@ impl WorkspaceCheckResult {
     #[must_use]
     pub fn program_for_target(&self, target: &Target) -> Option<&CheckedProgram> {
         self.programs.get(target.name().atom().value())
+    }
+
+    /// The canonical `@types.v1` observation of every function and module
+    /// value the accepted scope checked, which names no target or entry.
+    /// Absent when the scope is not accepted or declares no function.
+    #[must_use]
+    pub fn canonical_types(&self) -> Option<String> {
+        self.modules.as_deref().map(CheckedModuleSet::canonical_vibon)
     }
 
     /// Authoritative call binding facts for the checked applications of the
@@ -467,10 +477,16 @@ fn check_resolved_scope(
             programs.insert(target.name().atom().value().to_owned(), program.clone());
         }
     }
+    let modules = if status == CheckStatus::Accepted {
+        checked.module_set().cloned()
+    } else {
+        None
+    };
     WorkspaceCheckResult {
         status,
         diagnostics,
         programs,
+        modules,
         bindings,
         effect_rows,
     }
@@ -673,6 +689,7 @@ fn finish_result(diagnostics: Vec<Diagnostic>) -> WorkspaceCheckResult {
         status: classify(&diagnostics),
         diagnostics,
         programs: BTreeMap::new(),
+        modules: None,
         bindings: BTreeMap::new(),
         effect_rows: BTreeMap::new(),
     }
