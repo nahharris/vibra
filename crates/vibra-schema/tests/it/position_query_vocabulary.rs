@@ -1,14 +1,7 @@
 //! The closed position-query vocabulary after the pre-M4 binding revision
 //! (`docs/roadmap/pre-m4/01-bindings-return-never.md`, rows E32 and G06).
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    missing_docs
-)]
-
-const SCHEMA: &str = include_str!("../schemas/v1/workspace-position-query.json");
+const SCHEMA: &str = include_str!("../../schemas/v1/workspace-position-query.json");
 
 fn enum_of(name: &str) -> Vec<String> {
     let document: serde_json::Value =

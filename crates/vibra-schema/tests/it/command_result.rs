@@ -1,20 +1,13 @@
 //! Consumer tests for versioned CLI command-result envelopes.
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 use jsonschema::Validator;
 use serde_json::{Value, json};
 use vibra_schema::COMMAND_RESULT_SCHEMA;
 
+use crate::support;
+
 fn validator() -> Validator {
-    let schema: Value =
-        serde_json::from_str(COMMAND_RESULT_SCHEMA).expect("schema JSON");
-    jsonschema::validator_for(&schema).expect("schema is valid JSON Schema")
+    support::validator(COMMAND_RESULT_SCHEMA)
 }
 
 #[test]

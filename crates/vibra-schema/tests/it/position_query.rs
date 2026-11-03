@@ -1,15 +1,7 @@
 //! Producer and consumer tests for the Step 10 query schema.
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 use std::path::Path;
 
-use jsonschema::Validator;
 use serde_json::{Value, json};
 use vibra_diagnostics::LineIndex;
 use vibra_schema::{
@@ -17,24 +9,7 @@ use vibra_schema::{
 };
 use vibra_syntax::{FactStatus, parse_source};
 
-fn validator(schema_text: &str) -> Validator {
-    let schema: Value =
-        serde_json::from_str(schema_text).expect("the schema is valid JSON");
-    jsonschema::validator_for(&schema).expect("the schema is valid JSON Schema")
-}
-
-fn assert_valid(validator: &Validator, instance: &Value) {
-    let errors: Vec<String> = validator
-        .iter_errors(instance)
-        .map(|error| error.to_string())
-        .collect();
-    assert!(
-        errors.is_empty(),
-        "instance does not validate:\n{}\n{}",
-        serde_json::to_string_pretty(instance).unwrap_or_default(),
-        errors.join("\n")
-    );
-}
+use crate::support::{assert_valid, validator};
 
 #[test]
 fn rendered_queries_validate_and_round_trip_deterministically() {

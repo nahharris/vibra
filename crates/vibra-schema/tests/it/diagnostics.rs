@@ -7,14 +7,6 @@
 //! schema admits is what the implementation reads back, and that what it
 //! forbids is rejected.
 
-// A test asserts by panicking.
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 use std::collections::BTreeMap;
 
 use jsonschema::Validator;
@@ -27,11 +19,7 @@ use vibra_schema::{
     RegistryEntryDocument, SCHEMA_VERSION,
 };
 
-fn validator(schema_text: &str) -> Validator {
-    let schema: Value =
-        serde_json::from_str(schema_text).expect("the schema is valid JSON");
-    jsonschema::validator_for(&schema).expect("the schema is a valid JSON Schema")
-}
+use crate::support::{assert_valid, validator};
 
 fn diagnostic_validator() -> Validator {
     validator(DIAGNOSTIC_SCHEMA)
@@ -39,19 +27,6 @@ fn diagnostic_validator() -> Validator {
 
 fn registry_entry_validator() -> Validator {
     validator(REGISTRY_ENTRY_SCHEMA)
-}
-
-fn assert_valid(validator: &Validator, instance: &Value) {
-    let errors: Vec<String> = validator
-        .iter_errors(instance)
-        .map(|e| e.to_string())
-        .collect();
-    assert!(
-        errors.is_empty(),
-        "instance does not validate:\n{}\n{}",
-        serde_json::to_string_pretty(instance).unwrap_or_default(),
-        errors.join("\n")
-    );
 }
 
 /// A diagnostic exercising every optional part of the contract.

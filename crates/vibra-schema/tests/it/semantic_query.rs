@@ -1,15 +1,7 @@
 //! Producer and consumer tests for the semantic workspace-position schema.
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use jsonschema::Validator;
 use serde_json::{Value, json};
@@ -17,34 +9,14 @@ use vibra_diagnostics::LineIndex;
 use vibra_schema::{WORKSPACE_POSITION_QUERY_SCHEMA, WorkspacePositionQueryDocument};
 use vibra_workspace::WorkspaceSnapshot;
 
-static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
+use crate::support::{self, assert_valid, temporary_directory};
 
 fn validator() -> Validator {
-    let schema: Value =
-        serde_json::from_str(WORKSPACE_POSITION_QUERY_SCHEMA).expect("schema JSON");
-    jsonschema::validator_for(&schema).expect("schema is valid JSON Schema")
-}
-
-fn assert_valid(validator: &Validator, instance: &Value) {
-    let errors: Vec<String> = validator
-        .iter_errors(instance)
-        .map(|error| error.to_string())
-        .collect();
-    assert!(
-        errors.is_empty(),
-        "instance does not validate:\n{}\n{}",
-        serde_json::to_string_pretty(instance).unwrap_or_default(),
-        errors.join("\n")
-    );
+    support::validator(WORKSPACE_POSITION_QUERY_SCHEMA)
 }
 
 fn fixture() -> (PathBuf, WorkspaceSnapshot, String) {
-    let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-    let parent = fs::canonicalize(std::env::temp_dir()).expect("canonical temp parent");
-    let root = parent.join(format!(
-        "vibra-schema-query-{serial}-{}",
-        std::process::id()
-    ));
+    let root = temporary_directory("query");
     fs::create_dir_all(root.join("src")).expect("source directory");
     fs::write(
         root.join("project.vibon"),

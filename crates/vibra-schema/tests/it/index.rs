@@ -1,36 +1,16 @@
 //! Producer and consumer tests for the `@index.v1` JSON contract.
 
-#![allow(
-    clippy::expect_used,
-    clippy::indexing_slicing,
-    clippy::panic,
-    clippy::unwrap_used
-)]
-
 use std::path::Path;
 
 use jsonschema::Validator;
-use serde_json::{Value, json};
+use serde_json::json;
 use vibra_schema::{INDEX_SCHEMA, IndexDocumentJson, SCHEMA_VERSION};
 use vibra_workspace::WorkspaceSnapshot;
 
-fn validator() -> Validator {
-    let schema: Value =
-        serde_json::from_str(INDEX_SCHEMA).expect("the schema is valid JSON");
-    jsonschema::validator_for(&schema).expect("the schema is valid JSON Schema")
-}
+use crate::support::{self, assert_valid};
 
-fn assert_valid(validator: &Validator, instance: &Value) {
-    let errors: Vec<String> = validator
-        .iter_errors(instance)
-        .map(|error| error.to_string())
-        .collect();
-    assert!(
-        errors.is_empty(),
-        "instance does not validate:\n{}\n{}",
-        serde_json::to_string_pretty(instance).unwrap_or_default(),
-        errors.join("\n")
-    );
+fn validator() -> Validator {
+    support::validator(INDEX_SCHEMA)
 }
 
 /// The index of one corpus project, rendered as JSON.
