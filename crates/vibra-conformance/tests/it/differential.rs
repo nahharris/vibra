@@ -155,6 +155,35 @@ fn empty_entry_wasm_observation() -> WasmObservation {
 }
 
 #[test]
+fn every_executable_case_of_the_corpus_matches_in_both_backends() {
+    // The requirement of the gates is that no case fails: an emit failure or a
+    // disagreement of either backend on an executable case fails it.
+    let corpus = crate::support::corpus();
+    let executable = corpus
+        .cases()
+        .iter()
+        .filter(|case| case.manifest().is_executable())
+        .collect::<Vec<_>>();
+    assert!(!executable.is_empty(), "the corpus has no executable case");
+    let runner = ConformanceRunner::new(standard_dispatcher());
+    let failures = runner
+        .run_cases(&executable)
+        .into_iter()
+        .filter_map(|report| {
+            let backends = report.backends.as_ref()?;
+            let matched = backends.interpreter == CaseStatus::Passed
+                && backends.wasm == Some(WasmStatus::Matched);
+            (!matched).then(|| format!("{}: {:?}", report.case_id, report.status))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        failures.is_empty(),
+        "cases that fail:\n{}",
+        failures.join("\n")
+    );
+}
+
+#[test]
 fn the_empty_entry_runs_in_both_backends_and_matches() {
     let wasm = empty_entry_wasm_observation();
     assert_eq!(wasm, WasmObservation::Completed(void_execution()));
