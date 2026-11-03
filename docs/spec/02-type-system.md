@@ -88,7 +88,10 @@ enum body admits `true` and `false` as variant names, which is how `bool` spells
 its variants. `@std.bool` also declares the two values of the type as ordinary
 public module values, `(def true bool (bool.true) visibility: @public)` and
 `(def false bool (bool.false) visibility: @public)`. They are the only way
-source writes a boolean, because source has no boolean literal.
+source writes a boolean, because source has no boolean literal. The checker
+writes `(bool.true)`, `(bool.false)`, `true`, and `false` in typed IR as the
+boolean literals of `bool`, as it writes them in patterns, so no layer below
+the checker sees a `bool` variant.
 
 `@std.builtin` declares `(deftype dict (array (tuple k v)) where: (k ordered v
 any) role: @dict)`: a dict is its entries sorted by the `ordered.compare` of
