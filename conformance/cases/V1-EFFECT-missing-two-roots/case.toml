@@ -15,16 +15,16 @@ code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [198, 220]
-notes = ["performs @audit via @audit.record"]
+notes = ["performs @app.main.audit via @app.main.audit.record"]
 
 [[expect.diagnostics]]
 code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [198, 220]
-notes = ["performs @write via @audit.record"]
+notes = ["performs @app.main.write via @app.main.audit.record"]
 
   [[expect.diagnostics.related]]
   source = "input.vib"
   span = [147, 172]
-  message = "performs @write via @write.text"
+  message = "performs @app.main.write via @app.main.write.text"

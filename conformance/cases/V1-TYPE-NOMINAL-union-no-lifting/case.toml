@@ -11,13 +11,13 @@ source = "input.vib"
 accepted = false
 
 [[expect.diagnostics]]
-code = "@type.invalid-dict-key"
-level = "@error"
-source = "input.vib"
-span = [131, 137]
-
-[[expect.diagnostics]]
 code = "@name.unknown-symbol"
 level = "@error"
 source = "input.vib"
 span = [70, 88]
+
+[[expect.diagnostics]]
+code = "@type.invalid-dict-key"
+level = "@error"
+source = "input.vib"
+span = [131, 137]

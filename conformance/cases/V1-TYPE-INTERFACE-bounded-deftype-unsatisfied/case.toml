@@ -14,12 +14,6 @@ accepted = false
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "input.vib"
-span = [296, 343]
-
-[[expect.diagnostics]]
-code = "@type.unsatisfied-bound"
-level = "@error"
-source = "input.vib"
 span = [111, 129]
 
 [[expect.diagnostics]]
@@ -33,6 +27,12 @@ code = "@type.unsatisfied-bound"
 level = "@error"
 source = "input.vib"
 span = [256, 274]
+
+[[expect.diagnostics]]
+code = "@type.unsatisfied-bound"
+level = "@error"
+source = "input.vib"
+span = [296, 343]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"

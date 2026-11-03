@@ -15,36 +15,36 @@ code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [173, 178]
-notes = ["performs @write via @see"]
+notes = ["performs @app.main.write via @app.main.see"]
 
   [[expect.diagnostics.related]]
   source = "input.vib"
   span = [101, 117]
-  message = "performs @write via @write.text"
+  message = "performs @app.main.write via @app.main.write.text"
 
 [[expect.diagnostics]]
 code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [262, 267]
-notes = ["performs @write via @see"]
+notes = ["performs @app.main.write via @app.main.see"]
 
   [[expect.diagnostics.related]]
   source = "input.vib"
   span = [101, 117]
-  message = "performs @write via @write.text"
+  message = "performs @app.main.write via @app.main.write.text"
 
 [[expect.diagnostics]]
 code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [346, 351]
-notes = ["performs @write via @see"]
+notes = ["performs @app.main.write via @app.main.see"]
 
   [[expect.diagnostics.related]]
   source = "input.vib"
   span = [101, 117]
-  message = "performs @write via @write.text"
+  message = "performs @app.main.write via @app.main.write.text"
 
 [[expect.diagnostics]]
 code = "@effect.outside-ceiling"

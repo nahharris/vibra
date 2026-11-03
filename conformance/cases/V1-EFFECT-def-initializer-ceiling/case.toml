@@ -15,4 +15,4 @@ code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [59, 72]
-notes = ["performs @marker via @marker.mark"]
+notes = ["performs @app.main.marker via @app.main.marker.mark"]

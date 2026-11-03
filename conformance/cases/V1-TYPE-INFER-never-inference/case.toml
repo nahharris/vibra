@@ -11,16 +11,16 @@ source = "input.vib"
 accepted = false
 
 [[expect.diagnostics]]
-code = "@type.unreachable-code"
-level = "@error"
-source = "input.vib"
-span = [163, 169]
-
-[[expect.diagnostics]]
 code = "@type.ambiguous-inference"
 level = "@error"
 source = "input.vib"
 span = [157, 170]
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [163, 169]
 
 [[expect.diagnostics]]
 code = "@type.ambiguous-inference"

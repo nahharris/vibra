@@ -23,13 +23,13 @@ source = "input.vib"
 span = [63, 89]
 
 [[expect.diagnostics]]
-code = "@type.mismatch"
-level = "@error"
-source = "input.vib"
-span = [127, 131]
-
-[[expect.diagnostics]]
 code = "@type.redundant-return"
 level = "@error"
 source = "input.vib"
 span = [119, 132]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [127, 131]

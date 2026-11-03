@@ -11,12 +11,6 @@ source = "input.vib"
 accepted = false
 
 [[expect.diagnostics]]
-code = "@type.invalid-dict-key"
-level = "@error"
-source = "input.vib"
-span = [348, 353]
-
-[[expect.diagnostics]]
 code = "@name.wrong-entity-kind"
 level = "@error"
 source = "input.vib"
@@ -27,3 +21,9 @@ code = "@type.unsatisfied-bound"
 level = "@error"
 source = "input.vib"
 span = [299, 316]
+
+[[expect.diagnostics]]
+code = "@type.invalid-dict-key"
+level = "@error"
+source = "input.vib"
+span = [348, 353]
