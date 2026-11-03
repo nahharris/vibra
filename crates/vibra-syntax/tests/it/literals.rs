@@ -4,7 +4,8 @@
 //! of the valid forms are here.
 
 use vibra_syntax::{
-    IntegerSuffix, Literal, LiteralClassification, TokenKind, classify, lex,
+    IntegerSuffix, Literal, LiteralClassification, TokenKind,
+    canonical_string_spelling, classify, lex,
 };
 
 #[test]
@@ -163,4 +164,25 @@ fn booleans_void_and_numeric_candidates_are_classified_before_names() {
         classifications[4],
         LiteralClassification::Literal(Literal::Integer(_))
     ));
+}
+
+#[test]
+fn the_canonical_string_spelling_escapes_controls_and_decodes_back() {
+    assert_eq!(canonical_string_spelling("plain"), "\"plain\"");
+    assert_eq!(
+        canonical_string_spelling("q\" b\\ n\n r\r t\t"),
+        r#""q\" b\\ n\n r\r t\t""#
+    );
+    // Other C0 controls and DEL use `\u{hex}`; everything else is literal.
+    assert_eq!(
+        canonical_string_spelling("\u{0}\u{1b}\u{1f}\u{7f}é🌱"),
+        r#""\u{0}\u{1b}\u{1f}\u{7f}é🌱""#
+    );
+    let value = "a\u{1}\"\\\n\u{7f}z";
+    let LiteralClassification::Literal(Literal::String(decoded)) =
+        classify(&canonical_string_spelling(value))
+    else {
+        panic!("the canonical spelling is a valid string literal");
+    };
+    assert_eq!(decoded.value(), value);
 }

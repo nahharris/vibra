@@ -14,10 +14,10 @@ vibra-syntax.workspace = true
 vibra-workspace.workspace = true
 
 serde.workspace = true
-serde_json.workspace = true
 
 [dev-dependencies]
 jsonschema.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

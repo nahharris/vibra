@@ -27,3 +27,15 @@ fn the_context_vocabulary_has_the_new_contexts_and_no_let_body() {
 fn never_is_a_primitive_type_name() {
     assert!(enum_of("primitiveName").iter().any(|name| name == "never"));
 }
+
+/// The schema lists the primitive names on its own, so validating against it
+/// stays independent of the table the checker uses; this keeps the two from
+/// drifting.
+#[test]
+fn the_schema_primitive_names_are_the_syntax_table() {
+    let table: Vec<String> = vibra_syntax::PRIMITIVE_TYPES
+        .iter()
+        .map(|(name, _)| (*name).to_owned())
+        .collect();
+    assert_eq!(enum_of("primitiveName"), table);
+}

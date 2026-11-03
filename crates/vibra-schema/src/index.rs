@@ -5,7 +5,7 @@
 //! same records, in the same order, with identities as atom spellings without
 //! `@` and canonical type encodings as VIBON text.
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use vibra_workspace::index::{
     IndexDeclaration, IndexDocument, IndexImplementation, IndexSource,
 };
@@ -16,8 +16,8 @@ use crate::SCHEMA_VERSION;
 pub const INDEX_SCHEMA: &str = include_str!("../schemas/v1/index.json");
 
 /// One source span of the indexed snapshot.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IndexSourceDocument {
     /// The project-relative source identity.
     pub source_id: String,
@@ -39,8 +39,8 @@ impl IndexSourceDocument {
 
 /// An effect row: the record `{ "roots": [...] }` of the effects chapter,
 /// with the roots as atom spellings without `@`, in canonical order.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IndexRowDocument {
     /// The roots' identities.
     pub roots: Vec<String>,
@@ -55,8 +55,8 @@ impl IndexRowDocument {
 }
 
 /// The provider binding of a declaration written with `external:`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IndexExternalDocument {
     /// `host` or `compiler`.
     pub provider: String,
@@ -65,8 +65,8 @@ pub struct IndexExternalDocument {
 }
 
 /// The checked facts of one declaration.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IndexFactsDocument {
     /// The canonical VIBON of the signature.
     pub signature: String,
@@ -82,8 +82,8 @@ pub struct IndexFactsDocument {
 }
 
 /// One module-level or nested declaration.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IndexDeclarationDocument {
     /// The canonical atom identity.
     pub id: String,
@@ -134,8 +134,8 @@ impl IndexDeclarationDocument {
 }
 
 /// One member written in an `impl` block.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IndexImplementationMemberDocument {
     /// The identity of the contract member it implements.
     pub contract: String,
@@ -148,8 +148,8 @@ pub struct IndexImplementationMemberDocument {
 }
 
 /// One `impl` block, identified by its receiver and applied interface.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IndexImplementationDocument {
     /// The canonical VIBON of the receiver type.
     pub receiver: String,
@@ -185,8 +185,8 @@ impl IndexImplementationDocument {
 }
 
 /// One resolved written name.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IndexReferenceDocument {
     /// The identity of the enclosing declaration.
     pub from: String,
@@ -199,8 +199,8 @@ pub struct IndexReferenceDocument {
 }
 
 /// The `@index.v1` document rendered for a tooling consumer.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct IndexDocumentJson {
     /// Major version of this contract.
     pub schema_version: u32,

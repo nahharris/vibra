@@ -23,7 +23,7 @@ use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level};
 use vibra_syntax::{
     Attribute, Declaration, DeftypeBody, Expression, ExpressionKind,
     FunctionDeclaration, LabelledDefault, Literal, Name, Pattern, PatternKind,
-    TypeExpr, TypeMember, parse_source,
+    TypeExpr, TypeMember, canonical_string_spelling, parse_source,
 };
 
 /// Package provenance carried by every declaration identity.
@@ -828,8 +828,8 @@ impl ResolvedSnapshot {
         let _ = writeln!(
             output,
             "  package: (record name: {} version: {})",
-            quoted(&self.package.name),
-            quoted(&self.package.version)
+            canonical_string_spelling(&self.package.name),
+            canonical_string_spelling(&self.package.version)
         );
         output.push_str("  modules: (array\n");
         for module in &self.modules {
@@ -842,7 +842,7 @@ impl ResolvedSnapshot {
                 } else {
                     format!("@{}.{}", module.unit, module.segments.join("."))
                 },
-                quoted(&module.source_id)
+                canonical_string_spelling(&module.source_id)
             );
         }
         output.push_str("  )\n  declarations: (array\n");
@@ -850,10 +850,10 @@ impl ResolvedSnapshot {
             let _ = writeln!(
                 output,
                 "    (record id: {} kind: @{} visibility: @{} source: {} span: (array {}u64 {}u64))",
-                quoted(&declaration.id.canonical()),
+                canonical_string_spelling(&declaration.id.canonical()),
                 declaration.id.kind().as_str(),
                 declaration.visibility.as_str(),
-                quoted(&declaration.source_id),
+                canonical_string_spelling(&declaration.source_id),
                 declaration.span.start(),
                 declaration.span.end()
             );
@@ -869,7 +869,7 @@ impl ResolvedSnapshot {
                 "    (record alias: @{} target: {} source: {} span: (array {}u64 {}u64))",
                 import.alias,
                 module,
-                quoted(&import.source_id),
+                canonical_string_spelling(&import.source_id),
                 import.span.start(),
                 import.span.end()
             );
@@ -878,15 +878,15 @@ impl ResolvedSnapshot {
         for reference in &self.references {
             let target = reference.target.as_ref().map_or_else(
                 || "void".to_owned(),
-                |target| quoted(&target.canonical()),
+                |target| canonical_string_spelling(&target.canonical()),
             );
             let _ = writeln!(
                 output,
                 "    (record from: {} written: {} target: {} source: {} span: (array {}u64 {}u64))",
-                quoted(&reference.from.canonical()),
-                quoted(&reference.written),
+                canonical_string_spelling(&reference.from.canonical()),
+                canonical_string_spelling(&reference.written),
                 target,
-                quoted(&reference.source_id),
+                canonical_string_spelling(&reference.source_id),
                 reference.span.start(),
                 reference.span.end()
             );
@@ -3256,23 +3256,6 @@ fn diagnostic_key(diagnostic: &Diagnostic) -> (String, usize, usize, String) {
         span.end(),
         diagnostic.code().as_atom().to_owned(),
     )
-}
-
-fn quoted(value: &str) -> String {
-    let mut output = String::with_capacity(value.len() + 2);
-    output.push('"');
-    for character in value.chars() {
-        match character {
-            '\\' => output.push_str("\\\\"),
-            '"' => output.push_str("\\\""),
-            '\n' => output.push_str("\\n"),
-            '\r' => output.push_str("\\r"),
-            '\t' => output.push_str("\\t"),
-            character => output.push(character),
-        }
-    }
-    output.push('"');
-    output
 }
 
 trait SpanOr {

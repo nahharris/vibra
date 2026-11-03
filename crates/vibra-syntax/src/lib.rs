@@ -50,8 +50,8 @@ pub use data::{
 pub use literal::{
     BooleanLiteral, CharacterLiteral, FloatLiteral, FloatSuffix, IntegerLiteral,
     IntegerSuffix, InvalidLiteralKind, Literal, LiteralClassification, LiteralKind,
-    StringLiteral, VoidLiteral, canonical_character_spelling, classify,
-    classify_literal,
+    StringLiteral, VoidLiteral, canonical_character_spelling,
+    canonical_string_spelling, classify, classify_literal,
 };
 pub use name::{Name, NameClassification, NameKind, classify_name};
 pub use query::{

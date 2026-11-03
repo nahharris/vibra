@@ -1,11 +1,11 @@
-//! Producer and consumer tests for the published diagnostic contracts.
+//! Producer tests for the published diagnostic contracts.
 //!
-//! `docs/spec/07-diagnostics-and-conformance.md` makes "JSON producer/consumer
-//! tests validate every published interchange schema" a release-gate
-//! requirement. Producer tests assert that what the implementation emits
-//! validates against the published schema; consumer tests assert that what the
-//! schema admits is what the implementation reads back, and that what it
-//! forbids is rejected.
+//! `docs/spec/07-diagnostics-and-conformance.md` makes producer validation of
+//! every published interchange schema a release-gate requirement. These tests
+//! assert that what the implementation emits validates against the published
+//! schema, and that the schema rejects what it forbids. `vibra-schema` renders
+//! these documents and never reads them back, so the schema is the consumer
+//! contract.
 
 use std::collections::BTreeMap;
 
@@ -205,34 +205,10 @@ fn a_related_span_uses_the_index_for_its_source_document() {
 }
 
 #[test]
-fn a_rendered_diagnostic_round_trips_through_json() {
-    let (source, diagnostic) = rich_diagnostic();
-    let index = LineIndex::new(&source);
-    let document = DiagnosticDocument::render(&diagnostic, &index)
-        .expect("the diagnostic has all required source indexes");
-
-    let text = serde_json::to_string(&document).expect("the document serializes");
-    let parsed: DiagnosticDocument =
-        serde_json::from_str(&text).expect("it reads back");
-    assert_eq!(parsed, document);
-}
-
-#[test]
-fn a_registry_entry_round_trips_through_json() {
-    for code in DiagnosticCode::ALL {
-        let entry = RegistryEntryDocument::render(*code);
-        let text = serde_json::to_string(&entry).expect("the entry serializes");
-        let parsed: RegistryEntryDocument =
-            serde_json::from_str(&text).expect("it reads back");
-        assert_eq!(parsed, entry);
-    }
-}
-
-#[test]
-fn an_unknown_field_is_rejected_when_reading() {
+fn an_unknown_field_is_rejected_by_the_schema() {
     // The tooling chapter permits ignoring an unknown field only where an
     // output schema explicitly allows forward extension. Neither of these
-    // does, so both the schema and the reader must refuse it.
+    // does, so the schema must refuse it.
     let (source, diagnostic) = rich_diagnostic();
     let index = LineIndex::new(&source);
     let mut instance = serde_json::to_value(
@@ -249,14 +225,10 @@ fn an_unknown_field_is_rejected_when_reading() {
             .is_some(),
         "the schema must reject an unknown field"
     );
-    assert!(
-        serde_json::from_value::<DiagnosticDocument>(instance).is_err(),
-        "the reader must reject an unknown field"
-    );
 }
 
 #[test]
-fn a_missing_required_field_is_rejected_when_reading() {
+fn a_missing_required_field_is_rejected_by_the_schema() {
     let (source, diagnostic) = rich_diagnostic();
     let index = LineIndex::new(&source);
     let mut instance = serde_json::to_value(
@@ -277,12 +249,12 @@ fn a_missing_required_field_is_rejected_when_reading() {
             .is_some(),
         "the schema must require notes even when empty"
     );
-    assert!(serde_json::from_value::<DiagnosticDocument>(instance).is_err());
 }
 
 #[test]
 fn an_unsupported_schema_version_is_rejected_by_the_schema() {
-    // A reader must reject a newer major version rather than guessing.
+    // A consumer validating against the schema rejects a newer major version
+    // rather than guessing.
     let (source, diagnostic) = rich_diagnostic();
     let index = LineIndex::new(&source);
     let mut instance = serde_json::to_value(

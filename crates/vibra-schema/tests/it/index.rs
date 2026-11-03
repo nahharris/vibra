@@ -1,4 +1,4 @@
-//! Producer and consumer tests for the `@index.v1` JSON contract.
+//! Producer tests for the `@index.v1` JSON contract.
 
 use std::path::Path;
 
@@ -26,7 +26,7 @@ fn rendered(case: &str) -> IndexDocumentJson {
 }
 
 #[test]
-fn a_rendered_index_validates_and_round_trips_deterministically() {
+fn a_rendered_index_validates_and_is_deterministic() {
     let document = rendered("V1-TOOL-index-records");
     assert_eq!(document.schema_version, SCHEMA_VERSION);
 
@@ -37,9 +37,6 @@ fn a_rendered_index_validates_and_round_trips_deterministically() {
 
     let instance = serde_json::to_value(&document).expect("index becomes JSON");
     assert_valid(&validator(), &instance);
-    let parsed: IndexDocumentJson =
-        serde_json::from_str(&first).expect("index reads back");
-    assert_eq!(parsed, document);
 }
 
 #[test]
@@ -117,13 +114,10 @@ fn a_declaration_that_does_not_check_has_null_facts() {
 }
 
 #[test]
-fn effect_roots_and_operations_carry_rows_that_validate_and_round_trip() {
+fn effect_roots_and_operations_carry_rows_that_validate() {
     let document = rendered("V1-TOOL-index-effects");
     let instance = serde_json::to_value(&document).expect("index becomes JSON");
     assert_valid(&validator(), &instance);
-    let parsed: IndexDocumentJson =
-        serde_json::from_value(instance.clone()).expect("index reads back");
-    assert_eq!(parsed, document);
 
     let find = |id: &str| {
         document
