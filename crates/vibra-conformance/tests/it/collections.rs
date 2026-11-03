@@ -257,9 +257,11 @@ fn a_declared_key_is_ordered_by_its_own_compare_called_as_a_language_function() 
   (impl ordered\n\
     (defn compare (left self right self) core.ordering\n\
       (i32.compare (left @y) (right @y)))))\n";
-    let types = dict_type("@point", "@str");
+    let types = dict_type("@app.main.point", "@str");
     let point = |x: &str, y: &str| {
-        format!("(record kind: @record type: @point fields: (record x: {x} y: {y}))")
+        format!(
+            "(record kind: @record type: @app.main.point fields: (record x: {x} y: {y}))"
+        )
     };
     let value = dict_value(&[
         (&point("0i32", "1i32"), "\"low\""),

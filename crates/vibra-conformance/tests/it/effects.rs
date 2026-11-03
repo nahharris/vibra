@@ -9,7 +9,7 @@ use std::fs;
 use vibra_fmt::format_source_with_facts;
 use vibra_types::check_source;
 
-/// The single-source inputs of the cases that write an effect row.
+/// The source inputs of the cases that write an effect row.
 fn effect_inputs() -> Vec<(String, String)> {
     let mut inputs = Vec::new();
     for entry in fs::read_dir(corpus_root()).expect("corpus directory") {

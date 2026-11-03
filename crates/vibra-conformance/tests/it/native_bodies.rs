@@ -33,7 +33,7 @@ fn the_call_of_array_fold_in_tail_position_is_a_tail_call() {
     let spin = program
         .functions()
         .iter()
-        .find(|function| function.name() == "spin")
+        .find(|function| function.name().ends_with("/app.main.spin"))
         .expect("spin");
     assert!(
         format!("{:?}", spin.body()).contains("tail: true"),
@@ -93,7 +93,7 @@ fn the_wrapper_carries_one_checked_body_beside_it() {
     let fold = program
         .functions()
         .iter()
-        .find(|function| function.name() == "array.fold")
+        .find(|function| function.name().ends_with("/std.builtin.array.fold"))
         .expect("array.fold is a function of the program");
     assert!(fold.is_external_wrapper());
     let body = fold.native_body().expect("the checked body");
@@ -104,7 +104,7 @@ fn the_wrapper_carries_one_checked_body_beside_it() {
         let member = program
             .functions()
             .iter()
-            .find(|function| function.name() == name)
+            .find(|function| function.name().ends_with(&format!("/std.builtin.{name}")))
             .unwrap_or_else(|| panic!("{name} joins the program"));
         assert!(member.native_body().is_none());
     }
@@ -112,7 +112,7 @@ fn the_wrapper_carries_one_checked_body_beside_it() {
     for function in program.functions() {
         assert_eq!(
             function.native_body().is_some(),
-            function.name() == "array.fold",
+            function.name().ends_with("/std.builtin.array.fold"),
             "{}",
             function.name()
         );

@@ -170,7 +170,7 @@ pub(crate) fn corpus_case(id: &str) -> Case {
         .expect("a corpus case")
 }
 
-/// A single-source program of the corpus and the canonical form of what the
+/// A source program of the corpus and the canonical form of what the
 /// checker made of it.
 #[derive(Debug)]
 pub(crate) struct CheckedSource {
@@ -259,6 +259,24 @@ pub(crate) fn checked(source: &str) -> CheckedProgram {
     let result = check_source("input.vib", source);
     assert!(result.accepted(), "{:?}\n{source}", result.diagnostics());
     result.program().expect("an accepted program").clone()
+}
+
+/// How many calls in tail position the functions and module values of the
+/// source `source_id` hold, not counting those of the standard library the
+/// program also carries.
+pub(crate) fn tail_calls(program: &CheckedProgram, source_id: &str) -> usize {
+    let count = |body: &Expr| format!("{body:?}").matches("tail: true").count();
+    let functions = program
+        .functions()
+        .iter()
+        .filter(|function| function.origin().source_id() == source_id)
+        .map(|function| count(function.body()));
+    let globals = program
+        .globals()
+        .iter()
+        .filter(|global| global.origin().source_id() == source_id)
+        .map(|global| count(global.initializer()));
+    functions.chain(globals).sum()
 }
 
 pub(crate) fn entry_type(program: &CheckedProgram) -> Type {

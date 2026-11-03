@@ -308,7 +308,7 @@ fn the_typed_program_carries_the_members_type_arguments() {
     let canonical = checked.program().expect("program").canonical_vibon();
     assert!(
         canonical.contains(
-            "contract: @mapper member: @map-to receiver: 0u64 types: (array @str)"
+            "contract: @app.main.mapper member: @map-to receiver: 0u64 types: (array @str)"
         ),
         "{canonical}"
     );

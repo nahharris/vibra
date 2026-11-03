@@ -71,7 +71,7 @@ fn assert_balanced(source: &str) {
 fn a_declared_record_is_built_and_observed_in_declaration_order() {
     agree_on(
         "(deftype point (record x i32 y i32))\n(defn main () point (point x: 1i32 y: 2i32))\n",
-        "(record type: @point value: (record kind: @record type: @point fields: (record x: 1i32 y: 2i32)))\n",
+        "(record type: @app.main.point value: (record kind: @record type: @app.main.point fields: (record x: 1i32 y: 2i32)))\n",
     );
 }
 
@@ -87,7 +87,7 @@ fn a_record_projection_is_a_direct_component_read() {
 fn tuples_declared_and_anonymous_are_built_and_projected() {
     agree_on(
         "(deftype pair (tuple i32 str))\n(defn main () (tuple pair (tuple bool char)) (tupleof (pair 1i32 \"x\") (tupleof true \\z)))\n",
-        "(record type: (record type: @tuple arguments: (array @pair (record type: @tuple arguments: (array @bool @char)))) value: (record kind: @tuple values: (array (record kind: @tuple type: @pair values: (array 1i32 \"x\")) (record kind: @tuple values: (array true \\z)))))\n",
+        "(record type: (record type: @tuple arguments: (array @app.main.pair (record type: @tuple arguments: (array @bool @char)))) value: (record kind: @tuple values: (array (record kind: @tuple type: @app.main.pair values: (array 1i32 \"x\")) (record kind: @tuple values: (array true \\z)))))\n",
     );
     agree("(deftype pair (tuple i32 str))\n(defn main () str ((pair 1i32 \"x\") 1))\n");
 }
@@ -97,7 +97,7 @@ fn an_enum_with_only_void_payloads_has_discriminants_in_declaration_order() {
     let source = "(deftype color (enum red void green void blue void))\n(defn main () (tuple color color color) (tupleof (color.red) (color.green) (color.blue)))\n";
     agree_on(
         source,
-        "(record type: (record type: @tuple arguments: (array @color @color @color)) value: (record kind: @tuple values: (array (record kind: @enum type: @color variant: @red) (record kind: @enum type: @color variant: @green) (record kind: @enum type: @color variant: @blue))))\n",
+        "(record type: (record type: @tuple arguments: (array @app.main.color @app.main.color @app.main.color)) value: (record kind: @tuple values: (array (record kind: @enum type: @app.main.color variant: @red) (record kind: @enum type: @app.main.color variant: @green) (record kind: @enum type: @app.main.color variant: @blue))))\n",
     );
     for (name, discriminant) in [("red", 0), ("green", 1), ("blue", 2)] {
         let program = checked(&format!(
@@ -129,11 +129,11 @@ fn a_union_member_is_injected_with_its_written_position() {
     };
     agree_on(
         &source("5i32"),
-        "(record type: @number value: (record kind: @union type: @number member: @i32 value: 5i32))\n",
+        "(record type: @app.main.number value: (record kind: @union type: @app.main.number member: @i32 value: 5i32))\n",
     );
     agree_on(
         &source("\"five\""),
-        "(record type: @number value: (record kind: @union type: @number member: @str value: \"five\"))\n",
+        "(record type: @app.main.number value: (record kind: @union type: @app.main.number member: @str value: \"five\"))\n",
     );
     assert_eq!(result_variant(&checked(&source("5i32"))), 1);
     assert_eq!(result_variant(&checked(&source("\"five\""))), 0);
