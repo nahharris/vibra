@@ -179,13 +179,13 @@
     11u32
     median-microseconds:
     (array
-      (record program: @deep-tail-walk interpreter: 417977u64 wasm: 119321u64)
-      (record program: @m3-demo-tests interpreter: 372519u64 wasm: 787473u64)
-      (record program: @non-tail-depth interpreter: 374719u64 wasm: 38524u64)
-      (record program: @tail-loop interpreter: 3764607u64 wasm: 224340u64)
-      (record program: @array-fold interpreter: 1176u64 wasm: 30508u64)
-      (record program: @dict-insert interpreter: 190u64 wasm: 107277u64)
-      (record program: @text-concat interpreter: 17069u64 wasm: 68441u64)
-      (record program: @float-to-str interpreter: 9157u64 wasm: 68027u64)
-      (record program: @nested-value-5000 interpreter: 62118u64 wasm: 23525u64)
-      (record program: @effectful-walk interpreter: 19u64 wasm: 56621u64))))
+      (record program: @deep-tail-walk interpreter: 333990u64 wasm: 93193u64)
+      (record program: @m3-demo-tests interpreter: 332651u64 wasm: 635054u64)
+      (record program: @non-tail-depth interpreter: 287910u64 wasm: 24787u64)
+      (record program: @tail-loop interpreter: 2944086u64 wasm: 190293u64)
+      (record program: @array-fold interpreter: 1067u64 wasm: 24416u64)
+      (record program: @dict-insert interpreter: 151u64 wasm: 91584u64)
+      (record program: @text-concat interpreter: 15006u64 wasm: 15739u64)
+      (record program: @float-to-str interpreter: 4897u64 wasm: 12470u64)
+      (record program: @nested-value-5000 interpreter: 52784u64 wasm: 20083u64)
+      (record program: @effectful-walk interpreter: 16u64 wasm: 49381u64))))

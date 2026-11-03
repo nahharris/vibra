@@ -137,6 +137,20 @@ impl WorkspaceSnapshot {
         self.source.revision()
     }
 
+    /// This workspace with the text of the module `source_id` replaced, for
+    /// checking a candidate text in its project; `None` when the snapshot holds
+    /// no such module.
+    pub(crate) fn with_document_text(
+        &self,
+        source_id: &str,
+        text: &str,
+    ) -> Option<Self> {
+        Some(Self {
+            project: self.project.clone(),
+            source: self.source.with_module_bytes(source_id, text.as_bytes())?,
+        })
+    }
+
     /// Builds the explicit source graph without consulting the filesystem.
     pub fn source_graph(&self) -> Result<source_graph::SourceGraph, WorkspaceError> {
         source_graph::SourceGraph::build(&self.project, self.source.clone())
