@@ -1,6 +1,6 @@
 //! Static-v1 project corpus coverage.
 
-use std::path::{Path, PathBuf};
+use crate::support::{TempDir, copy_directory, corpus, corpus_root};
 
 use vibra_conformance::{
     Case, CaseObservation, ConformanceProfile, ConformanceRunner, Corpus,
@@ -12,40 +12,16 @@ use vibra_conformance::{
     ToolingV1QueryHandler,
 };
 
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("the crate lives two levels below the workspace root")
-        .to_path_buf()
-}
-
-fn copy_directory(from: &Path, to: &Path) {
-    std::fs::create_dir_all(to).expect("directory");
-    for entry in std::fs::read_dir(from).expect("a directory") {
-        let entry = entry.expect("an entry");
-        let target = to.join(entry.file_name());
-        if entry.file_type().expect("a type").is_dir() {
-            copy_directory(&entry.path(), &target);
-        } else {
-            std::fs::copy(entry.path(), target).expect("copy");
-        }
-    }
-}
-
 /// A corpus holding only the `V1-PROJECT-*` cases of the repository's corpus,
 /// copied under the system temporary directory and removed on drop. The whole
 /// corpus is the job of the conformance gate; this binary runs the project cases
 /// through a dispatcher it builds itself.
-struct ProjectCorpus(PathBuf);
+struct ProjectCorpus(TempDir);
 
 impl ProjectCorpus {
     fn new() -> Self {
-        let root = std::env::temp_dir()
-            .join(format!("vibra-project-step2-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        let source = workspace_root().join("conformance/cases");
-        for entry in std::fs::read_dir(&source).expect("the corpus") {
+        let root = TempDir::new("project");
+        for entry in std::fs::read_dir(corpus_root()).expect("the corpus") {
             let entry = entry.expect("an entry");
             if entry
                 .file_name()
@@ -59,16 +35,10 @@ impl ProjectCorpus {
     }
 }
 
-impl Drop for ProjectCorpus {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 #[test]
 fn static_project_cases_are_executed_by_the_real_handler() {
     let project_cases = ProjectCorpus::new();
-    let corpus = Corpus::discover(&project_cases.0).expect("project corpus");
+    let corpus = Corpus::discover(project_cases.0.path()).expect("project corpus");
     let static_cases = corpus
         .cases()
         .iter()
@@ -111,8 +81,7 @@ fn static_project_cases_are_executed_by_the_real_handler() {
 
 #[test]
 fn valid_project_observation_keeps_source_identity_and_schema_order() {
-    let corpus = Corpus::discover(workspace_root().join("conformance/cases"))
-        .expect("workspace corpus");
+    let corpus = corpus();
     let case = corpus
         .cases()
         .iter()
@@ -155,8 +124,7 @@ impl ProfileHandler for ClaimingProjectHandler {
 
 #[test]
 fn static_project_handler_composes_with_future_static_slices() {
-    let corpus = Corpus::discover(workspace_root().join("conformance/cases"))
-        .expect("workspace corpus");
+    let corpus = corpus();
     let case = corpus
         .cases()
         .iter()
@@ -181,8 +149,7 @@ fn static_project_handler_composes_with_future_static_slices() {
 
 #[test]
 fn static_dispatch_rejects_ambiguous_same_profile_handlers() {
-    let corpus = Corpus::discover(workspace_root().join("conformance/cases"))
-        .expect("workspace corpus");
+    let corpus = corpus();
     let case = corpus
         .cases()
         .iter()

@@ -9,16 +9,14 @@
 //! to add, so a branch that adds executable cases, or lowers more forms, is
 //! told exactly what to write.
 
-use std::path::{Path, PathBuf};
+use crate::support::corpus;
+
+use std::path::Path;
 
 use vibra_conformance::{
-    ConformanceRunner, Corpus, Findings, Observed, ParityInventory, WasmStatus,
+    ConformanceRunner, Findings, Observed, ParityInventory, WasmStatus,
     standard_dispatcher,
 };
-
-fn corpus_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases")
-}
 
 /// The step that owns a form, for suggesting a row. It is a hint for the person
 /// adding a row, never an authority: the table is the record, and the owner of a
@@ -74,7 +72,7 @@ fn suggested_owner(forms: &[String]) -> String {
 
 #[test]
 fn the_inventory_matches_the_corpus_and_the_runner() {
-    let corpus = Corpus::discover(corpus_root()).expect("the corpus loads");
+    let corpus = corpus();
     let path = corpus
         .parity_inventory_path()
         .expect("the corpus root has a parent");
@@ -147,7 +145,7 @@ fn failure_message(path: &Path, findings: &Findings) -> String {
 fn every_executable_case_has_a_row_and_no_row_is_extra() {
     // The same rule without running a backend: the set of ids is the set of
     // executable cases.
-    let corpus = Corpus::discover(corpus_root()).expect("the corpus loads");
+    let corpus = corpus();
     let path = corpus.parity_inventory_path().expect("a parent");
     let inventory =
         ParityInventory::parse(&std::fs::read_to_string(path).expect("table"))

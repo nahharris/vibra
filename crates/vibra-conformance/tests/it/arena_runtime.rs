@@ -7,6 +7,8 @@
 //! otherwise exactly an emitted one (`vibra_wasm::support`). The values are
 //! observed only through the exported accessors, as a host observes them.
 
+use crate::support::{MIB, runner, runner_with};
+
 use vibra_ir::boundary::TrapCode;
 use vibra_wasm::layout::{
     self, CellClass, Kind, STRIDE_BYTES, STRIDE_CELLS, header, state,
@@ -17,7 +19,6 @@ use vibra_wasm::support::{
 };
 use vibra_wasm_run::{Instance, MemoryLimit, Outcome, Runner, Started, ValueId};
 
-const MIB: usize = 1024 * 1024;
 const PAGE: usize = 65_536;
 
 // -- instruction helpers ----------------------------------------------------
@@ -167,10 +168,6 @@ fn repeat(counter: u32, count: u32, body: Vec<Ins>) -> Vec<Ins> {
 }
 
 // -- host helpers -----------------------------------------------------------
-
-fn runner() -> Runner {
-    Runner::new(MemoryLimit::new(64 * MIB)).expect("the engine configures")
-}
 
 fn started(runner: &Runner, bytes: &[u8]) -> Instance {
     match runner.start(bytes).expect("a v1 module") {
@@ -888,7 +885,7 @@ fn an_allocating_loop_has_a_live_arena_that_does_not_grow_with_its_iterations() 
 fn running_out_of_memory_is_the_host_event_and_never_a_trap() {
     // A chain that is never released, in a 1 MiB instance.
     let bytes = chain(1_000_000, true);
-    let small = Runner::new(MemoryLimit::new(MIB)).expect("engine");
+    let small = runner_with(MIB);
     assert_eq!(
         small.run_entry(&bytes).expect("runs"),
         Outcome::MemoryExhausted
@@ -950,12 +947,8 @@ fn a_block_that_exactly_fills_the_limit_runs_and_one_page_under_does_not() {
         code.extend([set(0), get(0), I::Call(f.drop)]);
         code
     });
-    let runs = |pages: usize| {
-        Runner::new(MemoryLimit::new(pages * PAGE))
-            .expect("engine")
-            .run_entry(&bytes)
-            .expect("runs")
-    };
+    let runs =
+        |pages: usize| runner_with(pages * PAGE).run_entry(&bytes).expect("runs");
     let need = (1..=8)
         .find(|pages| matches!(runs(*pages), Outcome::Completed { .. }))
         .expect("some limit admits it");

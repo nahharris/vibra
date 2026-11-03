@@ -11,170 +11,21 @@
 //! balanced, so the live size returns to what the module values keep, and an
 //! arm, a fallback, or a continuation in tail position replaces its activation.
 
-use std::collections::BTreeSet;
-
-use vibra_ir::{CheckedProgram, Type};
-use vibra_types::check_source;
-use vibra_wasm::layout::{self, header, state};
-use vibra_wasm_run::{
-    Instance, LiveSizes, MemoryLimit, Observed, Outcome, Runner, Started,
+use crate::support::{
+    ARENA_GROWTH_BOUND, LIVE_GROWTH_BOUND, MIB, agree, agree_on, checked, counter,
+    emitted, entry_type, footprint, result, runner_with, tuple_type, tuple_value,
 };
 
-const MIB: usize = 1024 * 1024;
+use vibra_wasm_run::{Observed, Outcome};
 
 // -- the harness --------------------------------------------------------------
-
-/// The checked program of `source`.
-fn checked(source: &str) -> CheckedProgram {
-    let result = check_source("input.vib", source);
-    assert!(result.accepted(), "{:?}\n{source}", result.diagnostics());
-    result.program().expect("an accepted program").clone()
-}
-
-fn entry_type(program: &CheckedProgram) -> Type {
-    program.entry().signature().result()
-}
-
-fn emitted(program: &CheckedProgram) -> Vec<u8> {
-    vibra_wasm::emit(program)
-        .unwrap_or_else(|error| panic!("the program lowers: {error}"))
-        .into_bytes()
-}
-
-fn runner() -> Runner {
-    Runner::new(MemoryLimit::new(64 * MIB)).expect("the engine configures")
-}
-
-/// The interpreter's canonical result, the oracle.
-fn oracle(program: &CheckedProgram) -> String {
-    vibra_interp::run(program)
-        .expect("the interpreter runs the program")
-        .canonical_result()
-}
-
-/// What the Wasm backend observes, with the live sizes around the run.
-fn wasm(program: &CheckedProgram) -> (String, LiveSizes) {
-    let ty = entry_type(program);
-    match runner()
-        .run_observed(&emitted(program), &ty, program.types())
-        .expect("the module runs")
-    {
-        Observed::Completed { value, live, .. } => {
-            (value.canonical_observation(&ty), live)
-        }
-        Observed::Stopped(outcome) => panic!("the entry did not complete: {outcome:?}"),
-    }
-}
-
-/// Runs `source` in both backends, asserts they agree, and returns the result
-/// and the live sizes.
-fn agree(source: &str) -> (String, LiveSizes) {
-    let program = checked(source);
-    let expected = oracle(&program);
-    let (observed, live) = wasm(&program);
-    assert_eq!(observed, expected, "the backends disagree on:\n{source}");
-    (observed, live)
-}
-
-/// Runs `source` in both backends, and holds the result to `expected`, which
-/// is written from the canonical value encoding of the runtime chapter.
-fn agree_on(source: &str, expected: &str) {
-    let (observed, _) = agree(source);
-    assert_eq!(
-        observed, expected,
-        "not the specified encoding for:\n{source}"
-    );
-}
-
-fn word(instance: &mut Instance, address: u32) -> u32 {
-    let bytes = instance
-        .read_memory_for_tests(address, 4)
-        .expect("the state is in memory");
-    u32::from_le_bytes(bytes.try_into().expect("four bytes"))
-}
-
-/// The bytes of every block the instance's module-value table reaches, the
-/// table's own block included: what an instance legitimately keeps for its
-/// lifetime after the host has released everything it held.
-fn module_values_bytes(instance: &mut Instance) -> u64 {
-    let table = word(instance, state::MODULE_VALUES);
-    if table == 0 {
-        return 0;
-    }
-    let mut seen = BTreeSet::new();
-    let mut pending = vec![table];
-    let mut bytes = 0_u64;
-    while let Some(block) = pending.pop() {
-        if !seen.insert(block) {
-            continue;
-        }
-        let size = word(instance, block + header::BLOCK_SIZE);
-        bytes += u64::from(size);
-        let kind_and_stride = word(instance, block + header::KIND);
-        let stride = (kind_and_stride >> 8) & 0xFF;
-        if stride != layout::STRIDE_CELLS {
-            continue;
-        }
-        let len = word(instance, block + header::LEN);
-        let classes = instance
-            .read_memory_for_tests(block + header::SIZE, len as usize)
-            .expect("class bytes");
-        let cells = block + layout::cells_offset(len);
-        for (position, class) in (0_u32..).zip(classes) {
-            if class == layout::CellClass::Ref.code() {
-                pending.push(word(instance, cells + 8 * position));
-            }
-        }
-    }
-    bytes
-}
-
-/// What a run left, after the host released the result: the live bytes, what the
-/// module values keep, the arena's high-water mark, and the frames left.
-struct Footprint {
-    /// The live size when the entry completed, while the host held the result.
-    with_result: u64,
-    live: u64,
-    kept: u64,
-    arena_used: u32,
-    frame_depth: u32,
-}
-
-/// Runs the entry once on a fresh instance, reads and releases the result, and
-/// measures what is still held.
-fn footprint(program: &CheckedProgram) -> Footprint {
-    let bytes = emitted(program);
-    let Started::Ready(mut instance) = runner().start(&bytes).expect("a v1 module")
-    else {
-        panic!("the module's own memory exceeds the limit");
-    };
-    let Outcome::Completed {
-        result,
-        live_size: with_result,
-    } = instance.call_entry().expect("runs")
-    else {
-        panic!("the entry did not complete");
-    };
-    instance
-        .observe(result, &entry_type(program), program.types())
-        .expect("the host reads the result");
-    let live = instance.live_size().expect("live size");
-    let kept = module_values_bytes(&mut instance);
-    Footprint {
-        with_result,
-        live,
-        kept,
-        arena_used: word(&mut instance, state::ARENA_USED),
-        frame_depth: word(&mut instance, state::FRAME_DEPTH),
-    }
-}
 
 /// Runs `source` in both backends, asserts they agree and are the specified
 /// result, and asserts the frame is balanced: after the host released the
 /// result nothing is live but what the module values keep, and no frame is left.
 fn balanced_on(source: &str, expected: &str) {
     agree_on(source, expected);
-    let after = footprint(&checked(source));
+    let after = footprint(&checked(source), 64 * MIB);
     assert_eq!(
         after.live, after.kept,
         "the live size is not at its baseline for:\n{source}"
@@ -183,27 +34,6 @@ fn balanced_on(source: &str, expected: &str) {
 }
 
 // -- the encoding of a result ---------------------------------------------------
-
-/// The canonical encoding of a result observation of type `ty` and value `value`.
-fn result(ty: &str, value: &str) -> String {
-    format!("(record type: {ty} value: {value})\n")
-}
-
-/// The type encoding of an anonymous tuple.
-fn tuple_type(components: &[&str]) -> String {
-    format!(
-        "(record type: @tuple arguments: (array {}))",
-        components.join(" ")
-    )
-}
-
-/// The value encoding of an anonymous tuple.
-fn tuple_value(components: &[&str]) -> String {
-    format!(
-        "(record kind: @tuple values: (array {}))",
-        components.join(" ")
-    )
-}
 
 /// The result of an entry that returns a tuple of `str`.
 fn strs(values: &[&str]) -> String {
@@ -505,20 +335,6 @@ fn two_matches_in_one_body_sequence_each_release_what_they_bind() {
 
 // -- a counter ----------------------------------------------------------------
 
-/// The definitions of a counter that counts to `n`: `state`, `(zero)`,
-/// `(inc s)`, which makes the next state, and `(done s)`, true exactly when the
-/// state is `n`. A state is a record of one `u32`, so every round allocates a
-/// fresh record, which the loops below rely on to show that the garbage is
-/// freed.
-fn counter(n: u32) -> String {
-    format!(
-        "(deftype state (record n u32))\n\
-(defn zero () state (state n: 0u32))\n\
-(defn inc (s state) state\n  (state n: (match (u32.add-checked (s @n) 1u32) (result.ok next) next (result.err -) 0u32)))\n\
-(defn done (s state) bool (u32.equal (s @n) {n}u32))\n"
-    )
-}
-
 /// A loop of `n` rounds whose repeating call is in tail position through one of
 /// the forms of this step.
 #[derive(Clone, Copy, Debug)]
@@ -570,17 +386,10 @@ fn a_tail_position_through_each_form_ends_where_the_counter_says() {
     }
 }
 
-/// The most the live arena may grow between two iteration counts of a loop, and
-/// the most the arena's high-water mark may: constants of the program, which
-/// allocates a fresh `state` tuple in every round. A loop that grew with its
-/// rounds would grow by megabytes between ten thousand and a hundred thousand.
-const LIVE_GROWTH_BOUND: u64 = 64;
-const ARENA_GROWTH_BOUND: u32 = 4 * 1024;
-
 #[test]
 fn a_loop_through_an_arm_a_let_else_a_try_and_a_return_holds_a_bounded_live_arena() {
     for kind in Loop::ALL {
-        let measure = |n| footprint(&checked(&kind.source(n)));
+        let measure = |n| footprint(&checked(&kind.source(n)), 64 * MIB);
         let small = measure(10_000);
         let large = measure(100_000);
         println!(
@@ -623,8 +432,7 @@ fn the_same_loops_run_in_a_few_pages_of_memory() {
         let program = checked(&kind.source(100_000));
         let bytes = emitted(&program);
         let ty = entry_type(&program);
-        let outcome = Runner::new(MemoryLimit::new(256 * 1024))
-            .expect("a runner")
+        let outcome = runner_with(256 * 1024)
             .run_observed(&bytes, &ty, program.types())
             .expect("runs");
         assert!(
@@ -648,8 +456,7 @@ fn a_try_operand_is_not_a_tail_position() {
     let bytes = emitted(&program);
     let ty = entry_type(&program);
     assert_eq!(
-        Runner::new(MemoryLimit::new(256 * 1024))
-            .expect("a runner")
+        runner_with(256 * 1024)
             .run_observed(&bytes, &ty, program.types())
             .expect("runs"),
         Observed::Stopped(Outcome::MemoryExhausted)

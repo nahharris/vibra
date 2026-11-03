@@ -10,9 +10,11 @@
 use std::collections::BTreeMap;
 use std::fs;
 
-use vibra_conformance::{ConformanceOperation, Corpus, corpus_root};
+use vibra_conformance::ConformanceOperation;
 use vibra_diagnostics::Level;
 use vibra_types::{check_bootstrap_text_import, check_source, load_stdlib};
+
+use crate::support::{TempDir, corpus};
 
 /// Cases whose two verdicts legitimately differ, with the reason.
 ///
@@ -32,9 +34,8 @@ const EXPECTED_DIFFERENCES: &[(&str, &str)] = &[
 
 /// `(case id, source text)` for every single-source type-check or interpret case.
 fn single_source_cases() -> Vec<(String, String)> {
-    let corpus = Corpus::discover(corpus_root()).expect("the corpus loads");
     let mut cases = Vec::new();
-    for case in corpus.cases() {
+    for case in corpus().cases() {
         let manifest = case.manifest();
         if !matches!(
             manifest.operation,
@@ -96,10 +97,8 @@ fn single_source_verdict(source: &str) -> Verdict {
     (checked.accepted(), codes)
 }
 
-fn workspace_verdict(id: &str, source: &str) -> Verdict {
-    let root = std::env::temp_dir()
-        .join(format!("vibra-check-paths-{}-{id}", std::process::id()));
-    let _ = fs::remove_dir_all(&root);
+fn workspace_verdict(source: &str) -> Verdict {
+    let root = TempDir::new("check-paths");
     fs::create_dir_all(root.join("src/app")).expect("create workspace");
     fs::write(
         root.join("project.vibon"),
@@ -114,7 +113,6 @@ fn workspace_verdict(id: &str, source: &str) -> Verdict {
         &snapshot,
         Some(&verification),
     );
-    let _ = fs::remove_dir_all(&root);
     let (_, codes) = verdict(checked.diagnostics());
     (
         checked.status() == vibra_workspace::semantic::CheckStatus::Accepted,
@@ -131,7 +129,7 @@ fn single_source_and_workspace_checks_agree_on_the_static_corpus() {
     let mut disagreements = Vec::new();
     for (id, source) in single_source_cases() {
         let single = single_source_verdict(&source);
-        let workspace = workspace_verdict(&id, &source);
+        let workspace = workspace_verdict(&source);
         let agrees = single == workspace;
         match (agrees, expected.contains_key(id.as_str())) {
             (true, false) | (false, true) => {}

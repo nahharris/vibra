@@ -7,40 +7,10 @@
 //! built there. The memory layer's own tests, which build values no lowered form
 //! builds, are in `arena_runtime.rs`.
 
+use crate::support::{literal, oracle};
+
 use vibra_conformance::{ExecutionObservation, WasmObservation, observe_wasm};
-use vibra_diagnostics::ByteSpan;
-use vibra_ir::{
-    CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Type, Value,
-};
-
-fn origin() -> SourceOrigin {
-    SourceOrigin::new("input.vib", ByteSpan::new(0, 1))
-}
-
-/// A program whose entry returns `body`, of type `result`.
-fn returning(result: Type, body: Expr) -> CheckedProgram {
-    let main = CheckedFunction::new(
-        "main",
-        FunctionSignature::new(Vec::new(), result),
-        body,
-        origin(),
-    )
-    .expect("a checked function");
-    CheckedProgram::try_new(vec![main], 0).expect("a checked program")
-}
-
-/// A program whose entry is the literal `value`.
-fn literal(value: Value) -> CheckedProgram {
-    let ty = value.ty();
-    returning(ty, Expr::literal(value, origin()))
-}
-
-/// The canonical result the reference interpreter reports.
-fn interpreter_result(program: &CheckedProgram) -> String {
-    vibra_interp::run(program)
-        .expect("the interpreter runs the program")
-        .canonical_result()
-}
+use vibra_ir::{CheckedProgram, Value};
 
 /// The canonical result the Wasm backend reports through its accessors.
 fn wasm_result(program: &CheckedProgram) -> String {
@@ -96,10 +66,6 @@ fn literals() -> Vec<Value> {
 fn every_literal_type_round_trips_through_the_accessors_and_matches_the_interpreter() {
     for value in literals() {
         let program = literal(value.clone());
-        assert_eq!(
-            wasm_result(&program),
-            interpreter_result(&program),
-            "{value:?}"
-        );
+        assert_eq!(wasm_result(&program), oracle(&program), "{value:?}");
     }
 }

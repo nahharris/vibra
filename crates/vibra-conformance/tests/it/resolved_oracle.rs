@@ -1,26 +1,19 @@
 //! Step 4 manifest and resolved-artifact oracle checks.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::support::{FixedHandler, TempDir};
 
 use vibra_conformance::{
     CaseManifest, CaseObservation, ConformanceOperation, ConformanceProfile,
-    ConformanceRunner, Corpus, HandlerError, ProfileDispatcher, ProfileHandler,
+    ConformanceRunner, Corpus, ProfileDispatcher,
 };
 
-static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
-
 struct TempCase {
-    root: PathBuf,
+    root: TempDir,
 }
 
 impl TempCase {
     fn new(id: &str, manifest: &str) -> Self {
-        let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "vibra-conformance-step4-{}-{serial}",
-            std::process::id()
-        ));
+        let root = TempDir::new("resolved-oracle");
         let directory = root.join(id);
         std::fs::create_dir_all(directory.join("tree")).expect("create temporary case");
         std::fs::write(directory.join("case.toml"), manifest)
@@ -34,25 +27,6 @@ impl TempCase {
 
     fn corpus(&self) -> Corpus {
         Corpus::discover(&self.root).expect("temporary case is valid")
-    }
-}
-
-impl Drop for TempCase {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
-    }
-}
-
-struct FixedHandler {
-    observation: CaseObservation,
-}
-
-impl ProfileHandler for FixedHandler {
-    fn run(
-        &self,
-        _case: &vibra_conformance::Case,
-    ) -> Result<CaseObservation, HandlerError> {
-        Ok(self.observation.clone())
     }
 }
 

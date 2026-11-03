@@ -3,9 +3,9 @@
 //! both backends against its one expectation, and the report says what each
 //! backend did.
 
-use std::path::{Path, PathBuf};
+use crate::support::{FixedHandler, TempDir, copy_directory, corpus_root};
+
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use vibra_diagnostics::ByteSpan;
 use vibra_ir::{
@@ -14,11 +14,9 @@ use vibra_ir::{
 
 use vibra_conformance::{
     BackendObservation, CaseObservation, CaseReport, CaseStatus, ConformanceProfile,
-    ConformanceRunner, Corpus, ExecutionObservation, HandlerError, ProfileDispatcher,
-    ProfileHandler, WasmObservation, WasmStatus, observe_wasm, standard_dispatcher,
+    ConformanceRunner, Corpus, ExecutionObservation, ProfileDispatcher, ProfileHandler,
+    WasmObservation, WasmStatus, observe_wasm, standard_dispatcher,
 };
-
-static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
 
 const VOID_RESULT: &str = "(record type: @void value: void)\n";
 const NO_EVENTS: &str = "(record format: @audit-trace.v1 events: (array))\n";
@@ -28,33 +26,16 @@ const NO_EVENTS: &str = "(record format: @audit-trace.v1 events: (array))\n";
 /// Step 11, so no real case is left that the emitter names.
 const TEST_CASE: &str = "V1-RUNTIME-workspace-test-passing";
 
-fn copy_directory(from: &Path, to: &Path) {
-    std::fs::create_dir_all(to).expect("directory");
-    for entry in std::fs::read_dir(from).expect("a directory") {
-        let entry = entry.expect("an entry");
-        let target = to.join(entry.file_name());
-        if entry.file_type().expect("a type").is_dir() {
-            copy_directory(&entry.path(), &target);
-        } else {
-            std::fs::copy(entry.path(), target).expect("copy");
-        }
-    }
-}
-
 /// A temporary corpus root that removes itself.
 struct TempCorpus {
-    root: PathBuf,
+    root: TempDir,
 }
 
 impl TempCorpus {
     fn new() -> Self {
-        let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "vibra-differential-{}-{serial}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&root).expect("temporary corpus");
-        Self { root }
+        Self {
+            root: TempDir::new("differential"),
+        }
     }
 
     /// Adds one `interpret` case that expects `accepted` and, when `result` is
@@ -90,32 +71,12 @@ impl TempCorpus {
 
     /// Adds the case `id` of the real corpus.
     fn copy_case(&self, id: &str) {
-        let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../conformance/cases")
-            .join(id);
+        let source = corpus_root().join(id);
         copy_directory(&source, &self.root.join(id));
     }
 
     fn corpus(&self) -> Corpus {
         Corpus::discover(&self.root).expect("a valid corpus")
-    }
-}
-
-impl Drop for TempCorpus {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
-    }
-}
-
-/// Reports a fixed observation for every case.
-struct Fixed(CaseObservation);
-
-impl ProfileHandler for Fixed {
-    fn run(
-        &self,
-        _case: &vibra_conformance::Case,
-    ) -> Result<CaseObservation, HandlerError> {
-        Ok(self.0.clone())
     }
 }
 
@@ -199,7 +160,7 @@ fn the_empty_entry_runs_in_both_backends_and_matches() {
     assert_eq!(wasm, WasmObservation::Completed(void_execution()));
     let report = run_with(
         &void_case(),
-        Fixed(expected_observation(Some(void_execution()), Some(wasm))),
+        FixedHandler::new(expected_observation(Some(void_execution()), Some(wasm))),
     );
     let (interpreter, wasm) = backends(&report);
     assert_eq!(interpreter, &CaseStatus::Passed, "{report:?}");
@@ -277,7 +238,7 @@ fn a_forced_wasm_disagreement_fails_the_case_and_names_the_backend() {
     };
     let report = run_with(
         &void_case(),
-        Fixed(expected_observation(
+        FixedHandler::new(expected_observation(
             Some(void_execution()),
             Some(WasmObservation::Completed(wrong)),
         )),
@@ -303,7 +264,7 @@ fn a_forced_wasm_audit_trace_disagreement_fails_the_case() {
     };
     let report = run_with(
         &void_case(),
-        Fixed(expected_observation(
+        FixedHandler::new(expected_observation(
             Some(void_execution()),
             Some(WasmObservation::Completed(noisy)),
         )),
@@ -325,7 +286,7 @@ fn an_interpreter_disagreement_fails_the_case_and_names_the_backend() {
     };
     let report = run_with(
         &void_case(),
-        Fixed(expected_observation(
+        FixedHandler::new(expected_observation(
             Some(wrong),
             Some(WasmObservation::Completed(void_execution())),
         )),
@@ -351,7 +312,7 @@ fn both_backends_failing_names_both() {
     };
     let report = run_with(
         &void_case(),
-        Fixed(expected_observation(
+        FixedHandler::new(expected_observation(
             Some(wrong.clone()),
             Some(WasmObservation::Completed(wrong)),
         )),
@@ -366,7 +327,7 @@ fn both_backends_failing_names_both() {
 fn a_wasm_backend_failure_fails_the_case() {
     let report = run_with(
         &void_case(),
-        Fixed(expected_observation(
+        FixedHandler::new(expected_observation(
             Some(void_execution()),
             Some(WasmObservation::Failed {
                 reason: "the module did not validate".to_owned(),
@@ -386,7 +347,7 @@ fn a_wasm_backend_failure_fails_the_case() {
 fn a_not_lowered_observation_is_recovered_and_counted() {
     let report = run_with(
         &void_case(),
-        Fixed(expected_observation(
+        FixedHandler::new(expected_observation(
             Some(void_execution()),
             Some(WasmObservation::NotLowered {
                 forms: vec!["array".to_owned()],
@@ -408,7 +369,7 @@ fn a_missing_wasm_observation_on_an_accepted_case_is_not_lowered() {
     // still passes on the interpreter side.
     let report = run_with(
         &void_case(),
-        Fixed(expected_observation(Some(void_execution()), None)),
+        FixedHandler::new(expected_observation(Some(void_execution()), None)),
     );
     assert_eq!(report.status, CaseStatus::Passed);
     assert_eq!(
@@ -439,7 +400,7 @@ fn the_host_event_is_held_to_both_backends() {
 
     let matched = run_with(
         &corpus,
-        Fixed(with_wasm(WasmObservation::HostEvent(
+        FixedHandler::new(with_wasm(WasmObservation::HostEvent(
             "@runtime.memory-exhausted".to_owned(),
         ))),
     );
@@ -448,7 +409,7 @@ fn the_host_event_is_held_to_both_backends() {
 
     let completed = run_with(
         &corpus,
-        Fixed(with_wasm(WasmObservation::Completed(void_execution()))),
+        FixedHandler::new(with_wasm(WasmObservation::Completed(void_execution()))),
     );
     let CaseStatus::Failed { reason } = &completed.status else {
         panic!("a module that completes where the event is expected disagrees");
@@ -460,7 +421,7 @@ fn the_host_event_is_held_to_both_backends() {
 
     let other = run_with(
         &corpus,
-        Fixed(with_wasm(WasmObservation::HostEvent(
+        FixedHandler::new(with_wasm(WasmObservation::HostEvent(
             "@runtime.other".to_owned(),
         ))),
     );
@@ -479,7 +440,7 @@ fn only_executable_cases_have_backend_statuses() {
     .expect("manifest");
     let runner = ConformanceRunner::new(ProfileDispatcher::new().with_handler(
         ConformanceProfile::StaticV1,
-        Fixed(CaseObservation::new(true)),
+        FixedHandler::new(CaseObservation::new(true)),
     ));
     let report = runner.run(&corpus.corpus());
     assert_eq!(report.cases()[0].backends, None);
@@ -490,8 +451,7 @@ fn only_executable_cases_have_backend_statuses() {
 fn the_report_prints_both_backend_lines() {
     let corpus = TempCorpus::new();
     // The binary requires a reader-v1 case; copy a small real one.
-    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../conformance/cases/V1-SRC-READER-data-loader-extension");
+    let source = corpus_root().join("V1-SRC-READER-data-loader-extension");
     let target = corpus.root.join("V1-SRC-READER-data-loader-extension");
     std::fs::create_dir_all(&target).expect("directory");
     for file in ["case.toml", "input.vib"] {
@@ -508,7 +468,7 @@ fn the_report_prints_both_backend_lines() {
 
     let output = Command::new(env!("CARGO_BIN_EXE_vibra-conformance"))
         .arg("--root")
-        .arg(&corpus.root)
+        .arg(corpus.root.path())
         .output()
         .expect("the binary runs");
     let stdout = String::from_utf8(output.stdout).expect("utf-8");

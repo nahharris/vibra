@@ -1,39 +1,23 @@
 //! Conformance corpus, manifest, and profile-runner tests.
 
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::support::{FixedHandler, TempDir, workspace_root};
+
+use std::path::Path;
 
 use vibra_conformance::{
     CaseManifest, CaseObservation, CaseStatus, ConformanceOperation,
-    ConformanceProfile, ConformanceRunner, Corpus, HandlerError, ProfileDispatcher,
-    ProfileHandler, ReaderV1Handler,
+    ConformanceProfile, ConformanceRunner, Corpus, ProfileDispatcher, ReaderV1Handler,
 };
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_syntax::DocumentMode;
 
-const ROOT: &str = env!("CARGO_MANIFEST_DIR");
-
-fn workspace_root() -> PathBuf {
-    Path::new(ROOT)
-        .ancestors()
-        .nth(2)
-        .expect("the crate lives two levels below the workspace root")
-        .to_path_buf()
-}
-
-static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
-
 struct TempCase {
-    root: PathBuf,
+    root: TempDir,
 }
 
 impl TempCase {
     fn new(id: &str, manifest: &str) -> Self {
-        let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "vibra-conformance-step3-{}-{serial}",
-            std::process::id()
-        ));
+        let root = TempDir::new("corpus");
         let directory = root.join(id);
         std::fs::create_dir_all(&directory).expect("create temporary case");
         std::fs::write(directory.join("case.toml"), manifest)
@@ -46,30 +30,11 @@ impl TempCase {
     }
 }
 
-impl Drop for TempCase {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
-    }
-}
-
 fn valid_manifest(id: &str, profile: &str) -> String {
     let rule = id.rsplit_once('-').map_or(id, |(prefix, _)| prefix);
     format!(
         "id = \"{id}\"\nrule = \"{rule}\"\nprofile = \"{profile}\"\n\n[expect]\naccepted = true\n"
     )
-}
-
-struct FixedHandler {
-    observation: CaseObservation,
-}
-
-impl ProfileHandler for FixedHandler {
-    fn run(
-        &self,
-        _case: &vibra_conformance::Case,
-    ) -> Result<CaseObservation, HandlerError> {
-        Ok(self.observation.clone())
-    }
 }
 
 #[test]

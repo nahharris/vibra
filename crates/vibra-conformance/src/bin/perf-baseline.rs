@@ -16,8 +16,8 @@ use std::process::ExitCode;
 
 use vibra_conformance::baseline::{
     BASELINE_PATH, Baseline, MIN_RUNS, differences, measure, measure_exact,
-    repository_root,
 };
+use vibra_conformance::workspace_root;
 
 fn main() -> ExitCode {
     let mut write = false;
@@ -35,7 +35,7 @@ fn main() -> ExitCode {
             other => return usage(&format!("unknown argument `{other}`")),
         }
     }
-    let root = repository_root();
+    let root = workspace_root();
     let path = root.join(BASELINE_PATH);
     if check {
         return check_exact(&root, &path);

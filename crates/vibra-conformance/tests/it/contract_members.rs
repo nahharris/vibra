@@ -7,26 +7,20 @@
 //! activation depth of tail calls through each form, and the formatter's rewrite.
 
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::Path;
 
+use crate::support::TempDir;
 use vibra_diagnostics::DiagnosticCode;
 use vibra_interp::Execution;
 use vibra_types::check_source;
 use vibra_workspace::format_plan::plan_format;
 
-static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
-
 /// One project directory holding one source, removed when it drops.
-struct Project(PathBuf);
+struct Project(TempDir);
 
 impl Project {
     fn new(source: &str) -> Self {
-        let nonce = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "vibra-contract-members-step2-{}-{nonce}",
-            std::process::id()
-        ));
+        let root = TempDir::new("contract-members");
         fs::create_dir_all(root.join("src/hello")).expect("create source root");
         fs::create_dir(root.join("tests")).expect("create test root");
         fs::write(
@@ -48,12 +42,6 @@ impl Project {
                 .map(vibra_diagnostics::Diagnostic::code)
                 .collect(),
         )
-    }
-}
-
-impl Drop for Project {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
     }
 }
 

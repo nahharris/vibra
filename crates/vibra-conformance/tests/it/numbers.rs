@@ -16,64 +16,21 @@
 //! the exact operands of the vectors. The interpreter and the module run the same
 //! rewritten program.
 
-use std::collections::BTreeSet;
+use crate::support::{
+    MIB, checked, emitted, entry_type, footprint, oracle, runner, runner_with, wasm,
+};
+
 use std::time::Instant;
 
 use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp, NumericType, Vector};
 use vibra_ir::{CheckedFunction, CheckedProgram, Expr, ObservedValue, Type, Value};
-use vibra_types::check_source;
-use vibra_wasm::layout::{self, header, state};
-use vibra_wasm_run::{Instance, MemoryLimit, Observed, Outcome, Runner, Started};
-
-const MIB: usize = 1024 * 1024;
+use vibra_wasm_run::{Observed, Outcome, Runner, Started};
 
 /// The vectors a program holds, so a program stays small enough to check and
 /// emit quickly.
 const CHUNK: usize = 300;
 
 // -- the harness --------------------------------------------------------------
-
-fn checked(source: &str) -> CheckedProgram {
-    let result = check_source("input.vib", source);
-    assert!(
-        result.accepted(),
-        "{:?}\n{}",
-        result.diagnostics(),
-        &source[..source.len().min(600)]
-    );
-    result.program().expect("an accepted program").clone()
-}
-
-fn entry_type(program: &CheckedProgram) -> Type {
-    program.entry().signature().result()
-}
-
-fn emitted(program: &CheckedProgram) -> Vec<u8> {
-    vibra_wasm::emit(program)
-        .unwrap_or_else(|error| panic!("the program lowers: {error}"))
-        .into_bytes()
-}
-
-fn runner() -> Runner {
-    Runner::new(MemoryLimit::new(64 * MIB)).expect("the engine configures")
-}
-
-fn interpreted(program: &CheckedProgram) -> String {
-    vibra_interp::run(program)
-        .expect("the interpreter runs the program")
-        .canonical_result()
-}
-
-fn observed_by_wasm(runner: &Runner, program: &CheckedProgram) -> String {
-    let ty = entry_type(program);
-    match runner
-        .run_observed(&emitted(program), &ty, program.types())
-        .expect("the module runs")
-    {
-        Observed::Completed { value, .. } => value.canonical_observation(&ty),
-        Observed::Stopped(outcome) => panic!("the entry did not complete: {outcome:?}"),
-    }
-}
 
 // -- the programs of the vectors ------------------------------------------------
 
@@ -225,7 +182,7 @@ fn run_row(runner: &Runner, intrinsic: CompilerIntrinsic) -> usize {
         let want = expected(&program, vectors).canonical_vibon();
         let ty = entry_type(&program);
 
-        let interpreter = result_value(&interpreted(&program));
+        let interpreter = result_value(&oracle(&program));
         assert_eq!(
             interpreter,
             want,
@@ -499,8 +456,8 @@ fn a_nan_is_one_value_wherever_it_is_observed() {
 (def nan64 f64 (f64.div 0.0f64 0.0f64))\n\
 (defn nan32 () f32 (f32.div 0.0f32 0.0f32))\n";
     let program = checked(source);
-    let interpreter = interpreted(&program);
-    let wasm = observed_by_wasm(&runner(), &program);
+    let interpreter = oracle(&program);
+    let wasm = wasm(&program).0;
     assert_eq!(wasm, interpreter);
     let value = result_value(&interpreter);
     assert!(
@@ -524,72 +481,6 @@ fn emission_of_the_number_rows_is_byte_identical() {
 }
 
 // -- reclamation ------------------------------------------------------------------
-
-fn word(instance: &mut Instance, address: u32) -> u32 {
-    let bytes = instance
-        .read_memory_for_tests(address, 4)
-        .expect("the state is in memory");
-    u32::from_le_bytes(bytes.try_into().expect("four bytes"))
-}
-
-/// The bytes of every block the instance's module-value table reaches: what an
-/// instance legitimately keeps after the host has released everything it held.
-fn module_values_bytes(instance: &mut Instance) -> u64 {
-    let table = word(instance, state::MODULE_VALUES);
-    if table == 0 {
-        return 0;
-    }
-    let mut seen = BTreeSet::new();
-    let mut pending = vec![table];
-    let mut bytes = 0_u64;
-    while let Some(block) = pending.pop() {
-        if !seen.insert(block) {
-            continue;
-        }
-        bytes += u64::from(word(instance, block + header::BLOCK_SIZE));
-        let stride = (word(instance, block + header::KIND) >> 8) & 0xFF;
-        if stride != layout::STRIDE_CELLS {
-            continue;
-        }
-        let len = word(instance, block + header::LEN);
-        let classes = instance
-            .read_memory_for_tests(block + header::SIZE, len as usize)
-            .expect("class bytes");
-        let cells = block + layout::cells_offset(len);
-        for (position, class) in (0_u32..).zip(classes) {
-            if class == layout::CellClass::Ref.code() {
-                pending.push(word(instance, cells + 8 * position));
-            }
-        }
-    }
-    bytes
-}
-
-struct Footprint {
-    live: u64,
-    kept: u64,
-    frame_depth: u32,
-}
-
-fn footprint(program: &CheckedProgram, limit: usize) -> Footprint {
-    let bytes = emitted(program);
-    let runner = Runner::new(MemoryLimit::new(limit)).expect("the engine configures");
-    let Started::Ready(mut instance) = runner.start(&bytes).expect("a v1 module")
-    else {
-        panic!("the module's own memory exceeds the limit");
-    };
-    let Outcome::Completed { result, .. } = instance.call_entry().expect("runs") else {
-        panic!("the entry did not complete");
-    };
-    instance
-        .observe(result, &entry_type(program), program.types())
-        .expect("the host reads the result");
-    Footprint {
-        live: instance.live_size().expect("live size"),
-        kept: module_values_bytes(&mut instance),
-        frame_depth: word(&mut instance, state::FRAME_DEPTH),
-    }
-}
 
 #[test]
 fn every_path_through_every_number_text_row_leaves_the_arena_balanced() {
@@ -653,14 +544,14 @@ fn a_loop_of_number_text_holds_a_bounded_arena() {
     // rounds; its run of twenty thousand says nothing more and is slow.
     let program = checked(&source(20_000));
     assert_eq!(
-        observed_by_wasm(&runner(), &program),
+        wasm(&program).0,
         "(record type: @u64 value: 200010000u64)\n",
         "the loop's result"
     );
     let program = checked(&source(500));
     assert_eq!(
-        observed_by_wasm(&runner(), &program),
-        interpreted(&program),
+        wasm(&program).0,
+        oracle(&program),
         "the loop's result in both backends"
     );
 }
@@ -678,7 +569,7 @@ fn a_string_built_at_the_end_of_memory_is_a_host_event_and_never_a_native_fault(
     let mut completed = 0;
     let mut exhausted = 0;
     for kib in 1..=256 {
-        let runner = Runner::new(MemoryLimit::new(kib * 1024)).expect("an engine");
+        let runner = runner_with(kib * 1024);
         match runner.start(&bytes).expect("a v1 module") {
             Started::Ready(mut instance) => {
                 match instance.call_entry().expect("runs") {

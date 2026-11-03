@@ -7,23 +7,18 @@
 //! million-byte output cross the boundary, and a provider that exhausts the
 //! host's memory is the host event in both backends.
 
-use vibra_diagnostics::ByteSpan;
+use crate::support::{MIB, emitted, origin, runner};
+
 use vibra_host::{
     AuditEvent, Done, Failure, HostProvider, HostWorld, IoError, WorldProvider,
 };
 use vibra_interp::{Interpreter, MemoryBudget, RuntimeError};
 use vibra_ir::external::host::{HostRow, host_row};
 use vibra_ir::{
-    CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Type,
-    TypeBody, TypeDefinition, TypeId, Value,
+    CheckedFunction, CheckedProgram, Expr, FunctionSignature, Type, TypeBody,
+    TypeDefinition, TypeId, Value,
 };
-use vibra_wasm_run::{MemoryLimit, Observed, Outcome, Runner};
-
-const MIB: usize = 1024 * 1024;
-
-fn origin() -> SourceOrigin {
-    SourceOrigin::new("input.vib", ByteSpan::new(0, 1))
-}
+use vibra_wasm_run::{Observed, Outcome};
 
 // -- the program --------------------------------------------------------------
 
@@ -154,16 +149,6 @@ fn interpreted(program: &CheckedProgram, world: &HostWorld) -> Seen {
         result: execution.canonical_result(),
         trace: execution.audit_trace().to_vec(),
     }
-}
-
-fn runner() -> Runner {
-    Runner::new(MemoryLimit::new(64 * MIB)).expect("the engine configures")
-}
-
-fn emitted(program: &CheckedProgram) -> Vec<u8> {
-    vibra_wasm::emit(program)
-        .unwrap_or_else(|error| panic!("the program lowers: {error}"))
-        .into_bytes()
 }
 
 fn webassembly(program: &CheckedProgram, world: &HostWorld) -> Seen {

@@ -10,36 +10,9 @@
 //! tail call of a loop. This file holds what a case cannot: the engine stack, the
 //! tail mark in the checked IR, and the shape of the checked body.
 
-use vibra_ir::{CheckedProgram, Type};
-use vibra_types::check_source;
-use vibra_wasm_run::{LiveSizes, MemoryLimit, Observed, Runner};
+use crate::support::{MIB, TempDir, checked, entry_type, wasm_on};
 
-const MIB: usize = 1024 * 1024;
-
-fn checked(source: &str) -> CheckedProgram {
-    let result = check_source("input.vib", source);
-    assert!(result.accepted(), "{:?}\n{source}", result.diagnostics());
-    result.program().expect("an accepted program").clone()
-}
-
-fn entry_type(program: &CheckedProgram) -> Type {
-    program.entry().signature().result()
-}
-
-fn run_with(runner: &Runner, program: &CheckedProgram) -> (String, LiveSizes) {
-    let ty = entry_type(program);
-    let module = vibra_wasm::emit(program)
-        .unwrap_or_else(|error| panic!("the program lowers: {error}"));
-    match runner
-        .run_observed(module.bytes(), &ty, program.types())
-        .expect("the module runs")
-    {
-        Observed::Completed { value, live, .. } => {
-            (value.canonical_observation(&ty), live)
-        }
-        Observed::Stopped(outcome) => panic!("the entry did not complete: {outcome:?}"),
-    }
-}
+use vibra_wasm_run::{MemoryLimit, Observed, Runner};
 
 /// Module functions every program below shares.
 const PRELUDE: &str = "(defn add (a i32 b i32) i32 (match (i32.add-checked a b) (result.ok sum) sum (result.err -) 0i32))\n(defn lower (count i32) i32 (match (i32.sub-checked count 1i32) (result.ok value) value (result.err -) 0i32))\n";
@@ -106,9 +79,9 @@ fn the_engine_stack_a_long_fold_needs_does_not_depend_on_its_length() {
     // after a one-element fold: the module values and nothing else.
     let small = Runner::with_wasm_stack(MemoryLimit::new(64 * MIB), long * 1024)
         .expect("a runner with a small engine stack");
-    let (observed, live) = run_with(&small, &checked(&long_fold(1_000)));
+    let (observed, live) = wasm_on(&small, &checked(&long_fold(1_000)));
     assert_eq!(observed, "(record type: @i32 value: 1000i32)\n");
-    let (_, base) = run_with(&small, &checked(&long_fold(1)));
+    let (_, base) = wasm_on(&small, &checked(&long_fold(1)));
     assert_eq!(live.start, 0);
     assert_eq!(base.start, 0);
     assert_eq!(live.end, base.end, "live size returns to its baseline");
@@ -171,10 +144,7 @@ fn every_native_has_an_import_or_a_checked_body_and_never_both() {
 #[test]
 fn the_workspace_checker_checks_the_same_body() {
     let project = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict))\n";
-    let parent =
-        std::fs::canonicalize(std::env::temp_dir()).expect("temporary directory");
-    let root = parent.join(format!("vibra-native-body-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+    let root = TempDir::canonical("native-body");
     std::fs::create_dir_all(root.join("src/app")).expect("project directory");
     std::fs::write(root.join("project.vibon"), project).expect("project marker");
     std::fs::write(
@@ -190,7 +160,6 @@ fn the_workspace_checker_checks_the_same_body() {
         .first()
         .expect("binary target");
     let run = vibra_workspace::semantic::run_target(&snapshot, target);
-    let _ = std::fs::remove_dir_all(&root);
     assert_eq!(
         run.check().status(),
         vibra_workspace::semantic::CheckStatus::Accepted,

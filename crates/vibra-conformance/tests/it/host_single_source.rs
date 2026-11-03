@@ -11,56 +11,7 @@
 //! path does not read the instance's memory. That the emitter does not know the
 //! provider is the dependency rule of `architecture_boundary`.
 
-use std::path::{Path, PathBuf};
-
-fn workspace_root() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("workspace root")
-}
-
-fn rust_sources(directory: &Path, found: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(directory).expect("readable source directory") {
-        let path = entry.expect("readable directory entry").path();
-        if path.is_dir() {
-            rust_sources(&path, found);
-        } else if path.extension().is_some_and(|extension| extension == "rs") {
-            found.push(path);
-        }
-    }
-}
-
-/// The production code of one source file: without its test module, and
-/// without comment lines.
-fn production(path: &Path) -> String {
-    let text = std::fs::read_to_string(path).expect("readable source");
-    let end = text.find("\n#[cfg(test)]").unwrap_or(text.len());
-    text[..end]
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("//"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn crate_sources(name: &str) -> Vec<(String, String)> {
-    let mut paths = Vec::new();
-    rust_sources(
-        &workspace_root().join("crates").join(name).join("src"),
-        &mut paths,
-    );
-    paths
-        .into_iter()
-        .map(|path| {
-            let relative = path
-                .strip_prefix(workspace_root())
-                .expect("inside the workspace")
-                .to_string_lossy()
-                .replace('\\', "/");
-            (relative, production(&path))
-        })
-        .collect()
-}
+use crate::support::{crate_sources, production, workspace_root};
 
 /// Every method of the provider: the 17 operations.
 const PROVIDER_METHODS: &[&str] = &[

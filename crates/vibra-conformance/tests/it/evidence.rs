@@ -1,5 +1,7 @@
 //! Step 11's specification-example inventory and lossless exercise.
 
+use crate::support::workspace_root;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -52,14 +54,6 @@ struct InventoryRow {
     deferred: String,
     count: usize,
     digest: String,
-}
-
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("the crate lives two levels below the workspace root")
-        .to_path_buf()
 }
 
 fn source_documents(root: &Path) -> Vec<PathBuf> {

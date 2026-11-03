@@ -9,20 +9,13 @@
 //! emits would rest on nobody having made a typo.
 
 // A test asserts by panicking.
+use crate::support::workspace_root;
+
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 
 use vibra_diagnostics::{DiagnosticCode, FixCapability, Level};
 
 const CHAPTER: &str = "docs/spec/07-diagnostics-and-conformance.md";
-
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("the crate lives two levels below the workspace root")
-        .to_path_buf()
-}
 
 /// The code-to-level table in the specification chapter.
 ///

@@ -10,81 +10,16 @@
 //! cannot say: the numbering of discriminants and the bytes a run leaves live.
 //! Recursion without a base case ends in the host event at any engine stack.
 
-use std::collections::BTreeSet;
-
-use vibra_ir::{CheckedProgram, Type};
-use vibra_types::check_source;
-use vibra_wasm::layout::{self, header, state};
-use vibra_wasm_run::{
-    Instance, LiveSizes, MemoryLimit, Observed, Outcome, Runner, Started, ValueId,
+use crate::support::{
+    FOREVER, MIB, agree, agree_on, checked, emitted, entry_type, module_values_bytes,
+    oracle, result_variant, runner, runner_with, wasm, word,
 };
 
-const MIB: usize = 1024 * 1024;
+use vibra_ir::{CheckedProgram, Type};
+use vibra_wasm::layout::state;
+use vibra_wasm_run::{Instance, MemoryLimit, Outcome, Runner, Started};
 
 // -- the harness --------------------------------------------------------------
-
-/// The checked program of `source`.
-fn checked(source: &str) -> CheckedProgram {
-    let result = check_source("input.vib", source);
-    assert!(result.accepted(), "{:?}\n{source}", result.diagnostics());
-    result.program().expect("an accepted program").clone()
-}
-
-fn entry_type(program: &CheckedProgram) -> Type {
-    program.entry().signature().result()
-}
-
-fn emitted(program: &CheckedProgram) -> Vec<u8> {
-    vibra_wasm::emit(program)
-        .unwrap_or_else(|error| panic!("the program lowers: {error}"))
-        .into_bytes()
-}
-
-fn runner() -> Runner {
-    Runner::new(MemoryLimit::new(64 * MIB)).expect("the engine configures")
-}
-
-/// The interpreter's canonical result, the oracle.
-fn oracle(program: &CheckedProgram) -> String {
-    vibra_interp::run(program)
-        .expect("the interpreter runs the program")
-        .canonical_result()
-}
-
-/// What the Wasm backend observes, with the live sizes around the run.
-fn wasm(program: &CheckedProgram) -> (String, LiveSizes) {
-    let ty = entry_type(program);
-    match runner()
-        .run_observed(&emitted(program), &ty, program.types())
-        .expect("the module runs")
-    {
-        Observed::Completed { value, live, .. } => {
-            (value.canonical_observation(&ty), live)
-        }
-        Observed::Stopped(outcome) => panic!("the entry did not complete: {outcome:?}"),
-    }
-}
-
-/// Runs `source` in both backends, asserts they agree, and returns the result
-/// and the live sizes.
-fn agree(source: &str) -> (String, LiveSizes) {
-    let program = checked(source);
-    let expected = oracle(&program);
-    let (observed, live) = wasm(&program);
-    assert_eq!(observed, expected, "the backends disagree on:\n{source}");
-    (observed, live)
-}
-
-/// Runs `source` in both backends, and holds the result to `expected`, which
-/// is written from the canonical value encoding of the runtime chapter.
-fn agree_on(source: &str, expected: &str) -> LiveSizes {
-    let (observed, live) = agree(source);
-    assert_eq!(
-        observed, expected,
-        "not the specified encoding for:\n{source}"
-    );
-    live
-}
 
 /// An instance that has run its entry once and whose result is released.
 fn finished(program: &CheckedProgram) -> Instance {
@@ -104,49 +39,6 @@ fn run_and_release(instance: &mut Instance, program: &CheckedProgram) {
     instance
         .observe(result, &entry_type(program), program.types())
         .expect("the host reads the result");
-}
-
-fn word(instance: &mut Instance, address: u32) -> u32 {
-    let bytes = instance
-        .read_memory_for_tests(address, 4)
-        .expect("the state is in memory");
-    u32::from_le_bytes(bytes.try_into().expect("four bytes"))
-}
-
-/// The bytes of every block the instance's module-value table reaches, the
-/// table's own block included: what an instance legitimately keeps for its
-/// lifetime after the host has released everything it held.
-fn module_values_bytes(instance: &mut Instance) -> u64 {
-    let table = word(instance, state::MODULE_VALUES);
-    if table == 0 {
-        return 0;
-    }
-    let mut seen = BTreeSet::new();
-    let mut pending = vec![table];
-    let mut bytes = 0_u64;
-    while let Some(block) = pending.pop() {
-        if !seen.insert(block) {
-            continue;
-        }
-        let size = word(instance, block + header::BLOCK_SIZE);
-        bytes += u64::from(size);
-        let kind_and_stride = word(instance, block + header::KIND);
-        let stride = (kind_and_stride >> 8) & 0xFF;
-        if stride != layout::STRIDE_CELLS {
-            continue;
-        }
-        let len = word(instance, block + header::LEN);
-        let classes = instance
-            .read_memory_for_tests(block + header::SIZE, len as usize)
-            .expect("class bytes");
-        let cells = block + layout::cells_offset(len);
-        for (position, class) in (0_u32..).zip(classes) {
-            if class == layout::CellClass::Ref.code() {
-                pending.push(word(instance, cells + 8 * position));
-            }
-        }
-    }
-    bytes
 }
 
 /// Asserts the live size of a finished run is only what the module values keep,
@@ -171,21 +63,6 @@ fn assert_balanced(source: &str) {
         assert_eq!(word(&mut instance, state::FRAME_TOP), 0, "no frame is left");
         assert_eq!(word(&mut instance, state::FRAME_DEPTH), 0, "no activation");
     }
-}
-
-fn result_variant(program: &CheckedProgram) -> u32 {
-    let bytes = emitted(program);
-    let Started::Ready(mut instance) = runner().start(&bytes).expect("a v1 module")
-    else {
-        panic!("the module's own memory exceeds the limit");
-    };
-    let Outcome::Completed { result, .. } = instance.call_entry().expect("runs") else {
-        panic!("the entry did not complete");
-    };
-    let id: ValueId = instance.result_id(result);
-    let variant = instance.variant(&id).expect("an enum or union");
-    instance.release(id).expect("release");
-    variant
 }
 
 // -- positive: every kind constructed, projected, and observed -------------------
@@ -465,8 +342,6 @@ fn depth_at_exhaustion(runner: &Runner, source: &str) -> u32 {
     word(&mut instance, state::FRAME_DEPTH)
 }
 
-const FOREVER: &str = "(defn main () void (do (forever) void))\n(defn forever () void (do (forever) void))\n";
-
 #[test]
 fn a_recursion_with_no_base_case_is_the_host_event_at_any_engine_stack() {
     let normal = depth_at_exhaustion(&runner(), FOREVER);
@@ -484,7 +359,7 @@ fn a_recursion_with_no_base_case_is_the_host_event_at_any_engine_stack() {
 fn recovery_after_exhaustion_a_new_instance_runs_with_a_larger_limit() {
     let program = checked(FOREVER);
     let bytes = emitted(&program);
-    let tiny = Runner::new(MemoryLimit::new(MIB)).expect("runner");
+    let tiny = runner_with(MIB);
     assert_eq!(
         tiny.run_entry(&bytes).expect("runs"),
         Outcome::MemoryExhausted

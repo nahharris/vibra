@@ -9,7 +9,8 @@
 //! so the domain is finite and the analysis cannot fail to converge on a
 //! checked program.
 
-use std::path::{Path, PathBuf};
+use crate::support::corpus_root;
+use std::path::PathBuf;
 
 use vibra_types::check_source;
 
@@ -17,10 +18,7 @@ use vibra_types::check_source;
 const SMALL_STACK: usize = 512 * 1024;
 
 fn case_input(case: &str) -> String {
-    let path: PathBuf = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../conformance/cases")
-        .join(case)
-        .join("input.vib");
+    let path: PathBuf = corpus_root().join(case).join("input.vib");
     std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }

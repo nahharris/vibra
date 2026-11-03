@@ -4,8 +4,8 @@
 //! `V1-TOOL-workspace-position-boundaries`.
 
 use std::fs;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
+use crate::support::TempDir;
 use vibra_conformance::{
     ConformanceProfile, ConformanceRunner, Corpus, ProfileDispatcher,
     ToolingV1QueryHandler,
@@ -14,16 +14,9 @@ use vibra_diagnostics::LineIndex;
 use vibra_schema::WorkspacePositionQueryDocument;
 use vibra_workspace::WorkspaceSnapshot;
 
-static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
-
 #[test]
 fn the_tooling_handler_passes_real_snapshots_and_rejects_wrong_facts() {
-    let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-    let parent = fs::canonicalize(std::env::temp_dir()).expect("canonical temp parent");
-    let root = parent.join(format!(
-        "vibra-conformance-semantic-query-{serial}-{}",
-        std::process::id()
-    ));
+    let root = TempDir::canonical("semantic-query");
     let tree = root.join("V1-TOOL-query-synthetic").join("tree");
     fs::create_dir_all(tree.join("src")).expect("tree source directory");
     let case = tree.parent().expect("case directory").to_path_buf();
@@ -97,6 +90,4 @@ snapshot = "query.json"
     assert_eq!(failed.failed(), 1);
     let reason = format!("{:?}", failed.cases());
     assert!(reason.contains("query snapshot mismatch"), "{reason}");
-
-    let _ = fs::remove_dir_all(root);
 }

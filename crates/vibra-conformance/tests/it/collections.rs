@@ -8,128 +8,11 @@
 //! size returns to what the module values keep, so a native import that builds
 //! or copies a value kept its counts exact.
 
-use std::collections::BTreeSet;
-
-use vibra_ir::{CheckedProgram, Type};
-use vibra_types::check_source;
-use vibra_wasm::layout::{self, header, state};
-use vibra_wasm_run::{
-    Instance, LiveSizes, MemoryLimit, Observed, Outcome, Runner, Started,
+use crate::support::{
+    MIB, checked, footprint, oracle, result, tuple_type, tuple_value, wasm,
 };
 
-const MIB: usize = 1024 * 1024;
-
 // -- the harness --------------------------------------------------------------
-
-fn checked(source: &str) -> CheckedProgram {
-    let result = check_source("input.vib", source);
-    assert!(result.accepted(), "{:?}\n{source}", result.diagnostics());
-    result.program().expect("an accepted program").clone()
-}
-
-fn entry_type(program: &CheckedProgram) -> Type {
-    program.entry().signature().result()
-}
-
-fn emitted(program: &CheckedProgram) -> Vec<u8> {
-    vibra_wasm::emit(program)
-        .unwrap_or_else(|error| panic!("the program lowers: {error}"))
-        .into_bytes()
-}
-
-fn runner() -> Runner {
-    Runner::new(MemoryLimit::new(64 * MIB)).expect("the engine configures")
-}
-
-/// The interpreter's canonical result, the oracle.
-fn oracle(program: &CheckedProgram) -> String {
-    vibra_interp::run(program)
-        .expect("the interpreter runs the program")
-        .canonical_result()
-}
-
-/// What the Wasm backend observes, with the live sizes around the run.
-fn wasm(program: &CheckedProgram) -> (String, LiveSizes) {
-    let ty = entry_type(program);
-    match runner()
-        .run_observed(&emitted(program), &ty, program.types())
-        .expect("the module runs")
-    {
-        Observed::Completed { value, live, .. } => {
-            (value.canonical_observation(&ty), live)
-        }
-        Observed::Stopped(outcome) => panic!("the entry did not complete: {outcome:?}"),
-    }
-}
-
-fn word(instance: &mut Instance, address: u32) -> u32 {
-    let bytes = instance
-        .read_memory_for_tests(address, 4)
-        .expect("the state is in memory");
-    u32::from_le_bytes(bytes.try_into().expect("four bytes"))
-}
-
-/// The bytes of every block the instance's module-value table reaches, the
-/// table's own block included: what an instance legitimately keeps for its
-/// lifetime after the host has released everything it held.
-fn module_values_bytes(instance: &mut Instance) -> u64 {
-    let table = word(instance, state::MODULE_VALUES);
-    if table == 0 {
-        return 0;
-    }
-    let mut seen = BTreeSet::new();
-    let mut pending = vec![table];
-    let mut bytes = 0_u64;
-    while let Some(block) = pending.pop() {
-        if !seen.insert(block) {
-            continue;
-        }
-        bytes += u64::from(word(instance, block + header::BLOCK_SIZE));
-        let kind_and_stride = word(instance, block + header::KIND);
-        if (kind_and_stride >> 8) & 0xFF != layout::STRIDE_CELLS {
-            continue;
-        }
-        let len = word(instance, block + header::LEN);
-        let classes = instance
-            .read_memory_for_tests(block + header::SIZE, len as usize)
-            .expect("class bytes");
-        let cells = block + layout::cells_offset(len);
-        for (position, class) in (0_u32..).zip(classes) {
-            if class == layout::CellClass::Ref.code() {
-                pending.push(word(instance, cells + 8 * position));
-            }
-        }
-    }
-    bytes
-}
-
-/// What a run left, after the host released the result.
-struct Footprint {
-    live: u64,
-    kept: u64,
-    frame_depth: u32,
-}
-
-fn footprint(program: &CheckedProgram) -> Footprint {
-    let bytes = emitted(program);
-    let Started::Ready(mut instance) = runner().start(&bytes).expect("a v1 module")
-    else {
-        panic!("the module's own memory exceeds the limit");
-    };
-    let Outcome::Completed { result, .. } = instance.call_entry().expect("runs") else {
-        panic!("the entry did not complete");
-    };
-    instance
-        .observe(result, &entry_type(program), program.types())
-        .expect("the host reads the result");
-    let live = instance.live_size().expect("live size");
-    let kept = module_values_bytes(&mut instance);
-    Footprint {
-        live,
-        kept,
-        frame_depth: word(&mut instance, state::FRAME_DEPTH),
-    }
-}
 
 /// Runs `source` in both backends, asserts they agree and are the specified
 /// result `expected`, and asserts the arena is balanced: after the host
@@ -144,7 +27,7 @@ fn balanced_on(source: &str, expected: &str) {
     );
     let (observed, _) = wasm(&program);
     assert_eq!(observed, want, "the backends disagree on:\n{source}");
-    let after = footprint(&program);
+    let after = footprint(&program, 64 * MIB);
     assert_eq!(
         after.live, after.kept,
         "the live size is not at its baseline for:\n{source}"
@@ -153,11 +36,6 @@ fn balanced_on(source: &str, expected: &str) {
 }
 
 // -- the encoding of a result ---------------------------------------------------
-
-/// The canonical encoding of a result observation of type `ty` and value `value`.
-fn result(ty: &str, value: &str) -> String {
-    format!("(record type: {ty} value: {value})\n")
-}
 
 fn array_type(element: &str) -> String {
     format!("(record type: @array arguments: (array {element}))")
@@ -170,20 +48,6 @@ fn array_value(values: &[&str]) -> String {
         format!("(array {})", values.join(" "))
     };
     format!("(record kind: @array values: {elements})")
-}
-
-fn tuple_type(components: &[&str]) -> String {
-    format!(
-        "(record type: @tuple arguments: (array {}))",
-        components.join(" ")
-    )
-}
-
-fn tuple_value(components: &[&str]) -> String {
-    format!(
-        "(record kind: @tuple values: (array {}))",
-        components.join(" ")
-    )
 }
 
 // -- arrays -----------------------------------------------------------------------

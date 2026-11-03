@@ -7,34 +7,13 @@
 //! (`lowers_every_form`) and across processes for an arena program
 //! (`wasm_skeleton`).
 
-use vibra_diagnostics::ByteSpan;
+use crate::support::{
+    emitted, literal, oracle, origin, returning, runner, runner_with,
+};
+
 use vibra_ir::boundary::MEMORY_EXPORT;
-use vibra_ir::{
-    CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Type, Value,
-};
-use vibra_wasm_run::{
-    Instance, MemoryLimit, Observed, Outcome, ResultSlot, Runner, Started, validate,
-};
-
-fn origin() -> SourceOrigin {
-    SourceOrigin::new("input.vib", ByteSpan::new(0, 1))
-}
-
-fn returning(result: Type, body: Expr) -> CheckedProgram {
-    let main = CheckedFunction::new(
-        "main",
-        FunctionSignature::new(Vec::new(), result),
-        body,
-        origin(),
-    )
-    .expect("a checked function");
-    CheckedProgram::try_new(vec![main], 0).expect("a checked program")
-}
-
-fn literal(value: Value) -> CheckedProgram {
-    let ty = value.ty();
-    returning(ty, Expr::literal(value, origin()))
-}
+use vibra_ir::{CheckedFunction, CheckedProgram, Expr, FunctionSignature, Type, Value};
+use vibra_wasm_run::{Instance, Observed, Outcome, ResultSlot, Started, validate};
 
 fn literals() -> Vec<Value> {
     vec![
@@ -58,22 +37,6 @@ fn literals() -> Vec<Value> {
         Value::Bytes(vec![0, 255]),
         Value::Bytes(Vec::new()),
     ]
-}
-
-fn emitted(program: &CheckedProgram) -> Vec<u8> {
-    vibra_wasm::emit(program)
-        .expect("the program lowers")
-        .into_bytes()
-}
-
-fn runner() -> Runner {
-    Runner::new(MemoryLimit::new(64 * 1024 * 1024)).expect("the engine configures")
-}
-
-fn interpreter_result(program: &CheckedProgram) -> String {
-    vibra_interp::run(program)
-        .expect("the interpreter runs the program")
-        .canonical_result()
 }
 
 fn observed_result(program: &CheckedProgram, ty: &Type) -> String {
@@ -246,10 +209,7 @@ fn a_sequence_drops_every_value_it_does_not_return() {
         origin: origin(),
     };
     let program = returning(Type::Bytes, body);
-    assert_eq!(
-        observed_result(&program, &Type::Bytes),
-        interpreter_result(&program)
-    );
+    assert_eq!(observed_result(&program, &Type::Bytes), oracle(&program));
 }
 
 #[test]
@@ -269,10 +229,7 @@ fn the_entry_need_not_be_the_first_function_and_other_functions_lower_too() {
     )
     .expect("a function");
     let program = CheckedProgram::try_new(vec![helper, main], 1).expect("a program");
-    assert_eq!(
-        observed_result(&program, &Type::U16),
-        interpreter_result(&program)
-    );
+    assert_eq!(observed_result(&program, &Type::U16), oracle(&program));
     assert_eq!(
         observed_result(&program, &Type::U16),
         "(record type: @u16 value: 513u16)\n"
@@ -285,7 +242,7 @@ fn the_entry_need_not_be_the_first_function_and_other_functions_lower_too() {
 fn a_literal_larger_than_the_limit_is_the_host_event_with_no_partial_result() {
     // 600 KiB of bytes is a 1 MiB block.
     let bytes = emitted(&literal(Value::Bytes(vec![0xAB; 600 * 1024])));
-    let small = Runner::new(MemoryLimit::new(512 * 1024)).expect("engine");
+    let small = runner_with(512 * 1024);
     assert_eq!(
         small.run_observed(&bytes, &Type::Bytes, &[]).expect("runs"),
         Observed::Stopped(Outcome::MemoryExhausted)
@@ -303,8 +260,7 @@ fn a_literal_larger_than_the_limit_is_the_host_event_with_no_partial_result() {
 fn the_limit_at_exactly_the_programs_need_runs_and_one_page_under_does_not() {
     let bytes = emitted(&literal(Value::Bytes(vec![1; 100 * 1024])));
     let runs = |pages: usize| {
-        Runner::new(MemoryLimit::new(pages * 65_536))
-            .expect("engine")
+        runner_with(pages * 65_536)
             .run_observed(&bytes, &Type::Bytes, &[])
             .expect("runs")
     };

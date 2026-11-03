@@ -2,15 +2,12 @@
 //! fact for each written effect row, and the formatter's idempotence over every
 //! corpus program that writes one.
 
+use crate::support::corpus_root;
+
 use std::fs;
-use std::path::{Path, PathBuf};
 
 use vibra_fmt::format_source_with_facts;
 use vibra_types::check_source;
-
-fn corpus_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases")
-}
 
 /// The single-source inputs of the cases that write an effect row.
 fn effect_inputs() -> Vec<(String, String)> {

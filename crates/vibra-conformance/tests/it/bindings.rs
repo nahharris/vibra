@@ -7,29 +7,16 @@
 //! `@type.initializer-cycle`), `V1-TYPE-NAMES-binding-discards`, and
 //! `V1-TYPE-NAMES-binding-constant-only`.
 
+use crate::support::corpus_case;
+
 use std::path::Path;
 
-use vibra_conformance::{Case, Corpus, ProfileHandler, StaticV1TypeHandler};
+use vibra_conformance::{ProfileHandler, StaticV1TypeHandler};
 use vibra_syntax::parse_data;
-
-/// The one case `id`, discovered from its own directory and not from the whole
-/// corpus.
-fn case(id: &str) -> Case {
-    Corpus::discover(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../conformance/cases")
-            .join(id),
-    )
-    .expect("Step 6 case directory")
-    .cases()
-    .first()
-    .cloned()
-    .expect("Step 6 case")
-}
 
 #[test]
 fn checked_binding_observation_is_valid_vibon() {
-    let case = case("V1-RUNTIME-bindings");
+    let case = corpus_case("V1-RUNTIME-bindings");
     let observation = StaticV1TypeHandler.run(&case).expect("type handler");
     let types = observation.types.expect("typed program observation");
     let document = parse_data(Path::new("types.vibon"), &types)

@@ -1,9 +1,9 @@
 //! Manifest requirements for the Step 13 workspace-test operation.
 
-use std::path::PathBuf;
+use crate::support::corpus;
 
 use vibra_conformance::{
-    CaseManifest, ConformanceOperation, Corpus, InterpreterV1WorkspaceTestHandler,
+    CaseManifest, ConformanceOperation, InterpreterV1WorkspaceTestHandler,
     ProfileHandler,
 };
 
@@ -122,10 +122,7 @@ interpreter = { result = "result.vibon" }
 
 #[test]
 fn workspace_test_handler_compares_authored_outcomes_and_empty_item_traces() {
-    let corpus_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .join("conformance/cases");
-    let corpus = Corpus::discover(corpus_root).expect("repository corpus");
+    let corpus = corpus();
     let handler = InterpreterV1WorkspaceTestHandler;
     for case_id in [
         "V1-RUNTIME-workspace-test-passing",

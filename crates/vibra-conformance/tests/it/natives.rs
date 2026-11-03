@@ -14,42 +14,13 @@
 //! is a provenance defect; and a fault in a native is the toolchain defect
 //! `@runtime.invalid-checked-program`, never a program result.
 
+use crate::support::{crate_sources, production, runner, workspace_root};
+
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
 
 use vibra_ir::external::{CompilerIntrinsic, NATIVE_ROWS};
 
-fn workspace_root() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("workspace root")
-}
-
 // -- the audit: one source ------------------------------------------------------
-
-fn rust_sources(directory: &Path, found: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(directory).expect("readable source directory") {
-        let path = entry.expect("readable directory entry").path();
-        if path.is_dir() {
-            rust_sources(&path, found);
-        } else if path.extension().is_some_and(|extension| extension == "rs") {
-            found.push(path);
-        }
-    }
-}
-
-/// The production code of one source file: without its test module, and
-/// without comment lines.
-fn production(path: &Path) -> String {
-    let text = std::fs::read_to_string(path).expect("readable source");
-    let end = text.find("\n#[cfg(test)]").unwrap_or(text.len());
-    text[..end]
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("//"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
 
 fn squeezed(text: &str) -> String {
     text.chars()
@@ -89,27 +60,6 @@ fn native_rows() -> Vec<CompilerIntrinsic> {
     CompilerIntrinsic::all()
         .into_iter()
         .filter(|row| row.is_native() || row.native_import().is_some())
-        .collect()
-}
-
-/// The sources of one crate, as `(path from the workspace root, production)`.
-fn crate_sources(name: &str) -> Vec<(String, String)> {
-    let mut paths = Vec::new();
-    rust_sources(
-        &workspace_root().join("crates").join(name).join("src"),
-        &mut paths,
-    );
-    paths
-        .into_iter()
-        .map(|path| {
-            let relative = path
-                .strip_prefix(workspace_root())
-                .expect("inside the workspace")
-                .to_string_lossy()
-                .replace('\\', "/");
-            let code = production(&path);
-            (relative, code)
-        })
         .collect()
 }
 
@@ -420,9 +370,7 @@ fn run_both(source: &str) -> Ran {
     let module = vibra_wasm::emit(program)
         .unwrap_or_else(|error| panic!("{source}\nnot lowered: {error}"));
     let ty = program.entry().signature().result();
-    let runner =
-        vibra_wasm_run::Runner::new(vibra_wasm_run::MemoryLimit::new(64 * 1024 * 1024))
-            .expect("the engine configures");
+    let runner = runner();
     let wasm = match runner
         .run_observed(module.bytes(), &ty, program.types())
         .expect("the module runs")
@@ -709,8 +657,7 @@ fn run_forged(kind: u8, stride: u8) -> vibra_wasm_run::Observed {
     bytes[at + 1] = kind;
     bytes[at + 3] = stride;
     let ty = program.entry().signature().result();
-    vibra_wasm_run::Runner::new(vibra_wasm_run::MemoryLimit::new(64 * 1024 * 1024))
-        .expect("the engine configures")
+    runner()
         .run_observed(&bytes, &ty, program.types())
         .expect("the module runs")
 }

@@ -15,6 +15,7 @@
 //! That the corpus reports no case as not lowered is held by
 //! `parity_inventory`, whose table has only `matched` rows.
 
+use crate::support::corpus_root;
 use std::path::Path;
 
 use vibra_ir::external::CompilerIntrinsic;
@@ -63,7 +64,7 @@ fn sources(directory: &Path, found: &mut Vec<String>) {
 
 #[test]
 fn every_program_the_corpus_checks_lowers() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases");
+    let root = corpus_root();
     let mut found = Vec::new();
     sources(&root, &mut found);
     assert!(found.len() > 100, "{} sources", found.len());

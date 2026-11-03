@@ -3,7 +3,7 @@
 //! manifest lists runs against its Vibra body over the same inputs, and both
 //! must produce the same canonical result.
 
-use std::path::Path;
+use crate::support::{runner, runner_with, workspace_root};
 
 use vibra_syntax::{Attribute, Declaration, Literal, TypeMember};
 
@@ -94,13 +94,6 @@ fn samples(symbol: &str) -> &'static [(&'static str, &'static str)] {
         "bytes.from-array" => &[("bytes", "(array.of 7u8 8u8)")],
         _ => &[],
     }
-}
-
-fn workspace_root() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .and_then(Path::parent)
-        .expect("workspace root")
 }
 
 /// Each native member of `@std.builtin` as `(symbol, type path, reference
@@ -219,10 +212,7 @@ fn finish(source: &str, checked: &vibra_types::CheckResult) -> Ran {
         .canonical_result();
     let wasm = vibra_wasm::emit(program).ok().map(|module| {
         let ty = program.entry().signature().result();
-        let runner = vibra_wasm_run::Runner::new(vibra_wasm_run::MemoryLimit::new(
-            64 * 1024 * 1024,
-        ))
-        .expect("the engine configures");
+        let runner = runner();
         match runner
             .run_observed(module.bytes(), &ty, program.types())
             .expect("the module runs")
@@ -778,10 +768,7 @@ fn the_text_and_bytes_vectors_hold_the_interpreter_and_the_module_to_one_answer(
         );
         let module_bytes = vibra_wasm::emit(program)
             .unwrap_or_else(|error| panic!("`{symbol}` lowers: {error}"));
-        let runner = vibra_wasm_run::Runner::new(vibra_wasm_run::MemoryLimit::new(
-            256 * 1024 * 1024,
-        ))
-        .expect("the engine configures");
+        let runner = runner_with(256 * 1024 * 1024);
         let observed = match runner
             .run_observed(module_bytes.bytes(), &entry, program.types())
             .expect("the module runs")

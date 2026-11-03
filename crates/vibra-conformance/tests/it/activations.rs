@@ -3,9 +3,11 @@
 //! `@runtime.memory-exhausted` (`docs/spec/06-runtime.md`, "Activations and
 //! memory" and "Reclamation").
 
+use crate::support::{FixedHandler, TempDir, corpus_root};
+
 use vibra_conformance::{
     CaseManifest, CaseObservation, ConformanceProfile, ConformanceRunner, Corpus,
-    HandlerError, ProfileDispatcher, ProfileHandler,
+    ProfileDispatcher,
 };
 use vibra_interp::{Interpreter, MemoryBudget, RuntimeError};
 use vibra_ir::Value;
@@ -382,8 +384,7 @@ fn a_case_that_ends_in_a_host_event_is_accepted_by_the_checker() {
 
 /// The corpus source with the nesting depth replaced.
 fn compare_nesting_source(depth: u64) -> String {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../conformance/cases/V1-RUNTIME-dict-compare-nesting/input.vib");
+    let path = corpus_root().join("V1-RUNTIME-dict-compare-nesting/input.vib");
     std::fs::read_to_string(path)
         .expect("corpus source")
         .replace("300u64", &format!("{depth}u64"))
@@ -417,26 +418,11 @@ fn key_comparison_nests_far_deeper_than_any_cap_on_a_small_stack() {
     }
 }
 
-struct FixedHandler(CaseObservation);
-
-impl ProfileHandler for FixedHandler {
-    fn run(
-        &self,
-        _case: &vibra_conformance::Case,
-    ) -> Result<CaseObservation, HandlerError> {
-        Ok(self.0.clone())
-    }
-}
-
 fn run_fixed_case(
     expect: &str,
     observation: CaseObservation,
 ) -> vibra_conformance::CaseStatus {
-    let root = std::env::temp_dir().join(format!(
-        "vibra-host-event-{}-{}",
-        std::process::id(),
-        expect.len() + usize::from(observation.host_event.is_some())
-    ));
+    let root = TempDir::new("host-event");
     let directory = root.join("V1-RUNTIME-host-event-run");
     std::fs::create_dir_all(&directory).expect("case directory");
     std::fs::write(
@@ -454,12 +440,11 @@ fn run_fixed_case(
     )
     .expect("result");
     let corpus = Corpus::discover(&root).expect("corpus");
-    let report = ConformanceRunner::new(
-        ProfileDispatcher::new()
-            .with_handler(ConformanceProfile::InterpreterV1, FixedHandler(observation)),
-    )
+    let report = ConformanceRunner::new(ProfileDispatcher::new().with_handler(
+        ConformanceProfile::InterpreterV1,
+        FixedHandler::new(observation),
+    ))
     .run(&corpus);
-    let _ = std::fs::remove_dir_all(&root);
     report.cases()[0].status.clone()
 }
 

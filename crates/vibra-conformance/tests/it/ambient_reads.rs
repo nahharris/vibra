@@ -8,8 +8,10 @@
 //! that every one of them passes through the host provider and a registry row.
 
 // A test asserts by panicking, and indexes fixtures it just built.
+use crate::support::{rust_sources, workspace_root};
+
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// The crate that reads ambient state on behalf of a running program: the system
 /// provider.
@@ -61,25 +63,6 @@ const AMBIENT_PATTERNS: &[&str] = &[
     "print!(",
     "eprint!(",
 ];
-
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("the crate lives two levels below the workspace root")
-        .to_path_buf()
-}
-
-fn rust_sources(directory: &Path, found: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(directory).expect("readable source directory") {
-        let path = entry.expect("readable directory entry").path();
-        if path.is_dir() {
-            rust_sources(&path, found);
-        } else if path.extension().is_some_and(|extension| extension == "rs") {
-            found.push(path);
-        }
-    }
-}
 
 fn crate_names(root: &Path) -> BTreeSet<String> {
     std::fs::read_dir(root.join("crates"))

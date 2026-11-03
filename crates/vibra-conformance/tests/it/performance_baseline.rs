@@ -8,20 +8,16 @@
 //! --write` in the same change. The wall-time medians of the document are
 //! information and take no part in any comparison here.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::support::{TempDir, runner, workspace_root};
 use std::time::{Duration, Instant};
 
 use vibra_conformance::baseline::{
     BASELINE_PATH, Baseline, Exact, InterpreterExact, MIN_RUNS, PROGRAMS, Program,
     WasmExact, differences, measure_exact, measure_program, measure_programs,
-    repository_root,
 };
 
-static NEXT: AtomicUsize = AtomicUsize::new(0);
-
 fn recorded() -> Baseline {
-    let path = repository_root().join(BASELINE_PATH);
+    let path = workspace_root().join(BASELINE_PATH);
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
     Baseline::parse(&text)
@@ -55,7 +51,7 @@ fn synthetic() -> Vec<Exact> {
 /// It runs twice, at once, to show that two measurements agree.
 #[test]
 fn the_checked_in_exact_metrics_equal_a_regeneration_and_a_second_one() {
-    let root = repository_root();
+    let root = workspace_root();
     let (first, second) = std::thread::scope(|scope| {
         let other = scope.spawn(|| measure_exact(&root));
         let first = measure_exact(&root);
@@ -104,7 +100,7 @@ fn a_measurement_of_the_cheap_programs_has_their_recorded_exact_metrics_and_roun
         cheap.map(|program| program.name),
         ["float-to-str", "effectful-walk"]
     );
-    let root = repository_root();
+    let root = workspace_root();
     let error =
         measure_programs(&root, &cheap, MIN_RUNS - 1).expect_err("too few runs");
     assert!(error.contains("at least"), "{error}");
@@ -146,7 +142,7 @@ fn the_medians_are_over_at_least_eleven_runs_and_name_their_machine() {
 
 #[test]
 fn the_document_is_canonical_vibon_and_the_decoder_round_trips_it() {
-    let path = repository_root().join(BASELINE_PATH);
+    let path = workspace_root().join(BASELINE_PATH);
     let text = std::fs::read_to_string(&path).expect("the baseline");
     let formatted = vibra_fmt::format_source("performance-baseline.vibon", &text)
         .expect("the baseline formats");
@@ -200,14 +196,12 @@ fn a_missing_or_extra_program_fails() {
 
 /// A root holding one source file, which removes itself.
 struct Scratch {
-    root: PathBuf,
+    root: TempDir,
 }
 
 impl Scratch {
     fn with(path: &str, text: &str) -> Self {
-        let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir()
-            .join(format!("vibra-step21-{}-{serial}", std::process::id()));
+        let root = TempDir::new("performance-baseline");
         let file = root.join(path);
         std::fs::create_dir_all(file.parent().expect("a parent")).expect("directory");
         std::fs::write(file, text).expect("source");
@@ -215,24 +209,19 @@ impl Scratch {
     }
 }
 
-impl Drop for Scratch {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
-    }
-}
-
 #[test]
 fn a_changed_program_moves_its_metrics_and_the_comparison_names_them() {
     // The tail loop at a thousand iterations instead of a million.
     let original = std::fs::read_to_string(
-        repository_root().join("examples/m4-baseline/programs/tail-loop.vib"),
+        workspace_root().join("examples/m4-baseline/programs/tail-loop.vib"),
     )
     .expect("the tail loop");
     assert!(original.contains("1000000u64"));
     let scratch =
         Scratch::with("tail-loop.vib", &original.replace("1000000u64", "1000u64"));
     let program = Program::source("tail-loop", "perturbed", "tail-loop.vib");
-    let changed = measure_program(&scratch.root, &program).expect("the program runs");
+    let changed =
+        measure_program(scratch.root.path(), &program).expect("the program runs");
     let baseline = recorded().exact;
     let mut after = baseline.clone();
     after[3] = changed;
@@ -262,12 +251,14 @@ fn a_program_that_does_not_complete_is_an_error_naming_it() {
         "(defn main () (result u64 u64) (result.err 1u64))\n",
     );
     let program = Program::source("fails", "returns err", "fails.vib");
-    let error = measure_program(&scratch.root, &program).expect_err("no measurement");
+    let error =
+        measure_program(scratch.root.path(), &program).expect_err("no measurement");
     assert!(error.contains("`fails`"), "{error}");
     // A source that is not accepted fails before any run.
     let scratch = Scratch::with("rejected.vib", "(defn main () u64 nothing)\n");
     let program = Program::source("rejected", "does not check", "rejected.vib");
-    let error = measure_program(&scratch.root, &program).expect_err("no measurement");
+    let error =
+        measure_program(scratch.root.path(), &program).expect_err("no measurement");
     assert!(error.contains("`rejected`"), "{error}");
 }
 
@@ -282,7 +273,7 @@ fn the_largest_programs_complete_in_bounded_time_in_a_debug_build() {
         .find(|program| program.name == "nested-value-5000")
         .expect("the nested value");
     let start = Instant::now();
-    let exact = measure_program(&repository_root(), nested).expect("it completes");
+    let exact = measure_program(&workspace_root(), nested).expect("it completes");
     assert!(
         start.elapsed() < Duration::from_secs(120),
         "{:?}",
@@ -303,10 +294,10 @@ fn the_largest_programs_complete_in_bounded_time_in_a_debug_build() {
 #[test]
 fn a_module_emitted_for_measurement_computes_what_the_plain_module_does() {
     use vibra_wasm::layout::state;
-    use vibra_wasm_run::{MemoryLimit, Outcome, Runner, Started};
+    use vibra_wasm_run::{Outcome, Started};
 
     let text = std::fs::read_to_string(
-        repository_root().join("examples/m4-baseline/programs/dict-insert.vib"),
+        workspace_root().join("examples/m4-baseline/programs/dict-insert.vib"),
     )
     .expect("the dict program");
     let checked = vibra_types::check_source("input.vib", &text);
@@ -314,7 +305,7 @@ fn a_module_emitted_for_measurement_computes_what_the_plain_module_does() {
     let plain = vibra_wasm::emit(program).expect("lowers");
     let counting = vibra_wasm::emit_measured(program).expect("lowers");
     assert_ne!(plain.bytes(), counting.bytes());
-    let runner = Runner::new(MemoryLimit::new(64 * 1024 * 1024)).expect("a runner");
+    let runner = runner();
     let mut counters = Vec::new();
     let mut results = Vec::new();
     for module in [&plain, &counting] {

@@ -1,5 +1,6 @@
 //! Focused host and conformance checks for M2 Step 9 tail execution.
 
+use crate::support::{TempDir, corpus_root};
 use vibra_types::{check_bootstrap_text_import, check_source, load_stdlib};
 
 /// A tail loop of `rounds` self transfers, counting down in a `u32`.
@@ -318,10 +319,7 @@ fn callable_return_and_unused_initializer_boundaries_remain_valid() {
 
 /// The source of a corpus case, so a host test and its case cannot drift.
 fn corpus_source(case: &str) -> String {
-    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../conformance/cases")
-        .join(case)
-        .join("input.vib");
+    let path = corpus_root().join(case).join("input.vib");
     std::fs::read_to_string(path).expect("corpus case source")
 }
 
@@ -380,10 +378,7 @@ fn unrelated_function_tail_calls_reuse_one_activation() {
 #[test]
 fn tail_calls_between_modules_reuse_one_activation() {
     let project = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict))\n";
-    let parent =
-        std::fs::canonicalize(std::env::temp_dir()).expect("temporary directory");
-    let root = parent.join(format!("vibra-tail-modules-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&root);
+    let root = TempDir::canonical("tail-modules");
     std::fs::create_dir_all(root.join("src/app")).expect("project directory");
     std::fs::write(root.join("project.vibon"), project).expect("project marker");
     std::fs::write(
@@ -404,7 +399,6 @@ fn tail_calls_between_modules_reuse_one_activation() {
         .first()
         .expect("binary target");
     let run = vibra_workspace::semantic::run_target(&snapshot, target);
-    let _ = std::fs::remove_dir_all(&root);
     assert_eq!(
         run.check().status(),
         vibra_workspace::semantic::CheckStatus::Accepted,

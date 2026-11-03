@@ -11,16 +11,14 @@
 //! call, by `tests_traps` and by the corpus case
 //! `V1-RUNTIME-workspace-test-hidden-function`.
 
+use crate::support::{origin, runner};
+
 use vibra_ir::boundary::TrapCode;
 use vibra_ir::{
-    CallTarget, CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin,
+    CallTarget, CheckedFunction, CheckedProgram, Expr, FunctionSignature,
     TestAssertion, Type, Value,
 };
-use vibra_wasm_run::{MemoryLimit, Outcome, Runner, Started, TestRun};
-
-fn origin() -> SourceOrigin {
-    SourceOrigin::new("trap.vib", vibra_diagnostics::ByteSpan::new(0, 1))
-}
+use vibra_wasm_run::{Outcome, Started, TestRun};
 
 /// An entry that calls the verified assertion `assert.true` on `true`.
 fn assertion_program(entry_result: Type) -> CheckedProgram {
@@ -50,10 +48,6 @@ fn assertion_program(entry_result: Type) -> CheckedProgram {
         CheckedFunction::new_test_assertion("assert", TestAssertion::True, origin())
             .expect("an assertion");
     CheckedProgram::try_new(vec![entry, assertion], 0).expect("a program")
-}
-
-fn runner() -> Runner {
-    Runner::new(MemoryLimit::new(64 * 1024 * 1024)).expect("an engine")
 }
 
 #[test]

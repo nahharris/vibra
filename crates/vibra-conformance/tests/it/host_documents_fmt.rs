@@ -2,8 +2,9 @@
 //! are canonical VIBON (Milestone 4, Step 16a): the formatter leaves each
 //! unchanged and is idempotent over it.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use crate::support::workspace_root;
 use vibra_fmt::format_document;
 use vibra_syntax::parse_data;
 
@@ -60,8 +61,7 @@ fn an_audit_trace_is_canonical() {
 /// canonical attribute order, so `@std.io` is a canonical source.
 #[test]
 fn the_io_module_is_canonical_source() {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/src/std/io.vib");
+    let path = workspace_root().join("stdlib/src/std/io.vib");
     let text = std::fs::read_to_string(&path).expect("a source file");
     let text = text.replace("\r\n", "\n");
     let once = vibra_fmt::format(&path, &text).expect("formats");
@@ -78,8 +78,7 @@ fn the_io_module_is_canonical_source() {
 #[test]
 fn the_standard_library_manifest_is_canonical_and_the_formatter_is_idempotent_over_it()
 {
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib/manifest.vibon");
+    let path = workspace_root().join("stdlib/manifest.vibon");
     let text = std::fs::read_to_string(path).expect("the manifest");
     let once = formatted("manifest.vibon", &text);
     assert_eq!(formatted("manifest.vibon", &once), once);

@@ -9,20 +9,17 @@
 //! it: parameters are borrowed, the result is adopted exactly once, and a
 //! balanced run returns the arena to where it started.
 
+use crate::support::{origin, runner};
+
 use std::sync::Arc;
-use vibra_diagnostics::ByteSpan;
 use vibra_ir::external::host::host_row;
 use vibra_ir::{
-    CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Type,
-    TypeBody, TypeDefinition, TypeId, Value,
+    CheckedFunction, CheckedProgram, Expr, FunctionSignature, Type, TypeBody,
+    TypeDefinition, TypeId, Value,
 };
 
 use vibra_ir::boundary::TrapCode;
-use vibra_wasm_run::{Builders, Forged, MemoryLimit, Outcome, Runner, Started, Stop};
-
-fn origin() -> SourceOrigin {
-    SourceOrigin::new("input.vib", ByteSpan::new(0, 1))
-}
+use vibra_wasm_run::{Builders, Forged, Outcome, Started, Stop};
 
 /// A program whose entry applies `io.stdout-text` to `"hi"` and answers `void`.
 fn module() -> Vec<u8> {
@@ -112,7 +109,7 @@ enum Ended {
 fn run(
     import: impl Fn(&mut Builders<'_, '_>, i64) -> Result<i64, Stop> + Send + Sync + 'static,
 ) -> Ended {
-    let runner = Runner::new(MemoryLimit::new(64 * 1024 * 1024)).expect("an engine");
+    let runner = runner();
     let forged: Forged = Arc::new(move |host, ids| import(host, ids[0]));
     let Started::Ready(mut instance) = runner
         .start_forged(&module(), "io.stdout-text", forged)

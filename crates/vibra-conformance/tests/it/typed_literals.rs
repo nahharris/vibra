@@ -2,33 +2,20 @@
 //! state. The typed observation and the result and trace of `V1-TYPE-INFER-primitives`
 //! and `V1-RUNTIME-literal` are held by those cases.
 
+use crate::support::{FixedHandler, corpus_case};
+
 use std::path::Path;
 
 use vibra_conformance::{
-    BackendObservation, Case, CaseObservation, ConformanceProfile, ConformanceRunner,
-    Corpus, HandlerError, ProfileDispatcher, ProfileHandler, StaticV1TypeHandler,
+    BackendObservation, CaseObservation, ConformanceProfile, ConformanceRunner,
+    ProfileDispatcher, ProfileHandler, StaticV1TypeHandler,
 };
 use vibra_ir::Value;
 use vibra_syntax::parse_data;
 
-/// The one case `id`, discovered from its own directory and not from the whole
-/// corpus.
-fn case(id: &str) -> Case {
-    Corpus::discover(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../conformance/cases")
-            .join(id),
-    )
-    .expect("Step 5 case directory")
-    .cases()
-    .first()
-    .cloned()
-    .expect("Step 5 case")
-}
-
 #[test]
 fn typed_program_observation_is_valid_vibon() {
-    let case = case("V1-TYPE-INFER-primitives");
+    let case = corpus_case("V1-TYPE-INFER-primitives");
     let observation = StaticV1TypeHandler.run(&case).expect("type handler");
     let types = observation.types.expect("typed program observation");
     let document =
@@ -56,20 +43,9 @@ fn bytes_and_unicode_whitespace_observations_are_valid_vibon() {
     }
 }
 
-#[derive(Clone, Debug)]
-struct FixedHandler {
-    observation: CaseObservation,
-}
-
-impl ProfileHandler for FixedHandler {
-    fn run(&self, _case: &Case) -> Result<CaseObservation, HandlerError> {
-        Ok(self.observation.clone())
-    }
-}
-
 #[test]
 fn runner_rejects_a_wrong_typed_program_snapshot() {
-    let case = case("V1-TYPE-INFER-primitives");
+    let case = corpus_case("V1-TYPE-INFER-primitives");
     let report = ConformanceRunner::new(ProfileDispatcher::new().with_handler(
         ConformanceProfile::StaticV1,
         FixedHandler {
@@ -89,7 +65,7 @@ fn runner_rejects_a_wrong_typed_program_snapshot() {
 
 #[test]
 fn runner_rejects_a_nonempty_trace_for_a_pure_program() {
-    let case = case("V1-RUNTIME-literal");
+    let case = corpus_case("V1-RUNTIME-literal");
     let report = ConformanceRunner::new(ProfileDispatcher::new().with_handler(
         ConformanceProfile::InterpreterV1,
         FixedHandler {

@@ -13,11 +13,8 @@
 //! and processes, which an address or an instance identity would break.
 
 use std::collections::BTreeSet;
-use std::path::Path;
 
-use vibra_conformance::{ConformanceOperation, Corpus};
-
-use crate::support::run_ignored_child;
+use crate::support::{CheckedSource, check_every_source, run_ignored_child};
 
 /// A field name that contains one of these denotes a place in an instance.
 const INSTANCE_WORDS: &[&str] = &[
@@ -28,35 +25,37 @@ const INSTANCE_WORDS: &[&str] = &[
 /// A field name that is one of these denotes a value ID.
 const VALUE_ID_NAMES: &[&str] = &["id", "value-id", "value_id", "ref", "reference"];
 
-fn corpus() -> Corpus {
-    Corpus::discover(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases"),
-    )
-    .expect("the corpus loads")
+/// The canonical forms of every checked program reachable from a single source
+/// document of an `interpret` or `type-check` case, in corpus order, checked
+/// afresh by this call.
+fn canonical_forms() -> Vec<(String, String)> {
+    forms_of(&check_every_source())
 }
 
-/// The canonical forms of every checked program reachable from a single source
-/// document of an `interpret` or `type-check` case, in corpus order.
-fn canonical_forms() -> Vec<(String, String)> {
-    let mut forms = Vec::new();
-    for case in corpus().cases() {
-        let operation = case.manifest().operation();
-        if !matches!(
-            operation,
-            ConformanceOperation::Interpret | ConformanceOperation::TypeCheck
-        ) {
-            continue;
-        }
-        let Some(source_id) = case.manifest().inputs.source.as_deref() else {
-            continue;
-        };
-        let source = case.read_file(source_id).expect("the source reads");
-        let result = vibra_types::check_source(source_id, &source);
-        if let Some(program) = result.program() {
-            forms.push((case.manifest().id.clone(), program.canonical_vibon()));
-        }
+/// The case id and canonical form of each source the checker accepted.
+fn forms_of(sources: &[CheckedSource]) -> Vec<(String, String)> {
+    sources
+        .iter()
+        .filter_map(|checked| {
+            Some((checked.case_id.clone(), checked.canonical.clone()?))
+        })
+        .collect()
+}
+
+/// A 64-bit FNV-1a digest of the forms, which needs no dependency and covers
+/// every byte, with the number of bytes it covers.
+fn digest(forms: &[(String, String)]) -> String {
+    let total = forms
+        .iter()
+        .map(|(case_id, canonical)| format!("{case_id}\n{canonical}"))
+        .collect::<Vec<_>>()
+        .join("\u{1}");
+    let mut digest = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in total.bytes() {
+        digest ^= u64::from(byte);
+        digest = digest.wrapping_mul(0x0100_0000_01b3);
     }
-    forms
+    format!("{digest:016x}:{}", total.len())
 }
 
 /// Every field name in a canonical form, outside string literals.
@@ -110,25 +109,14 @@ fn written_names(source: &str) -> BTreeSet<String> {
 fn no_field_of_the_canonical_form_denotes_a_place_in_an_instance() {
     let mut programs = 0_usize;
     let mut structural = BTreeSet::new();
-    for case in corpus().cases() {
-        if !matches!(
-            case.manifest().operation(),
-            ConformanceOperation::Interpret | ConformanceOperation::TypeCheck
-        ) {
-            continue;
-        }
-        let Some(source_id) = case.manifest().inputs.source.as_deref() else {
-            continue;
-        };
-        let source = case.read_file(source_id).expect("the source reads");
-        let result = vibra_types::check_source(source_id, &source);
-        let Some(program) = result.program() else {
+    for checked in &check_every_source() {
+        let Some(canonical) = &checked.canonical else {
             continue;
         };
         programs += 1;
-        let written = written_names(&source);
-        let case_id = &case.manifest().id;
-        for name in field_names(&program.canonical_vibon()) {
+        let written = written_names(&checked.source);
+        let case_id = &checked.case_id;
+        for name in field_names(canonical) {
             // A name the program's own source writes is a record field or a
             // similar user choice, and may be anything.
             if written.contains(&name) {
@@ -183,19 +171,7 @@ fn the_canonical_form_is_identical_across_independent_checks() {
 #[test]
 #[ignore = "run only as the child of `the_canonical_form_is_identical_across_processes`"]
 fn canonical_forms_in_child_process() {
-    let forms = canonical_forms();
-    let total = forms
-        .iter()
-        .map(|(case_id, canonical)| format!("{case_id}\n{canonical}"))
-        .collect::<Vec<_>>()
-        .join("\u{1}");
-    // A 64-bit FNV-1a digest, which needs no dependency and covers every byte.
-    let mut digest = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in total.bytes() {
-        digest ^= u64::from(byte);
-        digest = digest.wrapping_mul(0x0100_0000_01b3);
-    }
-    println!("\nDIGEST:{digest:016x}:{}", total.len());
+    println!("\nDIGEST:{}", digest(&canonical_forms()));
 }
 
 #[test]
@@ -210,20 +186,9 @@ fn the_canonical_form_is_identical_across_processes() {
             .to_owned()
     };
 
-    let forms = canonical_forms();
-    let total = forms
-        .iter()
-        .map(|(case_id, canonical)| format!("{case_id}\n{canonical}"))
-        .collect::<Vec<_>>()
-        .join("\u{1}");
-    let mut digest = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in total.bytes() {
-        digest ^= u64::from(byte);
-        digest = digest.wrapping_mul(0x0100_0000_01b3);
-    }
     assert_eq!(
         digest_of(&first),
-        format!("{digest:016x}:{}", total.len()),
+        digest(&forms_of(&check_every_source())),
         "another process produced another canonical form"
     );
 }

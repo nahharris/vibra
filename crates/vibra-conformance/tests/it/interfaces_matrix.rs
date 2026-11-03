@@ -8,9 +8,10 @@
 //! `V1-RUNTIME-interface-dispatch`, `V1-RUNTIME-tail-contract-member-interface-value`,
 //! and `V1-RUNTIME-entry-outcome-trap-holding-err`.
 
+use crate::support::runner_with;
 use vibra_ir::Type;
 use vibra_types::check_source;
-use vibra_wasm_run::{MemoryLimit, Observed, Outcome, Runner};
+use vibra_wasm_run::{Observed, Outcome};
 
 fn run_limited(source: &str, limit: usize) -> Observed {
     let result = check_source("input.vib", source);
@@ -19,8 +20,7 @@ fn run_limited(source: &str, limit: usize) -> Observed {
     let ty: Type = program.entry().signature().result();
     let module = vibra_wasm::emit(program).expect("the program lowers");
     let heads = |head: u32| module.descriptors().type_of(head).cloned();
-    Runner::new(MemoryLimit::new(limit))
-        .expect("the engine configures")
+    runner_with(limit)
         .run_observed_with(module.bytes(), &ty, program.types(), &heads)
         .expect("the module runs")
 }

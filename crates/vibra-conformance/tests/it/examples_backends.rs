@@ -13,8 +13,9 @@
 //! `cargo test -p vibra-conformance --test examples_backends -- --nocapture`
 //! prints the trace and the walk numbers the exit evidence records.
 
+use crate::support::{MIB, TempDir, copy_directory, runner, workspace_root};
+
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use vibra_conformance::{
     INSTANCE_MEMORY_LIMIT_BYTES, TestRow, TestsObserved, WasmObservation,
@@ -30,9 +31,6 @@ use vibra_workspace::semantic::{
     CheckStatus, TestItem, TestItemStatus, TestSuiteStatus, check_all_with_bootstrap,
 };
 
-static NEXT: AtomicUsize = AtomicUsize::new(0);
-
-const MIB: usize = 1024 * 1024;
 const WORLD: &str = "(record format: @host-world.v1 args: (array \"/in/note.txt\") files: (dict \"/in/note.txt\" \"alpha\\nbeta\\n\"))";
 const STDOUT: &str = "> alpha\n> beta\n";
 const WALK: &str = "a deep walk over a line of stock";
@@ -41,27 +39,14 @@ const DEMO_ROUNDS: u64 = 100_000;
 const START_COUNT: u64 = 7;
 
 fn examples() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples")
+    workspace_root()
+        .join("examples")
         .canonicalize()
         .expect("the examples")
 }
 
 fn example(name: &str) -> PathBuf {
     examples().join(name)
-}
-
-fn copy_directory(from: &Path, to: &Path) {
-    std::fs::create_dir_all(to).expect("directory");
-    for entry in std::fs::read_dir(from).expect("a directory") {
-        let entry = entry.expect("an entry");
-        let target = to.join(entry.file_name());
-        if entry.file_type().expect("a type").is_dir() {
-            copy_directory(&entry.path(), &target);
-        } else {
-            std::fs::copy(entry.path(), target).expect("copy");
-        }
-    }
 }
 
 fn run_suite(root: &Path) -> vibra_workspace::semantic::WorkspaceTestResult {
@@ -223,14 +208,12 @@ fn a_different_world_gives_a_different_trace_from_the_same_module() {
 
 /// A copy of the catalog whose walk runs `rounds` rounds, which removes itself.
 struct Copy {
-    root: PathBuf,
+    root: TempDir,
 }
 
 impl Copy {
     fn with_rounds(rounds: u64) -> Self {
-        let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir()
-            .join(format!("vibra-walk-{}-{serial}", std::process::id()));
+        let root = TempDir::new("walk");
         copy_directory(&example("m3-catalog"), &root);
         let path = root.join("tests/stock.vib");
         let text = std::fs::read_to_string(&path).expect("tests");
@@ -242,12 +225,6 @@ impl Copy {
             .replace(&from, &format!("{rounds}u64"));
         std::fs::write(&path, text).expect("rewritten tests");
         Self { root }
-    }
-}
-
-impl Drop for Copy {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
     }
 }
 
@@ -313,7 +290,7 @@ fn measure(rounds: u64) -> (InterpreterWalk, WasmWalk) {
     let module = vibra_wasm::emit_tests(first, &entries).expect("the tests lower");
     let heads = |head: u32| module.descriptors().type_of(head).cloned();
     let operand_of = |ordinal: u32| module.origins().operand_type(ordinal).cloned();
-    let runner = Runner::new(MemoryLimit::new(64 * MIB)).expect("a runner");
+    let runner = runner();
     let Started::Ready(mut instance) =
         runner.start(module.bytes()).expect("a v1 module")
     else {

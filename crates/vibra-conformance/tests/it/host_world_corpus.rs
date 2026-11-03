@@ -6,8 +6,7 @@
 //! each backend. The corpus counts do not move: these cases are synthetic
 //! corpora of the host-language suite, not checked-in conformance cases.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use crate::support::TempDir;
 
 use vibra_conformance::{
     CaseManifest, CaseStatus, ConformanceRunner, Corpus, HostWorldError,
@@ -111,19 +110,11 @@ fn the_world_path_is_a_relative_vibon_file_of_the_case() {
     }
 }
 
-static NEXT: AtomicUsize = AtomicUsize::new(0);
-
-struct Temp(PathBuf);
+struct Temp(TempDir);
 
 impl Temp {
     fn new() -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "vibra-conformance-world-{}-{}",
-            std::process::id(),
-            NEXT.fetch_add(1, Ordering::Relaxed)
-        ));
-        std::fs::create_dir_all(&root).expect("temporary corpus");
-        Self(root)
+        Self(TempDir::new("world"))
     }
 
     /// One `workspace-run` case with a trivial entry and the given world text.
@@ -169,12 +160,6 @@ impl Temp {
     }
 }
 
-impl Drop for Temp {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 const GOOD_WORLD: &str =
     "(record format: @host-world.v1 stdin: \"hi\" files: (dict \"/f\" \"orig\"))\n";
 
@@ -182,7 +167,7 @@ const GOOD_WORLD: &str =
 fn a_case_with_a_valid_world_loads_a_fresh_copy_each_time() {
     let temp = Temp::new();
     temp.case("V1-RUNTIME-world-valid", true, Some(GOOD_WORLD), "");
-    let corpus = Corpus::discover(&temp.0).expect("corpus");
+    let corpus = Corpus::discover(temp.0.path()).expect("corpus");
     let case = &corpus.cases()[0];
 
     let mut first = WorldProvider::new(&case.host_world().expect("world"));
@@ -195,7 +180,7 @@ fn a_case_with_a_valid_world_loads_a_fresh_copy_each_time() {
 
     // A case without the input runs in the default world.
     temp.case("V1-RUNTIME-world-default", true, None, "");
-    let corpus = Corpus::discover(&temp.0).expect("corpus");
+    let corpus = Corpus::discover(temp.0.path()).expect("corpus");
     let defaulted = corpus
         .cases()
         .iter()
@@ -216,7 +201,7 @@ fn a_malformed_world_is_reported_once_per_diagnostic_at_the_document() {
         Some("(record format: @host-world.v1 clock: (record wall: 0u64) random: (record seed: \"x\") network: (array))\n"),
         "",
     );
-    let corpus = Corpus::discover(&temp.0).expect("corpus");
+    let corpus = Corpus::discover(temp.0.path()).expect("corpus");
     let case = &corpus.cases()[0];
     let Err(HostWorldError::Invalid(diagnostics)) = case.host_world() else {
         panic!("the world must be rejected");
@@ -268,7 +253,7 @@ fn a_malformed_world_fails_its_case_and_not_the_corpus() {
     );
     temp.case("V1-RUNTIME-world-d-good", true, None, "");
 
-    let corpus = Corpus::discover(&temp.0).expect("corpus");
+    let corpus = Corpus::discover(temp.0.path()).expect("corpus");
     let report = ConformanceRunner::new(standard_dispatcher()).run(&corpus);
     let status = |id: &str| {
         report

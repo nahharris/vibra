@@ -9,6 +9,8 @@
 //! a deliberate change to the table below.
 
 // A test asserts by panicking, and indexes fixtures it just built.
+use crate::support::{rust_sources, workspace_root};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -141,14 +143,6 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
 /// Every dependency section a manifest may use to create an arrow.
 const DEPENDENCY_SECTIONS: &[&str] =
     &["dependencies", "dev-dependencies", "build-dependencies"];
-
-fn workspace_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .ancestors()
-        .nth(2)
-        .expect("the crate lives two levels below the workspace root")
-        .to_path_buf()
-}
 
 fn read_manifest(path: &Path) -> toml::Table {
     let text = std::fs::read_to_string(path)
@@ -552,17 +546,6 @@ fn a_dependency_on_the_engine_is_reported() {
 
 /// Filesystem entry points a semantic crate must not name.
 const FILESYSTEM_PATTERNS: &[&str] = &["std::fs", "fs::", "File::open", "read_dir("];
-
-fn rust_sources(directory: &Path, found: &mut Vec<PathBuf>) {
-    for entry in std::fs::read_dir(directory).expect("readable source directory") {
-        let path = entry.expect("readable directory entry").path();
-        if path.is_dir() {
-            rust_sources(&path, found);
-        } else if path.extension().is_some_and(|extension| extension == "rs") {
-            found.push(path);
-        }
-    }
-}
 
 fn filesystem_references(source: &str) -> Vec<&'static str> {
     FILESYSTEM_PATTERNS

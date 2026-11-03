@@ -3,17 +3,12 @@
 //! `V1-SRC-FMT-*` and `V1-SRC-READER-*` corpus case.
 
 use std::process::Command;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
-static NEXT_TEMP: AtomicUsize = AtomicUsize::new(0);
+use crate::support::TempDir;
 
 #[test]
 fn internal_entrypoint_returns_nonzero_when_a_case_fails() {
-    let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!(
-        "vibra-conformance-step4-failing-{serial}-{}",
-        std::process::id()
-    ));
+    let root = TempDir::new("reader-failing");
     let case = root.join("V1-SRC-READER-entrypoint-failure");
     std::fs::create_dir_all(&case).expect("create temporary case");
     std::fs::write(
@@ -43,29 +38,20 @@ end = 1
 
     let status = Command::new(env!("CARGO_BIN_EXE_vibra-conformance"))
         .args(["--root"])
-        .arg(&root)
+        .arg(root.path())
         .status()
         .expect("run internal conformance entrypoint");
     assert!(!status.success(), "a failed conformance case must fail CI");
-
-    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
 fn internal_entrypoint_returns_nonzero_for_an_empty_corpus() {
-    let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-    let root = std::env::temp_dir().join(format!(
-        "vibra-conformance-step4-empty-{serial}-{}",
-        std::process::id()
-    ));
-    std::fs::create_dir_all(&root).expect("create empty corpus root");
+    let root = TempDir::new("reader-empty");
 
     let status = Command::new(env!("CARGO_BIN_EXE_vibra-conformance"))
         .args(["--root"])
-        .arg(&root)
+        .arg(root.path())
         .status()
         .expect("run internal conformance entrypoint");
     assert!(!status.success(), "an empty corpus must fail CI");
-
-    let _ = std::fs::remove_dir_all(root);
 }

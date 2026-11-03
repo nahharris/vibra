@@ -7,42 +7,30 @@
 //! outcomes, the same assertion operands, the same trap codes, and the same
 //! origins.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
+use crate::support::{TempDir, runner, runner_with};
 use vibra_conformance::{TestRow, TestsObserved, observe_wasm_tests};
 use vibra_ir::boundary::TrapCode;
 use vibra_wasm_run::{MemoryLimit, Outcome, Runner, TestRun};
 use vibra_workspace::WorkspaceSnapshot;
 use vibra_workspace::semantic::TestItemStatus;
 
-static NEXT: AtomicUsize = AtomicUsize::new(0);
-
 const MAIN: &str = "(defn execute () void void)\n";
 const PROJECT: &str = "(record format: @project.v1 package: (record name: \"demo\" version: \"0.1.0\") targets: (array (record name: @app kind: @bin root: \"src/app\" entry: @app.main.execute effects: (array))) dependencies: (dict))\n";
 
 /// A project tree that removes itself.
 struct Tree {
-    root: PathBuf,
+    root: TempDir,
 }
 
 impl Tree {
     fn new(tests: &str) -> Self {
-        let serial = NEXT.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir()
-            .join(format!("vibra-step11-{}-{serial}", std::process::id()));
+        let root = TempDir::new("tests-traps");
         std::fs::create_dir_all(root.join("src/app")).expect("directory");
         std::fs::create_dir_all(root.join("tests")).expect("directory");
         std::fs::write(root.join("project.vibon"), PROJECT).expect("project");
         std::fs::write(root.join("src/app/main.vib"), MAIN).expect("main");
         std::fs::write(root.join("tests/t.vib"), tests).expect("tests");
         Self { root }
-    }
-}
-
-impl Drop for Tree {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.root);
     }
 }
 
@@ -495,7 +483,7 @@ fn a_test_position_outside_the_module_is_a_defect_of_the_caller() {
     let program = result.items()[0].program().expect("a program");
     let module = vibra_wasm::emit_tests(program, &[program.entry_index()])
         .expect("a test module");
-    let runner = Runner::new(MemoryLimit::new(64 * 1024 * 1024)).expect("an engine");
+    let runner = runner();
     let none = |_: u32| None;
     let run = runner
         .run_test(module.bytes(), 5, program.types(), &none, &none)
@@ -549,7 +537,7 @@ fn memory_exhaustion_in_a_test_is_the_host_event_and_not_a_trap() {
         .position(|function| function.name().contains("runs out"))
         .expect("the exhausting test is a function");
     let module = vibra_wasm::emit_tests(&program, &[runs_out]).expect("a test module");
-    let runner = Runner::new(MemoryLimit::new(1 << 20)).expect("an engine");
+    let runner = runner_with(1 << 20);
     let none = |_: u32| None;
     let run = runner
         .run_test(module.bytes(), 0, program.types(), &none, &none)

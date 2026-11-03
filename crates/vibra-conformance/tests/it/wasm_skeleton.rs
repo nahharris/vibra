@@ -7,23 +7,18 @@
 //! carries the prelude's `true` and `false` module values (Step 2b), which Step
 //! 5b lowers; a test below pins that.
 
+use crate::support::{emitted, origin, runner};
+
 use std::fmt::Write as _;
 
 use crate::support::run_ignored_child;
-use vibra_diagnostics::ByteSpan;
 use vibra_ir::boundary::{
     ENTRY_EXPORT, LENGTH_EXPORT, LIVE_SIZE_EXPORT, MEMORY_EXPORT, ORIGIN_EXPORT,
     READ_F32_EXPORT, READ_F64_EXPORT, READ_I32_EXPORT, READ_I64_EXPORT, READ_ID_EXPORT,
     RELEASE_EXPORT, RESULT_EXPORT, STATUS_EXPORT, TRAP_CODE_EXPORT, VARIANT_EXPORT,
 };
-use vibra_ir::{
-    CheckedFunction, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Type, Value,
-};
-use vibra_wasm_run::{MemoryLimit, Outcome, ResultSlot, Runner, validate};
-
-fn origin() -> SourceOrigin {
-    SourceOrigin::new("input.vib", ByteSpan::new(0, 1))
-}
+use vibra_ir::{CheckedFunction, CheckedProgram, Expr, FunctionSignature, Type, Value};
+use vibra_wasm_run::{Outcome, ResultSlot, validate};
 
 /// `(defn done () void)` as the checker would build it, without the prelude.
 fn empty_entry() -> CheckedProgram {
@@ -60,18 +55,12 @@ fn hex(bytes: &[u8]) -> String {
     })
 }
 
-fn emitted(program: &CheckedProgram) -> Vec<u8> {
-    vibra_wasm::emit(program)
-        .expect("the empty entry lowers")
-        .into_bytes()
-}
-
 #[test]
 fn the_empty_entry_is_emitted_validated_and_run() {
     for program in [empty_entry(), empty_do_entry()] {
         let bytes = emitted(&program);
         validate(&bytes).expect("the module validates under the baseline");
-        let runner = Runner::new(MemoryLimit::new(64 * 1024 * 1024)).expect("engine");
+        let runner = runner();
         assert_eq!(
             runner.run_entry(&bytes).expect("runs"),
             Outcome::Completed {
