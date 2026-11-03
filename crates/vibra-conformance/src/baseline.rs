@@ -24,7 +24,7 @@
 //! hand.
 
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use std::time::Instant;
 
@@ -156,12 +156,6 @@ pub const PROGRAMS: [Program; 10] = [
         ),
     },
 ];
-
-/// The repository root: the workspace root.
-#[must_use]
-pub fn repository_root() -> PathBuf {
-    crate::workspace_root()
-}
 
 /// What the interpreter's counters reported for a program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
