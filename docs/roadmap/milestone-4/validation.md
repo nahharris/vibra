@@ -38,6 +38,12 @@ moved from not lowered to matched.
 
 ## Before merging each step
 
+The integration tests of `vibra-conformance` are one test target, `it`, whose
+modules are in `crates/vibra-conformance/tests/it/`. A command below selects
+modules by path, as in `--test it -- patterns::`; a filter matches as a
+substring, so `corpus::` also selects `host_world_corpus::`. Under nextest the
+same module is `-E 'test(/^patterns::/)'`.
+
 ```powershell
 $env:RUSTFLAGS = '-D warnings'
 cargo fmt --all --check
@@ -46,9 +52,9 @@ cargo test --locked --offline --workspace --all-targets --all-features
 $env:RUSTDOCFLAGS = '-D warnings'
 cargo doc --locked --offline --workspace --no-deps --all-features
 cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
-cargo test --locked --offline -p vibra-conformance --test evidence_step11 --test m4_contract_inventory --test m3_contract_inventory --test diagnostic_registry
+cargo test --locked --offline -p vibra-conformance --test it -- evidence:: diagnostic_registry::
 # From Step 21 the exact performance metrics are a host test of the workspace run:
-# cargo test --locked --offline -p vibra-conformance --test performance_baseline_m4_step21
+# cargo test --locked --offline -p vibra-conformance --test it -- performance_baseline::
 cargo run --locked --offline -p vibra-conformance --bin m1-fuzz -- --profile ci-smoke
 git diff --check
 ```
@@ -57,7 +63,7 @@ From Step 13 the pre-merge list also names the parity inventory and architecture
 tests, which it has needed since Step 4 and which Stage 4B steps change:
 
 ```powershell
-cargo test --locked --offline -p vibra-conformance --test parity_inventory_m4_step4 --test architecture_boundary --test m3_contract_inventory
+cargo test --locked --offline -p vibra-conformance --test it -- parity_inventory:: architecture_boundary::
 ```
 
 The baseline at the head of Step 13 (on `m4` at the merge of PR #370, d567003) is 475 passed, 0 failed, 0 unavailable: 83 reader, 239 static, 138
@@ -68,7 +74,7 @@ From Step 4 add the parity inventory test, the module-bytes determinism test,
 and the differential harness test to the list above in each step's handoff:
 
 ```powershell
-cargo test --locked --offline -p vibra-conformance --test parity_inventory_m4_step4 --test wasm_skeleton_m4_step4 --test differential_m4_step4 --test typed_ir_identity_m4_step4
+cargo test --locked --offline -p vibra-conformance --test it -- parity_inventory:: wasm_skeleton:: differential:: typed_ir_identity::
 ```
 
 The parity inventory test names the rows to add when a case has none, so the
@@ -81,7 +87,7 @@ zero failed and zero unavailable, and report counts per profile and per
 backend. A `not lowered` count may be nonzero before Step 12 and must be zero
 at the Stage 4A sub-gate.
 
-`evidence_step11` keys the specification-example inventory
+The `evidence` module keys the specification-example inventory
 (`docs/roadmap/milestone-1/syntax-examples.tsv`) by line position, so any
 specification edit that moves lines needs a mechanical refresh of that file
 from the test's `missing inventory row` output. Review the refreshed rows: a
@@ -96,20 +102,20 @@ the anchors of headings it renames.
 
 | Steps | Command |
 | --- | --- |
-| 1 | `cargo test --locked --offline -p vibra-diagnostics -p vibra-schema`<br>`cargo test --locked --offline -p vibra-conformance --test m4_contract_inventory --test diagnostic_registry` |
+| 1 | `cargo test --locked --offline -p vibra-diagnostics -p vibra-schema`<br>`cargo test --locked --offline -p vibra-conformance --test it -- diagnostic_registry::` |
 | 2 | `cargo test --locked --offline -p vibra-resolve -p vibra-types -p vibra-ir -p vibra-interp -p vibra-fmt`<br>`cargo test --locked --offline -p vibra-workspace -p vibra-conformance` |
-| 3 | `cargo test --locked --offline -p vibra-interp -p vibra-ir -p vibra-cli -p vibra-workspace`<br>`cargo test --locked --offline -p vibra-conformance --test activations_m4_step3 --test tail_calls_step9` |
-| 4 | `cargo test --locked --offline -p vibra-wasm -p vibra-wasm-run -p vibra-ir`<br>`cargo test --locked --offline -p vibra-conformance --test parity_inventory_m4_step4 --test wasm_skeleton_m4_step4 --test differential_m4_step4 --test typed_ir_identity_m4_step4 --test architecture_boundary --test corpus_step3 --test activations_m4_step3` |
-| 5b | `cargo test --locked --offline -p vibra-conformance --test core_lowering_m4_step5b` (the host tests of the core lowering, depth, and balance) and the Step 4 row |
-| 6 | `cargo test --locked --offline -p vibra-conformance --test calls_m4_step6 --test initializer_calls_m4_step6` (the host tests of calls, generics, tail calls, depth, and reclamation; the second holds every module-initializer shape in the interpreter) and the Step 4 and Step 5b rows |
-| 7 | `cargo test --locked --offline -p vibra-conformance --test patterns_m4_step7` (the host tests of every pattern kind, destructuring, `let-else`, `as`, `try`, and `never`, the balance of every path, and tail position through each form) and the Step 4, Step 5b, and Step 6 rows |
-| 5a–12 | the emitter crate `vibra-wasm` and the runner crate `vibra-wasm-run`, with `cargo test --locked --offline -p vibra-conformance` for the parity inventory and the native harness (`natives_m3_step4b`) |
-| 8a–8c | `cargo test --locked --offline -p vibra-types` for the standard-library input and registry, and the registry vectors the step adds<br>8b: `cargo test --locked --offline -p vibra-native -p vibra-ir -p vibra-interp -p vibra-wasm` and `cargo test --locked --offline -p vibra-conformance --test collections_m4_step8b --test natives_m3_step4b --test architecture_boundary`<br>8c: `cargo test --locked --offline -p vibra-native -p vibra-ir -p vibra-interp -p vibra-wasm` and `cargo test --locked --offline -p vibra-conformance --test numbers_m4_step8c --test primitives_m4_step8a --test architecture_boundary` (the vectors of every float and number-text row in the interpreter, the module, and the table; NaN of every sign and payload; the arena balance of every path; an end-of-memory string) |
+| 3 | `cargo test --locked --offline -p vibra-interp -p vibra-ir -p vibra-cli -p vibra-workspace`<br>`cargo test --locked --offline -p vibra-conformance --test it -- activations:: tail_calls::` |
+| 4 | `cargo test --locked --offline -p vibra-wasm -p vibra-wasm-run -p vibra-ir`<br>`cargo test --locked --offline -p vibra-conformance --test it -- parity_inventory:: wasm_skeleton:: differential:: typed_ir_identity:: architecture_boundary:: corpus:: activations::` |
+| 5b | `cargo test --locked --offline -p vibra-conformance --test it -- core_lowering::` (the host tests of the core lowering, depth, and balance) and the Step 4 row |
+| 6 | `cargo test --locked --offline -p vibra-conformance --test it -- calls:: initializer_calls::` (the host tests of calls, generics, tail calls, depth, and reclamation; the second holds every module-initializer shape in the interpreter) and the Step 4 and Step 5b rows |
+| 7 | `cargo test --locked --offline -p vibra-conformance --test it -- patterns::` (the host tests of every pattern kind, destructuring, `let-else`, `as`, `try`, and `never`, the balance of every path, and tail position through each form) and the Step 4, Step 5b, and Step 6 rows |
+| 5a–12 | the emitter crate `vibra-wasm` and the runner crate `vibra-wasm-run`, with `cargo test --locked --offline -p vibra-conformance` for the parity inventory and the native harness (the `native_differential` module) |
+| 8a–8c | `cargo test --locked --offline -p vibra-types` for the standard-library input and registry, and the registry vectors the step adds<br>8b: `cargo test --locked --offline -p vibra-native -p vibra-ir -p vibra-interp -p vibra-wasm` and `cargo test --locked --offline -p vibra-conformance --test it -- collections:: native_differential:: architecture_boundary::`<br>8c: `cargo test --locked --offline -p vibra-native -p vibra-ir -p vibra-interp -p vibra-wasm` and `cargo test --locked --offline -p vibra-conformance --test it -- numbers:: primitives:: architecture_boundary::` (the vectors of every float and number-text row in the interpreter, the module, and the table; NaN of every sign and payload; the arena balance of every path; an end-of-memory string) |
 | 11 | `cargo test --locked --offline -p vibra-cli` for `run` and `test` output |
-| 13 | `cargo test --locked --offline -p vibra-diagnostics -p vibra-schema -p vibra-cli`<br>`cargo test --locked --offline -p vibra-conformance --test m4_contract_inventory --test diagnostic_registry --test evidence_step11` |
+| 13 | `cargo test --locked --offline -p vibra-diagnostics -p vibra-schema -p vibra-cli`<br>`cargo test --locked --offline -p vibra-conformance --test it -- diagnostic_registry:: evidence::` |
 | 14 | `cargo test --locked --offline -p vibra-resolve -p vibra-types -p vibra-ir -p vibra-interp -p vibra-fmt`, then `-p vibra-workspace -p vibra-conformance`; every new executable case `matched` in `conformance/parity.tsv` |
 | 15 | `cargo test --locked --offline -p vibra-workspace -p vibra-cli -p vibra-conformance` |
-| 16a | `cargo test --locked --offline -p vibra-host -p vibra-ir -p vibra-types` and `-p vibra-conformance --test architecture_boundary --test ambient_reads_m4_step16 --test host_world_corpus_m4_step16 --test host_documents_fmt_m4_step16`; the corpus count does not move |
+| 16a | `cargo test --locked --offline -p vibra-host -p vibra-ir -p vibra-types` and `-p vibra-conformance --test it -- architecture_boundary:: ambient_reads:: host_world_corpus:: host_documents_fmt::`; the corpus count does not move |
 | 16b–18 | `cargo test --locked --offline -p vibra-host -p vibra-ir -p vibra-interp -p vibra-wasm -p vibra-wasm-run -p vibra-cli -p vibra-schema`, the Step 4–12 row, and the registry snapshot and ambient-read tests; the Wasm backend has no `not lowered` row |
 | 19 | `cargo test --locked --offline -p vibra-cli -p vibra-workspace -p vibra-conformance`, with the process tests for exit codes 0, 3, 5, and 6 |
 | 20 | `cargo test --locked --offline -p vibra-schema -p vibra-workspace -p vibra-conformance` |

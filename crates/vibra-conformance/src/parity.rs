@@ -8,7 +8,7 @@
 //! step, and when the runner's result for a case disagrees with its
 //! disposition. This module reads the table and states those rules; the test
 //! that applies them to the real corpus is
-//! `tests/parity_inventory_m4_step4.rs`.
+//! `tests/it/parity_inventory.rs`.
 
 use std::collections::BTreeMap;
 use std::fmt;

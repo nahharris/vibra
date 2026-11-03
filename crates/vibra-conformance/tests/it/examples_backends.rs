@@ -10,7 +10,7 @@
 //! binary in `vibra-cli` (`process_examples`) and by the corpus cases
 //! `V1-EFFECT-demo-gate-*` and `V1-EFFECT-host-*`.
 //!
-//! `cargo test -p vibra-conformance --test examples_backends -- --nocapture`
+//! `cargo test -p vibra-conformance --test it -- examples_backends:: --nocapture`
 //! prints the trace and the walk numbers the exit evidence records.
 
 use crate::support::{MIB, TempDir, copy_directory, runner, workspace_root};
