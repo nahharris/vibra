@@ -1,11 +1,12 @@
 id = "V1-TYPE-INTERFACE-labelled-default-mismatch"
 rule = "V1-TYPE-INTERFACE"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "An implementation member keeps the labelled defaults of its contract: a different default value is rejected, and the same value is accepted however it is spelled."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [117, 190]

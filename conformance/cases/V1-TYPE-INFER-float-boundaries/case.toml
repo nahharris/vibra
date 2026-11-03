@@ -1,11 +1,12 @@
 id = "V1-TYPE-INFER-float-boundaries"
 rule = "V1-TYPE-INFER"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Direct f32 and f64 rounding plus finite maximum literals remain deterministic."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

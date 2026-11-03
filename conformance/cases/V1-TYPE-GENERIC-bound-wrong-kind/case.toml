@@ -1,11 +1,12 @@
 id = "V1-TYPE-GENERIC-bound-wrong-kind"
 rule = "V1-TYPE-GENERIC"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A type named where a bound requires an interface is the wrong kind of entity, not an unknown name, and an atom default needs an atom type."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,11 +14,11 @@ accepted = false
 [[expect.diagnostics]]
 code = "@name.wrong-entity-kind"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [59, 66]
 
 [[expect.diagnostics]]
 code = "@type.mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [113, 128]

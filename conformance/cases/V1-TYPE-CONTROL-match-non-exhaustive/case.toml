@@ -1,11 +1,12 @@
 id = "V1-TYPE-CONTROL-match-non-exhaustive"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Non-exhaustive enum, bool, tuple, atom, str, and integer matches name their first uncovered shape. A partly covered earlier variant is named before a later variant, an option payload is spelled inside its constructor, and a str is spelled with its type name."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,62 +14,62 @@ accepted = false
 [[expect.diagnostics]]
 code = "@pattern.non-exhaustive"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [83, 135]
 notes = ["`(color.green)` is not covered"]
 
 [[expect.diagnostics]]
 code = "@pattern.non-exhaustive"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [166, 189]
 notes = ["`false` is not covered"]
 
 [[expect.diagnostics]]
 code = "@pattern.non-exhaustive"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [235, 296]
 notes = ["`(tupleof false false)` is not covered"]
 
 [[expect.diagnostics]]
 code = "@pattern.non-exhaustive"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [328, 360]
 notes = ["`-` is not covered"]
 
 [[expect.diagnostics]]
 code = "@pattern.non-exhaustive"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [391, 413]
 notes = ["`-` is not covered"]
 
 [[expect.diagnostics]]
 code = "@pattern.non-exhaustive"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [446, 469]
 notes = ["`-` is not covered"]
 
 [[expect.diagnostics]]
 code = "@pattern.non-exhaustive"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [562, 602]
 notes = ["`(partial-enum.a false)` is not covered"]
 
 [[expect.diagnostics]]
 code = "@pattern.non-exhaustive"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [645, 682]
 notes = ["`(option.some false)` is not covered"]
 
 [[expect.diagnostics]]
 code = "@pattern.non-exhaustive"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [718, 750]
 notes = ["`(str (array -))` is not covered"]

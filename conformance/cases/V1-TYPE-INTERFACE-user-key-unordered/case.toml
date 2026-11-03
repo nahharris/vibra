@@ -1,11 +1,12 @@
 id = "V1-TYPE-INTERFACE-user-key-unordered"
 rule = "V1-TYPE-INTERFACE"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A deftype keys a dict only through its own ordered implementation, whether the dict type is written or inferred, and an ordered-bounded parameter rejects it."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,17 +14,17 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [103, 108]
 
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [163, 200]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [286, 317]

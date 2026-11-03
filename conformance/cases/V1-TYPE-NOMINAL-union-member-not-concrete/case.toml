@@ -1,11 +1,12 @@
 id = "V1-TYPE-NOMINAL-union-member-not-concrete"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A union member that is another union, declared or anonymous, or a bare generic name is not concrete."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,17 +14,17 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.union-member-not-concrete"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [50, 68]
 
 [[expect.diagnostics]]
 code = "@type.union-member-not-concrete"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [88, 101]
 
 [[expect.diagnostics]]
 code = "@type.union-member-not-concrete"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [141, 169]

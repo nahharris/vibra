@@ -1,11 +1,12 @@
 id = "V1-TYPE-INFER-boundaries"
 rule = "V1-TYPE-INFER"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Signed extrema and the unsigned maximum remain exact at their declared widths."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

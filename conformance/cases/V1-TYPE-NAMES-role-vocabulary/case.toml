@@ -1,11 +1,12 @@
 id = "V1-TYPE-NAMES-role-vocabulary"
 rule = "V1-TYPE-NAMES"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A type that plays a language role and its constructors need no import, and a declaration import binds the same type under an alias."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

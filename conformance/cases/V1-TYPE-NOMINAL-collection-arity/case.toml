@@ -1,11 +1,12 @@
 id = "V1-TYPE-NOMINAL-collection-arity"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "array and dict are ordinary generic types: any count of type arguments other than their own, including a bare head, is @type.type-argument-mismatch."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,29 +14,29 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.type-argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [11, 32]
 
 [[expect.diagnostics]]
 code = "@type.type-argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [58, 74]
 
 [[expect.diagnostics]]
 code = "@type.type-argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [102, 126]
 
 [[expect.diagnostics]]
 code = "@type.type-argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [159, 170]
 
 [[expect.diagnostics]]
 code = "@type.type-argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [202, 212]

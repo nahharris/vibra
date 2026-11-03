@@ -1,11 +1,12 @@
 id = "V1-SRC-CALLS-functions-not-applicable"
 rule = "V1-SRC-CALLS"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A primitive expression in callee position is rejected as a non-function."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.not-applicable"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [21, 25]

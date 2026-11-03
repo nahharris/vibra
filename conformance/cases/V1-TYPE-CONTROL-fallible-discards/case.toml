@@ -1,11 +1,12 @@
 id = "V1-TYPE-CONTROL-fallible-discards"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A result ignored under each of the three discard spellings, and an ignored option, are accepted."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

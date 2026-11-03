@@ -1,11 +1,12 @@
 id = "V1-TYPE-NOMINAL-names"
 rule = "V1-TYPE-NOMINAL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "An unknown type name is reported at its owning parameter, and a constructor is not a value."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -15,17 +16,17 @@ accepted = false
 [[expect.diagnostics]]
 code = "@name.unknown-symbol"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [46, 59]
 
 [[expect.diagnostics]]
 code = "@name.wrong-entity-kind"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [100, 105]
 
 [[expect.diagnostics]]
 code = "@name.wrong-entity-kind"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [144, 149]

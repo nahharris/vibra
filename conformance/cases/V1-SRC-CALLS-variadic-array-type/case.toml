@@ -1,11 +1,12 @@
 id = "V1-SRC-CALLS-variadic-array-type"
 rule = "V1-SRC-CALLS"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "An array-variadic function type binds a tail at a call through its value."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

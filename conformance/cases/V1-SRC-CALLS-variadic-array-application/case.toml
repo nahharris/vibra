@@ -1,11 +1,12 @@
 id = "V1-SRC-CALLS-variadic-array-application"
 rule = "V1-SRC-CALLS"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Array-variadic declarations accept empty and nonempty tails, packed into one array argument."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

@@ -1,11 +1,12 @@
 id = "V1-EFFECT-offending-callee-no-cascade"
 rule = "V1-EFFECT"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A callee that is over its own ceiling does not cascade: its caller sees its performed row and is within its own ceiling, and the declaration after an error still checks."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,13 +14,13 @@ accepted = false
 [[expect.diagnostics]]
 code = "@effect.outside-ceiling"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [74, 90]
 notes = ["performs @app.main.write via @app.main.write.text"]
 
 [[expect.diagnostics]]
 code = "@effect.outside-ceiling"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [165, 181]
 notes = ["performs @app.main.write via @app.main.write.text"]

@@ -1,11 +1,12 @@
 id = "V1-TYPE-CONTROL-empty-sequences"
 rule = "V1-TYPE-CONTROL"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "Empty do forms and empty let bodies produce void while retaining a typed discarded initializer."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

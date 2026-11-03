@@ -1,11 +1,12 @@
 id = "V1-SRC-CALLS-variadic-captured-alias"
 rule = "V1-SRC-CALLS"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A lambda keeps a variadic callee's binding shape through direct and nested captures of a local alias."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

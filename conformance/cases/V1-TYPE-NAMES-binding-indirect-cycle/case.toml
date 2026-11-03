@@ -1,11 +1,12 @@
 id = "V1-TYPE-NAMES-binding-indirect-cycle"
 rule = "V1-TYPE-NAMES"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A module initializer cycle reached through a fixed call is rejected before lowering."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.initializer-cycle"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [0, 22]

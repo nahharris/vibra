@@ -1,11 +1,12 @@
 id = "V1-TYPE-NAMES-reserved-binders"
 rule = "V1-TYPE-NAMES"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A lexical binder spelled as a keyword, `any`, `never`, or a primitive type name is @name.reserved-declaration at the binder name, at a parameter, a let, a let-else pattern, a match arm, a lambda parameter, a labelled parameter, and a variadic parameter. Each still binds, so the rest of its scope checks without a cascade, and a function with ordinary binders after them is accepted."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,41 +14,41 @@ accepted = false
 [[expect.diagnostics]]
 code = "@name.reserved-declaration"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [22, 24]
 
 [[expect.diagnostics]]
 code = "@name.reserved-declaration"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [79, 82]
 
 [[expect.diagnostics]]
 code = "@name.reserved-declaration"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [185, 190]
 
 [[expect.diagnostics]]
 code = "@name.reserved-declaration"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [313, 319]
 
 [[expect.diagnostics]]
 code = "@name.reserved-declaration"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [398, 405]
 
 [[expect.diagnostics]]
 code = "@name.reserved-declaration"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [511, 515]
 
 [[expect.diagnostics]]
 code = "@name.reserved-declaration"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [575, 578]

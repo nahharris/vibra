@@ -1,11 +1,12 @@
 id = "V1-TYPE-CONVERT-widening-rejections"
 rule = "V1-TYPE-CONVERT"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "No widening happens without a written expected type, through a container, or in two steps."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,23 +14,23 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [78, 99]
 
 [[expect.diagnostics]]
 code = "@type.mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [162, 168]
 
 [[expect.diagnostics]]
 code = "@type.argument-mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [216, 220]
 
 [[expect.diagnostics]]
 code = "@type.mismatch"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [264, 267]

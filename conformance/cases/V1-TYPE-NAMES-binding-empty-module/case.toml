@@ -1,11 +1,12 @@
 id = "V1-TYPE-NAMES-binding-empty-module"
 rule = "V1-TYPE-NAMES"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "An empty source document is a module with no declarations, which a workspace accepts."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

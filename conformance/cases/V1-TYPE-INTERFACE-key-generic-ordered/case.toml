@@ -1,11 +1,12 @@
 id = "V1-TYPE-INTERFACE-key-generic-ordered"
 rule = "V1-TYPE-INTERFACE"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A dict keyed by a tuple that holds a generic parameter bound by ordered is a valid key type."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = true

@@ -1,11 +1,12 @@
 id = "V1-TYPE-INTERFACE-undispatchable"
 rule = "V1-TYPE-INTERFACE"
 profile = "static-v1"
-operation = "type-check"
+operation = "workspace-check"
 description = "A contract member with no fixed positional self and no self in its result cannot select an implementation, whether it never names self or names it only in a variadic tail."
 
 [inputs]
-source = "input.vib"
+project = "tree/project.vibon"
+tree = "tree"
 
 [expect]
 accepted = false
@@ -13,11 +14,11 @@ accepted = false
 [[expect.diagnostics]]
 code = "@type.undispatchable-contract-member"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [47, 66]
 
 [[expect.diagnostics]]
 code = "@type.undispatchable-contract-member"
 level = "@error"
-source = "input.vib"
+source = "src/app/main.vib"
 span = [69, 126]
