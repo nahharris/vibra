@@ -18,6 +18,14 @@ engine for parsing, resolution, types, effects, diagnostics, queries, and edit
 planning. A tool may render the result differently; it may not reimplement the
 language or maintain a second symbol index.
 
+There is one checker. A source document that no project holds, as the
+conformance corpus checks for a `type-check` or `interpret` case, is the only
+module of a one-module workspace with the embedded standard library, resolved
+and checked exactly as a module of a project is. It keeps the source ID it was given. It can import the standard
+library and nothing else, because no other module is in that workspace, and the
+verdict, diagnostics, and spans for a source are those the workspace check
+reports for the same module.
+
 Every machine response has a schema version and is deterministic for one
 workspace snapshot. JSON is the general CLI and MCP interchange format. Vibra
 owns no persistent JSON file: project, lock, and build data use the canonical
@@ -188,8 +196,12 @@ returned. A recovered document is preserved byte-for-byte. The formatter may
 reorder labelled arguments only when an accepted checker result for that exact
 source in the captured workspace snapshot supplies their binding facts; absent
 facts never authorize an inferred reorder.
-If the single-source checker reports `@tool.unavailable`, `fmt` discards that
-incomplete check result and continues with syntax-only formatting. It uses no
+The source is checked as the module it is of the captured workspace, with the
+candidate text in place of its captured bytes and every other module as
+captured, by the check `vibra check` runs. A source that is not a module of the
+workspace is not checked. If there is no check, or the check reports
+`@tool.unavailable`, `fmt` discards the check result and continues with
+syntax-only formatting. It uses no
 binding facts and must preserve labelled argument order; the unavailable
 semantic check does not make formatting unavailable. Parser and formatter
 diagnostics still apply to preview and write. The layouts that `fmt` writes for

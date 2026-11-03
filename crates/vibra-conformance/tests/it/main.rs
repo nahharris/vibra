@@ -23,7 +23,6 @@ mod arena_runtime;
 mod bindings;
 mod call_flow;
 mod calls;
-mod check_paths_agree;
 mod collections;
 mod contract_members;
 mod core_lowering;

@@ -2,7 +2,7 @@ id = "V1-TOOL-format-imported-source"
 rule = "V1-TOOL"
 profile = "tooling-v1"
 operation = "format"
-description = "Formatting an imported source without checker binding facts preserves labelled argument order."
+description = "A source that imports a module of its project is checked in that project, so the formatter has the binding facts of the imported function: it writes the labelled operands in declaration order and the checker warns that the written order was not canonical."
 
 [inputs]
 source = "tree/src/hello/main.vib"
@@ -12,3 +12,12 @@ tree = "tree"
 [expect]
 accepted = true
 formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@style.argument-order"
+level = "@warning"
+source = "src/hello/main.vib"
+
+[expect.diagnostics.span]
+start = 56
+end = 103

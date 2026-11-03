@@ -14,18 +14,6 @@ accepted = false
 code = "@type.type-argument-mismatch"
 level = "@error"
 source = "input.vib"
-span = [420, 431]
-
-[[expect.diagnostics]]
-code = "@type.type-argument-mismatch"
-level = "@error"
-source = "input.vib"
-span = [483, 489]
-
-[[expect.diagnostics]]
-code = "@type.type-argument-mismatch"
-level = "@error"
-source = "input.vib"
 span = [65, 145]
 
 [[expect.diagnostics]]
@@ -39,6 +27,18 @@ code = "@type.mismatch"
 level = "@error"
 source = "input.vib"
 span = [339, 403]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [420, 431]
+
+[[expect.diagnostics]]
+code = "@type.type-argument-mismatch"
+level = "@error"
+source = "input.vib"
+span = [483, 489]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"

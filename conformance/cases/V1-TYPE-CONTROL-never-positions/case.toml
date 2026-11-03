@@ -14,12 +14,6 @@ accepted = false
 code = "@type.unreachable-code"
 level = "@error"
 source = "input.vib"
-span = [616, 622]
-
-[[expect.diagnostics]]
-code = "@type.unreachable-code"
-level = "@error"
-source = "input.vib"
 span = [343, 349]
 
 [[expect.diagnostics]]
@@ -51,6 +45,12 @@ code = "@type.unreachable-code"
 level = "@error"
 source = "input.vib"
 span = [584, 590]
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [616, 622]
 
 [[expect.diagnostics]]
 code = "@type.unreachable-code"

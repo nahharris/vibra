@@ -632,9 +632,7 @@ fn the_looping_rows_and_iteration_agree_across_both_backends_and_the_literal() {
 /// constructor call of the literal's object forged: the object is built with the
 /// `kind` and `stride` given, and the import then meets it.
 fn run_forged(kind: u8, stride: u8) -> vibra_wasm_run::Observed {
-    let stdlib = vibra_types::load_stdlib().expect("standard library");
-    let checked = vibra_types::check_bootstrap_text_import(
-        &stdlib,
+    let checked = vibra_types::check_source(
         "input.vib",
         "(import text @std.text)\n(defn main () u64 (text.length \"abc\"))\n",
     );

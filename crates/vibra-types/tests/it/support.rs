@@ -1,5 +1,5 @@
-//! Helpers shared by the `vibra-types` integration tests: the single-source
-//! checker's diagnostics, reduced to the codes (and spans) the tests assert.
+//! Helpers shared by the `vibra-types` integration tests: the diagnostics of a
+//! source checked on its own, reduced to the codes (and spans) the tests assert.
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 use vibra_types::check_source;

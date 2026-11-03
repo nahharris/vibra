@@ -15,11 +15,11 @@ code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [74, 90]
-notes = ["performs @write via @write.text"]
+notes = ["performs @app.main.write via @app.main.write.text"]
 
 [[expect.diagnostics]]
 code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [165, 181]
-notes = ["performs @write via @write.text"]
+notes = ["performs @app.main.write via @app.main.write.text"]

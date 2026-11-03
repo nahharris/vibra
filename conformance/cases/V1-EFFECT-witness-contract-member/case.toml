@@ -21,4 +21,4 @@ code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [277, 296]
-notes = ["performs @write via contract member @logger.log"]
+notes = ["performs @app.main.write via contract member @app.main.logger.log"]

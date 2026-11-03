@@ -43,7 +43,7 @@
       wasm:
       (record
         module-bytes:
-        5425u64
+        7775u64
         allocations:
         302703u64
         peak-live-bytes:
@@ -58,7 +58,7 @@
       wasm:
       (record
         module-bytes:
-        5668u64
+        8018u64
         allocations:
         3000003u64
         peak-live-bytes:
@@ -73,7 +73,7 @@
       wasm:
       (record
         module-bytes:
-        35469u64
+        37819u64
         allocations:
         4008u64
         peak-live-bytes:
@@ -88,7 +88,7 @@
       wasm:
       (record
         module-bytes:
-        145990u64
+        148340u64
         allocations:
         212u64
         peak-live-bytes:
@@ -103,7 +103,7 @@
       wasm:
       (record
         module-bytes:
-        5586u64
+        56504u64
         allocations:
         8004u64
         peak-live-bytes:
@@ -118,7 +118,7 @@
       wasm:
       (record
         module-bytes:
-        7062u64
+        57746u64
         allocations:
         4003u64
         peak-live-bytes:

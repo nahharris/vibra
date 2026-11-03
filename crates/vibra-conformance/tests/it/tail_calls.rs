@@ -1,7 +1,7 @@
 //! Focused host and conformance checks for M2 Step 9 tail execution.
 
-use crate::support::{TempDir, corpus_root};
-use vibra_types::{check_bootstrap_text_import, check_source, load_stdlib};
+use crate::support::{TempDir, corpus_root, tail_calls};
+use vibra_types::check_source;
 
 /// A tail loop of `rounds` self transfers, counting down in a `u32`.
 fn countdown_source(rounds: u32) -> String {
@@ -128,7 +128,6 @@ fn identity_returned_targets_remain_bounded_through_direct_and_local_calls() {
 
 #[test]
 fn mixed_source_and_external_tail_candidates_reuse_only_source_targets() {
-    let verification = load_stdlib().expect("bootstrap provenance");
     for (condition, expected, transfers, depth) in
         [("true", 99, 1, 1), ("false", 1, 0, 2)]
     {
@@ -140,11 +139,7 @@ fn mixed_source_and_external_tail_candidates_reuse_only_source_targets() {
 (defn local-length (value str) u64 99u64)
 "
         );
-        let checked = check_bootstrap_text_import(
-            &verification,
-            "tail-mixed-external.vib",
-            &source,
-        );
+        let checked = check_source("tail-mixed-external.vib", &source);
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
         let execution =
             vibra_interp::run(checked.program().expect("program")).expect("execution");
@@ -167,7 +162,7 @@ fn lambda_activations_reuse_for_calls_through_captured_values() {
     let program = checked.program().expect("program");
     // The call of the `lambda` and the call of `f` inside it are both tail
     // calls, so the one activation of `answer` runs all three bodies.
-    assert_eq!(program.canonical_vibon().matches("tail: true").count(), 2);
+    assert_eq!(tail_calls(program, "tail-lambda-activation.vib"), 2);
     let execution = vibra_interp::run(program).expect("execution");
     assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(1)));
     assert_eq!(execution.tail_transfer_count(), 2);
@@ -176,17 +171,12 @@ fn lambda_activations_reuse_for_calls_through_captured_values() {
 
 #[test]
 fn returned_external_callables_fall_back_to_ordinary_invocation() {
-    let verification = load_stdlib().expect("bootstrap provenance");
     let source = r#"
 (import text @std.text)
 (defn answer () u64 ((make) "x"))
 (defn make () (fn (str) u64) text.length)
 "#;
-    let checked = check_bootstrap_text_import(
-        &verification,
-        "tail-returned-external.vib",
-        source,
-    );
+    let checked = check_source("tail-returned-external.vib", source);
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let execution =
         vibra_interp::run(checked.program().expect("program")).expect("execution");
@@ -196,7 +186,6 @@ fn returned_external_callables_fall_back_to_ordinary_invocation() {
 
 #[test]
 fn unknown_callable_branches_keep_known_recursive_and_external_fallbacks() {
-    let verification = load_stdlib().expect("bootstrap provenance");
     for (condition, expected, transfers) in [("true", 99, 1), ("false", 1, 0)] {
         let source = format!(
             "\
@@ -207,11 +196,7 @@ fn unknown_callable_branches_keep_known_recursive_and_external_fallbacks() {
 (defn local-length (value str) u64 99u64)
 "
         );
-        let checked = check_bootstrap_text_import(
-            &verification,
-            "tail-unknown-external-branch.vib",
-            &source,
-        );
+        let checked = check_source("tail-unknown-external-branch.vib", &source);
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
         let execution =
             vibra_interp::run(checked.program().expect("program")).expect("execution");
@@ -231,7 +216,7 @@ fn non_tail_call_keeps_a_live_caller_activation() {
     let checked = check_source("tail-negative.vib", source);
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let program = checked.program().expect("program");
-    assert!(!program.canonical_vibon().contains("tail: true"));
+    assert_eq!(tail_calls(program, "tail-negative.vib"), 0);
     let execution = vibra_interp::run(program).expect("execution");
     assert_eq!(execution.value(), Some(&vibra_ir::Value::I32(7)));
     assert_eq!(execution.tail_transfer_count(), 0);
@@ -309,11 +294,10 @@ fn callable_return_and_unused_initializer_boundaries_remain_valid() {
     let checked = check_source("tail-unused-initializer.vib", unused);
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     assert!(
-        checked
-            .program()
-            .expect("program")
-            .canonical_vibon()
-            .contains("tail: true")
+        tail_calls(
+            checked.program().expect("program"),
+            "tail-unused-initializer.vib"
+        ) > 0
     );
 }
 
@@ -444,8 +428,9 @@ fn def_initializer_calls_are_never_tail_transfers() {
         let checked = check_source("tail-def-initializer.vib", source);
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
         let program = checked.program().expect("program");
-        assert!(
-            !program.canonical_vibon().contains("tail: true"),
+        assert_eq!(
+            tail_calls(program, "tail-def-initializer.vib"),
+            0,
             "{source}"
         );
         let execution = vibra_interp::run(program).expect("execution");

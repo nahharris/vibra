@@ -4,7 +4,7 @@ Status: normative target
 Implementation status: empty effect ceilings and pure execution are admitted
 through M3. Milestone 4 Step 13 closed the Stage 4B contracts of this chapter,
 of the host registry, and of the host world in the runtime chapter. Milestone 4
-Step 14 implements the static half of this chapter in both checkers, the typed
+Step 14 implements the static half of this chapter in the checker, the typed
 IR, and both backends: `deffect` roots and operations with Vibra bodies, effect
 rows on every function, `lambda`, function type, interface contract member, and
 test, performed rows over the function-call graph, `@effect.outside-ceiling`

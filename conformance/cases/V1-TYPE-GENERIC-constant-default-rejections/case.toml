@@ -11,12 +11,6 @@ source = "input.vib"
 accepted = false
 
 [[expect.diagnostics]]
-code = "@type.mismatch"
-level = "@error"
-source = "input.vib"
-span = [300, 304]
-
-[[expect.diagnostics]]
 code = "@type.not-constant"
 level = "@error"
 source = "input.vib"
@@ -37,6 +31,12 @@ code = "@type.not-constant"
 level = "@error"
 source = "input.vib"
 span = [242, 247]
+
+[[expect.diagnostics]]
+code = "@type.mismatch"
+level = "@error"
+source = "input.vib"
+span = [300, 304]
 
 [[expect.diagnostics]]
 code = "@type.mismatch"

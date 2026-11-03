@@ -55,7 +55,7 @@ fn the_first_function_of_a_source_is_its_entry_and_an_entry_takes_no_operands() 
     let checked = check_source("input.vib", source);
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let program = checked.program().expect("a program");
-    assert_eq!(program.entry().name(), "one");
+    assert_eq!(program.entry().name(), "@source@0.0.0/app.main.one");
     assert!(matches!(
         vibra_interp::run(program),
         Err(vibra_interp::RuntimeError::InvalidBody { .. })

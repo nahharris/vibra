@@ -21,11 +21,11 @@ code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [138, 152]
-notes = ["performs @lazy via @lazy.nothing"]
+notes = ["performs @app.main.lazy via @app.main.lazy.nothing"]
 
 [[expect.diagnostics]]
 code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [138, 152]
-notes = ["performs @write via @lazy.nothing"]
+notes = ["performs @app.main.write via @app.main.lazy.nothing"]

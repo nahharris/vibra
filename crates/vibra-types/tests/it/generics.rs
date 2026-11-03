@@ -1,4 +1,4 @@
-//! M3 Step 3 `any`-bounded generics through the single-source checker:
+//! M3 Step 3 `any`-bounded generics through the checker:
 //! call-site inference, `types:` agreement, ambiguity, and the style warning.
 
 use vibra_diagnostics::DiagnosticCode;

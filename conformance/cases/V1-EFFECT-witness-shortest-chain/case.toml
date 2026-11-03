@@ -15,24 +15,24 @@ code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [525, 533]
-notes = ["performs @write via @branch"]
+notes = ["performs @app.main.write via @app.main.branch"]
 
   [[expect.diagnostics.related]]
   source = "input.vib"
   span = [477, 483]
-  message = "performs @write via @fast"
+  message = "performs @app.main.write via @app.main.fast"
 
   [[expect.diagnostics.related]]
   source = "input.vib"
   span = [409, 415]
-  message = "performs @write via @leaf"
+  message = "performs @app.main.write via @app.main.leaf"
 
   [[expect.diagnostics.related]]
   source = "input.vib"
   span = [222, 244]
-  message = "performs @write via @audit.record"
+  message = "performs @app.main.write via @app.main.audit.record"
 
   [[expect.diagnostics.related]]
   source = "input.vib"
   span = [147, 172]
-  message = "performs @write via @write.text"
+  message = "performs @app.main.write via @app.main.write.text"

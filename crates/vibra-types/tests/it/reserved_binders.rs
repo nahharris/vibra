@@ -1,6 +1,5 @@
-//! A lexical binder spelled as a reserved word, through the single-source
-//! checker (`docs/spec/01-source-language.md`, "Reader"; M4 ledger D14.1). The
-//! resolver reports the same rule for a workspace.
+//! A lexical binder spelled as a reserved word, through the checker
+//! (`docs/spec/01-source-language.md`, "Reader"; M4 ledger D14.1).
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 
@@ -86,8 +85,10 @@ fn lambda_labelled_and_variadic_binders_are_rejected() {
         let labelled =
             format!("(defn f () i32\n  labelled: ({spelling} i32 0i32)\n  {spelling})");
         rejected(&labelled, &format!("({spelling} i32 0i32)"), spelling);
+        // The body returns the binder itself: a binder spelled `array` shadows
+        // the builtin type, so `array.length` would not name its member.
         let variadic = format!(
-            "(defn f () u64\n  variadic: ({spelling} (array i32))\n  (array.length {spelling}))"
+            "(defn f () (array i32)\n  variadic: ({spelling} (array i32))\n  {spelling})"
         );
         rejected(&variadic, &format!("({spelling} (array i32))"), spelling);
     }

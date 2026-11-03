@@ -86,16 +86,6 @@ impl Case {
             .map_err(|source| CorpusError::Io { path, source })
     }
 
-    /// Reads the optional source input as UTF-8.
-    pub fn read_source(&self) -> Result<Option<String>, CorpusError> {
-        self.manifest
-            .inputs
-            .source
-            .as_deref()
-            .map(|path| self.read_file(path))
-            .transpose()
-    }
-
     /// Loads every declared input as an explicit, source-identified document.
     ///
     /// Declaration order is source, project, then data paths, matching the

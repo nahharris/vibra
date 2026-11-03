@@ -2,16 +2,10 @@ id = "V1-TYPE-INFER-bootstrap-extra-import"
 rule = "V1-TYPE-INFER"
 profile = "static-v1"
 operation = "type-check"
-description = "The verified @std.text adapter points at an unsupported extra import."
+description = "A source may import several standard-library modules: it is a module of a workspace with the standard library."
 
 [inputs]
 source = "input.vib"
 
 [expect]
-accepted = false
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-source = "input.vib"
-span = [24, 51]
+accepted = true

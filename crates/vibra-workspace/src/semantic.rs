@@ -7,7 +7,10 @@ use vibra_host::{HostProvider, HostWorld, WorldProvider};
 use vibra_interp::{Execution, RuntimeError};
 use vibra_ir::CheckedProgram;
 use vibra_resolve::{EntityKind, ResolvedSnapshot};
-use vibra_syntax::{Declaration, NameKind, TypeExpr, is_primitive_type_name};
+use vibra_syntax::{
+    ApplicationBinding, Declaration, EffectRowOrder, NameKind, TypeExpr,
+    is_primitive_type_name,
+};
 
 use crate::{
     WorkspaceSnapshot,
@@ -47,6 +50,8 @@ pub struct WorkspaceCheckResult {
     status: CheckStatus,
     diagnostics: Vec<Diagnostic>,
     programs: BTreeMap<String, CheckedProgram>,
+    bindings: BTreeMap<String, Vec<ApplicationBinding>>,
+    effect_rows: BTreeMap<String, Vec<EffectRowOrder>>,
 }
 
 impl WorkspaceCheckResult {
@@ -66,6 +71,22 @@ impl WorkspaceCheckResult {
     #[must_use]
     pub fn program_for_target(&self, target: &Target) -> Option<&CheckedProgram> {
         self.programs.get(target.name().atom().value())
+    }
+
+    /// Authoritative call binding facts for the checked applications of the
+    /// module with `source_id`.
+    #[must_use]
+    pub fn application_bindings(&self, source_id: &str) -> &[ApplicationBinding] {
+        self.bindings.get(source_id).map_or(&[][..], Vec::as_slice)
+    }
+
+    /// The canonical order of every effect row the module with `source_id`
+    /// writes.
+    #[must_use]
+    pub fn effect_row_orders(&self, source_id: &str) -> &[EffectRowOrder] {
+        self.effect_rows
+            .get(source_id)
+            .map_or(&[][..], Vec::as_slice)
     }
 }
 
@@ -123,6 +144,38 @@ pub fn check_target_with_bootstrap(
     verification: Option<&vibra_types::Stdlib>,
 ) -> WorkspaceCheckResult {
     check_scope(snapshot, Some(target), verification)
+}
+
+/// Checks the module `source_id` of the workspace as `text` writes it, with
+/// every other module as the snapshot captured it, through the same resolve and
+/// check `check_all` runs. The checked scope is the module's unit and its
+/// import closure. `None` when the snapshot holds no such module or the
+/// workspace cannot be resolved.
+pub fn check_document(
+    snapshot: &WorkspaceSnapshot,
+    source_id: &str,
+    text: &str,
+    verification: &vibra_types::Stdlib,
+) -> Option<WorkspaceCheckResult> {
+    let edited = snapshot.with_document_text(source_id, text)?;
+    let graph = edited.source_graph().ok()?;
+    let resolved = edited.resolve_graph(&graph, Some(verification)).ok()?;
+    let unit = resolved
+        .modules()
+        .iter()
+        .find(|module| {
+            module.source_id() == source_id && module.package() == resolved.package()
+        })?
+        .unit()
+        .to_owned();
+    Some(check_resolved_scope(
+        &edited,
+        &resolved,
+        &BTreeSet::from([unit]),
+        None,
+        Some(verification),
+        graph.diagnostics().to_vec(),
+    ))
 }
 
 /// Checks a selected binary target and runs its accepted checked IR through
@@ -369,6 +422,24 @@ fn check_resolved_scope(
         )
     });
     let status = classify(&diagnostics);
+    let bindings = source_ids
+        .iter()
+        .map(|source_id| {
+            (
+                source_id.clone(),
+                checked.application_bindings(source_id).to_vec(),
+            )
+        })
+        .collect();
+    let effect_rows = source_ids
+        .iter()
+        .map(|source_id| {
+            (
+                source_id.clone(),
+                checked.effect_row_orders(source_id).to_vec(),
+            )
+        })
+        .collect();
     let mut programs = BTreeMap::new();
     if status == CheckStatus::Accepted {
         let targets = snapshot.project().project().targets();
@@ -400,6 +471,8 @@ fn check_resolved_scope(
         status,
         diagnostics,
         programs,
+        bindings,
+        effect_rows,
     }
 }
 
@@ -600,5 +673,7 @@ fn finish_result(diagnostics: Vec<Diagnostic>) -> WorkspaceCheckResult {
         status: classify(&diagnostics),
         diagnostics,
         programs: BTreeMap::new(),
+        bindings: BTreeMap::new(),
+        effect_rows: BTreeMap::new(),
     }
 }

@@ -118,28 +118,6 @@ const EMBEDDED_MODULES: &[(&str, &[u8])] = &[
     ),
 ];
 
-/// The identity a single source gives its declaration `name`: the standard
-/// identity when `source_id` is a module of the embedded library, so that a
-/// library module checked on its own declares the types and interfaces every
-/// run knows; otherwise the source's own.
-pub(crate) fn source_type_id(source_id: &str, name: &str) -> vibra_ir::TypeId {
-    let module = source_id
-        .strip_prefix("stdlib/src/std/")
-        .and_then(|path| path.strip_suffix(".vib"));
-    match module {
-        Some(module) => stdlib_type_id(&module.split('/').collect::<Vec<_>>(), name),
-        None => vibra_ir::TypeId::new(format!("{source_id}:{name}"), name),
-    }
-}
-
-/// The identity a single source gives its effect root `name`, as
-/// [`source_type_id`] gives a type: a single source has no package, so a
-/// root's path is its name.
-pub(crate) fn source_effect_root(source_id: &str, name: &str) -> vibra_ir::EffectRoot {
-    let id = source_type_id(source_id, name);
-    vibra_ir::EffectRoot::new(id.id(), id.path())
-}
-
 /// The identity of the declared type `name` in the standard-library module
 /// `@std.<module…>`: the identity the resolver gives every declaration of the
 /// embedded package.
@@ -301,13 +279,6 @@ impl Stdlib {
                 })
                 .collect(),
         )
-    }
-
-    /// Whether the manifest maps `atom` to the module at `source_id`.
-    pub(crate) fn maps(&self, atom: &str, source_id: &str) -> bool {
-        self.modules
-            .iter()
-            .any(|module| module.atom == atom && module.source_id == source_id)
     }
 
     /// Whether `module` is exactly an admitted standard-library module.
@@ -919,14 +890,26 @@ mod tests {
             stdlib.package(),
             &vibra_resolve::PackageId::new("vibra-stdlib", "0.3.0")
         );
-        assert!(stdlib.maps("std.text", super::STDLIB_TEXT_SOURCE_ID));
-        assert!(stdlib.maps("std.option", super::STDLIB_OPTION_SOURCE_ID));
+        assert!(
+            stdlib.module("std.text").is_some_and(
+                |module| module.source_id() == super::STDLIB_TEXT_SOURCE_ID
+            )
+        );
+        assert!(
+            stdlib.module("std.option").is_some_and(
+                |module| module.source_id() == super::STDLIB_OPTION_SOURCE_ID
+            )
+        );
         assert!(
             stdlib
                 .module("std.assert")
                 .is_some_and(|module| module.is_test_registry())
         );
-        assert!(!stdlib.maps("std.text", super::STDLIB_ASSERT_SOURCE_ID));
+        assert!(
+            stdlib.module("std.text").is_some_and(
+                |module| module.source_id() != super::STDLIB_ASSERT_SOURCE_ID
+            )
+        );
     }
 
     #[test]

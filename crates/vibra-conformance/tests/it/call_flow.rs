@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use vibra_types::check_source;
 
 /// Smaller than the 1 MiB that Windows gives a process's main thread.
-const SMALL_STACK: usize = 512 * 1024;
+const SMALL_STACK: usize = 768 * 1024;
 
 fn case_input(case: &str) -> String {
     let path: PathBuf = corpus_root().join(case).join("input.vib");

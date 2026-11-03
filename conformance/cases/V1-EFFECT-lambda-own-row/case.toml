@@ -15,4 +15,4 @@ code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [121, 145]
-notes = ["performs @write via @write.text"]
+notes = ["performs @app.main.write via @app.main.write.text"]

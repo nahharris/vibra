@@ -15,21 +15,21 @@ code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [375, 396]
-notes = ["performs @write via @through-value"]
+notes = ["performs @app.main.write via @app.main.through-value"]
 
   [[expect.diagnostics.related]]
   source = "input.vib"
   span = [216, 225]
-  message = "performs @write via a function value of type (fn (str) void effects: (write))"
+  message = "performs @app.main.write via a function value of type (fn (str) void effects: (app.main.write))"
 
 [[expect.diagnostics]]
 code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [441, 464]
-notes = ["performs @write via @through-member"]
+notes = ["performs @app.main.write via @app.main.through-member"]
 
   [[expect.diagnostics.related]]
   source = "input.vib"
   span = [291, 310]
-  message = "performs @write via contract member @logger.log"
+  message = "performs @app.main.write via contract member @app.main.logger.log"

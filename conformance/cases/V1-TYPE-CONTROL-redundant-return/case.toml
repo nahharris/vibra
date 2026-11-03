@@ -53,13 +53,13 @@ source = "input.vib"
 span = [378, 391]
 
 [[expect.diagnostics]]
-code = "@type.unreachable-code"
-level = "@error"
-source = "input.vib"
-span = [423, 436]
-
-[[expect.diagnostics]]
 code = "@type.redundant-return"
 level = "@error"
 source = "input.vib"
 span = [415, 437]
+
+[[expect.diagnostics]]
+code = "@type.unreachable-code"
+level = "@error"
+source = "input.vib"
+span = [423, 436]

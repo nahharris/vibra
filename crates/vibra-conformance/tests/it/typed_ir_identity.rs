@@ -27,7 +27,7 @@ const INSTANCE_WORDS: &[&str] = &[
 /// A field name that is one of these denotes a value ID.
 const VALUE_ID_NAMES: &[&str] = &["id", "value-id", "value_id", "ref", "reference"];
 
-/// The canonical forms of every checked program reachable from a single source
+/// The canonical forms of every checked program reachable from a source
 /// document of an `interpret` or `type-check` case, in corpus order, checked
 /// afresh by this call.
 fn canonical_forms() -> Vec<(String, String)> {

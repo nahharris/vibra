@@ -15,9 +15,9 @@ code = "@effect.outside-ceiling"
 level = "@error"
 source = "input.vib"
 span = [248, 277]
-notes = ["performs @write via @audit.record"]
+notes = ["performs @app.main.write via @app.main.audit.record"]
 
   [[expect.diagnostics.related]]
   source = "input.vib"
   span = [147, 172]
-  message = "performs @write via @write.text"
+  message = "performs @app.main.write via @app.main.write.text"

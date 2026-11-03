@@ -238,10 +238,8 @@ import-alias, lexical binding, or decoded module-local test name is
 The later span is primary and the earlier declaration or edge is a related
 span when available. Each repeated introduction has exactly one owning
 diagnostic: resolution owns lexical redeclaration, and later checking stages
-MUST NOT report the same introduction again. The single-source and workspace
-check paths report identical primary and related spans for it, as
-`02-type-system.md` states. Diagnostics are deterministic by source ID, primary span,
-and registry order. Resolution consumes only an explicit immutable source
+MUST NOT report the same introduction again. Diagnostics are deterministic by
+source ID, primary span, and registry order. Resolution consumes only an explicit immutable source
 graph and performs no filesystem, dependency, lock, cache, or network access.
 
 A resolver graph uses source IDs as document identities, so one source ID MUST
@@ -364,6 +362,10 @@ specification rule, not compiler module. Each case records:
   host world of the case, and compares one canonical
   `@test-run.v1` observation. The observation contains a separate
   `@audit-trace.v1` record for each test;
+  `type-check` and `interpret` take one `.vib` source input and check it as the
+  only module of a one-module workspace with the embedded standard library,
+  under the source ID the input names, so the verdict and diagnostics of a case
+  are those the workspace check reports for that module;
   `interpret` is pure and has no host world, so it takes no `host-world` input;
   non-reader case with multiple input kinds must state its operation;
 - source/project/data inputs and an optional confined tree directory;
@@ -794,7 +796,7 @@ prelude name at a plain-name site (a labelled or variadic parameter, or a
 `let-else` binder spelled `option`) is `@name.reserved-declaration`, that a
 `let` pattern spelled `true` is `@pattern.refutable-binding`, and that a module
 value or function spelled `true` or `false` is
-`@name.reserved-value-spelling` in a single source and in a workspace. Constant-default coverage proves that a labelled default is a constant expression in any form and of any type, a literal, `true`, a user constant, a constant defined by another constant, an inline constructor, a record, an enum variant with a payload, and a tuple, that a contract and an implementation whose defaults denote the same value keep one default however each is spelled, and, as rejections, that a call, a function, a module value with a call initializer, and an inline call are each `@type.not-constant`, relating the module value when one is named.
+`@name.reserved-value-spelling`. Constant-default coverage proves that a labelled default is a constant expression in any form and of any type, a literal, `true`, a user constant, a constant defined by another constant, an inline constructor, a record, an enum variant with a payload, and a tuple, that a contract and an implementation whose defaults denote the same value keep one default however each is spelled, and, as rejections, that a call, a function, a module value with a call initializer, and an inline call are each `@type.not-constant`, relating the module value when one is named.
 
 Unification coverage fixes the bound-agnostic reading: a union whose members are
 `(array t)` and `(array i32)` where `t` is bound by an interface `i32` does not

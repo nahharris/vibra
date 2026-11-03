@@ -17,6 +17,18 @@ source = "input.vib"
 span = [0, 86]
 
 [[expect.diagnostics]]
+code = "@type.union-member-not-concrete"
+level = "@error"
+source = "input.vib"
+span = [100, 127]
+
+[[expect.diagnostics]]
+code = "@type.union-member-not-concrete"
+level = "@error"
+source = "input.vib"
+span = [159, 226]
+
+[[expect.diagnostics]]
 code = "@type.infinite-size"
 level = "@error"
 source = "input.vib"
@@ -35,15 +47,3 @@ span = [275, 343]
   [[expect.diagnostics.related]]
   source = "input.vib"
   span = [297, 341]
-
-[[expect.diagnostics]]
-code = "@type.union-member-not-concrete"
-level = "@error"
-source = "input.vib"
-span = [100, 127]
-
-[[expect.diagnostics]]
-code = "@type.union-member-not-concrete"
-level = "@error"
-source = "input.vib"
-span = [159, 226]

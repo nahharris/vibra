@@ -1,4 +1,4 @@
-//! M3 Step 2 declared-type checking through the single-source checker.
+//! M3 Step 2 declared-type checking through the checker.
 
 use vibra_diagnostics::{ByteSpan, DiagnosticCode};
 use vibra_types::check_source;

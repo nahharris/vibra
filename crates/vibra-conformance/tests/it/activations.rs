@@ -123,7 +123,7 @@ fn a_deeply_nested_entry_result_is_observed_and_released_without_host_stack() {
     let execution = run_u64(source);
     let observation = execution.canonical_result();
     assert!(
-        observation.starts_with("(record type: @nat value: "),
+        observation.starts_with("(record type: @app.main.nat value: "),
         "{}",
         &observation[..60.min(observation.len())]
     );
