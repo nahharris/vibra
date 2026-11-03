@@ -19,7 +19,7 @@ planning. A tool may render the result differently; it may not reimplement the
 language or maintain a second symbol index.
 
 There is one checker. A source document that no project holds, as the
-conformance corpus checks for a `type-check` or `interpret` case, is the only
+conformance corpus runs for an `interpret` case, is the only
 module of a one-module workspace with the embedded standard library, resolved
 and checked exactly as a module of a project is. It keeps the source ID it was given. It can import the standard
 library and nothing else, because no other module is in that workspace, and the
