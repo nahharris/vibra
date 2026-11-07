@@ -86,7 +86,20 @@ or build the CLI from source using the pinned Rust toolchain:
 cargo build --release --locked -p vibra-cli
 ```
 
-With `vibra` on your path, from the hello project's directory:
+With `vibra` on your path, create a starter project:
+
+```sh
+vibra project init hello
+cd hello
+vibra check
+vibra run
+```
+
+The starter contains an empty `main` function. To try the hello world above,
+replace the generated project description with the example `project.vibon`
+and save the example source as `src/app/main.vib`.
+
+You can also check and run an existing project from its directory:
 
 ```sh
 vibra check
