@@ -60,7 +60,7 @@ fn a_wrapping_closure_that_captures_a_function_value_checks() {
   (if (equatable.equal count 0u64) (next 0u64)\n\
     (round (lower count) (lambda (total u64) u64 (next total)))))\n\
 (defn lower (count u64) u64\n\
-  (match (u64.sub count 1u64) (result.ok value) value (result.err -) 0u64))\n";
+  (match (u64.sub-checked count 1u64) (result.ok value) value (result.err -) 0u64))\n";
     if let Err(reason) = check_on_small_stack(source.to_owned(), SMALL_STACK) {
         panic!("{reason}");
     }

@@ -48,7 +48,7 @@
       (option.none) false))
   (defn ends-with (value str suffix str) bool
     visibility: @public
-    (match (u64.sub (str.length value) (str.length suffix))
+    (match (u64.sub-checked (str.length value) (str.length suffix))
       (result.ok start)
         (match (str.slice value start (str.length value))
           (option.some tail) (equatable.equal tail suffix)
@@ -135,11 +135,11 @@
   (match (str.slice value start end) (option.some piece) piece (option.none) ""))
 
 (defn search (value str needle str start u64) (option u64)
-  (match (str.slice value start (plus start (str.length needle)))
+  (match (str.slice value start (u64.add start (str.length needle)))
     (option.some window)
       (if (equatable.equal window needle)
         (option.some start)
-        (search value needle (plus start 1u64)))
+        (search value needle (u64.add start 1u64)))
     (option.none) (option.none)))
 
 (defn split-from (value str separator str start u64 parts (array str)) (array str)
@@ -148,7 +148,7 @@
       (split-from
         value
         separator
-        (plus at (str.length separator))
+        (u64.add at (str.length separator))
         (array.append parts (part value start at)))
     (option.none) (array.append parts (part value start (str.length value)))))
 
@@ -156,12 +156,12 @@
   (match (scalars index)
     (option.some scalar)
       (if (char.is-ascii-whitespace scalar)
-        (first-content scalars (plus index 1u64))
+        (first-content scalars (u64.add index 1u64))
         index)
     (option.none) index))
 
 (defn last-content (scalars (array char) end u64) u64
-  (match (u64.sub end 1u64)
+  (match (u64.sub-checked end 1u64)
     (result.ok before)
       (match (scalars before)
         (option.some scalar)
@@ -178,7 +178,7 @@
     (tupleof - (option.none)) (core.ordering.greater)
     (tupleof (option.some left) (option.some right))
       (match (ordered.compare left right)
-        (core.ordering.equal) (order first second (plus index 1u64))
+        (core.ordering.equal) (order first second (u64.add index 1u64))
         decided decided)))
 
 ; The UTF-8 bytes of the scalars from `index`, appended to `out`.
@@ -187,7 +187,7 @@
     (option.some scalar)
       (encode
         scalars
-        (plus index 1u64)
+        (u64.add index 1u64)
         (array.concat out (utf8-of (char.to-u32 scalar))))
     (option.none) out))
 
@@ -209,11 +209,11 @@
 
 ; A leading byte: `marker` plus the scalar's bits above `unit`.
 (defn lead (marker u32 scalar u32 unit u32) u8
-  (byte (plus32 marker (over scalar unit))))
+  (byte (u32.add marker (u32.div scalar unit))))
 
 ; A continuation byte: `0b10` and the six scalar bits at `unit`.
 (defn trail (scalar u32 unit u32) u8
-  (byte (plus32 128u32 (modulo (over scalar unit) 64u32))))
+  (byte (u32.add 128u32 (u32.rem (u32.div scalar unit) 64u32))))
 
 ; The scalars of well-formed UTF-8 from `index`, appended to `out`.
 (defn decode (items (array u8) index u64 out (array char))
@@ -225,7 +225,7 @@
         (option.some (tupleof scalar width))
           (match (char.from-u32 scalar)
             (option.some decoded)
-              (decode items (plus index width) (array.append out decoded))
+              (decode items (u64.add index width) (array.append out decoded))
             (option.none) (result.err (core.conversion-error.invalid-format)))
         (option.none) (result.err (core.conversion-error.invalid-format)))))
 
@@ -239,7 +239,7 @@
       (match (continuation items index 1u64 128u32 191u32)
         (option.some second)
           (option.some
-            (tupleof (plus32 (times (minus first 192u32) 64u32) second) 2u64))
+            (tupleof (u32.add (u32.mul (u32.sub first 192u32) 64u32) second) 2u64))
         (option.none) (option.none))
       (if (within first 224u32 239u32)
         (three items index first)
@@ -258,8 +258,8 @@
     (tupleof (option.some second) (option.some third))
       (option.some
         (tupleof
-          (plus32
-            (plus32 (times (minus first 224u32) 4096u32) (times second 64u32))
+          (u32.add
+            (u32.add (u32.mul (u32.sub first 224u32) 4096u32) (u32.mul second 64u32))
             third)
           3u64))
     - (option.none)))
@@ -278,12 +278,12 @@
     (tupleof (option.some second) (option.some third) (option.some fourth))
       (option.some
         (tupleof
-          (plus32
-            (plus32
-              (plus32
-                (times (minus first 240u32) 262144u32)
-                (times second 4096u32))
-              (times third 64u32))
+          (u32.add
+            (u32.add
+              (u32.add
+                (u32.mul (u32.sub first 240u32) 262144u32)
+                (u32.mul second 4096u32))
+              (u32.mul third 64u32))
             fourth)
           4u64))
     - (option.none)))
@@ -292,10 +292,10 @@
 ; lies in `[low, high]`.
 (defn continuation (items (array u8) index u64 offset u64 low u32 high u32)
   (option u32)
-  (match (items (plus index offset))
+  (match (items (u64.add index offset))
     (option.some found)
       (if (within (wide found) low high)
-        (option.some (minus (wide found) 128u32))
+        (option.some (u32.sub (wide found) 128u32))
         (option.none))
     (option.none) (option.none)))
 
@@ -303,37 +303,6 @@
   (match (ordered.compare value low)
     (core.ordering.less) false
     - (match (ordered.compare value high) (core.ordering.greater) false - true)))
-
-; Arithmetic the callers keep in range. A result outside its type would be a
-; defect in this module, and it saturates rather than trapping; the divisors
-; are constants, so no quotient divides by zero.
-(defn plus (left u64 right u64) u64
-  (match (u64.add left right)
-    (result.ok sum) sum
-    (result.err -) 18446744073709551615u64))
-
-(defn plus32 (left u32 right u32) u32
-  (match (u32.add left right) (result.ok sum) sum (result.err -) 4294967295u32))
-
-(defn minus (left u32 right u32) u32
-  (match (u32.sub left right)
-    (result.ok difference) difference
-    (result.err -) 0u32))
-
-(defn times (left u32 right u32) u32
-  (match (u32.mul left right)
-    (result.ok product) product
-    (result.err -) 4294967295u32))
-
-(defn over (left u32 right u32) u32
-  (match (u32.div left right)
-    (result.ok quotient) quotient
-    (result.err -) 0u32))
-
-(defn modulo (left u32 right u32) u32
-  (match (u32.rem left right)
-    (result.ok remainder) remainder
-    (result.err -) 0u32))
 
 ; A `u32` below 256 as a byte, and a byte as a `u32`.
 (defn byte (value u32) u8

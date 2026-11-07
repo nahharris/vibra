@@ -158,6 +158,9 @@ pub enum TrapCode {
     UnobservableFunction,
     /// `@runtime.invalid-host-value`.
     InvalidHostValue,
+    /// `@runtime.division-by-zero`: an unchecked `div` or `rem` had a zero
+    /// divisor.
+    DivisionByZero,
 }
 
 impl TrapCode {
@@ -168,6 +171,7 @@ impl TrapCode {
             Self::InvalidCheckedProgram => 1,
             Self::UnobservableFunction => 2,
             Self::InvalidHostValue => 3,
+            Self::DivisionByZero => 4,
         }
     }
 
@@ -178,6 +182,7 @@ impl TrapCode {
             1 => Some(Self::InvalidCheckedProgram),
             2 => Some(Self::UnobservableFunction),
             3 => Some(Self::InvalidHostValue),
+            4 => Some(Self::DivisionByZero),
             _ => None,
         }
     }
@@ -189,6 +194,7 @@ impl TrapCode {
             Self::InvalidCheckedProgram => DiagnosticCode::RuntimeInvalidCheckedProgram,
             Self::UnobservableFunction => DiagnosticCode::RuntimeUnobservableFunction,
             Self::InvalidHostValue => DiagnosticCode::RuntimeInvalidHostValue,
+            Self::DivisionByZero => DiagnosticCode::RuntimeDivisionByZero,
         }
     }
 }
@@ -212,6 +218,7 @@ mod tests {
             TrapCode::InvalidCheckedProgram,
             TrapCode::UnobservableFunction,
             TrapCode::InvalidHostValue,
+            TrapCode::DivisionByZero,
         ] {
             assert_eq!(TrapCode::from_code(trap.code()), Some(trap));
         }

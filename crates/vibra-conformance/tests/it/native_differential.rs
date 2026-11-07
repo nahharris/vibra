@@ -17,7 +17,7 @@ fn samples(symbol: &str) -> &'static [(&'static str, &'static str)] {
         "array.fold" => &[
             (
                 "i32",
-                "(array.of 1i32 2i32 3i32) 10i32 (lambda (total i32 item i32) i32 (match (i32.sub total item) (result.ok difference) difference - 0i32))",
+                "(array.of 1i32 2i32 3i32) 10i32 (lambda (total i32 item i32) i32 (match (i32.sub-checked total item) (result.ok difference) difference - 0i32))",
             ),
             (
                 "i32",

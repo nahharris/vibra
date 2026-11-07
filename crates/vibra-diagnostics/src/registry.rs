@@ -387,6 +387,8 @@ diagnostic_registry! {
         "a host operation received or returned a value its ABI does not admit";
     RuntimeInvalidCheckedProgram => "@runtime.invalid-checked-program", Runtime, Error, None,
         "checked program execution violated a runtime invariant";
+    RuntimeDivisionByZero => "@runtime.division-by-zero", Runtime, Error, None,
+        "an unchecked integer division or remainder had a zero divisor";
     RuntimeUnobservableFunction => "@runtime.unobservable-function", Runtime, Error, None,
         "a value that holds a function reached an observation, which has no encoding for one";
     RuntimeMemoryExhausted => "@runtime.memory-exhausted", Runtime, Error, None,
@@ -411,7 +413,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 93;
+    const REGISTERED_CODES: usize = 94;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

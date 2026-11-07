@@ -279,7 +279,9 @@ The other trap codes are `"@runtime.unobservable-function"`, whose origin in a
 test is the assertion call, and `"@runtime.invalid-host-value"`, which has no
 origin: it is raised when a host call, an accessor, or a builder receives a value
 it does not admit, and no checked program reaches it unless the toolchain has a
-defect. The `test` item schema and the `run` payload admit all three. `run` reports any trap as
+defect. `"@runtime.division-by-zero"`, which has no origin either, is raised
+when an unchecked integer `div` or `rem` receives a zero divisor. The `test`
+item schema and the `run` payload admit all four. `run` reports any trap as
 `@command.trap`, with the code in its payload's `trap` and a `null` origin. Only a
 host event, such as `@runtime.memory-exhausted`, is
 `@command.operational-failure`.

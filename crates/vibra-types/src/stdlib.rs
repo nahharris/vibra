@@ -946,10 +946,13 @@ mod tests {
 
     #[test]
     fn a_module_binding_an_unlisted_symbol_is_rejected() {
-        let manifest = manifest().replace("\n    \"i32.add\"", "");
+        let manifest = manifest().replace("\n    \"i32.add-checked\"", "");
         let mut inputs = StdlibInputs::embedded();
         inputs.manifest = manifest.as_bytes();
-        rejects(&inputs, "binds `i32.add`, which the manifest does not list");
+        rejects(
+            &inputs,
+            "binds `i32.add-checked`, which the manifest does not list",
+        );
     }
 
     #[test]

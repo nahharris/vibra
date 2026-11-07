@@ -189,7 +189,7 @@ const STEPPER: &str = "\
         (hopper value (lower n))))))
 (def hopper (fn (counter u64) u64) stepper.step-hopped)
 (defn lower (count u64) u64
-  (match (u64.sub count 1u64)
+  (match (u64.sub-checked count 1u64)
     (result.ok value) value
     (result.err -) 0u64))
 ";

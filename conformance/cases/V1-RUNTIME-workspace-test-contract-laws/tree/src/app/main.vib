@@ -16,10 +16,10 @@
 
 (defn double (value i32) i32
   visibility: @public
-  (match (i32.mul value 2i32) (result.ok twice) twice (result.err -) 0i32))
+  (match (i32.mul-checked value 2i32) (result.ok twice) twice (result.err -) 0i32))
 
 (defn odd (value i32) bool
   visibility: @public
-  (match (i32.rem value 2i32)
+  (match (i32.rem-checked value 2i32)
     (result.ok remainder) (equatable.equal remainder 1i32)
     (result.err -) false))

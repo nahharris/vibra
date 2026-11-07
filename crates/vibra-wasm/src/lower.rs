@@ -166,7 +166,7 @@ const CALLEE: u32 = 2;
 /// The object a constructor is building.
 const OBJECT: u32 = 3;
 /// A scratch word.
-const SCRATCH: u32 = 4;
+pub(crate) const SCRATCH: u32 = 4;
 /// The function value a call invokes.
 const FV: u32 = 5;
 /// The function the call enters.
@@ -4725,6 +4725,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 }
             }
             primitive::Outcome::Scalar(_)
+            | primitive::Outcome::Saturated(_)
             | primitive::Outcome::Bool
             | primitive::Outcome::Option => {}
         }
@@ -4745,7 +4746,19 @@ impl<'l, 'a> Builder<'l, 'a> {
             this.push(&[st64(at)]);
             this.set_byte(slot, cell_class(plan.class()).code());
         };
-        if let primitive::Outcome::Scalar(_) = plan.outcome() {
+        if let primitive::Outcome::Scalar(_) | primitive::Outcome::Saturated(_) =
+            plan.outcome()
+        {
+            // An unchecked quotient or remainder stops at a zero divisor.
+            if plan.traps() {
+                let stop = self.lowering.fns.stop_trap;
+                self.push(&[
+                    I::If(BlockType::Empty),
+                    c32(TrapCode::DivisionByZero.code()),
+                    I::Call(stop),
+                    I::End,
+                ]);
+            }
             value(self, dest);
             self.release_to(mark);
             return Ok(());
@@ -4844,7 +4857,7 @@ impl<'l, 'a> Builder<'l, 'a> {
                 self.build(Kind::Enum, none, &[], dest);
                 self.goto(join, join);
             }
-            primitive::Outcome::Scalar(_) => {}
+            primitive::Outcome::Scalar(_) | primitive::Outcome::Saturated(_) => {}
         }
         self.release_to(mark);
         Ok(())

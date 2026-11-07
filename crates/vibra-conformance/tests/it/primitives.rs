@@ -65,6 +65,10 @@ fn result_type(intrinsic: CompilerIntrinsic) -> String {
     match intrinsic {
         CompilerIntrinsic::Integer(_, IntegerOp::Equal) => "bool".to_owned(),
         CompilerIntrinsic::Integer(_, IntegerOp::Compare) => "core.ordering".to_owned(),
+        // An unchecked row returns its type, saturated.
+        CompilerIntrinsic::Integer(numeric, op) if op.checked().is_some() => {
+            numeric.name().to_owned()
+        }
         CompilerIntrinsic::Integer(numeric, _) => {
             format!("(result {} core.arithmetic-error)", numeric.name())
         }
@@ -247,10 +251,11 @@ fn a_row_is_inline_exactly_when_it_is_a_primitive_row_that_does_not_loop() {
         }
         lowered += usize::from(inline);
     }
-    // Eight integer types of nine rows, `neg` for the four signed ones,
-    // fifty-six conversions, the two `char` rows, `array.length`, and seven float
-    // rows of each of the two float types.
-    assert_eq!(lowered, 8 * 9 + 4 + 56 + 2 + 1 + 2 * 7);
+    // Eight integer types of sixteen rows (nine checked, seven unchecked),
+    // `neg` and `neg-checked` for the four signed ones, fifty-six conversions,
+    // the two `char` rows, `array.length`, and seven float rows of each of the
+    // two float types.
+    assert_eq!(lowered, 8 * 16 + 4 * 2 + 56 + 2 + 1 + 2 * 7);
 }
 
 /// The import table names exactly the native symbols that have an import, which
@@ -385,13 +390,13 @@ fn every_integer_type_has_every_row_and_every_boundary_in_the_table() {
     let mut per_type: BTreeMap<&str, usize> = BTreeMap::new();
     for numeric in NumericType::ALL.into_iter().filter(|n| n.is_integer()) {
         for op in [
-            IntegerOp::Add,
-            IntegerOp::Sub,
-            IntegerOp::Mul,
-            IntegerOp::Div,
-            IntegerOp::Rem,
-            IntegerOp::ShiftLeft,
-            IntegerOp::ShiftRight,
+            IntegerOp::AddChecked,
+            IntegerOp::SubChecked,
+            IntegerOp::MulChecked,
+            IntegerOp::DivChecked,
+            IntegerOp::RemChecked,
+            IntegerOp::ShiftLeftChecked,
+            IntegerOp::ShiftRightChecked,
             IntegerOp::Equal,
             IntegerOp::Compare,
         ] {
@@ -399,7 +404,7 @@ fn every_integer_type_has_every_row_and_every_boundary_in_the_table() {
             assert!(!vectors.is_empty(), "{}.{}", numeric.name(), op.name());
             *per_type.entry(numeric.name()).or_default() += vectors.len();
         }
-        let neg = CompilerIntrinsic::Integer(numeric, IntegerOp::Neg);
+        let neg = CompilerIntrinsic::Integer(numeric, IntegerOp::NegChecked);
         assert_eq!(neg.vectors().is_empty(), !numeric.is_signed());
     }
     assert_eq!(per_type.len(), 8);
@@ -410,8 +415,8 @@ fn every_integer_type_has_every_row_and_every_boundary_in_the_table() {
 #[test]
 fn a_program_of_primitive_rows_is_emitted_to_the_same_bytes_twice() {
     let program = checked(&row_program(
-        CompilerIntrinsic::Integer(NumericType::I8, IntegerOp::Div),
-        CompilerIntrinsic::Integer(NumericType::I8, IntegerOp::Div).vectors(),
+        CompilerIntrinsic::Integer(NumericType::I8, IntegerOp::DivChecked),
+        CompilerIntrinsic::Integer(NumericType::I8, IntegerOp::DivChecked).vectors(),
     ));
     assert_eq!(emitted(&program), emitted(&program));
 }
@@ -428,16 +433,16 @@ fn operations_compose_in_a_program_with_matches_try_and_tail_calls() {
            (widen 200u8) (char.from-u32 128512u32)))\n\
 (defn gcd (a u64 b u64) u64\n\
   (if (equatable.equal b 0u64) a\n\
-    (match (u64.rem a b) (result.ok r) (gcd b r) (result.err -) 0u64)))\n\
+    (match (u64.rem-checked a b) (result.ok r) (gcd b r) (result.err -) 0u64)))\n\
 (defn bits (n u32 count u32) u32\n\
   (if (equatable.equal n 0u32) count\n\
-    (match (u32.shift-right n 1u32)\n\
+    (match (u32.shift-right-checked n 1u32)\n\
       (result.ok half) (bits half (add-one count))\n\
       (result.err -) count)))\n\
-(defn add-one (n u32) u32 (match (u32.add n 1u32) (result.ok v) v (result.err -) n))\n\
+(defn add-one (n u32) u32 (match (u32.add-checked n 1u32) (result.ok v) v (result.err -) n))\n\
 (defn sum (a i32 b i32 c i32) (result i32 core.arithmetic-error)\n\
-  (let ab (try (i32.add a b)))\n\
-  (i32.add ab c))\n\
+  (let ab (try (i32.add-checked a b)))\n\
+  (i32.add-checked ab c))\n\
 (defn widen (n u8) u8 (match (as (result i8 core.conversion-error) (try-from.convert n)) (result.ok v) (match (as (result u8 core.conversion-error) (try-from.convert v)) (result.ok w) w (result.err -) 0u8) (result.err -) 1u8))\n";
     let program = checked(source);
     let expected = oracle(&program);
@@ -458,11 +463,11 @@ fn every_path_through_every_family_of_rows_leaves_the_arena_balanced() {
     // keep, and no frame is left.
     use NumericType::{I8, I64, U8, U16, U64};
     let rows = [
-        CompilerIntrinsic::Integer(I8, IntegerOp::Add),
-        CompilerIntrinsic::Integer(I64, IntegerOp::Mul),
-        CompilerIntrinsic::Integer(U64, IntegerOp::Div),
-        CompilerIntrinsic::Integer(I8, IntegerOp::ShiftLeft),
-        CompilerIntrinsic::Integer(I64, IntegerOp::Neg),
+        CompilerIntrinsic::Integer(I8, IntegerOp::AddChecked),
+        CompilerIntrinsic::Integer(I64, IntegerOp::MulChecked),
+        CompilerIntrinsic::Integer(U64, IntegerOp::DivChecked),
+        CompilerIntrinsic::Integer(I8, IntegerOp::ShiftLeftChecked),
+        CompilerIntrinsic::Integer(I64, IntegerOp::NegChecked),
         CompilerIntrinsic::Integer(U16, IntegerOp::Equal),
         CompilerIntrinsic::Integer(U8, IntegerOp::Compare),
         CompilerIntrinsic::Convert(I64, U8),
@@ -489,11 +494,11 @@ fn a_primitive_application_creates_no_activation_so_a_long_loop_of_them_holds_a_
 (defn spin (n u64 acc u64) u64\n\
   (if (equatable.equal n 0u64)\n\
     acc\n\
-    (match (u64.sub n 1u64)\n\
+    (match (u64.sub-checked n 1u64)\n\
       (result.ok next)\n\
-        (match (u64.shift-left 3u64 2u32)\n\
+        (match (u64.shift-left-checked 3u64 2u32)\n\
           (result.ok step)\n\
-            (match (u64.add acc step)\n\
+            (match (u64.add-checked acc step)\n\
               (result.ok total) (spin next total)\n\
               (result.err -) acc)\n\
           (result.err -) acc)\n\

@@ -207,7 +207,7 @@ fn deep_non_tail_recursion_in_a_test_stops_the_suite() {
 
 /// Non-tail recursion a hundred thousand activations deep, with a base case:
 /// `n + 1` activations are live at the bottom.
-const DEEP_WITH_BASE_CASE: &str = "(defn depth (remaining u64) u64\n  (if (equatable.equal remaining 0u64)\n    0u64\n    (match (u64.add (depth (lower remaining)) 1u64)\n      (result.ok total) total\n      (result.err -) 0u64)))\n\n(defn lower (count u64) u64\n  (match (u64.sub count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
+const DEEP_WITH_BASE_CASE: &str = "(defn depth (remaining u64) u64\n  (if (equatable.equal remaining 0u64)\n    0u64\n    (match (u64.add-checked (depth (lower remaining)) 1u64)\n      (result.ok total) total\n      (result.err -) 0u64)))\n\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
 
 #[test]
 fn deep_non_tail_recursion_with_a_base_case_completes_in_run_and_in_test() {

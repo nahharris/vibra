@@ -112,6 +112,7 @@ table governs.
 | `@project.io-error` | `@error` |
 | `@runtime.invalid-host-value` | `@error` |
 | `@runtime.invalid-checked-program` | `@error` |
+| `@runtime.division-by-zero` | `@error` |
 | `@runtime.unobservable-function` | `@error` |
 | `@runtime.memory-exhausted` | `@error` |
 | `@style.argument-order` | `@warning` |
@@ -211,7 +212,8 @@ is the trap of a host operation that receives a value ID or index it does not
 admit, and does not describe checked-program failures; no checked program
 reaches it unless the toolchain has a defect, and the CLI `run` and `test`
 schemas and the `@test-run.v1` observation admit it as a `trapCode`, with no
-origin. `@runtime.unobservable-function` is the trap of a
+origin. `@runtime.division-by-zero` is the trap of an unchecked integer `div` or
+`rem` with a zero divisor; it has no origin. `@runtime.unobservable-function` is the trap of a
 value holding a function that reaches a test assertion or the entry's result;
 in a test its diagnostic and trap origin are the assertion call.
 `@runtime.memory-exhausted` is the host event that ends execution when the
@@ -474,7 +476,8 @@ test that trapped keeps the events completed before the trap. For
 checked-program execution-boundary traps, `trap-code` is
 the exact string `"@runtime.invalid-checked-program"` and `origin` is omitted;
 for `"@runtime.unobservable-function"`, `origin` is the assertion call; and
-`"@runtime.invalid-host-value"` has no origin.
+`"@runtime.invalid-host-value"` and `"@runtime.division-by-zero"` have no
+origin.
 The test records contain all per-test traces, so a second
 suite-level audit snapshot is forbidden. An empty suite is `tests: (array)`
 with result `@command.ok`.

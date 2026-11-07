@@ -227,7 +227,7 @@ const DEEP_ERR: &str = r#"(deftype nat (record prev (array nat)))
 (deftype failure (record n nat))
 
 (defn lower (count i32) i32
-  (match (i32.sub count 1i32)
+  (match (i32.sub-checked count 1i32)
     (result.ok value) value
     (result.err -) 0i32))
 
@@ -261,7 +261,7 @@ const BIG_UNION_ERR: &str = r#"(import text @std.text)
 (deftype failure (record detail detail))
 
 (defn lower (count i32) i32
-  (match (i32.sub count 1i32)
+  (match (i32.sub-checked count 1i32)
     (result.ok value) value
     (result.err -) 0i32))
 

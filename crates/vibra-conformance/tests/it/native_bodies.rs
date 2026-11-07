@@ -15,7 +15,7 @@ use crate::support::{MIB, TempDir, checked, entry_type, wasm_on};
 use vibra_wasm_run::{MemoryLimit, Observed, Runner};
 
 /// Module functions every program below shares.
-const PRELUDE: &str = "(defn add (a i32 b i32) i32 (match (i32.add a b) (result.ok sum) sum (result.err -) 0i32))\n(defn lower (count i32) i32 (match (i32.sub count 1i32) (result.ok value) value (result.err -) 0i32))\n";
+const PRELUDE: &str = "(defn add (a i32 b i32) i32 (match (i32.add-checked a b) (result.ok sum) sum (result.err -) 0i32))\n(defn lower (count i32) i32 (match (i32.sub-checked count 1i32) (result.ok value) value (result.err -) 0i32))\n";
 
 fn with_prelude(body: &str) -> String {
     format!("{body}\n{PRELUDE}")

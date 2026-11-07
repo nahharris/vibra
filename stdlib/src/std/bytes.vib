@@ -46,12 +46,5 @@
     (tupleof - (option.none)) (core.ordering.greater)
     (tupleof (option.some left) (option.some right))
       (match (ordered.compare left right)
-        (core.ordering.equal) (order first second (plus index 1u64))
+        (core.ordering.equal) (order first second (u64.add index 1u64))
         decided decided)))
-
-; Index arithmetic the callers keep in range. A result outside `u64` would be
-; a defect in this module, and it saturates rather than trapping.
-(defn plus (left u64 right u64) u64
-  (match (u64.add left right)
-    (result.ok sum) sum
-    (result.err -) 18446744073709551615u64))

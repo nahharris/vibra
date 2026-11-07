@@ -522,7 +522,7 @@ fn a_loop_of_number_text_holds_a_bounded_arena() {
 (defn spin (n u64 acc u64) u64\n\
   (if (equatable.equal n 0u64)\n\
     acc\n\
-    (match (u64.sub n 1u64)\n\
+    (match (u64.sub-checked n 1u64)\n\
       (result.ok next)\n\
         (match (as (result u64 core.conversion-error) (try-from.convert (as str (from.convert n))))\n\
           (result.ok back)\n\
@@ -532,7 +532,7 @@ fn a_loop_of_number_text_holds_a_bounded_arena() {
           (result.err -) acc)\n\
       (result.err -) acc)))\n\
 (defn digits (value u64 acc u64) u64\n\
-  (match (u64.add acc value) (result.ok total) total (result.err -) acc))\n"
+  (match (u64.add-checked acc value) (result.ok total) total (result.err -) acc))\n"
         )
     };
     let small = footprint(&checked(&source(2_000)), 256 * 1024);

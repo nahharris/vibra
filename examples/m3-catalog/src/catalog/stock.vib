@@ -51,7 +51,7 @@
   (impl (iter t)
     (defn next (value self) (option (tuple t self))
       (match
-        (u64.sub (array.length (value @items)) 1u64)
+        (u64.sub-checked (array.length (value @items)) 1u64)
         (result.err -) (option.none)
         (result.ok last) (match
           (tupleof ((value @items) last) (array.slice (value @items) 0u64 last))
@@ -61,14 +61,14 @@
 ; A product that saturates at the largest `u64`.
 (defn times (left u64 right u64) u64
   (match
-    (u64.mul left right)
+    (u64.mul-checked left right)
     (result.ok product) product
     (result.err -) 18446744073709551615u64))
 
 ; A sum that saturates at the largest `u64`.
 (defn plus (left u64 right u64) u64
   (match
-    (u64.add left right)
+    (u64.add-checked left right)
     (result.ok sum) sum
     (result.err -) 18446744073709551615u64))
 
@@ -79,7 +79,7 @@
 (defn walk (line part rounds u64) u64
   visibility: @public
   (match
-    (u64.sub rounds 1u64)
+    (u64.sub-checked rounds 1u64)
     (result.err -) (line @count)
     (result.ok left) (walk
       (part
@@ -104,7 +104,7 @@
     (stock key)
     (option.none) (result.err (stock-error (unknown-sku key: key)))
     (option.some held) (match
-      (u64.sub held wanted)
+      (u64.sub-checked held wanted)
       (result.ok left) (result.ok left)
       (result.err -) (result.err (stock-error (short-stock key: key held: held wanted: wanted))))))
 

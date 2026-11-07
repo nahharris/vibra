@@ -474,10 +474,11 @@ mod tests {
             .map(|(type_name, member)| format!("{type_name}.{member}"))
             .collect::<Vec<_>>();
         assert_eq!(bound, declared);
-        // The arithmetic of each integer type, eight for a signed and seven for
-        // an unsigned one; seven for each float type; the eight `char` members,
-        // its two conversions and its classes; and the eight collection
-        // members. Comparison and conversion are implementation members.
-        assert_eq!(declared.len(), 4 * 8 + 4 * 7 + 2 * 7 + 8 + 8);
+        // The arithmetic of each integer type, unchecked and checked: sixteen
+        // for a signed and fourteen for an unsigned one; seven for each float
+        // type; the eight `char` members, its two conversions and its classes;
+        // and the eight collection members. Comparison and conversion are
+        // implementation members.
+        assert_eq!(declared.len(), 4 * 16 + 4 * 14 + 2 * 7 + 8 + 8);
     }
 }

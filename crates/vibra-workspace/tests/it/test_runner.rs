@@ -319,7 +319,7 @@ fn a_test_that_exhausts_its_budget_ends_the_run_with_the_host_event_and_no_count
             (
                 "tests/deep/forever.vib",
                 "(import assert @std.assert)
-(defn forever (count u64) u64\n  (match (u64.add (forever count) 1u64)\n    (result.ok total) total\n    (result.err -) 0u64))\n(test \"first\" (assert.true true))\n(test \"never ends\" (assert.equal (forever 0u64) 0u64))\n",
+(defn forever (count u64) u64\n  (match (u64.add-checked (forever count) 1u64)\n    (result.ok total) total\n    (result.err -) 0u64))\n(test \"first\" (assert.true true))\n(test \"never ends\" (assert.equal (forever 0u64) 0u64))\n",
             ),
         ],
     );
@@ -376,7 +376,7 @@ fn a_test_body_ending_in_a_source_call_reuses_its_activation() {
             (
                 "tests/tail/loop.vib",
                 "(import assert @std.assert)
-(defn finish () void (do))\n(defn spin (count u64) void\n  (if (equatable.equal count 0u64) (finish) (spin (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n(test \"one call\" (finish))\n(test \"a loop of a hundred thousand tail calls\" (spin 100000u64))\n",
+(defn finish () void (do))\n(defn spin (count u64) void\n  (if (equatable.equal count 0u64) (finish) (spin (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n(test \"one call\" (finish))\n(test \"a loop of a hundred thousand tail calls\" (spin 100000u64))\n",
             ),
         ],
     );

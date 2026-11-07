@@ -14,7 +14,7 @@
         (tupleof
           (value @from)
           (naturals
-            from: (match (u64.add (value @from) 1u64)
+            from: (match (u64.add-checked (value @from) 1u64)
               (result.ok higher) higher
               (result.err -) 0u64)))))))
 

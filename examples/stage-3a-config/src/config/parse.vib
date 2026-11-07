@@ -77,4 +77,4 @@
   (match (str.slice line start end) (option.some piece) piece (option.none) ""))
 
 (defn after (index u64) u64
-  (match (u64.add index 1u64) (result.ok next) next (result.err -) index))
+  (match (u64.add-checked index 1u64) (result.ok next) next (result.err -) index))

@@ -430,10 +430,10 @@ toolchain-owned declaration binds a signature to one of exactly two providers.
 its body:
 
 ```vibra
-(defn add (left i32 right i32) (result i32 core.arithmetic-error)
+(defn add-checked (left i32 right i32) (result i32 core.arithmetic-error)
   visibility: @public
   external: @compiler
-  symbol: "i32.add")
+  symbol: "i32.add-checked")
 ```
 
 `@compiler` selects a pure compiler intrinsic. Such a declaration MUST have an
@@ -558,7 +558,7 @@ result, generic, labelled, variadic, and effect syntax, but no name or visibilit
 
 ```vibra
 (lambda (value i32) (result i32 core.arithmetic-error)
-  (i32.add value 1i32))
+  (i32.add-checked value 1i32))
 ```
 
 ```ebnf
@@ -689,7 +689,7 @@ a `return` that is a branch of a final `if` or `match`.
   head)
 
 (lambda ((tupleof left right) (tuple i32 i32)) (result i32 core.arithmetic-error)
-  (i32.add left right))
+  (i32.add-checked left right))
 ```
 
 The second function is the shape `let-else` exists for: the `return` leaves

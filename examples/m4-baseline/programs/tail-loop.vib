@@ -8,11 +8,11 @@
     (spin (lower remaining) (bump total))))
 
 (defn lower (count u64) u64
-  (match (u64.sub count 1u64)
+  (match (u64.sub-checked count 1u64)
     (result.ok value) value
     (result.err -) 0u64))
 
 (defn bump (count u64) u64
-  (match (u64.add count 1u64)
+  (match (u64.add-checked count 1u64)
     (result.ok value) value
     (result.err -) 0u64))

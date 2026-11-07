@@ -144,21 +144,38 @@ impl NumericType {
 /// An integer static method.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IntegerOp {
-    /// `add`.
+    /// `add-checked`.
+    AddChecked,
+    /// `sub-checked`.
+    SubChecked,
+    /// `mul-checked`.
+    MulChecked,
+    /// `div-checked`.
+    DivChecked,
+    /// `rem-checked`.
+    RemChecked,
+    /// `neg-checked`, signed types only.
+    NegChecked,
+    /// `shift-left-checked`.
+    ShiftLeftChecked,
+    /// `shift-right-checked`.
+    ShiftRightChecked,
+    /// `add`: the sum, saturated at the bounds of the type.
     Add,
-    /// `sub`.
+    /// `sub`: the difference, saturated at the bounds of the type.
     Sub,
-    /// `mul`.
+    /// `mul`: the product, saturated at the bounds of the type.
     Mul,
-    /// `div`.
+    /// `div`: the quotient truncated toward zero, saturated at the bounds;
+    /// a zero divisor traps.
     Div,
-    /// `rem`.
+    /// `rem`: the remainder with the dividend's sign; a zero divisor traps.
     Rem,
-    /// `neg`, signed types only.
+    /// `neg`, signed types only: the negation, saturated at the bounds.
     Neg,
-    /// `shift-left`.
+    /// `shift-left`: `left * 2^amount`, saturated at the bounds.
     ShiftLeft,
-    /// `shift-right`.
+    /// `shift-right`: `floor(left / 2^amount)` for every amount.
     ShiftRight,
     /// `equal`.
     Equal,
@@ -171,7 +188,15 @@ pub enum IntegerOp {
 }
 
 impl IntegerOp {
-    const ALL: [Self; 12] = [
+    const ALL: [Self; 20] = [
+        Self::AddChecked,
+        Self::SubChecked,
+        Self::MulChecked,
+        Self::DivChecked,
+        Self::RemChecked,
+        Self::NegChecked,
+        Self::ShiftLeftChecked,
+        Self::ShiftRightChecked,
         Self::Add,
         Self::Sub,
         Self::Mul,
@@ -186,10 +211,35 @@ impl IntegerOp {
         Self::Parse,
     ];
 
-    /// The member name, such as `add`.
+    /// The checked row an unchecked row answers through: the same operation,
+    /// with its failures saturated or, for a zero divisor, trapping.
+    #[must_use]
+    pub const fn checked(self) -> Option<Self> {
+        Some(match self {
+            Self::Add => Self::AddChecked,
+            Self::Sub => Self::SubChecked,
+            Self::Mul => Self::MulChecked,
+            Self::Div => Self::DivChecked,
+            Self::Rem => Self::RemChecked,
+            Self::Neg => Self::NegChecked,
+            Self::ShiftLeft => Self::ShiftLeftChecked,
+            Self::ShiftRight => Self::ShiftRightChecked,
+            _ => return None,
+        })
+    }
+
+    /// The member name, such as `add-checked`.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
+            Self::AddChecked => "add-checked",
+            Self::SubChecked => "sub-checked",
+            Self::MulChecked => "mul-checked",
+            Self::DivChecked => "div-checked",
+            Self::RemChecked => "rem-checked",
+            Self::NegChecked => "neg-checked",
+            Self::ShiftLeftChecked => "shift-left-checked",
+            Self::ShiftRightChecked => "shift-right-checked",
             Self::Add => "add",
             Self::Sub => "sub",
             Self::Mul => "mul",
@@ -432,7 +482,7 @@ impl CompilerIntrinsic {
         target_low <= source_low && source_high <= target_high
     }
 
-    /// The stable registry symbol, such as `i32.add` or
+    /// The stable registry symbol, such as `i32.add-checked` or
     /// `text.concat`.
     #[must_use]
     pub fn symbol(self) -> &'static str {
@@ -544,16 +594,29 @@ impl CompilerIntrinsic {
             Self::Integer(numeric, op) => {
                 let value = numeric.to_type();
                 match op {
+                    IntegerOp::AddChecked
+                    | IntegerOp::SubChecked
+                    | IntegerOp::MulChecked
+                    | IntegerOp::DivChecked
+                    | IntegerOp::RemChecked => {
+                        function(vec![value.clone(), value.clone()], checked(value))
+                    }
+                    IntegerOp::NegChecked => {
+                        function(vec![value.clone()], checked(value))
+                    }
+                    IntegerOp::ShiftLeftChecked | IntegerOp::ShiftRightChecked => {
+                        function(vec![value.clone(), Type::U32], checked(value))
+                    }
                     IntegerOp::Add
                     | IntegerOp::Sub
                     | IntegerOp::Mul
                     | IntegerOp::Div
                     | IntegerOp::Rem => {
-                        function(vec![value.clone(), value.clone()], checked(value))
+                        function(vec![value.clone(), value.clone()], value)
                     }
-                    IntegerOp::Neg => function(vec![value.clone()], checked(value)),
+                    IntegerOp::Neg => function(vec![value.clone()], value),
                     IntegerOp::ShiftLeft | IntegerOp::ShiftRight => {
-                        function(vec![value.clone(), Type::U32], checked(value))
+                        function(vec![value.clone(), Type::U32], value)
                     }
                     IntegerOp::Equal => {
                         function(vec![value.clone(), value], Type::Bool)
@@ -650,7 +713,10 @@ impl CompilerIntrinsic {
                 all.extend(
                     IntegerOp::ALL
                         .into_iter()
-                        .filter(|op| *op != IntegerOp::Neg || numeric.is_signed())
+                        .filter(|op| {
+                            !matches!(op, IntegerOp::NegChecked | IntegerOp::Neg)
+                                || numeric.is_signed()
+                        })
                         .map(|op| Self::Integer(numeric, op)),
                 );
             } else {

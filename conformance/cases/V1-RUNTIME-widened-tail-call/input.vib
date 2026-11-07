@@ -43,7 +43,7 @@
 (defn down (count i32) number
   (if (equatable.equal count 0i32)
     0i32
-    (down (match (i32.sub count 1i32) (result.ok lower) lower (result.err -) 0i32))))
+    (down (match (i32.sub-checked count 1i32) (result.ok lower) lower (result.err -) 0i32))))
 
 (defn widen (text str) shape
   (parse text))

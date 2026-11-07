@@ -4948,10 +4948,10 @@ mod tests {
   symbol: "char.to-u32")"#,
             r#"(defn negate (value u8) u8
   external: @compiler
-  symbol: "u8.neg")"#,
+  symbol: "u8.neg-checked")"#,
             r#"(defn add (left i32 right i32) i32
   external: @compiler
-  symbol: "i32.add")"#,
+  symbol: "i32.add-checked")"#,
         ] {
             let document = vibra_syntax::parse_source(Path::new("trusted.vib"), source)
                 .expect("parse trusted boundary source");
@@ -4979,7 +4979,9 @@ mod tests {
             );
             let expected = if source.contains("@host") {
                 DiagnosticCode::SyntaxInvalidAttribute
-            } else if source.contains("text.unknown") || source.contains("u8.neg") {
+            } else if source.contains("text.unknown")
+                || source.contains("u8.neg-checked")
+            {
                 DiagnosticCode::ExternalUnknownSymbol
             } else {
                 DiagnosticCode::TypeArgumentMismatch

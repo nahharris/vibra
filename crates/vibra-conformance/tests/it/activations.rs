@@ -25,15 +25,15 @@ fn checked(source: &str) -> vibra_types::CheckResult {
 fn depth_source(depth: u64) -> String {
     format!(
         "(defn main () u64 (depth {depth}u64))\n\n\
-(defn depth (remaining u64) u64\n  (if (equatable.equal remaining 0u64)\n    0u64\n    (match (u64.add (depth (lower remaining)) 1u64)\n      (result.ok total) total\n      (result.err -) 0u64)))\n\n\
-(defn lower (count u64) u64\n  (match (u64.sub count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n"
+(defn depth (remaining u64) u64\n  (if (equatable.equal remaining 0u64)\n    0u64\n    (match (u64.add-checked (depth (lower remaining)) 1u64)\n      (result.ok total) total\n      (result.err -) 0u64)))\n\n\
+(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n"
     )
 }
 
 /// Non-tail recursion that never reaches a base case.
-const FOREVER: &str = "(defn main () u64 (forever 0u64))\n\n(defn forever (count u64) u64\n  (match (u64.add (forever count) 1u64)\n    (result.ok total) total\n    (result.err -) 0u64))\n";
+const FOREVER: &str = "(defn main () u64 (forever 0u64))\n\n(defn forever (count u64) u64\n  (match (u64.add-checked (forever count) 1u64)\n    (result.ok total) total\n    (result.err -) 0u64))\n";
 
-const ADD_ONE: &str = "(defn add-one (count u64) u64\n  (match (u64.add count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n\n(defn lower (count u64) u64\n  (match (u64.sub count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
+const ADD_ONE: &str = "(defn add-one (count u64) u64\n  (match (u64.add-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
 
 fn run_u64(source: &str) -> vibra_interp::Execution {
     let checked = checked(source);
@@ -103,7 +103,7 @@ fn nested_value_source(depth: u64) -> String {
         "(deftype nat (record prev (array nat)))\n\n\
 (defn main () u64 (let - (build {depth}u64)) 7u64)\n\n\
 (defn build (count u64) nat\n  (if (equatable.equal count 0u64)\n    (nat prev: (array.of))\n    (nat prev: (array.of (build (lower count))))))\n\n\
-(defn lower (count u64) u64\n  (match (u64.sub count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n"
+(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n"
     )
 }
 
@@ -119,7 +119,7 @@ fn a_value_nested_five_thousand_and_a_hundred_thousand_deep_is_built_and_dropped
 fn a_deeply_nested_entry_result_is_observed_and_released_without_host_stack() {
     // The entry's result is the nested value itself, which is encoded and
     // released after the run on the caller's own stack.
-    let source = "(deftype nat (record prev (array nat)))\n\n(defn main () nat (build 20000u64))\n\n(defn build (count u64) nat\n  (if (equatable.equal count 0u64)\n    (nat prev: (array.of))\n    (nat prev: (array.of (build (lower count))))))\n\n(defn lower (count u64) u64\n  (match (u64.sub count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
+    let source = "(deftype nat (record prev (array nat)))\n\n(defn main () nat (build 20000u64))\n\n(defn build (count u64) nat\n  (if (equatable.equal count 0u64)\n    (nat prev: (array.of))\n    (nat prev: (array.of (build (lower count))))))\n\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
     let execution = run_u64(source);
     let observation = execution.canonical_result();
     assert!(
@@ -213,7 +213,7 @@ fn the_budget_exactly_at_a_programs_need_completes_and_one_frame_under_does_not(
 fn a_tail_loop_never_approaches_a_small_budget() {
     // Each iteration reuses the one activation, so a hundred thousand of them
     // fit a budget that a few hundred live activations would exceed.
-    let source = "(defn main () u64 (spin 100000u64))\n(defn spin (count u64) u64\n  (if (equatable.equal count 0u64) 0u64 (spin (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
+    let source = "(defn main () u64 (spin 100000u64))\n(defn spin (count u64) u64\n  (if (equatable.equal count 0u64) 0u64 (spin (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
     let checked = checked(source);
     let budget = MemoryBudget::new(64 * 1024);
     let execution =
@@ -228,7 +228,7 @@ fn a_tail_loop_never_approaches_a_small_budget() {
 fn a_tail_loop_that_builds_fresh_values_runs_in_bounded_memory() {
     // The earlier arrays are released as the loop goes: only the live value
     // counts against the budget, however many were allocated in total.
-    let source = "(defn main () u64 (spin 20000u64 (array.of 1u64 2u64 3u64)))\n(defn spin (count u64 held (array u64)) u64\n  (if (equatable.equal count 0u64) (array.length held) (spin (lower count) (array.of count count count))))\n(defn lower (count u64) u64\n  (match (u64.sub count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
+    let source = "(defn main () u64 (spin 20000u64 (array.of 1u64 2u64 3u64)))\n(defn spin (count u64 held (array u64)) u64\n  (if (equatable.equal count 0u64) (array.length held) (spin (lower count) (array.of count count count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
     let checked = checked(source);
     let execution = Interpreter::run_with_budget(
         checked.program().expect("program"),
@@ -241,7 +241,7 @@ fn a_tail_loop_that_builds_fresh_values_runs_in_bounded_memory() {
 #[test]
 fn a_growing_value_exhausts_the_budget_through_allocation_not_recursion() {
     // One activation, but the live array doubles every iteration.
-    let source = "(defn main () u64 (grow 64u64 (array.of 1u64)))\n(defn grow (count u64 held (array u64)) u64\n  (if (equatable.equal count 0u64) (array.length held) (grow (lower count) (array.concat held held))))\n(defn lower (count u64) u64\n  (match (u64.sub count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
+    let source = "(defn main () u64 (grow 64u64 (array.of 1u64)))\n(defn grow (count u64 held (array u64)) u64\n  (if (equatable.equal count 0u64) (array.length held) (grow (lower count) (array.concat held held))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
     let checked = checked(source);
     let budget = MemoryBudget::new(8 * 1024 * 1024);
     let error =

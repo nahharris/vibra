@@ -273,9 +273,12 @@ test; it is not a trap and cannot be caught or converted into a Vibra
 ## M3 compiler intrinsic registry
 
 The Stage 3A `@compiler` registry is closed to the operations below, all under
-the registry identity `vibra_v1`. Every operation is pure, total,
-deterministic, and host-event free; none traps. A partial operation returns a
-standard `option` or `result` instead. Composite behavior — boolean
+the registry identity `vibra_v1`. Every operation is pure, deterministic, and
+host-event free. Every operation is total but the unchecked integer `div` and
+`rem`, which trap with `@runtime.division-by-zero` on a zero divisor; no other
+operation traps. A partial operation returns a standard `option` or `result`
+instead, and every unchecked integer operation has a `-checked` counterpart
+that does. Composite behavior — boolean
 connectives, character classes, searching, splitting, trimming, folds — is
 ordinary standard-library Vibra over these operations and is specified by its
 reviewed source, not by this table.
@@ -308,20 +311,29 @@ In the signatures, `R t` abbreviates `(result t arithmetic-error)` and `C t`
 abbreviates `(result t conversion-error)`.
 
 For each integer type `T` among `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`,
-and `u64`, the registry has these rows, with symbols spelled `T.<name>`. Every
-integer operation is checked, so its name carries no suffix: the result type
-says that it can fail. The arithmetic rows are static methods of `T`; the
-comparison and conversion rows are members of implementations, as the table
-after this one states, and are never static methods:
+and `u64`, the registry has these rows, with symbols spelled `T.<name>`. Each
+arithmetic operation comes in two forms. The unchecked form is the plain name
+and returns `T`: a result past the type saturates at its nearest bound, so
+overflow never wraps, and a zero divisor traps. The checked form adds the
+`-checked` suffix and returns `R T`, reporting each failure as a value. The
+arithmetic rows are static methods of `T`; the comparison and conversion rows
+are members of implementations, as the table after this one states, and are
+never static methods:
 
 | Name | Signature | Semantics |
 | --- | --- | --- |
-| `add`, `sub`, `mul` | `T T -> R T` | Exact result, or `overflow` when it lies outside `T` |
-| `div` | `T T -> R T` | Quotient truncated toward zero; `division-by-zero` for a zero divisor; `overflow` for the signed minimum divided by `-1` |
-| `rem` | `T T -> R T` | Remainder with the dividend's sign, so `left = quotient * right + remainder`; `division-by-zero` for a zero divisor; the signed minimum and `-1` yield `0` |
-| `neg` (signed `T` only) | `T -> R T` | Negation, or `overflow` for the minimum |
-| `shift-left` | `T u32 -> R T` | `left * 2^amount`; `invalid-shift` when the amount is at least the bit width, else `overflow` when the product lies outside `T` |
-| `shift-right` | `T u32 -> R T` | `floor(left / 2^amount)`; `invalid-shift` when the amount is at least the bit width |
+| `add`, `sub`, `mul` | `T T -> T` | The exact result, saturated at the bounds of `T` |
+| `div` | `T T -> T` | The quotient truncated toward zero, so the signed minimum divided by `-1` saturates at the maximum; traps with `@runtime.division-by-zero` for a zero divisor |
+| `rem` | `T T -> T` | The remainder with the dividend's sign; the signed minimum and `-1` yield `0`; traps with `@runtime.division-by-zero` for a zero divisor |
+| `neg` (signed `T` only) | `T -> T` | The negation, so the minimum saturates at the maximum |
+| `shift-left` | `T u32 -> T` | `left * 2^amount`, saturated at the bounds of `T`, for every amount: zero stays zero |
+| `shift-right` | `T u32 -> T` | `floor(left / 2^amount)` for every amount, so a shift of at least the bit width yields `0`, or `-1` for a negative value |
+| `add-checked`, `sub-checked`, `mul-checked` | `T T -> R T` | Exact result, or `overflow` when it lies outside `T` |
+| `div-checked` | `T T -> R T` | Quotient truncated toward zero; `division-by-zero` for a zero divisor; `overflow` for the signed minimum divided by `-1` |
+| `rem-checked` | `T T -> R T` | Remainder with the dividend's sign, so `left = quotient * right + remainder`; `division-by-zero` for a zero divisor; the signed minimum and `-1` yield `0` |
+| `neg-checked` (signed `T` only) | `T -> R T` | Negation, or `overflow` for the minimum |
+| `shift-left-checked` | `T u32 -> R T` | `left * 2^amount`; `invalid-shift` when the amount is at least the bit width, else `overflow` when the product lies outside `T` |
+| `shift-right-checked` | `T u32 -> R T` | `floor(left / 2^amount)`; `invalid-shift` when the amount is at least the bit width |
 | `equal` | `T T -> bool` | Numeric equality |
 | `compare` | `T T -> ordering` | Numeric order |
 | `to-str` | `T -> str` | Shortest decimal digits, with a leading `-` only for a negative value and no suffix |
@@ -398,7 +410,7 @@ The arithmetic rows and the `char.*`, `array.*`, and `dict.*` rows are static
 methods declared in the embedded module `@std.builtin`: in the `intrinsic-type`
 declarations of the builtin types, and in the `dict` declaration that plays
 `@dict`. They are reached through the type path with no import, exactly as
-those types themselves need none, so `(i32.add left right)` needs no
+those types themselves need none, so `(i32.add-checked left right)` needs no
 `import`. The `text.*` and `bytes.*` rows are likewise reached as the members
 `str.concat` and `bytes.length`, with no import.
 
@@ -901,8 +913,9 @@ failure, and a trap stays `@command.trap`.
 ## Traps
 
 Host responses that are ordinary environmental outcomes use typed `result`
-errors. ABI mismatch, impossible typed IR, invalid host value IDs, and runtime
-invariant violation are traps. A trap has a stable code and a source origin
+errors. ABI mismatch, impossible typed IR, invalid host value IDs, runtime
+invariant violation, and an unchecked integer division by zero are traps. A
+trap has a stable code and a source origin
 when its failing source span is known; otherwise it has no origin. The trap
 codes are closed:
 
@@ -911,6 +924,7 @@ codes are closed:
 | `@runtime.invalid-checked-program` | The checked program has no executable entry, a body violates the checked-IR invariants, or the toolchain itself fails, including every engine trap that generated code did not raise | None |
 | `@runtime.unobservable-function` | A value that holds a function reaches an observation | The assertion call in a test; none for the entry's result |
 | `@runtime.invalid-host-value` | A host call, an accessor, or a builder receives a value ID that is zero, was never issued by the instance, has been released, or names a value of a kind it does not admit; an index outside the value or of the wrong class; a write to a sealed value; a write of an unsealed child; a seal with a slot unwritten; a `char` that is not a Unicode scalar; or a result ID that is not a sealed `(result t e)` value | None |
+| `@runtime.division-by-zero` | An unchecked integer `div` or `rem` receives a zero divisor | None |
 
 A failure with no origin uses an unlocated diagnostic primary at `0..0` with no
 source ID. The CLI `trapCode` is the exact diagnostic-code spelling as a
@@ -993,7 +1007,7 @@ both.
 | `vibra_v1_entry` | `() -> ()` | Runs the binary target's entry |
 | `vibra_v1_test` | `(i32) -> ()` | Runs the test at that zero-based position in canonical discovery order; a host runs each test in a fresh instance |
 | `vibra_v1_status` | `() -> i32` | What the last call recorded: `0` nothing, `1` a trap, `2` the memory host event, `3` a failed assertion |
-| `vibra_v1_trap_code` | `() -> i32` | After status `1`: `1` for `@runtime.invalid-checked-program`, `2` for `@runtime.unobservable-function`, `3` for `@runtime.invalid-host-value` |
+| `vibra_v1_trap_code` | `() -> i32` | After status `1`: `1` for `@runtime.invalid-checked-program`, `2` for `@runtime.unobservable-function`, `3` for `@runtime.invalid-host-value`, `4` for `@runtime.division-by-zero` |
 | `vibra_v1_origin` | `() -> i32` | After status `1` or `3`: the origin ordinal of the trap or the assertion call, `0` for none |
 | `vibra_v1_failure` | `() -> i32` | After status `3`: `1` for `assert.true`, `2` for `assert.false`, `3` for `assert.equal` |
 | `vibra_v1_failure_expected`, `vibra_v1_failure_actual` | `() -> i64` | After status `3` and `assert.equal`: the two operands, as the bits of a scalar or as a value ID, by the operand type that the origin table records |

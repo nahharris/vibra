@@ -20,7 +20,7 @@
             (tupleof
               (value @next-value)
               (evens
-                next-value: (match (u8.add (value @next-value) 2u8)
+                next-value: (match (u8.add-checked (value @next-value) 2u8)
                   (result.ok next) next
                   (result.err -) 255u8)
                 limit: (value @limit))))))))

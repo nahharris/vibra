@@ -5,11 +5,11 @@
 (defn depth (remaining u64) u64
   (if (equatable.equal remaining 0u64)
     0u64
-    (match (u64.add (depth (lower remaining)) 1u64)
+    (match (u64.add-checked (depth (lower remaining)) 1u64)
       (result.ok total) total
       (result.err -) 0u64)))
 
 (defn lower (count u64) u64
-  (match (u64.sub count 1u64)
+  (match (u64.sub-checked count 1u64)
     (result.ok value) value
     (result.err -) 0u64))

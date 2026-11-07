@@ -683,7 +683,7 @@ of a name that is visible there.
 A module-level `def`, `defn`, or import alias MUST NOT be spelled as a builtin
 type name: a primitive type (`never` included), `array`, `dict`, or `tuple`. Builtin types own
 static methods reached by dotted path, so such an alias or value would make
-`i32.add` or `array.of` ambiguous. A top-level use of one of those
+`i32.add-checked` or `array.of` ambiguous. A top-level use of one of those
 spellings as a value or alias emits `@name.reserved-value-spelling`. Every
 name of the prelude is a reserved spelling, and this is the one rule for all of
 them, types and values: a module value or function spelled as a prelude name

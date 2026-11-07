@@ -1,5 +1,5 @@
 ; Members of the builtin types. They are reached through the type path, such
-; as `(array.of 1i32 2i32)` or `(i32.add 1i32 2i32)`, with no import.
+; as `(array.of 1i32 2i32)` or `(i32.add-checked 1i32 2i32)`, with no import.
 ; `external:` members are primitive operations; `native:` members are Vibra
 ; whose native implementation the toolchain may run instead, and the others
 ; are Vibra alone. Each type implements the comparison and conversion
@@ -64,38 +64,72 @@
 
 (deftype i8 (intrinsic-type @i8)
   visibility: @public
-  (defn add (left i8 right i8) (result i8 core.arithmetic-error)
+  ; Saturating arithmetic: a result past the type is its nearest bound, and
+  ; a zero divisor traps. The -checked members return the failure instead.
+  (defn add (left i8 right i8) i8
     visibility: @public
     external: @compiler
     symbol: "i8.add")
-  (defn sub (left i8 right i8) (result i8 core.arithmetic-error)
+  (defn sub (left i8 right i8) i8
     visibility: @public
     external: @compiler
     symbol: "i8.sub")
-  (defn mul (left i8 right i8) (result i8 core.arithmetic-error)
+  (defn mul (left i8 right i8) i8
     visibility: @public
     external: @compiler
     symbol: "i8.mul")
-  (defn div (left i8 right i8) (result i8 core.arithmetic-error)
+  (defn div (left i8 right i8) i8
     visibility: @public
     external: @compiler
     symbol: "i8.div")
-  (defn rem (left i8 right i8) (result i8 core.arithmetic-error)
+  (defn rem (left i8 right i8) i8
     visibility: @public
     external: @compiler
     symbol: "i8.rem")
-  (defn neg (value i8) (result i8 core.arithmetic-error)
+  (defn neg (value i8) i8
     visibility: @public
     external: @compiler
     symbol: "i8.neg")
-  (defn shift-left (value i8 amount u32) (result i8 core.arithmetic-error)
+  (defn shift-left (value i8 amount u32) i8
     visibility: @public
     external: @compiler
     symbol: "i8.shift-left")
-  (defn shift-right (value i8 amount u32) (result i8 core.arithmetic-error)
+  (defn shift-right (value i8 amount u32) i8
     visibility: @public
     external: @compiler
     symbol: "i8.shift-right")
+  (defn add-checked (left i8 right i8) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.add-checked")
+  (defn sub-checked (left i8 right i8) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.sub-checked")
+  (defn mul-checked (left i8 right i8) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.mul-checked")
+  (defn div-checked (left i8 right i8) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.div-checked")
+  (defn rem-checked (left i8 right i8) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.rem-checked")
+  (defn neg-checked (value i8) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.neg-checked")
+  (defn shift-left-checked (value i8 amount u32) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.shift-left-checked")
+  (defn shift-right-checked (value i8 amount u32) (result i8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i8.shift-right-checked")
   (impl equatable
     (defn equal (left self right self) bool
       external: @compiler
@@ -139,38 +173,72 @@
 
 (deftype i16 (intrinsic-type @i16)
   visibility: @public
-  (defn add (left i16 right i16) (result i16 core.arithmetic-error)
+  ; Saturating arithmetic: a result past the type is its nearest bound, and
+  ; a zero divisor traps. The -checked members return the failure instead.
+  (defn add (left i16 right i16) i16
     visibility: @public
     external: @compiler
     symbol: "i16.add")
-  (defn sub (left i16 right i16) (result i16 core.arithmetic-error)
+  (defn sub (left i16 right i16) i16
     visibility: @public
     external: @compiler
     symbol: "i16.sub")
-  (defn mul (left i16 right i16) (result i16 core.arithmetic-error)
+  (defn mul (left i16 right i16) i16
     visibility: @public
     external: @compiler
     symbol: "i16.mul")
-  (defn div (left i16 right i16) (result i16 core.arithmetic-error)
+  (defn div (left i16 right i16) i16
     visibility: @public
     external: @compiler
     symbol: "i16.div")
-  (defn rem (left i16 right i16) (result i16 core.arithmetic-error)
+  (defn rem (left i16 right i16) i16
     visibility: @public
     external: @compiler
     symbol: "i16.rem")
-  (defn neg (value i16) (result i16 core.arithmetic-error)
+  (defn neg (value i16) i16
     visibility: @public
     external: @compiler
     symbol: "i16.neg")
-  (defn shift-left (value i16 amount u32) (result i16 core.arithmetic-error)
+  (defn shift-left (value i16 amount u32) i16
     visibility: @public
     external: @compiler
     symbol: "i16.shift-left")
-  (defn shift-right (value i16 amount u32) (result i16 core.arithmetic-error)
+  (defn shift-right (value i16 amount u32) i16
     visibility: @public
     external: @compiler
     symbol: "i16.shift-right")
+  (defn add-checked (left i16 right i16) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.add-checked")
+  (defn sub-checked (left i16 right i16) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.sub-checked")
+  (defn mul-checked (left i16 right i16) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.mul-checked")
+  (defn div-checked (left i16 right i16) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.div-checked")
+  (defn rem-checked (left i16 right i16) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.rem-checked")
+  (defn neg-checked (value i16) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.neg-checked")
+  (defn shift-left-checked (value i16 amount u32) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.shift-left-checked")
+  (defn shift-right-checked (value i16 amount u32) (result i16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i16.shift-right-checked")
   (impl equatable
     (defn equal (left self right self) bool
       external: @compiler
@@ -214,38 +282,72 @@
 
 (deftype i32 (intrinsic-type @i32)
   visibility: @public
-  (defn add (left i32 right i32) (result i32 core.arithmetic-error)
+  ; Saturating arithmetic: a result past the type is its nearest bound, and
+  ; a zero divisor traps. The -checked members return the failure instead.
+  (defn add (left i32 right i32) i32
     visibility: @public
     external: @compiler
     symbol: "i32.add")
-  (defn sub (left i32 right i32) (result i32 core.arithmetic-error)
+  (defn sub (left i32 right i32) i32
     visibility: @public
     external: @compiler
     symbol: "i32.sub")
-  (defn mul (left i32 right i32) (result i32 core.arithmetic-error)
+  (defn mul (left i32 right i32) i32
     visibility: @public
     external: @compiler
     symbol: "i32.mul")
-  (defn div (left i32 right i32) (result i32 core.arithmetic-error)
+  (defn div (left i32 right i32) i32
     visibility: @public
     external: @compiler
     symbol: "i32.div")
-  (defn rem (left i32 right i32) (result i32 core.arithmetic-error)
+  (defn rem (left i32 right i32) i32
     visibility: @public
     external: @compiler
     symbol: "i32.rem")
-  (defn neg (value i32) (result i32 core.arithmetic-error)
+  (defn neg (value i32) i32
     visibility: @public
     external: @compiler
     symbol: "i32.neg")
-  (defn shift-left (value i32 amount u32) (result i32 core.arithmetic-error)
+  (defn shift-left (value i32 amount u32) i32
     visibility: @public
     external: @compiler
     symbol: "i32.shift-left")
-  (defn shift-right (value i32 amount u32) (result i32 core.arithmetic-error)
+  (defn shift-right (value i32 amount u32) i32
     visibility: @public
     external: @compiler
     symbol: "i32.shift-right")
+  (defn add-checked (left i32 right i32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.add-checked")
+  (defn sub-checked (left i32 right i32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.sub-checked")
+  (defn mul-checked (left i32 right i32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.mul-checked")
+  (defn div-checked (left i32 right i32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.div-checked")
+  (defn rem-checked (left i32 right i32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.rem-checked")
+  (defn neg-checked (value i32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.neg-checked")
+  (defn shift-left-checked (value i32 amount u32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.shift-left-checked")
+  (defn shift-right-checked (value i32 amount u32) (result i32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i32.shift-right-checked")
   (impl equatable
     (defn equal (left self right self) bool
       external: @compiler
@@ -289,38 +391,72 @@
 
 (deftype i64 (intrinsic-type @i64)
   visibility: @public
-  (defn add (left i64 right i64) (result i64 core.arithmetic-error)
+  ; Saturating arithmetic: a result past the type is its nearest bound, and
+  ; a zero divisor traps. The -checked members return the failure instead.
+  (defn add (left i64 right i64) i64
     visibility: @public
     external: @compiler
     symbol: "i64.add")
-  (defn sub (left i64 right i64) (result i64 core.arithmetic-error)
+  (defn sub (left i64 right i64) i64
     visibility: @public
     external: @compiler
     symbol: "i64.sub")
-  (defn mul (left i64 right i64) (result i64 core.arithmetic-error)
+  (defn mul (left i64 right i64) i64
     visibility: @public
     external: @compiler
     symbol: "i64.mul")
-  (defn div (left i64 right i64) (result i64 core.arithmetic-error)
+  (defn div (left i64 right i64) i64
     visibility: @public
     external: @compiler
     symbol: "i64.div")
-  (defn rem (left i64 right i64) (result i64 core.arithmetic-error)
+  (defn rem (left i64 right i64) i64
     visibility: @public
     external: @compiler
     symbol: "i64.rem")
-  (defn neg (value i64) (result i64 core.arithmetic-error)
+  (defn neg (value i64) i64
     visibility: @public
     external: @compiler
     symbol: "i64.neg")
-  (defn shift-left (value i64 amount u32) (result i64 core.arithmetic-error)
+  (defn shift-left (value i64 amount u32) i64
     visibility: @public
     external: @compiler
     symbol: "i64.shift-left")
-  (defn shift-right (value i64 amount u32) (result i64 core.arithmetic-error)
+  (defn shift-right (value i64 amount u32) i64
     visibility: @public
     external: @compiler
     symbol: "i64.shift-right")
+  (defn add-checked (left i64 right i64) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.add-checked")
+  (defn sub-checked (left i64 right i64) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.sub-checked")
+  (defn mul-checked (left i64 right i64) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.mul-checked")
+  (defn div-checked (left i64 right i64) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.div-checked")
+  (defn rem-checked (left i64 right i64) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.rem-checked")
+  (defn neg-checked (value i64) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.neg-checked")
+  (defn shift-left-checked (value i64 amount u32) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.shift-left-checked")
+  (defn shift-right-checked (value i64 amount u32) (result i64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "i64.shift-right-checked")
   (impl equatable
     (defn equal (left self right self) bool
       external: @compiler
@@ -364,34 +500,64 @@
 
 (deftype u8 (intrinsic-type @u8)
   visibility: @public
-  (defn add (left u8 right u8) (result u8 core.arithmetic-error)
+  ; Saturating arithmetic: a result past the type is its nearest bound, and
+  ; a zero divisor traps. The -checked members return the failure instead.
+  (defn add (left u8 right u8) u8
     visibility: @public
     external: @compiler
     symbol: "u8.add")
-  (defn sub (left u8 right u8) (result u8 core.arithmetic-error)
+  (defn sub (left u8 right u8) u8
     visibility: @public
     external: @compiler
     symbol: "u8.sub")
-  (defn mul (left u8 right u8) (result u8 core.arithmetic-error)
+  (defn mul (left u8 right u8) u8
     visibility: @public
     external: @compiler
     symbol: "u8.mul")
-  (defn div (left u8 right u8) (result u8 core.arithmetic-error)
+  (defn div (left u8 right u8) u8
     visibility: @public
     external: @compiler
     symbol: "u8.div")
-  (defn rem (left u8 right u8) (result u8 core.arithmetic-error)
+  (defn rem (left u8 right u8) u8
     visibility: @public
     external: @compiler
     symbol: "u8.rem")
-  (defn shift-left (value u8 amount u32) (result u8 core.arithmetic-error)
+  (defn shift-left (value u8 amount u32) u8
     visibility: @public
     external: @compiler
     symbol: "u8.shift-left")
-  (defn shift-right (value u8 amount u32) (result u8 core.arithmetic-error)
+  (defn shift-right (value u8 amount u32) u8
     visibility: @public
     external: @compiler
     symbol: "u8.shift-right")
+  (defn add-checked (left u8 right u8) (result u8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.add-checked")
+  (defn sub-checked (left u8 right u8) (result u8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.sub-checked")
+  (defn mul-checked (left u8 right u8) (result u8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.mul-checked")
+  (defn div-checked (left u8 right u8) (result u8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.div-checked")
+  (defn rem-checked (left u8 right u8) (result u8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.rem-checked")
+  (defn shift-left-checked (value u8 amount u32) (result u8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.shift-left-checked")
+  (defn shift-right-checked (value u8 amount u32) (result u8 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u8.shift-right-checked")
   (impl equatable
     (defn equal (left self right self) bool
       external: @compiler
@@ -435,34 +601,64 @@
 
 (deftype u16 (intrinsic-type @u16)
   visibility: @public
-  (defn add (left u16 right u16) (result u16 core.arithmetic-error)
+  ; Saturating arithmetic: a result past the type is its nearest bound, and
+  ; a zero divisor traps. The -checked members return the failure instead.
+  (defn add (left u16 right u16) u16
     visibility: @public
     external: @compiler
     symbol: "u16.add")
-  (defn sub (left u16 right u16) (result u16 core.arithmetic-error)
+  (defn sub (left u16 right u16) u16
     visibility: @public
     external: @compiler
     symbol: "u16.sub")
-  (defn mul (left u16 right u16) (result u16 core.arithmetic-error)
+  (defn mul (left u16 right u16) u16
     visibility: @public
     external: @compiler
     symbol: "u16.mul")
-  (defn div (left u16 right u16) (result u16 core.arithmetic-error)
+  (defn div (left u16 right u16) u16
     visibility: @public
     external: @compiler
     symbol: "u16.div")
-  (defn rem (left u16 right u16) (result u16 core.arithmetic-error)
+  (defn rem (left u16 right u16) u16
     visibility: @public
     external: @compiler
     symbol: "u16.rem")
-  (defn shift-left (value u16 amount u32) (result u16 core.arithmetic-error)
+  (defn shift-left (value u16 amount u32) u16
     visibility: @public
     external: @compiler
     symbol: "u16.shift-left")
-  (defn shift-right (value u16 amount u32) (result u16 core.arithmetic-error)
+  (defn shift-right (value u16 amount u32) u16
     visibility: @public
     external: @compiler
     symbol: "u16.shift-right")
+  (defn add-checked (left u16 right u16) (result u16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.add-checked")
+  (defn sub-checked (left u16 right u16) (result u16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.sub-checked")
+  (defn mul-checked (left u16 right u16) (result u16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.mul-checked")
+  (defn div-checked (left u16 right u16) (result u16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.div-checked")
+  (defn rem-checked (left u16 right u16) (result u16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.rem-checked")
+  (defn shift-left-checked (value u16 amount u32) (result u16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.shift-left-checked")
+  (defn shift-right-checked (value u16 amount u32) (result u16 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u16.shift-right-checked")
   (impl equatable
     (defn equal (left self right self) bool
       external: @compiler
@@ -506,34 +702,64 @@
 
 (deftype u32 (intrinsic-type @u32)
   visibility: @public
-  (defn add (left u32 right u32) (result u32 core.arithmetic-error)
+  ; Saturating arithmetic: a result past the type is its nearest bound, and
+  ; a zero divisor traps. The -checked members return the failure instead.
+  (defn add (left u32 right u32) u32
     visibility: @public
     external: @compiler
     symbol: "u32.add")
-  (defn sub (left u32 right u32) (result u32 core.arithmetic-error)
+  (defn sub (left u32 right u32) u32
     visibility: @public
     external: @compiler
     symbol: "u32.sub")
-  (defn mul (left u32 right u32) (result u32 core.arithmetic-error)
+  (defn mul (left u32 right u32) u32
     visibility: @public
     external: @compiler
     symbol: "u32.mul")
-  (defn div (left u32 right u32) (result u32 core.arithmetic-error)
+  (defn div (left u32 right u32) u32
     visibility: @public
     external: @compiler
     symbol: "u32.div")
-  (defn rem (left u32 right u32) (result u32 core.arithmetic-error)
+  (defn rem (left u32 right u32) u32
     visibility: @public
     external: @compiler
     symbol: "u32.rem")
-  (defn shift-left (value u32 amount u32) (result u32 core.arithmetic-error)
+  (defn shift-left (value u32 amount u32) u32
     visibility: @public
     external: @compiler
     symbol: "u32.shift-left")
-  (defn shift-right (value u32 amount u32) (result u32 core.arithmetic-error)
+  (defn shift-right (value u32 amount u32) u32
     visibility: @public
     external: @compiler
     symbol: "u32.shift-right")
+  (defn add-checked (left u32 right u32) (result u32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.add-checked")
+  (defn sub-checked (left u32 right u32) (result u32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.sub-checked")
+  (defn mul-checked (left u32 right u32) (result u32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.mul-checked")
+  (defn div-checked (left u32 right u32) (result u32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.div-checked")
+  (defn rem-checked (left u32 right u32) (result u32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.rem-checked")
+  (defn shift-left-checked (value u32 amount u32) (result u32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.shift-left-checked")
+  (defn shift-right-checked (value u32 amount u32) (result u32 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u32.shift-right-checked")
   (impl equatable
     (defn equal (left self right self) bool
       external: @compiler
@@ -577,34 +803,64 @@
 
 (deftype u64 (intrinsic-type @u64)
   visibility: @public
-  (defn add (left u64 right u64) (result u64 core.arithmetic-error)
+  ; Saturating arithmetic: a result past the type is its nearest bound, and
+  ; a zero divisor traps. The -checked members return the failure instead.
+  (defn add (left u64 right u64) u64
     visibility: @public
     external: @compiler
     symbol: "u64.add")
-  (defn sub (left u64 right u64) (result u64 core.arithmetic-error)
+  (defn sub (left u64 right u64) u64
     visibility: @public
     external: @compiler
     symbol: "u64.sub")
-  (defn mul (left u64 right u64) (result u64 core.arithmetic-error)
+  (defn mul (left u64 right u64) u64
     visibility: @public
     external: @compiler
     symbol: "u64.mul")
-  (defn div (left u64 right u64) (result u64 core.arithmetic-error)
+  (defn div (left u64 right u64) u64
     visibility: @public
     external: @compiler
     symbol: "u64.div")
-  (defn rem (left u64 right u64) (result u64 core.arithmetic-error)
+  (defn rem (left u64 right u64) u64
     visibility: @public
     external: @compiler
     symbol: "u64.rem")
-  (defn shift-left (value u64 amount u32) (result u64 core.arithmetic-error)
+  (defn shift-left (value u64 amount u32) u64
     visibility: @public
     external: @compiler
     symbol: "u64.shift-left")
-  (defn shift-right (value u64 amount u32) (result u64 core.arithmetic-error)
+  (defn shift-right (value u64 amount u32) u64
     visibility: @public
     external: @compiler
     symbol: "u64.shift-right")
+  (defn add-checked (left u64 right u64) (result u64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.add-checked")
+  (defn sub-checked (left u64 right u64) (result u64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.sub-checked")
+  (defn mul-checked (left u64 right u64) (result u64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.mul-checked")
+  (defn div-checked (left u64 right u64) (result u64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.div-checked")
+  (defn rem-checked (left u64 right u64) (result u64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.rem-checked")
+  (defn shift-left-checked (value u64 amount u32) (result u64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.shift-left-checked")
+  (defn shift-right-checked (value u64 amount u32) (result u64 core.arithmetic-error)
+    visibility: @public
+    external: @compiler
+    symbol: "u64.shift-right-checked")
   (impl equatable
     (defn equal (left self right self) bool
       external: @compiler

@@ -278,6 +278,8 @@ pub enum RuntimeError {
         /// The observing call, when it is in source.
         origin: Option<SourceOrigin>,
     },
+    /// An unchecked `div` or `rem` had a zero divisor.
+    DivisionByZero,
 }
 
 impl fmt::Display for RuntimeError {
@@ -297,6 +299,8 @@ impl fmt::Display for RuntimeError {
             Self::UnobservableFunction { .. } => formatter.write_str(
                 "a value that holds a function has no canonical encoding to observe",
             ),
+            Self::DivisionByZero => formatter
+                .write_str("an unchecked division or remainder had a zero divisor"),
         }
     }
 }
@@ -320,6 +324,10 @@ impl RuntimeError {
             Self::UnobservableFunction { origin } => Some((
                 vibra_diagnostics::DiagnosticCode::RuntimeUnobservableFunction,
                 origin.as_ref(),
+            )),
+            Self::DivisionByZero => Some((
+                vibra_diagnostics::DiagnosticCode::RuntimeDivisionByZero,
+                None,
             )),
             Self::NoEntry | Self::InvalidBody { .. } => Some((
                 vibra_diagnostics::DiagnosticCode::RuntimeInvalidCheckedProgram,
@@ -394,6 +402,7 @@ impl Interpreter {
         {
             Ok(value) => value,
             Err(Halt::Memory) => return Err(RuntimeError::MemoryExhausted { budget }),
+            Err(Halt::DivisionByZero) => return Err(RuntimeError::DivisionByZero),
             Err(Halt::Invalid | Halt::Assertion) => return Err(invalid()),
         };
         let value_type = function.signature().result();
@@ -456,6 +465,9 @@ impl Interpreter {
         let outcome = machine.run_entry(program.entry_index(), entry_frame(program));
         if outcome == Err(Halt::Memory) {
             return Err(RuntimeError::MemoryExhausted { budget });
+        }
+        if outcome == Err(Halt::DivisionByZero) {
+            return Err(RuntimeError::DivisionByZero);
         }
         if let Some(origin) = machine.unobservable.take() {
             return Err(RuntimeError::UnobservableFunction {

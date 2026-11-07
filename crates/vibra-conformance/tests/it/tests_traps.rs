@@ -226,7 +226,7 @@ fn values_nested_five_thousand_deep_compare_and_differ() {
              tip\n\
              (build (lower count) (chain next: (array.of tip)))))\n\
          (defn lower (count u64) u64\n\
-           (match (u64.sub count 1u64) (result.ok value) value (result.err -) 0u64))\n\
+           (match (u64.sub-checked count 1u64) (result.ok value) value (result.err -) 0u64))\n\
          (test \"equal\" (assert.equal (build 5000u64 (chain next: (array.of))) (build 5000u64 (chain next: (array.of)))))\n\
          (test \"differ at the bottom\" (assert.equal (build 5000u64 (chain next: (array.of))) (build 5000u64 (chain next: (array.of (chain next: (array.of)))))))\n",
     );
@@ -286,7 +286,7 @@ fn values_nested_five_thousand_deep_inside_an_interface_value_compare() {
          (defn build (count u64 tip chain) chain\n\
            (if (equatable.equal count 0u64) tip (build (lower count) (chain next: (array.of tip)))))\n\
          (defn lower (count u64) u64\n\
-           (match (u64.sub count 1u64) (result.ok value) value (result.err -) 0u64))\n\
+           (match (u64.sub-checked count 1u64) (result.ok value) value (result.err -) 0u64))\n\
          (test \"equal\" (assert.equal (as any (build 5000u64 (chain next: (array.of)))) (as any (build 5000u64 (chain next: (array.of))))))\n\
          (test \"differ\" (assert.equal (as any (build 5000u64 (chain next: (array.of)))) (as any (build 4999u64 (chain next: (array.of))))))\n",
     );
@@ -428,7 +428,7 @@ fn a_passing_test_returns_the_live_size_to_its_baseline() {
          (defn build (count u64 tip chain) chain\n\
            (if (equatable.equal count 0u64) tip (build (lower count) (chain next: (array.of tip)))))\n\
          (defn lower (count u64) u64\n\
-           (match (u64.sub count 1u64) (result.ok value) value (result.err -) 0u64))\n\
+           (match (u64.sub-checked count 1u64) (result.ok value) value (result.err -) 0u64))\n\
          (test \"small\" (assert.equal (build 3u64 (chain next: (array.of))) (build 3u64 (chain next: (array.of)))))\n\
          (test \"large\" (assert.equal (build 3000u64 (chain next: (array.of))) (build 3000u64 (chain next: (array.of)))))\n\
          (test \"texts\" (assert.equal (array.of \"a\" \"b\") (array.of \"a\" \"b\")))
@@ -504,7 +504,7 @@ fn memory_exhaustion_in_a_test_is_the_host_event_and_not_a_trap() {
     let tree = Tree::new(
         "(import assert @std.assert)
 \n         (defn forever (count u64) u64
-\n           (match (u64.add (forever count) 1u64) (result.ok total) total (result.err -) 0u64))
+\n           (match (u64.add-checked (forever count) 1u64) (result.ok total) total (result.err -) 0u64))
 \n         (test \"runs out\" (assert.equal (forever 0u64) 0u64))
 \n         (test \"fine\" (assert.true true))
 ",

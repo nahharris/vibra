@@ -228,19 +228,19 @@ macro_rules! integer_rows {
                     let operands = || vec![$make(left), $make(right)];
                     push(
                         out,
-                        row(IntegerOp::Add),
+                        row(IntegerOp::AddChecked),
                         operands(),
                         checked(left.checked_add(right), $make),
                     );
                     push(
                         out,
-                        row(IntegerOp::Sub),
+                        row(IntegerOp::SubChecked),
                         operands(),
                         checked(left.checked_sub(right), $make),
                     );
                     push(
                         out,
-                        row(IntegerOp::Mul),
+                        row(IntegerOp::MulChecked),
                         operands(),
                         checked(left.checked_mul(right), $make),
                     );
@@ -249,7 +249,7 @@ macro_rules! integer_rows {
                     // two apart.
                     push(
                         out,
-                        row(IntegerOp::Div),
+                        row(IntegerOp::DivChecked),
                         operands(),
                         if right == 0 {
                             Outcome::Err("division-by-zero")
@@ -260,7 +260,7 @@ macro_rules! integer_rows {
                     // The signed minimum and `-1` have the remainder `0`.
                     push(
                         out,
-                        row(IntegerOp::Rem),
+                        row(IntegerOp::RemChecked),
                         operands(),
                         if right == 0 {
                             Outcome::Err("division-by-zero")
@@ -268,6 +268,40 @@ macro_rules! integer_rows {
                             Outcome::Ok($make(left.wrapping_rem(right)))
                         },
                     );
+                    // The unchecked rows saturate where the checked ones fail;
+                    // a zero divisor traps, so it has no vector.
+                    push(
+                        out,
+                        row(IntegerOp::Add),
+                        operands(),
+                        Outcome::Value($make(left.saturating_add(right))),
+                    );
+                    push(
+                        out,
+                        row(IntegerOp::Sub),
+                        operands(),
+                        Outcome::Value($make(left.saturating_sub(right))),
+                    );
+                    push(
+                        out,
+                        row(IntegerOp::Mul),
+                        operands(),
+                        Outcome::Value($make(left.saturating_mul(right))),
+                    );
+                    if right != 0 {
+                        push(
+                            out,
+                            row(IntegerOp::Div),
+                            operands(),
+                            Outcome::Value($make(left.saturating_div(right))),
+                        );
+                        push(
+                            out,
+                            row(IntegerOp::Rem),
+                            operands(),
+                            Outcome::Value($make(left.wrapping_rem(right))),
+                        );
+                    }
                     push(
                         out,
                         row(IntegerOp::Equal),
@@ -284,23 +318,62 @@ macro_rules! integer_rows {
                 if numeric.is_signed() {
                     push(
                         out,
-                        row(IntegerOp::Neg),
+                        row(IntegerOp::NegChecked),
                         vec![$make(left)],
                         checked(left.checked_neg(), $make),
+                    );
+                    push(
+                        out,
+                        row(IntegerOp::Neg),
+                        vec![$make(left)],
+                        Outcome::Value($make(<$t>::default().saturating_sub(left))),
                     );
                 }
                 for amount in amounts(numeric) {
                     let operands = || vec![$make(left), Value::U32(amount)];
-                    if amount >= numeric.bits() {
+                    // `left * 2^amount` saturated at the bounds, and
+                    // `floor(left / 2^amount)`, for every amount: past the
+                    // width, a nonzero value saturates by its sign and a shift
+                    // right leaves `0` or `-1`.
+                    let (low, high) = numeric.range();
+                    let wide = i128::from(left);
+                    let product = if wide == 0 {
+                        0
+                    } else {
+                        wide.saturating_mul(
+                            1_i128
+                                .checked_shl(amount)
+                                .filter(|factor| *factor > 0)
+                                .unwrap_or(i128::MAX),
+                        )
+                    };
+                    if let (Ok(shifted), Ok(floored)) = (
+                        <$t>::try_from(product.clamp(low, high)),
+                        <$t>::try_from(wide >> amount.min(127)),
+                    ) {
                         push(
                             out,
                             row(IntegerOp::ShiftLeft),
+                            operands(),
+                            Outcome::Value($make(shifted)),
+                        );
+                        push(
+                            out,
+                            row(IntegerOp::ShiftRight),
+                            operands(),
+                            Outcome::Value($make(floored)),
+                        );
+                    }
+                    if amount >= numeric.bits() {
+                        push(
+                            out,
+                            row(IntegerOp::ShiftLeftChecked),
                             operands(),
                             Outcome::Err("invalid-shift"),
                         );
                         push(
                             out,
-                            row(IntegerOp::ShiftRight),
+                            row(IntegerOp::ShiftRightChecked),
                             operands(),
                             Outcome::Err("invalid-shift"),
                         );
@@ -311,7 +384,7 @@ macro_rules! integer_rows {
                     let product = i128::from(left) * (1_i128 << amount);
                     push(
                         out,
-                        row(IntegerOp::ShiftLeft),
+                        row(IntegerOp::ShiftLeftChecked),
                         operands(),
                         checked(<$t>::try_from(product).ok(), $make),
                     );
@@ -320,7 +393,7 @@ macro_rules! integer_rows {
                     // one, where the two agree.
                     push(
                         out,
-                        row(IntegerOp::ShiftRight),
+                        row(IntegerOp::ShiftRightChecked),
                         operands(),
                         Outcome::Ok($make(left >> amount)),
                     );
@@ -741,27 +814,30 @@ mod tests {
 
     #[test]
     fn the_table_holds_the_examples_the_specification_gives() {
-        use IntegerOp::{Add, Div, Mul, Neg, Rem, ShiftLeft, ShiftRight, Sub};
+        use IntegerOp::{
+            AddChecked, DivChecked, MulChecked, NegChecked, RemChecked,
+            ShiftLeftChecked, ShiftRightChecked, SubChecked,
+        };
         use NumericType::{I8, I16, I32, I64, U8, U32, U64};
         let examples = vec![
             // Exact result, or `overflow`.
             example(
-                row(U64, Add),
+                row(U64, AddChecked),
                 vec![Value::U64(u64::MAX), Value::U64(1)],
                 Outcome::Err("overflow"),
             ),
             example(
-                row(U64, Mul),
+                row(U64, MulChecked),
                 vec![Value::U64(u64::MAX), Value::U64(1)],
                 Outcome::Ok(Value::U64(u64::MAX)),
             ),
             example(
-                row(U8, Sub),
+                row(U8, SubChecked),
                 vec![Value::U8(0), Value::U8(1)],
                 Outcome::Err("overflow"),
             ),
             example(
-                row(I32, Add),
+                row(I32, AddChecked),
                 vec![Value::I32(i32::MAX - 1), Value::I32(1)],
                 Outcome::Ok(Value::I32(i32::MAX)),
             ),
@@ -769,79 +845,79 @@ mod tests {
             // sign; the signed minimum divided by `-1` overflows and has the
             // remainder `0`.
             example(
-                row(I8, Div),
+                row(I8, DivChecked),
                 vec![Value::I8(-7), Value::I8(2)],
                 Outcome::Ok(Value::I8(-3)),
             ),
             example(
-                row(I8, Rem),
+                row(I8, RemChecked),
                 vec![Value::I8(-7), Value::I8(2)],
                 Outcome::Ok(Value::I8(-1)),
             ),
             example(
-                row(I8, Rem),
+                row(I8, RemChecked),
                 vec![Value::I8(7), Value::I8(-2)],
                 Outcome::Ok(Value::I8(1)),
             ),
             example(
-                row(I64, Div),
+                row(I64, DivChecked),
                 vec![Value::I64(i64::MIN), Value::I64(-1)],
                 Outcome::Err("overflow"),
             ),
             example(
-                row(I64, Rem),
+                row(I64, RemChecked),
                 vec![Value::I64(i64::MIN), Value::I64(-1)],
                 Outcome::Ok(Value::I64(0)),
             ),
             example(
-                row(U8, Div),
+                row(U8, DivChecked),
                 vec![Value::U8(1), Value::U8(0)],
                 Outcome::Err("division-by-zero"),
             ),
             example(
-                row(I16, Neg),
+                row(I16, NegChecked),
                 vec![Value::I16(i16::MIN)],
                 Outcome::Err("overflow"),
             ),
             // `invalid-shift` at the width, `overflow` when the product
             // leaves the type, and a flooring right shift.
             example(
-                row(U32, ShiftLeft),
+                row(U32, ShiftLeftChecked),
                 vec![Value::U32(1), Value::U32(32)],
                 Outcome::Err("invalid-shift"),
             ),
             example(
-                row(U8, ShiftLeft),
+                row(U8, ShiftLeftChecked),
                 vec![Value::U8(1), Value::U32(7)],
                 Outcome::Ok(Value::U8(128)),
             ),
             example(
-                row(U8, ShiftLeft),
+                row(U8, ShiftLeftChecked),
                 vec![Value::U8(2), Value::U32(7)],
                 Outcome::Err("overflow"),
             ),
             example(
-                row(I8, ShiftLeft),
+                row(I8, ShiftLeftChecked),
                 vec![Value::I8(-1), Value::U32(7)],
                 Outcome::Ok(Value::I8(i8::MIN)),
             ),
             example(
-                row(I8, ShiftLeft),
+                row(I8, ShiftLeftChecked),
                 vec![Value::I8(1), Value::U32(7)],
                 Outcome::Err("overflow"),
             ),
             example(
-                row(I64, ShiftRight),
+                row(I64, ShiftRightChecked),
                 vec![Value::I64(-7), Value::U32(1)],
                 Outcome::Ok(Value::I64(-4)),
             ),
             example(
-                row(I16, ShiftRight),
+                row(I16, ShiftRightChecked),
                 vec![Value::I16(-1), Value::U32(15)],
                 Outcome::Ok(Value::I16(-1)),
             ),
             example(
-                row(U64, ShiftRight),
+                row(U64, ShiftRightChecked),
                 vec![Value::U64(1), Value::U32(64)],
                 Outcome::Err("invalid-shift"),
             ),
@@ -928,7 +1004,7 @@ mod tests {
         };
         for numeric in NumericType::ALL.into_iter().filter(|n| n.is_integer()) {
             let (min, max) = numeric.range();
-            let operands = of(row(numeric, IntegerOp::Add))
+            let operands = of(row(numeric, IntegerOp::AddChecked))
                 .iter()
                 .map(|vector| vector.operands.clone())
                 .collect::<Vec<_>>();

@@ -1,0 +1,12 @@
+id = "V1-RUNTIME-registry-saturating"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "interpret"
+description = "The unchecked integer operations saturate at the bounds of their type: a sum, difference, product, and negation past a bound, the signed minimum divided by -1, a shift left past the width, and a flooring shift right past it; inside the bounds they are exact."
+
+[inputs]
+source = "input.vib"
+
+[expect]
+accepted = true
+interpreter = { result = "result.vibon", audit_trace = "audit.vibon" }

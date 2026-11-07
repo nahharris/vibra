@@ -11,12 +11,12 @@
         (tupleof
           (value @from)
           (naturals
-            from: (match (u64.add (value @from) 1u64)
+            from: (match (u64.add-checked (value @from) 1u64)
               (result.ok higher) higher
               (result.err -) 0u64)))))))
 
 (defn even (value u64) bool
   visibility: @public
-  (match (u64.rem value 2u64)
+  (match (u64.rem-checked value 2u64)
     (result.ok remainder) (equatable.equal remainder 0u64)
     (result.err -) false))
