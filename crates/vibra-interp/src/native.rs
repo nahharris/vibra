@@ -98,7 +98,7 @@ pub(crate) fn apply(
         _ => None,
     };
     Some(match (intrinsic, operands) {
-        (C::TextLength, [value]) => {
+        (C::StrLength, [value]) => {
             let value = text(value)?;
             primitive(Value::U64(vibra_native::length(&Units(&value))))
         }
@@ -106,7 +106,7 @@ pub(crate) fn apply(
             let value = bytes(value)?;
             primitive(Value::U64(vibra_native::length(&Units(&value))))
         }
-        (C::TextEqual, [first, second]) => {
+        (C::StrEqual, [first, second]) => {
             let (first, second) = (text(first)?, text(second)?);
             primitive(Value::Bool(vibra_native::same(
                 &Units(&first),
@@ -120,7 +120,7 @@ pub(crate) fn apply(
                 &Units(&second),
             )))
         }
-        (C::TextCompare, [first, second]) => {
+        (C::StrCompare, [first, second]) => {
             let (first, second) = (text(first)?, text(second)?);
             ordering(
                 result,
@@ -134,7 +134,7 @@ pub(crate) fn apply(
                 vibra_native::compare(&Units(&first), &Units(&second)),
             )
         }
-        (C::TextConcat, [first, second]) => {
+        (C::StrConcat, [first, second]) => {
             let (first, second) = (text(first)?, text(second)?);
             let mut out = Collect(Vec::new());
             vibra_native::concat(&Units(&first), &Units(&second), &mut out);
@@ -146,7 +146,7 @@ pub(crate) fn apply(
             vibra_native::concat(&Units(&first), &Units(&second), &mut out);
             bytes_value(out.0)
         }
-        (C::TextSlice, [value, start, end]) => {
+        (C::StrSlice, [value, start, end]) => {
             let (value, start, end) = (text(value)?, index(start)?, index(end)?);
             let mut out = Collect(Vec::new());
             let some = vibra_native::slice(&Units(&value), start, end, &mut out);
@@ -158,7 +158,7 @@ pub(crate) fn apply(
             let some = vibra_native::slice(&Units(&value), start, end, &mut out);
             option(result, some.then(|| bytes_value(out.0)))
         }
-        (C::TextToChars, [value]) => {
+        (C::StrToChars, [value]) => {
             let value = text(value)?;
             let mut out = Collect(Vec::new());
             vibra_native::copy(&Units(&value), &mut out);
@@ -183,7 +183,7 @@ pub(crate) fn apply(
                     .collect(),
             )
         }
-        (C::TextFromChars, [Array { values, .. }]) => {
+        (C::StrFromChars, [Array { values, .. }]) => {
             let items = values
                 .iter()
                 .map(|value| match value {
@@ -207,13 +207,13 @@ pub(crate) fn apply(
             vibra_native::copy(&Units(&items), &mut out);
             bytes_value(out.0)
         }
-        (C::TextToUtf8, [value]) => {
+        (C::StrToUtf8, [value]) => {
             let value = text(value)?;
             let mut out = Collect(Vec::new());
             vibra_native::to_utf8(&Units(&value), &mut out);
             bytes_value(out.0)
         }
-        (C::TextFromUtf8, [value]) => {
+        (C::StrFromUtf8, [value]) => {
             let value = bytes(value)?;
             let mut out = Collect(Vec::new());
             if vibra_native::from_utf8(&Units(&value), &mut out) {
@@ -326,8 +326,8 @@ pub(crate) fn apply(
 // The rest of the interpreter that reads a sequence. Canonical key order, the
 // `iter.next` of a builtin value, and the array a `str` or `bytes` pattern is
 // written over are the same operations as a native row: ordering text or bytes
-// is `text.compare` and `bytes.compare`, the iterator that remains is `slice`
-// from the second unit, and the array of a text is `text.to-chars`. Each goes
+// is `str.compare` and `bytes.compare`, the iterator that remains is `slice`
+// from the second unit, and the array of a text is `str.to-chars`. Each goes
 // through the one function of `vibra-native` that the row is, so the
 // interpreter holds no second copy of an algorithm.
 
@@ -360,7 +360,7 @@ impl Source for Scalars<'_> {
     }
 }
 
-/// `text.compare` of two spellings: a `str`, an atom, or the name of a variant.
+/// `str.compare` of two spellings: a `str`, an atom, or the name of a variant.
 pub(crate) fn order_text(first: &str, second: &str) -> std::cmp::Ordering {
     vibra_native::compare(&Scalars(first), &Scalars(second))
 }
@@ -379,7 +379,7 @@ pub(crate) fn rest<U: Copy>(units: &[U]) -> Vec<U> {
     out.0
 }
 
-/// The first scalar of a `str` and the text after it (`text.slice` from `1`),
+/// The first scalar of a `str` and the text after it (`str.slice` from `1`),
 /// or `None` for the empty text.
 pub(crate) fn text_rest(text: &str) -> Option<(char, String)> {
     let head = text.chars().next()?;
@@ -390,11 +390,11 @@ pub(crate) fn text_rest(text: &str) -> Option<(char, String)> {
 }
 
 /// The array of `char` or `u8` a `str` or `bytes` value is written over:
-/// `text.to-chars` and `bytes.to-array`.
+/// `str.to-chars` and `bytes.to-array`.
 pub(crate) fn items_of(value: &RuntimeValue) -> Option<RuntimeValue> {
     let (row, element) = match value {
         RuntimeValue::Primitive(Value::Str(_)) => {
-            (CompilerIntrinsic::TextToChars, Type::Char)
+            (CompilerIntrinsic::StrToChars, Type::Char)
         }
         RuntimeValue::Primitive(Value::Bytes(_)) => {
             (CompilerIntrinsic::BytesToArray, Type::U8)

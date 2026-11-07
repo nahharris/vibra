@@ -21,8 +21,8 @@ use vibra_syntax::{
     Literal, NameKind, TypeExpr, TypeMember,
 };
 
-/// The source identity of the `@std.text` module.
-pub const STDLIB_TEXT_SOURCE_ID: &str = "stdlib/src/std/text.vib";
+/// The source identity of the `@std.str` module.
+pub const STDLIB_STR_SOURCE_ID: &str = "stdlib/src/std/str.vib";
 /// The source identity of the `@std.assert` test-registry module.
 pub const STDLIB_ASSERT_SOURCE_ID: &str = "stdlib/src/std/assert.vib";
 /// The source identity of the `@std.option` module.
@@ -78,8 +78,8 @@ const EMBEDDED_MODULES: &[(&str, &[u8])] = &[
         include_bytes!("../../../stdlib/src/std/bytes.vib"),
     ),
     (
-        "std/text.vib",
-        include_bytes!("../../../stdlib/src/std/text.vib"),
+        "std/str.vib",
+        include_bytes!("../../../stdlib/src/std/str.vib"),
     ),
     (
         "std/option.vib",
@@ -191,7 +191,7 @@ pub struct StdlibModule {
 }
 
 impl StdlibModule {
-    /// The module atom without its `@`, such as `std.text`.
+    /// The module atom without its `@`, such as `std.str`.
     #[must_use]
     pub fn atom(&self) -> &str {
         &self.atom
@@ -896,8 +896,8 @@ mod tests {
             &vibra_resolve::PackageId::new("vibra-stdlib", "0.3.0")
         );
         assert!(
-            stdlib.module("std.text").is_some_and(
-                |module| module.source_id() == super::STDLIB_TEXT_SOURCE_ID
+            stdlib.module("std.str").is_some_and(
+                |module| module.source_id() == super::STDLIB_STR_SOURCE_ID
             )
         );
         assert!(
@@ -911,7 +911,7 @@ mod tests {
                 .is_some_and(|module| module.is_test_registry())
         );
         assert!(
-            stdlib.module("std.text").is_some_and(
+            stdlib.module("std.str").is_some_and(
                 |module| module.source_id() != super::STDLIB_ASSERT_SOURCE_ID
             )
         );
@@ -920,8 +920,8 @@ mod tests {
     #[test]
     fn a_module_digest_mismatch_is_rejected() {
         let inputs =
-            StdlibInputs::embedded().with_module("std/text.vib", b"; tampered\n");
-        rejects(&inputs, "`@std.text` digest mismatch");
+            StdlibInputs::embedded().with_module("std/str.vib", b"; tampered\n");
+        rejects(&inputs, "`@std.str` digest mismatch");
     }
 
     #[test]

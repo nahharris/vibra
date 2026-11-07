@@ -55,8 +55,8 @@
 //! eight integer types and of `f32` and `f64`.
 //!
 //! `array.of` and `dict.of` are natives whose meaning is the packed tail they
-//! receive, so their import answers its operand; `text.length`, `bytes.length`,
-//! `text.equal`, and `bytes.equal` answer a count and a `bool`.
+//! receive, so their import answers its operand; `str.length`, `bytes.length`,
+//! `str.equal`, and `bytes.equal` answer a count and a `bool`.
 
 use super::{CompilerIntrinsic, FloatOp, IntegerOp, NumericType};
 
@@ -261,35 +261,35 @@ pub const NATIVE_ROWS: [NativeRow; 42] = table![
     (Float, FloatOp, F32),
     (Float, FloatOp, F64);
     row(
-        CompilerIntrinsic::TextConcat,
+        CompilerIntrinsic::StrConcat,
         &[Text, Text],
         object(Str, Total),
     ),
-    row(CompilerIntrinsic::TextLength, &[Text], Answer::Length),
-    row(CompilerIntrinsic::TextEqual, &[Text, Text], Answer::Same),
-    row(CompilerIntrinsic::TextCompare, &[Text, Text], Answer::Order),
+    row(CompilerIntrinsic::StrLength, &[Text], Answer::Length),
+    row(CompilerIntrinsic::StrEqual, &[Text, Text], Answer::Same),
+    row(CompilerIntrinsic::StrCompare, &[Text, Text], Answer::Order),
     row(
-        CompilerIntrinsic::TextSlice,
+        CompilerIntrinsic::StrSlice,
         &[Text, Index, Index],
         object(Str, Maybe),
     ),
     row(
-        CompilerIntrinsic::TextToChars,
+        CompilerIntrinsic::StrToChars,
         &[Text],
         object(Array, Total),
     ),
     row(
-        CompilerIntrinsic::TextFromChars,
+        CompilerIntrinsic::StrFromChars,
         &[Cells],
         object(Str, Total),
     ),
     row(
-        CompilerIntrinsic::TextToUtf8,
+        CompilerIntrinsic::StrToUtf8,
         &[Text],
         object(BytesObject, Total),
     ),
     row(
-        CompilerIntrinsic::TextFromUtf8,
+        CompilerIntrinsic::StrFromUtf8,
         &[Bytes],
         object(Str, Conversion),
     ),

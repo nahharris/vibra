@@ -323,24 +323,24 @@ pub enum CompilerIntrinsic {
     CharToU32,
     /// `char.from-u32`.
     CharFromU32,
-    /// `text.concat`.
-    TextConcat,
-    /// `text.length`.
-    TextLength,
-    /// `text.equal`.
-    TextEqual,
-    /// `text.compare`.
-    TextCompare,
-    /// `text.slice`.
-    TextSlice,
-    /// `text.to-chars`.
-    TextToChars,
-    /// `text.from-chars`.
-    TextFromChars,
-    /// `text.to-utf8`.
-    TextToUtf8,
-    /// `text.from-utf8`.
-    TextFromUtf8,
+    /// `str.concat`.
+    StrConcat,
+    /// `str.length`.
+    StrLength,
+    /// `str.equal`.
+    StrEqual,
+    /// `str.compare`.
+    StrCompare,
+    /// `str.slice`.
+    StrSlice,
+    /// `str.to-chars`.
+    StrToChars,
+    /// `str.from-chars`.
+    StrFromChars,
+    /// `str.to-utf8`.
+    StrToUtf8,
+    /// `str.from-utf8`.
+    StrFromUtf8,
     /// `bytes.length`.
     BytesLength,
     /// `bytes.concat`.
@@ -483,7 +483,7 @@ impl CompilerIntrinsic {
     }
 
     /// The stable registry symbol, such as `i32.add-checked` or
-    /// `text.concat`.
+    /// `str.concat`.
     #[must_use]
     pub fn symbol(self) -> &'static str {
         match self {
@@ -492,15 +492,15 @@ impl CompilerIntrinsic {
             }
             Self::CharToU32 => "char.to-u32",
             Self::CharFromU32 => "char.from-u32",
-            Self::TextConcat => "text.concat",
-            Self::TextLength => "text.length",
-            Self::TextEqual => "text.equal",
-            Self::TextCompare => "text.compare",
-            Self::TextSlice => "text.slice",
-            Self::TextToChars => "text.to-chars",
-            Self::TextFromChars => "text.from-chars",
-            Self::TextToUtf8 => "text.to-utf8",
-            Self::TextFromUtf8 => "text.from-utf8",
+            Self::StrConcat => "str.concat",
+            Self::StrLength => "str.length",
+            Self::StrEqual => "str.equal",
+            Self::StrCompare => "str.compare",
+            Self::StrSlice => "str.slice",
+            Self::StrToChars => "str.to-chars",
+            Self::StrFromChars => "str.from-chars",
+            Self::StrToUtf8 => "str.to-utf8",
+            Self::StrFromUtf8 => "str.from-utf8",
             Self::BytesLength => "bytes.length",
             Self::BytesConcat => "bytes.concat",
             Self::BytesEqual => "bytes.equal",
@@ -645,18 +645,18 @@ impl CompilerIntrinsic {
             }
             Self::CharToU32 => function(vec![Type::Char], Type::U32),
             Self::CharFromU32 => function(vec![Type::U32], roles.option_of(Type::Char)),
-            Self::TextConcat => function(vec![Type::Str, Type::Str], Type::Str),
-            Self::TextLength => function(vec![Type::Str], Type::U64),
-            Self::TextEqual => function(vec![Type::Str, Type::Str], Type::Bool),
-            Self::TextCompare => function(vec![Type::Str, Type::Str], roles.ordering()),
-            Self::TextSlice => function(
+            Self::StrConcat => function(vec![Type::Str, Type::Str], Type::Str),
+            Self::StrLength => function(vec![Type::Str], Type::U64),
+            Self::StrEqual => function(vec![Type::Str, Type::Str], Type::Bool),
+            Self::StrCompare => function(vec![Type::Str, Type::Str], roles.ordering()),
+            Self::StrSlice => function(
                 vec![Type::Str, Type::U64, Type::U64],
                 roles.option_of(Type::Str),
             ),
-            Self::TextToChars => function(vec![Type::Str], array_of(Type::Char)),
-            Self::TextFromChars => function(vec![array_of(Type::Char)], Type::Str),
-            Self::TextToUtf8 => function(vec![Type::Str], Type::Bytes),
-            Self::TextFromUtf8 => function(vec![Type::Bytes], converted(Type::Str)),
+            Self::StrToChars => function(vec![Type::Str], array_of(Type::Char)),
+            Self::StrFromChars => function(vec![array_of(Type::Char)], Type::Str),
+            Self::StrToUtf8 => function(vec![Type::Str], Type::Bytes),
+            Self::StrFromUtf8 => function(vec![Type::Bytes], converted(Type::Str)),
             Self::BytesLength => function(vec![Type::Bytes], Type::U64),
             Self::BytesConcat => function(vec![Type::Bytes, Type::Bytes], Type::Bytes),
             Self::BytesEqual => function(vec![Type::Bytes, Type::Bytes], Type::Bool),
@@ -733,15 +733,15 @@ impl CompilerIntrinsic {
         all.extend([
             Self::CharToU32,
             Self::CharFromU32,
-            Self::TextConcat,
-            Self::TextLength,
-            Self::TextEqual,
-            Self::TextCompare,
-            Self::TextSlice,
-            Self::TextToChars,
-            Self::TextFromChars,
-            Self::TextToUtf8,
-            Self::TextFromUtf8,
+            Self::StrConcat,
+            Self::StrLength,
+            Self::StrEqual,
+            Self::StrCompare,
+            Self::StrSlice,
+            Self::StrToChars,
+            Self::StrFromChars,
+            Self::StrToUtf8,
+            Self::StrFromUtf8,
             Self::BytesLength,
             Self::BytesConcat,
             Self::BytesEqual,

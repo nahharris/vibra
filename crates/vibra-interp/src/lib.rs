@@ -1414,7 +1414,7 @@ fn primitive_order(left: &Value, right: &Value) -> std::cmp::Ordering {
     match (left, right) {
         (Value::Bool(left), Value::Bool(right)) => left.cmp(right),
         (Value::Char(left), Value::Char(right)) => left.cmp(right),
-        // Text, bytes, and an atom's spelling order as `text.compare` and
+        // Text, bytes, and an atom's spelling order as `str.compare` and
         // `bytes.compare` do: they are those natives.
         (Value::Str(left), Value::Str(right))
         | (Value::Atom(left), Value::Atom(right)) => native::order_text(left, right),
@@ -1634,7 +1634,7 @@ mod tests {
     fn compiler_text_intrinsics_execute_without_audit_events() {
         let origin = SourceOrigin::new("external.vib", ByteSpan::new(0, 1));
         let concat = Expr::external(
-            vibra_ir::external::CompilerIntrinsic::TextConcat,
+            vibra_ir::external::CompilerIntrinsic::StrConcat,
             vec![
                 Expr::literal(Value::Str("A😀".to_owned()), origin.clone()),
                 Expr::literal(Value::Str("Ω".to_owned()), origin.clone()),
@@ -1642,7 +1642,7 @@ mod tests {
             origin.clone(),
         );
         let length = Expr::external(
-            vibra_ir::external::CompilerIntrinsic::TextLength,
+            vibra_ir::external::CompilerIntrinsic::StrLength,
             vec![concat],
             origin.clone(),
         );

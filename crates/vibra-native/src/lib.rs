@@ -115,7 +115,7 @@ impl<U: Copy> Sink for Count<U> {
     }
 }
 
-/// All of `source`: `text.to-chars`, `text.from-chars`, `bytes.to-array`,
+/// All of `source`: `str.to-chars`, `str.from-chars`, `bytes.to-array`,
 /// `bytes.from-array`, and `dict.entries` copy a sequence into the unit of
 /// another kind of object.
 pub fn copy<S: Source, K: Sink<Unit = S::Unit> + ?Sized>(source: &S, out: &mut K) {
@@ -124,7 +124,7 @@ pub fn copy<S: Source, K: Sink<Unit = S::Unit> + ?Sized>(source: &S, out: &mut K
     }
 }
 
-/// `text.concat`, `bytes.concat`, and `array.concat`: the units of `first`, then
+/// `str.concat`, `bytes.concat`, and `array.concat`: the units of `first`, then
 /// those of `second`.
 pub fn concat<S, T, K>(first: &S, second: &T, out: &mut K)
 where
@@ -146,7 +146,7 @@ pub fn append<S: Source, K: Sink<Unit = S::Unit> + ?Sized>(
     out.put(unit);
 }
 
-/// `text.slice`, `bytes.slice`, and `array.slice`: the units in the half-open
+/// `str.slice`, `bytes.slice`, and `array.slice`: the units in the half-open
 /// range `start..end`, or `false` and nothing when `start` exceeds `end` or
 /// `end` exceeds the length.
 pub fn slice<S: Source, K: Sink<Unit = S::Unit> + ?Sized>(
@@ -164,7 +164,7 @@ pub fn slice<S: Source, K: Sink<Unit = S::Unit> + ?Sized>(
     true
 }
 
-/// `text.compare` and `bytes.compare`: lexicographic by unit, so the first
+/// `str.compare` and `bytes.compare`: lexicographic by unit, so the first
 /// differing unit decides and a proper prefix is less. The scalar value of a
 /// `char` and a byte are their own order.
 pub fn compare<S, T>(first: &S, second: &T) -> Ordering
@@ -185,12 +185,12 @@ where
     first.len().cmp(&second.len())
 }
 
-/// `text.length`, `bytes.length`: the number of units.
+/// `str.length`, `bytes.length`: the number of units.
 pub fn length<S: Source>(source: &S) -> u64 {
     source.len()
 }
 
-/// `text.equal`, `bytes.equal`: the same units in the same order.
+/// `str.equal`, `bytes.equal`: the same units in the same order.
 pub fn same<S, T>(first: &S, second: &T) -> bool
 where
     S: Source,
@@ -221,7 +221,7 @@ pub const fn order_code(order: Ordering) -> i32 {
     }
 }
 
-/// `text.to-utf8`: the UTF-8 encoding of the scalars of `source`.
+/// `str.to-utf8`: the UTF-8 encoding of the scalars of `source`.
 pub fn to_utf8<S, K>(source: &S, out: &mut K)
 where
     S: Source<Unit = u32>,
@@ -232,7 +232,7 @@ where
     }
 }
 
-/// `text.from-utf8`: the scalars of well-formed UTF-8, or `false` for an
+/// `str.from-utf8`: the scalars of well-formed UTF-8, or `false` for an
 /// ill-formed sequence: an overlong form, a surrogate, a value above U+10FFFF, a
 /// stray continuation byte, or a truncated sequence. What a sink received before
 /// `false` is of no use.

@@ -6393,9 +6393,9 @@ mod tests {
     #[test]
     fn program_constructor_accepts_tail_call_to_an_external_wrapper() {
         let origin = origin();
-        let intrinsic = super::external::CompilerIntrinsic::TextLength;
+        let intrinsic = super::external::CompilerIntrinsic::StrLength;
         let external = CheckedFunction::new_external(
-            "text.length",
+            "str.length",
             intrinsic.signature(&super::external::RoleTypes::default()),
             intrinsic,
             origin.clone(),

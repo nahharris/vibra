@@ -89,10 +89,8 @@ pub fn standard_resolve_input(
 ) -> ResolveInput {
     let mut input = ResolveInput::new(package_name, package_version, units)
         .with_reserved_import_paths(
-            [
-                "text", "option", "result", "core", "bool", "bytes", "assert",
-            ]
-            .map(|module| ("std".to_owned(), vec![module.to_owned()])),
+            ["str", "option", "result", "core", "bool", "bytes", "assert"]
+                .map(|module| ("std".to_owned(), vec![module.to_owned()])),
         )
         .with_builtin_members(crate::builtin_member_names())
         .with_assertion_members(crate::assertion_member_names())

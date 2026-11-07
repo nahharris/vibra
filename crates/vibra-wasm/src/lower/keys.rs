@@ -199,7 +199,7 @@ impl Builder<'_, '_> {
 
         // The texts, ordered by the code that orders them for the interpreter.
         let next = self.when_class(&[class::TEXT, class::ATOM, class::SINGLETON]);
-        let text = self.lowering.import(CompilerIntrinsic::TextCompare);
+        let text = self.lowering.import(CompilerIntrinsic::StrCompare);
         let (a, b) = (self.cell(A), self.cell(B));
         self.answer(
             result,

@@ -370,7 +370,7 @@ A call reaches them through the contract, as `(equatable.equal a b)`,
 other spelling names them.
 
 The remaining operations are bound by modules, except the `char.*`, `array.*`,
-and `dict.*` rows. The `text.*` and `bytes.*` rows are native implementations of
+and `dict.*` rows. The `str.*` and `bytes.*` rows are native implementations of
 the members of `str` and `bytes` and of their comparison implementations, whose
 Vibra bodies over the scalars and bytes a `str` or `bytes` value is written
 over are their meaning, as are `array.of`, `array.fold`, and `dict.of`:
@@ -379,21 +379,21 @@ over are their meaning, as are `array.of`, `array.fold`, and `dict.of`:
 | --- | --- | --- |
 | `char.to-u32` | `char -> u32` | Unicode scalar value |
 | `char.from-u32` | `u32 -> (option char)` | `none` for a surrogate or a value above U+10FFFF |
-| `text.concat` | `str str -> str` | Scalar concatenation |
-| `text.length` | `str -> u64` | Scalar count |
-| `text.equal` | `str str -> bool` | Equal scalar sequences |
-| `text.compare` | `str str -> ordering` | Lexicographic by scalar value |
-| `text.slice` | `str u64 u64 -> (option str)` | Scalars in the half-open range; `none` when start exceeds end or end exceeds the length |
-| `text.to-chars` | `str -> (array char)` | Scalars in order |
-| `text.from-chars` | `(array char) -> str` | Scalars in order |
+| `str.concat` | `str str -> str` | Scalar concatenation |
+| `str.length` | `str -> u64` | Scalar count |
+| `str.equal` | `str str -> bool` | Equal scalar sequences |
+| `str.compare` | `str str -> ordering` | Lexicographic by scalar value |
+| `str.slice` | `str u64 u64 -> (option str)` | Scalars in the half-open range; `none` when start exceeds end or end exceeds the length |
+| `str.to-chars` | `str -> (array char)` | Scalars in order |
+| `str.from-chars` | `(array char) -> str` | Scalars in order |
 
-| `text.to-utf8` | `str -> bytes` | UTF-8 encoding |
-| `text.from-utf8` | `bytes -> C str` | `invalid-format` for ill-formed UTF-8 |
+| `str.to-utf8` | `str -> bytes` | UTF-8 encoding |
+| `str.from-utf8` | `bytes -> C str` | `invalid-format` for ill-formed UTF-8 |
 | `bytes.length` | `bytes -> u64` | Byte count |
 | `bytes.concat` | `bytes bytes -> bytes` | Concatenation |
 | `bytes.equal` | `bytes bytes -> bool` | Equal byte sequences |
 | `bytes.compare` | `bytes bytes -> ordering` | Lexicographic by byte |
-| `bytes.slice` | `bytes u64 u64 -> (option bytes)` | As `text.slice`, over bytes |
+| `bytes.slice` | `bytes u64 u64 -> (option bytes)` | As `str.slice`, over bytes |
 | `bytes.to-array` | `bytes -> (array u8)` | Bytes in order |
 | `bytes.from-array` | `(array u8) -> bytes` | Bytes in order |
 
@@ -403,7 +403,7 @@ over are their meaning, as are `array.of`, `array.fold`, and `dict.of`:
 | `array.length` | `(array t) -> u64` | Element count; `where: (t any)` |
 | `array.append` | `(array t) t -> (array t)` | New array with one trailing element |
 | `array.concat` | `(array t) (array t) -> (array t)` | Elements of the first, then the second |
-| `array.slice` | `(array t) u64 u64 -> (option (array t))` | As `text.slice`, over elements |
+| `array.slice` | `(array t) u64 u64 -> (option (array t))` | As `str.slice`, over elements |
 | `array.fold` | `(array t) a (fn (a t) a) -> a` | The left fold: `step` applied to the accumulator and each element in order, starting from `initial`; `where: (t any)` on the type and `(a any)` on the member |
 
 The arithmetic rows and the `char.*`, `array.*`, and `dict.*` rows are static
@@ -411,7 +411,7 @@ methods declared in the embedded module `@std.builtin`: in the `intrinsic-type`
 declarations of the builtin types, and in the `dict` declaration that plays
 `@dict`. They are reached through the type path with no import, exactly as
 those types themselves need none, so `(i32.add-checked left right)` needs no
-`import`. The `text.*` and `bytes.*` rows are likewise reached as the members
+`import`. The `str.*` and `bytes.*` rows are likewise reached as the members
 `str.concat` and `bytes.length`, with no import.
 
 The `to-chars`, `from-chars`, `to-array`, and `from-array` rows are the native

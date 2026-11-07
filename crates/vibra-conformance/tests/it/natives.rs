@@ -40,7 +40,7 @@ fn names(text: &str, word: &str) -> bool {
 }
 
 /// The Rust identifier of the registry variant that stands for a native or a
-/// looping primitive row: `TextConcat`, or `ToStr` and `Parse` for the number
+/// looping primitive row: `StrConcat`, or `ToStr` and `Parse` for the number
 /// rows, which a variant carries as its operation.
 fn variant_name(intrinsic: CompilerIntrinsic) -> String {
     let debug = format!("{intrinsic:?}");
@@ -105,24 +105,24 @@ fn a_native_is_named_only_where_it_is_called_or_imported() {
             ident(&["ArrayOf", "DictOf", "ArrayFold"]),
         ),
         // The emitter writes a call of the import, and nothing else: iteration
-        // slices through the import of `array.slice` and `text.slice`, and key
-        // order compares text through the import of `text.compare`.
+        // slices through the import of `array.slice` and `str.slice`, and key
+        // order compares text through the import of `str.compare`.
         (
             "crates/vibra-wasm/src/lower/iterate.rs",
-            ident(&["ArraySlice", "TextSlice"]),
+            ident(&["ArraySlice", "StrSlice"]),
         ),
         (
             "crates/vibra-wasm/src/lower/keys.rs",
-            ident(&["TextCompare", "BytesCompare"]),
+            ident(&["StrCompare", "BytesCompare"]),
         ),
         // Key order compares text and bytes through their imports, and a
         // wrapper over `str` or `bytes` is the import that converts an array.
         (
             "crates/vibra-wasm/src/lower.rs",
             ident(&[
-                "TextCompare",
+                "StrCompare",
                 "BytesCompare",
-                "TextFromChars",
+                "StrFromChars",
                 "BytesFromArray",
             ]),
         ),
@@ -130,7 +130,7 @@ fn a_native_is_named_only_where_it_is_called_or_imported() {
         // derives its array with; the lowering calls the row's import.
         (
             "crates/vibra-wasm/src/pattern.rs",
-            ident(&["TextToChars", "BytesToArray"]),
+            ident(&["StrToChars", "BytesToArray"]),
         ),
         // The inline table declines the number text rows.
         (
@@ -498,7 +498,7 @@ fn loop_samples() -> Vec<(&'static str, &'static str, &'static str, &'static str
             "(dict.entries (as (dict str i32) (dict.of)))",
             "(as (array (tuple str i32)) (array.of))",
         ),
-        // Atoms are ordered by their spelling through `text.compare`: a prefix
+        // Atoms are ordered by their spelling through `str.compare`: a prefix
         // before its extension, and `-` (U+002D) before a letter.
         (
             "dict.entries",
@@ -556,13 +556,13 @@ fn loop_samples() -> Vec<(&'static str, &'static str, &'static str, &'static str
             "(option.some (tupleof (tupleof (as atom @a) 2i32) (dict.of (as atom @b) 1i32)))",
         ),
         (
-            "text.slice",
+            "str.slice",
             "(option (tuple char str))",
             "(iter.next \"h\u{e9}\u{1d11e}\")",
             "(option.some (tupleof \\h \"\u{e9}\u{1d11e}\"))",
         ),
         (
-            "text.slice",
+            "str.slice",
             "(option (tuple char str))",
             "(iter.next \"\")",
             "(as (option (tuple char str)) (option.none))",
@@ -616,8 +616,8 @@ fn the_looping_rows_and_iteration_agree_across_both_backends_and_the_literal() {
         "array.concat",
         "array.slice",
         "dict.entries",
-        "text.slice",
-        "text.compare",
+        "str.slice",
+        "str.compare",
     ] {
         assert!(
             declared.iter().any(|(_, declared)| declared == name),
@@ -628,13 +628,13 @@ fn the_looping_rows_and_iteration_agree_across_both_backends_and_the_literal() {
 
 // -- a fault in a native is the toolchain defect, end to end -------------------
 
-/// The module the emitter writes for `text.length` of a literal, with the
+/// The module the emitter writes for `str.length` of a literal, with the
 /// constructor call of the literal's object forged: the object is built with the
 /// `kind` and `stride` given, and the import then meets it.
 fn run_forged(kind: u8, stride: u8) -> vibra_wasm_run::Observed {
     let checked = vibra_types::check_source(
         "input.vib",
-        "(import text @std.text)\n(defn main () u64 (str.length \"abc\"))\n",
+        "(import text @std.str)\n(defn main () u64 (str.length \"abc\"))\n",
     );
     let program = checked.program().expect("a program");
     let mut bytes = vibra_wasm::emit(program).expect("lowers").into_bytes();
@@ -676,7 +676,7 @@ fn a_native_that_meets_a_forged_object_ends_as_the_toolchain_defect() {
     for (kind, stride) in [(2, 4), (1, 8), (1, 1), (5, 4)] {
         match run_forged(kind, stride) {
             Observed::Stopped(Outcome::Defect { cause }) => {
-                assert!(cause.contains("native `text.length`"), "{cause}");
+                assert!(cause.contains("native `str.length`"), "{cause}");
             }
             other => panic!("kind {kind} stride {stride} must be a defect: {other:?}"),
         }
@@ -723,13 +723,13 @@ fn a_manifest_that_lists_a_native_the_toolchain_does_not_implement_is_a_provenan
     assert!(rejected(&primitive).contains("`array.slice` in the wrong tier"));
     let native = manifest().replace(
         "compiler: (array\n",
-        "compiler: (array\n    \"text.concat\"\n",
+        "compiler: (array\n    \"str.concat\"\n",
     );
-    assert!(rejected(&native).contains("`text.concat` in the wrong tier"));
+    assert!(rejected(&native).contains("`str.concat` in the wrong tier"));
     // A native a module declares and the manifest does not list.
-    let unlisted = manifest().replace(" \"text.slice\"", "");
+    let unlisted = manifest().replace(" \"str.slice\"", "");
     assert!(
         rejected(&unlisted)
-            .contains("binds `text.slice`, which the manifest does not list")
+            .contains("binds `str.slice`, which the manifest does not list")
     );
 }

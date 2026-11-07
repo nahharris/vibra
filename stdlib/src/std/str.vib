@@ -14,30 +14,30 @@
   visibility: @public
   (defn concat (left str right str) str
     visibility: @public
-    native: "text.concat"
+    native: "str.concat"
     (let (str first) left)
     (let (str second) right)
     (str (array.concat first second)))
   (defn length (value str) u64
     visibility: @public
-    native: "text.length"
+    native: "str.length"
     (let (str scalars) value)
     (array.length scalars))
   (defn slice (value str start u64 end u64) (option str)
     visibility: @public
-    native: "text.slice"
+    native: "str.slice"
     (let (str scalars) value)
     (match (array.slice scalars start end)
       (option.some piece) (option.some (str piece))
       (option.none) (option.none)))
   (defn to-utf8 (value str) bytes
     visibility: @public
-    native: "text.to-utf8"
+    native: "str.to-utf8"
     (let (str scalars) value)
     (bytes (encode scalars 0u64 (array.of))))
   (defn from-utf8 (encoded bytes) (result str core.conversion-error)
     visibility: @public
-    native: "text.from-utf8"
+    native: "str.from-utf8"
     (let (bytes items) encoded)
     (decode items 0u64 (array.of)))
   ; The operations below are reviewed Vibra over the operations above.
@@ -82,11 +82,11 @@
       (last-content scalars (str.length value))))
   (impl equatable
     (defn equal (left self right self) bool
-      native: "text.equal"
+      native: "str.equal"
       (match (ordered.compare left right) (core.ordering.equal) true - false)))
   (impl ordered
     (defn compare (left self right self) core.ordering
-      native: "text.compare"
+      native: "str.compare"
       (let (str first) left)
       (let (str second) right)
       (order first second 0u64)))

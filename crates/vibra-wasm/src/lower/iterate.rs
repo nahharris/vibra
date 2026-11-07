@@ -319,7 +319,7 @@ impl Builder<'_, '_> {
         let (one, length, slice) = (self.temp(), self.temp(), self.temp());
         self.store_bits(one, 1, ValueClass::I64);
         self.store_length(length, iterator);
-        let row = CompilerIntrinsic::TextSlice
+        let row = CompilerIntrinsic::StrSlice
             .native_import()
             .ok_or_else(|| EmitError::malformed("shape", Some(origin.clone())))?;
         let sliced = Type::Applied(option.clone(), vec![Type::Str]);

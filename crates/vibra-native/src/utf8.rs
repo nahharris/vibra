@@ -1,7 +1,7 @@
 //! UTF-8 encoding and decoding over a [`Source`] and a [`Sink`].
 //!
 //! The decoder accepts exactly the well-formed sequences of Unicode, Table 3-7,
-//! the ones the Vibra body of `text.from-utf8` accepts: a scalar at its
+//! the ones the Vibra body of `str.from-utf8` accepts: a scalar at its
 //! shortest form, no surrogate, nothing above U+10FFFF.
 
 use crate::{Sink, Source};

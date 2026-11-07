@@ -254,7 +254,7 @@ fn an_error_nested_five_thousand_deep_is_reported_whole() {
 }
 
 /// An error whose payload is a union, with a text of one mebibyte.
-const BIG_UNION_ERR: &str = r#"(import text @std.text)
+const BIG_UNION_ERR: &str = r#"(import text @std.str)
 
 (deftype detail (union i32 str))
 

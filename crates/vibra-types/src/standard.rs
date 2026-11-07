@@ -21,7 +21,7 @@ use crate::nominal::TypeNames;
 use crate::stdlib::{
     STDLIB_BOOL_SOURCE_ID, STDLIB_BUILTIN_SOURCE_ID, STDLIB_BYTES_SOURCE_ID,
     STDLIB_CORE_SOURCE_ID, STDLIB_ITER_SOURCE_ID, STDLIB_OPTION_SOURCE_ID,
-    STDLIB_RESULT_SOURCE_ID, STDLIB_TEXT_SOURCE_ID, embedded_module, stdlib_type_id,
+    STDLIB_RESULT_SOURCE_ID, STDLIB_STR_SOURCE_ID, embedded_module, stdlib_type_id,
 };
 
 /// The embedded modules that declare types every run can reach: by path,
@@ -30,7 +30,7 @@ const TYPE_MODULES: [(&str, &str, &str); 8] = [
     ("std/iter.vib", STDLIB_ITER_SOURCE_ID, "iter"),
     ("std/builtin.vib", STDLIB_BUILTIN_SOURCE_ID, "builtin"),
     ("std/bool.vib", STDLIB_BOOL_SOURCE_ID, "bool"),
-    ("std/text.vib", STDLIB_TEXT_SOURCE_ID, "text"),
+    ("std/str.vib", STDLIB_STR_SOURCE_ID, "str"),
     ("std/bytes.vib", STDLIB_BYTES_SOURCE_ID, "bytes"),
     ("std/option.vib", STDLIB_OPTION_SOURCE_ID, "option"),
     ("std/result.vib", STDLIB_RESULT_SOURCE_ID, "result"),

@@ -322,7 +322,7 @@ declarations as the type-system chapter defines. A path whose walk reaches no
 module emits `@module.unknown-path`.
 
 ```vibra
-(import text @std.text)
+(import text @std.str)
 (import model @hello.model)
 ```
 
@@ -332,7 +332,7 @@ module. The first atom component names a unit; the remaining components name a
 module beneath that unit's source root, optionally followed by exactly one
 declaration name. Thus
 `@hello.model` resolves to the local `hello` target's `model.vib`, while
-`@std.text` resolves through the `@std` dependency alias. The resolver never
+`@std.str` resolves through the `@std` dependency alias. The resolver never
 guesses from the importing file's directory.
 
 Resolution is total, but access is not. An atom path resolves to a private
@@ -458,12 +458,12 @@ with unit `@std`, keep that provenance in every declaration identity, and are
 imported explicitly, except for the prelude of the type chapter, whose
 declarations every module sees. Every module that declares a prelude name, a
 value or a declaration that plays a role, is in every checked graph: `@std.bool`,
-`@std.core`, `@std.text`, `@std.bytes`, `@std.option`, `@std.result`,
+`@std.core`, `@std.str`, `@std.bytes`, `@std.option`, `@std.result`,
 `@std.iter`, and `@std.builtin`. So `check`, `run`, and `test` always load the
 embedded library. A declaration outside this
 embedded package that writes `external:` acquires no provider authority and is
 rejected before execution. The module set of the package is `@std.core`,
-`@std.option`, `@std.result`, `@std.bool`, `@std.text`,
+`@std.option`, `@std.result`, `@std.bool`, `@std.str`,
 `@std.bytes`, `@std.iter`, the builtin-member module `@std.builtin`, and the
 test-registry module `@std.assert`. Milestone 4 adds the five effect modules
 `@std.io`, `@std.fs`, `@std.env`, `@std.time`, and `@std.random`, which declare

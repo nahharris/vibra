@@ -14,5 +14,5 @@ accepted = false
 [[expect.diagnostics]]
 code = "@module.source-id-collision"
 level = "@error"
-source = "stdlib/src/std/text.vib"
+source = "stdlib/src/std/str.vib"
 span = [0, 0]

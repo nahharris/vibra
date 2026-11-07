@@ -56,7 +56,7 @@ pub use standard::{
 pub use stdlib::{
     STDLIB_ASSERT_SOURCE_ID, STDLIB_BOOL_SOURCE_ID, STDLIB_BUILTIN_SOURCE_ID,
     STDLIB_BYTES_SOURCE_ID, STDLIB_CORE_SOURCE_ID, STDLIB_OPTION_SOURCE_ID,
-    STDLIB_RESULT_SOURCE_ID, STDLIB_TEXT_SOURCE_ID, Stdlib, StdlibError, StdlibInputs,
+    STDLIB_RESULT_SOURCE_ID, STDLIB_STR_SOURCE_ID, Stdlib, StdlibError, StdlibInputs,
     StdlibModule, load_stdlib, load_stdlib_bytes,
 };
 
@@ -4846,7 +4846,7 @@ mod tests {
     fn ordinary_source_cannot_authorize_a_compiler_external() {
         let source = r#"(defn length (value str) u64
   external: @compiler
-  symbol: "text.length")"#;
+  symbol: "str.length")"#;
         let checked = check_source("copied.vib", source);
         assert!(!checked.accepted());
         assert!(checked.program().is_none());
@@ -4894,14 +4894,14 @@ mod tests {
 
     #[test]
     fn a_text_import_lowers_qualified_calls_through_checked_ir() {
-        let source = r#"(import text @std.text)
+        let source = r#"(import text @std.str)
 (defn answer () u64
   (str.length (str.concat "A😀" "")))"#;
         let checked = check_source("app/main.vib", source);
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
         let program = checked.program().expect("checked imported program");
-        assert!(program.canonical_vibon().contains("text.concat"));
-        assert!(program.canonical_vibon().contains("text.length"));
+        assert!(program.canonical_vibon().contains("str.concat"));
+        assert!(program.canonical_vibon().contains("str.length"));
         assert!(!format!("{:?}", program.entry().body()).contains("tail: true"));
     }
 
@@ -4909,7 +4909,7 @@ mod tests {
     fn an_import_alias_collision_relates_the_import() {
         let module = check_source(
             "app/main.vib",
-            "(import text @std.text)\n(def text str \"shadow\")\n(defn answer () str text)",
+            "(import text @std.str)\n(def text str \"shadow\")\n(defn answer () str text)",
         );
         assert!(!module.accepted());
         let diagnostic = module
@@ -4918,11 +4918,11 @@ mod tests {
             .find(|diagnostic| diagnostic.code() == DiagnosticCode::NameRedeclaration)
             .expect("module alias collision");
         assert_eq!(diagnostic.related().len(), 1);
-        assert_eq!(diagnostic.related()[0].span, ByteSpan::new(0, 23));
+        assert_eq!(diagnostic.related()[0].span, ByteSpan::new(0, 22));
 
         let local = check_source(
             "app/main.vib",
-            "(import text @std.text)\n(defn answer () u64 (let text 1u64) text)",
+            "(import text @std.str)\n(defn answer () u64 (let text 1u64) text)",
         );
         assert!(!local.accepted());
         let diagnostic = local
@@ -4931,7 +4931,7 @@ mod tests {
             .find(|diagnostic| diagnostic.code() == DiagnosticCode::NameRedeclaration)
             .expect("local alias collision");
         assert_eq!(diagnostic.related().len(), 1);
-        assert_eq!(diagnostic.related()[0].span, ByteSpan::new(0, 23));
+        assert_eq!(diagnostic.related()[0].span, ByteSpan::new(0, 22));
     }
 
     #[test]
@@ -4939,7 +4939,7 @@ mod tests {
         for source in [
             r#"(defn read () str
   external: @host
-  symbol: "text.concat")"#,
+  symbol: "str.concat")"#,
             r#"(defn read () str
   external: @compiler
   symbol: "text.unknown")"#,
@@ -4998,14 +4998,14 @@ mod tests {
     fn a_source_cannot_authorize_an_external_declaration() {
         for (source, code) in [
             (
-                r#"(import text @std.text)
+                r#"(import text @std.str)
 (defn answer () str "spoof"
   external: @compiler
-  symbol: "text.concat")"#,
+  symbol: "str.concat")"#,
                 DiagnosticCode::SyntaxInvalidAttribute,
             ),
             (
-                r#"(import text @std.text)
+                r#"(import text @std.str)
 (defn answer () str
   effects: (@std.io)
   "spoof")"#,

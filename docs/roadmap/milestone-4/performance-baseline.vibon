@@ -13,7 +13,7 @@
       wasm:
       (record
         module-bytes:
-        101682u64
+        101679u64
         allocations:
         300015u64
         peak-live-bytes:
@@ -28,7 +28,7 @@
       wasm:
       (record
         module-bytes:
-        101682u64
+        101679u64
         allocations:
         300349u64
         peak-live-bytes:
@@ -73,7 +73,7 @@
       wasm:
       (record
         module-bytes:
-        42224u64
+        42222u64
         allocations:
         4008u64
         peak-live-bytes:
@@ -88,7 +88,7 @@
       wasm:
       (record
         module-bytes:
-        153313u64
+        153311u64
         allocations:
         212u64
         peak-live-bytes:
@@ -103,7 +103,7 @@
       wasm:
       (record
         module-bytes:
-        6768u64
+        6766u64
         allocations:
         8004u64
         peak-live-bytes:
@@ -118,7 +118,7 @@
       wasm:
       (record
         module-bytes:
-        7998u64
+        7997u64
         allocations:
         4003u64
         peak-live-bytes:
@@ -148,7 +148,7 @@
       wasm:
       (record
         module-bytes:
-        52282u64
+        52281u64
         allocations:
         38u64
         peak-live-bytes:
@@ -179,13 +179,13 @@
     11u32
     median-microseconds:
     (array
-      (record program: @deep-tail-walk interpreter: 510267u64 wasm: 141218u64)
-      (record program: @m3-demo-tests interpreter: 497868u64 wasm: 960861u64)
-      (record program: @non-tail-depth interpreter: 445956u64 wasm: 53661u64)
-      (record program: @tail-loop interpreter: 3858386u64 wasm: 224984u64)
-      (record program: @array-fold interpreter: 1291u64 wasm: 50159u64)
-      (record program: @dict-insert interpreter: 202u64 wasm: 139422u64)
-      (record program: @text-concat interpreter: 17224u64 wasm: 38561u64)
-      (record program: @float-to-str interpreter: 5981u64 wasm: 29202u64)
-      (record program: @nested-value-5000 interpreter: 66654u64 wasm: 34630u64)
-      (record program: @effectful-walk interpreter: 21u64 wasm: 62232u64))))
+      (record program: @deep-tail-walk interpreter: 360333u64 wasm: 101962u64)
+      (record program: @m3-demo-tests interpreter: 360450u64 wasm: 690060u64)
+      (record program: @non-tail-depth interpreter: 306897u64 wasm: 39325u64)
+      (record program: @tail-loop interpreter: 3135046u64 wasm: 180872u64)
+      (record program: @array-fold interpreter: 1107u64 wasm: 42039u64)
+      (record program: @dict-insert interpreter: 157u64 wasm: 108760u64)
+      (record program: @text-concat interpreter: 15962u64 wasm: 28474u64)
+      (record program: @float-to-str interpreter: 5651u64 wasm: 23795u64)
+      (record program: @nested-value-5000 interpreter: 52273u64 wasm: 29082u64)
+      (record program: @effectful-walk interpreter: 19u64 wasm: 51282u64))))
