@@ -1,0 +1,24 @@
+{
+  "name": "vibra",
+  "version": "0.0.1",
+  "description": "Write, check, run, and test Vibra programs: the language, its standard library, and the vibra CLI.",
+  "author": {
+    "name": "Hannah Harrisonn",
+    "url": "https://github.com/nahharris"
+  },
+  "homepage": "https://github.com/nahharris/vibra",
+  "repository": "https://github.com/nahharris/vibra",
+  "license": "MIT OR Apache-2.0",
+  "keywords": ["vibra", "programming-language", "skills"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Vibra",
+    "shortDescription": "Write and run Vibra programs",
+    "longDescription": "Skills for the Vibra pre-alpha: write idiomatic Vibra source with its types, effects, and standard library, and drive the vibra CLI to format, check, run, and test projects.",
+    "developerName": "Hannah Harrisonn",
+    "category": "Developer Tools",
+    "capabilities": ["Read", "Write"],
+    "websiteURL": "https://github.com/nahharris/vibra",
+    "defaultPrompt": ["Write a Vibra program that reads a file and prints its line count."]
+  }
+}

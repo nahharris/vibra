@@ -1,0 +1,20 @@
+{
+  "name": "vibra",
+  "interface": {
+    "displayName": "Vibra"
+  },
+  "plugins": [
+    {
+      "name": "vibra",
+      "source": {
+        "source": "local",
+        "path": "./plugins/vibra"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

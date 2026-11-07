@@ -1,0 +1,17 @@
+{
+  "name": "vibra",
+  "owner": {
+    "name": "Hannah Harrisonn"
+  },
+  "metadata": {
+    "description": "Agent skills for writing and running Vibra, the vibe-coding-first programming language (pre-alpha).",
+    "version": "0.0.1"
+  },
+  "plugins": [
+    {
+      "name": "vibra",
+      "source": "./plugins/vibra",
+      "description": "Write, check, run, and test Vibra programs: the language, its standard library, and the vibra CLI."
+    }
+  ]
+}

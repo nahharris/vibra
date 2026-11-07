@@ -1,6 +1,7 @@
 /target/
 /tmp/
-/.agents/
+/.agents/*
+!/.agents/plugins/
 /.worktrees/
 skills-lock.json
 *.rs.bk

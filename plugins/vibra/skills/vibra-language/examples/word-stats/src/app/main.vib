@@ -1,0 +1,47 @@
+; Reads the file named by the first program argument and prints its statistics:
+;
+;   vibra run -- notes.txt
+;
+; Every way the run can fail is a variant of `app-error`, and `main` returns it
+; as an `err`, which `vibra run` reports with exit code 6.
+(import env @std.env)
+
+(import fs @std.fs)
+
+(import io @std.io)
+
+(import count @stats.count)
+
+(deftype usage (enum missing-path void))
+
+(deftype app-error (union usage env.env-error fs.fs-error io.io-error))
+
+(defn first-argument () (result str app-error)
+  effects: (env.read)
+  (match
+    (env.read.args)
+    (result.err cause) (result.err (app-error cause))
+    (result.ok args) (match
+      (args 0u64)
+      (option.some path) (result.ok path)
+      (option.none) (result.err (app-error (usage.missing-path))))))
+
+(defn read-source (path str) (result str app-error)
+  effects: (fs.read)
+  (match
+    (fs.read.text (fs.path path))
+    (result.ok contents) (result.ok contents)
+    (result.err cause) (result.err (app-error cause))))
+
+(defn print (output str) (result void app-error)
+  effects: (io.stdout)
+  (match
+    (io.stdout.text output)
+    (result.ok) (result.ok)
+    (result.err cause) (result.err (app-error cause))))
+
+(defn main () (result void app-error)
+  effects: (env.read fs.read io.stdout)
+  (let path (try (first-argument)))
+  (let source (try (read-source path)))
+  (print (count.render (count.summarize source))))

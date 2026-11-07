@@ -1,0 +1,72 @@
+; Pure text statistics. Nothing here performs an effect, so every function has
+; the default empty effect row and the tests can call it directly. The counts
+; use the unchecked `u64.add` and `u64.sub`, which saturate at the bounds of
+; `u64` instead of returning a `result`.
+(import core @std.core)
+
+(import from @std.core.from)
+
+(deftype summary (record lines u64 words u64 longest u64) visibility: @public)
+
+; The larger of two counts.
+(defn larger (left u64 right u64) u64
+  (match (ordered.compare left right) (core.ordering.less) right - left))
+
+; The number of words in `line`: runs of characters that are not ASCII
+; whitespace. The walk is a tail call, so it runs in constant stack depth.
+(defn count-words (line str) u64
+  visibility: @public
+  (let (str scalars) line)
+  (words-from scalars 0u64 false 0u64))
+
+(defn words-from (scalars (array char) index u64 inside bool count u64) u64
+  (match
+    (scalars index)
+    (option.none) count
+    (option.some scalar) (if
+      (char.is-ascii-whitespace scalar)
+      (words-from scalars (u64.add index 1u64) false count)
+      (words-from
+        scalars
+        (u64.add index 1u64)
+        true
+        (if inside count (u64.add count 1u64))))))
+
+; Line, word, and longest-line counts of `source`. An empty document has no
+; lines; a trailing newline does not start another line.
+(defn summarize (source str) summary
+  visibility: @public
+  (if
+    (equatable.equal source "")
+    (summary lines: 0u64 words: 0u64 longest: 0u64)
+    (array.fold
+      (str.split (trimmed source) "\n")
+      (summary lines: 0u64 words: 0u64 longest: 0u64)
+      (lambda
+        (seen summary line str)
+        summary
+        (summary
+          lines: (u64.add (seen @lines) 1u64)
+          words: (u64.add (seen @words) (count-words line))
+          longest: (larger (seen @longest) (str.length line)))))))
+
+(defn trimmed (source str) str
+  (if
+    (str.ends-with source "\n")
+    (match
+      (str.slice source 0u64 (u64.sub (str.length source) 1u64))
+      (option.some head) head
+      (option.none) source)
+    source))
+
+; One report line, such as `lines: 2`. `from.convert` renders the count,
+; because the expected type is `str`.
+(defn field (label str value u64) str
+  (str.concat label (str.concat ": " (str.concat (from.convert value) "\n"))))
+
+; The report `vibra run` prints.
+(defn render (stats summary) str
+  visibility: @public
+  (str.concat
+    (field "lines" (stats @lines))
+    (str.concat (field "words" (stats @words)) (field "longest" (stats @longest)))))
