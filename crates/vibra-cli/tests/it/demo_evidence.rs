@@ -137,7 +137,7 @@ fn assert_nonexecuting_run(
     expected_exit: i32,
     diagnostic_code: &str,
 ) {
-    let output = run(&workspace.root, &["run", "src/hello"]);
+    let output = run(&workspace.root, &["run", "@hello"]);
     assert_nonexecuting_output(
         &output,
         expected_result,
@@ -242,7 +242,7 @@ fn actual_binary_positive_demo_repeats_in_two_fresh_hello_workspaces() {
             "(import assert @std.assert)\n(import helper @hello.helper)\n(test \"answer\" (assert.equal (helper.answer) 42i32))\n",
         );
 
-        let checked = run(&workspace.root, &["check", "src/hello"]);
+        let checked = run(&workspace.root, &["check", "@hello"]);
         let check_document = envelope(&checked, 0, "check", "@command.ok");
         assert!(
             check_document["payload"]["accepted"]
@@ -251,9 +251,9 @@ fn actual_binary_positive_demo_repeats_in_two_fresh_hello_workspaces() {
         );
         assert_eq!(check_document["diagnostics"], serde_json::json!([]));
 
-        let executed = run(&workspace.root, &["run", "src/hello"]);
+        let executed = run(&workspace.root, &["run", "@hello"]);
         let run_document = envelope(&executed, 0, "run", "@command.ok");
-        assert_eq!(run_document["payload"]["target"], "src/hello");
+        assert_eq!(run_document["payload"]["target"], "@hello");
         assert_eq!(
             run_document["payload"]["programResult"],
             "(record type: @void value: void)\n"
@@ -288,11 +288,8 @@ fn actual_binary_run_preflight_failures_never_produce_a_program_result() {
         "src/hello/main.vib",
         "(defn spin () void (spin))\n(defn value (number i32) i32 number)\n(defn main () void (let - (spin)) (let - (value true)) (do))\n",
     );
-    let mismatch_output = run_with_timeout(
-        &mismatch.root,
-        &["run", "src/hello"],
-        Duration::from_secs(10),
-    );
+    let mismatch_output =
+        run_with_timeout(&mismatch.root, &["run", "@hello"], Duration::from_secs(10));
     assert_nonexecuting_output(
         &mismatch_output,
         "@command.diagnostics",

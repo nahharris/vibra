@@ -35,7 +35,7 @@ impl Scratch {
 
     /// The JSON envelope of `run`, validated against the command-result schema.
     fn json(&self, input: &[u8], code: i32, result: &str) -> Value {
-        let output = self.vibra(&["--format", "json", "run", "src/app"], input);
+        let output = self.vibra(&["--format", "json", "run", "@app"], input);
         assert_eq!(output.status.code(), Some(code), "{output:?}");
         let envelope: Value = serde_json::from_slice(&output.stdout).expect("json");
         assert_envelope_schema(&envelope);
@@ -45,7 +45,7 @@ impl Scratch {
 
     /// Human `run`.
     fn human(&self, input: &[u8], code: i32) -> Output {
-        let output = self.vibra(&["run", "src/app"], input);
+        let output = self.vibra(&["run", "@app"], input);
         assert_eq!(output.status.code(), Some(code), "{output:?}");
         output
     }

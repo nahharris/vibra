@@ -60,7 +60,7 @@ fn check_accepts_a_continuation_passing_loop() {
 #[test]
 fn run_completes_a_continuation_passing_loop() {
     let scratch = Scratch::new();
-    let run = scratch.vibra(&["run", "src/app"]);
+    let run = scratch.vibra(&["run", "@app"]);
     assert_eq!(run.status.code(), Some(0), "{run:?}");
     assert!(run.stderr.is_empty(), "{run:?}");
 }

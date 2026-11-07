@@ -42,7 +42,7 @@ vibra fmt
 vibra check
 vibra lint
 vibra test
-vibra run <target> [-- <arg>...]
+vibra run [<target>] [-- <arg>...]
 vibra build
 vibra query <subject> [--include <metadata>] [--expand <relations>]
 vibra edit fix|rename|organize-imports
@@ -64,7 +64,7 @@ The admitted process grammar is closed and uses one global option prefix:
 vibra [--format human|json] [--workspace PATH] project init [DEST]
 vibra [--format human|json] [--workspace PATH] fmt PATH [--write]
 vibra [--format human|json] [--workspace PATH] check [TARGET]
-vibra [--format human|json] [--workspace PATH] run TARGET [-- ARG...]
+vibra [--format human|json] [--workspace PATH] run [TARGET] [-- ARG...]
 vibra [--format human|json] [--workspace PATH] test [TEST]
 vibra [--format human|json] help
 ```
@@ -73,8 +73,8 @@ vibra [--format human|json] help
 token. Every token after `--` is one argument, in order and verbatim, including a
 token that begins with `-` or is itself `--`; `--` with no argument after it is
 valid and gives none. The arguments are what `env.read.args` returns. `--` is
-accepted only by `run`, only after `TARGET`, and only once as the separator;
-before `TARGET` it is invalid input, as is `--` on any other command. `test`
+accepted only by `run`, after the optional `TARGET`, and only once as the
+separator; `--` on any other command is invalid input. `test`
 takes no arguments: its host world supplies `args`, as the runtime chapter's host
 world section states, so the same test gives the same result wherever it runs. An
 argument that is not Unicode is `not-unicode` to the operation that reads it, not
@@ -87,8 +87,8 @@ no arguments, prints this grammar to stdout in human mode, and succeeds with
 
 `--format` defaults to `human` and may occur once before the command. The
 default workspace is the current directory. `PATH` and `DEST` are
-workspace-relative and may not escape its canonical root. `TARGET` is relative
-to the discovered project root and may not escape it. `TEST` is an exact
+workspace-relative and may not escape its canonical root. `TARGET` is the
+canonical atom of a target's `name`, such as `@app`. `TEST` is an exact
 test selector, not a path. Its grammar is a canonical test-module atom, then
 `::`, then one canonical Vibra string literal containing the decoded test
 name; for example, `@tests.math::"adds one"`. The module atom MUST begin with
@@ -102,6 +102,9 @@ empty, and the command creates only the canonical `project.vibon`, `src/`, and
 `tests/` layout. `fmt` previews by default; `--write` is its only mutating
 flag. `check`
 checks every target when `TARGET` is omitted. `run` requires one binary target.
+When `TARGET` is omitted, `run` selects the project's only binary target; a
+project with no binary target or with several is `@command.invalid-input`
+(exit 2, empty diagnostic array).
 `test` runs every test in canonical discovery order when `TEST` is omitted and
 otherwise selects the declaration or declarations with exactly that module and
 decoded name; a valid workspace has one because duplicate names are errors. A
@@ -149,13 +152,12 @@ are limited to the explicit `fmt --write` spelling and the `--` separator of
 `run`; unknown options, extra positionals before the separator, and alternate
 spellings are invalid input.
 
-`TARGET` is a relative filesystem path. After canonicalization beneath the
-discovered project root, it MUST identify exactly one validated local target's
-canonical root; target names and target-name atoms are not selectors. Pairwise
-disjoint roots make this match unique. A path that does not identify a target
-and a library selected by `run` are `@command.invalid-input` with process exit
-2 and an empty diagnostic array. Omitting the required `run TARGET` is also
-invalid input.
+`TARGET` is a canonical atom. It MUST equal the `name` of exactly one validated
+local target of the discovered project; names are unique, so the match is
+unique. Paths, roots, and non-atom spellings are not selectors. A token that
+names no target, and a library selected by `run`, are `@command.invalid-input`
+with process exit 2 and an empty diagnostic array. The `target` field of the
+`run` payload is that atom.
 
 `check TARGET` checks every source declaration in that target and in every
 local target unit reached through its imports, recursively. It checks all

@@ -65,7 +65,7 @@ fn a_program_reads_the_file_named_on_stdin_and_writes_beside_it() {
     let at = spelled(&input);
     let run = vibra(
         &scratch,
-        &["--format", "json", "run", "src/app"],
+        &["--format", "json", "run", "@app"],
         &format!("{at}\n"),
     );
     assert_eq!(run.status.code(), Some(0), "{run:?}");
@@ -106,7 +106,7 @@ fn a_missing_file_is_the_err_of_its_call_the_entry_returns_and_no_trap() {
     let missing = spelled(&scratch.path().join("data/absent.txt"));
     let run = vibra(
         &scratch,
-        &["--format", "json", "run", "src/app"],
+        &["--format", "json", "run", "@app"],
         &format!("{missing}\n"),
     );
     // The outcome code of an `err` entry is Step 19; here the run has no trap.
