@@ -399,14 +399,8 @@ fn step13_test_command_runs_an_empty_suite_after_step12_commands() {
     assert_eq!(check_envelope["payload"]["accepted"], true);
     assert_eq!(check_envelope["diagnostics"], serde_json::json!([]));
 
-    let run_output = run(&[
-        "--format",
-        "json",
-        "--workspace",
-        &workspace,
-        "run",
-        "src/app",
-    ]);
+    let run_output =
+        run(&["--format", "json", "--workspace", &workspace, "run", "@app"]);
     assert_eq!(run_output.status.code(), Some(0));
     let run_envelope = json(&run_output);
     assert_envelope_schema(&run_envelope);
@@ -443,8 +437,12 @@ fn valid_commands_validate_the_frozen_argument_grammar_first() {
         &["check", "one", "two"],
         &["check", "--all"],
         &["check", "../outside"],
-        &["run"],
-        &["run", "app", "extra"],
+        &["check", "src/app"],
+        &["check", "@missing"],
+        &["run", "app"],
+        &["run", "src/app"],
+        &["run", "@app", "extra"],
+        &["run", "@missing"],
         &["run", "../outside"],
         &["test", "module.case", "extra"],
         &["test", "module.case"],
@@ -482,8 +480,9 @@ fn valid_commands_validate_the_frozen_argument_grammar_first() {
 
     let valid: &[&[&str]] = &[
         &["check"],
-        &["check", "src/app"],
-        &["run", "src/app"],
+        &["check", "@app"],
+        &["run", "@app"],
+        &["run"],
         &["test"],
     ];
     for arguments in valid {

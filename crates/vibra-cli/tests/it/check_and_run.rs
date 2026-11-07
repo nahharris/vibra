@@ -39,7 +39,7 @@ fn check_accepts_a_selected_target_by_its_project_relative_root() {
         "--workspace",
         &workspace,
         "check",
-        "src/app",
+        "@app",
     ]);
 
     assert_eq!(output.status.code(), Some(0));
@@ -61,14 +61,7 @@ fn run_emits_one_json_envelope_and_keeps_program_output_inside_it() {
     );
     let workspace = project.path().to_string_lossy().into_owned();
 
-    let output = run(&[
-        "--format",
-        "json",
-        "--workspace",
-        &workspace,
-        "run",
-        "src/app",
-    ]);
+    let output = run(&["--format", "json", "--workspace", &workspace, "run", "@app"]);
 
     assert_eq!(output.status.code(), Some(0));
     assert!(output.stderr.is_empty());
@@ -77,7 +70,7 @@ fn run_emits_one_json_envelope_and_keeps_program_output_inside_it() {
     assert_eq!(envelope["command"], "run");
     assert_eq!(envelope["result"], "@command.ok");
     assert_eq!(envelope["diagnostics"], serde_json::json!([]));
-    assert_eq!(envelope["payload"]["target"], "src/app");
+    assert_eq!(envelope["payload"]["target"], "@app");
     assert_eq!(envelope["payload"]["stdout"], "");
     assert_eq!(envelope["payload"]["stderr"], "");
     assert_eq!(envelope["payload"]["auditTrace"], serde_json::json!([]));
@@ -108,7 +101,7 @@ fn explicit_check_does_not_fail_on_an_unrelated_target() {
         "--workspace",
         &workspace,
         "check",
-        "src/app",
+        "@app",
     ]);
     let all = run(&["--format", "json", "--workspace", &workspace, "check"]);
 
@@ -138,7 +131,7 @@ fn unknown_target_is_invalid_input_with_the_documented_exit() {
         "--workspace",
         &workspace,
         "check",
-        "src/missing",
+        "@missing",
     ]);
 
     assert_eq!(output.status.code(), Some(2));
@@ -176,16 +169,10 @@ fn selected_check_includes_every_declaration_in_the_transitive_import_closure() 
         "--workspace",
         &workspace,
         "check",
-        "src/app",
+        "@app",
     ]);
-    let run_target = run(&[
-        "--format",
-        "json",
-        "--workspace",
-        &workspace,
-        "run",
-        "src/app",
-    ]);
+    let run_target =
+        run(&["--format", "json", "--workspace", &workspace, "run", "@app"]);
 
     assert_eq!(check.status.code(), Some(1));
     let check_envelope = json(&check);
@@ -206,7 +193,7 @@ fn selected_check_includes_every_declaration_in_the_transitive_import_closure() 
     let run_envelope = json(&run_target);
     assert_envelope_schema(&run_envelope);
     assert_eq!(run_envelope["result"], "@command.diagnostics");
-    assert_eq!(run_envelope["payload"]["target"], "src/app");
+    assert_eq!(run_envelope["payload"]["target"], "@app");
     assert_eq!(run_envelope["payload"]["programResult"], Value::Null);
 }
 
@@ -234,7 +221,7 @@ fn run_rejects_a_library_target_as_invalid_input() {
         "--workspace",
         &workspace,
         "run",
-        "src/util",
+        "@util",
     ]);
 
     assert_eq!(output.status.code(), Some(2));
@@ -255,7 +242,7 @@ fn check_and_run_select_project_relative_targets_from_a_nested_cwd() {
     fs::create_dir_all(&nested).expect("create nested working directory");
 
     for command in ["check", "run"] {
-        let output = run_from(&nested, &["--format", "json", command, "src/app"]);
+        let output = run_from(&nested, &["--format", "json", command, "@app"]);
 
         assert_eq!(output.status.code(), Some(0), "{command}: {:?}", output);
         assert!(output.stderr.is_empty(), "{command}: {:?}", output.stderr);
@@ -264,7 +251,7 @@ fn check_and_run_select_project_relative_targets_from_a_nested_cwd() {
         assert_eq!(envelope["command"], command);
         assert_eq!(envelope["result"], "@command.ok");
         if command == "run" {
-            assert_eq!(envelope["payload"]["target"], "src/app");
+            assert_eq!(envelope["payload"]["target"], "@app");
         }
     }
 }
@@ -297,7 +284,7 @@ fn signed_stdlib_imports_cannot_be_rebound_by_a_local_std_target() {
             "--workspace",
             &workspace,
             command,
-            "src/app",
+            "@app",
         ]);
 
         assert_eq!(output.status.code(), Some(0), "{command}: {:?}", output);
@@ -320,7 +307,7 @@ fn check_returns_without_interpreting_a_nonterminating_pure_entry() {
     );
     let mut child = vibra()
         .current_dir(project.path())
-        .args(["--format", "json", "check", "src/app"])
+        .args(["--format", "json", "check", "@app"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

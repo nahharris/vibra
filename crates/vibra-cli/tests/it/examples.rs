@@ -130,7 +130,7 @@ fn every_example_checks_passes_its_tests_and_is_in_canonical_format() {
 #[test]
 fn the_catalog_and_the_configuration_example_run_to_ok() {
     for name in ["m3-catalog", "stage-3a-config"] {
-        let run = vibra(&example(name), &["--format", "json", "run", "src/app"]);
+        let run = vibra(&example(name), &["--format", "json", "run", "@app"]);
         assert_eq!(run.status.code(), Some(0), "{name}: {run:?}");
         let run = json(&run);
         assert_eq!(run["result"], "@command.ok", "{name}");
@@ -222,7 +222,7 @@ fn the_console_test_writes_to_its_audit_trace_and_not_the_process() {
 fn json_run_captures_the_streams_and_reports_the_events_as_objects() {
     let run = vibra_in(
         &example("m4-console"),
-        &["--format", "json", "run", "src/app"],
+        &["--format", "json", "run", "@app"],
         "hello\n",
     );
     assert_eq!(run.status.code(), Some(0), "{run:?}");
@@ -254,7 +254,7 @@ fn json_run_captures_the_streams_and_reports_the_events_as_objects() {
 
 #[test]
 fn human_run_writes_the_programs_bytes_to_the_process() {
-    let run = vibra_in(&example("m4-console"), &["run", "src/app"], "hello\n");
+    let run = vibra_in(&example("m4-console"), &["run", "@app"], "hello\n");
     assert_eq!(run.status.code(), Some(0), "{run:?}");
     assert_eq!(
         String::from_utf8(run.stdout).expect("utf-8"),
@@ -270,14 +270,14 @@ fn the_demo_reads_the_path_it_is_given_and_writes_the_quoted_content() {
     let at = spelled(&input);
     let demo = example("m4-demo");
 
-    let human = vibra(&demo, &["run", "src/app", "--", &at]);
+    let human = vibra(&demo, &["run", "@app", "--", &at]);
     assert_eq!(human.status.code(), Some(0), "{human:?}");
     assert_eq!(
         String::from_utf8(human.stdout).expect("utf-8"),
         "> alpha\n> beta\n"
     );
 
-    let machine = vibra(&demo, &["--format", "json", "run", "src/app", "--", &at]);
+    let machine = vibra(&demo, &["--format", "json", "run", "@app", "--", &at]);
     assert_eq!(machine.status.code(), Some(0), "{machine:?}");
     let envelope = json(&machine);
     assert_eq!(envelope["result"], "@command.ok");
@@ -297,7 +297,7 @@ fn the_demo_reads_the_path_it_is_given_and_writes_the_quoted_content() {
     // Another argument reads another file with the same binary source.
     let other = scratch.path().join("other.txt");
     std::fs::write(&other, "one\n").expect("input file");
-    let run = vibra(&demo, &["run", "src/app", "--", &spelled(&other)]);
+    let run = vibra(&demo, &["run", "@app", "--", &spelled(&other)]);
     assert_eq!(run.status.code(), Some(0), "{run:?}");
     assert_eq!(String::from_utf8(run.stdout).expect("utf-8"), "> one\n");
 }
@@ -308,17 +308,17 @@ fn a_function_ceiling_that_omits_a_performed_root_is_rejected_before_running() {
         (
             "@std.fs.read",
             "(env.read io.stdout)",
-            "performs @std.fs.read via @std.fs.read.text",
+            "performs @std.fs.read via @app.main.read-file",
         ),
         (
             "@std.env.read",
             "(fs.read io.stdout)",
-            "performs @std.env.read via @std.env.read.args",
+            "performs @std.env.read via @app.main.first-argument",
         ),
         (
             "@std.io.stdout",
             "(env.read fs.read)",
-            "performs @std.io.stdout via @std.io.stdout.text",
+            "performs @std.io.stdout via @app.main.write-out",
         ),
     ] {
         let scratch = TempDir::new("examples");
@@ -347,7 +347,7 @@ fn a_function_ceiling_that_omits_a_performed_root_is_rejected_before_running() {
         // `run` refuses the same source and performs nothing.
         let run = vibra(
             &project,
-            &["--format", "json", "run", "src/app", "--", "unused"],
+            &["--format", "json", "run", "@app", "--", "unused"],
         );
         assert_ne!(run.status.code(), Some(0), "{omitted}: {run:?}");
         let performed = json(&run);

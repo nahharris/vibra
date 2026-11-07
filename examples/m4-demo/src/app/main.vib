@@ -6,27 +6,45 @@
 
 (import text @std.text)
 
+(deftype usage (enum missing-path void))
+
+(deftype demo-error (union usage env.env-error fs.fs-error io.io-error))
+
 (defn quote (quoted str line str) str
   (text.concat quoted (text.concat "> " (text.concat line "\n"))))
 
+(defn first-argument () (result str demo-error)
+  effects: (env.read)
+  (match
+    (env.read.args)
+    (result.ok found) (match
+      (found 0u64)
+      (option.some path) (result.ok path)
+      (option.none) (result.err (demo-error (usage.missing-path))))
+    (result.err cause) (result.err (demo-error cause))))
+
+(defn read-file (path str) (result str demo-error)
+  effects: (fs.read)
+  (match
+    (fs.read.text (fs.path path))
+    (result.ok contents) (result.ok contents)
+    (result.err cause) (result.err (demo-error cause))))
+
+(defn write-out (output str) (result void demo-error)
+  effects: (io.stdout)
+  (match
+    (io.stdout.text output)
+    (result.ok) (result.ok)
+    (result.err cause) (result.err (demo-error cause))))
+
 ; The M4 demo: reads the file named by the first program argument, quotes each
 ; of its lines, and writes the result to standard output. The entry declares
-; each root it performs, and so does the target.
-(defn main () (result void fs.fs-error)
+; each root it performs, and so does the target. No failure is swallowed: a
+; missing argument, an unreadable file, and a failed write each end the run as an
+; `err` of `demo-error`, which `vibra run` reports with exit code 6.
+(defn main () (result void demo-error)
   effects: (env.read fs.read io.stdout)
-  (let
-    arguments
-    (match (env.read.args) (result.ok found) found (result.err -) (array.of "")))
-  (let
-    first
-    (match
-      (array.slice arguments 0u64 1u64)
-      (option.some picked) picked
-      (option.none) (array.of "")))
-  (let name (array.fold first "" text.concat))
-  (let contents (try (fs.read.text (fs.path name))))
+  (let path (try (first-argument)))
+  (let contents (try (read-file path)))
   (let lines (text.split (text.trim contents) "\n"))
-  (match
-    (io.stdout.text (array.fold lines "" quote))
-    (result.ok) (result.ok)
-    (result.err -) (result.ok)))
+  (write-out (array.fold lines "" quote)))

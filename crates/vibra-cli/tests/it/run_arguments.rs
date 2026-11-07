@@ -1,7 +1,7 @@
-//! M4 Step 18: `vibra run TARGET [-- ARG...]` through the real binary. The
+//! M4 Step 18: `vibra run [TARGET] [-- ARG...]` through the real binary. The
 //! arguments after the literal `--` are exactly what `env.read.args` returns
 //! under the system provider, verbatim and in order; `--` is accepted only by
-//! `run`, only after `TARGET`, and only as the first `--` after it.
+//! `run`, after the optional `TARGET`, and only as the first `--` after it.
 
 use std::process::Output;
 
@@ -55,15 +55,49 @@ fn stdout(output: &Output) -> String {
 #[test]
 fn arguments_after_the_separator_are_what_env_read_args_returns() {
     let scratch = Scratch::new();
-    let run = scratch.vibra(&["run", "src/app", "--", "a", "b", "c"]);
+    let run = scratch.vibra(&["run", "@app", "--", "a", "b", "c"]);
     assert_eq!(run.status.code(), Some(0), "{run:?}");
     assert_eq!(stdout(&run), "a\nb\nc\n");
 }
 
 #[test]
+fn an_omitted_target_runs_the_only_binary_target() {
+    let scratch = Scratch::new();
+    let run = scratch.vibra(&["run", "--", "a", "@app"]);
+    assert_eq!(run.status.code(), Some(0), "{run:?}");
+    assert_eq!(stdout(&run), "a\n@app\n");
+    let bare = scratch.vibra(&["run"]);
+    assert_eq!(bare.status.code(), Some(0), "{bare:?}");
+    assert_eq!(stdout(&bare), "");
+}
+
+#[test]
+fn an_omitted_target_needs_exactly_one_binary_target() {
+    let two = manifest(
+        "args-demo",
+        &format!(
+            "{} {}",
+            app_target("main", "@std.env.read @std.io.stdout"),
+            "(record name: @tool kind: @bin root: \"src/tool\" entry: @tool.main.main effects: (array @std.env.read @std.io.stdout))"
+        ),
+        "(dict)",
+    );
+    let project = TempDir::project(
+        "args18-two",
+        &two,
+        &[("src/app/main.vib", MAIN), ("src/tool/main.vib", MAIN)],
+    );
+    let output = run_workspace(project.path(), &["--format", "json", "run"], None);
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let named = run_workspace(project.path(), &["run", "@tool", "--", "z"], None);
+    assert_eq!(named.status.code(), Some(0), "{named:?}");
+    assert_eq!(stdout(&named), "z\n");
+}
+
+#[test]
 fn a_separator_with_no_argument_gives_none_and_so_does_its_absence() {
     let scratch = Scratch::new();
-    for arguments in [&["run", "src/app", "--"][..], &["run", "src/app"][..]] {
+    for arguments in [&["run", "@app", "--"][..], &["run", "@app"][..]] {
         let run = scratch.vibra(arguments);
         assert_eq!(run.status.code(), Some(0), "{run:?}");
         assert_eq!(stdout(&run), "");
@@ -74,7 +108,7 @@ fn a_separator_with_no_argument_gives_none_and_so_does_its_absence() {
 fn everything_after_the_separator_is_an_argument_even_an_option_or_another_separator() {
     let scratch = Scratch::new();
     let run = scratch.vibra(&[
-        "run", "src/app", "--", "--flag", "--", "-h", "--format", "json", "",
+        "run", "@app", "--", "--flag", "--", "-h", "--format", "json", "",
     ]);
     assert_eq!(run.status.code(), Some(0), "{run:?}");
     assert_eq!(stdout(&run), "--flag\n--\n-h\n--format\njson\n\n");
@@ -83,7 +117,7 @@ fn everything_after_the_separator_is_an_argument_even_an_option_or_another_separ
 #[test]
 fn json_run_reports_the_read_in_the_trace() {
     let scratch = Scratch::new();
-    let run = scratch.vibra(&["--format", "json", "run", "src/app", "--", "x y"]);
+    let run = scratch.vibra(&["--format", "json", "run", "@app", "--", "x y"]);
     assert_eq!(run.status.code(), Some(0), "{run:?}");
     let envelope: serde_json::Value =
         serde_json::from_slice(&run.stdout).expect("json");
@@ -105,7 +139,7 @@ fn ten_thousand_arguments_and_a_one_mebibyte_argument_arrive_verbatim() {
             .map(std::ffi::OsString::from)
             .to_vec();
         arguments.push(scratch.path().to_path_buf().into_os_string());
-        arguments.extend(["run", "src/app", "--"].map(std::ffi::OsString::from));
+        arguments.extend(["run", "@app", "--"].map(std::ffi::OsString::from));
         arguments.extend(tail.into_iter().map(std::ffi::OsString::from));
         let mut out = Vec::new();
         let code = vibra_cli::run(arguments, &mut out, std::io::sink());
@@ -124,15 +158,14 @@ fn ten_thousand_arguments_and_a_one_mebibyte_argument_arrive_verbatim() {
 }
 
 #[test]
-fn the_separator_is_invalid_before_the_target_and_on_other_commands() {
+fn the_separator_is_invalid_before_the_command_and_on_other_commands() {
     let scratch = Scratch::new();
     for arguments in [
-        &["run", "--", "src/app"][..],
-        &["--", "run", "src/app"][..],
+        &["--", "run", "@app"][..],
         &["test", "--", "x"][..],
         &["test", "--"][..],
         &["check", "--", "a"][..],
-        &["check", "src/app", "--"][..],
+        &["check", "@app", "--"][..],
         &["fmt", "--"][..],
         &["fmt", "src/app/main.vib", "--", "a"][..],
         &["help", "--"][..],
@@ -152,8 +185,7 @@ fn the_separator_is_invalid_before_the_target_and_on_other_commands() {
 #[test]
 fn an_error_in_the_command_line_runs_nothing() {
     let scratch = Scratch::new();
-    let output =
-        scratch.vibra(&["--format", "json", "run", "--", "src/app", "--", "a"]);
+    let output = scratch.vibra(&["--format", "json", "run", "@app", "@app", "--", "a"]);
     assert_eq!(output.status.code(), Some(2));
     let envelope: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("json");
@@ -168,7 +200,7 @@ fn the_help_text_is_the_closed_grammar_with_the_separator() {
     let output = scratch.vibra(&["help"]);
     assert_eq!(output.status.code(), Some(0));
     assert!(
-        stdout(&output).contains("run TARGET [-- ARG...]"),
+        stdout(&output).contains("run [TARGET] [-- ARG...]"),
         "{}",
         stdout(&output)
     );
@@ -182,7 +214,7 @@ fn a_non_unicode_argument_is_not_unicode_at_the_operation_not_a_command_error() 
     let bad = std::ffi::OsStr::from_bytes(&[b'a', 0xff]);
     let output = crate::support::vibra()
         .args(["--workspace", scratch.path().to_str().expect("utf-8")])
-        .args(["run", "src/app", "--"])
+        .args(["run", "@app", "--"])
         .arg(bad)
         .stdin(std::process::Stdio::null())
         .output()

@@ -5,7 +5,7 @@ pub mod init;
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::io::Write;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Level, LineIndex};
@@ -133,10 +133,11 @@ usage:
   vibra [--format human|json] [--workspace PATH] project init [DEST]
   vibra [--format human|json] [--workspace PATH] fmt PATH [--write]
   vibra [--format human|json] [--workspace PATH] check [TARGET]
-  vibra [--format human|json] [--workspace PATH] run TARGET [-- ARG...]
+  vibra [--format human|json] [--workspace PATH] run [TARGET] [-- ARG...]
   vibra [--format human|json] [--workspace PATH] test [TEST]
   vibra [--format human|json] help
 
+TARGET is a target name such as @app; `run` without one takes the only binary target.
 TEST is a canonical selector such as @tests.math::\"adds one\".
 ";
 
@@ -203,10 +204,12 @@ enum Action {
         write: bool,
     },
     Check {
-        target: Option<PathBuf>,
+        /// A target name atom such as `@app`.
+        target: Option<String>,
     },
     Run {
-        target: PathBuf,
+        /// A target name atom, or none for the only binary target.
+        target: Option<String>,
         /// The program arguments after the literal `--`, verbatim.
         arguments: Vec<OsString>,
     },
@@ -291,7 +294,7 @@ fn execute<W: Write, E: Write>(
             execute_check(&invocation, target.as_deref(), stdout, stderr)
         }
         Action::Run { target, arguments } => {
-            execute_run(&invocation, &target, arguments, stderr)
+            execute_run(&invocation, target.as_deref(), arguments, stderr)
         }
         Action::Test { selector } => {
             execute_test(&invocation, selector.as_ref(), stdout, stderr)
@@ -452,7 +455,7 @@ fn execute_format<W: Write, E: Write>(
 
 fn execute_check<W: Write, E: Write>(
     invocation: &Invocation,
-    target_path: Option<&Path>,
+    target_path: Option<&str>,
     stdout: &mut W,
     stderr: &mut E,
 ) -> CommandEnvelope {
@@ -462,19 +465,16 @@ fn execute_check<W: Write, E: Write>(
         Err(error) => return workspace_load_error_envelope(invocation, error, stderr),
     };
     let target = match target_path {
-        Some(path) => match select_target(&snapshot, path) {
+        Some(name) => match select_target(&snapshot, name) {
             Ok(target) => Some(target),
             Err(()) => {
                 if invocation.output_format == OutputFormat::Human {
                     let _ = writeln!(
                         stderr,
-                        "invalid input: target root does not identify a local target"
+                        "invalid input: `{name}` does not name a local target"
                     );
                 }
-                return invalid_envelope(
-                    invocation,
-                    target_path.map(Path::to_path_buf),
-                );
+                return invalid_envelope(invocation, None);
             }
         },
         None => None,
@@ -539,7 +539,7 @@ fn execute_check<W: Write, E: Write>(
 
 fn execute_run<E: Write>(
     invocation: &Invocation,
-    target_path: &Path,
+    target_name: Option<&str>,
     arguments: Vec<OsString>,
     stderr: &mut E,
 ) -> CommandEnvelope {
@@ -548,25 +548,27 @@ fn execute_run<E: Write>(
         Ok(snapshot) => snapshot,
         Err(error) => return workspace_load_error_envelope(invocation, error, stderr),
     };
-    let target = match select_target(&snapshot, target_path) {
+    let selected = match target_name {
+        Some(name) => select_target(&snapshot, name)
+            .map_err(|()| format!("`{name}` does not name a local target")),
+        None => only_binary_target(&snapshot),
+    };
+    let target = match selected {
         Ok(target) => target,
-        Err(()) => {
+        Err(message) => {
             if invocation.output_format == OutputFormat::Human {
-                let _ = writeln!(
-                    stderr,
-                    "invalid input: target root does not identify a local binary target"
-                );
+                let _ = writeln!(stderr, "invalid input: {message}");
             }
-            return invalid_envelope(invocation, Some(target_path.to_path_buf()));
+            return invalid_envelope(invocation, None);
         }
     };
     if target.kind() != vibra_workspace::project::TargetKind::Bin {
         if invocation.output_format == OutputFormat::Human {
             let _ = writeln!(stderr, "invalid input: `run` requires a binary target");
         }
-        return invalid_envelope(invocation, Some(target_path.to_path_buf()));
+        return invalid_envelope(invocation, None);
     }
-    let target_root = canonical_target_root(&snapshot, target);
+    let target_root = format!("@{}", target.name().atom().value());
     let verification = match verify_toolchain_bootstrap().map(Some) {
         Ok(verification) => verification,
         Err(message) => {
@@ -879,48 +881,46 @@ fn operational_test_envelope<E: Write>(
     }
 }
 
+/// The target whose `name` is the canonical atom `selector`, such as `@app`.
 fn select_target<'a>(
     snapshot: &'a vibra_workspace::WorkspaceSnapshot,
-    path: &Path,
+    selector: &str,
 ) -> Result<&'a vibra_workspace::project::Target, ()> {
-    let root = snapshot.project().root();
-    let selected = root.join(path).canonicalize().map_err(|_| ())?;
-    if !selected.starts_with(root) {
-        return Err(());
-    }
-    let unit = snapshot
-        .source()
-        .units()
-        .iter()
-        .find(|unit| unit.root() == selected)
-        .ok_or(())?;
+    let name = selector.strip_prefix('@').ok_or(())?;
     snapshot
         .project()
         .project()
         .targets()
         .iter()
-        .find(|target| target.name().atom().value() == unit.name())
+        .find(|target| target.name().atom().value() == name)
         .ok_or(())
 }
 
-fn canonical_target_root(
+/// The one binary target of the project, for a `run` that names none.
+fn only_binary_target(
     snapshot: &vibra_workspace::WorkspaceSnapshot,
-    target: &vibra_workspace::project::Target,
-) -> String {
-    let Some(unit) = snapshot
-        .source()
-        .units()
+) -> Result<&vibra_workspace::project::Target, String> {
+    let mut binaries = snapshot
+        .project()
+        .project()
+        .targets()
         .iter()
-        .find(|unit| unit.name() == target.name().atom().value())
-    else {
-        return target.root().value().replace('\\', "/");
-    };
-    unit.root()
-        .strip_prefix(snapshot.source().project_root())
-        .map_or_else(
-            |_| target.root().value().replace('\\', "/"),
-            |relative| relative.to_string_lossy().replace('\\', "/"),
-        )
+        .filter(|target| target.kind() == vibra_workspace::project::TargetKind::Bin);
+    match (binaries.next(), binaries.next()) {
+        (Some(target), None) => Ok(target),
+        (None, _) => Err("the project has no binary target to run".to_owned()),
+        (Some(first), Some(second)) => {
+            let names = std::iter::once(first)
+                .chain(std::iter::once(second))
+                .chain(binaries)
+                .map(|target| format!("@{}", target.name().atom().value()))
+                .collect::<Vec<_>>()
+                .join(", ");
+            Err(format!(
+                "the project has several binary targets ({names}); name one"
+            ))
+        }
+    }
 }
 
 fn verify_toolchain_bootstrap() -> Result<vibra_types::Stdlib, String> {
@@ -1023,7 +1023,7 @@ fn classify_workspace_load_error(
 
 fn operational_check_envelope(
     invocation: &Invocation,
-    target: Option<&Path>,
+    target: Option<&str>,
     message: String,
 ) -> CommandEnvelope {
     let diagnostics = render_unlocated_diagnostics(&[operational_diagnostic(message)]);
@@ -1063,14 +1063,12 @@ fn check_or_run_error_envelope(
     invocation: &Invocation,
     result: CommandResult,
     diagnostics: Vec<DiagnosticDocument>,
-    target: Option<&Path>,
+    target: Option<&str>,
 ) -> CommandEnvelope {
     let payload = match invocation.command.as_str() {
         "check" => Payload::Check(CheckPayload { accepted: false }),
         "run" => Payload::Run(RunPayload {
-            target: target.map_or_else(String::new, |path| {
-                path.to_string_lossy().replace('\\', "/")
-            }),
+            target: target.map_or_else(String::new, str::to_owned),
             program_result: None,
             stdout: String::new(),
             stderr: String::new(),
@@ -1274,27 +1272,41 @@ fn parse_check_command(
     workspace: PathBuf,
     arguments: &[OsString],
 ) -> Invocation {
-    if arguments.len() > 1
-        || arguments
-            .iter()
-            .any(|argument| !is_confined_workspace_argument(argument))
-    {
-        return invalid_invocation(
-            output_format,
-            workspace,
-            "check",
-            "`check` accepts at most one project-relative target root",
-            None,
-        );
-    }
+    let target = match arguments {
+        [] => None,
+        [target] => match target_selector(target) {
+            Some(target) => Some(target),
+            None => return invalid_target_selector(output_format, workspace, "check"),
+        },
+        _ => return invalid_target_selector(output_format, workspace, "check"),
+    };
     Invocation {
         output_format,
         workspace,
         command: "check".to_owned(),
-        action: Action::Check {
-            target: arguments.first().map(PathBuf::from),
-        },
+        action: Action::Check { target },
     }
+}
+
+/// A target selector is the canonical atom of a target name, such as `@app`.
+fn target_selector(argument: &OsStr) -> Option<String> {
+    let value = argument.to_str()?;
+    let name = value.strip_prefix('@')?;
+    (!name.is_empty() && !name.chars().any(char::is_whitespace))
+        .then(|| value.to_owned())
+}
+
+fn invalid_target_selector(
+    output_format: OutputFormat,
+    workspace: PathBuf,
+    command: &str,
+) -> Invocation {
+    let message = if command == "run" {
+        "`run` accepts at most one target name such as `@app`"
+    } else {
+        "`check` accepts at most one target name such as `@app`"
+    };
+    invalid_invocation(output_format, workspace, command, message, None)
 }
 
 fn parse_run_command(
@@ -1317,57 +1329,23 @@ fn parse_run_command(
         ),
         None => (arguments, Vec::new()),
     };
-    let Some(target) = arguments.first() else {
-        return invalid_invocation(
-            output_format,
-            workspace,
-            "run",
-            "`run` requires exactly one project-relative binary target root",
-            None,
-        );
+    let target = match arguments {
+        [] => None,
+        [target] => match target_selector(target) {
+            Some(target) => Some(target),
+            None => return invalid_target_selector(output_format, workspace, "run"),
+        },
+        _ => return invalid_target_selector(output_format, workspace, "run"),
     };
-    if arguments.len() != 1 || !is_confined_workspace_argument(target) {
-        return invalid_invocation(
-            output_format,
-            workspace,
-            "run",
-            "`run` requires exactly one project-relative binary target root",
-            None,
-        );
-    }
     Invocation {
         output_format,
         workspace,
         command: "run".to_owned(),
         action: Action::Run {
-            target: PathBuf::from(target),
+            target,
             arguments: program_arguments,
         },
     }
-}
-
-fn is_confined_workspace_argument(argument: &OsStr) -> bool {
-    let Some(value) = argument.to_str() else {
-        return false;
-    };
-    if value.is_empty() || value.starts_with('-') {
-        return false;
-    }
-    let path = Path::new(value);
-    if path.is_absolute() {
-        return false;
-    }
-    let mut has_name = false;
-    for component in path.components() {
-        match component {
-            Component::Normal(_) => has_name = true,
-            Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return false;
-            }
-        }
-    }
-    has_name
 }
 
 fn parse_project_command(
@@ -1700,7 +1678,7 @@ mod tests {
 
     use super::{
         Action, CommandResult, Invocation, OutputFormat, classify_workspace_load_error,
-        is_confined_workspace_argument, workspace_load_error_envelope,
+        target_selector, workspace_load_error_envelope,
     };
     use std::ffi::{OsStr, OsString};
     use std::path::PathBuf;
@@ -1735,16 +1713,15 @@ mod tests {
     }
 
     #[test]
-    fn deferred_arguments_are_confined_workspace_paths() {
-        for invalid in ["", "-all", "../outside", "/outside"] {
-            assert!(
-                !is_confined_workspace_argument(OsStr::new(invalid)),
-                "{invalid:?}"
-            );
+    fn target_selectors_are_name_atoms() {
+        for invalid in ["", "@", "-all", "app", "src/app", "../outside", "@a b"] {
+            assert_eq!(target_selector(OsStr::new(invalid)), None, "{invalid:?}");
         }
-        assert!(is_confined_workspace_argument(OsStr::new("app")));
-        assert!(is_confined_workspace_argument(OsStr::new("app.main.case")));
-        assert!(is_confined_workspace_argument(OsStr::new("./app")));
+        assert_eq!(target_selector(OsStr::new("@app")), Some("@app".to_owned()));
+        assert_eq!(
+            target_selector(OsStr::new("@my-app")),
+            Some("@my-app".to_owned())
+        );
     }
 
     #[test]
@@ -1812,7 +1789,7 @@ mod tests {
         use std::os::windows::ffi::OsStringExt;
 
         let invalid_unicode = OsString::from_wide(&[0xD800]);
-        assert!(!is_confined_workspace_argument(&invalid_unicode));
+        assert!(target_selector(&invalid_unicode).is_none());
     }
 
     #[cfg(unix)]
@@ -1821,6 +1798,6 @@ mod tests {
         use std::os::unix::ffi::OsStringExt;
 
         let invalid_unicode = OsString::from_vec(vec![0xFF]);
-        assert!(!is_confined_workspace_argument(&invalid_unicode));
+        assert!(target_selector(&invalid_unicode).is_none());
     }
 }
