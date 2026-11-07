@@ -1,0 +1,77 @@
+name: Release
+
+# Pushing a `v*` tag builds the `vibra` binary on every platform CI tests and
+# attaches the bare binaries, one checksum file each, and the LICENSE to the
+# GitHub release of that tag, creating the release if it does not exist.
+# Running the workflow by hand with a tag name does the same for an existing
+# tag, which is how a release made before this workflow gets its binaries.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to build and attach binaries to
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+
+jobs:
+  release:
+    name: release ${{ github.event.inputs.tag || github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Create the release if the tag has none, and attach the license
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --title "$TAG" --prerelease --generate-notes
+          fi
+          gh release upload "$TAG" LICENSE --clobber
+
+  binary:
+    name: binary (${{ matrix.os }})
+    needs: release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Install pinned toolchain
+        run: rustup toolchain install
+
+      - name: Build
+        run: cargo build --release --locked -p vibra-cli
+
+      # The asset is the executable itself, named by tag and target triple.
+      - name: Name the binary and checksum it
+        shell: bash
+        run: |
+          triple=$(rustc -vV | sed -n 's/^host: //p')
+          suffix=""
+          if [ "${{ runner.os }}" = "Windows" ]; then suffix=".exe"; fi
+          asset="vibra-$TAG-$triple$suffix"
+          mkdir dist
+          cp "target/release/vibra$suffix" "dist/$asset"
+          (cd dist && if command -v sha256sum >/dev/null; then sha256sum "$asset"; else shasum -a 256 "$asset"; fi > "$asset.sha256")
+          echo "ASSET=$asset" >> "$GITHUB_ENV"
+
+      - name: Attach to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$TAG" "dist/$ASSET" "dist/$ASSET.sha256" --clobber
