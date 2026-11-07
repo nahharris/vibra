@@ -19,11 +19,12 @@ edit, `vibra fmt FILE --write`, `vibra --format json check`, `vibra test`.
 1. **No loops and no mutation.** There is no `while`, `for`, assignment, or
    mutable variable. Iterate with tail recursion, `array.fold`, or the `iter`
    adapters. A call in tail position runs in constant stack depth.
-2. **No operators.** Arithmetic and comparison are functions on the numeric
-   type: `(u64.add-checked a b)` returns `(result u64 core.arithmetic-error)`,
-   `(u64.equal a b)` returns `bool`, and `(u64.compare a b)` returns
-   `core.ordering`. Floats use `f64.add`, `f64.mul`, and so on, which do not
-   fail.
+2. **No operators.** Arithmetic is functions on the numeric type:
+   `(u64.add a b)` returns `(result u64 core.arithmetic-error)`, because every
+   integer operation is checked. Comparison is the prelude contracts, with no
+   import: `(equatable.equal a b)` returns `bool` and `(ordered.compare a b)`
+   returns `core.ordering`, for integers, `char`, `bool`, `str`, and `bytes`
+   alike. Floats use `f64.add`, `f64.mul`, and so on, which do not fail.
 3. **No exceptions.** Failure is a value: `(result t e)` or `(option t)`. A
    `result` you ignore is a compile error (`@type.unhandled-fallible`). Match
    it, `try` it, return it, or discard it with `(let - expr)`.
@@ -35,7 +36,7 @@ edit, `vibra fmt FILE --write`, `vibra --format json check`, `vibra test`.
    `-3i32`, `2.5f64`) unless context fixes it. Imports have aliases. Nothing is
    public unless it says `visibility: @public`.
 6. **Names are kebab-case**: lowercase ASCII, digits, and `-`, starting with a
-   letter. Dots separate path segments (`text.concat`) and are never field
+   letter. Dots separate path segments (`str.concat`) and are never field
    access. `?`, `!`, `_`, and uppercase are invalid in names.
 7. **Don't guess.** If a form or function isn't in this skill or its
    references, assume it does not exist. Check it with `vibra check` before
@@ -51,12 +52,10 @@ its own name. The top-level forms are `import`, `deftype`, `defint`,
 ```vibra
 (import io @std.io)
 
-(import text @std.text)
-
-; A greeting for `name`.
+; A greeting for `name`. `str` and its members need no import.
 (defn greeting (name str) str
   visibility: @public
-  (text.concat "Hello, " (text.concat name "!\n")))
+  (str.concat "Hello, " (str.concat name "!\n")))
 
 (defn main () (result void io.io-error)
   effects: (io.stdout)
@@ -81,7 +80,7 @@ result. Attributes come before the body, in this order: `where:`, `labelled:`,
   (option.none) default)                      ; alternating pattern/result; exhaustive
 (try (might-fail))                            ; unwrap ok/some, or return err/none early
 (return value)                                ; early exit only, never in tail position
-(lambda (item u64) bool (u64.equal item 0u64)) ; anonymous function
+(lambda (item u64) bool (equatable.equal item 0u64)) ; anonymous function
 (as (array u64) (array.of))                   ; type ascription (widening/fixing, never a cast)
 ```
 
@@ -175,19 +174,20 @@ Standard effect roots: `io.stdin`, `io.stdout`, `io.stderr` (`@std.io`);
 ; Tail recursion: the accumulator carries state, and the call is in tail position.
 (defn sum-to (n u64 total u64) u64
   (match
-    (u64.sub-checked n 1u64)
+    (u64.sub n 1u64)
     (result.err -) total
     (result.ok next) (sum-to next (plus total n))))
 
 ; Fold an array.
 (array.fold items 0u64 (lambda (total u64 item u64) u64 (plus total item)))
 
-; Lazy adapters over anything iterable (arrays, dicts, str, option, your types),
-; after (import iter @std.iter.iter):
+; Lazy adapters over anything iterable (arrays, dicts, str, option, your types).
+; `iter` is in the prelude; `from.convert` renders a number, after
+; (import from @std.core.from):
 (iter.collect
   (iter.map
-    (iter.filter items (lambda (item u64) bool (u64.equal item 0u64)))
-    (lambda (item u64) str (u64.to-str item))))
+    (iter.filter items (lambda (item u64) bool (equatable.equal item 0u64)))
+    (lambda (item u64) str (from.convert item))))
 ```
 
 Write small saturating or defaulting helpers such as `plus` and `minus` around
@@ -219,8 +219,8 @@ captured.
 
 Don't look for these. They don't exist yet:
 
-- String formatting or interpolation. Build text with `text.concat` and
-  `u64.to-str`, `i64.to-str`, or `f64.to-str`.
+- String formatting or interpolation. Build text with `str.concat` and
+  `(from.convert n)`, which renders any number where a `str` is expected.
 - Inserting into or removing from a `dict`. Dicts come only from
   `(dict.of k v ...)`. Use an `(array (tuple k v))` that you append to, or
   rebuild the dict.

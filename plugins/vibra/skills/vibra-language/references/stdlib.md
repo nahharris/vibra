@@ -4,8 +4,18 @@ The standard library is embedded in the toolchain under the unit `@std`.
 Nothing else is available: package dependencies are not implemented yet. This
 file lists every public member. If a function is not here, it does not exist.
 
-Usage: `(import ALIAS @std.MODULE)`, then `(ALIAS.member ...)`. The builtin
-types (`array`, `dict`, the integer, float, and `char` types) need no import.
+Usage: `(import ALIAS @std.MODULE)`, then `(ALIAS.member ...)`. The prelude
+needs no import: the builtin types (`array`, `dict`, the integer and float
+types, `char`) and the types and interfaces that play a language role (`str`,
+`bytes`, `bool`, `option`, `result`, `iter`, `equatable`, `ordered`). Their
+members are reached through the name itself, such as `(str.concat a b)` or
+`(ordered.compare a b)`.
+
+Each operation has one spelling. Comparison is the `equatable` and `ordered`
+contracts, so no integer, `char`, `str`, or `bytes` has its own `equal` or
+`compare`; only the floats keep IEEE `equal` and `compare-total`, because they
+implement neither contract. Conversion is `from` and `try-from`, so no number
+has a `parse`, `to-str`, or `to-i64`-style member.
 
 ## Builtin members (no import)
 
@@ -34,34 +44,83 @@ a new one, or keep an `(array (tuple k v))`.
 
 ### Integers: `i8 i16 i32 i64 u8 u16 u32 u64`
 
-Every type `N` has the members below. The `iN` types also have
-`N.neg-checked (value N) -> (result N core.arithmetic-error)`.
+Every integer operation is checked, so each returns
+`(result N core.arithmetic-error)`. The names carry no `-checked` suffix.
 
 | Member | Signature |
 | --- | --- |
-| `N.add-checked` `N.sub-checked` `N.mul-checked` `N.div-checked` `N.rem-checked` | `(left N right N) -> (result N core.arithmetic-error)` |
-| `N.shift-left-checked` `N.shift-right` | `(value N amount u32) -> (result N core.arithmetic-error)` |
-| `N.equal` | `(left N right N) -> bool` |
-| `N.compare` | `(left N right N) -> core.ordering` |
-| `N.to-str` | `(value N) -> str` |
-| `N.parse` | `(text str) -> (result N core.conversion-error)` |
-| `N.to-M` | widening: `(value N) -> M`. Narrowing or a sign change: `-> (result M core.conversion-error)` |
+| `N.add` `N.sub` `N.mul` `N.div` `N.rem` | `(left N right N) -> (result N core.arithmetic-error)` |
+| `N.neg` (signed `iN` only) | `(value N) -> (result N core.arithmetic-error)` |
+| `N.shift-left` `N.shift-right` | `(value N amount u32) -> (result N core.arithmetic-error)` |
 
 `core.arithmetic-error` is `(enum overflow void division-by-zero void
-invalid-shift void)`.
+invalid-shift void)`. Every integer type also implements:
+
+- `equatable` and `ordered`: `(equatable.equal a b)`, `(ordered.compare a b)`.
+- `(from M)` for every integer type `M` whose values it holds, and
+  `(try-from M)` for every other one: `(from.convert x)` widens and
+  `(try-from.convert x)` narrows or changes sign, returning
+  `(result N core.conversion-error)`.
+- `(try-from str)`: `(try-from.convert "42")` parses decimal text.
 
 ### Floats: `f32 f64`
 
 `add sub mul div : (left F right F) -> F`, `neg : (value F) -> F`,
-`equal : -> bool`, `compare-total : -> core.ordering`, `to-str : -> str`,
-`parse : (text str) -> (result F core.conversion-error)`. Float operations
-don't fail. There is no float/integer conversion member.
+`equal : (left F right F) -> bool` (IEEE: NaN is unequal to itself),
+`compare-total : -> core.ordering`. Float operations don't fail. A float is
+not `equatable` or `ordered`, so it is not a dict key. It implements
+`(try-from str)`. There is no float/integer conversion.
 
 ### `char`
 
-`char.to-u32 (value char) -> u32`, `char.from-u32 (scalar u32) -> (option char)`.
+| Member | Signature |
+| --- | --- |
+| `char.to-u32` | `(value char) -> u32` |
+| `char.from-u32` | `(scalar u32) -> (option char)` |
+| `char.in-range` | `(value char low char high char) -> bool`, inclusive |
+| `char.is-ascii-digit` `char.is-ascii-upper` `char.is-ascii-lower` `char.is-ascii-letter` `char.is-ascii-whitespace` | `(value char) -> bool` |
 
-## `@std.core`: ordering, errors, and the core interfaces
+`char` implements `equatable` and `ordered` (by scalar value).
+
+## Comparison and conversion
+
+`equatable` and `ordered` are in the prelude. Bound by them, implement them, or
+call them with no import:
+
+- `(equatable.equal left right) -> bool`
+- `(ordered.compare left right) -> core.ordering`
+
+```vibra
+(defn biggest (items (array t) fallback t) t
+  where: (t ordered)
+  (array.fold
+    items
+    fallback
+    (lambda (best t item t) t
+      (match (ordered.compare item best) (core.ordering.greater) item - best))))
+```
+
+The conversion contracts need an import:
+
+- `(import from @std.core.from)`: `(from.convert value) -> self`. Lossless.
+- `(import try-from @std.core.try-from)`:
+  `(try-from.convert value) -> (result self core.conversion-error)`.
+
+The destination comes from the expected type: a written result type, a
+parameter type, or an `as`. In a `match` scrutinee nothing is expected, so
+write the `as`:
+
+```vibra
+(defn describe (count u64) str (str.concat "count: " (from.convert count)))
+
+(defn port (value i64) u16
+  (match
+    (as (result u16 core.conversion-error) (try-from.convert value))
+    (result.ok narrow) narrow
+    (result.err -) 0u16))
+```
+
+## `@std.core`: ordering and errors
 
 ```vibra
 (import core @std.core)
@@ -71,17 +130,12 @@ don't fail. There is no float/integer conversion member.
   `(core.ordering.less)` and the other variants.
 - `core.arithmetic-error`, `core.conversion-error` (`out-of-range`,
   `invalid-format`, `unrepresentable`).
-- Interfaces, each imported as a declaration so you can bound by it,
-  implement it, or call it:
-  - `(import equatable @std.core.equatable)`: `(equatable.equal left right) -> bool`
-  - `(import ordered @std.core.ordered)`: `(ordered.compare left right) -> core.ordering`
-  - `(import from @std.core.from)`: `(from.convert value) -> self`.
-    Lossless. The destination comes from the expected type
-  - `(import try-from @std.core.try-from)`: `(try-from.convert value) -> (result self core.conversion-error)`
+- `core.from` and `core.try-from` are the conversion contracts above.
 
 ## `@std.bool`
 
-`true` and `false` need no import. The connectives are ordinary functions, so
+`true` and `false` need no import, and `bool` implements `equatable` and
+`ordered` (`false` before `true`). The connectives are ordinary functions, so
 both operands are always evaluated. For short-circuiting, use `if`. Don't use
 `bool` as the alias, because it is reserved.
 
@@ -92,59 +146,40 @@ both operands are always evaluated. For short-circuiting, use `if`. Don't use
 `logic.not (value bool) -> bool`, `logic.and`, `logic.or`, `logic.xor`
 `(left bool right bool) -> bool`.
 
-## `@std.text`: `str` is a sequence of Unicode scalars
-
-```vibra
-(import text @std.text)
-```
+## `str`: a sequence of Unicode scalars (no import)
 
 | Member | Signature |
 | --- | --- |
-| `text.concat` | `(left str right str) -> str`. Exactly two operands, so nest calls for more |
-| `text.length` | `(value str) -> u64` (scalars, not bytes) |
-| `text.equal` | `(left str right str) -> bool` |
-| `text.compare` | `(left str right str) -> core.ordering` |
-| `text.slice` | `(value str start u64 end u64) -> (option str)` |
-| `text.starts-with` `text.ends-with` `text.contains` | `(value str other str) -> bool` |
-| `text.index-of` | `(value str needle str) -> (option u64)` |
-| `text.split` | `(value str separator str) -> (array str)` |
-| `text.trim` `text.trim-start` `text.trim-end` | `(value str) -> str` (ASCII whitespace) |
-| `text.to-chars` | `(value str) -> (array char)` |
-| `text.from-chars` | `(scalars (array char)) -> str` |
-| `text.to-utf8` | `(value str) -> bytes` |
-| `text.from-utf8` | `(encoded bytes) -> (result str core.conversion-error)` |
+| `str.concat` | `(left str right str) -> str`. Exactly two operands, so nest calls for more |
+| `str.length` | `(value str) -> u64` (scalars, not bytes) |
+| `str.slice` | `(value str start u64 end u64) -> (option str)` |
+| `str.starts-with` `str.ends-with` `str.contains` | `(value str other str) -> bool` |
+| `str.index-of` | `(value str needle str) -> (option u64)` |
+| `str.split` | `(value str separator str) -> (array str)` |
+| `str.trim` `str.trim-start` `str.trim-end` | `(value str) -> str` (ASCII whitespace) |
+| `str.to-utf8` | `(value str) -> bytes` |
+| `str.from-utf8` | `(encoded bytes) -> (result str core.conversion-error)` |
 | lookup | `(value index-u64) -> (option char)` |
 
-To turn a number into text, use `u64.to-str`, `i64.to-str`, `f64.to-str`, and
-so on. There is no formatting or interpolation.
+`str` implements `equatable` and `ordered` (by scalar), and `(from N)` for every
+number type, so `(from.convert 42u64)` with `str` expected renders `"42"`.
+There is no formatting or interpolation.
 
-## `@std.char`: ASCII classes
+The wrapper constructor and pattern convert between a `str` and its scalars:
+`(str scalars)` builds one from an `(array char)`, and `(let (str scalars) text)`
+takes it apart.
 
-```vibra
-(import classes @std.char)
-```
+## `bytes` (no import)
 
-`classes.equal`, `classes.compare (left char right char)`;
-`classes.is-ascii-digit`, `is-ascii-upper`, `is-ascii-lower`,
-`is-ascii-letter`, `is-ascii-whitespace (value char) -> bool`.
-
-## `@std.bytes`
-
-```vibra
-(import octets @std.bytes)
-```
-
-`octets.length -> u64`, `octets.concat`, `octets.equal`, `octets.compare`,
-`octets.slice (value bytes start u64 end u64) -> (option bytes)`,
-`octets.to-array (value bytes) -> (array u8)`,
-`octets.from-array (values (array u8)) -> bytes`. Looking up a `bytes` value
-gives `(option u8)`. Don't use `bytes` as the alias, because it is reserved.
-
+`bytes.length (value bytes) -> u64`, `bytes.concat (left bytes right bytes) ->
+bytes`, `bytes.slice (value bytes start u64 end u64) -> (option bytes)`.
+Looking up a `bytes` value gives `(option u8)`. `bytes` implements `equatable`
+and `ordered` (by byte). `(bytes items)` builds one from an `(array u8)`, and
+`(let (bytes items) value)` takes it apart.
 ## `@std.iter`: lazy iteration
 
-```vibra
-(import iter @std.iter.iter)
-```
+`iter` is in the prelude: call `(iter.collect ...)` or write
+`(impl (iter t) ...)` with no import.
 
 Arrays, dicts (as `(tuple k v)` items), `str` (as `char` items), `option`,
 and any type with `(impl (iter t) (defn next (value self) (option (tuple t self)) ...))`

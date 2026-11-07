@@ -26,7 +26,7 @@ toolchain disagree, the toolchain wins. Check with `vibra check`.
   separates tokens, and `;` starts a comment to the end of the line. There are
   no brackets, braces, commas, quoting, or reader macros.
 - **Names** are dot-separated kebab segments, each matching `[a-z][a-z0-9-]*`.
-  `a`, `a1`, `user-id`, and `text.concat` are valid. `A`, `_x`, `x?`, `1a`,
+  `a`, `a1`, `user-id`, and `str.concat` are valid. `A`, `_x`, `x?`, `1a`,
   and `-a` are invalid (`@syntax.invalid-name`).
 - **Atoms** are `@name`, for example `@info` or `@std.io`. An atom is a plain
   value, except in an `import` locator, a record selector `(r @field)`, and
@@ -207,8 +207,6 @@ equal.
   (let-else (option.some head) (items 0u64) (return fallback))
   head)
 
-(import ordered @std.core.ordered)
-
 (defn biggest (items (array t) fallback t) t
   where: (t ordered)
   (array.fold
@@ -221,10 +219,10 @@ equal.
 Each generic name appears once in `where:` with its bound. The bound is
 either `any` (no requirement) or a **bare** interface name. A dotted bound
 such as `core.ordered` is `@syntax.invalid-form` ("generic bounds must be
-symbols"). Import the interface as a declaration instead, with
-`(import ordered @std.core.ordered)` or
-`(import equatable @std.core.equatable)`, or use a `defint` from the same
-module. Type arguments are inferred. When inference can't decide, pass
+symbols"). `ordered`, `equatable`, and `iter` are in the prelude, so they need
+no import. Bound by another module's interface by importing it as a
+declaration, such as `(import from @std.core.from)`, or use a `defint` from the
+same module. Type arguments are inferred. When inference can't decide, pass
 `types: (i32)` as a labelled operand at the call:
 `(mapper.map-to types: (i32) box f)`. A `dict` key type must implement
 `ordered`.
@@ -236,7 +234,7 @@ module. Type arguments are inferred. When inference can't decide, pass
   visibility: @public
   (defn cents (value self) u64)                 ; abstract: no body
   (defn above (value self limit u64) bool       ; default method: has a body
-    (match (u64.compare (priced.cents value) limit) (core.ordering.greater) true - false)))
+    (match (ordered.compare (priced.cents value) limit) (core.ordering.greater) true - false)))
 
 (deftype part (record name str unit-cents u64 count u64)
   visibility: @public
@@ -251,25 +249,22 @@ module. Type arguments are inferred. When inference can't decide, pass
   default.
 - Call a member through the interface path: `(priced.cents x)`. Interface
   values (the interface written as a type) dispatch at run time.
-- Standard interfaces: `@std.core.equatable` (`equal`),
-  `@std.core.ordered` (`compare`, which returns `core.ordering`),
-  `@std.iter.iter` (`next`), `@std.core.from`, and `@std.core.try-from`.
-  Import each one as a declaration under its own name, for example
-  `(import ordered @std.core.ordered)`, before you implement it, bound by it,
-  or call it. The builtin integers, `char`, `bool`, `str`, and `bytes`
-  implement `equatable` and `ordered`.
+- Standard interfaces: `equatable` (`equal`), `ordered` (`compare`, which
+  returns `core.ordering`), and `iter` (`next`) are in the prelude: implement
+  them, bound by them, or call them with no import. `@std.core.from` and
+  `@std.core.try-from` need an import as a declaration under their own name,
+  such as `(import from @std.core.from)`. The builtin integers, `char`, `bool`,
+  `str`, and `bytes` implement `equatable` and `ordered`; there is no
+  `u64.equal` or `str.compare`.
 - Implementing `iter` for your type makes the adapters `map`, `filter`,
-  `skip`, `take`, and `collect` available on it. `impl` names the interface
-  by its import alias:
+  `skip`, `take`, and `collect` available on it:
 
 ```vibra
-(import iter @std.iter.iter)
-
 (deftype countdown (record from u64)
   (impl (iter u64)
     (defn next (value self) (option (tuple u64 self))
       (match
-        (u64.sub-checked (value @from) 1u64)
+        (u64.sub (value @from) 1u64)
         (result.ok lower) (option.some (tupleof (value @from) (countdown from: lower)))
         (result.err -) (option.none)))))
 ```
@@ -286,10 +281,15 @@ module. Type arguments are inferred. When inference can't decide, pass
 ```
 
 The destination is chosen by the expected type, whether that is a written
-result type, a parameter type, or an `as`. Implement `(impl (from i16) ...)`
-on your own type to make it a conversion destination. The integer types also
-have direct members, such as `u8.to-u32` (cannot fail) and `u64.to-u8`
-(returns a `result`).
+result type, a parameter type, or an `as`; with none, the call is
+`@type.ambiguous-destination`. Implement `(impl (from i16) ...)` on your own
+type to make it a conversion destination. These are the only conversions:
+
+- between integer types, `from` when the destination holds every source value
+  and `try-from` otherwise;
+- parsing, `(try-from str)` on every number type: `(try-from.convert "42")`;
+- rendering, `(from n)` on `str` for every number type: `(from.convert 42u64)`
+  where a `str` is expected.
 
 ## 9. Unions and `as`
 
@@ -297,7 +297,7 @@ have direct members, such as `u8.to-u32` (cannot fail) and `u64.to-u8`
 (deftype number (union i32 str))
 
 (defn render (value number) str
-  (match value (as i32 n) (i32.to-str n) (as str text) text))
+  (match value (as i32 n) (from.convert n) (as str text) text))
 ```
 
 Construct with `(number 5i32)` or widen with `(as number 5i32)`. An
@@ -354,12 +354,13 @@ own, and user code cannot declare `external: @host`.
 - Aliases may not be builtin type names, so `(import bool @std.bool)` is
   rejected. Use an alias such as `logic`.
 - These are in scope without an import: the primitive types and their
-  members (`u64.add-checked`, `f64.to-str`, `char.to-u32`, ...), `array` and
+  members (`u64.add`, `f64.mul`, `char.is-ascii-digit`, ...), `array` and
   `dict` with their members (`array.of`, `array.fold`, `dict.of`, ...),
-  `option`, `result`, `bool`, `str`, `bytes`, `true`, and `false`. Everything
-  else needs an import, including `text.concat` (`@std.text`),
-  `core.ordering` (`@std.core`), and the `iter` interface
-  (`@std.iter.iter`).
+  `option`, `result`, `bool`, `str` and `bytes` with their members
+  (`str.concat`, `bytes.length`, ...), the interfaces `equatable`, `ordered`,
+  and `iter`, and `true` and `false`. Everything else needs an import,
+  including `core.ordering` (`@std.core`) and `from` and `try-from`
+  (`@std.core.from`, `@std.core.try-from`).
 - Everything is private unless it declares `visibility: @public`. This applies
   to methods and effect operations individually. Importing a private
   declaration is `@name.private-access`.

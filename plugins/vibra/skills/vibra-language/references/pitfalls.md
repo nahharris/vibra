@@ -8,17 +8,19 @@ file, line, and column (`primarySpan.sourceId` and `startPosition`).
 
 | You wrote | Diagnostic | Write instead |
 | --- | --- | --- |
-| `(+ a b)`, `(= a b)`, `(< a b)` | `@syntax.invalid-name` or `@name.unknown-symbol` | `(u64.add-checked a b)` gives a `result`. Also `(u64.equal a b)` and `(match (u64.compare a b) (core.ordering.less) ...)` |
+| `(+ a b)`, `(= a b)`, `(< a b)` | `@syntax.invalid-name` or `@name.unknown-symbol` | `(u64.add a b)` gives a `result`. Also `(equatable.equal a b)` and `(match (ordered.compare a b) (core.ordering.less) ...)` |
 | `(while ...)`, `(for ...)`, `break` | `@syntax.retired-form` | A tail-recursive helper with an accumulator, `array.fold`, or `iter` |
 | `(set! x ...)`, reassigning with `let` | `@name.redeclaration` | A new name. Bindings never shadow, even across nested scopes |
 | `(if cond value)` without else | `@syntax.invalid-form` | Both branches. Use `void` for "nothing": `(if c (do-it) void)` |
-| `(if n ...)` on a number or option | `@type.mismatch` ("expected bool") | An explicit test such as `(u64.equal n 0u64)`, or a `match` |
+| `(if n ...)` on a number or option | `@type.mismatch` ("expected bool") | An explicit test such as `(equatable.equal n 0u64)`, or a `match` |
 | `fooBar`, `foo_bar`, `valid?`, `Foo` | `@syntax.invalid-name` | `foo-bar`, `is-valid` |
-| `(text.concat a b c)` | `@type.argument-mismatch` ("unexpected positional operands") | `(text.concat a (text.concat b c))` |
+| `(str.concat a b c)` | `@type.argument-mismatch` ("unexpected positional operands") | `(str.concat a (str.concat b c))` |
+| `(u64.equal a b)`, `(text.equal a b)`, `(u64.add-checked a b)`, `(i32.to-str n)` | `@name.unknown-symbol` ("the builtin type `u64` has no member") | `(equatable.equal a b)`, `(u64.add a b)`, `(from.convert n)` with `str` expected |
 | `(let x 5)` | `@type.ambiguous-inference` | `5u64`, or a typed context |
 | `-1u8`, `256u8` | `@type.numeric-out-of-range` | A type that fits |
-| Mixing `u64` and `i32` | `@type.argument-mismatch` | Convert explicitly: `(i32.to-u64 n)` returns a `result`, `(u32.to-u64 n)` does not |
-| `(import bool @std.bool)`, alias `text` for `@std.char` | `@name.reserved-value-spelling` | An alias that isn't a builtin type name (`logic`, `classes`, `octets`) |
+| Mixing `u64` and `i32` | `@type.argument-mismatch` | Convert explicitly: `(try-from.convert n)` returns a `result` for `i32` to `u64`, `(from.convert n)` widens `u32` to `u64` |
+| `(match (try-from.convert n) ...)` or `(let x (from.convert n))` | `@type.ambiguous-destination` | Name the destination: `(as (result u64 core.conversion-error) (try-from.convert n))` |
+| `(import bool @std.bool)`, `(import bytes @std.bytes)` | `@name.reserved-value-spelling` | An alias that isn't a builtin type name (`logic`). `str`, `bytes`, and `char` need no import at all |
 
 ## Failure handling
 
@@ -39,9 +41,8 @@ file, line, and column (`primarySpan.sourceId` and `startPosition`).
 | A parameter or `let` with the same name as a module function | `@name.redeclaration` ("shadows a visible module binding") | Rename one of them |
 | Missing record field: `(p x: 1u64)` | `@type.argument-mismatch` ("missing field") | Supply every field. Records have no defaults |
 | `(array.of)` or `(dict.of)` with nothing to fix its type | `@type.ambiguous-inference` | `(as (array u64) (array.of))` |
-| `where: (t core.ordered)` | `@syntax.invalid-form` ("generic bounds must be symbols") | `(import ordered @std.core.ordered)` and `where: (t ordered)` |
-| `(impl (iter u64) ...)` without importing `iter` | `@name.unknown-symbol` ("does not name a visible interface") | `(import iter @std.iter.iter)` |
-| Using `core.ordering`, `text.*`, or `fs.*` without importing | `@name.unknown-symbol` | `(import core @std.core)`, `(import text @std.text)`, ... |
+| `where: (t core.ordered)` | `@syntax.invalid-form` ("generic bounds must be symbols") | `where: (t ordered)`: `ordered`, `equatable`, and `iter` are in the prelude |
+| Using `core.ordering`, `from.convert`, or `fs.*` without importing | `@name.unknown-symbol` | `(import core @std.core)`, `(import from @std.core.from)`, `(import fs @std.fs)`, ... |
 | Calling a private function from another module or a test | `@name.private-access` | Add `visibility: @public` to the declaration |
 
 ## Effects
