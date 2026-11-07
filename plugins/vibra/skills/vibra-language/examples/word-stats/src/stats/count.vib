@@ -1,0 +1,80 @@
+; Pure text statistics. Nothing here performs an effect, so every function has
+; the default empty effect row and the tests can call it directly.
+(import classes @std.char)
+
+(import core @std.core)
+
+(import text @std.text)
+
+(deftype summary (record lines u64 words u64 longest u64) visibility: @public)
+
+; A sum that saturates at the largest `u64` instead of failing. Vibra has no
+; `+`: every integer operation is checked and returns a `result`.
+(defn plus (left u64 right u64) u64
+  (match
+    (u64.add-checked left right)
+    (result.ok sum) sum
+    (result.err -) 18446744073709551615u64))
+
+; The larger of two counts.
+(defn larger (left u64 right u64) u64
+  (match (u64.compare left right) (core.ordering.less) right - left))
+
+; The number of words in `line`: runs of characters that are not ASCII
+; whitespace. The walk is a tail call, so it runs in constant stack depth.
+(defn count-words (line str) u64
+  visibility: @public
+  (words-from (text.to-chars line) 0u64 false 0u64))
+
+(defn words-from (scalars (array char) index u64 inside bool count u64) u64
+  (match
+    (scalars index)
+    (option.none) count
+    (option.some scalar) (if
+      (classes.is-ascii-whitespace scalar)
+      (words-from scalars (plus index 1u64) false count)
+      (words-from scalars (plus index 1u64) true (if inside count (plus count 1u64))))))
+
+; Line, word, and longest-line counts of `source`. An empty document has no
+; lines; a trailing newline does not start another line.
+(defn summarize (source str) summary
+  visibility: @public
+  (if
+    (text.equal source "")
+    (summary lines: 0u64 words: 0u64 longest: 0u64)
+    (array.fold
+      (text.split (trimmed source) "\n")
+      (summary lines: 0u64 words: 0u64 longest: 0u64)
+      (lambda
+        (seen summary line str)
+        summary
+        (summary
+          lines: (plus (seen @lines) 1u64)
+          words: (plus (seen @words) (count-words line))
+          longest: (larger (seen @longest) (text.length line)))))))
+
+(defn trimmed (source str) str
+  (if
+    (text.ends-with source "\n")
+    (match
+      (text.slice source 0u64 (minus (text.length source) 1u64))
+      (option.some head) head
+      (option.none) source)
+    source))
+
+(defn minus (left u64 right u64) u64
+  (match
+    (u64.sub-checked left right)
+    (result.ok difference) difference
+    (result.err -) 0u64))
+
+; One report line, such as `lines: 2`.
+(defn field (label str value u64) str
+  (text.concat label (text.concat ": " (text.concat (u64.to-str value) "\n"))))
+
+; The report `vibra run` prints.
+(defn render (stats summary) str
+  visibility: @public
+  (text.concat
+    (field "lines" (stats @lines))
+    (text.concat (field "words" (stats @words)) (field "longest" (stats @longest)))))

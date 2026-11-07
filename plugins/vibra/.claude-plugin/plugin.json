@@ -1,0 +1,14 @@
+{
+  "name": "vibra",
+  "displayName": "Vibra",
+  "version": "0.0.1",
+  "description": "Write, check, run, and test Vibra programs: the language, its standard library, and the vibra CLI.",
+  "author": {
+    "name": "Hannah Harrisonn",
+    "url": "https://github.com/nahharris"
+  },
+  "homepage": "https://github.com/nahharris/vibra",
+  "repository": "https://github.com/nahharris/vibra",
+  "license": "MIT OR Apache-2.0",
+  "keywords": ["vibra", "programming-language", "skills"]
+}

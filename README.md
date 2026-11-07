@@ -111,6 +111,19 @@ The repository also contains [example projects](examples/), including a
 The CLI currently supports project initialization, formatting, checking,
 running, and testing. Use `vibra help` to see the available commands.
 
+### Skills for coding agents
+
+This repository is a plugin marketplace for Claude Code, Cursor, and Codex.
+The `vibra` plugin ships two skills. `vibra-language` covers writing Vibra
+source, and `vibra-toolchain` covers driving the `vibra` CLI.
+
+- **Claude Code:** `/plugin marketplace add nahharris/vibra`, then
+  `/plugin install vibra@vibra`
+- **Codex:** `codex plugin marketplace add nahharris/vibra`, then
+  `codex plugin add vibra@vibra`
+- **Cursor:** add `nahharris/vibra` as a plugin marketplace from a GitHub
+  repository, then install `vibra`
+
 ## 🧭 Where the project stands
 
 The current implementation includes a reader and formatter, a nominal static

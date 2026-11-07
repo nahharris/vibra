@@ -1,0 +1,17 @@
+{
+  "name": "vibra",
+  "description": "Agent skills for writing and running Vibra, the vibe-coding-first programming language (pre-alpha).",
+  "owner": {
+    "name": "Hannah Harrisonn",
+    "url": "https://github.com/nahharris"
+  },
+  "plugins": [
+    {
+      "name": "vibra",
+      "source": "./plugins/vibra",
+      "description": "Write, check, run, and test Vibra programs: the language, its standard library, and the vibra CLI.",
+      "category": "development",
+      "tags": ["vibra", "programming-language", "skills"]
+    }
+  ]
+}
