@@ -13,7 +13,7 @@
 //! integer's bits, or the offset of an object. A routine reads components of
 //! the objects it is given and calls the routine of each component, so the
 //! engine's stack depth is the nesting of the type and never of a value. The
-//! rows of the registry that order text, `text.compare` and `bytes.compare`,
+//! rows of the registry that order text, `str.compare` and `bytes.compare`,
 //! are the native imports of the module, so strings are ordered by the code that
 //! the reference interpreter calls too.
 //!
@@ -133,7 +133,7 @@ pub(crate) fn order_of(
 /// The function indices a comparer calls.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Calls {
-    /// `text.compare`, when the module imports it.
+    /// `str.compare`, when the module imports it.
     pub(crate) text: u32,
     /// `bytes.compare`, when the module imports it.
     pub(crate) bytes: u32,

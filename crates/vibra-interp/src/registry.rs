@@ -685,25 +685,25 @@ mod tests {
             run(CompilerIntrinsic::CharFromU32, &[Value::U32(0x10_FFFF)])
                 .contains("@some")
         );
-        assert_eq!(run(CompilerIntrinsic::TextLength, &[text("")]), "0u64");
-        assert_eq!(run(CompilerIntrinsic::TextLength, &[text("𝄞é")]), "2u64");
+        assert_eq!(run(CompilerIntrinsic::StrLength, &[text("")]), "0u64");
+        assert_eq!(run(CompilerIntrinsic::StrLength, &[text("𝄞é")]), "2u64");
         assert!(
             run(
-                CompilerIntrinsic::TextSlice,
+                CompilerIntrinsic::StrSlice,
                 &[text("𝄞é"), Value::U64(1), Value::U64(2)]
             )
             .contains("payload: \"é\"")
         );
         assert!(
             run(
-                CompilerIntrinsic::TextSlice,
+                CompilerIntrinsic::StrSlice,
                 &[text(""), Value::U64(0), Value::U64(1)]
             )
             .contains("@none")
         );
         assert!(is_err(
             &run(
-                CompilerIntrinsic::TextFromUtf8,
+                CompilerIntrinsic::StrFromUtf8,
                 &[Value::Bytes(vec![0xED, 0xA0, 0x80])]
             ),
             "invalid-format"
@@ -711,7 +711,7 @@ mod tests {
         // A lone surrogate never decodes, and scalar order is UTF-8 byte order.
         assert!(
             run(
-                CompilerIntrinsic::TextCompare,
+                CompilerIntrinsic::StrCompare,
                 &[text("\u{FFFF}"), text("𝄞")]
             )
             .contains("@less")

@@ -146,7 +146,7 @@ fn a_failed_assertion_inside_a_called_function_stops_the_test() {
 #[test]
 fn operands_cross_as_scalars_or_as_values_by_their_type() {
     let rows = agree(
-        "(import text @std.text)\n\
+        "(import text @std.str)\n\
          (deftype point (record x i32 y i32))\n\
          (deftype shade (enum dark void light void))\n\
          (deftype wide u64)\n\

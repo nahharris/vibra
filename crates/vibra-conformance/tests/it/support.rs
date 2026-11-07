@@ -42,10 +42,10 @@ pub(crate) const ROW_IMPORTS: &str = "(import core @std.core)\n(import from @std
 pub(crate) fn call_head(intrinsic: vibra_ir::external::CompilerIntrinsic) -> String {
     use vibra_ir::external::{CompilerIntrinsic as C, FloatOp, IntegerOp};
     match intrinsic {
-        C::Integer(_, IntegerOp::Equal) | C::TextEqual | C::BytesEqual => {
+        C::Integer(_, IntegerOp::Equal) | C::StrEqual | C::BytesEqual => {
             "equatable.equal".to_owned()
         }
-        C::Integer(_, IntegerOp::Compare) | C::TextCompare | C::BytesCompare => {
+        C::Integer(_, IntegerOp::Compare) | C::StrCompare | C::BytesCompare => {
             "ordered.compare".to_owned()
         }
         C::Integer(_, IntegerOp::ToStr) | C::Float(_, FloatOp::ToStr) => {
@@ -58,10 +58,7 @@ pub(crate) fn call_head(intrinsic: vibra_ir::external::CompilerIntrinsic) -> Str
             "from.convert".to_owned()
         }
         C::Convert(..) => "try-from.convert".to_owned(),
-        other => match other.symbol().strip_prefix("text.") {
-            Some(member) => format!("str.{member}"),
-            None => other.symbol().to_owned(),
-        },
+        other => other.symbol().to_owned(),
     }
 }
 

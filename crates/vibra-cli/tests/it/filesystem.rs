@@ -9,7 +9,7 @@ use crate::support::{TempDir, app_target, manifest, run_workspace, spelled};
 
 const MAIN: &str = r#"(import fs @std.fs)
 (import io @std.io)
-(import text @std.text)
+(import text @std.str)
 
 (defn main () (result void fs.fs-error)
   effects: (fs.read fs.write io.stdin io.stdout)

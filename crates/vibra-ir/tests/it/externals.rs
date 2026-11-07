@@ -27,7 +27,7 @@ fn registry_contains_only_the_reviewed_operations() {
         "f32.compare-total",
         "f64.to-str",
         "char.from-u32",
-        "text.from-utf8",
+        "str.from-utf8",
         "bytes.to-array",
         "array.slice",
     ] {
@@ -47,13 +47,13 @@ fn registry_contains_only_the_reviewed_operations() {
 
 #[test]
 fn registry_signatures_are_exact_and_backend_neutral() {
-    let concat = CompilerIntrinsic::TextConcat.signature(&RoleTypes::default());
+    let concat = CompilerIntrinsic::StrConcat.signature(&RoleTypes::default());
     assert_eq!(concat.parameters().len(), 2);
     assert_eq!(concat.parameters()[0], vibra_ir::Type::Str);
     assert_eq!(concat.parameters()[1], vibra_ir::Type::Str);
     assert_eq!(concat.result(), vibra_ir::Type::Str);
 
-    let length = CompilerIntrinsic::TextLength.signature(&RoleTypes::default());
+    let length = CompilerIntrinsic::StrLength.signature(&RoleTypes::default());
     assert_eq!(length.parameters(), &[vibra_ir::Type::Str]);
     assert_eq!(length.result(), vibra_ir::Type::U64);
 }
@@ -67,7 +67,7 @@ fn the_registry_identity_is_the_one_the_spec_names() {
 fn external_operands_remain_in_initializer_cycle_analysis() {
     let origin = SourceOrigin::new("cycle-external.vib", ByteSpan::new(0, 1));
     let initializer = Expr::external(
-        CompilerIntrinsic::TextConcat,
+        CompilerIntrinsic::StrConcat,
         vec![
             Expr::call(0, Vec::new(), Type::Str, origin.clone()),
             Expr::literal(Value::Str(String::new()), origin.clone()),

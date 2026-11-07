@@ -28,24 +28,24 @@ fn samples(symbol: &str) -> &'static [(&'static str, &'static str)] {
             ("(dict str i32)", ""),
             ("(dict str i32)", "\"b\" 2i32 \"a\" 1i32 \"b\" 3i32"),
         ],
-        "text.concat" => &[("str", "\"hé\" \"llo\""), ("str", "\"\" \"\"")],
-        "text.length" => &[("u64", "\"\""), ("u64", "\"h𝄞é\"")],
-        "text.equal" => &[("bool", "\"é\" \"é\""), ("bool", "\"a\" \"ab\"")],
-        "text.compare" => &[
+        "str.concat" => &[("str", "\"hé\" \"llo\""), ("str", "\"\" \"\"")],
+        "str.length" => &[("u64", "\"\""), ("u64", "\"h𝄞é\"")],
+        "str.equal" => &[("bool", "\"é\" \"é\""), ("bool", "\"a\" \"ab\"")],
+        "str.compare" => &[
             ("core.ordering", "\"ab\" \"b\""),
             ("core.ordering", "\"ab\" \"a\""),
             ("core.ordering", "\"\u{FFFF}\" \"𝄞\""),
             ("core.ordering", "\"é\" \"é\""),
         ],
-        "text.slice" => &[
+        "str.slice" => &[
             ("(option str)", "\"h𝄞llo\" 1u64 3u64"),
             ("(option str)", "\"abc\" 2u64 1u64"),
             ("(option str)", "\"abc\" 0u64 4u64"),
         ],
-        "text.to-chars" => &[("(array char)", "\"hé\""), ("(array char)", "\"\"")],
-        "text.from-chars" => &[("str", r"(array.of \h \é)"), ("str", "(array.of)")],
-        "text.to-utf8" => &[("bytes", "\"aé€𝄞\""), ("bytes", "\"\"")],
-        "text.from-utf8" => &[
+        "str.to-chars" => &[("(array char)", "\"hé\""), ("(array char)", "\"\"")],
+        "str.from-chars" => &[("str", r"(array.of \h \é)"), ("str", "(array.of)")],
+        "str.to-utf8" => &[("bytes", "\"aé€𝄞\""), ("bytes", "\"\"")],
+        "str.from-utf8" => &[
             (
                 "(result str core.conversion-error)",
                 "(bytes (array.of 97u8 195u8 169u8 240u8 157u8 132u8 158u8))",
@@ -232,11 +232,11 @@ fn finish(source: &str, checked: &vibra_types::CheckResult) -> Ran {
     Ran { interpreter, wasm }
 }
 
-/// One native of `@std.text` or `@std.bytes`: a static method of `str` or
+/// One native of `@std.str` or `@std.bytes`: a static method of `str` or
 /// `bytes`, or a member of its comparison implementations.
 struct ModuleNative {
     symbol: String,
-    /// The module, such as `std/text.vib`.
+    /// The module, such as `std/str.vib`.
     module: &'static str,
     /// How source applies it, such as `str.concat` or `equatable.equal`.
     call: String,
@@ -255,7 +255,7 @@ fn native_symbol(attributes: &[Attribute]) -> Option<String> {
 /// Each native of the role types `str` and `bytes`, from their `deftype`s.
 fn module_natives() -> Vec<ModuleNative> {
     let mut natives = Vec::new();
-    for module in ["std/text.vib", "std/bytes.vib"] {
+    for module in ["std/str.vib", "std/bytes.vib"] {
         let path = workspace_root().join("stdlib/src").join(module);
         let text = std::fs::read_to_string(&path).expect("module");
         let document = vibra_syntax::parse_source(&path, &text).expect("parse");
@@ -357,8 +357,8 @@ fn body_source(module: &str) -> String {
 /// constructor and the pattern of `str` and `bytes`.
 fn wrapper_call(symbol: &str, operand: &str) -> Option<String> {
     Some(match symbol {
-        "text.to-chars" => format!("(do (let (str scalars) {operand}) scalars)"),
-        "text.from-chars" => format!("(str {operand})"),
+        "str.to-chars" => format!("(do (let (str scalars) {operand}) scalars)"),
+        "str.from-chars" => format!("(str {operand})"),
         "bytes.to-array" => format!("(do (let (bytes items) {operand}) items)"),
         "bytes.from-array" => format!("(bytes {operand})"),
         _ => return None,
@@ -534,7 +534,7 @@ fn extra_samples(symbol: &str) -> Vec<(String, String)> {
                 numbers(150, "i32")
             ),
         )],
-        "text.concat" => vec![
+        "str.concat" => vec![
             sample("str", format!("{} {}", quoted(&text(1)), quoted(""))),
             sample("str", format!("{} {}", quoted(""), quoted(&text(1)))),
             sample(
@@ -542,8 +542,8 @@ fn extra_samples(symbol: &str) -> Vec<(String, String)> {
                 format!("{} {}", quoted(&text(200)), quoted(&text(200))),
             ),
         ],
-        "text.length" => vec![sample("u64", quoted(&text(250)))],
-        "text.equal" => vec![
+        "str.length" => vec![sample("u64", quoted(&text(250)))],
+        "str.equal" => vec![
             sample(
                 "bool",
                 format!("{} {}", quoted(&text(40)), quoted(&text(40))),
@@ -554,7 +554,7 @@ fn extra_samples(symbol: &str) -> Vec<(String, String)> {
             ),
             sample("bool", format!("{} {}", quoted(""), quoted(""))),
         ],
-        "text.compare" => vec![
+        "str.compare" => vec![
             sample("core.ordering", format!("{} {}", quoted(""), quoted("a"))),
             sample("core.ordering", format!("{} {}", quoted("a"), quoted(""))),
             sample(
@@ -570,7 +570,7 @@ fn extra_samples(symbol: &str) -> Vec<(String, String)> {
                 format!("{} {}", quoted("ab"), quoted("a-b")),
             ),
         ],
-        "text.slice" => vec![
+        "str.slice" => vec![
             sample("(option str)", format!("{} 0u64 0u64", quoted(&text(3)))),
             sample("(option str)", format!("{} 0u64 12u64", quoted(&text(3)))),
             sample("(option str)", format!("{} 12u64 12u64", quoted(&text(3)))),
@@ -582,22 +582,22 @@ fn extra_samples(symbol: &str) -> Vec<(String, String)> {
                 format!("{} 0u64 18446744073709551615u64", quoted("abc")),
             ),
         ],
-        "text.to-chars" => vec![
+        "str.to-chars" => vec![
             array("char", quoted(&text(1))),
             array("char", quoted(&text(120))),
         ],
-        "text.from-chars" => vec![
+        "str.from-chars" => vec![
             sample("str", r"(array.of \a \é \€ \𝄞)".to_owned()),
             sample("str", r"(array.of \a)".to_owned()),
         ],
-        "text.to-utf8" => vec![
+        "str.to-utf8" => vec![
             sample(
                 "bytes",
                 quoted("\u{7f}\u{80}\u{7ff}\u{800}\u{ffff}\u{10000}\u{10ffff}"),
             ),
             sample("bytes", quoted(&text(150))),
         ],
-        "text.from-utf8" => {
+        "str.from-utf8" => {
             let result = "(result str core.conversion-error)";
             let mut samples = [
                 &[][..],
@@ -727,13 +727,13 @@ fn operand(value: &vibra_ir::Value) -> String {
 fn written_result(intrinsic: vibra_ir::external::CompilerIntrinsic) -> &'static str {
     use vibra_ir::external::CompilerIntrinsic as C;
     match intrinsic {
-        C::TextConcat => "str",
-        C::TextLength | C::BytesLength => "u64",
-        C::TextEqual | C::BytesEqual => "bool",
-        C::TextCompare | C::BytesCompare => "core.ordering",
-        C::TextSlice => "(option str)",
-        C::TextToUtf8 | C::BytesConcat => "bytes",
-        C::TextFromUtf8 => "(result str core.conversion-error)",
+        C::StrConcat => "str",
+        C::StrLength | C::BytesLength => "u64",
+        C::StrEqual | C::BytesEqual => "bool",
+        C::StrCompare | C::BytesCompare => "core.ordering",
+        C::StrSlice => "(option str)",
+        C::StrToUtf8 | C::BytesConcat => "bytes",
+        C::StrFromUtf8 => "(result str core.conversion-error)",
         C::BytesSlice => "(option bytes)",
         other => panic!("no vectors for {}", other.symbol()),
     }
@@ -753,7 +753,7 @@ fn the_text_and_bytes_vectors_hold_the_interpreter_and_the_module_to_one_answer(
         let vectors = intrinsic.vectors();
         let symbol = intrinsic.symbol();
         if vectors.is_empty()
-            || !(symbol.starts_with("text.") || symbol.starts_with("bytes."))
+            || !(symbol.starts_with("str.") || symbol.starts_with("bytes."))
         {
             continue;
         }
@@ -864,7 +864,7 @@ fn key_samples() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
             ],
         ),
         (
-            "std/text.vib",
+            "std/str.vib",
             vec![
                 ("\"ab\" \"b\"", "less"),
                 ("\"b\" \"ab\"", "greater"),

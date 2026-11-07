@@ -255,10 +255,10 @@ pub(crate) fn decompose<'p>(
         }
         // A wrapper over `str` or `bytes` is written over an array of `char` or
         // `u8`, which the object does not store: the part is the array that the
-        // registry's conversion (`text.to-chars`, `bytes.to-array`) makes of it.
+        // registry's conversion (`str.to-chars`, `bytes.to-array`) makes of it.
         Pattern::Wrap(inner) if matches!(ty, Type::Str | Type::Bytes) => {
             let (derive, element) = if *ty == Type::Str {
-                (CompilerIntrinsic::TextToChars, Type::Char)
+                (CompilerIntrinsic::StrToChars, Type::Char)
             } else {
                 (CompilerIntrinsic::BytesToArray, Type::U8)
             };
@@ -469,7 +469,7 @@ mod tests {
         let text = node(&wrapper, &Type::Str);
         assert_eq!(text.test, Test::Always);
         let child = &text.children[0];
-        assert_eq!(child.derive, Some(CompilerIntrinsic::TextToChars));
+        assert_eq!(child.derive, Some(CompilerIntrinsic::StrToChars));
         assert_eq!(child.ty, Type::Array(Box::new(Type::Char)));
         let bytes = node(&wrapper, &Type::Bytes);
         assert_eq!(

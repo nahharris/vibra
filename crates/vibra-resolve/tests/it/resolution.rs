@@ -75,7 +75,7 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
                 "app",
                 ["main"],
                 "src/main.vib",
-                b"(import text @std.text)\n(defn execute () str (text.str.concat \"a\" \"b\"))",
+                b"(import text @std.str)\n(defn execute () str (text.str.concat \"a\" \"b\"))",
             )],
         )],
     )
@@ -90,9 +90,9 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
         vec![
             vibra_resolve::SourceModule::new(
                 "std",
-                ["text"],
-                "stdlib/src/std/text.vib",
-                include_bytes!("../../../../stdlib/src/std/text.vib"),
+                ["str"],
+                "stdlib/src/std/str.vib",
+                include_bytes!("../../../../stdlib/src/std/str.vib"),
             ),
             vibra_resolve::SourceModule::new(
                 "std",
@@ -114,7 +114,7 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
     let module = snapshot
         .modules()
         .iter()
-        .find(|module| module.source_id() == "stdlib/src/std/text.vib")
+        .find(|module| module.source_id() == "stdlib/src/std/str.vib")
         .expect("bootstrap module in overlay");
     assert_eq!(module.package().name(), "vibra-stdlib");
     assert_eq!(module.package().version(), "0.3.0");
@@ -149,15 +149,15 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
                     "app",
                     ["main"],
                     "src/app/main.vib",
-                    b"(import text @std.text)\n(defn execute () str (text.str.concat \"a\" \"b\"))",
+                    b"(import text @std.str)\n(defn execute () str (text.str.concat \"a\" \"b\"))",
                 )],
             ),
             vibra_resolve::SourceUnit::lib(
                 "std",
                 vec![vibra_resolve::SourceModule::new(
                     "std",
-                    ["text"],
-                    "src/std/text.vib",
+                    ["str"],
+                    "src/std/str.vib",
                     b"(defn concat (left str right str) str visibility: @public \"local\")",
                 )],
             ),
@@ -174,9 +174,9 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
         vec![
             vibra_resolve::SourceModule::new(
                 "std",
-                ["text"],
-                "stdlib/src/std/text.vib",
-                include_bytes!("../../../../stdlib/src/std/text.vib"),
+                ["str"],
+                "stdlib/src/std/str.vib",
+                include_bytes!("../../../../stdlib/src/std/str.vib"),
             ),
             vibra_resolve::SourceModule::new(
                 "std",
@@ -198,9 +198,9 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
     let target = snapshot.imports()[0].module().expect("resolved import");
     assert_eq!(target.package().name(), "vibra-stdlib");
     assert_eq!(target.unit(), "std");
-    assert_eq!(target.segments(), ["text"]);
+    assert_eq!(target.segments(), ["str"]);
     assert!(snapshot.modules().iter().any(|module| {
-        module.source_id() == "stdlib/src/std/text.vib"
+        module.source_id() == "stdlib/src/std/str.vib"
             && module.package().name() == "vibra-stdlib"
     }));
 }

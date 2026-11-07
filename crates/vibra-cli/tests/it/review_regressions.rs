@@ -77,7 +77,7 @@ fn a_relocated_binary_verifies_its_embedded_bootstrap() {
     fs::copy(env!("CARGO_BIN_EXE_vibra"), &binary).expect("copy the built binary");
     let project = demo_project(
         "relocated",
-        "(import text @std.text)\n(defn main () void (let - (str.length \"A😀\")) (do))\n",
+        "(import text @std.str)\n(defn main () void (let - (str.length \"A😀\")) (do))\n",
     );
     project.write(
         "tests/math.vib",

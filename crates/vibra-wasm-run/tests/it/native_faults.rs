@@ -86,7 +86,7 @@ fn forged(
 
 fn length_of(setup: Vec<Instruction<'static>>, operand: i32) -> Outcome {
     runner()
-        .run_entry(&forged("text.length", &[ValType::I32], setup, &[operand]))
+        .run_entry(&forged("str.length", &[ValType::I32], setup, &[operand]))
         .expect("a runnable module")
 }
 
@@ -172,13 +172,13 @@ fn a_length_that_reaches_past_its_block_or_the_memory_is_a_defect() {
 
 #[test]
 fn a_destination_that_is_not_sized_to_the_result_is_a_defect() {
-    // `text.concat` of two empty strings builds a string of no scalar, and the
+    // `str.concat` of two empty strings builds a string of no scalar, and the
     // destination the module allocated holds five.
     let mut setup = object(1024, kind::STR, 4, 64, 0);
     setup.extend(object(2048, kind::STR, 4, 64, 0));
     setup.extend(object(3072, kind::STR, 4, 64, 5));
     let bytes = forged(
-        "text.concat",
+        "str.concat",
         &[ValType::I32, ValType::I32, ValType::I32],
         setup,
         &[1024, 2048, 3072],
@@ -190,7 +190,7 @@ fn a_destination_that_is_not_sized_to_the_result_is_a_defect() {
     setup.extend(object(2048, kind::STR, 4, 64, 0));
     setup.extend(object(3072, kind::STR, 4, 64, 0));
     let bytes = forged(
-        "text.concat",
+        "str.concat",
         &[ValType::I32, ValType::I32, ValType::I32],
         setup,
         &[1024, 2048, 3072],
@@ -206,7 +206,7 @@ fn a_destination_outside_the_memory_is_a_defect() {
     let mut setup = object(1024, kind::STR, 4, 64, 0);
     setup.extend(object(2048, kind::STR, 4, 64, 0));
     let bytes = forged(
-        "text.concat",
+        "str.concat",
         &[ValType::I32, ValType::I32, ValType::I32],
         setup,
         &[1024, 2048, 0x7fff_fff0],

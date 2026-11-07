@@ -604,7 +604,7 @@ pub fn call(
             let parsed = crate::number::parse_float(numeric, &text);
             return answer_parsed(memory, destination, parsed);
         }
-        C::TextLength => {
+        C::StrLength => {
             return i64::try_from(crate::length(&Chars(object(0, Layout::Chars)?)))
                 .map_err(|_| Fault::OutOfBounds);
         }
@@ -612,7 +612,7 @@ pub fn call(
             return i64::try_from(crate::length(&ByteSeq(object(0, Layout::Bytes)?)))
                 .map_err(|_| Fault::OutOfBounds);
         }
-        C::TextEqual => {
+        C::StrEqual => {
             let (a, b) = (
                 Chars(object(0, Layout::Chars)?),
                 Chars(object(1, Layout::Chars)?),
@@ -633,7 +633,7 @@ pub fn call(
             return i64::try_from(crate::identity(packed.at))
                 .map_err(|_| Fault::OutOfBounds);
         }
-        C::TextCompare => {
+        C::StrCompare => {
             let (a, b) = (
                 Chars(object(0, Layout::Chars)?),
                 Chars(object(1, Layout::Chars)?),
@@ -647,7 +647,7 @@ pub fn call(
             );
             return Ok(i64::from(crate::order_code(crate::compare(&a, &b))));
         }
-        C::TextConcat => {
+        C::StrConcat => {
             let (a, b) = (
                 Chars(object(0, Layout::Chars)?),
                 Chars(object(1, Layout::Chars)?),
@@ -661,7 +661,7 @@ pub fn call(
                 },
             )?
         }
-        C::TextSlice => {
+        C::StrSlice => {
             let a = Chars(object(0, Layout::Chars)?);
             let (start, end) = (index(1)?, index(2)?);
             build(
@@ -670,7 +670,7 @@ pub fn call(
                 |out: &mut dyn Sink<Unit = u32>| crate::slice(&a, start, end, out),
             )?
         }
-        C::TextToChars => {
+        C::StrToChars => {
             let a = Chars(object(0, Layout::Chars)?);
             build(
                 destination,
@@ -684,7 +684,7 @@ pub fn call(
                 },
             )?
         }
-        C::TextFromChars => {
+        C::StrFromChars => {
             let a = Narrow::<_, u32>(
                 Cells(object(0, Layout::Cells)?),
                 std::marker::PhantomData,
@@ -698,7 +698,7 @@ pub fn call(
                 },
             )?
         }
-        C::TextToUtf8 => {
+        C::StrToUtf8 => {
             let a = Chars(object(0, Layout::Chars)?);
             build(
                 destination,
@@ -709,7 +709,7 @@ pub fn call(
                 },
             )?
         }
-        C::TextFromUtf8 => {
+        C::StrFromUtf8 => {
             let a = ByteSeq(object(0, Layout::Bytes)?);
             build(
                 destination,

@@ -689,13 +689,13 @@ fn sequences(out: &mut Vec<Vector>) {
     for first in TEXTS {
         push(
             out,
-            C::TextLength,
+            C::StrLength,
             vec![text(first)],
             Outcome::Value(Value::U64(first.chars().count() as u64)),
         );
         push(
             out,
-            C::TextToUtf8,
+            C::StrToUtf8,
             vec![text(first)],
             Outcome::Value(bytes(first.as_bytes())),
         );
@@ -708,7 +708,7 @@ fn sequences(out: &mut Vec<Vector>) {
                 .and_then(|(start, end)| scalars.get(start..end));
             push(
                 out,
-                C::TextSlice,
+                C::StrSlice,
                 vec![text(first), Value::U64(start), Value::U64(end)],
                 piece.map_or(Outcome::None, |piece| {
                     Outcome::Some(text(&piece.iter().collect::<String>()))
@@ -718,19 +718,19 @@ fn sequences(out: &mut Vec<Vector>) {
         for second in TEXTS {
             push(
                 out,
-                C::TextConcat,
+                C::StrConcat,
                 vec![text(first), text(second)],
                 Outcome::Value(text(&format!("{first}{second}"))),
             );
             push(
                 out,
-                C::TextEqual,
+                C::StrEqual,
                 vec![text(first), text(second)],
                 Outcome::Value(Value::Bool(first == second)),
             );
             push(
                 out,
-                C::TextCompare,
+                C::StrCompare,
                 vec![text(first), text(second)],
                 order_of(first.chars().cmp(second.chars())),
             );
@@ -739,7 +739,7 @@ fn sequences(out: &mut Vec<Vector>) {
     for first in BYTE_STRINGS {
         push(
             out,
-            C::TextFromUtf8,
+            C::StrFromUtf8,
             vec![bytes(first)],
             match std::str::from_utf8(first) {
                 Ok(valid) => Outcome::Ok(text(valid)),
@@ -1026,13 +1026,13 @@ mod tests {
                 CompilerIntrinsic::Convert(..)
                 | CompilerIntrinsic::CharToU32
                 | CompilerIntrinsic::CharFromU32
-                | CompilerIntrinsic::TextConcat
-                | CompilerIntrinsic::TextLength
-                | CompilerIntrinsic::TextEqual
-                | CompilerIntrinsic::TextCompare
-                | CompilerIntrinsic::TextSlice
-                | CompilerIntrinsic::TextToUtf8
-                | CompilerIntrinsic::TextFromUtf8
+                | CompilerIntrinsic::StrConcat
+                | CompilerIntrinsic::StrLength
+                | CompilerIntrinsic::StrEqual
+                | CompilerIntrinsic::StrCompare
+                | CompilerIntrinsic::StrSlice
+                | CompilerIntrinsic::StrToUtf8
+                | CompilerIntrinsic::StrFromUtf8
                 | CompilerIntrinsic::BytesLength
                 | CompilerIntrinsic::BytesConcat
                 | CompilerIntrinsic::BytesEqual

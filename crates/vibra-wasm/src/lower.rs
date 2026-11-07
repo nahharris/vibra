@@ -881,7 +881,7 @@ impl<'a> Lowering<'a> {
             .collect::<Vec<_>>();
         match shape {
             KeyShape::Text => {
-                self.import(CompilerIntrinsic::TextCompare);
+                self.import(CompilerIntrinsic::StrCompare);
             }
             KeyShape::Bytes => {
                 self.import(CompilerIntrinsic::BytesCompare);
@@ -916,7 +916,7 @@ impl<'a> Lowering<'a> {
     /// their function indices.
     pub(crate) fn comparer_routines(&mut self) -> Vec<Routine> {
         let calls = Calls {
-            text: self.import_index(CompilerIntrinsic::TextCompare),
+            text: self.import_index(CompilerIntrinsic::StrCompare),
             bytes: self.import_index(CompilerIntrinsic::BytesCompare),
         };
         let mut routines = Vec::new();
@@ -3257,7 +3257,7 @@ impl<'l, 'a> Builder<'l, 'a> {
     /// are the exception the language itself makes: `str` and `bytes` are
     /// written over an array of `char` or `u8`, and a value of either is one
     /// object of its own kind, so wrapping an array is the native conversion
-    /// of the registry (`text.from-chars`, `bytes.from-array`).
+    /// of the registry (`str.from-chars`, `bytes.from-array`).
     fn wrap(
         &mut self,
         value_type: &Type,
@@ -3266,7 +3266,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         dest: u32,
     ) -> Result<(), EmitError> {
         let conversion = match value_type {
-            Type::Str => Some(CompilerIntrinsic::TextFromChars),
+            Type::Str => Some(CompilerIntrinsic::StrFromChars),
             Type::Bytes => Some(CompilerIntrinsic::BytesFromArray),
             _ => None,
         };

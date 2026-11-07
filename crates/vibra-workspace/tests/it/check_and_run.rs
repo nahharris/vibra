@@ -569,7 +569,7 @@ fn verified_bootstrap_imports_keep_package_identity_and_execute_through_checked_
         "verified-stdlib",
         &[(
             "src/app/main.vib",
-            "(import text @std.text)\n(defn execute () void (let - (str.length (str.concat \"a\" \"b\"))) (do))\n",
+            "(import text @std.str)\n(defn execute () void (let - (str.length (str.concat \"a\" \"b\"))) (do))\n",
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
@@ -605,7 +605,7 @@ fn verified_bootstrap_imports_keep_package_identity_and_execute_through_checked_
     let module = resolved
         .modules()
         .iter()
-        .find(|module| module.source_id() == vibra_types::STDLIB_TEXT_SOURCE_ID)
+        .find(|module| module.source_id() == vibra_types::STDLIB_STR_SOURCE_ID)
         .expect("verified text module");
     assert_eq!(module.package().name(), "vibra-stdlib");
     assert_eq!(module.package().version(), "0.3.0");
@@ -620,10 +620,10 @@ fn bootstrap_overlay_rejects_a_duplicate_project_source_identity() {
         &[
             (
                 "src/app/main.vib",
-                "(import text @std.text)\n(defn execute () void (let - (str.length \"x\")) (do))\n",
+                "(import text @std.str)\n(defn execute () void (let - (str.length \"x\")) (do))\n",
             ),
             (
-                "stdlib/src/std/text.vib",
+                "stdlib/src/std/str.vib",
                 "(defn local () i32 \"wrong type\")\n",
             ),
         ],
@@ -655,7 +655,7 @@ fn bootstrap_spelling_without_verification_is_unavailable_and_never_runs() {
         "unverified-stdlib",
         &[(
             "src/app/main.vib",
-            "(import text @std.text)\n(defn execute () void (let - (str.length \"spoof\")) (do))\n",
+            "(import text @std.str)\n(defn execute () void (let - (str.length \"spoof\")) (do))\n",
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
@@ -713,7 +713,7 @@ fn imported_std_modules_keep_the_verified_package_and_local_std_units_resolve_lo
         &[
             (
                 "src/app/main.vib",
-                "(import text @std.text)\n(import assertions @std.assert)\n(import extra @std.extra)\n(defn execute () void (let - (str.length (extra.suffix \"a\"))) (do))\n",
+                "(import text @std.str)\n(import assertions @std.assert)\n(import extra @std.extra)\n(defn execute () void (let - (str.length (extra.suffix \"a\"))) (do))\n",
             ),
             (
                 "src/std/extra.vib",
@@ -756,7 +756,7 @@ fn imported_std_modules_keep_the_verified_package_and_local_std_units_resolve_lo
             )
         })
         .collect::<BTreeMap<_, _>>();
-    assert_eq!(imports.get("std.text"), Some(&"vibra-stdlib"));
+    assert_eq!(imports.get("std.str"), Some(&"vibra-stdlib"));
     assert_eq!(imports.get("std.assert"), Some(&"vibra-stdlib"));
     assert_eq!(imports.get("std.extra"), Some(&"demo"));
 }
@@ -770,10 +770,10 @@ fn an_exact_local_std_text_target_cannot_satisfy_the_reserved_bootstrap_import()
         &[
             (
                 "src/app/main.vib",
-                "(import text @std.text)\n(defn execute () void (let - (str.length \"local\")) (do))\n",
+                "(import text @std.str)\n(defn execute () void (let - (str.length \"local\")) (do))\n",
             ),
             (
-                "src/std/text.vib",
+                "src/std/str.vib",
                 "(defn length (value str) u64 visibility: @public 5u64)\n",
             ),
         ],
@@ -808,7 +808,7 @@ fn an_unrelated_reserved_bootstrap_import_blocks_an_explicit_target() {
             ("src/app/main.vib", "(defn execute () void (do))\n"),
             (
                 "src/other/module.vib",
-                "(import text @std.text)\n(defn broken () i32 \"wrong type\")\n",
+                "(import text @std.str)\n(defn broken () i32 \"wrong type\")\n",
             ),
         ],
     );

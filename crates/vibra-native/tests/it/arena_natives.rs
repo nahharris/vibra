@@ -54,10 +54,10 @@ fn a_row_measures_with_no_destination_and_fills_the_one_it_is_given() {
     heap.text(A, "hé");
     heap.text(B, "𝄞!");
     let (a, b) = (A as i64, B as i64);
-    assert_eq!(heap.run(CompilerIntrinsic::TextConcat, &[a, b, 0]), Ok(4));
+    assert_eq!(heap.run(CompilerIntrinsic::StrConcat, &[a, b, 0]), Ok(4));
     heap.header(OUT, kind::STR, 4, 4);
     assert_eq!(
-        heap.run(CompilerIntrinsic::TextConcat, &[a, b, OUT as i64]),
+        heap.run(CompilerIntrinsic::StrConcat, &[a, b, OUT as i64]),
         Ok(4)
     );
     assert_eq!(
@@ -73,19 +73,19 @@ fn a_partial_row_measures_minus_one_when_it_has_no_object() {
     let a = A as i64;
     for (start, end, want) in [(1, 3, 2), (2, 1, -1), (0, 4, -1), (3, 3, 0)] {
         assert_eq!(
-            heap.run(CompilerIntrinsic::TextSlice, &[a, start, end, 0]),
+            heap.run(CompilerIntrinsic::StrSlice, &[a, start, end, 0]),
             Ok(want),
             "{start}..{end}"
         );
     }
     heap.bytes(B, &[0xED, 0xA0, 0x80]);
     assert_eq!(
-        heap.run(CompilerIntrinsic::TextFromUtf8, &[B as i64, 0]),
+        heap.run(CompilerIntrinsic::StrFromUtf8, &[B as i64, 0]),
         Ok(-1)
     );
     heap.bytes(B, &[0x61, 0xC3, 0xA9]);
     assert_eq!(
-        heap.run(CompilerIntrinsic::TextFromUtf8, &[B as i64, 0]),
+        heap.run(CompilerIntrinsic::StrFromUtf8, &[B as i64, 0]),
         Ok(2)
     );
 }
@@ -96,9 +96,9 @@ fn a_native_that_orders_answers_minus_one_zero_or_one() {
     heap.text(A, "ab");
     heap.text(B, "b");
     let (a, b) = (A as i64, B as i64);
-    assert_eq!(heap.run(CompilerIntrinsic::TextCompare, &[a, b]), Ok(-1));
-    assert_eq!(heap.run(CompilerIntrinsic::TextCompare, &[b, a]), Ok(1));
-    assert_eq!(heap.run(CompilerIntrinsic::TextCompare, &[a, a]), Ok(0));
+    assert_eq!(heap.run(CompilerIntrinsic::StrCompare, &[a, b]), Ok(-1));
+    assert_eq!(heap.run(CompilerIntrinsic::StrCompare, &[b, a]), Ok(1));
+    assert_eq!(heap.run(CompilerIntrinsic::StrCompare, &[a, a]), Ok(0));
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn an_operand_that_is_not_an_object_of_the_row_is_a_fault_and_never_a_read() {
     heap.text(A, "abc");
     heap.bytes(B, &[1, 2]);
     let compare = |heap: &mut Heap, left: i64, right: i64| {
-        heap.run(CompilerIntrinsic::TextCompare, &[left, right])
+        heap.run(CompilerIntrinsic::StrCompare, &[left, right])
     };
     // An offset past the end of the memory, and a header that ends there.
     assert_eq!(
@@ -155,14 +155,14 @@ fn an_operand_that_is_not_an_object_of_the_row_is_a_fault_and_never_a_read() {
     heap.header(OUT, kind::STR, 4, 2);
     assert_eq!(
         heap.run(
-            CompilerIntrinsic::TextConcat,
+            CompilerIntrinsic::StrConcat,
             &[A as i64, A as i64, OUT as i64]
         ),
         Err(Fault::Destination)
     );
     // A call that does not match the signature.
     assert_eq!(
-        heap.run(CompilerIntrinsic::TextConcat, &[A as i64]),
+        heap.run(CompilerIntrinsic::StrConcat, &[A as i64]),
         Err(Fault::Signature)
     );
 }

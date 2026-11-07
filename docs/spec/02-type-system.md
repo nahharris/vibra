@@ -81,7 +81,7 @@ role is a toolchain defect reported as an operational provenance diagnostic.
 Adding a role is a specification change to this table.
 
 `@std.bool` declares `(deftype bool (enum false void true void) role: @bool)`,
-`@std.text` declares `(deftype str (array char) role: @str)`, and `@std.bytes`
+`@std.str` declares `(deftype str (array char) role: @str)`, and `@std.bytes`
 declares `(deftype bytes (array u8) role: @bytes)`. Their constructors and
 patterns are the declared ones, so `(bool.true)`, `(str scalars)`, and
 `(bytes items)` build and destructure values, while a toolchain represents the

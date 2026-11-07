@@ -629,7 +629,7 @@ fn validate_entries(
 
 pub(crate) fn is_bootstrap_import_path(written: &str) -> bool {
     [
-        "std.text",
+        "std.str",
         "std.option",
         "std.result",
         "std.core",

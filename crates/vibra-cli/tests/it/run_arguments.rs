@@ -10,7 +10,7 @@ use crate::support::{TempDir, app_target, manifest, run_workspace, text};
 /// Writes each argument on its own line, so the output shows the list.
 const MAIN: &str = r#"(import env @std.env)
 (import io @std.io)
-(import text @std.text)
+(import text @std.str)
 
 (defn line (acc str item str) str
   (str.concat acc (str.concat item "\n")))
