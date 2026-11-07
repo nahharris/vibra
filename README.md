@@ -32,9 +32,11 @@ it available to both the compiler and the tools an agent uses.
 - **Static effects.** Functions declare the kinds of operations they may
   perform, such as reading a file or writing to the console. The compiler
   checks those declarations and the effects allowed by a project target.
-- **Fewer unnecessary choices.** Immutable values, explicit boundaries, and a
-  canonical formatter give people and agents a consistent language to work
-  with.
+- **Functional by design.** Vibra is expression-oriented, with first-class
+  functions and immutable values. Pure computations can be composed without
+  introducing effects.
+- **Fewer unnecessary choices.** Explicit boundaries and a canonical
+  formatter give people and agents a consistent language to work with.
 - **Structured tooling.** Machine-readable diagnostics and workspace queries
   are part of the design. Richer agent-facing queries, transactional edits,
   and MCP support are still ahead on the roadmap.
