@@ -1,5 +1,10 @@
 # Vibra
 
+[![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-cba6f7)](docs/roadmap/v1.md)
+[![CI](https://github.com/nahharris/vibra/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nahharris/vibra/actions/workflows/ci.yml)
+[![Rust 1.96+](https://img.shields.io/badge/rust-1.96%2B-dea584?logo=rust)](https://www.rust-lang.org/)
+[![License: MIT or Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](LICENSE)
+
 **A vibe-coding-first programming language.**
 
 Vibra is a general-purpose language designed for software written and maintained
@@ -14,7 +19,7 @@ language and tooling are still evolving and are not ready for production.
 [See the roadmap](docs/roadmap/v1.md) ·
 [Releases](https://github.com/nahharris/vibra/releases)
 
-## Why Vibra?
+## ✨ Why Vibra?
 
 Coding agents can write a lot of code, but the people using that code still
 need to understand what it does and whether it meets their intent. Vibra aims
@@ -38,7 +43,7 @@ These checks catch some mistakes before execution. They do not establish that
 an agent understood a request, prove a program correct, or sandbox its runtime.
 Effects are checked statically; they are not runtime grants.
 
-## Hello, Vibra
+## 👋 Hello, Vibra
 
 ```lisp
 (import io @std.io)
@@ -91,7 +96,7 @@ The repository also contains [example projects](examples/), including a
 The CLI currently supports project initialization, formatting, checking,
 running, and testing. Use `vibra help` to see the available commands.
 
-## Where the project stands
+## 🧭 Where the project stands
 
 The current implementation includes a reader and formatter, a nominal static
 type system, an interpreter, a WebAssembly backend, static effect checking,
