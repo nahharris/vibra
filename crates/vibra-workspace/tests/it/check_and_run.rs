@@ -569,7 +569,7 @@ fn verified_bootstrap_imports_keep_package_identity_and_execute_through_checked_
         "verified-stdlib",
         &[(
             "src/app/main.vib",
-            "(import text @std.text)\n(defn execute () void (let - (text.length (text.concat \"a\" \"b\"))) (do))\n",
+            "(import text @std.text)\n(defn execute () void (let - (str.length (str.concat \"a\" \"b\"))) (do))\n",
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
@@ -620,7 +620,7 @@ fn bootstrap_overlay_rejects_a_duplicate_project_source_identity() {
         &[
             (
                 "src/app/main.vib",
-                "(import text @std.text)\n(defn execute () void (let - (text.length \"x\")) (do))\n",
+                "(import text @std.text)\n(defn execute () void (let - (str.length \"x\")) (do))\n",
             ),
             (
                 "stdlib/src/std/text.vib",
@@ -655,7 +655,7 @@ fn bootstrap_spelling_without_verification_is_unavailable_and_never_runs() {
         "unverified-stdlib",
         &[(
             "src/app/main.vib",
-            "(import text @std.text)\n(defn execute () void (let - (text.length \"spoof\")) (do))\n",
+            "(import text @std.text)\n(defn execute () void (let - (str.length \"spoof\")) (do))\n",
         )],
     );
     let snapshot = WorkspaceSnapshot::load(project.path()).expect("snapshot");
@@ -713,7 +713,7 @@ fn imported_std_modules_keep_the_verified_package_and_local_std_units_resolve_lo
         &[
             (
                 "src/app/main.vib",
-                "(import text @std.text)\n(import assertions @std.assert)\n(import extra @std.extra)\n(defn execute () void (let - (text.length (extra.suffix \"a\"))) (do))\n",
+                "(import text @std.text)\n(import assertions @std.assert)\n(import extra @std.extra)\n(defn execute () void (let - (str.length (extra.suffix \"a\"))) (do))\n",
             ),
             (
                 "src/std/extra.vib",
@@ -770,7 +770,7 @@ fn an_exact_local_std_text_target_cannot_satisfy_the_reserved_bootstrap_import()
         &[
             (
                 "src/app/main.vib",
-                "(import text @std.text)\n(defn execute () void (let - (text.length \"local\")) (do))\n",
+                "(import text @std.text)\n(defn execute () void (let - (str.length \"local\")) (do))\n",
             ),
             (
                 "src/std/text.vib",

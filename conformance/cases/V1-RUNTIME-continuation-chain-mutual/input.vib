@@ -1,12 +1,12 @@
 (defn main () u64 (ping 100000u64 (lambda (total u64) u64 total)))
 
 (defn ping (count u64 next (fn (u64) u64)) u64
-  (if (u64.equal count 0u64)
+  (if (equatable.equal count 0u64)
     (next 0u64)
     (pong (lower count) (lambda (total u64) u64 (next (raise total))))))
 
 (defn pong (count u64 next (fn (u64) u64)) u64
-  (if (u64.equal count 0u64)
+  (if (equatable.equal count 0u64)
     (next 0u64)
     (ping (lower count) (lambda (total u64) u64 (next (raise (raise total)))))))
 

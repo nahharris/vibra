@@ -16,7 +16,7 @@
     (result.err -) 0i32))
 
 (defn loop (count i32 next (fn (i32) i32)) i32
-  (if (i32.equal count 0i32) 7i32 (next (lower count))))
+  (if (equatable.equal count 0i32) 7i32 (next (lower count))))
 
 (defn pong (count i32) i32
   (loop count pong))
@@ -27,10 +27,10 @@
 
 ; Mutual tail recursion through a generic identity.
 (defn ping (count i32) i32
-  (if (i32.equal count 0i32) 7i32 ((same back) (lower count))))
+  (if (equatable.equal count 0i32) 7i32 ((same back) (lower count))))
 
 (defn back (count i32) i32
-  (if (i32.equal count 0i32) 8i32 ((same ping) (lower count))))
+  (if (equatable.equal count 0i32) 8i32 ((same ping) (lower count))))
 
 ; The callee is whatever function the fold returns.
 (defn pick (steps (array (fn (i32) i32)) fallback (fn (i32) i32)) (fn (i32) i32)

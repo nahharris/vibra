@@ -233,6 +233,7 @@ fn build(
     // The lambdas of the program follow its functions and module values in the
     // table, in the order a traversal meets them.
     let lambdas = lower::collect(program);
+    let reachable = lower::reachable(program, tests);
     let total = u32::try_from(lambdas.len())
         .ok()
         .and_then(|lambdas| total.checked_add(lambdas))
@@ -261,7 +262,8 @@ fn build(
         Vec::new(),
         lower::Extras::default(),
         run_tests,
-    );
+    )
+    .with_reachable(reachable.clone());
     let mut sizes = Vec::with_capacity(count);
     for index in 0..count {
         sizes.push(first.function(index)?.slots);
@@ -289,7 +291,8 @@ fn build(
         host_imports.clone(),
         extras,
         run_tests,
-    );
+    )
+    .with_reachable(reachable);
     let mut lowered = Vec::with_capacity(count);
     for index in 0..count {
         lowered.push(lowering.function(index)?.code);

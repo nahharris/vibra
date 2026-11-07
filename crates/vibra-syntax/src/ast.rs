@@ -69,9 +69,10 @@ pub fn is_primitive_type_name(name: &str) -> bool {
 fn is_builtin_type_name(name: &str) -> bool {
     is_primitive_type_name(name) || BUILTIN_CONSTRUCTOR_NAMES.contains(&name)
 }
-/// The names of the types that play a language role and are named without an
-/// import; only the declaration that claims the role may use one.
-const ROLE_TYPE_NAMES: &[&str] = &["option", "result", "iter"];
+/// The names of the declarations that play a language role and are named without
+/// an import, types and interfaces alike; only the declaration that claims the
+/// role may use one.
+const ROLE_TYPE_NAMES: &[&str] = &["option", "result", "iter", "equatable", "ordered"];
 /// Heads that are reserved forms in expression position.
 const RESERVED_EXPRESSION_TYPE_HEADS: &[&str] = &[
     "tuple",

@@ -86,12 +86,13 @@ fn row_program(intrinsic: CompilerIntrinsic, vectors: &[Vector]) -> String {
                 .map(placeholder)
                 .collect::<Vec<_>>()
                 .join(" ");
-            format!("({} {operands})", intrinsic.symbol())
+            format!("({} {operands})", crate::support::call_head(intrinsic))
         })
         .collect::<Vec<_>>()
         .join("\n    ");
     format!(
-        "(import core @std.core)\n(defn main () (tuple {types})\n  (tupleof\n    {calls}))\n"
+        "{}(defn main () (tuple {types})\n  (tupleof\n    {calls}))\n",
+        crate::support::ROW_IMPORTS
     )
 }
 
@@ -443,16 +444,16 @@ fn a_nan_is_one_value_wherever_it_is_observed() {
     // `0.0 / 0.0` is a NaN the engine and the host compute; `neg` flips its
     // sign bit. Neither is observable: `to-str`, `equal`, `compare-total`, and
     // the canonical encoding of the result agree in both backends.
-    let source = "(import core @std.core)\n\
+    let source = "(import core @std.core)\n(import from @std.core.from)\n(import try-from @std.core.try-from)\n\
 (defn main ()\n\
   (tuple str str bool bool core.ordering core.ordering f64 f32 f64 f32 (result f64 core.conversion-error))\n\
   (tupleof\n\
-    (f64.to-str nan64) (f32.to-str (nan32))\n\
+    (from.convert nan64) (from.convert (nan32))\n\
     (f64.equal nan64 nan64) (f32.equal (nan32) (nan32))\n\
     (f64.compare-total nan64 (f64.neg nan64))\n\
     (f32.compare-total (f32.neg (nan32)) (nan32))\n\
     nan64 (nan32) (f64.neg nan64) (f32.neg (nan32))\n\
-    (f64.parse \"nan\")))\n\
+    (try-from.convert \"nan\")))\n\
 (def nan64 f64 (f64.div 0.0f64 0.0f64))\n\
 (defn nan32 () f32 (f32.div 0.0f32 0.0f32))\n";
     let program = checked(source);
@@ -516,16 +517,16 @@ fn a_loop_of_number_text_holds_a_bounded_arena() {
     // a tail call, so a hundred thousand rounds hold what ten thousand do.
     let source = |rounds: u32| {
         format!(
-            "(import core @std.core)\n\
+            "(import core @std.core)\n(import from @std.core.from)\n(import try-from @std.core.try-from)\n\
 (defn main () u64 (spin {rounds}u64 0u64))\n\
 (defn spin (n u64 acc u64) u64\n\
-  (if (u64.equal n 0u64)\n\
+  (if (equatable.equal n 0u64)\n\
     acc\n\
     (match (u64.sub-checked n 1u64)\n\
       (result.ok next)\n\
-        (match (u64.parse (u64.to-str n))\n\
+        (match (as (result u64 core.conversion-error) (try-from.convert (as str (from.convert n))))\n\
           (result.ok back)\n\
-            (match (f64.parse (f64.to-str 1.5e-7f64))\n\
+            (match (as (result f64 core.conversion-error) (try-from.convert (as str (from.convert 1.5e-7f64))))\n\
               (result.ok -) (spin next (digits back acc))\n\
               (result.err -) acc)\n\
           (result.err -) acc)\n\
@@ -561,9 +562,9 @@ fn a_string_built_at_the_end_of_memory_is_a_host_event_and_never_a_native_fault(
     // Shrink the memory limit until the strings no longer fit. At every limit the
     // run completes or exhausts its memory; a native that read or wrote past the
     // end of the memory would be a defect.
-    let source = "(defn main () (tuple str str str str)\n\
-  (tupleof (f64.to-str 1.7976931348623157e308f64) (f64.to-str -5e-324f64)\n\
-           (i64.to-str -9223372036854775808i64) (u64.to-str 18446744073709551615u64)))\n";
+    let source = "(import from @std.core.from)\n(defn main () (tuple str str str str)\n\
+  (tupleof (from.convert 1.7976931348623157e308f64) (from.convert -5e-324f64)\n\
+           (from.convert -9223372036854775808i64) (from.convert 18446744073709551615u64)))\n";
     let program = checked(source);
     let bytes = emitted(&program);
     let mut completed = 0;

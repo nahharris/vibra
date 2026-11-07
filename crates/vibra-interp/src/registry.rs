@@ -149,12 +149,57 @@ fn checked(numeric: NumericType, value: Option<i128>, result: &Type) -> RuntimeV
     }
 }
 
+/// The exact `value` clamped to the bounds of `numeric`.
+fn saturated(numeric: NumericType, value: i128) -> Option<RuntimeValue> {
+    let (low, high) = numeric.range();
+    make_integer(numeric, value.clamp(low, high)).map(primitive)
+}
+
+/// An unchecked row: the exact result in `i128`, saturated at the bounds of
+/// the type. Every operand of a type of at most 64 bits computes exactly, but
+/// for a product or a shift past `i128`, which saturates there with its sign.
+/// A zero divisor never reaches this function: the machine traps first.
+fn unchecked(
+    numeric: NumericType,
+    op: IntegerOp,
+    operands: &[&Value],
+) -> Option<RuntimeValue> {
+    match (op, operands) {
+        (IntegerOp::Neg, [value]) => saturated(numeric, -integer_value(value)?),
+        (IntegerOp::ShiftLeft, [value, Value::U32(amount)]) => {
+            let value = integer_value(value)?;
+            let factor = 1_i128.checked_shl(*amount).filter(|factor| *factor > 0);
+            saturated(numeric, value.saturating_mul(factor.unwrap_or(i128::MAX)))
+        }
+        // `>>` on `i128` floors, so a shift past the width leaves `0` or `-1`.
+        (IntegerOp::ShiftRight, [value, Value::U32(amount)]) => {
+            saturated(numeric, integer_value(value)? >> (*amount).min(127))
+        }
+        (_, [left, right]) => {
+            let (left, right) = (integer_value(left)?, integer_value(right)?);
+            let exact = match op {
+                IntegerOp::Add => left + right,
+                IntegerOp::Sub => left - right,
+                IntegerOp::Mul => left.saturating_mul(right),
+                IntegerOp::Div => left.checked_div(right)?,
+                IntegerOp::Rem => left.checked_rem(right)?,
+                _ => return None,
+            };
+            saturated(numeric, exact)
+        }
+        _ => None,
+    }
+}
+
 fn integer(
     numeric: NumericType,
     op: IntegerOp,
     operands: &[&Value],
     result: &Type,
 ) -> Option<RuntimeValue> {
+    if op.checked().is_some() {
+        return unchecked(numeric, op, operands);
+    }
     let values = operands
         .iter()
         .map(|value| integer_value(value))
@@ -167,14 +212,14 @@ fn integer(
             checked(numeric, value.checked_neg(), result)
         }
         (
-            IntegerOp::ShiftLeftChecked | IntegerOp::ShiftRight,
+            IntegerOp::ShiftLeftChecked | IntegerOp::ShiftRightChecked,
             [value, Value::U32(amount)],
         ) => {
             let value = integer_value(value)?;
             if *amount >= numeric.bits() {
                 return Some(err(result, "invalid-shift"));
             }
-            if op == IntegerOp::ShiftRight {
+            if op == IntegerOp::ShiftRightChecked {
                 // `>>` on `i128` floors, as `floor(left / 2^amount)` does.
                 checked(numeric, Some(value >> amount), result)
             } else {
@@ -480,14 +525,14 @@ mod tests {
 
     #[test]
     fn shifts_reject_amounts_at_or_above_the_width() {
-        use IntegerOp::{ShiftLeftChecked, ShiftRight};
+        use IntegerOp::{ShiftLeftChecked, ShiftRightChecked};
         use NumericType::{I16, U8};
         assert!(is_err(
             &int(U8, ShiftLeftChecked, &[Value::U8(1), Value::U32(8)]),
             "invalid-shift"
         ));
         assert!(is_err(
-            &int(U8, ShiftRight, &[Value::U8(1), Value::U32(9)]),
+            &int(U8, ShiftRightChecked, &[Value::U8(1), Value::U32(9)]),
             "invalid-shift"
         ));
         assert!(
@@ -499,7 +544,7 @@ mod tests {
             "overflow"
         ));
         assert!(
-            int(I16, ShiftRight, &[Value::I16(-1), Value::U32(15)])
+            int(I16, ShiftRightChecked, &[Value::I16(-1), Value::U32(15)])
                 .contains("payload: -1i16")
         );
     }

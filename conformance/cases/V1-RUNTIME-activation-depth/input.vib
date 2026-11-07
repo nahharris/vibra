@@ -3,7 +3,7 @@
 (defn main () u64 (depth 100000u64))
 
 (defn depth (remaining u64) u64
-  (if (u64.equal remaining 0u64)
+  (if (equatable.equal remaining 0u64)
     0u64
     (match (u64.add-checked (depth (lower remaining)) 1u64)
       (result.ok total) total

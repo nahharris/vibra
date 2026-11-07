@@ -7,7 +7,7 @@ use vibra_types::check_source;
 fn countdown_source(rounds: u32) -> String {
     format!(
         "(defn answer () i32 (count {rounds}u32))
-(defn count (n u32) i32 (if (u32.equal n 0u32) 0i32 (count (lower n))))
+(defn count (n u32) i32 (if (equatable.equal n 0u32) 0i32 (count (lower n))))
 (defn lower (n u32) u32 (match (u32.sub-checked n 1u32) (result.ok v) v (result.err -) 0u32))
 "
     )
@@ -135,7 +135,7 @@ fn mixed_source_and_external_tail_candidates_reuse_only_source_targets() {
             "\
 (import text @std.text)
 (defn answer () u64
-  ((if {condition} local-length text.length) \"x\"))
+  ((if {condition} local-length str.length) \"x\"))
 (defn local-length (value str) u64 99u64)
 "
         );
@@ -174,7 +174,7 @@ fn returned_external_callables_fall_back_to_ordinary_invocation() {
     let source = r#"
 (import text @std.text)
 (defn answer () u64 ((make) "x"))
-(defn make () (fn (str) u64) text.length)
+(defn make () (fn (str) u64) str.length)
 "#;
     let checked = check_source("tail-returned-external.vib", source);
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
@@ -191,7 +191,7 @@ fn unknown_callable_branches_keep_known_recursive_and_external_fallbacks() {
             "\
 (import text @std.text)
 (defn answer () u64
-  ((if {condition} (make) text.length) \"x\"))
+  ((if {condition} (make) str.length) \"x\"))
 (defn make () (fn (str) u64) local-length)
 (defn local-length (value str) u64 99u64)
 "
@@ -366,7 +366,7 @@ fn tail_calls_between_modules_reuse_one_activation() {
     .expect("main module");
     std::fs::write(
         root.join("src/app/steps.vib"),
-        "(defn step (count u64 next (fn (u64) void)) void visibility: @public\n  (if (u64.equal count 0u64) (do) (next (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n",
+        "(defn step (count u64 next (fn (u64) void)) void visibility: @public\n  (if (equatable.equal count 0u64) (do) (next (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n",
     )
     .expect("steps module");
     let snapshot = vibra_workspace::WorkspaceSnapshot::load(&root).expect("snapshot");
@@ -376,7 +376,13 @@ fn tail_calls_between_modules_reuse_one_activation() {
         .targets()
         .first()
         .expect("binary target");
-    let run = vibra_workspace::semantic::run_target(&snapshot, target);
+    // `equatable.equal` is a prelude root, which the verified library declares.
+    let stdlib = vibra_types::load_stdlib().expect("standard library");
+    let run = vibra_workspace::semantic::run_target_with_bootstrap(
+        &snapshot,
+        target,
+        Some(&stdlib),
+    );
     assert_eq!(
         run.check().status(),
         vibra_workspace::semantic::CheckStatus::Accepted,
@@ -435,7 +441,7 @@ fn def_initializer_calls_are_never_tail_transfers() {
 
 #[test]
 fn a_lambda_in_a_def_initializer_tail_calls_in_one_activation() {
-    let source = "(def drive (fn (u64) u64) (lambda (count u64) u64 (spin count)))\n(defn answer () u64 (drive 1000u64))\n(defn spin (count u64) u64\n  (if (u64.equal count 0u64) 3u64 (spin (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
+    let source = "(def drive (fn (u64) u64) (lambda (count u64) u64 (spin count)))\n(defn answer () u64 (drive 1000u64))\n(defn spin (count u64) u64\n  (if (equatable.equal count 0u64) 3u64 (spin (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n";
     let checked = check_source("tail-def-lambda.vib", source);
     assert!(checked.accepted(), "{:?}", checked.diagnostics());
     let execution =

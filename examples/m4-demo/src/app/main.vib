@@ -4,14 +4,12 @@
 
 (import io @std.io)
 
-(import text @std.text)
-
 (deftype usage (enum missing-path void))
 
 (deftype demo-error (union usage env.env-error fs.fs-error io.io-error))
 
 (defn quote (quoted str line str) str
-  (text.concat quoted (text.concat "> " (text.concat line "\n"))))
+  (str.concat quoted (str.concat "> " (str.concat line "\n"))))
 
 (defn first-argument () (result str demo-error)
   effects: (env.read)
@@ -46,5 +44,5 @@
   effects: (env.read fs.read io.stdout)
   (let path (try (first-argument)))
   (let contents (try (read-file path)))
-  (let lines (text.split (text.trim contents) "\n"))
+  (let lines (str.split (str.trim contents) "\n"))
   (write-out (array.fold lines "" quote)))

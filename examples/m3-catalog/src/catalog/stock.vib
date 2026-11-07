@@ -4,8 +4,6 @@
 
 (import iter @std.iter.iter)
 
-(import ordered @std.core.ordered)
-
 ; A stock-keeping unit. Stock is listed from the highest number down, so a
 ; dict keyed by `sku` follows this order, not the order of the number inside.
 (deftype sku u32
@@ -14,7 +12,7 @@
     (defn compare (left self right self) core.ordering
       (match
         (tupleof left right)
-        (tupleof (sku first) (sku second)) (u32.compare second first))))
+        (tupleof (sku first) (sku second)) (ordered.compare second first))))
   (impl (from u32) (defn convert (value u32) self (sku value))))
 
 ; What a line of stock is worth.
@@ -24,7 +22,7 @@
   ; Whether the value is worth more than `limit` cents.
   (defn above (value self limit u64) bool
     (match
-      (u64.compare (priced.cents value) limit)
+      (ordered.compare (priced.cents value) limit)
       (core.ordering.greater) true
       - false)))
 

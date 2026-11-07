@@ -1,6 +1,4 @@
 (import core @std.core)
-(import equatable @std.core.equatable)
-(import ordered @std.core.ordered)
 
 (defn execute () void void)
 
@@ -12,8 +10,8 @@
       (match (ordered.compare left right) (core.ordering.equal) true - false)))
   (impl ordered
     (defn compare (left self right self) core.ordering
-      (match (u8.compare (left @major) (right @major))
-        (core.ordering.equal) (u8.compare (left @minor) (right @minor))
+      (match (ordered.compare (left @major) (right @major))
+        (core.ordering.equal) (ordered.compare (left @minor) (right @minor))
         order order))))
 
 (defn double (value i32) i32
@@ -23,5 +21,5 @@
 (defn odd (value i32) bool
   visibility: @public
   (match (i32.rem-checked value 2i32)
-    (result.ok remainder) (i32.equal remainder 1i32)
+    (result.ok remainder) (equatable.equal remainder 1i32)
     (result.err -) false))

@@ -112,6 +112,7 @@ table governs.
 | `@project.io-error` | `@error` |
 | `@runtime.invalid-host-value` | `@error` |
 | `@runtime.invalid-checked-program` | `@error` |
+| `@runtime.division-by-zero` | `@error` |
 | `@runtime.unobservable-function` | `@error` |
 | `@runtime.memory-exhausted` | `@error` |
 | `@style.argument-order` | `@warning` |
@@ -211,7 +212,8 @@ is the trap of a host operation that receives a value ID or index it does not
 admit, and does not describe checked-program failures; no checked program
 reaches it unless the toolchain has a defect, and the CLI `run` and `test`
 schemas and the `@test-run.v1` observation admit it as a `trapCode`, with no
-origin. `@runtime.unobservable-function` is the trap of a
+origin. `@runtime.division-by-zero` is the trap of an unchecked integer `div` or
+`rem` with a zero divisor; it has no origin. `@runtime.unobservable-function` is the trap of a
 value holding a function that reaches a test assertion or the entry's result;
 in a test its diagnostic and trap origin are the assertion call.
 `@runtime.memory-exhausted` is the host event that ends execution when the
@@ -269,8 +271,8 @@ owning source identity:
 | expression of type `never` in a position that does not admit one | `@type.unreachable-code` | the expression | none |
 | element following an element of type `never` in one body sequence | `@type.unreachable-code` | the first following element | the diverging element |
 | binder repeating a name a `let` or `let-else` left visible | `@name.redeclaration` | the later binder | the earlier binder |
-| lexical binder of any form (parameter, `let`, `let-else`, `match` arm, or `lambda` parameter) spelled as a keyword, `any`, or a name of the prelude (a primitive type name, `option`, `result`, `iter`, `array`, `dict`, `true`, or `false`) | `@name.reserved-declaration` | the binder name | none; `true` and `false` reach this only as a plain name, because they are constant patterns at a pattern site |
-| module value or function spelled as a prelude name (`true`, `false`, `option`, `result`, `iter`, or a builtin type name), or an import alias spelled as a builtin type name, `true`, or `false`, outside the embedded standard library | `@name.reserved-value-spelling` | the declaration or the name | none |
+| lexical binder of any form (parameter, `let`, `let-else`, `match` arm, or `lambda` parameter) spelled as a keyword, `any`, or a name of the prelude (a primitive type name, `option`, `result`, `iter`, `equatable`, `ordered`, `array`, `dict`, `true`, or `false`) | `@name.reserved-declaration` | the binder name | none; `true` and `false` reach this only as a plain name, because they are constant patterns at a pattern site |
+| module value or function spelled as a prelude name (`true`, `false`, `option`, `result`, `iter`, `equatable`, `ordered`, or a builtin type name), or an import alias spelled as a builtin type name, `true`, or `false`, outside the embedded standard library | `@name.reserved-value-spelling` | the declaration or the name | none |
 | pattern name that resolves to a module value that is not a compile-time constant | `@name.redeclaration` | the name | the module value, with a note that it is not a compile-time constant |
 | labelled default that is not a constant expression: a call, a function, or a module value whose initializer is not constant | `@type.not-constant` | the default expression | the module value, when the expression is a name of one |
 | declaration named `never` | `@name.reserved-declaration` | the name | none |
@@ -474,7 +476,8 @@ test that trapped keeps the events completed before the trap. For
 checked-program execution-boundary traps, `trap-code` is
 the exact string `"@runtime.invalid-checked-program"` and `origin` is omitted;
 for `"@runtime.unobservable-function"`, `origin` is the assertion call; and
-`"@runtime.invalid-host-value"` has no origin.
+`"@runtime.invalid-host-value"` and `"@runtime.division-by-zero"` have no
+origin.
 The test records contain all per-test traces, so a second
 suite-level audit snapshot is forbidden. An empty suite is `tests: (array)`
 with result `@command.ok`.

@@ -14,7 +14,7 @@
 (deftype countdown (record from i32)
   (impl (iter i32)
     (defn next (value self) (option (tuple i32 self))
-      (match (i32.compare (value @from) 0i32)
+      (match (ordered.compare (value @from) 0i32)
         (core.ordering.greater)
           (option.some
             (tupleof

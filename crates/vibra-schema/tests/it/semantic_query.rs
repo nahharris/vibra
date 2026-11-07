@@ -377,7 +377,7 @@ fn type_metadata_validates_and_names_what_it_resolved() {
         ("(shape.label value)", "default", false),
         ("(shape.name value))\n\n(defn widened", "dynamic", false),
         ("(from.convert value))\n\n(defn main", "static", true),
-        ("(from.convert value)", "closed", true),
+        ("(from.convert value)", "static", true),
     ];
     for (needle, selection, destination) in selections {
         let call = serde_json::to_value(typed(needle)).expect("JSON");

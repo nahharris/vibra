@@ -8,7 +8,6 @@
     (apply show (point x: 3i32))))
 
 (import core @std.core)
-(import ordered @std.core.ordered)
 
 (defint shape
   (defn name (value self) str)

@@ -90,13 +90,14 @@ pub fn standard_resolve_input(
     let mut input = ResolveInput::new(package_name, package_version, units)
         .with_reserved_import_paths(
             [
-                "text", "option", "result", "core", "bool", "char", "bytes", "assert",
+                "text", "option", "result", "core", "bool", "bytes", "assert",
             ]
             .map(|module| ("std".to_owned(), vec![module.to_owned()])),
         )
         .with_builtin_members(crate::builtin_member_names())
         .with_assertion_members(crate::assertion_member_names())
-        .with_role_types(crate::role_type_names().into_iter().map(|(_, name)| name));
+        .with_role_types(crate::role_type_names().into_iter().map(|(_, name)| name))
+        .with_prelude_roots(crate::prelude_roots());
     if let Some(verification) = verification {
         let (overlay_package, modules) = verification.resolver_overlay();
         input = input.with_verified_overlay(

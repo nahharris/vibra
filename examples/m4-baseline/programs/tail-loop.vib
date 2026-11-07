@@ -3,7 +3,7 @@
 (defn main () u64 (spin 1000000u64 0u64))
 
 (defn spin (remaining u64 total u64) u64
-  (if (u64.equal remaining 0u64)
+  (if (equatable.equal remaining 0u64)
     total
     (spin (lower remaining) (bump total))))
 

@@ -1,5 +1,9 @@
 (import core @std.core)
 
+(import from @std.core.from)
+
+(import try-from @std.core.try-from)
+
 (defn main ()
   (tuple
     (result i32 core.arithmetic-error)
@@ -24,10 +28,10 @@
     (i16.neg-checked -32768i16)
     (u8.div-checked 1u8 0u8)
     (u32.shift-left-checked 1u32 32u32)
-    (i64.shift-right -9i64 1u32)
-    (u16.equal 7u16 7u16)
-    (i32.compare -1i32 1i32)
-    (i64.to-str -9223372036854775808i64)
-    (u16.parse "65535")
-    (i8.parse "-129")
-    (u64.parse "-1")))
+    (i64.shift-right-checked -9i64 1u32)
+    (equatable.equal 7u16 7u16)
+    (ordered.compare -1i32 1i32)
+    (from.convert -9223372036854775808i64)
+    (try-from.convert "65535")
+    (try-from.convert "-129")
+    (try-from.convert "-1")))

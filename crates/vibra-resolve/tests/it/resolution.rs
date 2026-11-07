@@ -75,7 +75,7 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
                 "app",
                 ["main"],
                 "src/main.vib",
-                b"(import text @std.text)\n(defn execute () str (text.concat \"a\" \"b\"))",
+                b"(import text @std.text)\n(defn execute () str (text.str.concat \"a\" \"b\"))",
             )],
         )],
     )
@@ -83,6 +83,7 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
     .with_role_types(
         ["bool", "str", "bytes", "option", "result"].map(str::to_owned),
     )
+    .with_prelude_roots(prelude_roots())
     .with_verified_overlay(
         "vibra-stdlib",
         "0.3.0",
@@ -98,12 +99,6 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
                 ["core"],
                 "stdlib/src/std/core.vib",
                 include_bytes!("../../../../stdlib/src/std/core.vib"),
-            ),
-            vibra_resolve::SourceModule::new(
-                "std",
-                ["char"],
-                "stdlib/src/std/char.vib",
-                include_bytes!("../../../../stdlib/src/std/char.vib"),
             ),
             vibra_resolve::SourceModule::new(
                 "std",
@@ -134,7 +129,7 @@ fn verified_overlay_keeps_distinct_package_identity_across_imports() {
     let target = snapshot
         .references()
         .iter()
-        .find(|reference| reference.written() == "text.concat")
+        .find(|reference| reference.written() == "text.str.concat")
         .and_then(|reference| reference.target())
         .expect("resolved bootstrap declaration");
     assert_eq!(target.package().name(), "vibra-stdlib");
@@ -154,7 +149,7 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
                     "app",
                     ["main"],
                     "src/app/main.vib",
-                    b"(import text @std.text)\n(defn execute () str (text.concat \"a\" \"b\"))",
+                    b"(import text @std.text)\n(defn execute () str (text.str.concat \"a\" \"b\"))",
                 )],
             ),
             vibra_resolve::SourceUnit::lib(
@@ -172,6 +167,7 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
     .with_role_types(
         ["bool", "str", "bytes", "option", "result"].map(str::to_owned),
     )
+    .with_prelude_roots(prelude_roots())
     .with_verified_overlay(
         "vibra-stdlib",
         "0.3.0",
@@ -187,12 +183,6 @@ fn an_exact_local_std_module_never_shadows_the_verified_bootstrap_overlay() {
                 ["core"],
                 "stdlib/src/std/core.vib",
                 include_bytes!("../../../../stdlib/src/std/core.vib"),
-            ),
-            vibra_resolve::SourceModule::new(
-                "std",
-                ["char"],
-                "stdlib/src/std/char.vib",
-                include_bytes!("../../../../stdlib/src/std/char.vib"),
             ),
             vibra_resolve::SourceModule::new(
                 "std",
@@ -820,6 +810,14 @@ fn import_cycle_related_span_comes_from_the_traversed_cycle_edge() {
                 .iter()
                 .any(|related| related.source_id.as_deref() == Some("src/a.vib"))
     }));
+}
+
+/// The prelude's path roots the standard library's own bodies use: its
+/// comparison contracts, which `@std.core` declares.
+fn prelude_roots() -> Vec<(String, Vec<String>)> {
+    ["equatable", "ordered"]
+        .map(|root| (root.to_owned(), vec!["core".to_owned()]))
+        .into()
 }
 
 /// The `(type, member)` names `@std.builtin` declares, which the standard

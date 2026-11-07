@@ -28,7 +28,7 @@ fn the_call_of_array_fold_in_tail_position_is_a_tail_call() {
     // position like any other, in user code and in the body alike. The run of
     // this loop is in `V1-RUNTIME-array-fold`.
     let program = checked(&with_prelude(
-        "(defn main () i32 (spin 2000i32))\n(defn spin (n i32) i32 (if (i32.equal n 0i32) 7i32 (array.fold (array.of n) 0i32 (lambda (total i32 k i32) i32 (spin (lower k))))))",
+        "(defn main () i32 (spin 2000i32))\n(defn spin (n i32) i32 (if (equatable.equal n 0i32) 7i32 (array.fold (array.of n) 0i32 (lambda (total i32 k i32) i32 (spin (lower k))))))",
     ));
     let spin = program
         .functions()

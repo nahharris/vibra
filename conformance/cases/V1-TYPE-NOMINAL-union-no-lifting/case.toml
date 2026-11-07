@@ -15,10 +15,10 @@ accepted = false
 code = "@name.unknown-symbol"
 level = "@error"
 source = "src/app/main.vib"
-span = [70, 88]
+span = [70, 80]
 
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
 source = "src/app/main.vib"
-span = [131, 137]
+span = [123, 129]

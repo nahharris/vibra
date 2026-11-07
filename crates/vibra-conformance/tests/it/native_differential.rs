@@ -232,69 +232,138 @@ fn finish(source: &str, checked: &vibra_types::CheckResult) -> Ran {
     Ran { interpreter, wasm }
 }
 
-/// Each native function of a standard-library module as `(symbol, module
-/// path, function name)`.
-fn module_natives() -> Vec<(String, &'static str, String)> {
+/// One native of `@std.text` or `@std.bytes`: a static method of `str` or
+/// `bytes`, or a member of its comparison implementations.
+struct ModuleNative {
+    symbol: String,
+    /// The module, such as `std/text.vib`.
+    module: &'static str,
+    /// How source applies it, such as `str.concat` or `equatable.equal`.
+    call: String,
+    /// The function its body becomes in [`body_source`].
+    name: String,
+}
+
+/// The `native:` symbol a declaration names.
+fn native_symbol(attributes: &[Attribute]) -> Option<String> {
+    attributes.iter().find_map(|attribute| match attribute {
+        Attribute::Native(Literal::String(symbol)) => Some(symbol.value().to_owned()),
+        _ => None,
+    })
+}
+
+/// Each native of the role types `str` and `bytes`, from their `deftype`s.
+fn module_natives() -> Vec<ModuleNative> {
     let mut natives = Vec::new();
     for module in ["std/text.vib", "std/bytes.vib"] {
         let path = workspace_root().join("stdlib/src").join(module);
         let text = std::fs::read_to_string(&path).expect("module");
         let document = vibra_syntax::parse_source(&path, &text).expect("parse");
         for declaration in document.ast().expect("module ast").declarations() {
-            let Declaration::Defn(function) = declaration else {
+            let Declaration::Deftype(owner) = declaration else {
                 continue;
             };
-            if let Some(symbol) =
-                function.attributes().items().iter().find_map(|attribute| {
-                    match attribute {
-                        Attribute::Native(Literal::String(symbol)) => {
-                            Some(symbol.value().to_owned())
+            let owner_name = owner.name().value();
+            for member in owner.members() {
+                match member {
+                    TypeMember::Method(method) => {
+                        if let Some(symbol) = native_symbol(method.attributes().items())
+                        {
+                            let name = method.name().value().to_owned();
+                            natives.push(ModuleNative {
+                                symbol,
+                                module,
+                                call: format!("{owner_name}.{name}"),
+                                name,
+                            });
                         }
-                        _ => None,
                     }
-                })
-            {
-                natives.push((symbol, module, function.name().value().to_owned()));
+                    TypeMember::Implementation(block) => {
+                        for method in block.members() {
+                            if let Some(symbol) =
+                                native_symbol(method.attributes().items())
+                            {
+                                let name = method.name().value().to_owned();
+                                let call = match name.as_str() {
+                                    "equal" => "equatable.equal",
+                                    _ => "ordered.compare",
+                                };
+                                natives.push(ModuleNative {
+                                    symbol,
+                                    module,
+                                    call: call.to_owned(),
+                                    name,
+                                });
+                            }
+                        }
+                    }
+                }
             }
         }
     }
     natives
 }
 
-/// The alias a source gives the standard-library module at `module`, such as
-/// `text` for `std/text.vib`.
-fn alias_of(module: &str) -> &str {
-    module
-        .strip_prefix("std/")
-        .and_then(|name| name.strip_suffix(".vib"))
-        .unwrap_or(module)
-}
-
-/// The module rewritten as ordinary source after `main`, so that each function
-/// runs its Vibra body: without its `deftype`s, which the role types `str` and
-/// `bytes` already are in every source, and without `native:`.
+/// The module rewritten as ordinary source after `main`, so that each native
+/// runs its Vibra body: its top-level declarations, and each native member of
+/// its role type as a top-level function of the member's name, with `self` as
+/// the type. A role type is declared only by the standard library, so the
+/// `deftype` itself stays there. An `equal` that compares through `compare`
+/// reaches the rewritten `compare`, not the library's.
 fn body_source(module: &str) -> String {
     let path = workspace_root().join("stdlib/src").join(module);
     let text = std::fs::read_to_string(&path).expect("module");
     let document = vibra_syntax::parse_source(&path, &text).expect("parse");
-    document
-        .ast()
-        .expect("module ast")
-        .declarations()
-        .iter()
-        .filter(|declaration| !matches!(declaration, Declaration::Deftype(_)))
-        .map(|declaration| {
-            let span = declaration.span();
-            text[span.start()..span.end()]
-                .lines()
-                .filter(|line| !line.trim_start().starts_with("native:"))
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n")
+    let strip = |source: &str| {
+        source
+            .lines()
+            .filter(|line| {
+                let line = line.trim_start();
+                !line.starts_with("native:") && !line.starts_with("visibility:")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let mut parts = Vec::new();
+    for declaration in document.ast().expect("module ast").declarations() {
+        let span = declaration.span();
+        let Declaration::Deftype(owner) = declaration else {
+            parts.push(strip(&text[span.start()..span.end()]));
+            continue;
+        };
+        let owner_name = owner.name().value();
+        let mut hoisted = Vec::new();
+        for member in owner.members() {
+            match member {
+                TypeMember::Method(method) => hoisted.push(method),
+                TypeMember::Implementation(block) => hoisted.extend(block.members()),
+            }
+        }
+        for method in hoisted {
+            if native_symbol(method.attributes().items()).is_none() {
+                continue;
+            }
+            let span = method.span();
+            let source = strip(&text[span.start()..span.end()])
+                .replace("self", owner_name)
+                .replace("(ordered.compare left right)", "(compare left right)");
+            parts.push(source);
+        }
+    }
+    parts.join("\n\n")
 }
 
+/// How source spells a wrapper conversion row, which no function names: the
+/// constructor and the pattern of `str` and `bytes`.
+fn wrapper_call(symbol: &str, operand: &str) -> Option<String> {
+    Some(match symbol {
+        "text.to-chars" => format!("(do (let (str scalars) {operand}) scalars)"),
+        "text.from-chars" => format!("(str {operand})"),
+        "bytes.to-array" => format!("(do (let (bytes items) {operand}) items)"),
+        "bytes.from-array" => format!("(bytes {operand})"),
+        _ => return None,
+    })
+}
 #[test]
 fn every_listed_native_matches_its_body() {
     let stdlib = vibra_types::load_stdlib().expect("standard library");
@@ -328,26 +397,34 @@ fn every_listed_native_matches_its_body() {
                         ),
                     ),
                 )
+            } else if let Some(call) = wrapper_call(symbol, operands) {
+                // A wrapper conversion's meaning is the declared wrapper, which
+                // the interpreter and the module each implement; its program
+                // runs on both, and the body is the same program.
+                let ran = run("native.vib", &format!("(defn main () {result} {call})"));
+                let again = run("body.vib", &format!("(defn main () {result} {call})"));
+                (ran, again)
             } else {
-                let (_, module, name) = modules
+                let native = modules
                     .iter()
-                    .find(|(native, _, _)| native == symbol)
+                    .find(|native| native.symbol == *symbol)
                     .unwrap_or_else(|| panic!("`{symbol}` has no native declaration"));
-                let alias = alias_of(module);
                 (
-                    // The native: the module as the standard library embeds it.
+                    // The native: the member as the standard library embeds it.
                     run(
                         "native.vib",
                         &format!(
-                            "(import core @std.core)\n(import library @std.{alias})\n(defn main () {result} (library.{name} {operands}))"
+                            "(import core @std.core)\n(defn main () {result} ({} {operands}))",
+                            native.call
                         ),
                     ),
-                    // The body: the module's function, written in an ordinary source.
+                    // The body: the member, written as an ordinary function.
                     run(
                         "body.vib",
                         &format!(
-                            "(defn main () {result} ({name} {operands}))\n\n{}",
-                            body_source(module)
+                            "(defn main () {result} ({} {operands}))\n\n{}",
+                            native.name,
+                            body_source(native.module)
                         ),
                     ),
                 )
@@ -680,12 +757,12 @@ fn the_text_and_bytes_vectors_hold_the_interpreter_and_the_module_to_one_answer(
         {
             continue;
         }
-        let (_, module, name) = modules
+        let call = &modules
             .iter()
-            .find(|(native, _, _)| native == symbol)
-            .unwrap_or_else(|| panic!("`{symbol}` has no native declaration"));
+            .find(|native| native.symbol == symbol)
+            .unwrap_or_else(|| panic!("`{symbol}` has no native declaration"))
+            .call;
         let result = written_result(intrinsic);
-        let alias = alias_of(module);
         let calls = vectors
             .iter()
             .map(|vector| {
@@ -695,7 +772,7 @@ fn the_text_and_bytes_vectors_hold_the_interpreter_and_the_module_to_one_answer(
                     .map(operand)
                     .collect::<Vec<_>>()
                     .join(" ");
-                format!("(library.{name} {operands})")
+                format!("({call} {operands})")
             })
             .collect::<Vec<_>>()
             .join("\n    ");
@@ -703,7 +780,7 @@ fn the_text_and_bytes_vectors_hold_the_interpreter_and_the_module_to_one_answer(
         let checked = vibra_types::check_source(
             "vectors.vib",
             &format!(
-                "(import core @std.core)\n(import library @std.{alias})\n(defn main () (tuple {types})\n  (tupleof\n    {calls}))"
+                "(import core @std.core)\n(defn main () (tuple {types})\n  (tupleof\n    {calls}))"
             ),
         );
         let program = checked
@@ -810,7 +887,7 @@ fn key_samples() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
             ],
         ),
         (
-            "std/core.vib",
+            "std/builtin.vib",
             vec![
                 ("-1i8 1i8", "less"),
                 ("300i16 -300i16", "greater"),
@@ -828,18 +905,31 @@ fn key_samples() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
     ]
 }
 
+/// The two operands of a sample, split at the space between them.
+fn operand_pair(operands: &str) -> (&str, &str) {
+    let mut depth = 0_i32;
+    for (index, character) in operands.char_indices() {
+        match character {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ' ' if depth == 0 => return (&operands[..index], &operands[index + 1..]),
+            _ => {}
+        }
+    }
+    panic!("`{operands}` is not two operands")
+}
+
 /// Each written key conformance of the standard library answers as canonical
-/// key order does (`docs/spec/02-type-system.md`, "Nominal declarations"). A
-/// module whose implementation is not in scope reaches the closed registry
-/// instead, and that answer must be the same one.
+/// key order does (`docs/spec/02-type-system.md`, "Nominal declarations"). Every
+/// written implementation is in scope in every module, so the closed registry
+/// answers the same pair inside a one-component tuple, which no written
+/// implementation covers, and that answer must be the same one.
 #[test]
 fn every_library_key_conformance_answers_canonical_key_order() {
-    let imports = "(import core @std.core)\n(import equatable @std.core.equatable)\n(import ordered @std.core.ordered)";
     let mut closed_comparisons = 0;
     for (module, pairs) in key_samples() {
-        // The module imported whole puts its written implementations in scope.
-        let library = format!("(import library @std.{})", alias_of(module));
         for (operands, order) in pairs {
+            let (left, right) = operand_pair(operands);
             for (result, member, expected) in [
                 (
                     "core.ordering",
@@ -852,8 +942,9 @@ fn every_library_key_conformance_answers_canonical_key_order() {
                     format!("value: {}", order == "equal"),
                 ),
             ] {
-                let call = format!("(defn main () {result} ({member} {operands}))");
-                let written_source = format!("{library}\n{call}\n\n{imports}");
+                let written_source = format!(
+                    "(import core @std.core)\n(defn main () {result} ({member} {left} {right}))"
+                );
                 let checked = vibra_types::check_source("written.vib", &written_source);
                 let program = checked
                     .program()
@@ -861,7 +952,7 @@ fn every_library_key_conformance_answers_canonical_key_order() {
                 // The call must reach a written implementation, not the registry.
                 assert!(
                     !program.canonical_vibon().contains("closed: @key."),
-                    "`{member} {operands}` in {module} fell back to the closed registry"
+                    "`{member} {operands}` of {module} fell back to the closed registry"
                 );
                 let written = vibra_interp::run(program)
                     .expect("execution")
@@ -870,23 +961,25 @@ fn every_library_key_conformance_answers_canonical_key_order() {
                     written.contains(&expected),
                     "`{member}` of {module} does not answer `{expected}` on `{operands}`: {written}"
                 );
-                let closed_source = format!("{call}\n\n{imports}");
+                let closed_source = format!(
+                    "(import core @std.core)\n(defn main () {result} ({member} (tupleof {left}) (tupleof {right})))"
+                );
                 let closed_checked =
                     vibra_types::check_source("closed.vib", &closed_source);
-                if closed_checked.program().is_some_and(|program| {
-                    program.canonical_vibon().contains("closed: @key.")
-                }) {
-                    closed_comparisons += 1;
-                    assert_eq!(
-                        finish(&closed_source, &closed_checked).interpreter,
-                        written,
-                        "`{member}` of {module} disagrees with the closed registry on `{operands}`"
-                    );
-                }
+                assert!(
+                    closed_checked.program().is_some_and(|program| {
+                        program.canonical_vibon().contains("closed: @key.")
+                    }),
+                    "`{member}` over a tuple of {module} does not reach the closed registry"
+                );
+                closed_comparisons += 1;
+                assert_eq!(
+                    finish(&closed_source, &closed_checked).interpreter,
+                    written,
+                    "`{member}` of {module} disagrees with the closed registry on `{operands}`"
+                );
             }
         }
     }
-    // Text and bytes are not in scope without their import: their closed
-    // registry is the reference for those pairs.
-    assert!(closed_comparisons >= 14, "{closed_comparisons}");
+    assert!(closed_comparisons >= 44, "{closed_comparisons}");
 }

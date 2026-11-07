@@ -23,12 +23,12 @@
 
 ; A fold in a tail loop of a thousand rounds.
 (defn rounds (n i32 acc i32) i32
-  (if (i32.equal n 0i32) acc (rounds (lower n) (array.fold (array.of 1i32 2i32) acc add))))
+  (if (equatable.equal n 0i32) acc (rounds (lower n) (array.fold (array.of 1i32 2i32) acc add))))
 
 ; The call of array.fold is in tail position, and the fold's step calls the
 ; loop again.
 (defn spin (n i32) i32
-  (if (i32.equal n 0i32)
+  (if (equatable.equal n 0i32)
     7i32
     (array.fold (array.of n) 0i32 (lambda (total i32 k i32) i32 (spin (lower k))))))
 

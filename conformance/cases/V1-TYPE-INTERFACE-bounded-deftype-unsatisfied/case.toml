@@ -15,28 +15,28 @@ accepted = false
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "src/app/main.vib"
-span = [111, 129]
+span = [76, 94]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "src/app/main.vib"
-span = [183, 204]
+span = [148, 169]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "src/app/main.vib"
-span = [256, 274]
+span = [221, 239]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "src/app/main.vib"
-span = [296, 343]
+span = [261, 308]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "src/app/main.vib"
-span = [445, 458]
+span = [410, 423]

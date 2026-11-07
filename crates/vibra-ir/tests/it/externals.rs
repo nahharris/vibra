@@ -13,15 +13,16 @@ fn registry_contains_only_the_reviewed_operations() {
         .into_iter()
         .map(CompilerIntrinsic::symbol)
         .collect::<Vec<_>>();
-    // Twelve methods for each signed and eleven for each unsigned integer
-    // type, a conversion to each of the seven other integer types, nine for
-    // each float type, and the module and collection rows.
-    assert_eq!(symbols.len(), 4 * 12 + 4 * 11 + 8 * 7 + 2 * 9 + 26);
+    // Twenty methods for each signed and eighteen for each unsigned integer
+    // type (each arithmetic row unchecked and checked), a conversion to each
+    // of the seven other integer types, nine for each float type, and the
+    // module and collection rows.
+    assert_eq!(symbols.len(), 4 * 20 + 4 * 18 + 8 * 7 + 2 * 9 + 26);
     let distinct = symbols.iter().collect::<std::collections::BTreeSet<_>>();
     assert_eq!(distinct.len(), symbols.len());
     for symbol in [
         "i8.neg-checked",
-        "u64.shift-right",
+        "u64.shift-right-checked",
         "i32.parse",
         "f32.compare-total",
         "f64.to-str",
@@ -33,8 +34,8 @@ fn registry_contains_only_the_reviewed_operations() {
         assert!(symbols.contains(&symbol), "{symbol} is missing");
     }
     assert!(CompilerIntrinsic::from_symbol("u8.neg-checked").is_none());
-    assert!(CompilerIntrinsic::from_symbol("f64.add-checked").is_none());
-    assert!(CompilerIntrinsic::from_symbol("integer.add-checked").is_none());
+    assert!(CompilerIntrinsic::from_symbol("f64.rem").is_none());
+    assert!(CompilerIntrinsic::from_symbol("integer.add").is_none());
     assert!(CompilerIntrinsic::from_symbol("host.read").is_none());
     for intrinsic in CompilerIntrinsic::all() {
         assert_eq!(

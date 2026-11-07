@@ -29,12 +29,6 @@
     (option.some (tupleof first rest)) (drain rest (array.append seen first))
     (option.none) seen))
 
-; One less than `count`, which is above zero where this is called.
-(defn decrement (count u64) u64
-  (match (u64.sub-checked count 1u64)
-    (result.ok lower) lower
-    (result.err -) 0u64))
-
 ; `map`: each item of `source` through `transform`.
 (deftype mapped-iter (record source (iter item) transform (fn (item) out))
   where: (item any out any)
@@ -82,9 +76,9 @@
   where: (item any)
   (match (iter.next source)
     (option.some (tupleof first rest))
-      (if (u64.equal count 0u64)
+      (if (equatable.equal count 0u64)
         (option.some (tupleof first (skipped-iter source: rest count: 0u64)))
-        (skip-step rest (decrement count)))
+        (skip-step rest (u64.sub count 1u64)))
     (option.none) (option.none)))
 
 ; `take`: at most the first `count` items of `source`.
@@ -93,12 +87,12 @@
   visibility: @public
   (impl (iter item)
     (defn next (value self) (option (tuple item self))
-      (if (u64.equal (value @count) 0u64)
+      (if (equatable.equal (value @count) 0u64)
         (option.none)
         (match (iter.next (value @source))
           (option.some (tupleof first rest))
             (option.some
               (tupleof
                 first
-                (taken-iter source: rest count: (decrement (value @count)))))
+                (taken-iter source: rest count: (u64.sub (value @count) 1u64))))
           (option.none) (option.none))))))

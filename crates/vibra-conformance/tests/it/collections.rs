@@ -256,7 +256,7 @@ fn a_declared_key_is_ordered_by_its_own_compare_called_as_a_language_function() 
 (deftype point (record x i32 y i32)\n\
   (impl ordered\n\
     (defn compare (left self right self) core.ordering\n\
-      (i32.compare (left @y) (right @y)))))\n";
+      (ordered.compare (left @y) (right @y)))))\n";
     let types = dict_type("@app.main.point", "@str");
     let point = |x: &str, y: &str| {
         format!(

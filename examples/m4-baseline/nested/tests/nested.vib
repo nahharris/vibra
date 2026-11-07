@@ -5,7 +5,7 @@
 (deftype chain (record next (array chain)))
 
 (defn build (count u64 tip chain) chain
-  (if (u64.equal count 0u64)
+  (if (equatable.equal count 0u64)
     tip
     (build (lower count) (chain next: (array.of tip)))))
 

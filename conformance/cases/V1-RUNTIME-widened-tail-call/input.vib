@@ -41,7 +41,7 @@
 
 ; The recursive call already has the result type, so it stays a tail transfer.
 (defn down (count i32) number
-  (if (i32.equal count 0i32)
+  (if (equatable.equal count 0i32)
     0i32
     (down (match (i32.sub-checked count 1i32) (result.ok lower) lower (result.err -) 0i32))))
 

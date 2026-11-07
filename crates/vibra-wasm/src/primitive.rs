@@ -16,6 +16,7 @@
 //! | `bool` | `equal` | the enum `bool`, discriminant `false` 0 and `true` 1 |
 //! | `ordering` | `compare`, the float `compare-total` | an enum of three `void` variants |
 //! | `(result t e)` | the checked operations, a conversion that can fail | `ok` of a cell, or `err` of an enum of `void` variants |
+//! | saturated scalar | the unchecked integer operations | none: a cell, after an unchecked `div` or `rem` traps on a zero divisor |
 //! | `(option char)` | `char.from-u32` | `some` of a cell, or `none` |
 //!
 //! # The computation
@@ -42,7 +43,7 @@ use vibra_ir::{CANONICAL_NAN_F32, CANONICAL_NAN_F64};
 use wasm_encoder::Instruction as I;
 
 use crate::layout::header;
-use crate::lower::{FRAME, WA, WB, WR};
+use crate::lower::{FRAME, SCRATCH, WA, WB, WR};
 use crate::runtime::{Ins, ValueClass, c32, c64, get, ld32, ld64, set};
 
 /// How a row's result is built.
@@ -58,6 +59,9 @@ pub(crate) enum Outcome {
     Checked(NumericType),
     /// `(option char)`.
     Option,
+    /// A scalar of this integer type that an unchecked row saturated at the
+    /// bounds of the type, left in a cell.
+    Saturated(NumericType),
 }
 
 /// A way a checked row fails, which the checked result's error enum names.
@@ -106,6 +110,8 @@ impl Names {
 enum Body {
     /// A checked arithmetic or shift row of this type.
     Arithmetic(NumericType, IntegerOp),
+    /// An unchecked arithmetic or shift row of this type.
+    Unchecked(NumericType, IntegerOp),
     /// `equal` of this type.
     Equal,
     /// `compare` of this type.
@@ -189,10 +195,29 @@ pub(crate) fn plan(intrinsic: CompilerIntrinsic) -> Option<Plan> {
                     Outcome::Checked(numeric),
                     Body::Arithmetic(numeric, op),
                 ),
-                IntegerOp::ShiftLeftChecked | IntegerOp::ShiftRight => (
+                IntegerOp::ShiftLeftChecked | IntegerOp::ShiftRightChecked => (
                     vec![numeric, U32],
                     Outcome::Checked(numeric),
                     Body::Arithmetic(numeric, op),
+                ),
+                IntegerOp::Add
+                | IntegerOp::Sub
+                | IntegerOp::Mul
+                | IntegerOp::Div
+                | IntegerOp::Rem => (
+                    vec![numeric, numeric],
+                    Outcome::Saturated(numeric),
+                    Body::Unchecked(numeric, op),
+                ),
+                IntegerOp::Neg => (
+                    vec![numeric],
+                    Outcome::Saturated(numeric),
+                    Body::Unchecked(numeric, op),
+                ),
+                IntegerOp::ShiftLeft | IntegerOp::ShiftRight => (
+                    vec![numeric, U32],
+                    Outcome::Saturated(numeric),
+                    Body::Unchecked(numeric, op),
                 ),
                 IntegerOp::Equal => {
                     (vec![numeric, numeric], Outcome::Bool, Body::Equal)
@@ -254,6 +279,16 @@ impl Plan {
         self.outcome
     }
 
+    /// Whether the row leaves, above its value, an `i32` that is nonzero when
+    /// it must trap with `@runtime.division-by-zero`: an unchecked `div` or
+    /// `rem`.
+    pub(crate) const fn traps(&self) -> bool {
+        matches!(
+            self.body,
+            Body::Unchecked(_, IntegerOp::Div | IntegerOp::Rem)
+        )
+    }
+
     /// The faults the row can report.
     pub(crate) fn faults(&self) -> Vec<Fault> {
         match self.body {
@@ -267,7 +302,7 @@ impl Plan {
                 IntegerOp::ShiftLeftChecked => {
                     vec![Fault::InvalidShift, Fault::Overflow]
                 }
-                IntegerOp::ShiftRight => vec![Fault::InvalidShift],
+                IntegerOp::ShiftRightChecked => vec![Fault::InvalidShift],
                 _ => Vec::new(),
             },
             Body::Convert(..) if matches!(self.outcome, Outcome::Checked(_)) => {
@@ -289,6 +324,7 @@ impl Plan {
         }
         match self.body {
             Body::Arithmetic(numeric, op) => arithmetic(numeric, op, names, &mut code),
+            Body::Unchecked(numeric, op) => saturate(numeric, op, &mut code),
             Body::Equal => code.extend([get(WA), get(WB), I::I64Eq]),
             Body::Compare(numeric) => {
                 order(names, numeric.is_signed(), &mut code);
@@ -339,7 +375,7 @@ impl Plan {
     /// of at most 32 bits zero-extended from its 32 bits.
     pub(crate) fn value(&self) -> Vec<Ins> {
         let ty = match self.outcome {
-            Outcome::Scalar(ty) | Outcome::Checked(ty) => ty,
+            Outcome::Scalar(ty) | Outcome::Checked(ty) | Outcome::Saturated(ty) => ty,
             Outcome::Bool | Outcome::Ordering | Outcome::Option => NumericType::U32,
         };
         let mut code = vec![get(WR)];
@@ -354,7 +390,11 @@ impl Plan {
         match self.outcome {
             Outcome::Scalar(NumericType::F32) => ValueClass::F32,
             Outcome::Scalar(NumericType::F64) => ValueClass::F64,
-            Outcome::Scalar(ty) | Outcome::Checked(ty) if wide(ty) => ValueClass::I64,
+            Outcome::Scalar(ty) | Outcome::Checked(ty) | Outcome::Saturated(ty)
+                if wide(ty) =>
+            {
+                ValueClass::I64
+            }
             _ => ValueClass::I32,
         }
     }
@@ -712,12 +752,101 @@ fn arithmetic(numeric: NumericType, op: IntegerOp, names: &Names, code: &mut Vec
             when(overflow, &leaves, &mut inner);
             first_of(names.fault(Fault::InvalidShift), &bad_shift, &inner, code);
         }
-        IntegerOp::ShiftRight => {
+        IntegerOp::ShiftRightChecked => {
             code.extend([a, b, shift_right, set(WR)]);
             when(names.fault(Fault::InvalidShift), &bad_shift, code);
         }
-        // Not a checked row: `plan` never gives these a body.
-        IntegerOp::Equal | IntegerOp::Compare | IntegerOp::ToStr | IntegerOp::Parse => {
+        // Not a checked row: `plan` never gives these this body, and an
+        // unchecked row computes through its checked counterpart.
+        IntegerOp::Equal
+        | IntegerOp::Compare
+        | IntegerOp::ToStr
+        | IntegerOp::Parse
+        | IntegerOp::Add
+        | IntegerOp::Sub
+        | IntegerOp::Mul
+        | IntegerOp::Div
+        | IntegerOp::Rem
+        | IntegerOp::Neg
+        | IntegerOp::ShiftLeft
+        | IntegerOp::ShiftRight => {}
+    }
+}
+
+/// The fault kinds an unchecked row computes its checked counterpart with: `1`
+/// plus the position of each [`Fault`], none of them `0`.
+const KINDS: Names = Names {
+    faults: [1, 2, 3, 4],
+    order: [0, 0, 0],
+};
+
+/// An unchecked row: its checked counterpart, whose value replaces by the bound
+/// of the type it would cross when that counterpart fails. The kind is kept in
+/// `SCRATCH`; an unchecked `div` or `rem` then leaves whether the divisor was
+/// zero, which traps.
+fn saturate(numeric: NumericType, op: IntegerOp, code: &mut Vec<Ins>) {
+    let checked = op.checked().unwrap_or(op);
+    arithmetic(numeric, checked, &KINDS, code);
+    code.push(set(SCRATCH));
+    bound(numeric, op, code);
+    code.extend([get(WR), get(SCRATCH), I::Select, set(WR)]);
+    if matches!(op, IntegerOp::Div | IntegerOp::Rem) {
+        code.extend([
+            get(SCRATCH),
+            c32(KINDS.fault(Fault::DivisionByZero)),
+            I::I32Eq,
+        ]);
+    }
+}
+
+/// The bound an unchecked row saturates at, from its operands in `WA` and `WB`:
+/// the end of the type its exact result lies past. A shift left of zero stays
+/// zero, and a shift right past the width floors to `0` or `-1`.
+fn bound(numeric: NumericType, op: IntegerOp, code: &mut Vec<Ins>) {
+    let signed = numeric.is_signed();
+    let (low, high) = numeric.range();
+    let (minimum, maximum) = (pattern(low), pattern(high));
+    let negative = |local: u32| [get(local), c64(0), I::I64LtS];
+    match (op, signed) {
+        (IntegerOp::Add, true) => {
+            code.extend([c64(minimum), c64(maximum)]);
+            code.extend(negative(WB));
+            code.push(I::Select);
         }
+        (IntegerOp::Sub, true) => {
+            code.extend([c64(maximum), c64(minimum)]);
+            code.extend(negative(WB));
+            code.push(I::Select);
+        }
+        (IntegerOp::Sub, false) | (IntegerOp::Rem, _) => code.push(c64(minimum.max(0))),
+        (IntegerOp::Mul, true) => {
+            code.extend([
+                c64(minimum),
+                c64(maximum),
+                get(WA),
+                get(WB),
+                I::I64Xor,
+                c64(0),
+                I::I64LtS,
+                I::Select,
+            ]);
+        }
+        (IntegerOp::ShiftLeft, _) => {
+            if signed {
+                code.push(c64(minimum));
+            }
+            code.extend([c64(0), c64(maximum), get(WA), I::I64Eqz, I::Select]);
+            if signed {
+                code.extend(negative(WA));
+                code.push(I::Select);
+            }
+        }
+        (IntegerOp::ShiftRight, true) => {
+            code.extend([c64(-1), c64(0)]);
+            code.extend(negative(WA));
+            code.push(I::Select);
+        }
+        (IntegerOp::ShiftRight, false) => code.push(c64(0)),
+        _ => code.push(c64(maximum)),
     }
 }

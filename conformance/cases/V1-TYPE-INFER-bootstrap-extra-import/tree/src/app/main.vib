@@ -1,3 +1,2 @@
-(import text @std.text)
 (import assert @std.assert)
-(defn answer () u64 (text.length "x"))
+(defn answer () u64 (str.length "x"))

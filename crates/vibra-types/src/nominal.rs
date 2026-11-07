@@ -216,6 +216,9 @@ pub(crate) struct TypeNames {
     /// role atom without `@`.
     roles: BTreeMap<String, usize>,
     interfaces: Vec<DeclaredInterface>,
+    /// The standard-library interfaces that play a language role, keyed by
+    /// their name: prelude roots every module names without an import.
+    prelude_interfaces: BTreeMap<String, usize>,
     /// Interface indices keyed by the source ID of their module.
     interfaces_by_module: BTreeMap<String, BTreeMap<String, usize>>,
     implementations: Vec<Implementation>,
@@ -394,6 +397,14 @@ impl TypeNames {
             parameters: generic_names(declaration.attributes().items()),
             members: Vec::new(),
         });
+        if declaration
+            .attributes()
+            .items()
+            .iter()
+            .any(|attribute| matches!(attribute, Attribute::Role(_)))
+        {
+            self.prelude_interfaces.entry(name.clone()).or_insert(index);
+        }
         self.scopes
             .entry(source_id.to_owned())
             .or_default()
@@ -973,7 +984,8 @@ impl TypeNames {
                     let index =
                         self.interfaces_by_module.get(target)?.get(name).copied()?;
                     self.interfaces.get(index)?.public.then_some(index)
-                }),
+                })
+                .or_else(|| self.prelude_interfaces.get(local).copied()),
             [alias, member] => {
                 let target = scope?.imports.get(alias)?;
                 let index = self

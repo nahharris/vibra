@@ -18,5 +18,5 @@
 (defn narrowing () u8
   (from.convert 300u32))
 
-(defn unimplemented () str
+(defn unimplemented () bool
   (from.convert 1u8))

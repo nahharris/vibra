@@ -1,0 +1,7 @@
+(defn halve (value u64 divisor u64) u64 (u64.div value divisor))
+
+(defn main () void
+  (match
+    (u64.div-checked 7u64 0u64)
+    (result.ok -) void
+    (result.err -) (do (let - (halve 7u64 0u64)) void)))

@@ -1,5 +1,4 @@
 (import core @std.core)
-(import ordered @std.core.ordered)
 
 (defn smallest (left k right k) k
   where: (k ordered)

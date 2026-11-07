@@ -232,7 +232,7 @@ const DEEP_ERR: &str = r#"(deftype nat (record prev (array nat)))
     (result.err -) 0i32))
 
 (defn build (count i32 inner nat) nat
-  (if (i32.equal count 0i32)
+  (if (equatable.equal count 0i32)
     inner
     (build (lower count) (nat prev: (array.of inner)))))
 
@@ -266,9 +266,9 @@ const BIG_UNION_ERR: &str = r#"(import text @std.text)
     (result.err -) 0i32))
 
 (defn grow (value str count i32) str
-  (if (i32.equal count 0i32)
+  (if (equatable.equal count 0i32)
     value
-    (grow (text.concat value value) (lower count))))
+    (grow (str.concat value value) (lower count))))
 
 (defn main () (result void failure)
   (result.err (failure detail: (detail (grow "a" 20i32)))))

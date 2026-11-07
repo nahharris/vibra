@@ -19,6 +19,6 @@
               (result.err -) 0u64)))))))
 
 (defn large (value u64) bool
-  (match (u64.compare value 10000u64)
+  (match (ordered.compare value 10000u64)
     (core.ordering.less) false
     - true))

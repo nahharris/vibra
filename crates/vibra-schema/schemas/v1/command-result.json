@@ -259,7 +259,8 @@
       "enum": [
         "@runtime.invalid-checked-program",
         "@runtime.unobservable-function",
-        "@runtime.invalid-host-value"
+        "@runtime.invalid-host-value",
+        "@runtime.division-by-zero"
       ]
     },
     "auditEvent": {

@@ -29,6 +29,42 @@ pub(crate) use vibra_conformance::{corpus_root, workspace_root};
 
 pub(crate) const MIB: usize = 1024 * 1024;
 
+// -- the registry in source ----------------------------------------------------
+
+/// The imports a program that spells registry rows with [`call_head`] needs.
+pub(crate) const ROW_IMPORTS: &str = "(import core @std.core)\n(import from @std.core.from)\n(import try-from @std.core.try-from)\n";
+
+/// How source reaches a registry row: a static method through its type path,
+/// such as `i32.add-checked` or `str.concat`, or, for a row that is the member of an
+/// implementation, its contract, such as `equatable.equal` for `i32.equal` and
+/// `from.convert` for `i8.to-i16` or `i32.to-str`. A contract call selects the
+/// implementation from its operands or from the written result type.
+pub(crate) fn call_head(intrinsic: vibra_ir::external::CompilerIntrinsic) -> String {
+    use vibra_ir::external::{CompilerIntrinsic as C, FloatOp, IntegerOp};
+    match intrinsic {
+        C::Integer(_, IntegerOp::Equal) | C::TextEqual | C::BytesEqual => {
+            "equatable.equal".to_owned()
+        }
+        C::Integer(_, IntegerOp::Compare) | C::TextCompare | C::BytesCompare => {
+            "ordered.compare".to_owned()
+        }
+        C::Integer(_, IntegerOp::ToStr) | C::Float(_, FloatOp::ToStr) => {
+            "from.convert".to_owned()
+        }
+        C::Integer(_, IntegerOp::Parse) | C::Float(_, FloatOp::Parse) => {
+            "try-from.convert".to_owned()
+        }
+        C::Convert(source, target) if C::conversion_is_total(source, target) => {
+            "from.convert".to_owned()
+        }
+        C::Convert(..) => "try-from.convert".to_owned(),
+        other => match other.symbol().strip_prefix("text.") {
+            Some(member) => format!("str.{member}"),
+            None => other.symbol().to_owned(),
+        },
+    }
+}
+
 // -- the filesystem -----------------------------------------------------------
 
 /// The one process-wide serial that keeps every temporary directory of this
@@ -532,7 +568,7 @@ pub(crate) fn counter(n: u32) -> String {
         "(deftype state (record n u32))\n\
 (defn zero () state (state n: 0u32))\n\
 (defn inc (s state) state\n  (state n: (match (u32.add-checked (s @n) 1u32) (result.ok next) next (result.err -) 0u32)))\n\
-(defn done (s state) bool (u32.equal (s @n) {n}u32))\n"
+(defn done (s state) bool (equatable.equal (s @n) {n}u32))\n"
     )
 }
 

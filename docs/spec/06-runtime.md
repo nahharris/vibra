@@ -273,9 +273,12 @@ test; it is not a trap and cannot be caught or converted into a Vibra
 ## M3 compiler intrinsic registry
 
 The Stage 3A `@compiler` registry is closed to the operations below, all under
-the registry identity `vibra_v1`. Every operation is pure, total,
-deterministic, and host-event free; none traps. A partial operation returns a
-standard `option` or `result` instead. Composite behavior — boolean
+the registry identity `vibra_v1`. Every operation is pure, deterministic, and
+host-event free. Every operation is total but the unchecked integer `div` and
+`rem`, which trap with `@runtime.division-by-zero` on a zero divisor; no other
+operation traps. A partial operation returns a standard `option` or `result`
+instead, and every unchecked integer operation has a `-checked` counterpart
+that does. Composite behavior — boolean
 connectives, character classes, searching, splitting, trimming, folds — is
 ordinary standard-library Vibra over these operations and is specified by its
 reviewed source, not by this table.
@@ -308,24 +311,39 @@ In the signatures, `R t` abbreviates `(result t arithmetic-error)` and `C t`
 abbreviates `(result t conversion-error)`.
 
 For each integer type `T` among `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`,
-and `u64`, the builtin type `T` has these static methods, with registry symbols
-spelled `T.<name>`:
+and `u64`, the registry has these rows, with symbols spelled `T.<name>`. Each
+arithmetic operation comes in two forms. The unchecked form is the plain name
+and returns `T`: a result past the type saturates at its nearest bound, so
+overflow never wraps, and a zero divisor traps. The checked form adds the
+`-checked` suffix and returns `R T`, reporting each failure as a value. The
+arithmetic rows are static methods of `T`; the comparison and conversion rows
+are members of implementations, as the table after this one states, and are
+never static methods:
 
 | Name | Signature | Semantics |
 | --- | --- | --- |
+| `add`, `sub`, `mul` | `T T -> T` | The exact result, saturated at the bounds of `T` |
+| `div` | `T T -> T` | The quotient truncated toward zero, so the signed minimum divided by `-1` saturates at the maximum; traps with `@runtime.division-by-zero` for a zero divisor |
+| `rem` | `T T -> T` | The remainder with the dividend's sign; the signed minimum and `-1` yield `0`; traps with `@runtime.division-by-zero` for a zero divisor |
+| `neg` (signed `T` only) | `T -> T` | The negation, so the minimum saturates at the maximum |
+| `shift-left` | `T u32 -> T` | `left * 2^amount`, saturated at the bounds of `T`, for every amount: zero stays zero |
+| `shift-right` | `T u32 -> T` | `floor(left / 2^amount)` for every amount, so a shift of at least the bit width yields `0`, or `-1` for a negative value |
 | `add-checked`, `sub-checked`, `mul-checked` | `T T -> R T` | Exact result, or `overflow` when it lies outside `T` |
 | `div-checked` | `T T -> R T` | Quotient truncated toward zero; `division-by-zero` for a zero divisor; `overflow` for the signed minimum divided by `-1` |
 | `rem-checked` | `T T -> R T` | Remainder with the dividend's sign, so `left = quotient * right + remainder`; `division-by-zero` for a zero divisor; the signed minimum and `-1` yield `0` |
 | `neg-checked` (signed `T` only) | `T -> R T` | Negation, or `overflow` for the minimum |
 | `shift-left-checked` | `T u32 -> R T` | `left * 2^amount`; `invalid-shift` when the amount is at least the bit width, else `overflow` when the product lies outside `T` |
-| `shift-right` | `T u32 -> R T` | `floor(left / 2^amount)`; `invalid-shift` when the amount is at least the bit width |
+| `shift-right-checked` | `T u32 -> R T` | `floor(left / 2^amount)`; `invalid-shift` when the amount is at least the bit width |
 | `equal` | `T T -> bool` | Numeric equality |
 | `compare` | `T T -> ordering` | Numeric order |
 | `to-str` | `T -> str` | Shortest decimal digits, with a leading `-` only for a negative value and no suffix |
 | `parse` | `str -> C T` | Accepts an optional `-` (signed `T` only) followed by one or more ASCII decimal digits and nothing else; `invalid-format` otherwise, `out-of-range` for a well-formed value outside `T` |
 | `to-U`, for each other integer type `U` | `T -> U` when every `T` value is a `U` value, else `T -> C U` | The same integer as a `U`; `out-of-range` when `U` cannot hold it |
 
-For `F` among `f32` and `f64`, the builtin type `F` has:
+For `F` among `f32` and `f64`, the registry has these rows. A float implements
+neither comparison contract, because IEEE equality is not reflexive, so `equal`
+and `compare-total` are static methods of `F` like its arithmetic; `to-str` and
+`parse` are implementation members:
 
 | Name | Signature | Semantics |
 | --- | --- | --- |
@@ -336,11 +354,26 @@ For `F` among `f32` and `f64`, the builtin type `F` has:
 | `to-str` | `F -> str` | The canonical float serialization of this chapter, without a suffix |
 | `parse` | `str -> C F` | The unsuffixed decimal float literal grammar; `invalid-format` otherwise, `out-of-range` when the rounded value is infinite |
 
+Each comparison and conversion row is the member of exactly one written
+implementation, bound with `external: @compiler`:
+
+| Row | Implementation |
+| --- | --- |
+| `T.equal` | `(impl equatable …)` of `T` |
+| `T.compare` | `(impl ordered …)` of `T` |
+| `S.to-T` | `(impl (from S) …)` of `T` when every `S` value is a `T` value, else `(impl (try-from S) …)` of `T` |
+| `T.parse`, `F.parse` | `(impl (try-from str) …)` of `T` or `F` |
+| `T.to-str`, `F.to-str` | `(impl (from T) …)` or `(impl (from F) …)` of `str` |
+
+A call reaches them through the contract, as `(equatable.equal a b)`,
+`(try-from.convert text)`, and `(from.convert n)` with `str` expected; no
+other spelling names them.
+
 The remaining operations are bound by modules, except the `char.*`, `array.*`,
 and `dict.*` rows. The `text.*` and `bytes.*` rows are native implementations of
-the `@std.text` and `@std.bytes` functions, whose Vibra bodies over the scalars
-and bytes a `str` or `bytes` value is written over are their meaning, as are
-`array.of`, `array.fold`, and `dict.of`:
+the members of `str` and `bytes` and of their comparison implementations, whose
+Vibra bodies over the scalars and bytes a `str` or `bytes` value is written
+over are their meaning, as are `array.of`, `array.fold`, and `dict.of`:
 
 | Symbol | Signature | Semantics |
 | --- | --- | --- |
@@ -353,6 +386,7 @@ and bytes a `str` or `bytes` value is written over are their meaning, as are
 | `text.slice` | `str u64 u64 -> (option str)` | Scalars in the half-open range; `none` when start exceeds end or end exceeds the length |
 | `text.to-chars` | `str -> (array char)` | Scalars in order |
 | `text.from-chars` | `(array char) -> str` | Scalars in order |
+
 | `text.to-utf8` | `str -> bytes` | UTF-8 encoding |
 | `text.from-utf8` | `bytes -> C str` | `invalid-format` for ill-formed UTF-8 |
 | `bytes.length` | `bytes -> u64` | Byte count |
@@ -362,6 +396,7 @@ and bytes a `str` or `bytes` value is written over are their meaning, as are
 | `bytes.slice` | `bytes u64 u64 -> (option bytes)` | As `text.slice`, over bytes |
 | `bytes.to-array` | `bytes -> (array u8)` | Bytes in order |
 | `bytes.from-array` | `(array u8) -> bytes` | Bytes in order |
+
 | `array.of` | `-> (array t)`, `variadic: (items (array t))` | The packed tail; `where: (t any)` |
 | `dict.of` | `-> (dict k v)`, `variadic: (entries (dict k v))` | The packed tail, in key order, a later entry replacing an equal key; `where: (k ordered v any)` |
 | `dict.entries` | `(dict k v) -> (array (tuple k v))` | The entries in key order |
@@ -371,12 +406,21 @@ and bytes a `str` or `bytes` value is written over are their meaning, as are
 | `array.slice` | `(array t) u64 u64 -> (option (array t))` | As `text.slice`, over elements |
 | `array.fold` | `(array t) a (fn (a t) a) -> a` | The left fold: `step` applied to the accumulator and each element in order, starting from `initial`; `where: (t any)` on the type and `(a any)` on the member |
 
-The numeric rows and the `char.*`, `array.*`, and `dict.*` rows are static
+The arithmetic rows and the `char.*`, `array.*`, and `dict.*` rows are static
 methods declared in the embedded module `@std.builtin`: in the `intrinsic-type`
 declarations of the builtin types, and in the `dict` declaration that plays
 `@dict`. They are reached through the type path with no import, exactly as
 those types themselves need none, so `(i32.add-checked left right)` needs no
-`import`.
+`import`. The `text.*` and `bytes.*` rows are likewise reached as the members
+`str.concat` and `bytes.length`, with no import.
+
+The `to-chars`, `from-chars`, `to-array`, and `from-array` rows are the native
+implementation of the wrapper constructor and pattern of `str` and `bytes`,
+which convert between the toolchain's direct representation and the array the
+type is written over. Their meaning is the declared wrapper, and no source names
+them: `(str scalars)` and the pattern `(str scalars)` are the only spelling of
+that conversion, as are `(bytes items)` and the pattern `(bytes items)`. The
+manifest lists them with the other natives.
 
 `@std.option` declares `(deftype option (enum some t none void) where: (t any))`
 and `@std.result` declares `(deftype result (enum ok t err e) where: (t any)
@@ -869,8 +913,9 @@ failure, and a trap stays `@command.trap`.
 ## Traps
 
 Host responses that are ordinary environmental outcomes use typed `result`
-errors. ABI mismatch, impossible typed IR, invalid host value IDs, and runtime
-invariant violation are traps. A trap has a stable code and a source origin
+errors. ABI mismatch, impossible typed IR, invalid host value IDs, runtime
+invariant violation, and an unchecked integer division by zero are traps. A
+trap has a stable code and a source origin
 when its failing source span is known; otherwise it has no origin. The trap
 codes are closed:
 
@@ -879,6 +924,7 @@ codes are closed:
 | `@runtime.invalid-checked-program` | The checked program has no executable entry, a body violates the checked-IR invariants, or the toolchain itself fails, including every engine trap that generated code did not raise | None |
 | `@runtime.unobservable-function` | A value that holds a function reaches an observation | The assertion call in a test; none for the entry's result |
 | `@runtime.invalid-host-value` | A host call, an accessor, or a builder receives a value ID that is zero, was never issued by the instance, has been released, or names a value of a kind it does not admit; an index outside the value or of the wrong class; a write to a sealed value; a write of an unsealed child; a seal with a slot unwritten; a `char` that is not a Unicode scalar; or a result ID that is not a sealed `(result t e)` value | None |
+| `@runtime.division-by-zero` | An unchecked integer `div` or `rem` receives a zero divisor | None |
 
 A failure with no origin uses an unlocated diagnostic primary at `0..0` with no
 source ID. The CLI `trapCode` is the exact diagnostic-code spelling as a
@@ -961,7 +1007,7 @@ both.
 | `vibra_v1_entry` | `() -> ()` | Runs the binary target's entry |
 | `vibra_v1_test` | `(i32) -> ()` | Runs the test at that zero-based position in canonical discovery order; a host runs each test in a fresh instance |
 | `vibra_v1_status` | `() -> i32` | What the last call recorded: `0` nothing, `1` a trap, `2` the memory host event, `3` a failed assertion |
-| `vibra_v1_trap_code` | `() -> i32` | After status `1`: `1` for `@runtime.invalid-checked-program`, `2` for `@runtime.unobservable-function`, `3` for `@runtime.invalid-host-value` |
+| `vibra_v1_trap_code` | `() -> i32` | After status `1`: `1` for `@runtime.invalid-checked-program`, `2` for `@runtime.unobservable-function`, `3` for `@runtime.invalid-host-value`, `4` for `@runtime.division-by-zero` |
 | `vibra_v1_origin` | `() -> i32` | After status `1` or `3`: the origin ordinal of the trap or the assertion call, `0` for none |
 | `vibra_v1_failure` | `() -> i32` | After status `3`: `1` for `assert.true`, `2` for `assert.false`, `3` for `assert.equal` |
 | `vibra_v1_failure_expected`, `vibra_v1_failure_actual` | `() -> i64` | After status `3` and `assert.equal`: the two operands, as the bits of a scalar or as a value ID, by the operand type that the origin table records |

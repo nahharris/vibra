@@ -1,6 +1,5 @@
 (import assert @std.assert)
 (import core @std.core)
-(import equatable @std.core.equatable)
 (import from @std.core.from)
 (import try-from @std.core.try-from)
 (import rank @geo.rank)

@@ -14,7 +14,7 @@
   visibility: @public
   (impl (iter.iter u8)
     (defn next (value self) (option (tuple u8 self))
-      (match (u8.compare (value @next-value) (value @limit))
+      (match (ordered.compare (value @next-value) (value @limit))
         (core.ordering.greater) (option.none)
         - (option.some
             (tupleof

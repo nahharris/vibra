@@ -8,7 +8,6 @@
     (as (nest i32) (nest (array.of 1i32)))))
 
 (import core @std.core)
-(import ordered @std.core.ordered)
 
 ; A declared union keeps its written member order, so it may be generic.
 (deftype many (union (array t) str)

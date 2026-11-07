@@ -162,8 +162,9 @@ The reserved expression heads include
 `do`, `let`, `let-else`, `if`, `match`, `return`, `as`, `try`, `lambda`,
 `tupleof`, `recordof`, and `enumof`. A lexical binder, whatever form
 introduces it, that is spelled as a keyword, `any`, or a name of the prelude (a
-primitive type name, `option`, `result`, `iter`, `array`, `dict`, `true`, or
-`false`) is `@name.reserved-declaration` at the binder name, and it still binds
+primitive type name, `option`, `result`, `iter`, `equatable`, `ordered`,
+`array`, `dict`, `true`, or `false`) is `@name.reserved-declaration` at the
+binder name, and it still binds
 for the rest of its scope so that the error does not cascade. At a pattern site
 (a positional parameter, `let`, `let-else`, or `match` arm pattern) resolution
 decides first whether a name denotes a module value; if it does, the name is a
@@ -375,7 +376,7 @@ Visibility is part of the declaration, not a wrapper form.
 
 (defn greet (name str) str
   visibility: @public
-  (text.concat "hello, " name))
+  (str.concat "hello, " name))
 
 (deftype option
   (enum some t none void)
@@ -441,6 +442,23 @@ on a member of the `deffect` that owns the operation's nominal effect root. A
 `@host` external member MUST have no additive effects. An interface contract
 cannot be external.
 
+A `@compiler` binding and a `native:` symbol are attributes of a function, not
+of where it is declared: a module-level `defn`, a static method nested in a
+`deftype`, and a member of an `impl` block are all functions, and each may bind
+one. An implementation member binds exactly as any function does, and its
+signature, with `self` replaced by the receiver, MUST match the registry row
+exactly. This is how a builtin type implements a contract without a second
+function to forward to:
+
+```vibra
+(deftype i32 (intrinsic-type @i32)
+  visibility: @public
+  (impl equatable
+    (defn equal (left self right self) bool
+      external: @compiler
+      symbol: "i32.equal")))
+```
+
 The provider and string symbol are checked against closed, versioned toolchain
 registries. External declarations are accepted only in the embedded
 standard-library modules; ordinary packages cannot declare them. A `@host`
@@ -469,7 +487,7 @@ does not.
   (record name str id user-id)
   visibility: @public
   (defn name-length (value self) u64
-    (text.length (value @name)))
+    (str.length (value @name)))
   (impl printable
     (defn render (value self) str
       (value @name))))
@@ -489,7 +507,7 @@ another module by placing an `impl` block in the owning `defint`:
   (defn render (value self) str)
   (impl i32
     (defn render (value self) str
-      (i32.to-str value))))
+      (from.convert value))))
 ```
 
 `impl` is valid only as a direct child of the `deftype` that owns the type or
@@ -663,7 +681,7 @@ a `return` that is a branch of a final `if` or `match`.
 (defn describe-pair (pair (tuple str i32)) str
   (let
     (tupleof name id) pair
-    full (text.concat name (i32.to-str id)))
+    full (str.concat name (from.convert id)))
   full)
 
 (defn first-or-zero (items (array i32)) i32
@@ -710,7 +728,7 @@ expressions. Arms are checked for reachability and exhaustiveness.
 
 ```vibra
 (match value
-  (option.some text) (text.length text)
+  (option.some text) (str.length text)
   (option.none) 0)
 ```
 
@@ -763,8 +781,8 @@ segment.
 (defn render (value number) str
   visibility: @public
   (match value
-    (as i32 n) (i32.to-str n)
-    (as f32 x) (f32.to-str x)))
+    (as i32 n) (from.convert n)
+    (as f32 x) (from.convert x)))
 ```
 
 The two positions mirror each other: an expression `as` widens to a written

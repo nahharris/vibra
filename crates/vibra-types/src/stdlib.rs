@@ -46,8 +46,17 @@ const SOURCE_ROOT: &str = "stdlib/src/";
 /// The closed table of language roles (`docs/spec/02-type-system.md`,
 /// "Language core and standard library"). Each is claimed by exactly one
 /// declaration of the standard library.
-const LANGUAGE_ROLES: &[&str] =
-    &["bool", "str", "bytes", "option", "result", "dict", "iter"];
+const LANGUAGE_ROLES: &[&str] = &[
+    "bool",
+    "str",
+    "bytes",
+    "option",
+    "result",
+    "dict",
+    "iter",
+    "equatable",
+    "ordered",
+];
 
 const PACKAGE_NAME: &str = "vibra-stdlib";
 const PACKAGE_VERSION: &str = "0.3.0";
@@ -63,10 +72,6 @@ const EMBEDDED_MODULES: &[(&str, &[u8])] = &[
     (
         "std/bool.vib",
         include_bytes!("../../../stdlib/src/std/bool.vib"),
-    ),
-    (
-        "std/char.vib",
-        include_bytes!("../../../stdlib/src/std/char.vib"),
     ),
     (
         "std/bytes.vib",

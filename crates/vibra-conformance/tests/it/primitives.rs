@@ -65,6 +65,10 @@ fn result_type(intrinsic: CompilerIntrinsic) -> String {
     match intrinsic {
         CompilerIntrinsic::Integer(_, IntegerOp::Equal) => "bool".to_owned(),
         CompilerIntrinsic::Integer(_, IntegerOp::Compare) => "core.ordering".to_owned(),
+        // An unchecked row returns its type, saturated.
+        CompilerIntrinsic::Integer(numeric, op) if op.checked().is_some() => {
+            numeric.name().to_owned()
+        }
         CompilerIntrinsic::Integer(numeric, _) => {
             format!("(result {} core.arithmetic-error)", numeric.name())
         }
@@ -94,12 +98,13 @@ fn row_program(intrinsic: CompilerIntrinsic, vectors: &[Vector]) -> String {
                 .map(literal)
                 .collect::<Vec<_>>()
                 .join(" ");
-            format!("({} {operands})", intrinsic.symbol())
+            format!("({} {operands})", crate::support::call_head(intrinsic))
         })
         .collect::<Vec<_>>()
         .join("\n    ");
     format!(
-        "(import core @std.core)\n(defn main () (tuple {types})\n  (tupleof\n    {calls}))\n"
+        "{}(defn main () (tuple {types})\n  (tupleof\n    {calls}))\n",
+        crate::support::ROW_IMPORTS
     )
 }
 
@@ -246,10 +251,11 @@ fn a_row_is_inline_exactly_when_it_is_a_primitive_row_that_does_not_loop() {
         }
         lowered += usize::from(inline);
     }
-    // Eight integer types of nine rows, `neg-checked` for the four signed ones,
-    // fifty-six conversions, the two `char` rows, `array.length`, and seven float
-    // rows of each of the two float types.
-    assert_eq!(lowered, 8 * 9 + 4 + 56 + 2 + 1 + 2 * 7);
+    // Eight integer types of sixteen rows (nine checked, seven unchecked),
+    // `neg` and `neg-checked` for the four signed ones, fifty-six conversions,
+    // the two `char` rows, `array.length`, and seven float rows of each of the
+    // two float types.
+    assert_eq!(lowered, 8 * 16 + 4 * 2 + 56 + 2 + 1 + 2 * 7);
 }
 
 /// The import table names exactly the native symbols that have an import, which
@@ -390,7 +396,7 @@ fn every_integer_type_has_every_row_and_every_boundary_in_the_table() {
             IntegerOp::DivChecked,
             IntegerOp::RemChecked,
             IntegerOp::ShiftLeftChecked,
-            IntegerOp::ShiftRight,
+            IntegerOp::ShiftRightChecked,
             IntegerOp::Equal,
             IntegerOp::Compare,
         ] {
@@ -419,25 +425,25 @@ fn a_program_of_primitive_rows_is_emitted_to_the_same_bytes_twice() {
 fn operations_compose_in_a_program_with_matches_try_and_tail_calls() {
     // gcd by the remainder, the number of set bits by shifts, and a checked sum
     // that stops at the first overflow through `try`.
-    let source = "(import core @std.core)\n\
+    let source = "(import core @std.core)\n(import try-from @std.core.try-from)\n\
 (defn main () (tuple u64 u32 (result i32 core.arithmetic-error) (result i32 core.arithmetic-error) bool core.ordering u8 (option char))\n\
   (tupleof (gcd 1071u64 462u64) (bits 255u32 0u32)\n\
            (sum 1i32 2i32 3i32) (sum 2147483647i32 1i32 0i32)\n\
-           (u16.equal 7u16 7u16) (i64.compare -1i64 1i64)\n\
+           (equatable.equal 7u16 7u16) (ordered.compare -1i64 1i64)\n\
            (widen 200u8) (char.from-u32 128512u32)))\n\
 (defn gcd (a u64 b u64) u64\n\
-  (if (u64.equal b 0u64) a\n\
+  (if (equatable.equal b 0u64) a\n\
     (match (u64.rem-checked a b) (result.ok r) (gcd b r) (result.err -) 0u64)))\n\
 (defn bits (n u32 count u32) u32\n\
-  (if (u32.equal n 0u32) count\n\
-    (match (u32.shift-right n 1u32)\n\
+  (if (equatable.equal n 0u32) count\n\
+    (match (u32.shift-right-checked n 1u32)\n\
       (result.ok half) (bits half (add-one count))\n\
       (result.err -) count)))\n\
 (defn add-one (n u32) u32 (match (u32.add-checked n 1u32) (result.ok v) v (result.err -) n))\n\
 (defn sum (a i32 b i32 c i32) (result i32 core.arithmetic-error)\n\
   (let ab (try (i32.add-checked a b)))\n\
   (i32.add-checked ab c))\n\
-(defn widen (n u8) u8 (match (u8.to-i8 n) (result.ok v) (match (i8.to-u8 v) (result.ok w) w (result.err -) 0u8) (result.err -) 1u8))\n";
+(defn widen (n u8) u8 (match (as (result i8 core.conversion-error) (try-from.convert n)) (result.ok v) (match (as (result u8 core.conversion-error) (try-from.convert v)) (result.ok w) w (result.err -) 0u8) (result.err -) 1u8))\n";
     let program = checked(source);
     let expected = oracle(&program);
     assert_eq!(wasm(&program).0, expected);
@@ -486,7 +492,7 @@ fn a_primitive_application_creates_no_activation_so_a_long_loop_of_them_holds_a_
         format!(
             "(defn main () u64 (spin {rounds}u64 0u64))\n\
 (defn spin (n u64 acc u64) u64\n\
-  (if (u64.equal n 0u64)\n\
+  (if (equatable.equal n 0u64)\n\
     acc\n\
     (match (u64.sub-checked n 1u64)\n\
       (result.ok next)\n\

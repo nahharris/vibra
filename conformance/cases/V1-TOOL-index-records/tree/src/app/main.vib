@@ -1,5 +1,6 @@
 (import core @std.core)
 (import from @std.core.from)
+(import try-from @std.core.try-from)
 
 (def limit i32 10i32)
 
@@ -25,6 +26,6 @@
   (option.some (shape.label (celsius.warmer value))))
 
 (defn parse (text str) (result i32 core.conversion-error)
-  (i32.parse text))
+  (try-from.convert text))
 
 (defn execute () void void)

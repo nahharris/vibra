@@ -33,7 +33,7 @@ use std::sync::Arc;
 mod compare;
 
 use vibra_host::{AuditEvent, HostCall, HostProvider, build_reply, perform};
-use vibra_ir::external::CompilerIntrinsic;
+use vibra_ir::external::{CompilerIntrinsic, IntegerOp};
 use vibra_ir::{
     CallTarget, CheckedProgram, ClosedContract, Expr, FunctionSignature, MatchArm,
     SourceOrigin, TestAssertion, Type, TypeId, Value, vocabulary,
@@ -56,6 +56,9 @@ pub(crate) enum Halt {
     Assertion,
     /// The budget was exhausted or a stack could not grow: the host event.
     Memory,
+    /// An unchecked `div` or `rem` had a zero divisor: the trap
+    /// `@runtime.division-by-zero`.
+    DivisionByZero,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1277,6 +1280,15 @@ impl<'a> Machine<'a> {
             }
             CompilerIntrinsic::ArrayFold => return self.fold_start(values, result),
             _ => {}
+        }
+        // An unchecked quotient or remainder with a zero divisor traps.
+        if let (
+            CompilerIntrinsic::Integer(_, IntegerOp::Div | IntegerOp::Rem),
+            [_, RuntimeValue::Primitive(divisor)],
+        ) = (intrinsic, values.as_slice())
+            && registry::integer_value(divisor) == Some(0)
+        {
+            return Err(Halt::DivisionByZero);
         }
         let value = match (intrinsic, values.as_slice()) {
             (CompilerIntrinsic::ArrayLength, [RuntimeValue::Array { values, .. }]) => {

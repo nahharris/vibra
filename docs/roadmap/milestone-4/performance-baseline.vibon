@@ -13,7 +13,7 @@
       wasm:
       (record
         module-bytes:
-        104656u64
+        101682u64
         allocations:
         300015u64
         peak-live-bytes:
@@ -28,7 +28,7 @@
       wasm:
       (record
         module-bytes:
-        104656u64
+        101682u64
         allocations:
         300349u64
         peak-live-bytes:
@@ -43,7 +43,7 @@
       wasm:
       (record
         module-bytes:
-        7775u64
+        6612u64
         allocations:
         302703u64
         peak-live-bytes:
@@ -58,7 +58,7 @@
       wasm:
       (record
         module-bytes:
-        8018u64
+        6858u64
         allocations:
         3000003u64
         peak-live-bytes:
@@ -73,7 +73,7 @@
       wasm:
       (record
         module-bytes:
-        37819u64
+        42224u64
         allocations:
         4008u64
         peak-live-bytes:
@@ -88,7 +88,7 @@
       wasm:
       (record
         module-bytes:
-        148340u64
+        153313u64
         allocations:
         212u64
         peak-live-bytes:
@@ -103,7 +103,7 @@
       wasm:
       (record
         module-bytes:
-        56504u64
+        6768u64
         allocations:
         8004u64
         peak-live-bytes:
@@ -118,7 +118,7 @@
       wasm:
       (record
         module-bytes:
-        57746u64
+        7998u64
         allocations:
         4003u64
         peak-live-bytes:
@@ -133,7 +133,7 @@
       wasm:
       (record
         module-bytes:
-        12001u64
+        10755u64
         allocations:
         70020u64
         peak-live-bytes:
@@ -148,7 +148,7 @@
       wasm:
       (record
         module-bytes:
-        65640u64
+        52282u64
         allocations:
         38u64
         peak-live-bytes:
@@ -162,7 +162,7 @@
       os:
       "windows"
       os-version:
-      "unknown"
+      "Microsoft Windows [versão 10.0.26300.9818]"
       arch:
       "x86_64"
       cpu:
@@ -170,7 +170,7 @@
       logical-cpus:
       22u32
       rust:
-      "rustc 1.96.1 (31fca3adb 2026-06-26)"
+      "unknown"
       wasmtime:
       "49.0.2"
       profile:
@@ -179,13 +179,13 @@
     11u32
     median-microseconds:
     (array
-      (record program: @deep-tail-walk interpreter: 333990u64 wasm: 93193u64)
-      (record program: @m3-demo-tests interpreter: 332651u64 wasm: 635054u64)
-      (record program: @non-tail-depth interpreter: 287910u64 wasm: 24787u64)
-      (record program: @tail-loop interpreter: 2944086u64 wasm: 190293u64)
-      (record program: @array-fold interpreter: 1067u64 wasm: 24416u64)
-      (record program: @dict-insert interpreter: 151u64 wasm: 91584u64)
-      (record program: @text-concat interpreter: 15006u64 wasm: 15739u64)
-      (record program: @float-to-str interpreter: 4897u64 wasm: 12470u64)
-      (record program: @nested-value-5000 interpreter: 52784u64 wasm: 20083u64)
-      (record program: @effectful-walk interpreter: 16u64 wasm: 49381u64))))
+      (record program: @deep-tail-walk interpreter: 510267u64 wasm: 141218u64)
+      (record program: @m3-demo-tests interpreter: 497868u64 wasm: 960861u64)
+      (record program: @non-tail-depth interpreter: 445956u64 wasm: 53661u64)
+      (record program: @tail-loop interpreter: 3858386u64 wasm: 224984u64)
+      (record program: @array-fold interpreter: 1291u64 wasm: 50159u64)
+      (record program: @dict-insert interpreter: 202u64 wasm: 139422u64)
+      (record program: @text-concat interpreter: 17224u64 wasm: 38561u64)
+      (record program: @float-to-str interpreter: 5981u64 wasm: 29202u64)
+      (record program: @nested-value-5000 interpreter: 66654u64 wasm: 34630u64)
+      (record program: @effectful-walk interpreter: 21u64 wasm: 62232u64))))

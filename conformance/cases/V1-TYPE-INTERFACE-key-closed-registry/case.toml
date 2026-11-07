@@ -15,10 +15,10 @@ accepted = false
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "src/app/main.vib"
-span = [166, 189]
+span = [92, 115]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "src/app/main.vib"
-span = [211, 226]
+span = [137, 152]

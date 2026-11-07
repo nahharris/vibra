@@ -49,7 +49,10 @@ pub use resolved::{
     check_resolved,
 };
 pub use source::{CheckResult, check_source, standard_resolve_input};
-pub use standard::{assertion_member_names, builtin_member_names, role_type_names};
+pub use standard::{
+    assertion_member_names, builtin_member_names, prelude_modules, prelude_roots,
+    role_type_names,
+};
 pub use stdlib::{
     STDLIB_ASSERT_SOURCE_ID, STDLIB_BOOL_SOURCE_ID, STDLIB_BUILTIN_SOURCE_ID,
     STDLIB_BYTES_SOURCE_ID, STDLIB_CORE_SOURCE_ID, STDLIB_OPTION_SOURCE_ID,
@@ -4893,7 +4896,7 @@ mod tests {
     fn a_text_import_lowers_qualified_calls_through_checked_ir() {
         let source = r#"(import text @std.text)
 (defn answer () u64
-  (text.length (text.concat "A😀" "")))"#;
+  (str.length (str.concat "A😀" "")))"#;
         let checked = check_source("app/main.vib", source);
         assert!(checked.accepted(), "{:?}", checked.diagnostics());
         let program = checked.program().expect("checked imported program");
@@ -5045,13 +5048,15 @@ mod tests {
         assert!(result.accepted(), "{:?}", result.diagnostics());
         let program = result.program().expect("program");
         // Every call through an alias packs its tail into one array argument.
-        assert_eq!(
-            program
-                .canonical_vibon()
-                .matches("(record kind: @array")
-                .count(),
-            3
-        );
+        // The standard library's own functions are in the program too, so only
+        // this source's are counted.
+        let arrays = program
+            .functions()
+            .iter()
+            .filter(|function| function.origin().source_id() == "captured-variadic.vib")
+            .map(|function| format!("{:?}", function.body()).matches("Array {").count())
+            .sum::<usize>();
+        assert_eq!(arrays, 3);
     }
 
     #[test]

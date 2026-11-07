@@ -1,137 +1,145 @@
 ; Text. Every operation is Vibra over the Unicode scalars a `str` is written
 ; over; `native:` names the implementation a toolchain may run instead.
-(import classes @std.char)
 (import core @std.core)
-(import equatable @std.core.equatable)
-(import ordered @std.core.ordered)
+(import from @std.core.from)
+(import try-from @std.core.try-from)
 
 ; The standard string type, which plays the `@str` role: string literals have
 ; this type. It is written over its Unicode scalars, and the toolchain
-; represents it directly.
+; represents it directly; `(str scalars)` and the pattern `(str scalars)`
+; convert between it and its `(array char)`. Each number renders as its
+; `from` conversion.
 (deftype str (array char)
   role: @str
   visibility: @public
+  (defn concat (left str right str) str
+    visibility: @public
+    native: "text.concat"
+    (let (str first) left)
+    (let (str second) right)
+    (str (array.concat first second)))
+  (defn length (value str) u64
+    visibility: @public
+    native: "text.length"
+    (let (str scalars) value)
+    (array.length scalars))
+  (defn slice (value str start u64 end u64) (option str)
+    visibility: @public
+    native: "text.slice"
+    (let (str scalars) value)
+    (match (array.slice scalars start end)
+      (option.some piece) (option.some (str piece))
+      (option.none) (option.none)))
+  (defn to-utf8 (value str) bytes
+    visibility: @public
+    native: "text.to-utf8"
+    (let (str scalars) value)
+    (bytes (encode scalars 0u64 (array.of))))
+  (defn from-utf8 (encoded bytes) (result str core.conversion-error)
+    visibility: @public
+    native: "text.from-utf8"
+    (let (bytes items) encoded)
+    (decode items 0u64 (array.of)))
+  ; The operations below are reviewed Vibra over the operations above.
+  (defn starts-with (value str prefix str) bool
+    visibility: @public
+    (match (str.slice value 0u64 (str.length prefix))
+      (option.some head) (equatable.equal head prefix)
+      (option.none) false))
+  (defn ends-with (value str suffix str) bool
+    visibility: @public
+    (match (u64.sub-checked (str.length value) (str.length suffix))
+      (result.ok start)
+        (match (str.slice value start (str.length value))
+          (option.some tail) (equatable.equal tail suffix)
+          (option.none) false)
+      (result.err -) false))
+  (defn index-of (value str needle str) (option u64)
+    visibility: @public
+    (search value needle 0u64))
+  (defn contains (value str needle str) bool
+    visibility: @public
+    (match (str.index-of value needle) (option.some -) true (option.none) false))
+  (defn split (value str separator str) (array str)
+    visibility: @public
+    (if (equatable.equal (str.length separator) 0u64)
+      (array.of value)
+      (split-from value separator 0u64 (array.of))))
+  (defn trim-start (value str) str
+    visibility: @public
+    (let (str scalars) value)
+    (part value (first-content scalars 0u64) (str.length value)))
+  (defn trim-end (value str) str
+    visibility: @public
+    (let (str scalars) value)
+    (part value 0u64 (last-content scalars (str.length value))))
+  (defn trim (value str) str
+    visibility: @public
+    (let (str scalars) value)
+    (part
+      value
+      (first-content scalars 0u64)
+      (last-content scalars (str.length value))))
   (impl equatable
-    (defn equal (left self right self) bool (equal left right)))
+    (defn equal (left self right self) bool
+      native: "text.equal"
+      (match (ordered.compare left right) (core.ordering.equal) true - false)))
   (impl ordered
-    (defn compare (left self right self) core.ordering (compare left right))))
-
-(defn concat (left str right str) str
-  visibility: @public
-  native: "text.concat"
-  (let (str first) left)
-  (let (str second) right)
-  (str (array.concat first second)))
-
-(defn length (value str) u64
-  visibility: @public
-  native: "text.length"
-  (let (str scalars) value)
-  (array.length scalars))
-
-(defn equal (left str right str) bool
-  visibility: @public
-  native: "text.equal"
-  (match (compare left right) (core.ordering.equal) true - false))
-
-(defn compare (left str right str) core.ordering
-  visibility: @public
-  native: "text.compare"
-  (let (str first) left)
-  (let (str second) right)
-  (order first second 0u64))
-
-(defn slice (value str start u64 end u64) (option str)
-  visibility: @public
-  native: "text.slice"
-  (let (str scalars) value)
-  (match (array.slice scalars start end)
-    (option.some piece) (option.some (str piece))
-    (option.none) (option.none)))
-
-(defn to-chars (value str) (array char)
-  visibility: @public
-  native: "text.to-chars"
-  (let (str scalars) value)
-  scalars)
-
-(defn from-chars (scalars (array char)) str
-  visibility: @public
-  native: "text.from-chars"
-  (str scalars))
-
-(defn to-utf8 (value str) bytes
-  visibility: @public
-  native: "text.to-utf8"
-  (let (str scalars) value)
-  (bytes (encode scalars 0u64 (array.of))))
-
-(defn from-utf8 (encoded bytes) (result str core.conversion-error)
-  visibility: @public
-  native: "text.from-utf8"
-  (let (bytes items) encoded)
-  (decode items 0u64 (array.of)))
-
-; The text operations below are reviewed Vibra over the operations above.
-
-(defn starts-with (value str prefix str) bool
-  visibility: @public
-  (match (slice value 0u64 (length prefix))
-    (option.some head) (equal head prefix)
-    (option.none) false))
-
-(defn ends-with (value str suffix str) bool
-  visibility: @public
-  (match (u64.sub-checked (length value) (length suffix))
-    (result.ok start)
-      (match (slice value start (length value))
-        (option.some tail) (equal tail suffix)
-        (option.none) false)
-    (result.err -) false))
-
-(defn index-of (value str needle str) (option u64)
-  visibility: @public
-  (search value needle 0u64))
-
-(defn contains (value str needle str) bool
-  visibility: @public
-  (match (index-of value needle) (option.some -) true (option.none) false))
-
-(defn split (value str separator str) (array str)
-  visibility: @public
-  (if (u64.equal (length separator) 0u64)
-    (array.of value)
-    (split-from value separator 0u64 (array.of))))
-
-(defn trim-start (value str) str
-  visibility: @public
-  (let scalars (to-chars value))
-  (part value (first-content scalars 0u64) (length value)))
-
-(defn trim-end (value str) str
-  visibility: @public
-  (let scalars (to-chars value))
-  (part value 0u64 (last-content scalars (length value))))
-
-(defn trim (value str) str
-  visibility: @public
-  (let scalars (to-chars value))
-  (part value (first-content scalars 0u64) (last-content scalars (length value))))
-
-(defn plus (left u64 right u64) u64
-  (match (u64.add-checked left right)
-    (result.ok sum) sum
-    (result.err -) 18446744073709551615u64))
+    (defn compare (left self right self) core.ordering
+      native: "text.compare"
+      (let (str first) left)
+      (let (str second) right)
+      (order first second 0u64)))
+  (impl (from i8)
+    (defn convert (value i8) self
+      external: @compiler
+      symbol: "i8.to-str"))
+  (impl (from i16)
+    (defn convert (value i16) self
+      external: @compiler
+      symbol: "i16.to-str"))
+  (impl (from i32)
+    (defn convert (value i32) self
+      external: @compiler
+      symbol: "i32.to-str"))
+  (impl (from i64)
+    (defn convert (value i64) self
+      external: @compiler
+      symbol: "i64.to-str"))
+  (impl (from u8)
+    (defn convert (value u8) self
+      external: @compiler
+      symbol: "u8.to-str"))
+  (impl (from u16)
+    (defn convert (value u16) self
+      external: @compiler
+      symbol: "u16.to-str"))
+  (impl (from u32)
+    (defn convert (value u32) self
+      external: @compiler
+      symbol: "u32.to-str"))
+  (impl (from u64)
+    (defn convert (value u64) self
+      external: @compiler
+      symbol: "u64.to-str"))
+  (impl (from f32)
+    (defn convert (value f32) self
+      external: @compiler
+      symbol: "f32.to-str"))
+  (impl (from f64)
+    (defn convert (value f64) self
+      external: @compiler
+      symbol: "f64.to-str")))
 
 (defn part (value str start u64 end u64) str
-  (match (slice value start end) (option.some piece) piece (option.none) ""))
+  (match (str.slice value start end) (option.some piece) piece (option.none) ""))
 
 (defn search (value str needle str start u64) (option u64)
-  (match (slice value start (plus start (length needle)))
+  (match (str.slice value start (u64.add start (str.length needle)))
     (option.some window)
-      (if (equal window needle)
+      (if (equatable.equal window needle)
         (option.some start)
-        (search value needle (plus start 1u64)))
+        (search value needle (u64.add start 1u64)))
     (option.none) (option.none)))
 
 (defn split-from (value str separator str start u64 parts (array str)) (array str)
@@ -140,15 +148,15 @@
       (split-from
         value
         separator
-        (plus at (length separator))
+        (u64.add at (str.length separator))
         (array.append parts (part value start at)))
-    (option.none) (array.append parts (part value start (length value)))))
+    (option.none) (array.append parts (part value start (str.length value)))))
 
 (defn first-content (scalars (array char) index u64) u64
   (match (scalars index)
     (option.some scalar)
-      (if (classes.is-ascii-whitespace scalar)
-        (first-content scalars (plus index 1u64))
+      (if (char.is-ascii-whitespace scalar)
+        (first-content scalars (u64.add index 1u64))
         index)
     (option.none) index))
 
@@ -157,7 +165,7 @@
     (result.ok before)
       (match (scalars before)
         (option.some scalar)
-          (if (classes.is-ascii-whitespace scalar) (last-content scalars before) end)
+          (if (char.is-ascii-whitespace scalar) (last-content scalars before) end)
         (option.none) end)
     (result.err -) end))
 
@@ -169,8 +177,8 @@
     (tupleof (option.none) -) (core.ordering.less)
     (tupleof - (option.none)) (core.ordering.greater)
     (tupleof (option.some left) (option.some right))
-      (match (u32.compare (char.to-u32 left) (char.to-u32 right))
-        (core.ordering.equal) (order first second (plus index 1u64))
+      (match (ordered.compare left right)
+        (core.ordering.equal) (order first second (u64.add index 1u64))
         decided decided)))
 
 ; The UTF-8 bytes of the scalars from `index`, appended to `out`.
@@ -179,7 +187,7 @@
     (option.some scalar)
       (encode
         scalars
-        (plus index 1u64)
+        (u64.add index 1u64)
         (array.concat out (utf8-of (char.to-u32 scalar))))
     (option.none) out))
 
@@ -201,11 +209,11 @@
 
 ; A leading byte: `marker` plus the scalar's bits above `unit`.
 (defn lead (marker u32 scalar u32 unit u32) u8
-  (byte (plus32 marker (over scalar unit))))
+  (byte (u32.add marker (u32.div scalar unit))))
 
 ; A continuation byte: `0b10` and the six scalar bits at `unit`.
 (defn trail (scalar u32 unit u32) u8
-  (byte (plus32 128u32 (modulo (over scalar unit) 64u32))))
+  (byte (u32.add 128u32 (u32.rem (u32.div scalar unit) 64u32))))
 
 ; The scalars of well-formed UTF-8 from `index`, appended to `out`.
 (defn decode (items (array u8) index u64 out (array char))
@@ -217,7 +225,7 @@
         (option.some (tupleof scalar width))
           (match (char.from-u32 scalar)
             (option.some decoded)
-              (decode items (plus index width) (array.append out decoded))
+              (decode items (u64.add index width) (array.append out decoded))
             (option.none) (result.err (core.conversion-error.invalid-format)))
         (option.none) (result.err (core.conversion-error.invalid-format)))))
 
@@ -231,7 +239,7 @@
       (match (continuation items index 1u64 128u32 191u32)
         (option.some second)
           (option.some
-            (tupleof (plus32 (times (minus first 192u32) 64u32) second) 2u64))
+            (tupleof (u32.add (u32.mul (u32.sub first 192u32) 64u32) second) 2u64))
         (option.none) (option.none))
       (if (within first 224u32 239u32)
         (three items index first)
@@ -244,14 +252,14 @@
         items
         index
         1u64
-        (if (u32.equal first 224u32) 160u32 128u32)
-        (if (u32.equal first 237u32) 159u32 191u32))
+        (if (equatable.equal first 224u32) 160u32 128u32)
+        (if (equatable.equal first 237u32) 159u32 191u32))
       (continuation items index 2u64 128u32 191u32))
     (tupleof (option.some second) (option.some third))
       (option.some
         (tupleof
-          (plus32
-            (plus32 (times (minus first 224u32) 4096u32) (times second 64u32))
+          (u32.add
+            (u32.add (u32.mul (u32.sub first 224u32) 4096u32) (u32.mul second 64u32))
             third)
           3u64))
     - (option.none)))
@@ -263,19 +271,19 @@
         items
         index
         1u64
-        (if (u32.equal first 240u32) 144u32 128u32)
-        (if (u32.equal first 244u32) 143u32 191u32))
+        (if (equatable.equal first 240u32) 144u32 128u32)
+        (if (equatable.equal first 244u32) 143u32 191u32))
       (continuation items index 2u64 128u32 191u32)
       (continuation items index 3u64 128u32 191u32))
     (tupleof (option.some second) (option.some third) (option.some fourth))
       (option.some
         (tupleof
-          (plus32
-            (plus32
-              (plus32
-                (times (minus first 240u32) 262144u32)
-                (times second 4096u32))
-              (times third 64u32))
+          (u32.add
+            (u32.add
+              (u32.add
+                (u32.mul (u32.sub first 240u32) 262144u32)
+                (u32.mul second 4096u32))
+              (u32.mul third 64u32))
             fourth)
           4u64))
     - (option.none)))
@@ -284,46 +292,23 @@
 ; lies in `[low, high]`.
 (defn continuation (items (array u8) index u64 offset u64 low u32 high u32)
   (option u32)
-  (match (items (plus index offset))
+  (match (items (u64.add index offset))
     (option.some found)
       (if (within (wide found) low high)
-        (option.some (minus (wide found) 128u32))
+        (option.some (u32.sub (wide found) 128u32))
         (option.none))
     (option.none) (option.none)))
 
 (defn within (value u32 low u32 high u32) bool
-  (match (u32.compare value low)
+  (match (ordered.compare value low)
     (core.ordering.less) false
-    - (match (u32.compare value high) (core.ordering.greater) false - true)))
-
-; Arithmetic that the callers keep in range; an out-of-range operand would be
-; a defect in this module, and it yields zero rather than trapping.
-(defn plus32 (left u32 right u32) u32
-  (match (u32.add-checked left right) (result.ok sum) sum (result.err -) 0u32))
-
-(defn minus (left u32 right u32) u32
-  (match (u32.sub-checked left right)
-    (result.ok difference) difference
-    (result.err -) 0u32))
-
-(defn times (left u32 right u32) u32
-  (match (u32.mul-checked left right)
-    (result.ok product) product
-    (result.err -) 0u32))
-
-(defn over (left u32 right u32) u32
-  (match (u32.div-checked left right)
-    (result.ok quotient) quotient
-    (result.err -) 0u32))
-
-(defn modulo (left u32 right u32) u32
-  (match (u32.rem-checked left right)
-    (result.ok remainder) remainder
-    (result.err -) 0u32))
+    - (match (ordered.compare value high) (core.ordering.greater) false - true)))
 
 ; A `u32` below 256 as a byte, and a byte as a `u32`.
 (defn byte (value u32) u8
-  (match (u32.to-u8 value) (result.ok narrow) narrow (result.err -) 0u8))
+  (match (as (result u8 core.conversion-error) (try-from.convert value))
+    (result.ok narrow) narrow
+    (result.err -) 255u8))
 
 (defn wide (value u8) u32
-  (u8.to-u32 value))
+  (from.convert value))

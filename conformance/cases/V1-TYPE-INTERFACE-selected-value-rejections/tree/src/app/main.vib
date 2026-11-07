@@ -12,7 +12,7 @@
 (defn no-such-source () (fn (str) celsius)
   from.convert)
 
-(defn no-destination () (fn (i16) str)
+(defn no-destination () (fn (i16) bool)
   from.convert)
 
 (defn labelled-member () (fn (meter) i32 labelled: (scale i32))

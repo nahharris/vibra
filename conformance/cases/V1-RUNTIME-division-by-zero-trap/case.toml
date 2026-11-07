@@ -1,0 +1,17 @@
+id = "V1-RUNTIME-division-by-zero-trap"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "An unchecked integer division by zero traps with @runtime.division-by-zero, which has no origin, so the run has the trap diagnostic and no result or trace snapshot; div-checked reports the same divisor as a value."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+
+[[expect.diagnostics]]
+code = "@runtime.division-by-zero"
+level = "@error"
+span = [0, 0]

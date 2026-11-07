@@ -5,11 +5,10 @@
     (array.length (dict.entries (as (dict str i32) (dict.of))))))
 
 (import core @std.core)
-(import ordered @std.core.ordered)
 
 (deftype point (record x i32 y i32)
   (impl ordered
     (defn compare (left self right self) core.ordering
-      (match (i32.compare (left @y) (right @y))
-        (core.ordering.equal) (i32.compare (left @x) (right @x))
+      (match (ordered.compare (left @y) (right @y))
+        (core.ordering.equal) (ordered.compare (left @x) (right @x))
         order order))))

@@ -1,10 +1,10 @@
 (defn main () u64 (first 100000u64))
 
 (defn first (count u64) u64
-  (if (u64.equal count 0u64) (second 100000u64) (first (lower count))))
+  (if (equatable.equal count 0u64) (second 100000u64) (first (lower count))))
 
 (defn second (count u64) u64
-  (if (u64.equal count 0u64) (last 19u64) (second (lower count))))
+  (if (equatable.equal count 0u64) (last 19u64) (second (lower count))))
 
 (defn last (value u64) u64 value)
 

@@ -68,12 +68,14 @@ fills with a library type:
 | `@result` | `result` | `try`, unhandled-failure checking |
 | `@dict` | `dict` | dict variadic tails and `dict.of` |
 | `@iter` | `iter` | iteration contracts |
+| `@equatable` | `equatable` | the closed key registry's `equal` |
+| `@ordered` | `ordered` | dict keys and the closed key registry's `compare` |
 
 The associative type is named `dict`, not `map`, so that it shares no spelling
 with the `iter` default member `map`, which transforms items.
 
 The standard library declares each role exactly once, with the `role:`
-attribute on the playing `deftype`; `role:` is admissible only in the embedded
+attribute on the playing `deftype` or `defint`; `role:` is admissible only in the embedded
 standard library, under the same rule as `external:`. A missing or repeated
 role is a toolchain defect reported as an operational provenance diagnostic.
 Adding a role is a specification change to this table.
@@ -83,7 +85,11 @@ Adding a role is a specification change to this table.
 declares `(deftype bytes (array u8) role: @bytes)`. Their constructors and
 patterns are the declared ones, so `(bool.true)`, `(str scalars)`, and
 `(bytes items)` build and destructure values, while a toolchain represents the
-values directly under the representation latitude of the runtime chapter. An
+values directly under the representation latitude of the runtime chapter. The
+pattern and the constructor are the only conversion between a `str` and its
+`(array char)`, or a `bytes` and its `(array u8)`. The operations of `str` and
+`bytes` are their static methods, such as `str.concat` and `bytes.slice`, and
+their comparison is their `equatable` and `ordered` implementations. An
 enum body admits `true` and `false` as variant names, which is how `bool` spells
 its variants. `@std.bool` also declares the two values of the type as ordinary
 public module values, `(def true bool (bool.true) visibility: @public)` and
@@ -100,15 +106,19 @@ declaration has no written constructor or pattern. A dict is built by `dict.of`
 or a dict variadic tail, which sort and merge their entries, and read by lookup
 and by `dict.entries`.
 
-The compiler-owned types, the types that play a role, and the two values
-`true` and `false` that `@std.bool` declares are the only declarations a
-program names without an import, and their names are reserved spellings;
+The compiler-owned types, the types and interfaces that play a role, and the
+two values `true` and `false` that `@std.bool` declares are the only
+declarations a program names without an import, and their names are reserved
+spellings;
 every other standard-library declaration is reached through an explicit
 import. This closed set is the **prelude**. It is fixed by this specification:
 it is not user-extensible, no package can add to it, and it cannot grow
 without a specification change. Every module sees it, because the modules that
 declare it are in every checked graph, and a prelude name resolves to its real
-declaration in every module, a type or a value alike. No name in it can be
+declaration in every module, a type, an interface, or a value alike. A path
+that starts with a prelude name reaches that declaration's members as an import
+of it would: `(str.concat a b)` applies a static method of `str`, and
+`(ordered.compare a b)` a contract member of `ordered`. No name in it can be
 shadowed: a lexical binder, and a module value, function, or import alias,
 that is spelled as a prelude name is rejected (`@name.reserved-declaration`
 and `@name.reserved-value-spelling`, as the source chapter and the namespaces
@@ -308,14 +318,18 @@ Dict keys must implement the standard `ordered` interface. A dict is ordered by
 its keys, so `compare` alone decides both where a key goes and whether two keys
 are the same key; v1 has no hashed collection and therefore no `hashable`
 interface. `@std.core` declares the two comparison contracts as ordinary nominal
-interfaces:
+interfaces. They play the `@equatable` and `@ordered` roles, so they belong to
+the prelude and every module applies `(equatable.equal a b)` and
+`(ordered.compare a b)` without an import:
 
 ```vibra
 (defint equatable
+  role: @equatable
   visibility: @public
   (defn equal (left self right self) bool))
 
 (defint ordered
+  role: @ordered
   visibility: @public
   (defn compare (left self right self) ordering))
 ```
@@ -350,9 +364,12 @@ implementation:
   both contracts: the structure's `equal` holds exactly where its `compare`
   is `equal`.
 
-The standard library writes these conformances as ordinary implementations:
-`equatable` and `ordered` carry them for the builtin integers and `char`, and
-`bool`, `str`, and `bytes` implement both where they are declared. The closed
+The standard library writes these conformances as ordinary implementations,
+each where its type is declared: the builtin integers and `char` in their
+`intrinsic-type` declarations in `@std.builtin`, whose integer members bind the
+`equal` and `compare` registry rows directly, and `bool`, `str`, and `bytes` in
+their own modules. A type compares only through these implementations; it
+declares no second `equal` or `compare` of its own. The closed
 registry is their native implementation, so it MUST answer as they do. The
 atom types have no declaration to carry one, and the rule for anonymous types
 is the language's own structural rule; both conform through the registry
@@ -391,7 +408,10 @@ binds the declaration to a closed registry of builtin type identities:
 whose spelling is the declaration's own name, otherwise the declaration emits
 `@external.unknown-symbol`. Such a declaration supplies the builtin type's
 static methods as ordinary nested members, which are reached through the type
-path with no import, exactly as the builtin type needs none. `intrinsic-type`
+path with no import, exactly as the builtin type needs none, and its
+implementations as ordinary nested `impl` blocks. A static method binds a
+primitive with `external:`, names a native with `native:`, or is Vibra alone,
+as the character classes of `char` are. `intrinsic-type`
 is admissible only in the toolchain-embedded package, under the same rule as
 `external:`; users cannot declare or extend a builtin type.
 
@@ -1674,16 +1694,19 @@ associated types on an interface contract. A conversion needing a richer error
 is an ordinary `defn` returning `(result t e)`, which requires no new machinery.
 Per-implementation error types are a post-v1 concern recorded in the roadmap.
 
-The builtin integer types conform to both contracts through a closed toolchain
-registry, keyed by the pair of source and destination types, as the closed
-`iter` registry is keyed by constructor identity. For two distinct integer
-types, the destination implements `(from source)` exactly when it holds every
-value of the source, and `(try-from source)` otherwise, with `out-of-range` for
-a value it cannot hold. The registry is the `to-U` family of the runtime
-chapter, and a call selects its operation directly. An unsuffixed integer
-literal has no type of its own, so where more than one source converts to the
-destination the call is `@type.ambiguous-implementation`, whatever the
-literal's value. The floating-point types have no registry conversion in v1.
+The builtin number types implement both contracts with written
+implementations in `@std.builtin`, each member bound to its registry row as the
+runtime chapter lists. For two distinct integer types, the destination
+implements `(from source)` exactly when it holds every value of the source, and
+`(try-from source)` otherwise, with `out-of-range` for a value it cannot hold.
+Every number type implements `(try-from str)`, which parses its decimal text,
+and `str` implements `(from n)` for every number type `n`, which renders it.
+There is no other spelling of these conversions: a number type has no `to-U`,
+`parse`, or `to-str` static method. An unsuffixed integer literal has no type of
+its own, so where more than one source converts to the destination the call is
+`@type.ambiguous-implementation`, whatever the literal's value. The
+floating-point types convert between each other and the integers through no
+contract in v1.
 
 Across `from` and `try-from` together, a receiver's source targets MUST be
 pairwise non-unifiable, as the overlap section defines. The same written source

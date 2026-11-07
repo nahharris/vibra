@@ -15,16 +15,16 @@ accepted = false
 code = "@type.invalid-dict-key"
 level = "@error"
 source = "src/app/main.vib"
-span = [103, 108]
+span = [68, 73]
 
 [[expect.diagnostics]]
 code = "@type.invalid-dict-key"
 level = "@error"
 source = "src/app/main.vib"
-span = [163, 200]
+span = [128, 165]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "src/app/main.vib"
-span = [286, 317]
+span = [251, 282]

@@ -14,7 +14,7 @@ const MAIN: &str = r#"(defn main () void
   (do))
 
 (defn walk (count u64 next (fn (u64) u64)) u64
-  (if (u64.equal count 0u64)
+  (if (equatable.equal count 0u64)
     (next 0u64)
     (walk (lower count) (lambda (total u64) u64 (next (raise total))))))
 

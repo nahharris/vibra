@@ -376,7 +376,7 @@ fn a_test_body_ending_in_a_source_call_reuses_its_activation() {
             (
                 "tests/tail/loop.vib",
                 "(import assert @std.assert)
-(defn finish () void (do))\n(defn spin (count u64) void\n  (if (u64.equal count 0u64) (finish) (spin (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n(test \"one call\" (finish))\n(test \"a loop of a hundred thousand tail calls\" (spin 100000u64))\n",
+(defn finish () void (do))\n(defn spin (count u64) void\n  (if (equatable.equal count 0u64) (finish) (spin (lower count))))\n(defn lower (count u64) u64\n  (match (u64.sub-checked count 1u64)\n    (result.ok value) value\n    (result.err -) 0u64))\n(test \"one call\" (finish))\n(test \"a loop of a hundred thousand tail calls\" (spin 100000u64))\n",
             ),
         ],
     );
