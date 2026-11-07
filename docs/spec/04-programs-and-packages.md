@@ -434,7 +434,9 @@ record with `path` (a `stdlib/src/`-relative slash path), `sha256` (the
 `@test-registry`). `compiler` lists every `@compiler` symbol the modules may
 bind, `host` lists every `@host` registry symbol the modules may bind, `native`
 lists every native implementation symbol the modules may name with `native:`,
-and `assertions` lists the test-only assertion members.
+together with the four that implement the `str` and `bytes` wrapper constructor
+and pattern, which no module names (`docs/spec/06-runtime.md`), and
+`assertions` lists the test-only assertion members.
 
 The toolchain embeds the manifest and every listed module at build time. At
 load it decodes the manifest through its closed record, hashes each embedded
@@ -454,19 +456,21 @@ directory, a vendor tree, a cache, or the network.
 The admitted modules enter the resolver as the `vibra-stdlib@0.3.0` package
 with unit `@std`, keep that provenance in every declaration identity, and are
 imported explicitly, except for the prelude of the type chapter, whose
-declarations every module sees and whose declaring module `@std.bool` is in
-every checked graph, so `check`, `run`, and `test` always load the embedded
-library. A declaration outside this
+declarations every module sees. Every module that declares a prelude name, a
+value or a declaration that plays a role, is in every checked graph: `@std.bool`,
+`@std.core`, `@std.text`, `@std.bytes`, `@std.option`, `@std.result`,
+`@std.iter`, and `@std.builtin`. So `check`, `run`, and `test` always load the
+embedded library. A declaration outside this
 embedded package that writes `external:` acquires no provider authority and is
-rejected before execution. The module set of the M3 package is `@std.core`,
-`@std.option`, `@std.result`, `@std.bool`, `@std.char`, `@std.text`,
+rejected before execution. The module set of the package is `@std.core`,
+`@std.option`, `@std.result`, `@std.bool`, `@std.text`,
 `@std.bytes`, `@std.iter`, the builtin-member module `@std.builtin`, and the
 test-registry module `@std.assert`. Milestone 4 adds the five effect modules
 `@std.io`, `@std.fs`, `@std.env`, `@std.time`, and `@std.random`, which declare
 the roots, operations, and error types of the host registry in the runtime
-chapter. `@std.builtin` is never imported: it declares the members of the
-builtin numeric, `array`, `dict`, and `tuple` types, which are reached
-through those type paths. Adding a module or symbol is a specification change to
+chapter. `@std.builtin` is never imported: it declares the members and the
+implementations of the builtin numeric, `char`, `array`, and `dict` types,
+whose members are reached through those type paths. Adding a module or symbol is a specification change to
 this list and to the runtime registry, and replaces the manifest and the package
 version in place.
 

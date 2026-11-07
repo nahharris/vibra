@@ -1,8 +1,6 @@
 ; The standard boolean type, which plays the `@bool` role: `true`, `false`, and
 ; `if` conditions have this type. The toolchain represents it directly.
 (import core @std.core)
-(import equatable @std.core.equatable)
-(import ordered @std.core.ordered)
 
 ; The two values of `bool`. They belong to the closed import-free vocabulary:
 ; every program names `true` and `false` without an import, and nothing can
@@ -19,7 +17,7 @@
   visibility: @public
   (impl equatable
     (defn equal (left self right self) bool
-      (if left right (if right false true))))
+      (if left right (not right))))
   (impl ordered
     (defn compare (left self right self) core.ordering
       (if left
