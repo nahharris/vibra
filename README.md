@@ -123,6 +123,10 @@ source, and `vibra-toolchain` covers driving the `vibra` CLI.
   `codex plugin add vibra@vibra`
 - **Cursor:** add `nahharris/vibra` as a plugin marketplace from a GitHub
   repository, then install `vibra`
+- **Any agent, through [`npx skills`](https://github.com/vercel-labs/skills):**
+  `npx skills add nahharris/vibra`. Add `--skill vibra-language` to pick one
+  skill, `-a claude-code` (or `codex`, `cursor`, ...) to pick an agent, and
+  `-g` to install for every project
 
 ## 🧭 Where the project stands
 
