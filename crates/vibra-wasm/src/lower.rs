@@ -334,6 +334,105 @@ pub(crate) fn collect(program: &CheckedProgram) -> Lambdas<'_> {
     lambdas
 }
 
+/// Which language functions a module can run: those reachable from its entry,
+/// or from its tests, and from every module-value initializer. A direct call
+/// and a function named as a value reach their function, and a contract call
+/// reaches every implementation and default of its member. A dict, a lookup,
+/// or a closed key contract may order keys by a written `compare`, so it
+/// reaches every implementation of the comparison contracts. The rest are never
+/// called, so the module carries a stub for each: every function keeps its
+/// index, and the standard library a program does not use costs it a few bytes.
+pub(crate) fn reachable(
+    program: &CheckedProgram,
+    tests: Option<&[usize]>,
+) -> Vec<bool> {
+    let functions = program.functions();
+    let mut seen = vec![false; functions.len()];
+    let mut pending: Vec<usize> = match tests {
+        Some(entries) => entries.to_vec(),
+        None => vec![program.entry_index()],
+    };
+    let mut contracts: BTreeSet<(String, String)> = BTreeSet::new();
+    let mut keys = false;
+    let mut roots: Vec<&Expr> = program
+        .globals()
+        .iter()
+        .map(|global| global.initializer())
+        .collect();
+    loop {
+        while let Some(expr) = roots.pop() {
+            match expr {
+                Expr::Call {
+                    target: CallTarget::Direct(function),
+                    ..
+                }
+                | Expr::Function { function, .. } => pending.push(*function),
+                Expr::Call {
+                    target:
+                        CallTarget::Contract {
+                            interface,
+                            member,
+                            closed,
+                            ..
+                        },
+                    ..
+                } => {
+                    contracts.insert((interface.path().to_owned(), member.clone()));
+                    keys |= matches!(
+                        closed,
+                        Some(
+                            vibra_ir::ClosedContract::KeyCompare
+                                | vibra_ir::ClosedContract::KeyEqual
+                        )
+                    );
+                }
+                Expr::Dict { .. } | Expr::Lookup { .. } => keys = true,
+                _ => {}
+            }
+            if let Expr::Closure { body, .. } = expr {
+                roots.push(body);
+            }
+            roots.extend(children(expr));
+        }
+        // A contract call reaches the implementations of its member.
+        for (index, function) in functions.iter().enumerate() {
+            if seen.get(index).copied().unwrap_or(true) {
+                continue;
+            }
+            let Some(implements) = function.implements() else {
+                continue;
+            };
+            let path = implements.interface.path();
+            let key_contract = matches!(
+                (path, implements.member.as_str()),
+                ("std.core.ordered", "compare") | ("std.core.equatable", "equal")
+            );
+            if (keys && key_contract)
+                || contracts.contains(&(path.to_owned(), implements.member.clone()))
+            {
+                pending.push(index);
+            }
+        }
+        let mut grew = false;
+        while let Some(index) = pending.pop() {
+            let Some(slot) = seen.get_mut(index) else {
+                continue;
+            };
+            if *slot {
+                continue;
+            }
+            *slot = true;
+            grew = true;
+            if let Some(function) = functions.get(index) {
+                roots.push(function.module_body().0);
+            }
+        }
+        if !grew && roots.is_empty() {
+            return seen;
+        }
+    }
+}
+
 fn visit<'a>(expr: &'a Expr, visible: &[String], out: &mut Lambdas<'a>) {
     match expr {
         Expr::Closure {
@@ -637,6 +736,9 @@ pub(crate) struct Lowering<'a> {
     tests: bool,
     /// The origins a stop names, in the order the lowering first needs one.
     origins: Vec<OriginEntry>,
+    /// Which language functions the module can run (`reachable`); every other
+    /// one lowers to a stub. Empty means all of them.
+    reachable: Vec<bool>,
 }
 
 /// One row of the origin table being built.
@@ -681,7 +783,14 @@ impl<'a> Lowering<'a> {
             needs_typed: false,
             tests,
             origins: Vec::new(),
+            reachable: Vec::new(),
         }
+    }
+
+    /// The same lowering, lowering only the functions `reachable` marks.
+    pub(crate) fn with_reachable(mut self, reachable: Vec<bool>) -> Self {
+        self.reachable = reachable;
+        self
     }
 
     /// The function index of the first routine after the constructor that is a
@@ -1005,6 +1114,18 @@ impl<'a> Lowering<'a> {
             let mut builder = Builder::new(self, known, shape);
             builder.key_unit()?;
             return Ok(builder.finish());
+        }
+        // A function the module never runs is a stub that keeps its index.
+        if index < functions && !self.reachable.get(index).copied().unwrap_or(true) {
+            return Ok(Lowered {
+                code: FunctionCode {
+                    params: vec![ValType::I32],
+                    results: Vec::new(),
+                    locals: Vec::new(),
+                    body: vec![I::Unreachable, I::End],
+                },
+                slots: 0,
+            });
         }
         let owned: Expr;
         let (body, shape, result): (&Expr, Shape1, Type) = if let Some(function) =
