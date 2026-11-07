@@ -1414,7 +1414,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vibra-cli"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "jsonschema",
  "same-file",
@@ -1432,7 +1432,7 @@ dependencies = [
 
 [[package]]
 name = "vibra-conformance"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1454,11 +1454,11 @@ dependencies = [
 
 [[package]]
 name = "vibra-diagnostics"
-version = "0.0.0"
+version = "0.0.1"
 
 [[package]]
 name = "vibra-fmt"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "vibra-diagnostics",
  "vibra-syntax",
@@ -1466,7 +1466,7 @@ dependencies = [
 
 [[package]]
 name = "vibra-host"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "getrandom",
  "serde_json",
@@ -1477,7 +1477,7 @@ dependencies = [
 
 [[package]]
 name = "vibra-interp"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "vibra-diagnostics",
  "vibra-host",
@@ -1487,21 +1487,21 @@ dependencies = [
 
 [[package]]
 name = "vibra-ir"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "vibra-diagnostics",
 ]
 
 [[package]]
 name = "vibra-native"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "vibra-ir",
 ]
 
 [[package]]
 name = "vibra-resolve"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "vibra-diagnostics",
  "vibra-syntax",
@@ -1509,7 +1509,7 @@ dependencies = [
 
 [[package]]
 name = "vibra-schema"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "jsonschema",
  "serde",
@@ -1521,14 +1521,14 @@ dependencies = [
 
 [[package]]
 name = "vibra-syntax"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "vibra-diagnostics",
 ]
 
 [[package]]
 name = "vibra-types"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "sha2",
  "vibra-diagnostics",
@@ -1539,7 +1539,7 @@ dependencies = [
 
 [[package]]
 name = "vibra-wasm"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "vibra-diagnostics",
  "vibra-ir",
@@ -1548,7 +1548,7 @@ dependencies = [
 
 [[package]]
 name = "vibra-wasm-run"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "vibra-host",
  "vibra-ir",
@@ -1560,7 +1560,7 @@ dependencies = [
 
 [[package]]
 name = "vibra-workspace"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "rustix",
  "sha2",
