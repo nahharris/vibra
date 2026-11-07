@@ -160,16 +160,13 @@ fn integer(
         .map(|value| integer_value(value))
         .collect::<Option<Vec<_>>>();
     Some(match (op, operands) {
-        (IntegerOp::NegChecked, _) => {
+        (IntegerOp::Neg, _) => {
             let [value] = values.as_deref()? else {
                 return None;
             };
             checked(numeric, value.checked_neg(), result)
         }
-        (
-            IntegerOp::ShiftLeftChecked | IntegerOp::ShiftRight,
-            [value, Value::U32(amount)],
-        ) => {
+        (IntegerOp::ShiftLeft | IntegerOp::ShiftRight, [value, Value::U32(amount)]) => {
             let value = integer_value(value)?;
             if *amount >= numeric.bits() {
                 return Some(err(result, "invalid-shift"));
@@ -193,26 +190,16 @@ fn integer(
             };
             let (left, right) = (*left, *right);
             match op {
-                IntegerOp::AddChecked => {
-                    checked(numeric, left.checked_add(right), result)
-                }
-                IntegerOp::SubChecked => {
-                    checked(numeric, left.checked_sub(right), result)
-                }
-                IntegerOp::MulChecked => {
-                    checked(numeric, left.checked_mul(right), result)
-                }
+                IntegerOp::Add => checked(numeric, left.checked_add(right), result),
+                IntegerOp::Sub => checked(numeric, left.checked_sub(right), result),
+                IntegerOp::Mul => checked(numeric, left.checked_mul(right), result),
                 // `i128` division truncates toward zero and its remainder
                 // takes the dividend's sign; the signed minimum divided by
                 // `-1` lies outside the type, and its remainder is `0`.
-                IntegerOp::DivChecked if right == 0 => err(result, "division-by-zero"),
-                IntegerOp::DivChecked => {
-                    checked(numeric, left.checked_div(right), result)
-                }
-                IntegerOp::RemChecked if right == 0 => err(result, "division-by-zero"),
-                IntegerOp::RemChecked => {
-                    checked(numeric, left.checked_rem(right), result)
-                }
+                IntegerOp::Div if right == 0 => err(result, "division-by-zero"),
+                IntegerOp::Div => checked(numeric, left.checked_div(right), result),
+                IntegerOp::Rem if right == 0 => err(result, "division-by-zero"),
+                IntegerOp::Rem => checked(numeric, left.checked_rem(right), result),
                 IntegerOp::Equal => primitive(Value::Bool(left == right)),
                 IntegerOp::Compare => ordering(result, left.cmp(&right)),
                 _ => return None,
@@ -397,40 +384,34 @@ mod tests {
 
     #[test]
     fn integer_boundaries() {
-        use IntegerOp::{AddChecked, DivChecked, MulChecked, NegChecked, RemChecked};
+        use IntegerOp::{Add, Div, Mul, Neg, Rem};
         use NumericType::{I8, I64, U8, U64};
         assert!(is_err(
-            &int(U64, AddChecked, &[Value::U64(u64::MAX), Value::U64(1)]),
+            &int(U64, Add, &[Value::U64(u64::MAX), Value::U64(1)]),
             "overflow"
         ));
         assert!(
-            int(U64, MulChecked, &[Value::U64(u64::MAX), Value::U64(1)])
+            int(U64, Mul, &[Value::U64(u64::MAX), Value::U64(1)])
                 .contains("payload: 18446744073709551615u64")
         );
         assert!(is_err(
-            &int(U8, MulChecked, &[Value::U8(16), Value::U8(16)]),
+            &int(U8, Mul, &[Value::U8(16), Value::U8(16)]),
             "overflow"
         ));
         assert!(is_err(
-            &int(I64, DivChecked, &[Value::I64(i64::MIN), Value::I64(-1)]),
+            &int(I64, Div, &[Value::I64(i64::MIN), Value::I64(-1)]),
             "overflow"
         ));
         assert!(
-            int(I64, RemChecked, &[Value::I64(i64::MIN), Value::I64(-1)])
+            int(I64, Rem, &[Value::I64(i64::MIN), Value::I64(-1)])
                 .contains("payload: 0i64")
         );
         assert!(is_err(
-            &int(I8, RemChecked, &[Value::I8(1), Value::I8(0)]),
+            &int(I8, Rem, &[Value::I8(1), Value::I8(0)]),
             "division-by-zero"
         ));
-        assert!(is_err(
-            &int(I8, NegChecked, &[Value::I8(i8::MIN)]),
-            "overflow"
-        ));
-        assert!(
-            int(I8, DivChecked, &[Value::I8(-7), Value::I8(2)])
-                .contains("payload: -3i8")
-        );
+        assert!(is_err(&int(I8, Neg, &[Value::I8(i8::MIN)]), "overflow"));
+        assert!(int(I8, Div, &[Value::I8(-7), Value::I8(2)]).contains("payload: -3i8"));
     }
 
     #[test]
@@ -480,10 +461,10 @@ mod tests {
 
     #[test]
     fn shifts_reject_amounts_at_or_above_the_width() {
-        use IntegerOp::{ShiftLeftChecked, ShiftRight};
+        use IntegerOp::{ShiftLeft, ShiftRight};
         use NumericType::{I16, U8};
         assert!(is_err(
-            &int(U8, ShiftLeftChecked, &[Value::U8(1), Value::U32(8)]),
+            &int(U8, ShiftLeft, &[Value::U8(1), Value::U32(8)]),
             "invalid-shift"
         ));
         assert!(is_err(
@@ -491,11 +472,11 @@ mod tests {
             "invalid-shift"
         ));
         assert!(
-            int(U8, ShiftLeftChecked, &[Value::U8(1), Value::U32(7)])
+            int(U8, ShiftLeft, &[Value::U8(1), Value::U32(7)])
                 .contains("payload: 128u8")
         );
         assert!(is_err(
-            &int(U8, ShiftLeftChecked, &[Value::U8(2), Value::U32(7)]),
+            &int(U8, ShiftLeft, &[Value::U8(2), Value::U32(7)]),
             "overflow"
         ));
         assert!(

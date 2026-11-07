@@ -175,21 +175,21 @@ pub(crate) fn plan(intrinsic: CompilerIntrinsic) -> Option<Plan> {
         }
         CompilerIntrinsic::Integer(numeric, op) if numeric.is_integer() => {
             let (operands, outcome, body) = match op {
-                IntegerOp::AddChecked
-                | IntegerOp::SubChecked
-                | IntegerOp::MulChecked
-                | IntegerOp::DivChecked
-                | IntegerOp::RemChecked => (
+                IntegerOp::Add
+                | IntegerOp::Sub
+                | IntegerOp::Mul
+                | IntegerOp::Div
+                | IntegerOp::Rem => (
                     vec![numeric, numeric],
                     Outcome::Checked(numeric),
                     Body::Arithmetic(numeric, op),
                 ),
-                IntegerOp::NegChecked => (
+                IntegerOp::Neg => (
                     vec![numeric],
                     Outcome::Checked(numeric),
                     Body::Arithmetic(numeric, op),
                 ),
-                IntegerOp::ShiftLeftChecked | IntegerOp::ShiftRight => (
+                IntegerOp::ShiftLeft | IntegerOp::ShiftRight => (
                     vec![numeric, U32],
                     Outcome::Checked(numeric),
                     Body::Arithmetic(numeric, op),
@@ -258,13 +258,12 @@ impl Plan {
     pub(crate) fn faults(&self) -> Vec<Fault> {
         match self.body {
             Body::Arithmetic(_, op) => match op {
-                IntegerOp::AddChecked
-                | IntegerOp::SubChecked
-                | IntegerOp::MulChecked
-                | IntegerOp::NegChecked => vec![Fault::Overflow],
-                IntegerOp::DivChecked => vec![Fault::DivisionByZero, Fault::Overflow],
-                IntegerOp::RemChecked => vec![Fault::DivisionByZero],
-                IntegerOp::ShiftLeftChecked => {
+                IntegerOp::Add | IntegerOp::Sub | IntegerOp::Mul | IntegerOp::Neg => {
+                    vec![Fault::Overflow]
+                }
+                IntegerOp::Div => vec![Fault::DivisionByZero, Fault::Overflow],
+                IntegerOp::Rem => vec![Fault::DivisionByZero],
+                IntegerOp::ShiftLeft => {
                     vec![Fault::InvalidShift, Fault::Overflow]
                 }
                 IntegerOp::ShiftRight => vec![Fault::InvalidShift],
@@ -568,7 +567,7 @@ fn arithmetic(numeric: NumericType, op: IntegerOp, names: &Names, code: &mut Vec
     ]
     .to_vec();
     match op {
-        IntegerOp::AddChecked => {
+        IntegerOp::Add => {
             code.extend([a.clone(), b.clone(), I::I64Add, set(WR)]);
             // A 64-bit sum overflows on a carry (unsigned), or when the
             // operands have one sign and the sum another (signed).
@@ -591,7 +590,7 @@ fn arithmetic(numeric: NumericType, op: IntegerOp, names: &Names, code: &mut Vec
             };
             when(overflow, &carried, code);
         }
-        IntegerOp::SubChecked => {
+        IntegerOp::Sub => {
             code.extend([a.clone(), b.clone(), I::I64Sub, set(WR)]);
             // A 64-bit difference overflows on a borrow (unsigned), or when the
             // operands differ in sign and the result's sign is not the
@@ -615,7 +614,7 @@ fn arithmetic(numeric: NumericType, op: IntegerOp, names: &Names, code: &mut Vec
             };
             when(overflow, &borrowed, code);
         }
-        IntegerOp::MulChecked => {
+        IntegerOp::Mul => {
             code.extend([a.clone(), b.clone(), I::I64Mul, set(WR)]);
             let wrapped = if exact {
                 outside
@@ -649,12 +648,12 @@ fn arithmetic(numeric: NumericType, op: IntegerOp, names: &Names, code: &mut Vec
             };
             when(overflow, &wrapped, code);
         }
-        IntegerOp::NegChecked => {
+        IntegerOp::Neg => {
             code.extend([c64(0), a.clone(), I::I64Sub, set(WR)]);
             when(overflow, &equals(WA, minimum), code);
         }
-        IntegerOp::DivChecked | IntegerOp::RemChecked => {
-            let divide = op == IntegerOp::DivChecked;
+        IntegerOp::Div | IntegerOp::Rem => {
+            let divide = op == IntegerOp::Div;
             let operation = match (divide, signed) {
                 (true, true) => I::I64DivS,
                 (true, false) => I::I64DivU,
@@ -699,7 +698,7 @@ fn arithmetic(numeric: NumericType, op: IntegerOp, names: &Names, code: &mut Vec
                 when(names.fault(Fault::DivisionByZero), &zero_divisor, code);
             }
         }
-        IntegerOp::ShiftLeftChecked => {
+        IntegerOp::ShiftLeft => {
             code.extend([a.clone(), b.clone(), I::I64Shl, set(WR)]);
             let leaves = if exact {
                 outside

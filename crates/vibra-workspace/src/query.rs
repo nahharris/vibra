@@ -2661,38 +2661,6 @@ impl<'a> SemanticCollector<'a> {
                     }),
                 )
             }
-            // An integer conversion: `from` or `try-from` on a builtin
-            // destination, answered by the closed registry.
-            Expr::External {
-                intrinsic:
-                    vibra_ir::external::CompilerIntrinsic::Convert(source, target),
-                arguments,
-                result,
-                ..
-            } => Some(
-                ApplicationContract::new(
-                    None,
-                    None,
-                    slots(arguments.iter().map(Expr::result_type).collect()),
-                    Vec::new(),
-                    semantic_type(result),
-                )
-                .contract(ContractDispatch {
-                    interface:
-                        if vibra_ir::external::CompilerIntrinsic::conversion_is_total(
-                            *source, *target,
-                        ) {
-                            "std.core.from"
-                        } else {
-                            "std.core.try-from"
-                        }
-                        .to_owned(),
-                    member: "convert".to_owned(),
-                    receiver: semantic_type(&target.to_type()),
-                    selection: DispatchSelection::Closed,
-                    destination: true,
-                }),
-            ),
             _ => None,
         }
     }

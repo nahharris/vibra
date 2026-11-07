@@ -11,7 +11,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
-use vibra_ir::external::{CompilerIntrinsic, NumericType};
 use vibra_ir::{
     CallTarget, ClosedContract, Expr, FunctionSignature, Implements, SourceOrigin, Type,
 };
@@ -280,6 +279,9 @@ pub(crate) struct ImplPlan {
 pub(crate) struct PlanModule<'a> {
     pub(crate) source_id: &'a str,
     pub(crate) declarations: &'a [Declaration],
+    /// Whether the module is part of the embedded standard library, whose
+    /// implementation members may bind `external:` and `native:` symbols.
+    pub(crate) trusted: bool,
 }
 
 /// Locates every `impl` block of `modules`, checking its target slot, its
@@ -296,8 +298,13 @@ pub(crate) fn plan_implementations(
         for (declaration_index, declaration) in module.declarations.iter().enumerate() {
             let (members, owner) = match declaration {
                 Declaration::Deftype(value) => {
+                    // An intrinsic type is builtin rather than declared, so
+                    // it carries its registry atom and its generic names.
                     let intrinsic = match value.body() {
-                        DeftypeBody::Intrinsic(atom) => Some(atom.value().to_owned()),
+                        DeftypeBody::Intrinsic(atom) => Some((
+                            atom.value().to_owned(),
+                            crate::nominal::generic_names(value.attributes().items()),
+                        )),
                         DeftypeBody::Type(_) => None,
                     };
                     (value.members(), Owner::Type(value.span(), intrinsic))
@@ -406,9 +413,9 @@ pub(crate) fn plan_implementations(
 }
 
 enum Owner {
-    /// A `deftype`, identified by its span, with its registry atom when it
-    /// declares an intrinsic type.
-    Type(ByteSpan, Option<String>),
+    /// A `deftype`, identified by its span, with its registry atom and generic
+    /// names when it declares an intrinsic type.
+    Type(ByteSpan, Option<(String, Vec<String>)>),
     /// A `defint`, identified by its span.
     Interface(ByteSpan),
 }
@@ -430,24 +437,27 @@ fn resolve_block(
     };
     match owner {
         Owner::Type(owner_span, intrinsic) => {
-            let index = types.declared().iter().position(|declared| {
-                declared.span == *owner_span && declared.source_id == source_id
-            })?;
-            let declared = types.get(index)?;
-            // A type the toolchain represents directly is implemented at that
-            // representation, which is the type its values have.
-            let receiver = match intrinsic {
-                Some(atom) => {
-                    crate::standard::builtin_self_type(atom, &declared.parameters)?
+            // A builtin type is implemented at the type its values have, and
+            // so is a type the toolchain represents directly.
+            let (receiver, parameters) = match intrinsic {
+                Some((atom, parameters)) => (
+                    crate::standard::builtin_self_type(atom, parameters)?,
+                    parameters.clone(),
+                ),
+                None => {
+                    let index = types.declared().iter().position(|declared| {
+                        declared.span == *owner_span && declared.source_id == source_id
+                    })?;
+                    let declared = types.get(index)?;
+                    let receiver = types.representation(index).unwrap_or_else(|| {
+                        crate::nominal::declared_self_type(
+                            &declared.id,
+                            &declared.parameters,
+                        )
+                    });
+                    (receiver, declared.parameters.clone())
                 }
-                None => types.representation(index).unwrap_or_else(|| {
-                    crate::nominal::declared_self_type(
-                        &declared.id,
-                        &declared.parameters,
-                    )
-                }),
             };
-            let parameters = declared.parameters.clone();
             let (head, written) = match target {
                 TypeExpr::Name(name) => (name, &[][..]),
                 TypeExpr::Applied { head, arguments } => (head, arguments.as_slice()),
@@ -1502,14 +1512,30 @@ pub(crate) fn materialize(
                     )
                 })
                 .unwrap_or_default();
+            // An implementation member of the embedded standard library may
+            // bind a primitive operation or name a native implementation, as
+            // any other function there may.
+            let external = crate::compiler_intrinsic(
+                &plan.source_id,
+                method,
+                diagnostics,
+                module.trusted,
+                &signature,
+                &crate::standard::role_types(types),
+            );
+            let external_declared = method
+                .attributes()
+                .items()
+                .iter()
+                .any(|attribute| matches!(attribute, Attribute::External(_)));
             functions.push(crate::FunctionHeader {
                 declaration_index: plan.declaration_index,
                 module_index: plan.module_index,
                 source_id: plan.source_id.clone(),
                 name: name(plan.module_index, method.span()),
                 signature,
-                external: None,
-                external_declared: false,
+                external,
+                external_declared,
                 test: None,
                 test_assertion: None,
                 member_index: Some(plan.member_index),
@@ -1752,8 +1778,6 @@ struct Candidate {
 enum CandidateTarget {
     /// A written or default member, by its function.
     Function(usize),
-    /// A closed toolchain conformance, by its registry operation.
-    Primitive(CompilerIntrinsic),
     /// The implementation for the type the receiver holds at run time: a
     /// builtin constructor type through the closed registry, an interface
     /// value, or the `self` of a default member.
@@ -2008,9 +2032,6 @@ fn check_selected_call(
                 tail_position,
             )
         }
-        CandidateTarget::Primitive(intrinsic) => {
-            Expr::external_with_result(intrinsic, arguments, result, origin)
-        }
         CandidateTarget::Function(_) | CandidateTarget::Dispatch => Expr::Call {
             target: CallTarget::Contract {
                 interface: declared.id.clone(),
@@ -2220,9 +2241,6 @@ fn check_selected_value(
                 origin.clone(),
                 true,
             )
-        }
-        CandidateTarget::Primitive(intrinsic) => {
-            Expr::external_with_result(intrinsic, arguments, result, origin.clone())
         }
         CandidateTarget::Function(_) | CandidateTarget::Dispatch => Expr::Call {
             target: CallTarget::Contract {
@@ -2436,29 +2454,6 @@ fn candidates(
             &[item],
             CandidateTarget::Dispatch,
         ));
-    }
-    // The builtin integer types convert through the closed registry: a
-    // conversion that cannot fail is a `from`, every other one a `try-from`.
-    if let Some(total) = conversion_contract(types, interface)
-        && let Some(target) = NumericType::ALL
-            .into_iter()
-            .find(|numeric| numeric.is_integer() && numeric.to_type() == *receiver)
-    {
-        for source in NumericType::ALL {
-            if source == target
-                || !source.is_integer()
-                || CompilerIntrinsic::conversion_is_total(source, target) != total
-            {
-                continue;
-            }
-            found.push(candidate(
-                declared,
-                contract,
-                receiver,
-                &[source.to_type()],
-                CandidateTarget::Primitive(CompilerIntrinsic::Convert(source, target)),
-            ));
-        }
     }
     found
 }

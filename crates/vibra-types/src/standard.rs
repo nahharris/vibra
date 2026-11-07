@@ -163,7 +163,8 @@ pub(crate) fn builtin_self_type(atom: &str, parameters: &[String]) -> Option<Typ
     }
 }
 
-/// One static method of a builtin type, bound to a compiler operation.
+/// One static method of a builtin type: bound to a compiler operation, or
+/// written in Vibra alone.
 #[derive(Clone, Debug)]
 pub(crate) struct BuiltinMember {
     /// The builtin type name, such as `array`.
@@ -172,8 +173,9 @@ pub(crate) struct BuiltinMember {
     pub(crate) member: String,
     /// The checked signature, exactly the registry's.
     pub(crate) signature: vibra_ir::FunctionSignature,
-    /// The bound registry operation.
-    pub(crate) intrinsic: CompilerIntrinsic,
+    /// The bound registry operation, or None for a member that is only its
+    /// Vibra body.
+    pub(crate) intrinsic: Option<CompilerIntrinsic>,
     /// The complete generic parameter list: the type's, then the member's.
     pub(crate) type_parameters: Vec<String>,
     /// The member as the embedded module writes it, whose Vibra body a native
@@ -185,6 +187,12 @@ impl BuiltinMember {
     /// The value path that reaches the member, such as `array.of`.
     pub(crate) fn path(&self) -> String {
         format!("{}.{}", self.type_name, self.member)
+    }
+
+    /// Whether a program runs the member's Vibra body: a member written in
+    /// Vibra alone, or a native, whose body is its meaning.
+    pub(crate) fn runs_body(&self) -> bool {
+        self.intrinsic.is_none_or(CompilerIntrinsic::runs_body)
     }
 }
 
@@ -261,20 +269,34 @@ pub(crate) fn builtin_members(types: &TypeNames) -> Vec<BuiltinMember> {
             ) else {
                 continue;
             };
-            let Some(intrinsic) = crate::compiler_intrinsic(
-                STDLIB_BUILTIN_SOURCE_ID,
-                method,
-                &mut ignored,
-                true,
-                &signature,
-                &role_types(types),
-            ) else {
-                continue;
+            let bound = method.attributes().items().iter().any(|attribute| {
+                matches!(
+                    attribute,
+                    vibra_syntax::Attribute::External(_)
+                        | vibra_syntax::Attribute::Native(_)
+                )
+            });
+            let intrinsic = if bound {
+                let Some(intrinsic) = crate::compiler_intrinsic(
+                    STDLIB_BUILTIN_SOURCE_ID,
+                    method,
+                    &mut ignored,
+                    true,
+                    &signature,
+                    &role_types(types),
+                ) else {
+                    continue;
+                };
+                if !signature.same_shape(&intrinsic.signature(&role_types(types)))
+                    || generics != intrinsic.type_parameters()
+                {
+                    continue;
+                }
+                Some(intrinsic)
+            } else {
+                None
             };
-            if !ignored.is_empty()
-                || !signature.same_shape(&intrinsic.signature(&role_types(types)))
-                || generics != intrinsic.type_parameters()
-            {
+            if !ignored.is_empty() {
                 continue;
             }
             members.push(BuiltinMember {
@@ -302,7 +324,7 @@ pub(crate) fn members_with_bodies(
     loop {
         let before = included.len();
         for member in &members {
-            if member.intrinsic.runs_body() && included.contains(&member.path()) {
+            if member.runs_body() && included.contains(&member.path()) {
                 included.extend(crate::function_value_paths(member.method));
             }
         }
@@ -367,6 +389,68 @@ pub fn role_type_names() -> Vec<(String, String)> {
         .clone()
 }
 
+/// The prelude's path roots: every declaration of the embedded standard
+/// library that claims a language role with `role:`, a type or an interface,
+/// with the `@std` module segments that declare it. Each is reached with no
+/// import, and the modules that declare them are in every checked graph.
+#[must_use]
+pub fn prelude_roots() -> Vec<(String, Vec<String>)> {
+    static ROOTS: OnceLock<Vec<(String, Vec<String>)>> = OnceLock::new();
+    ROOTS
+        .get_or_init(|| {
+            let mut roots = Vec::new();
+            for (path, bytes) in crate::stdlib::embedded_modules() {
+                let Ok(text) = std::str::from_utf8(bytes) else {
+                    continue;
+                };
+                let source_id = format!("stdlib/src/{path}");
+                let Ok(document) =
+                    vibra_syntax::parse_source(Path::new(&source_id), text)
+                else {
+                    continue;
+                };
+                let Some(ast) = document.ast() else {
+                    continue;
+                };
+                let segments = path
+                    .trim_start_matches("std/")
+                    .trim_end_matches(".vib")
+                    .split('/')
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>();
+                for declaration in ast.declarations() {
+                    let (name, attributes) = match declaration {
+                        Declaration::Deftype(value) => {
+                            (value.name().value(), value.attributes().items())
+                        }
+                        Declaration::Defint(value) => {
+                            (value.name().value(), value.attributes().items())
+                        }
+                        _ => continue,
+                    };
+                    if attributes.iter().any(|attribute| {
+                        matches!(attribute, vibra_syntax::Attribute::Role(_))
+                    }) {
+                        roots.push((name.to_owned(), segments.clone()));
+                    }
+                }
+            }
+            roots
+        })
+        .clone()
+}
+
+/// The `@std` modules in every checked graph: those that declare a prelude
+/// root, and `@std.bool`, which declares the prelude values.
+#[must_use]
+pub fn prelude_modules() -> BTreeSet<Vec<String>> {
+    prelude_roots()
+        .into_iter()
+        .map(|(_, segments)| segments)
+        .chain(std::iter::once(vec!["bool".to_owned()]))
+        .collect()
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
@@ -390,10 +474,10 @@ mod tests {
             .map(|(type_name, member)| format!("{type_name}.{member}"))
             .collect::<Vec<_>>();
         assert_eq!(bound, declared);
-        // Twelve methods for each signed and eleven for each unsigned integer
-        // type, a conversion to each of the seven other integer types, nine
-        // for each float type, the two `char` members, and the eight
-        // collection members.
-        assert_eq!(declared.len(), 4 * 12 + 4 * 11 + 8 * 7 + 2 * 9 + 2 + 8);
+        // The arithmetic of each integer type, eight for a signed and seven for
+        // an unsigned one; seven for each float type; the eight `char` members,
+        // its two conversions and its classes; and the eight collection
+        // members. Comparison and conversion are implementation members.
+        assert_eq!(declared.len(), 4 * 8 + 4 * 7 + 2 * 7 + 8 + 8);
     }
 }

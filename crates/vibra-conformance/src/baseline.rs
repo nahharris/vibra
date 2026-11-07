@@ -132,7 +132,7 @@ pub const PROGRAMS: [Program; 10] = [
     },
     Program {
         name: "text-concat",
-        what: "two thousand text.concat calls onto one growing text",
+        what: "two thousand str.concat calls onto one growing text",
         kind: Kind::Source("examples/m4-baseline/programs/text-concat.vib"),
     },
     Program {

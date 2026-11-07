@@ -245,8 +245,9 @@ pub fn check_resolved(
     verification: Option<&crate::Stdlib>,
 ) -> ResolvedCheckResult {
     let mut selected = source_ids.iter().cloned().collect::<BTreeSet<_>>();
-    // The module that declares the closed import-free vocabulary's values is
-    // in every checked graph, so every module sees them without an import.
+    // The modules that declare the prelude are in every checked graph, so
+    // every module sees its values and path roots without an import.
+    let prelude = crate::prelude_modules();
     selected.extend(
         snapshot
             .modules()
@@ -254,7 +255,7 @@ pub fn check_resolved(
             .filter(|module| {
                 module.package().name() == "vibra-stdlib"
                     && module.unit() == "std"
-                    && module.segments() == ["bool"]
+                    && prelude.contains(module.segments())
             })
             .map(|module| module.source_id().to_owned()),
     );
@@ -369,6 +370,12 @@ pub fn check_resolved(
             let Declaration::Deftype(value) = declaration else {
                 continue;
             };
+            // The compiler owns an intrinsic type: it is builtin, not declared.
+            if module.trusted
+                && matches!(value.body(), vibra_syntax::DeftypeBody::Intrinsic(_))
+            {
+                continue;
+            }
             let Some(id) = module
                 .declarations
                 .get(&(module.record.source_id().to_owned(), value.span()))
@@ -625,6 +632,11 @@ pub fn check_resolved(
                         host: None,
                     });
                 }
+                // The static methods `@std.builtin` declares are the builtin
+                // members, which join a program only when it names them.
+                Declaration::Deftype(_)
+                    if module.record.source_id() == crate::STDLIB_BUILTIN_SOURCE_ID => {
+                }
                 Declaration::Deftype(value) => {
                     let Some((self_type, owner_generics, owner_bounds)) = types
                         .declared()
@@ -683,6 +695,24 @@ pub fn check_resolved(
                         ) else {
                             continue;
                         };
+                        // A static method of the embedded standard library
+                        // may bind a primitive or name a native, as a
+                        // module-level function there may.
+                        let external = compiler_intrinsic(
+                            module.record.source_id(),
+                            method,
+                            &mut diagnostics,
+                            module.trusted,
+                            &signature,
+                            &crate::standard::role_types(&types),
+                        );
+                        let external_declared =
+                            method.attributes().items().iter().any(|attribute| {
+                                matches!(
+                                    attribute,
+                                    vibra_syntax::Attribute::External(_)
+                                )
+                            });
                         let index = functions.len();
                         function_indices.insert(id.clone(), index);
                         functions.push(FunctionHeader {
@@ -691,8 +721,8 @@ pub fn check_resolved(
                             source_id: module.record.source_id().to_owned(),
                             name: id.canonical(),
                             signature,
-                            external: None,
-                            external_declared: false,
+                            external,
+                            external_declared,
                             test: None,
                             test_assertion: None,
                             member_index: Some(member_index),
@@ -804,6 +834,7 @@ pub fn check_resolved(
             .map(|module| crate::interfaces::PlanModule {
                 source_id: module.record.source_id(),
                 declarations: module.ast.declarations(),
+                trusted: module.trusted,
             })
             .collect::<Vec<_>>();
         crate::interfaces::materialize(
@@ -897,7 +928,7 @@ pub fn check_resolved(
         let index = functions.len();
         function_indices.insert(id.clone(), index);
         builtin_indices.insert(member.path(), index);
-        if member.intrinsic.runs_body() {
+        if member.runs_body() {
             native_bodies.insert(index, member.method);
         }
         functions.push(FunctionHeader {
@@ -906,8 +937,8 @@ pub fn check_resolved(
             source_id: crate::STDLIB_BUILTIN_SOURCE_ID.to_owned(),
             name: id.canonical(),
             signature: member.signature,
-            external: Some(member.intrinsic),
-            external_declared: true,
+            external: member.intrinsic,
+            external_declared: member.intrinsic.is_some(),
             test: None,
             test_assertion: None,
             member_index: None,
@@ -1014,10 +1045,22 @@ pub fn check_resolved(
         let _ = module;
     }
 
+    // A builtin member's body sees the prelude values, `true` and `false`, as
+    // every module does.
+    let prelude_values: BTreeMap<String, usize> = globals
+        .iter()
+        .enumerate()
+        .filter(|(_, global)| global.source_id == crate::STDLIB_BOOL_SOURCE_ID)
+        .filter_map(|(index, global)| {
+            let name = global.name.rsplit('.').next()?;
+            vibra_syntax::is_prelude_value_spelling(name)
+                .then(|| (name.to_owned(), index))
+        })
+        .collect();
     let mut checked_functions = vec![None; functions.len()];
     for (index, header) in functions.iter().cloned().enumerate() {
         if header.declaration_index == crate::IMPORTED_FUNCTION_DECLARATION
-            && let Some(intrinsic) = header.external
+            && header.source_id == crate::STDLIB_BUILTIN_SOURCE_ID
         {
             if let Some(method) = native_bodies.get(&index).copied() {
                 // The body is the embedded module's own text, checked in its
@@ -1026,7 +1069,7 @@ pub fn check_resolved(
                 let mut environment = CheckEnvironment::new(
                     crate::STDLIB_BUILTIN_SOURCE_ID,
                     &mut diagnostics,
-                    &empty_indices,
+                    &prelude_values,
                     &globals,
                     &functions,
                     &builtin_indices,
@@ -1046,14 +1089,24 @@ pub fn check_resolved(
                     continue;
                 };
                 let slot_count = environment.next_slot;
-                match CheckedFunction::new_external_with_body(
-                    header.name,
-                    header.signature,
-                    intrinsic,
-                    body,
-                    slot_count,
-                    origin,
-                ) {
+                let checked = match header.external {
+                    Some(intrinsic) => CheckedFunction::new_external_with_body(
+                        header.name,
+                        header.signature,
+                        intrinsic,
+                        body,
+                        slot_count,
+                        origin,
+                    ),
+                    None => CheckedFunction::with_slots(
+                        header.name,
+                        header.signature,
+                        body,
+                        origin,
+                        slot_count,
+                    ),
+                };
+                match checked {
                     Ok(checked) => {
                         if let Some(slot) = checked_functions.get_mut(index) {
                             *slot = Some(checked);
@@ -1068,6 +1121,9 @@ pub fn check_resolved(
                 }
                 continue;
             }
+            let Some(intrinsic) = header.external else {
+                continue;
+            };
             let origin =
                 SourceOrigin::new(header.source_id.as_str(), ByteSpan::empty_at(0));
             if let Ok(checked) = CheckedFunction::new_external(
@@ -1188,6 +1244,7 @@ pub fn check_resolved(
         }
         if let Some(intrinsic) = header.external {
             let origin = SourceOrigin::new(header.source_id.as_str(), function.span());
+            let implements = header.implements.clone();
             match CheckedFunction::new_external(
                 header.name,
                 header.signature,
@@ -1195,6 +1252,12 @@ pub fn check_resolved(
                 origin,
             ) {
                 Ok(checked) => {
+                    // An implementation member bound to the registry is still
+                    // the member its dispatch selects.
+                    let checked = match implements {
+                        Some(implements) => checked.with_implements(implements),
+                        None => checked,
+                    };
                     if let Some(slot) = checked_functions.get_mut(index) {
                         *slot = Some(checked);
                     }

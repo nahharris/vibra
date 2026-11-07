@@ -267,6 +267,7 @@ pub struct ResolveInput {
     reserved_import_paths: Vec<(String, Vec<String>)>,
     builtin_members: Vec<(String, String)>,
     role_types: Vec<String>,
+    prelude_roots: Vec<(String, Vec<String>)>,
     assertion_members: Vec<String>,
 }
 
@@ -295,6 +296,7 @@ impl ResolveInput {
             reserved_import_paths: Vec::new(),
             builtin_members: Vec::new(),
             role_types: Vec::new(),
+            prelude_roots: Vec::new(),
             assertion_members: Vec::new(),
         }
     }
@@ -346,6 +348,20 @@ impl ResolveInput {
     #[must_use]
     pub fn with_role_types(mut self, names: impl IntoIterator<Item = String>) -> Self {
         self.role_types.extend(names);
+        self
+    }
+
+    /// Declares the prelude's path roots: each standard-library declaration
+    /// that plays a language role, with the `@std` module that declares it. A
+    /// value path whose first segment is one of them, and is neither an import
+    /// alias nor a declaration of the module, starts at that declaration, so
+    /// `str.concat` and `ordered.compare` need no import.
+    #[must_use]
+    pub fn with_prelude_roots(
+        mut self,
+        roots: impl IntoIterator<Item = (String, Vec<String>)>,
+    ) -> Self {
+        self.prelude_roots.extend(roots);
         self
     }
 
@@ -2927,8 +2943,22 @@ impl Resolution {
         // A builtin member of a role type, such as `dict.of`, is a member.
         let builtin_member = matches!(path, [type_name, member]
             if self.input.builtin_members.iter().any(|(builtin, name)| builtin == type_name && name == member));
+        // A static method of a role type, such as `str.concat`, is an
+        // ordinary declaration of the module that declares the type; its
+        // constructors stay the checker's to resolve.
+        let declared_member = matches!(path, [_, _]) && {
+            let (target_module, declaration_path, _) = self.locate(module, path);
+            target_module
+                .and_then(|target_module| {
+                    self.declaration_indexes
+                        .get(&(target_module, declaration_path))
+                })
+                .and_then(|index| self.declarations.get(*index))
+                .is_some_and(|work| work.declaration.id.kind() == EntityKind::Function)
+        };
         if let [type_name] | [type_name, _] = path
             && !builtin_member
+            && !declared_member
             && self.input.role_types.iter().any(|role| role == type_name)
             && !self
                 .imports
@@ -3179,6 +3209,27 @@ impl Resolution {
                     true,
                 ),
             };
+        }
+        // A prelude root starts at its declaring module, which every module
+        // sees without an import; a declaration of the module keeps its name.
+        if let Some(overlay) = self.input.overlay.as_ref()
+            && let Some((_, segments)) = self
+                .input
+                .prelude_roots
+                .iter()
+                .find(|(root, _)| root == first)
+            && !self
+                .declaration_indexes
+                .contains_key(&(module.clone(), vec![first.clone()]))
+        {
+            let declaring = ModuleKey {
+                package: overlay.package.clone(),
+                unit: "std".to_owned(),
+                segments: segments.clone(),
+            };
+            if declaring != *module {
+                return (Some(declaring), path.to_vec(), true);
+            }
         }
         if let [name] = path
             && vibra_syntax::is_prelude_value_spelling(name)

@@ -144,20 +144,20 @@ impl NumericType {
 /// An integer static method.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum IntegerOp {
-    /// `add-checked`.
-    AddChecked,
-    /// `sub-checked`.
-    SubChecked,
-    /// `mul-checked`.
-    MulChecked,
-    /// `div-checked`.
-    DivChecked,
-    /// `rem-checked`.
-    RemChecked,
-    /// `neg-checked`, signed types only.
-    NegChecked,
-    /// `shift-left-checked`.
-    ShiftLeftChecked,
+    /// `add`.
+    Add,
+    /// `sub`.
+    Sub,
+    /// `mul`.
+    Mul,
+    /// `div`.
+    Div,
+    /// `rem`.
+    Rem,
+    /// `neg`, signed types only.
+    Neg,
+    /// `shift-left`.
+    ShiftLeft,
     /// `shift-right`.
     ShiftRight,
     /// `equal`.
@@ -172,13 +172,13 @@ pub enum IntegerOp {
 
 impl IntegerOp {
     const ALL: [Self; 12] = [
-        Self::AddChecked,
-        Self::SubChecked,
-        Self::MulChecked,
-        Self::DivChecked,
-        Self::RemChecked,
-        Self::NegChecked,
-        Self::ShiftLeftChecked,
+        Self::Add,
+        Self::Sub,
+        Self::Mul,
+        Self::Div,
+        Self::Rem,
+        Self::Neg,
+        Self::ShiftLeft,
         Self::ShiftRight,
         Self::Equal,
         Self::Compare,
@@ -186,17 +186,17 @@ impl IntegerOp {
         Self::Parse,
     ];
 
-    /// The member name, such as `add-checked`.
+    /// The member name, such as `add`.
     #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
-            Self::AddChecked => "add-checked",
-            Self::SubChecked => "sub-checked",
-            Self::MulChecked => "mul-checked",
-            Self::DivChecked => "div-checked",
-            Self::RemChecked => "rem-checked",
-            Self::NegChecked => "neg-checked",
-            Self::ShiftLeftChecked => "shift-left-checked",
+            Self::Add => "add",
+            Self::Sub => "sub",
+            Self::Mul => "mul",
+            Self::Div => "div",
+            Self::Rem => "rem",
+            Self::Neg => "neg",
+            Self::ShiftLeft => "shift-left",
             Self::ShiftRight => "shift-right",
             Self::Equal => "equal",
             Self::Compare => "compare",
@@ -432,7 +432,7 @@ impl CompilerIntrinsic {
         target_low <= source_low && source_high <= target_high
     }
 
-    /// The stable registry symbol, such as `i32.add-checked` or
+    /// The stable registry symbol, such as `i32.add` or
     /// `text.concat`.
     #[must_use]
     pub fn symbol(self) -> &'static str {
@@ -544,17 +544,15 @@ impl CompilerIntrinsic {
             Self::Integer(numeric, op) => {
                 let value = numeric.to_type();
                 match op {
-                    IntegerOp::AddChecked
-                    | IntegerOp::SubChecked
-                    | IntegerOp::MulChecked
-                    | IntegerOp::DivChecked
-                    | IntegerOp::RemChecked => {
+                    IntegerOp::Add
+                    | IntegerOp::Sub
+                    | IntegerOp::Mul
+                    | IntegerOp::Div
+                    | IntegerOp::Rem => {
                         function(vec![value.clone(), value.clone()], checked(value))
                     }
-                    IntegerOp::NegChecked => {
-                        function(vec![value.clone()], checked(value))
-                    }
-                    IntegerOp::ShiftLeftChecked | IntegerOp::ShiftRight => {
+                    IntegerOp::Neg => function(vec![value.clone()], checked(value)),
+                    IntegerOp::ShiftLeft | IntegerOp::ShiftRight => {
                         function(vec![value.clone(), Type::U32], checked(value))
                     }
                     IntegerOp::Equal => {
@@ -652,9 +650,7 @@ impl CompilerIntrinsic {
                 all.extend(
                     IntegerOp::ALL
                         .into_iter()
-                        .filter(|op| {
-                            *op != IntegerOp::NegChecked || numeric.is_signed()
-                        })
+                        .filter(|op| *op != IntegerOp::Neg || numeric.is_signed())
                         .map(|op| Self::Integer(numeric, op)),
                 );
             } else {
