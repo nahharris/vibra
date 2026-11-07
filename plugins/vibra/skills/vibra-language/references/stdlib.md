@@ -44,14 +44,21 @@ a new one, or keep an `(array (tuple k v))`.
 
 ### Integers: `i8 i16 i32 i64 u8 u16 u32 u64`
 
-Every integer operation is checked, so each returns
-`(result N core.arithmetic-error)`. The names carry no `-checked` suffix.
+Each operation comes in two forms. The plain one returns `N` and
+**saturates**: a result past the type is its nearest bound, so
+`(u8.add 250u8 10u8)` is `255u8` and `(u8.sub 3u8 5u8)` is `0u8`. The
+`-checked` one returns `(result N core.arithmetic-error)` instead. Unchecked
+`div` and `rem` **trap** with `@runtime.division-by-zero` on a zero divisor, so
+use `div-checked` and `rem-checked` when the divisor may be zero.
 
 | Member | Signature |
 | --- | --- |
-| `N.add` `N.sub` `N.mul` `N.div` `N.rem` | `(left N right N) -> (result N core.arithmetic-error)` |
-| `N.neg` (signed `iN` only) | `(value N) -> (result N core.arithmetic-error)` |
-| `N.shift-left` `N.shift-right` | `(value N amount u32) -> (result N core.arithmetic-error)` |
+| `N.add` `N.sub` `N.mul` `N.div` `N.rem` | `(left N right N) -> N` |
+| `N.neg` (signed `iN` only) | `(value N) -> N` |
+| `N.shift-left` `N.shift-right` | `(value N amount u32) -> N`. Past the width, a shift left saturates and a shift right leaves `0` or `-1` |
+| `N.add-checked` `N.sub-checked` `N.mul-checked` `N.div-checked` `N.rem-checked` | `(left N right N) -> (result N core.arithmetic-error)` |
+| `N.neg-checked` (signed `iN` only) | `(value N) -> (result N core.arithmetic-error)` |
+| `N.shift-left-checked` `N.shift-right-checked` | `(value N amount u32) -> (result N core.arithmetic-error)` |
 
 `core.arithmetic-error` is `(enum overflow void division-by-zero void
 invalid-shift void)`. Every integer type also implements:

@@ -1,18 +1,12 @@
 ; Pure text statistics. Nothing here performs an effect, so every function has
-; the default empty effect row and the tests can call it directly.
+; the default empty effect row and the tests can call it directly. The counts
+; use the unchecked `u64.add` and `u64.sub`, which saturate at the bounds of
+; `u64` instead of returning a `result`.
 (import core @std.core)
 
 (import from @std.core.from)
 
 (deftype summary (record lines u64 words u64 longest u64) visibility: @public)
-
-; A sum that saturates at the largest `u64` instead of failing. Vibra has no
-; `+`: every integer operation is checked and returns a `result`.
-(defn plus (left u64 right u64) u64
-  (match
-    (u64.add left right)
-    (result.ok sum) sum
-    (result.err -) 18446744073709551615u64))
 
 ; The larger of two counts.
 (defn larger (left u64 right u64) u64
@@ -31,8 +25,12 @@
     (option.none) count
     (option.some scalar) (if
       (char.is-ascii-whitespace scalar)
-      (words-from scalars (plus index 1u64) false count)
-      (words-from scalars (plus index 1u64) true (if inside count (plus count 1u64))))))
+      (words-from scalars (u64.add index 1u64) false count)
+      (words-from
+        scalars
+        (u64.add index 1u64)
+        true
+        (if inside count (u64.add count 1u64))))))
 
 ; Line, word, and longest-line counts of `source`. An empty document has no
 ; lines; a trailing newline does not start another line.
@@ -48,21 +46,18 @@
         (seen summary line str)
         summary
         (summary
-          lines: (plus (seen @lines) 1u64)
-          words: (plus (seen @words) (count-words line))
+          lines: (u64.add (seen @lines) 1u64)
+          words: (u64.add (seen @words) (count-words line))
           longest: (larger (seen @longest) (str.length line)))))))
 
 (defn trimmed (source str) str
   (if
     (str.ends-with source "\n")
     (match
-      (str.slice source 0u64 (minus (str.length source) 1u64))
+      (str.slice source 0u64 (u64.sub (str.length source) 1u64))
       (option.some head) head
       (option.none) source)
     source))
-
-(defn minus (left u64 right u64) u64
-  (match (u64.sub left right) (result.ok difference) difference (result.err -) 0u64))
 
 ; One report line, such as `lines: 2`. `from.convert` renders the count,
 ; because the expected type is `str`.

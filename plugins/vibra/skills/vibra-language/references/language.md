@@ -264,7 +264,7 @@ same module. Type arguments are inferred. When inference can't decide, pass
   (impl (iter u64)
     (defn next (value self) (option (tuple u64 self))
       (match
-        (u64.sub (value @from) 1u64)
+        (u64.sub-checked (value @from) 1u64)
         (result.ok lower) (option.some (tupleof (value @from) (countdown from: lower)))
         (result.err -) (option.none)))))
 ```

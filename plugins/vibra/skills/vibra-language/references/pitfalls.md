@@ -8,14 +8,16 @@ file, line, and column (`primarySpan.sourceId` and `startPosition`).
 
 | You wrote | Diagnostic | Write instead |
 | --- | --- | --- |
-| `(+ a b)`, `(= a b)`, `(< a b)` | `@syntax.invalid-name` or `@name.unknown-symbol` | `(u64.add a b)` gives a `result`. Also `(equatable.equal a b)` and `(match (ordered.compare a b) (core.ordering.less) ...)` |
+| `(+ a b)`, `(= a b)`, `(< a b)` | `@syntax.invalid-name` or `@name.unknown-symbol` | `(u64.add a b)`, which saturates, or `(u64.add-checked a b)`, which gives a `result`. Also `(equatable.equal a b)` and `(match (ordered.compare a b) (core.ordering.less) ...)` |
 | `(while ...)`, `(for ...)`, `break` | `@syntax.retired-form` | A tail-recursive helper with an accumulator, `array.fold`, or `iter` |
 | `(set! x ...)`, reassigning with `let` | `@name.redeclaration` | A new name. Bindings never shadow, even across nested scopes |
 | `(if cond value)` without else | `@syntax.invalid-form` | Both branches. Use `void` for "nothing": `(if c (do-it) void)` |
 | `(if n ...)` on a number or option | `@type.mismatch` ("expected bool") | An explicit test such as `(equatable.equal n 0u64)`, or a `match` |
 | `fooBar`, `foo_bar`, `valid?`, `Foo` | `@syntax.invalid-name` | `foo-bar`, `is-valid` |
 | `(str.concat a b c)` | `@type.argument-mismatch` ("unexpected positional operands") | `(str.concat a (str.concat b c))` |
-| `(u64.equal a b)`, `(text.equal a b)`, `(u64.add-checked a b)`, `(i32.to-str n)` | `@name.unknown-symbol` ("the builtin type `u64` has no member") | `(equatable.equal a b)`, `(u64.add a b)`, `(from.convert n)` with `str` expected |
+| `(u64.equal a b)`, `(text.equal a b)`, `(i32.to-str n)` | `@name.unknown-symbol` ("the builtin type `u64` has no member") | `(equatable.equal a b)`, `(from.convert n)` with `str` expected |
+| `(match (u64.add a b) (result.ok sum) ...)` | `@type.mismatch` | `u64.add` saturates and returns `u64`. Use `u64.add-checked` to match on overflow |
+| `(u64.div total count)` where `count` may be `0` | The run stops with the trap `@runtime.division-by-zero` (exit 5) | `(u64.div-checked total count)`, and handle `(result.err -)` |
 | `(let x 5)` | `@type.ambiguous-inference` | `5u64`, or a typed context |
 | `-1u8`, `256u8` | `@type.numeric-out-of-range` | A type that fits |
 | Mixing `u64` and `i32` | `@type.argument-mismatch` | Convert explicitly: `(try-from.convert n)` returns a `result` for `i32` to `u64`, `(from.convert n)` widens `u32` to `u64` |

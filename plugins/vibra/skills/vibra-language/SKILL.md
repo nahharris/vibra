@@ -19,9 +19,11 @@ edit, `vibra fmt FILE --write`, `vibra --format json check`, `vibra test`.
 1. **No loops and no mutation.** There is no `while`, `for`, assignment, or
    mutable variable. Iterate with tail recursion, `array.fold`, or the `iter`
    adapters. A call in tail position runs in constant stack depth.
-2. **No operators.** Arithmetic is functions on the numeric type:
-   `(u64.add a b)` returns `(result u64 core.arithmetic-error)`, because every
-   integer operation is checked. Comparison is the prelude contracts, with no
+2. **No operators.** Arithmetic is functions on the numeric type. The plain
+   integer operations saturate: `(u64.add a b)` returns a `u64`, clamped at the
+   bounds of the type, and `(u64.div a 0u64)` traps. When a failure matters,
+   use the `-checked` form: `(u64.add-checked a b)` returns
+   `(result u64 core.arithmetic-error)`. Comparison is the prelude contracts, with no
    import: `(equatable.equal a b)` returns `bool` and `(ordered.compare a b)`
    returns `core.ordering`, for integers, `char`, `bool`, `str`, and `bytes`
    alike. Floats use `f64.add`, `f64.mul`, and so on, which do not fail.
@@ -174,12 +176,12 @@ Standard effect roots: `io.stdin`, `io.stdout`, `io.stderr` (`@std.io`);
 ; Tail recursion: the accumulator carries state, and the call is in tail position.
 (defn sum-to (n u64 total u64) u64
   (match
-    (u64.sub n 1u64)
+    (u64.sub-checked n 1u64)
     (result.err -) total
-    (result.ok next) (sum-to next (plus total n))))
+    (result.ok next) (sum-to next (u64.add total n))))
 
 ; Fold an array.
-(array.fold items 0u64 (lambda (total u64 item u64) u64 (plus total item)))
+(array.fold items 0u64 (lambda (total u64 item u64) u64 (u64.add total item)))
 
 ; Lazy adapters over anything iterable (arrays, dicts, str, option, your types).
 ; `iter` is in the prelude; `from.convert` renders a number, after
@@ -190,8 +192,10 @@ Standard effect roots: `io.stdin`, `io.stdout`, `io.stderr` (`@std.io`);
     (lambda (item u64) str (from.convert item))))
 ```
 
-Write small saturating or defaulting helpers such as `plus` and `minus` around
-the checked operations. The standard library does the same. An example is in
+Use the plain operations for counters and indices, which saturate, and the
+`-checked` forms where overflow or a zero divisor is a case to handle. Unchecked
+`div` and `rem` trap on a zero divisor (`@runtime.division-by-zero`), so divide
+by a value that may be zero with `div-checked`. An example is in
 [examples/word-stats](examples/word-stats/src/stats/count.vib).
 
 ## Tests

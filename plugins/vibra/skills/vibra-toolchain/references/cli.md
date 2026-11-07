@@ -85,7 +85,8 @@ For `run` and `test`, the audit trace shows exactly which effects happened.
   human mode prints that encoding to stderr. This outcome is neither a trap nor
   a diagnostic.
 - A trap is `@command.trap` (exit 5), with `trapCode`, for example
-  `@runtime.invalid-checked-program`.
+  `@runtime.division-by-zero` for an unchecked integer `div` or `rem` by zero,
+  or `@runtime.invalid-checked-program`.
 - `vibra run` uses the real host: the files, environment, arguments, and
   clock of the machine. `vibra test` never does.
 
