@@ -170,26 +170,26 @@ const STEPPER: &str = "\
   (impl stepper
     (defn step (value self n u64 tag u) u64
       where: (u any)
-      (if (u64.equal n 0u64)
+      (if (equatable.equal n 0u64)
         17u64
         (stepper.step value (lower n) tag)))
     (defn step-labelled (value self n u64) u64
       labelled: (hop u64 1u64)
-      (if (u64.equal n 0u64)
+      (if (equatable.equal n 0u64)
         18u64
         (stepper.step-labelled value (lower n) hop: hop)))
     (defn step-tail (value self n u64) u64
       variadic: (rest (dict str u64))
-      (if (u64.equal n 0u64)
+      (if (equatable.equal n 0u64)
         19u64
         (stepper.step-tail value (lower n) \"k\" 1u64)))
     (defn step-hopped (value self n u64) u64
-      (if (u64.equal n 0u64)
+      (if (equatable.equal n 0u64)
         20u64
         (hopper value (lower n))))))
 (def hopper (fn (counter u64) u64) stepper.step-hopped)
 (defn lower (count u64) u64
-  (match (u64.sub-checked count 1u64)
+  (match (u64.sub count 1u64)
     (result.ok value) value
     (result.err -) 0u64))
 ";

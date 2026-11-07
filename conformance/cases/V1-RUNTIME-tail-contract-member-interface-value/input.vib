@@ -7,11 +7,11 @@
 (deftype counter (record left u64)
   (impl walker
     (defn walk (value self) u64
-      (if (u64.equal (value @left) 0u64)
+      (if (equatable.equal (value @left) 0u64)
         17u64
         (walker.walk (as walker (counter left: (lower (value @left)))))))))
 
 (defn lower (count u64) u64
-  (match (u64.sub-checked count 1u64)
+  (match (u64.sub count 1u64)
     (result.ok value) value
     (result.err -) 0u64))

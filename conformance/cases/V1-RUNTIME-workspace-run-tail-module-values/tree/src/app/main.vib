@@ -7,7 +7,7 @@
 (def hopper (fn (u64) u64) walk)
 
 (defn walk (n u64) u64
-  (if (u64.equal n 0u64)
+  (if (equatable.equal n 0u64)
     1u64
     (hopper (lower n))))
 
@@ -19,13 +19,13 @@
 (deftype counter (record left u64)
   (impl stepper
     (defn step-hopped (value self n u64) u64
-      (if (u64.equal n 0u64)
+      (if (equatable.equal n 0u64)
         20u64
         (member-hopper value (lower n))))))
 
 (def member-hopper (fn (counter u64) u64) stepper.step-hopped)
 
 (defn lower (count u64) u64
-  (match (u64.sub-checked count 1u64)
+  (match (u64.sub count 1u64)
     (result.ok value) value
     (result.err -) 0u64))

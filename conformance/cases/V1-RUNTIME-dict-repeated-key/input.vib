@@ -4,10 +4,9 @@
     (dict.of "a" 1i32 "a" 2i32)))
 
 (import core @std.core)
-(import ordered @std.core.ordered)
 
 ; Points are the same key when their `y` is equal.
 (deftype point (record x i32 y i32)
   (impl ordered
     (defn compare (left self right self) core.ordering
-      (i32.compare (left @y) (right @y)))))
+      (ordered.compare (left @y) (right @y)))))

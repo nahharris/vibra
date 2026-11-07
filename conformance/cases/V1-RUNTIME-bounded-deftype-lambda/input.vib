@@ -10,7 +10,6 @@
     (index.size (index entries: (dict.of (tupleof 1i32 \a) 0i32)))))
 
 (import core @std.core)
-(import ordered @std.core.ordered)
 
 ; An index keyed by any ordered type, whose methods see the bound.
 (deftype index (record entries (dict k v))

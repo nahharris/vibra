@@ -1,4 +1,3 @@
-(import ordered @std.core.ordered)
 
 (deftype holder (record item t)
   where: (t ordered))

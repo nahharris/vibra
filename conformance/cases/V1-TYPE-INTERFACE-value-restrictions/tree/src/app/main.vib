@@ -1,4 +1,3 @@
-(import ordered @std.core.ordered)
 (import core @std.core)
 
 (defint named

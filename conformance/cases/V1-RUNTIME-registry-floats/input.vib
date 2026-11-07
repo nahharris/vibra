@@ -1,5 +1,9 @@
 (import core @std.core)
 
+(import from @std.core.from)
+
+(import try-from @std.core.try-from)
+
 (defn main ()
   (tuple
     f64
@@ -24,10 +28,10 @@
     (f64.equal -0.0f64 0.0f64)
     (f64.compare-total -0.0f64 0.0f64)
     (f32.compare-total (f32.div 1.0f32 0.0f32) (f32.div 0.0f32 0.0f32))
-    (f64.to-str 100.0f64)
-    (f64.to-str 1.0e20f64)
-    (f32.to-str (f32.div -1.0f32 0.0f32))
-    (f64.to-str (f64.div 0.0f64 0.0f64))
-    (f64.parse "2.5e-3")
-    (f32.parse "1e39")
-    (f64.parse "12")))
+    (from.convert 100.0f64)
+    (from.convert 1.0e20f64)
+    (from.convert (f32.div -1.0f32 0.0f32))
+    (from.convert (f64.div 0.0f64 0.0f64))
+    (try-from.convert "2.5e-3")
+    (try-from.convert "1e39")
+    (try-from.convert "12")))

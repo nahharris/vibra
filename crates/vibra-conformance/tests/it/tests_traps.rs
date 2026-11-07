@@ -164,7 +164,7 @@ fn operands_cross_as_scalars_or_as_values_by_their_type() {
          (test \"record\" (assert.equal (point x: 1i32 y: 2i32) (point x: 1i32 y: 3i32)))\n\
          (test \"enum\" (assert.equal (shade.dark) (shade.light)))\n\
          (test \"array\" (assert.equal (array.of 1i32) (array.of 1i32 2i32)))\n\
-         (test \"bytes\" (assert.equal (text.to-utf8 \"a\") (text.to-utf8 \"b\")))\n\
+         (test \"bytes\" (assert.equal (str.to-utf8 \"a\") (str.to-utf8 \"b\")))\n\
          (test \"atom\" (assert.equal (pick-atom true) (pick-atom false)))\n\
          (test \"any\" (assert.equal (as any 1i32) (as any 1u32)))\n",
     );
@@ -179,14 +179,16 @@ fn operands_cross_as_scalars_or_as_values_by_their_type() {
 #[test]
 fn a_nan_equals_a_nan_and_zeros_differ_by_sign() {
     let rows = agree(
-        "(def nan64 f64 (f64.div 0.0f64 0.0f64))\n\
+        "(import core @std.core)\n\
+         (import try-from @std.core.try-from)\n\
+         (def nan64 f64 (f64.div 0.0f64 0.0f64))\n\
          (defn nan32 () f32 (f32.div 0.0f32 0.0f32))\n\
          (test \"nan\" (assert.equal nan64 nan64))\n\
          (test \"nan of either sign\" (assert.equal nan64 (f64.neg nan64)))\n\
          (test \"nan32\" (assert.equal (nan32) (f32.neg (nan32))))\n\
          (test \"nan in a tuple\" (assert.equal (tupleof nan64 1u8) (tupleof (f64.neg nan64) 1u8)))\n\
          (test \"nan in an array\" (assert.equal (array.of nan64) (array.of (f64.neg nan64))))\n\
-         (test \"parsed nan\" (assert.equal (f64.parse \"nan\") (f64.parse \"nan\")))\n\
+         (test \"parsed nan\" (assert.equal (as (result f64 core.conversion-error) (try-from.convert \"nan\")) (as (result f64 core.conversion-error) (try-from.convert \"nan\"))))\n\
          (test \"zero\" (assert.equal 0.0f64 0.0f64))\n\
          (test \"negative zero\" (assert.equal 0.0f64 (f64.neg 0.0f64)))\n\
          (test \"negative zero 32\" (assert.equal 0.0f32 (f32.neg 0.0f32)))\n\
@@ -220,11 +222,11 @@ fn values_nested_five_thousand_deep_compare_and_differ() {
     let rows = agree(
         "(deftype chain (record next (array chain)))\n\
          (defn build (count u64 tip chain) chain\n\
-           (if (u64.equal count 0u64)\n\
+           (if (equatable.equal count 0u64)\n\
              tip\n\
              (build (lower count) (chain next: (array.of tip)))))\n\
          (defn lower (count u64) u64\n\
-           (match (u64.sub-checked count 1u64) (result.ok value) value (result.err -) 0u64))\n\
+           (match (u64.sub count 1u64) (result.ok value) value (result.err -) 0u64))\n\
          (test \"equal\" (assert.equal (build 5000u64 (chain next: (array.of))) (build 5000u64 (chain next: (array.of)))))\n\
          (test \"differ at the bottom\" (assert.equal (build 5000u64 (chain next: (array.of))) (build 5000u64 (chain next: (array.of (chain next: (array.of)))))))\n",
     );
@@ -282,9 +284,9 @@ fn values_nested_five_thousand_deep_inside_an_interface_value_compare() {
     let rows = agree(
         "(deftype chain (record next (array chain)))\n\
          (defn build (count u64 tip chain) chain\n\
-           (if (u64.equal count 0u64) tip (build (lower count) (chain next: (array.of tip)))))\n\
+           (if (equatable.equal count 0u64) tip (build (lower count) (chain next: (array.of tip)))))\n\
          (defn lower (count u64) u64\n\
-           (match (u64.sub-checked count 1u64) (result.ok value) value (result.err -) 0u64))\n\
+           (match (u64.sub count 1u64) (result.ok value) value (result.err -) 0u64))\n\
          (test \"equal\" (assert.equal (as any (build 5000u64 (chain next: (array.of)))) (as any (build 5000u64 (chain next: (array.of))))))\n\
          (test \"differ\" (assert.equal (as any (build 5000u64 (chain next: (array.of)))) (as any (build 4999u64 (chain next: (array.of))))))\n",
     );
@@ -424,9 +426,9 @@ fn a_passing_test_returns_the_live_size_to_its_baseline() {
         "(import assert @std.assert)\n\
          (deftype chain (record next (array chain)))\n\
          (defn build (count u64 tip chain) chain\n\
-           (if (u64.equal count 0u64) tip (build (lower count) (chain next: (array.of tip)))))\n\
+           (if (equatable.equal count 0u64) tip (build (lower count) (chain next: (array.of tip)))))\n\
          (defn lower (count u64) u64\n\
-           (match (u64.sub-checked count 1u64) (result.ok value) value (result.err -) 0u64))\n\
+           (match (u64.sub count 1u64) (result.ok value) value (result.err -) 0u64))\n\
          (test \"small\" (assert.equal (build 3u64 (chain next: (array.of))) (build 3u64 (chain next: (array.of)))))\n\
          (test \"large\" (assert.equal (build 3000u64 (chain next: (array.of))) (build 3000u64 (chain next: (array.of)))))\n\
          (test \"texts\" (assert.equal (array.of \"a\" \"b\") (array.of \"a\" \"b\")))
@@ -502,7 +504,7 @@ fn memory_exhaustion_in_a_test_is_the_host_event_and_not_a_trap() {
     let tree = Tree::new(
         "(import assert @std.assert)
 \n         (defn forever (count u64) u64
-\n           (match (u64.add-checked (forever count) 1u64) (result.ok total) total (result.err -) 0u64))
+\n           (match (u64.add (forever count) 1u64) (result.ok total) total (result.err -) 0u64))
 \n         (test \"runs out\" (assert.equal (forever 0u64) 0u64))
 \n         (test \"fine\" (assert.true true))
 ",

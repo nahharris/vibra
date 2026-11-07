@@ -59,7 +59,7 @@ snapshot = "destination-member.json"
 [[expect.queries]]
 input = "tree/src/main.vib"
 offset = 312
-snapshot = "closed-member.json"
+snapshot = "builtin-member.json"
 
 [[expect.queries]]
 input = "tree/src/main.vib"

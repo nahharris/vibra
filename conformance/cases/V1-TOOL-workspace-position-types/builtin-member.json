@@ -111,7 +111,30 @@
     "value": {
       "kind": "@contract",
       "callee": null,
-      "calleeType": null,
+      "calleeType": {
+        "kind": "function",
+        "name": "fn",
+        "parameters": [
+          {
+            "kind": "primitive",
+            "name": "i16",
+            "parameters": [],
+            "result": null,
+            "labelled": []
+          }
+        ],
+        "result": {
+          "kind": "primitive",
+          "name": "i32",
+          "parameters": [],
+          "result": null,
+          "labelled": []
+        },
+        "labelled": [],
+        "effects": {
+          "roots": []
+        }
+      },
       "positional": [
         {
           "kind": "primitive",
@@ -139,7 +162,7 @@
           "result": null,
           "labelled": []
         },
-        "selection": "closed",
+        "selection": "static",
         "destination": true
       }
     }

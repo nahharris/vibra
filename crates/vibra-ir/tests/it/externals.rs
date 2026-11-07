@@ -20,7 +20,7 @@ fn registry_contains_only_the_reviewed_operations() {
     let distinct = symbols.iter().collect::<std::collections::BTreeSet<_>>();
     assert_eq!(distinct.len(), symbols.len());
     for symbol in [
-        "i8.neg-checked",
+        "i8.neg",
         "u64.shift-right",
         "i32.parse",
         "f32.compare-total",
@@ -32,9 +32,9 @@ fn registry_contains_only_the_reviewed_operations() {
     ] {
         assert!(symbols.contains(&symbol), "{symbol} is missing");
     }
-    assert!(CompilerIntrinsic::from_symbol("u8.neg-checked").is_none());
-    assert!(CompilerIntrinsic::from_symbol("f64.add-checked").is_none());
-    assert!(CompilerIntrinsic::from_symbol("integer.add-checked").is_none());
+    assert!(CompilerIntrinsic::from_symbol("u8.neg").is_none());
+    assert!(CompilerIntrinsic::from_symbol("f64.rem").is_none());
+    assert!(CompilerIntrinsic::from_symbol("integer.add").is_none());
     assert!(CompilerIntrinsic::from_symbol("host.read").is_none());
     for intrinsic in CompilerIntrinsic::all() {
         assert_eq!(

@@ -1,5 +1,4 @@
 (import assert @std.assert)
-(import raw @std.bytes)
 (import env @std.env)
 (import random @std.random)
 (import time @std.time)
@@ -25,7 +24,7 @@
     (result.ok second) (assert.equal 13u64 second)
     (result.err -) (assert.true false))
   (match (random.generate.bytes 1u64)
-    (result.ok found) (assert.equal 1u64 (raw.length found))
+    (result.ok found) (assert.equal 1u64 (bytes.length found))
     (result.err -) (assert.true false)))
 
 (test "each test starts from a fresh copy of the world"

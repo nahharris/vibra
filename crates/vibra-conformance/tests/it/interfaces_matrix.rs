@@ -35,8 +35,8 @@ fn tail_source(n: u32, tail: bool) -> String {
     format!(
         "(defn main () u64 (walker.walk (as walker (counter left: {n}u64))))\n\
 (defint walker (defn walk (value self) u64))\n\
-(deftype counter (record left u64) (impl walker (defn walk (value self) u64 (if (u64.equal (value @left) 0u64) 7u64 {step}))))\n\
-(defn lower (c u64) u64 (match (u64.sub-checked c 1u64) (result.ok v) v (result.err -) 0u64))"
+(deftype counter (record left u64) (impl walker (defn walk (value self) u64 (if (equatable.equal (value @left) 0u64) 7u64 {step}))))\n\
+(defn lower (c u64) u64 (match (u64.sub c 1u64) (result.ok v) v (result.err -) 0u64))"
     )
 }
 

@@ -64,12 +64,12 @@
   (impl stepper
     (defn step (value self n u64 tag u) u64
       where: (u any)
-      (if (u64.equal n 0u64)
+      (if (equatable.equal n 0u64)
         (value @left)
         (stepper.step value (lower n) tag)))))
 
 (defn lower (count u64) u64
-  (match (u64.sub-checked count 1u64)
+  (match (u64.sub count 1u64)
     (result.ok value) value
     (result.err -) 0u64))
 

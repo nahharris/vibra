@@ -1,7 +1,5 @@
 (import assert @std.assert)
 (import core @std.core)
-(import ordered @std.core.ordered)
-(import equatable @std.core.equatable)
 
 ; A name that compares and equals ignoring its tag.
 (deftype name (record text str tag i32)

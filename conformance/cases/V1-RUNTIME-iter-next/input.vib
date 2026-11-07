@@ -14,7 +14,7 @@
 (deftype countdown (record from i32)
   (impl (iter i32)
     (defn next (value self) (option (tuple i32 self))
-      (match (i32.compare (value @from) 0i32)
+      (match (ordered.compare (value @from) 0i32)
         (core.ordering.greater)
           (option.some
             (tupleof
@@ -25,18 +25,18 @@
 (import core @std.core)
 
 (defn lower (value i32) i32
-  (match (i32.sub-checked value 1i32) (result.ok next) next (result.err -) 0i32))
+  (match (i32.sub value 1i32) (result.ok next) next (result.err -) 0i32))
 
 ; A walk over any iterator of `i32`: tail-recursive, so its depth is constant.
 (defn sum (values (iter i32) total i32) i32
   (match (iter.next values)
     (option.some (tupleof item rest))
-      (sum rest (match (i32.add-checked total item) (result.ok next) next (result.err -) total))
+      (sum rest (match (i32.add total item) (result.ok next) next (result.err -) total))
     (option.none) total))
 
 (defn count (values (iter item) seen u64) u64
   where: (item any)
   (match (iter.next values)
     (option.some (tupleof - rest))
-      (count rest (match (u64.add-checked seen 1u64) (result.ok next) next (result.err -) seen))
+      (count rest (match (u64.add seen 1u64) (result.ok next) next (result.err -) seen))
     (option.none) seen))

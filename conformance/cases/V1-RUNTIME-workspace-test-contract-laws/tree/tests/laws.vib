@@ -1,9 +1,7 @@
 (import assert @std.assert)
 (import core @std.core)
-(import equatable @std.core.equatable)
 (import iter @std.iter.iter)
 (import main @app.main)
-(import ordered @std.core.ordered)
 
 (test "equatable is reflexive, symmetric, and transitive"
   (let low (main.version major: 1u8 minor: 2u8))

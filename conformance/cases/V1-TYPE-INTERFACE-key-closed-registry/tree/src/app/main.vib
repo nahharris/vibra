@@ -1,5 +1,3 @@
-(import ordered @std.core.ordered)
-(import equatable @std.core.equatable)
 
 (defn largest (left k right k) k
   where: (k ordered)

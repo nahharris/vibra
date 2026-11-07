@@ -21,4 +21,4 @@ span = [255, 267]
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "src/app/main.vib"
-span = [311, 323]
+span = [312, 324]

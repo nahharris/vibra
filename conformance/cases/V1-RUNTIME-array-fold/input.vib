@@ -4,7 +4,7 @@
     (array.fold (as (array i32) (array.of)) 7i32 add)
     (array.fold (array.of 5i32) 0i32 add)
     (array.fold (array.of 1i32 2i32 3i32 4i32 5i32 6i32 7i32 8i32 9i32 10i32 11i32 12i32 13i32 14i32 15i32 16i32 17i32 18i32 19i32 20i32) 0i32 add)
-    (array.fold (array.of 1i32 2i32 3i32) 10i32 (lambda (total i32 item i32) i32 (match (i32.sub-checked total item) (result.ok d) d (result.err -) 0i32)))
+    (array.fold (array.of 1i32 2i32 3i32) 10i32 (lambda (total i32 item i32) i32 (match (i32.sub total item) (result.ok d) d (result.err -) 0i32)))
     (captured)
     (array.fold (array.of 4i32 5i32) 1i32 mul)
     (array.fold (array.of 1i32 2i32 3i32) 10i32 add)
@@ -23,17 +23,17 @@
 
 ; A fold in a tail loop of a thousand rounds.
 (defn rounds (n i32 acc i32) i32
-  (if (i32.equal n 0i32) acc (rounds (lower n) (array.fold (array.of 1i32 2i32) acc add))))
+  (if (equatable.equal n 0i32) acc (rounds (lower n) (array.fold (array.of 1i32 2i32) acc add))))
 
 ; The call of array.fold is in tail position, and the fold's step calls the
 ; loop again.
 (defn spin (n i32) i32
-  (if (i32.equal n 0i32)
+  (if (equatable.equal n 0i32)
     7i32
     (array.fold (array.of n) 0i32 (lambda (total i32 k i32) i32 (spin (lower k))))))
 
-(defn add (a i32 b i32) i32 (match (i32.add-checked a b) (result.ok sum) sum (result.err -) 0i32))
+(defn add (a i32 b i32) i32 (match (i32.add a b) (result.ok sum) sum (result.err -) 0i32))
 
-(defn mul (a i32 b i32) i32 (match (i32.mul-checked a b) (result.ok product) product (result.err -) 0i32))
+(defn mul (a i32 b i32) i32 (match (i32.mul a b) (result.ok product) product (result.err -) 0i32))
 
-(defn lower (count i32) i32 (match (i32.sub-checked count 1i32) (result.ok value) value (result.err -) 0i32))
+(defn lower (count i32) i32 (match (i32.sub count 1i32) (result.ok value) value (result.err -) 0i32))

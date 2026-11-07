@@ -9,7 +9,6 @@
     (ordered.compare (chain 300u64) (chain 301u64))))
 
 (import core @std.core)
-(import ordered @std.core.ordered)
 (import option @std.option)
 
 (deftype tree (record next (array tree))
@@ -28,22 +27,22 @@
 ; The first key of the dict is the smaller tree, and an equal pair is one key.
 (defn order (first tree second tree) core.ordering
   (let both (dict.of first 0u64 second 1u64))
-  (match (u64.equal (array.length (dict.entries both)) 1u64)
+  (match (equatable.equal (array.length (dict.entries both)) 1u64)
     true (core.ordering.equal)
     false
       (match ((dict.entries both) 0u64)
         (option.some (tupleof - tag))
-          (match (u64.equal tag 0u64)
+          (match (equatable.equal tag 0u64)
             true (core.ordering.less)
             false (core.ordering.greater))
         (option.none) (core.ordering.equal))))
 
 (defn chain (levels u64) tree
-  (if (u64.equal levels 0u64)
+  (if (equatable.equal levels 0u64)
     (tree next: (array.of))
     (tree next: (array.of (chain (lower levels))))))
 
 (defn lower (count u64) u64
-  (match (u64.sub-checked count 1u64)
+  (match (u64.sub count 1u64)
     (result.ok value) value
     (result.err -) 0u64))

@@ -14,17 +14,17 @@ const MAIN: &str = r#"(defn main () void
   (do))
 
 (defn walk (count u64 next (fn (u64) u64)) u64
-  (if (u64.equal count 0u64)
+  (if (equatable.equal count 0u64)
     (next 0u64)
     (walk (lower count) (lambda (total u64) u64 (next (raise total))))))
 
 (defn raise (count u64) u64
-  (match (u64.add-checked count 1u64)
+  (match (u64.add count 1u64)
     (result.ok value) value
     (result.err -) 0u64))
 
 (defn lower (count u64) u64
-  (match (u64.sub-checked count 1u64)
+  (match (u64.sub count 1u64)
     (result.ok value) value
     (result.err -) 0u64))
 "#;

@@ -5,12 +5,12 @@
 (deftype chain (record next (array chain)))
 
 (defn build (count u64 tip chain) chain
-  (if (u64.equal count 0u64)
+  (if (equatable.equal count 0u64)
     tip
     (build (lower count) (chain next: (array.of tip)))))
 
 (defn lower (count u64) u64
-  (match (u64.sub-checked count 1u64)
+  (match (u64.sub count 1u64)
     (result.ok value) value
     (result.err -) 0u64))
 

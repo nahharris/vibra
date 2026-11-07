@@ -1,8 +1,8 @@
 ; Parses `key = value` lines into typed entries. Blank lines and lines starting
 ; with `#` are skipped; every failure names its 1-based line.
-(import classes @std.char)
+(import core @std.core)
 
-(import text @std.text)
+(import try-from @std.core.try-from)
 
 (deftype value (enum integer i64 flag bool word str) visibility: @public)
 
@@ -19,7 +19,7 @@
 
 (defn parse (source str) (result (array entry) parse-error)
   visibility: @public
-  (parse-lines (text.split source "\n") 0u64 (array.of)))
+  (parse-lines (str.split source "\n") 0u64 (array.of)))
 
 (defn parse-lines (lines (array str) index u64 entries (array entry))
   (result (array entry) parse-error)
@@ -27,7 +27,7 @@
     (lines index)
     (option.none) (result.ok entries)
     (option.some raw) (do
-      (let line (text.trim raw))
+      (let line (str.trim raw))
       (let number (after index))
       (if
         (skipped line)
@@ -38,17 +38,17 @@
           (array.append entries (try (parse-entry line number))))))))
 
 (defn skipped (line str) bool
-  (if (text.equal line "") true (text.starts-with line "#")))
+  (if (equatable.equal line "") true (str.starts-with line "#")))
 
 (defn parse-entry (line str number u64) (result entry parse-error)
   (match
-    (text.index-of line "=")
+    (str.index-of line "=")
     (option.none) (result.err (parse-error (missing-separator line: number)))
     (option.some at) (do
-      (let key (text.trim (part line 0u64 at)))
-      (let raw (text.trim (part line (after at) (text.length line))))
+      (let key (str.trim (part line 0u64 at)))
+      (let raw (str.trim (part line (after at) (str.length line))))
       (if
-        (text.equal key "")
+        (equatable.equal key "")
         (result.err (parse-error (empty-key line: number)))
         (result.ok (entry key: key value: (try (parse-value raw number))))))))
 
@@ -60,20 +60,21 @@
     - (if
       (numeric raw)
       (match
-        (i64.parse raw)
+        (as (result i64 core.conversion-error) (try-from.convert raw))
         (result.ok integer) (result.ok (value.integer integer))
         (result.err -) (result.err (parse-error (bad-integer line: number text: raw))))
       (result.ok (value.word raw)))))
 
 ; A value that starts like an integer is read as one.
 (defn numeric (raw str) bool
+  (let (str scalars) raw)
   (match
-    ((text.to-chars raw) 0u64)
-    (option.some first) (if (classes.is-ascii-digit first) true (classes.equal first \-))
+    (scalars 0u64)
+    (option.some first) (if (char.is-ascii-digit first) true (equatable.equal first \-))
     (option.none) false))
 
 (defn part (line str start u64 end u64) str
-  (match (text.slice line start end) (option.some piece) piece (option.none) ""))
+  (match (str.slice line start end) (option.some piece) piece (option.none) ""))
 
 (defn after (index u64) u64
-  (match (u64.add-checked index 1u64) (result.ok next) next (result.err -) index))
+  (match (u64.add index 1u64) (result.ok next) next (result.err -) index))

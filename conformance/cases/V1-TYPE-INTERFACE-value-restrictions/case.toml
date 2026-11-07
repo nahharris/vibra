@@ -15,22 +15,22 @@ accepted = false
 code = "@type.mismatch"
 level = "@error"
 source = "src/app/main.vib"
-span = [282, 286]
+span = [247, 251]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "src/app/main.vib"
-span = [351, 356]
+span = [316, 321]
 
 [[expect.diagnostics]]
 code = "@type.unsatisfied-bound"
 level = "@error"
 source = "src/app/main.vib"
-span = [394, 409]
+span = [359, 374]
 
 [[expect.diagnostics]]
 code = "@type.mismatch"
 level = "@error"
 source = "src/app/main.vib"
-span = [492, 497]
+span = [457, 462]

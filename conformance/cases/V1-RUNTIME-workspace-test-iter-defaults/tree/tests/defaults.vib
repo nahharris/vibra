@@ -1,4 +1,5 @@
 (import assert @std.assert)
+(import from @std.core.from)
 (import iter @std.iter)
 (import main @app.main)
 
@@ -7,7 +8,7 @@
 
 (test "maps to another element type"
   (assert.equal
-    (iter.iter.collect (iter.iter.map (array.of 1i32 2i32) (lambda (value i32) str (i32.to-str value))))
+    (iter.iter.collect (iter.iter.map (array.of 1i32 2i32) (lambda (value i32) str (from.convert value))))
     (array.of "1" "2")))
 
 (test "filters, skips, and takes"

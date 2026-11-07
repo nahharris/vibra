@@ -13,7 +13,7 @@ const MAIN: &str = r#"(import env @std.env)
 (import text @std.text)
 
 (defn line (acc str item str) str
-  (text.concat acc (text.concat item "\n")))
+  (str.concat acc (str.concat item "\n")))
 
 (defn main () (result void io.io-error)
   effects: (env.read io.stdout)

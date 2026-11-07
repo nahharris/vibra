@@ -7,10 +7,9 @@
     (ordered.compare (tupleof (pair 1i32 5i32) "x") (tupleof (pair 2i32 9i32) "x"))))
 
 (import core @std.core)
-(import ordered @std.core.ordered)
 
 ; Orders by the second component only, from the highest down.
 (deftype pair (tuple i32 i32)
   (impl ordered
     (defn compare (left self right self) core.ordering
-      (i32.compare (right 1) (left 1)))))
+      (ordered.compare (right 1) (left 1)))))
