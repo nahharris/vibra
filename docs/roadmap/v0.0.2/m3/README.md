@@ -1,35 +1,50 @@
-# Milestone 3 — WebAssembly products and pre-alpha release
+# Milestone 3 — Interactive evaluation and tests
 
-Outcome: Vibra ships WebAssembly build products and a toolchain that meets the
-`full-v1` conformance profile.
+An agent can evaluate ordinary Vibra forms repeatedly, try a
+definition change, and run selected tests against the exact same session
+revision. The terminal REPL, MCP, and editor clients use one session engine.
 
-Deliverables:
+## Delivery order
 
-- `vibra build` `.wasm` and canonical `@build.v1` `.build.vibon` products over
-  the v0.0.1 M4 lowering, with the closed scalar-only `@host` ABI;
-- deterministic source maps, required-effect metadata, and build fingerprints;
-- byte-identical build tests across two clean environments;
-- platform packaging for the explicitly supported matrix;
-- fuzz, performance, and ABI-boundary audits, with performance compared against
-  the v0.0.1 M4 baseline;
-- the runtime chapter's representation latitude — wrapper erasure, compact enum
-  layouts, and in-place update of unshared values — enabled only after
-  unoptimized parity and measured against the v0.0.1 M4 baseline;
-- release documentation containing only implemented commands and examples; and
-- a forward-compatibility review against [the scratchpad](../../scratchpad/README.md#milestone-dependencies)
-  that confirms the arena, registry, audit-trace, effect-row, format-evolution,
-  and interface-law obligations through v0.0.2 M1, and decides whether any
-  expression spelling must be reserved before v1.0.0. Under the stable
-  compatibility policy, a new reserved expression form requires a source
-  major version.
+1. Open a session against a pinned checked revision and explicit module
+   context. Evaluate expressions and batches of declarations through the
+   existing reader, checker, and reference interpreter. Accept a selection
+   or enclosing top-level form from an editor buffer with its source origin.
+   Return structured values and types, effects, diagnostics, traps, and
+   captured output with revision and source origin.
+2. Stage new and replacement definitions in a private overlay. Recheck
+   affected callers and initializers before advancing the checked session
+   revision. Failed checks
+   retain the last checked revision and report draft diagnostics. Provide
+   explicit inspect, reset, refresh, and close operations. Keep the session
+   alive across submissions, including definitions and results still valid
+   in its checked revision. A session can
+   publish through M2's edit plan using the expected base head.
+3. Run selected project tests or an ordinary test form staged in the session.
+   Use the existing test selection and outcome model and a fresh deterministic
+   host world per test. Keep session output separate from transport messages.
 
-Exit gate:
+Close result encoding, initializer and old-value lifetime, concurrent requests,
+cancellation, and resource-limit semantics in the tooling, effects, runtime,
+and conformance chapters. Start with pure expression evaluation. Support
+explicit run and test actions. An effectful run requires the server's execution
+permission and a selected checked target that already admits its effects.
+Test execution requires its own permission and uses the deterministic test
+host. Expression evaluation requires explicit execution permission even for
+pure code.
+An unsuccessful session edit leaves the checked revision intact. Host effects
+already performed by an authorized run remain observable.
 
-- the [full conformance gate](../../../spec/07-diagnostics-and-conformance.md#full-conformance-gate)
-  passes for the `full-v1` profile;
-- two clean environments produce byte-identical artifacts;
-- no raw Wasm, WASI, or unknown import crosses the specified ABI boundary;
-- unoptimized parity is complete before any optimization is enabled;
-- archive references are absent from release behavior and compatibility claims;
-- the forward-compatibility review is recorded with its decisions; and
-- the release audit is reviewed before v0.0.2 is tagged.
+- **Demo.** Open a module, send a top-level form from its buffer to the same
+  running session twice with a redefinition, rerun a named test against the
+  overlay, then reset and observe the original result.
+- **Exit.** CLI, MCP, terminal, and editor clients use the same session
+  semantics.
+  A fresh CLI run/test on equivalent checked inputs agrees on observable
+  outcomes. Concurrent sessions cannot see each other's drafts. Invalid forms,
+  denied execution, exhausted budgets, cancellation, and close have defined
+  outcomes. A later request cannot observe a half-applied redefinition.
+
+The REPL takes inspiration from Clojure's interactive development loop.
+Vibra keeps explicit module context and static effect consent.
+[Clojure REPL guide](https://clojure.org/guides/repl/introduction)

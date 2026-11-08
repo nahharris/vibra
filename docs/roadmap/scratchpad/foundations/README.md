@@ -168,8 +168,9 @@ would extend today's flat rows, which have an empty relation.
 ## Other distribution work
 
 Signing, publishing build products, and multi-artifact application containers
-are unscheduled. The v0.0.2 draft separately includes packaging the toolchain
-for supported platforms.
+are unscheduled. [Reproducible project dependencies](dependencies.md) covers
+exact inputs, offline vendor sync, locks, and stdlib provenance. The
+[v0.0.3 release](../../v0.0.3/m3/README.md) owns native toolchain packaging.
 
 ## Candidate demo
 

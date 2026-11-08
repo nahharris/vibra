@@ -137,11 +137,12 @@ access. It also has the beginnings of a standard library and workspace tooling.
 
 Vibra is developed specification-first. The [charter](docs/spec/00-charter.md)
 and [language specifications](docs/index.md) define the language contracts.
-[v0.0.1](docs/roadmap/v0.0.1/README.md) shipped M1–M4 in pre-alpha. The provisional
-[v0.0.2 roadmap](docs/roadmap/v0.0.2/README.md) starts from v0.0.2 M1–M3: reproducible
-dependencies, agent-facing tooling, and WebAssembly build products. The
-[scratchpad](docs/roadmap/scratchpad/README.md) collects unscheduled research on
-verification, concurrency, interactive applications, and other topics.
+[v0.0.1](docs/roadmap/v0.0.1/README.md) shipped M1–M4 in pre-alpha.
+[v0.0.2](docs/roadmap/v0.0.2/README.md) plans a content-addressed codebase and
+agent tooling for queries, edits, evaluation, tests, and debugging.
+[v0.0.3](docs/roadmap/v0.0.3/README.md) plans native executables with Nexus
+and the gates for replacing WebAssembly. The
+[scratchpad](docs/roadmap/scratchpad/README.md) collects unscheduled proposals.
 
 An earlier implementation is preserved in [the archive](archive/pre-v1) as
 part of the project's history. The current implementation is a fresh start and

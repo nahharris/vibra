@@ -4,8 +4,9 @@ Status: normative target
 Implementation status: M1 supplies generic VIBON data and structural query
 metadata; M2 decodes projects, resolves local modules, and supports init,
 check, run, and test; M3 embeds the standard library as the toolchain input.
-Ordinary dependency delivery (v0.0.2 M1) and build products (v0.0.2 M3) remain unimplemented,
-and `run` and `test` execute the reference interpreter. Milestone 4 Step 13 closes
+Ordinary dependency delivery and build products remain unimplemented.
+See the [release roadmap](../roadmap/README.md) for delivery status.
+`run` and `test` execute the reference interpreter. Milestone 4 Step 13 closes
 the Stage 4B contracts of this chapter, the `host` list and effect modules of the
 standard-library manifest, the test host world, and the target `effects`
 diagnostics, and implements none of them; Steps 14 to 18 do.
@@ -226,11 +227,11 @@ reserved `@tests` unit, and one explicit, unresolved dependency edge for each
 declared dependency. The `@tests` unit has kind `@lib` in the graph snapshot,
 but it is not a project target or a dependency and has no target entry. A
 dependency edge retains its alias, kind, target value, and source span. Graph
-construction MUST NOT resolve, fetch, inspect, or silently discard a dependency;
-because ordinary dependency delivery is deferred to v0.0.2 M1, each unsupported edge
-reports `@tool.unavailable` at its dependency alias while remaining present in
-the graph. The graph accepts only the immutable snapshot produced by this
-workspace boundary; later resolver phases receive no ambient filesystem handle.
+construction MUST NOT resolve, fetch, inspect, or silently discard a dependency.
+Each unsupported edge reports `@tool.unavailable` at its dependency alias
+while remaining present in the graph. The graph accepts only the immutable
+snapshot produced by this workspace boundary. Later resolver phases receive
+no ambient filesystem handle.
 
 ## Packages and targets
 
