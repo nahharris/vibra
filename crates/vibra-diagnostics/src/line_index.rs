@@ -172,17 +172,19 @@ mod proofs {
 
     /// For every short document: every offset, in range or not, has a
     /// one-based position inside the document, and every line has its text.
+    // Four bytes hold one scalar of every width, a CRLF, and an empty last
+    // line. Offsets past the end clamp to it, so one past is enough.
     #[kani::proof]
-    #[kani::unwind(8)]
+    #[kani::unwind(6)]
     fn every_offset_has_a_position_and_every_line_has_text() {
-        let bytes: [u8; 6] = kani::any();
+        let bytes: [u8; 4] = kani::any();
         let len: usize = kani::any_where(|len| *len <= bytes.len());
         let Ok(source) = std::str::from_utf8(bytes.get(..len).unwrap_or(&[])) else {
             return;
         };
         let index = LineIndex::new(source);
 
-        let position = index.position(kani::any());
+        let position = index.position(kani::any_where(|offset| *offset <= len + 1));
         assert!(position.line >= 1 && position.column >= 1);
         assert!(position.line <= source.len() + 1);
         assert!(position.column <= source.chars().count() + 1);

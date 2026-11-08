@@ -129,6 +129,9 @@ jobs:
   kani:
     name: kani proofs
     runs-on: ubuntu-latest
+    # A harness whose bound is too large runs for hours, not seconds; fail it
+    # early instead of holding a runner.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
 
