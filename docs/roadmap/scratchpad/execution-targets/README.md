@@ -1,8 +1,9 @@
 # Execution targets
 
-Status: design direction; not normative
-Question: how far can WebAssembly carry these proposals, and when is a
-native backend justified?
+The [Nexus proposal](nexus.md) describes the planned native direction and
+its follow-on research. The sections below preserve earlier WebAssembly
+alternatives and backend-independent compiler research. The
+[v0.0.3 roadmap](../../v0.0.3/README.md) owns the native cutover.
 
 ## Summary
 
@@ -96,8 +97,8 @@ values across the ABI.
 
 ## When a native backend is justified
 
-A native AOT backend (for example through Cranelift) from the shared typed IR
-is a horizon track. Any of these would justify it:
+The earlier design considered a native AOT backend alongside Wasm when
+evidence showed one of these needs:
 
 - benchmarks showing that the embedding engine's code quality, not the
   algorithm or copy cost, dominates realistic services;
