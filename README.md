@@ -141,7 +141,9 @@ and [language specifications](docs/index.md) define the language contracts.
 [v0.0.2](docs/roadmap/v0.0.2/README.md) plans a content-addressed codebase and
 agent tooling for queries, edits, evaluation, tests, and debugging.
 [v0.0.3](docs/roadmap/v0.0.3/README.md) plans native executables with Nexus
-and the gates for replacing WebAssembly. The
+and the gates for replacing WebAssembly.
+[v0.0.4](docs/roadmap/v0.0.4/README.md) plans typed local actors, multicore
+scheduling, and scoped message authority. The
 [scratchpad](docs/roadmap/scratchpad/README.md) collects unscheduled proposals.
 
 An earlier implementation is preserved in [the archive](archive/pre-v1) as

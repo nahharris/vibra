@@ -27,6 +27,7 @@ illustrative.
 - [v0.0.1 (shipped, M1–M4)](roadmap/v0.0.1/README.md)
 - [v0.0.2 (planned, content-addressed agent tooling)](roadmap/v0.0.2/README.md)
 - [v0.0.3 (planned, Nexus and native builds)](roadmap/v0.0.3/README.md)
+- [v0.0.4 (planned, local actors and message authority)](roadmap/v0.0.4/README.md)
 - [Milestone execution model](roadmap/execution.md)
 - [Milestone 1 step plan](roadmap/v0.0.1/m1/execution.md)
 - [Milestone 2 step plan](roadmap/v0.0.1/m2/execution.md)

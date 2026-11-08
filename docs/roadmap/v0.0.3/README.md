@@ -31,8 +31,11 @@ storage, execution checkpoints, traps, and host dispatch for this release.
 Host providers and representation-neutral primitives remain shared.
 
 This release targets AOT executables and cooperative execution checkpoints.
-Actors, parallel placement, GPU and remote execution, native libraries,
-native debugger integration, and cross-compilation are outside its scope.
+The [v0.0.4 handoff](../v0.0.4/README.md) carries forward runtime-owned
+frames, opaque context-local handles, and source-linked host events.
+v0.0.4 owns local actor scheduling and the first public capability surface.
+GPU and remote execution, native libraries, native debugger integration,
+and cross-compilation are outside this release.
 See the [Nexus scratchpad](../scratchpad/execution-targets/nexus.md) for the
 proposal and follow-on work. [GitHub #408](https://github.com/nahharris/vibra/issues/408)
 

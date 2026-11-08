@@ -21,7 +21,7 @@ illustrative.
 | Issue | Scheduled work | Scratchpad |
 | --- | --- | --- |
 | [#409](https://github.com/nahharris/vibra/issues/409) | The [release map](../README.md) adopts versioned outcomes and exit gates. v0.0.2 leads with the agent workflow and v0.0.3 owns the native transition. | [Stronger type guarantees for agents](type-system/README.md#stronger-guarantees-for-agents) and [full dependency delivery](foundations/dependencies.md) |
-| [#408](https://github.com/nahharris/vibra/issues/408) | [Portable build inputs and the native handoff](../v0.0.2/m6/README.md), followed by [Nexus, parity, and the cutover](../v0.0.3/README.md). | [Nexus rationale and follow-on research](execution-targets/nexus.md) |
+| [#408](https://github.com/nahharris/vibra/issues/408) | [Portable build inputs](../v0.0.2/m6/README.md), [Nexus and the cutover](../v0.0.3/README.md), then [local actors](../v0.0.4/README.md). | [Nexus rationale and follow-on research](execution-targets/nexus.md) |
 
 ## North star
 

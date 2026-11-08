@@ -2,8 +2,10 @@
 
 The [v0.0.2 handoff](../../v0.0.2/m6/README.md) and
 [v0.0.3 roadmap](../../v0.0.3/README.md) schedule the initial compiler and
-runtime work. This note captures the rationale and unscheduled extensions
-from the open proposal. [GitHub #408](https://github.com/nahharris/vibra/issues/408)
+runtime work. [v0.0.4](../../v0.0.4/README.md) schedules local actors,
+message capabilities, and multicore scheduling. This note captures the
+rationale and unscheduled extensions from the open proposal.
+[GitHub #408](https://github.com/nahharris/vibra/issues/408)
 
 ## Initial boundary
 
@@ -27,8 +29,8 @@ and macOS arm64 before retiring the Wasm path.
 
 | Track | Question and promotion evidence |
 | --- | --- |
-| Typed boundaries | Can effect-row polymorphism and resource ownership express process bodies, transfer, and cleanup? Start with a one-shot reply and diagnostics for duplicate sends, branch joins, and cancellation. |
-| Local scheduling and actors | Can one state machine drive deterministic simulation and real workers? Replay cancellation and a worker crash with bounded mailboxes and deterministic wakeup ownership. Measure parked-process memory and wakeup latency before setting thresholds. |
+| Stronger capability and ownership rules | Find a protocol that requires holder binding, revocation, or host-resource scope. Compare checked local actor addresses with stronger rules for transfer, cancellation, and cleanup. |
+| Scheduler scaling and supervision | Replay cancellation and a worker crash. Measure parked-process memory and wakeup latency before setting thresholds. |
 | Ordered CPU fork/join | Can a pure two-thunk primitive match left-to-right results and trap precedence when run on multiple workers? Show bounded queues and isolation from actor scheduling before adding ordered bulk map or lawful reduce. |
 | GPU placement | Can one checked pure region lower to a CPU fallback and an eligible device kernel? Test integer parity and measure upload, kernel, and readback together before admitting floating point or adding a second device target. |
 | Distribution | Can nodes match a semantic build to their own compatible artifacts and exchange versioned typed values? Replay a worker loss, partition, and late duplicate with bounded work and explicit retry semantics. |

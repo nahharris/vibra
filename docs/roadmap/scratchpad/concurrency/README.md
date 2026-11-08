@@ -5,6 +5,10 @@ Prerequisites: [effect-row polymorphism](../foundations/README.md#effect-row-pol
 [process-owned resources](../foundations/README.md#resources-and-handles),
 [reductions](../foundations/README.md#execution-budgets-and-reductions)
 
+The [v0.0.4 roadmap](../../v0.0.4/README.md) sets the first local actor
+release boundary and the order for adding message capabilities. The broader
+sketches here explore alternative contracts and follow-on work.
+
 ## Why the BEAM model
 
 Erlang and Elixir showed that fault-tolerant services come from a few

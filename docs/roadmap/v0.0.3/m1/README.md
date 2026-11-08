@@ -19,8 +19,12 @@ compiler, Nexus, and the closed host registry on a small fixture.
 3. In Nexus, push runtime frames for non-tail calls, replace the current
    activation on a tail transfer, and return control to a dispatcher at a
    checkpoint. Route generated host calls through the shared registry.
-   Keep process-local handles and compiler-private layouts inside the
-   execution context.
+   Keep handles and compiler-private layouts inside the execution context.
+   Review this boundary for the [actor handoff](../../v0.0.4/README.md).
+   Leave handle representation private and record which checkpoint and
+   source-origin contracts v0.0.4 can extend. Record the proposed split
+   between [message authority and performed effects](../../v0.0.4/README.md#capabilities-and-effects)
+   in the handoff.
 4. Run the Windows x64 fixture first. Prove PE/COFF object emission, the
    pinned MSVC link path, and direct `.exe` launch from Windows. Exercise
    the Linux x86-64 and macOS arm64 object, linker, and launcher paths
