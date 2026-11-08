@@ -82,7 +82,10 @@ fn decoding_agrees_with_the_standard_library() {
             assert!(accepted);
             assert!(scalars.0.iter().copied().eq(text.chars().map(u32::from)));
         }
-        Err(_) => assert!(!accepted),
+        // Kani's `assert!` ends in a semicolon, so it cannot be a bare arm.
+        Err(_) => {
+            assert!(!accepted);
+        }
     }
 }
 
