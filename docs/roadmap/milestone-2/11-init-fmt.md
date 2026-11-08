@@ -1,6 +1,6 @@
 # Step 11 — project initialization and formatting commands
 
-Requires Step 10 and C2/C6/C8/C10. Read tooling **V1 CLI**, **One workspace
+Requires Step 10 and C2/C6/C8/C10. Read tooling **CLI commands**, **One workspace
 engine**, **Project operations**, **Transactional edit plans**, projects
 **Packages and targets**, source **Canonical format**:
 [tooling](../../spec/05-tooling.md), [projects](../../spec/04-programs-and-packages.md),

@@ -1,23 +1,19 @@
 # Verification
 
 Status: design direction; not normative
-Lines: V0 in [1.x](README.md#1x--foundations), V1 in
-[Vibra 2](README.md#vibra-2--concurrent-services), V2 in
-[Vibra 3](README.md#vibra-3--distributed-and-proven), V3 on the
-[horizon](README.md#horizon)
 
 ## Why Vibra should verify programs
 
 Agents produce plausible code quickly. What they lack is a cheap, local signal
-that the code means what was asked. V1 supplies that signal for shape (types)
+that the code means what was asked. Vibra supplies that signal for shape (types)
 and reach (effects). Verification supplies it for meaning. A contract states
 what a function promises. A checker either proves the promise or returns a
 concrete counterexample the agent can act on.
 
-Vibra's v1 design already removes most of what makes verification expensive in
+Vibra's design already removes most of what makes verification expensive in
 mainstream languages:
 
-| V1 property | Consequence for verification |
+| Existing property | Consequence for verification |
 | --- | --- |
 | Immutable values, no references or aliasing | No heap reasoning, frame conditions, or separation logic for Vibra values |
 | No assignment or loops, mandatory tail calls | Every loop is a recursive function with explicit parameters, so no loop invariants are needed beyond function contracts |
@@ -43,7 +39,7 @@ Two broad styles exist:
 Vibra adopts **auto-active verification as the primary model** and keeps a
 path to interactive proof for the hard residue:
 
-1. The charter excludes dependent and refinement types from v1. Contracts in
+1. The charter excludes dependent and refinement types from the current specification. Contracts in
    ordinary Vibra expressions add meaning without changing the type system's
    decidable core.
 2. Counterexamples are the agent-native failure. A structured, concrete input
@@ -58,17 +54,20 @@ path to interactive proof for the hard residue:
 A note on Bend: Bend (on the HVM2 runtime) is a massively parallel functional
 language. It is not primarily a proof system. Its relevance to Vibra is the
 parallelism track, discussed in
-[Concurrency and distribution](concurrency.md#data-parallelism). The same group's proof-oriented
+[Concurrency and distribution](../concurrency/README.md#data-parallelism). The same group's proof-oriented
 language is Kind, which is in the interactive, dependently typed family above.
 
 ## Stages
+
+V0 through V3 describe the progression of this proposal. Each stage remains
+unscheduled.
 
 Each stage is usable on its own and is a strict extension of the previous
 one. Source written for an earlier stage keeps its meaning.
 
 ### V0 — executable contracts and properties
 
-Line: 1.x. No solver.
+This stage needs no solver.
 
 **Contracts** are attributes on `defn`, nested methods, and interface contract
 members. They are pure boolean expressions over the parameters. `ensures:`
@@ -118,7 +117,7 @@ enclosing function's, so a recursive call made inside a lambda classifies the
 function that wrote it. The fact is informational and rejects nothing: a
 static ban on non-tail recursion was studied and rejected, with the reasons
 recorded in the
-[pre-M4 decisions](../pre-m4/README.md#a-static-ban-on-non-tail-recursion-is-rejected).
+[pre-M4 decisions](../../roadmap/pre-m4/README.md#a-static-ban-on-non-tail-recursion-is-rejected).
 Stage V1's termination check and an agent reviewing stack behavior can both start from
 it.
 
@@ -127,7 +126,7 @@ contracts for tests has already written V1's specifications.
 
 ### V1 — static contracts and termination
 
-Line: Vibra 2. Adds a pinned SMT solver to the toolchain.
+This stage would add a pinned SMT solver to the toolchain.
 
 **Termination.** A verified function MUST terminate, because a non-terminating
 function can "prove" anything. Termination is checked per recursive group:
@@ -163,7 +162,7 @@ verification conditions from typed IR and asks the solver to prove them:
   Host responses are unconstrained inputs unless the registry entry states a
   postcondition.
 
-**Invariant newtypes** turn v1 newtypes into checked refinements without
+**Invariant newtypes** turn existing newtypes into checked refinements without
 refinement types:
 
 ```vibra
@@ -210,8 +209,6 @@ turns every unverified contract reachable from it into an error.
   `decreases:` candidate. These are suggestions and never auto-apply.
 
 ### V2 — lemmas and interface laws
-
-Line: Vibra 3.
 
 **Lemmas** are pure, erased, terminating functions whose result is a fact:
 

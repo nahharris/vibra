@@ -36,7 +36,7 @@ and one proof owner per atomic row.
 
 | ID | Close before | Required decision and evidence |
 | --- | --- | --- |
-| D1 | All 3A steps | Stage scope (gap G1). Decide whether `any`-bounded parametric generics move into Stage 3A. If they do, amend the Stage 3A and 3B lists in `v1.md` in this PR and state exactly which generic forms stay `@tool.unavailable` until Stage 3B (interface bounds, `defint`, `impl`, `any` and interfaces in type position). |
+| D1 | All 3A steps | Stage scope (gap G1). Decide whether `any`-bounded parametric generics move into Stage 3A. If they do, amend the Stage 3A and 3B lists in `v0.0.1.md` in this PR and state exactly which generic forms stay `@tool.unavailable` until Stage 3B (interface bounds, `defint`, `impl`, `any` and interfaces in type position). |
 | D2 | 2–8 | M3 availability boundary: one M3 surface inventory giving every AST variant and every M2 ledger row deferred to M3 an owning step, plus the M4-owned rows unchanged. Add an inventory test that fails on an undisposed variant, modelled on `crates/vibra-conformance/tests/m2_contract_inventory.rs`. |
 | D3 | 4, 8 | Dict-key admissibility (gap G2): declare `equatable`, `ordered`, and `hashable` in the type chapter (their members may be written now and implemented in 3B), a closed builtin-conformance table for primitive key types and whether tuples of admissible keys qualify, and the canonical key order used by the runtime and later by `iter`. |
 | D4 | 8 | Closed M3 library contract (gap G3): module dict (`@std.option`, `@std.result`, `@std.integer`, `@std.text`, `@std.bytes`, `@std.array`, `@std.dict`, or another reviewed split), every `@compiler` symbol with exact signature and total semantics, the checked-arithmetic error type(s) replacing the undeclared `overflow`, and the equality/comparison functions Stage 3A uses before interfaces exist. Extend the runtime chapter's intrinsic profile the same way M2 did for text. |
@@ -54,7 +54,7 @@ and one proof owner per atomic row.
    settled rules because an implementation shortcut would be easier.
 2. Close D1–D10 in their owning chapters. Following
    [`AGENTS.md`](../../../AGENTS.md), update every affected chapter, the
-   diagnostic registry, the conformance rule table, and `v1.md` in this one PR.
+   diagnostic registry, the conformance rule table, and `v0.0.1.md` in this one PR.
 3. Update the diagnostic registry crate and schema producer/consumer tests for
    the reviewed codes. Add the M3 inventory and its test.
 4. Extend neutral conformance infrastructure only where the new observations

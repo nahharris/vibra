@@ -29,9 +29,9 @@ registry/schema evidence, and review.
   [exit evidence](../milestone-3/exit-evidence.md#reassigned-to-later-milestones),
   and the [pre-M4 changes](../pre-m4/README.md) with
   [their checklist](../pre-m4/01-bindings-return-never.md#known-gaps).
-- [Beyond v1](../beyond-v1/README.md#what-v1-carries-for-later-lines): the four
+- [Scratchpad milestone dependencies](../../scratchpad/README.md#milestone-dependencies): the four
   obligations M4 carries, and
-  [foundations](../beyond-v1/foundations.md) on reductions and process heaps,
+  [foundations](../../scratchpad/foundations/README.md) on reductions and process heaps,
   which bound how D1 and D3 may be decided.
 
 ## Decision checklist
@@ -43,7 +43,7 @@ and one proof owner per atomic row.
 
 | ID | Close before | Required decision and evidence |
 | --- | --- | --- |
-| D1 | 3, 6 | Deep non-tail recursion (gap G1). Choose (a) a portable activation-depth limit or (b) activations held in the arena, and replace the host-event rule in the runtime, tooling, and conformance chapters. For (a): the limit's value, what counts as one activation, the trap code that replaces `@runtime.host-stack-exhausted`, its command and test results, and the argument that the chosen engine's stack cannot run out first, including for a module run by a host Vibra does not control. For (b): the exhaustion outcome when memory, not depth, is the bound. Suggestion: (a), because it keeps non-tail calls as direct Wasm calls and is the smaller change; (b) is the direction the beyond-v1 process model points, so record why it is not needed now. Needs a maintainer decision. |
+| D1 | 3, 6 | Deep non-tail recursion (gap G1). Choose (a) a portable activation-depth limit or (b) activations held in the arena, and replace the host-event rule in the runtime, tooling, and conformance chapters. For (a): the limit's value, what counts as one activation, the trap code that replaces `@runtime.host-stack-exhausted`, its command and test results, and the argument that the chosen engine's stack cannot run out first, including for a module run by a host Vibra does not control. For (b): the exhaustion outcome when memory, not depth, is the bound. Suggestion: (a), because it keeps non-tail calls as direct Wasm calls and is the smaller change; (b) is the direction the proposed process model points, so record why it is not needed now. Needs a maintainer decision. |
 | D2 | 5 | The arena (gap G2). State where compound values live, what an index denotes and its width, the closed set of value kinds, what "instance-owned" means for a module with no import, and how a host reads and builds a compound value across a scalar-only boundary. State which exports a v1 module has in Stage 4A and that none is a guest pointer. The Stage 4B host ABI is written against this section, so it must not assume an import. |
 | D3 | 5, 6 | The reclamation rule (gap G3): when an index stops being live and its storage is released; that reclamation is unobservable apart from memory use; that an index is never reused within an instance; the outcome of exhausting the index space and of exhausting memory, and whether either is a trap or a host event; and that releasing a deeply nested value uses bounded engine stack. State the bound the exit gate measures for a long allocating tail loop. |
 | D4 | 4 | The Wasm module contract for M4 (gap G6): the feature baseline, including whether tail position uses the tail-call instructions or a trampoline; the versioned entry export; no import in Stage 4A; which custom sections M4 emits, if any, and which wait for M7; and byte-identical emission for an identical checked program. |
@@ -69,7 +69,7 @@ and one proof owner per atomic row.
    step and cannot be closed by an implementer alone.
 3. Close D1–D15 in their owning chapters. Following
    [`AGENTS.md`](../../../AGENTS.md), update every affected chapter, the
-   diagnostic registry, the conformance rule table, and `v1.md` in this one PR.
+   diagnostic registry, the conformance rule table, and `v0.0.1.md` in this one PR.
 4. Update the diagnostic registry crate and schema producer/consumer tests for
    the reviewed codes. Add the M4 inventory and its test.
 5. Extend neutral conformance infrastructure only where the new observations

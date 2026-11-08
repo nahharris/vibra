@@ -1,7 +1,7 @@
 # Milestone 2 step plan
 
 Status: All 14 steps are merged to `m2`; M2 exit evidence is complete
-Milestone: [Milestone 2 — executable pure core](../v1.md#milestone-2--executable-pure-core)
+Milestone: [Milestone 2 — executable pure core](../v0.0.1.md#milestone-2--executable-pure-core)
 Execution model: [execution.md](../execution.md)
 Integration branch: `m2`
 
@@ -55,8 +55,9 @@ Step PRs target `m2`; the milestone PR alone eventually targets `main`.
   orchestration. Semantic crates accept explicit inputs and never search disk,
   consult environment variables, invoke a shell, or download dependencies.
 - **Closed coverage.** Maintain a supported-surface table, including exclusions,
-  as each slice lands. M1 still parses later-v1 syntax; M2 does not execute it
-  or reinterpret it. Availability is distinct from malformed syntax.
+  as each slice lands. M1 parses syntax assigned to later milestones. M2
+  reports those forms as unavailable, preserving their meaning and keeping
+  availability distinct from malformed syntax.
 - **No backend shortcuts.** No LLVM, JIT, Wasm, host registry execution, hidden
   arithmetic operator, ambient stdlib prelude, or archived implementation is
   needed for this milestone. Pure intrinsics have reviewed exact semantics.
@@ -108,7 +109,7 @@ steps additionally exercise real processes. Step 14 adds reproducible evidence.
 | `project init`, `fmt`, `check`, `run`, `test` | 11–14; actual binary, JSON, exits, writes, clean demo; imported-source format fallback |
 | Static/interpreter profiles for implemented subset | Every behavior step, 14; explicit scope and zero failed/unavailable in gate corpus |
 | Pure execution has no host events or ambient observations | 5, 8–9, 12–14; empty audit traces and isolated-input tests |
-| Unsupported later-v1 forms have explicit availability diagnostics | 1 and every widening step; availability inventory swept by 14 |
+| Unsupported forms assigned to later milestones have explicit availability diagnostics | 1 and every widening step; availability inventory swept by 14 |
 | Clean offline multi-module demo and tests | 14; repeat from exact checkout, commands and results recorded |
 
 ## Scope boundaries to freeze before implementation
@@ -127,9 +128,9 @@ stdlib bootstrap. These are pending contracts, not permission to silently
 relax the language or to implement later milestones. Valid deferred syntax
 keeps its M1 structure and receives the agreed availability result.
 
-The `@tool.unavailable` diagnostic is the canonical result for a valid v1
-surface outside the selected M2 implementation profile. It is separate from a
-runner capability status and from malformed syntax.
+The `@tool.unavailable` diagnostic is the canonical result for valid syntax
+outside the M2 implementation profile. It is distinct from a runner
+capability status and from malformed syntax.
 
 ## Step 3 handoff (integrated on `m2`)
 

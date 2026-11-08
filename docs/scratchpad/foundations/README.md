@@ -1,17 +1,14 @@
 # Foundations
 
 Status: design direction; not normative
-Line: mostly [1.x](README.md#1x--foundations); resources and budgets in
-[Vibra 2](README.md#vibra-2--concurrent-services)
 
-Verification, concurrency, and interactive applications all hit the same v1
-restrictions first. This document designs the shared extensions, so that no
-track solves them privately. Each section names the v1 rule it relaxes and why
-the relaxation keeps accepted programs valid.
+Verification, concurrency, and interactive applications share several
+prerequisites. These sketches describe the current restrictions and how
+candidate extensions could keep accepted programs valid.
 
 ## Effect-row polymorphism
 
-**V1 rule relaxed:** effect variables and polymorphic rows are excluded, so a
+**Current restriction.** Effect variables and polymorphic rows are excluded, so a
 higher-order function declares the exact callback row it accepts, and `iter`
 `map`/`filter` accept only pure callbacks.
 
@@ -47,10 +44,10 @@ used inside effect rows:
   typed boundary, as a fourth widening relation. This is sound, because a row
   bounds what may happen. It is needed so that callbacks with different rows
   can share one collection, such as a supervisor's child specifications. As
-  with every v1 widening, it fires only from a written expected type and never
+  with existing widening rules, it fires only from a written expected type and never
   computes a least upper bound.
 
-**Compatibility:** every v1 program has only closed rows, which stay valid.
+**Compatibility:** every currently specified program has only closed rows, which stay valid.
 The `iter` defaults may later gain effect-polymorphic variants under new names.
 Changing `map` itself would alter accepted signatures.
 
@@ -60,26 +57,9 @@ complicates the interpreter/Wasm parity contract. Handlers stay unscheduled
 until a track shows a need that injection-based test providers and processes
 cannot meet.
 
-## Generic implementations and associated types
-
-**V1 rule relaxed:** an `impl` target must be closed, so `(impl (from t) ...)`
-over a generic receiver parameter is unwritable, and associated types are
-excluded.
-
-Generic implementations follow the existing ownership and bound-agnostic
-overlap rules unchanged: an implementation over `(box t)` overlaps with one
-over `(box i32)`, and overlap is still decided at the declaration. This is a
-1.x candidate because it needs no new identity kind.
-
-Associated types stay deferred for the reason recorded in `v1.md`: they create
-per-implementation identities that no atom path addresses. The track reopens
-only if the `try-from` error-type limitation shows up as a real cost in user
-code. The expected fix then is a contract-level type parameter with a
-default, which keeps every identity addressable.
-
 ## Resources and handles
 
-**V1 rule relaxed:** host operations are value-in/value-out, and there are no
+**Current restriction.** Host operations are value-in/value-out, and there are no
 handles, streams, sockets, or scoped lifetimes.
 
 Sockets, file streams, timers, windows, and GPU surfaces all need a long-lived
@@ -102,7 +82,7 @@ one process.**
 
 This keeps values immutable and needs no borrow checker. Lifetime errors
 become typed, testable failures, and supervision cleans up after crashes. A
-single-process program (every v1 program) owns all its handles through the
+single-process program owns all its handles through the
 implicit root process.
 
 **Study item:** an affine `once` qualifier for handles whose double use is a
@@ -124,7 +104,7 @@ the ownership model rather than replacing it.
 
 ## Network and child processes as values
 
-The first network and process effects need no handles and fit the v1 ABI:
+The first network and process effects need no handles and fit the existing host ABI:
 
 | Root | Operation shape |
 | --- | --- |
@@ -134,14 +114,14 @@ The first network and process effects need no handles and fit the v1 ABI:
 
 Each operation is one registry entry with an owning root and an audit event.
 `subprocess.run` accepts no shell string: the program is a path and the arguments
-are an array. Streaming variants wait for resources and processes in line 2.
+are an array. Streaming variants wait for resources and processes described in [concurrency](../concurrency/README.md).
 
 ## Execution budgets and reductions
 
-**V1 rule relaxed:** no language-defined fuel, memory, or host-operation
-budgets.
+**Current restriction.** The language defines no fuel, memory, or
+host-operation budgets.
 
-Line 2's preemptive scheduler counts **reductions**, one per function
+The proposed preemptive scheduler counts **reductions**, one per function
 application, as BEAM does. The same counter delivers budgets:
 
 - a process may be spawned with a reduction budget, a mailbox bound, and a
@@ -153,25 +133,49 @@ application, as BEAM does. The same counter delivers budgets:
   event.
 
 For the root process of a single-process program, the outcome of deep
-non-tail recursion is whatever rule
-[Milestone 4](../v1.md#milestone-4--webassembly-spine-static-effects-and-host-operations)
-writes into the runtime chapter.
+non-tail recursion follows the rule
+[Milestone 4](../../roadmap/v0.0.1.md#milestone-4--webassembly-spine-static-effects-and-host-operations)
+established in the runtime chapter.
 
 ## Packages and publishing
 
-V1 dependencies are local paths or exact Git revisions. If a registry is
-added, the recommended selection algorithm is **minimal version selection**:
-each dependency declares minimum versions, and the build picks the smallest
-version that satisfies them all. It is deterministic, needs no SAT solver, and
+The specified dependency model uses local paths or exact Git revisions. A
+registry and version solver are worth exploring if exact revisions become a
+major adoption barrier. The candidate algorithm is **minimal version
+selection**. Each dependency declares minimum versions, and the build picks
+the smallest version that satisfies them all. It is deterministic, needs no SAT solver, and
 the lock still records exact content hashes. Publishing must never run package
 code. The published unit is the canonical source tree plus its `.vibon`
-metadata and, from line 3 onward, its proof status.
+metadata, with proof status if [verification](../verification/README.md)
+can report it.
 
 ## Foreign code
 
 Native FFI, raw Wasm FFI, and user-defined host providers remain excluded. New
 host capability arrives as toolchain-owned, versioned registries (for example
-a `vibra_ui_v1` registry in line 4), each entry with an owning effect root and
+a `vibra_ui_v1` registry for UI hosts), each entry with an owning effect root and
 audit shape. If evidence later shows that closed registries block adoption,
 the candidate design is a sandboxed component with a declared effect
 signature, checked at the component boundary. It is not an unchecked import.
+
+## Other effect and host extensions
+
+Environment writes and monotonic sleep could begin as additive registry
+entries. Signals, streaming handles, and asynchronous operations need further
+design. Sealed effect roots and declared dominance or sub-effect relations
+would extend today's flat rows, which have an empty relation.
+
+## Other distribution work
+
+Signing, publishing build products, and multi-artifact application containers
+are unscheduled. The v0.0.2 draft separately includes packaging the toolchain
+for supported platforms.
+
+## Candidate demo
+
+A command-line tool fetches JSON over HTTPS and transforms it through a
+[generic](../type-system/README.md), effect-polymorphic pipeline. Its
+[property tests](../verification/README.md#v0--executable-contracts-and-properties)
+shrink failing inputs to a minimal counterexample. This could fit an additive
+source, registry, and project schema revision if existing programs and
+artifacts keep their meaning.

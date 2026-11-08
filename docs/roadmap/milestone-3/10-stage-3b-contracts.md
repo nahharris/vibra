@@ -16,7 +16,7 @@ guides for Steps 11–16.
   keys, so `compare` alone decides where a key goes and whether two keys are
   one. Dict keys therefore require only `ordered`. `@std.core` declares
   `equatable` and `ordered`, with an explicit total-order and agreement rule,
-  and v1 declares no `hashable`. A generic key type needs one bound,
+  and Vibra declares no `hashable`. A generic key type needs one bound,
   `ordered`, which also resolves the one-bound-per-parameter conflict.
 - **G9 / X3 → D18.3.** The tooling chapter defines the `@index.v1` projection
   of `@workspace`. It has three kinds of records:

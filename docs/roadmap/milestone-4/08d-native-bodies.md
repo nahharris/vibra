@@ -108,7 +108,7 @@ The [Step 4–12 row](validation.md#focused-checks) and the full
 
 ## Excluded
 
-Any other native that applies a function value (none exists in v1); lowering
+Any other native that applies a function value (none is specified); lowering
 `array.fold` as a hand-written loop; accelerating a body.
 
 ## Completion evidence

@@ -1,21 +1,18 @@
 # Concurrency and distribution
 
 Status: design direction; not normative
-Lines: processes, supervision, simulation, and data parallelism in
-[Vibra 2](README.md#vibra-2--concurrent-services); distribution in
-[Vibra 3](README.md#vibra-3--distributed-and-proven)
-Prerequisites: [effect-row polymorphism](foundations.md#effect-row-polymorphism),
-[process-owned resources](foundations.md#resources-and-handles),
-[reductions](foundations.md#execution-budgets-and-reductions)
+Prerequisites: [effect-row polymorphism](../foundations/README.md#effect-row-polymorphism),
+[process-owned resources](../foundations/README.md#resources-and-handles),
+[reductions](../foundations/README.md#execution-budgets-and-reductions)
 
 ## Why the BEAM model
 
 Erlang and Elixir showed that fault-tolerant services come from a few
 composable ideas: isolated lightweight processes, message passing, "let it
-crash", supervision trees, and location transparency. Vibra v1 already has the
+crash", supervision trees, and location transparency. Vibra already has the
 conditions those ideas need:
 
-| BEAM idea | Vibra v1 property it builds on |
+| BEAM idea | Existing Vibra property it builds on |
 | --- | --- |
 | Share-nothing processes | Immutable values; no references, identity, or shared mutable state |
 | State threaded through a receive loop | Mandatory tail calls, so a process loop is an ordinary tail-recursive function |
@@ -76,7 +73,7 @@ A process runs one function to completion in isolation. It receives its own
   `(fn (m) (option r))` and leaves non-matching messages queued, which is
   selective receive without scanning semantics in the language.
 - Only the owning process can receive from an inbox, by the
-  [resource ownership rule](foundations.md#resources-and-handles). The
+  [resource ownership rule](../foundations/README.md#resources-and-handles). The
   inbox parameter, not ambient state, gives a function the right to receive.
 - Messages from one sender to one receiver arrive in send order. No other
   ordering is promised.
@@ -160,16 +157,16 @@ Supervisors are standard-library processes, not language features:
 
 - The runtime runs M:N: many processes on a pool of scheduler threads.
 - Preemption happens at function applications, counted in
-  [reductions](foundations.md#execution-budgets-and-reductions). The
+  [reductions](../foundations/README.md#execution-budgets-and-reductions). The
   interpreter counts the same reductions, so budgets and fairness behave the
   same in both backends.
 - A blocked receive, a call, and a timer wait suspend only the current process.
-  [Execution targets](execution-targets.md#processes-over-webassembly)
+  [Execution targets](../execution-targets/README.md#processes-over-webassembly)
   describes how suspension is implemented over Wasm.
 
 ## Determinism and simulation testing
 
-V1 promises determinism for fixed source, inputs, and ordered host responses.
+Vibra promises determinism for fixed source, inputs, and ordered host responses.
 Concurrency keeps that promise by treating **every scheduling decision, timer
 firing, and delivery as an ordered host response**:
 
@@ -185,11 +182,14 @@ firing, and delivery as an ordered host response**:
 - A failure reports its seed and the schedule as VIBON. `vibra test --replay`
   reruns exactly that execution, in either backend, with identical results.
 - Given one schedule, the interpreter and Wasm produce identical outputs and
-  traces. That is the concurrency form of the v1 parity gate.
+  traces. That is the concurrency form of interpreter/backend parity.
 
 This follows FoundationDB- and TigerBeetle-style deterministic simulation. For
 agents it is the most important part of this track: concurrency bugs become
 reproducible, shrinkable test failures instead of flaky runs.
+
+User-supplied host worlds for `vibra test` and replay of a recorded run are
+also open ideas for deterministic testing of single-process programs.
 
 ## Data parallelism
 
@@ -197,9 +197,9 @@ Pure computation can run in parallel without any observable difference, so it
 needs no effect root and no process:
 
 - `par.dict` over an array with a pure callback returns results in input order.
-- `par.reduce` requires a `monoid` implementation. Its associativity is a
-  documented law in line 2 and a proven one from
-  [Verification V2](verification.md#v2--lemmas-and-interface-laws).
+- `par.reduce` requires a `monoid` implementation. Its associativity starts as a
+  documented law and could become a proof obligation in
+  [Verification V2](../verification/README.md#v2--lemmas-and-interface-laws).
 - `par.both` evaluates two pure thunks.
 - If several elements trap, the trap from the lowest index is reported, so
   failure is deterministic.
@@ -208,11 +208,11 @@ needs no effect root and no process:
 
 Parallel points are explicit in the first design. Bend and HVM show that pure
 functional code can be parallelized automatically, through interaction nets.
-That remains a [horizon](README.md#horizon) study. An explicit `par` keeps a
+Automatic parallel evaluation remains a research question. An explicit `par` keeps a
 predictable cost model, which matters most when each worker is a separate Wasm
 instance and values are copied between instances.
 
-## Distribution (Vibra 3)
+## Distribution
 
 ### Nodes and addresses
 
@@ -256,11 +256,23 @@ Functions, inboxes, and other handles are never wire.
 ### Hot code upgrade (horizon)
 
 The BEAM upgrades code in place. With static types, a state upgrade needs a
-typed migration. The natural design uses v1's `from` interface: a new state
+typed migration. The natural design uses the existing `from` interface: a new state
 type implements `(from old-state)`, and a release upgrade is admitted only if
 every live process's state type has a migration path. It depends on build
-fingerprints and stable identities, which v1 already provides, and it stays
-on the horizon until services exist to motivate it.
+fingerprints and stable identities. Long-running services would give us
+workloads to test it against.
+
+## Candidate demos
+
+- A supervised HTTP key-value service restarts a crashed worker. Its request
+  parser has [statically checked contracts](../verification/README.md#v1--static-contracts-and-termination).
+  A simulation finds a seeded ordering bug and replays it in both backends.
+  This design may need a new host ABI and artifact format, with additive
+  source changes.
+- A three-node replicated store survives a simulated partition. An
+  [interface-law proof](../verification/README.md#v2--lemmas-and-interface-laws)
+  verifies its `ordered` implementation. Dependency proof status recorded in
+  lock and build metadata appears in `vibra query`.
 
 ## Open questions
 

@@ -65,6 +65,6 @@ gaps G17–G20:
 
 ## Done
 
-The type, source, packages, and runtime chapters, the charter, the v1 roadmap,
+The type, source, packages, and runtime chapters, the charter, the M3 release roadmap,
 this README, and the decision ledger agree; the specification-example
 inventory is refreshed; validation passes.

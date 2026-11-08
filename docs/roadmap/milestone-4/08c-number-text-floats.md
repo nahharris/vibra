@@ -85,7 +85,7 @@ counts of the shared vectors.
 ## Excluded
 
 Any Vibra body for these rows; `to-bits` and `from-bits`; float conversions to or
-from integers, which v1 does not have; a `@host` import for number formatting.
+from integers, which Vibra does not have; a `@host` import for number formatting.
 
 ## Completion evidence
 

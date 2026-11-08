@@ -1,6 +1,6 @@
 # Step 12 — checking and pure interpreter run
 
-Requires Step 11 and C1/C3/C10/C11. Read tooling **V1 CLI**, **Schemas and
+Requires Step 11 and C1/C3/C10/C11. Read tooling **CLI commands**, **Schemas and
 errors**, projects **Packages and targets**, runtime **Semantic reference**,
 **Determinism and observability**: [tooling](../../spec/05-tooling.md),
 [projects](../../spec/04-programs-and-packages.md), [runtime](../../spec/06-runtime.md).
@@ -40,10 +40,10 @@ errors**, projects **Packages and targets**, runtime **Semantic reference**,
 
 Pure execution's empty host trace does not forbid the compiler reading source
 files or the CLI writing its own diagnostics. Test those boundaries separately.
-V1 defines no runtime language budget; a process timeout is external evidence,
+Vibra defines no runtime language budget; a process timeout is external evidence,
 not a portable program result.
 
 Run [common validation](validation.md), actual CLI process tests, and static
 and interpreter corpus profiles for the supported subset. Record exact check/run
 demo commands, process exit codes, structured atoms, and stream bytes. No Wasm
-build, network fallback, effect execution, or advertising a supported v1 release.
+build, network fallback, effect execution, or advertising the `full-v1` profile.

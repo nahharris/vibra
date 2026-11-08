@@ -1,7 +1,7 @@
 # Milestone 1 step plan
 
 Status: exit gate evidenced; integration PR #283 ready for review
-Milestone: [Milestone 1 — reader, formatter, and conformance spine](../v1.md)
+Milestone: [Milestone 1 — reader, formatter, and conformance spine](../v0.0.1.md#milestone-1--reader-formatter-and-conformance-spine)
 Execution model: [`../execution.md`](../execution.md)
 Integration branch: `m1`
 
@@ -85,15 +85,12 @@ identifier under a domain the project controls, and the intended home is
 name a location nothing serves, so the URN states only what is true today.
 
 Switching to HTTPS later is a contract break, not a refactor. It must happen
-in one change across every published schema, and it must happen before v1 is
-released, while the only consumers are inside this repository. A session that
-finds the subdomain live should make that change rather than adding a schema
-under the old scheme.
+in one change across every published schema, before the first stable release
+and while the only consumers are inside this repository. Once the subdomain
+is live, new schemas should use the new scheme after that change.
 
-The `v1` in an identifier is the **schema's** major version, not the
-language's. The charter versions machine schemas independently of the source
-language after 1.0, so a schema `v2` can exist under language v1 and the two
-must not be assumed to move together.
+The `v1` in an identifier is the **schema's** major version. Schema
+versions can change independently of source-language and toolchain versions.
 
 ### D6 — The dependency direction is a test, not a convention
 

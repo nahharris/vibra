@@ -181,7 +181,7 @@ are in `crates/vibra-conformance/tests` unless a crate is named.
 
 ## Deliverable coverage
 
-Each M4 deliverable of [`v1.md`](../v1.md#milestone-4--webassembly-spine-static-effects-and-host-operations)
+Each M4 deliverable of [`v0.0.1.md`](../v0.0.1.md#milestone-4--webassembly-spine-static-effects-and-host-operations)
 and the owning step's evidence. The Stage 4A rows are evidenced in
 [their report](stage-4a-evidence.md#stage-4a-exit-clauses), re-run here.
 

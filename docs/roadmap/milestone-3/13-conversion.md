@@ -32,7 +32,7 @@ Prerequisite: Step 12 merged. Stage 3B behavior step.
 
 Member generics, labelled operands, a dict variadic tail, and a generic
 interface dispatched through a bounded generic or an interface value arrive
-with Step 14. Floating-point conversions are not in v1's registry.
+with Step 14. Floating-point conversions are not in the registry.
 
 ## Test matrix
 

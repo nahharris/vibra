@@ -9,7 +9,7 @@ retired when M3 Step 2 changed the AST; the
 enforce exhaustiveness, and this table records the M2 state only. `supported` means
 the M2 checker/interpreter will implement it by the owning step. `deferred`
 means M1 may parse it, but M2 reports `@tool.unavailable` when semantic support
-is required. `rejected` means the active v1 grammar itself rejects it. This is
+is required. `rejected` means the active grammar itself rejects it. This is
 a proof inventory only; normative behavior and M2 availability are defined by
 the linked topic chapters in `docs/spec/`.
 

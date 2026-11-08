@@ -1,11 +1,9 @@
 # Interactive applications
 
 Status: design direction; not normative
-Line: [Vibra 4](README.md#vibra-4--interactive-applications); GPU work on the
-[horizon](README.md#horizon)
-Prerequisites: [processes](concurrency.md),
-[effect-row polymorphism](foundations.md#effect-row-polymorphism),
-[process-owned resources](foundations.md#resources-and-handles)
+Prerequisites: [processes](../concurrency/README.md),
+[effect-row polymorphism](../foundations/README.md#effect-row-polymorphism),
+[process-owned resources](../foundations/README.md#resources-and-handles)
 
 ## Design choice: model-view-update over processes
 
@@ -95,7 +93,7 @@ statically when a target selects that host, not at run time.
 For the desktop host, the main choice is between a custom GPU renderer in
 the host runtime and a system webview that reuses the browser host. The
 webview is faster to ship. The custom renderer gives consistent layout and
-input semantics. The decision belongs to the line 4 specification and needs
+input semantics. The decision belongs to a future specification for interactive applications and needs
 prototypes of both.
 
 ## 2D graphics
@@ -129,7 +127,7 @@ prototypes of both.
 
 The interpreter/Wasm parity contract extends to models, messages, commands,
 UI trees, draw lists, and reference layout. Rasterized pixels, platform font
-rendering, and input-device timing are host outputs, in the same way that v1
+rendering, and input-device timing are host outputs, in the same way that
 treats terminal rendering of stdout bytes.
 
 ## GPU work (horizon)
@@ -142,6 +140,13 @@ the ordinary type checker plus a subset rule, and lowered to a GPU shading
 language such as WGSL. The same subset would serve both custom canvas shaders
 and GPU-backed `par` compute. It stays on the horizon until 2D graphics and
 `par` show which use arrives first.
+
+## Candidate demo
+
+One application source runs as a terminal UI and in a browser. Headless
+tests pass identically on both hosts. An agent drives the UI through
+accessibility-tree queries alone. The desktop host would build on the same
+model.
 
 ## Open questions
 

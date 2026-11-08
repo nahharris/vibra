@@ -13,7 +13,7 @@ below have canonical prose, diagnostic/schema contracts, and review evidence.
   **Functions as values**, **Inference and checking**, **Control flow and failure**.
 - [Projects](../../spec/04-programs-and-packages.md): **Project file**,
   **Packages and targets**, **Dependencies and lock**, **Tests**.
-- [Tooling](../../spec/05-tooling.md): **V1 CLI**, **Workspace queries**,
+- [Tooling](../../spec/05-tooling.md): **CLI commands**, **Workspace queries**,
   **Transactional edit plans**, **Schemas and errors**.
 - [Runtime](../../spec/06-runtime.md): **Evaluation**, **Tail calls**,
   **External providers**; [diagnostics](../../spec/07-diagnostics-and-conformance.md):
@@ -35,7 +35,7 @@ duplicating semantic payload types owned by later crates.
 
 | ID | Close before dependent code | Required decision and evidence |
 | --- | --- | --- |
-| C1 | All steps | Normative M2 admission clauses in the topic specifications: primitive `bytes`/`atom`, monomorphic function types, direct bindings, labelled literal defaults, and empty effects. Keep the supported-surface table as the exhaustive AST proof inventory; keep singleton widening, `as`, variadics, generic `types:`, nonempty effects, `result`, collections, nominal forms, and failure completion deferred; explicitly assign every overlap in `v1.md`. |
+| C1 | All steps | Normative M2 admission clauses in the topic specifications: primitive `bytes`/`atom`, monomorphic function types, direct bindings, labelled literal defaults, and empty effects. Keep the supported-surface table as the exhaustive AST proof inventory; keep singleton widening, `as`, variadics, generic `types:`, nonempty effects, `result`, collections, nominal forms, and failure completion deferred; explicitly assign every overlap in `v0.0.1.md`. |
 | C2 | 2–3, 11–12 | Full closed `@project.v1` field/type/requiredness/order and nested atom-slot role/kind tables. Version/name validation, path syntax, discovery start/stop rules, canonical-root target selection, and diagnostics with origins. Schema decode accepts valid future dependency data without silently resolving or executing it. |
 | C3 | 3–4, 12 | Selected-target and transitive-import checking scope, deterministic file/declaration/diagnostic order, root symlink/junction policy, layout failures, import cycles, private access, duplicate declarations/aliases and no-shadowing codes. Preserve specified unknown-path vs wrong-kind distinctions. |
 | C4 | 5–7 | Codes and spans for type mismatch, ambiguous numeric inference, invalid condition/result/default, duplicate/missing/unknown arguments, shadowing, and unsupported features. Define recovery/cascade policy; reuse an existing code only if its condition matches. |
@@ -46,7 +46,7 @@ duplicating semantic payload types owned by later crates.
 | C9 | 13 | Reserved project-wide `@tests` unit and optional confined `tests/` root; test declarations are confined to that unit; test-relative module identity, relationship to targets, import/visibility rules, exact canonical selector, deterministic discovery, module-local decoded-name uniqueness, and result contract. Require explicit `@std.assert` imports with `@module.missing-required-import`. Keep the exact pure assertion registry test-only, and define assertion failures without hidden host effects, general exceptions, generics, or fabricated `result` types. |
 | C10 | 11–13 | Exact implemented command grammar/options/defaults, canonical `test` selector and payload, result atoms, numeric process exits, init destinations, fmt preview/write contract, and `run --format json` routing consistent with program-owned stdout. Preserve revision checking and atomic writes. |
 | C11 | 4–14 | Canonical resolved/type/execution/test/query observations and schemas, source-file identity on multi-file spans, structured traps distinct from ordinary outcomes, the exact M2 checked-program trap code and unlocated-origin rule, exact/recovered/unavailable facts, and snapshot revision semantics. No Rust `Debug` wire format. |
-| C12 | All steps | Partial M2 profile admission vs unsupported execution: explicit availability diagnostics for deferred valid forms, no dialect/profile renaming, no full-v1 claim, and no green gate produced by skipping unavailable cases. |
+| C12 | All steps | Partial M2 profile admission vs unsupported execution: explicit availability diagnostics for deferred valid forms, no dialect/profile renaming, no `full-v1` profile claim, and no green gate produced by skipping unavailable cases. |
 
 ## Ordered work
 
@@ -56,8 +56,8 @@ duplicating semantic payload types owned by later crates.
 2. Close C1–C12 in their owning specification chapters and update affected
    roadmap boundaries together. Follow [`AGENTS.md`](../../../AGENTS.md)'s
    specification-change protocol: affected chapters, diagnostic registry,
-   conformance rule table, and `v1.md` change in one PR. If a decision changes
-   the v1 boundary, do not code it before that review.
+   conformance rule table, and `v0.0.1.md` change in one PR. If a decision changes
+   the specification boundary, complete that review before coding.
 3. Update the diagnostic registry and neutral envelope schema producer/consumer
    tests for reviewed additions. Step 1 may use fixture-owned observations to
    test comparator behavior; semantic payload schemas are owned by Steps 4–10.

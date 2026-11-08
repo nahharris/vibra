@@ -162,10 +162,10 @@ are M4's and M6's scope and no longer open questions of M3. Each still reports
 | G21: the command result for an entry that returns `err` | M4 | It needs a tooling-chapter decision on a result atom and exit code. M4 introduces host failures at the entry and must make the same decision for them. |
 
 Float conversions are not reassigned either: the type chapter gives the
-floating-point types no registry conversion in v1, so `from` and `try-from`
+floating-point types no registry conversion, so `from` and `try-from`
 over a float report an ordinary missing implementation.
 
-`hashable` is not reassigned: v1 has no `hashable`, because dict keys need only
+`hashable` is not reassigned: Vibra has no `hashable`, because dict keys need only
 `ordered` (D18.2), so the roadmap's law clause covers `equatable`, `ordered`,
 and `iter` (Step 14c).
 

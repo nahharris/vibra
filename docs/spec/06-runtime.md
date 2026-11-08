@@ -1,4 +1,4 @@
-# Vibra v1 runtime and WebAssembly
+# Vibra runtime and WebAssembly
 
 Status: normative target
 Implementation status: the reference interpreter and the WebAssembly backend
@@ -17,18 +17,18 @@ unimplemented until Milestone 4 Steps 19 and 20.
 
 The language semantics are independent of a backend. A small reference
 interpreter is the executable oracle for evaluation, types after erasure,
-effect events, and failures. The production compiler emits WebAssembly. A v1
-implementation is conforming only when both produce the same observable
-behavior for the conformance corpus.
+effect events, and failures. The production compiler emits WebAssembly. The
+backends MUST produce the same observable behavior for the executable
+conformance corpus.
 
 The interpreter is not a second frontend: it consumes the same resolved typed
 IR as the Wasm backend. Parsing, name resolution, type checking, performed-row
 calculation, and external-registry validation are shared.
 
 Both backends consume only successfully checked IR. A toolchain's implemented
-profile may be narrower than v1: a valid operation outside it is reported as
-`@tool.unavailable` before lowering and is never reinterpreted as a generic
-application. Neither backend reads ambient filesystem, environment, time, or
+profile may cover a subset of the specification. A valid operation outside it
+reports `@tool.unavailable` before lowering and is never reinterpreted as a
+generic application. Neither backend reads ambient filesystem, environment, time, or
 randomness state on behalf of an effect-free operation.
 
 The reference interpreter is the oracle. The two backends are compared on
@@ -39,7 +39,7 @@ are not observable. The conformance chapter defines how a runner executes one
 case in both.
 
 WebAssembly is a compiler output backend, not a source interoperability
-surface. V1 source cannot import a `.wasm` module or name a WebAssembly
+surface. Vibra source cannot import a `.wasm` module or name a WebAssembly
 provider.
 
 ## Evaluation
@@ -239,7 +239,7 @@ mutation is not a source feature.
 
 ## Activations and memory
 
-V1 defines no activation-depth limit. A non-tail call creates an activation
+Vibra defines no activation-depth limit. A non-tail call creates an activation
 that lasts until the call returns, and the depth of nested activations is
 bounded only by the memory available to the instance, exactly as the size of
 any other value is. A conforming backend MUST NOT consume host or engine stack
@@ -565,7 +565,7 @@ MAY, without any observable difference and without any promise to do so:
   so that a standard-library operation over an unshared array or dict avoids a
   copy.
 
-These are implementation strategies, not guarantees; v1 makes no
+These are implementation strategies, not guarantees; the runtime makes no
 optimization promise.
 
 `never` has no value and therefore no representation. No checked program
@@ -642,11 +642,11 @@ Unknown symbols, providers, Wasm imports, and WASI imports are rejected before
 execution. User source cannot add registry entries. Composite behavior belongs
 in Vibra standard-library code over small external operations.
 
-The v1 inventory is value-in/value-out. Filesystem operations read or write
-complete values for a supplied path; console, environment, clock, and random
+Host operations are value-in/value-out. Filesystem operations read or write
+complete values for a supplied path. Console, environment, clock, and random
 operations likewise exchange ordinary typed values. There are no user-visible
 file or stream handles, scoped resources, close operations, or resource
-lifetime semantics in v1.
+lifetime semantics in the specified runtime.
 
 ## The host registry
 
@@ -717,7 +717,7 @@ of each row is closed here, and a provider MUST NOT add behavior to it:
   any other failure is `other`.
 - **Paths.** A `path` is the wrapper `(deftype path str)` of `@std.fs`, and
   `(fs.path "text")` builds one. The language does not normalize, join, split,
-  or compare paths: there is no path algebra in v1. The host interprets the
+  or compare paths: there is no path algebra in Vibra. The host interprets the
   text: `/` separates components, and a NUL character in the text is
   `invalid-path`. A provider MAY accept further separators of its platform, and
   a program that needs one spelling writes `/`.
@@ -853,7 +853,7 @@ A conformance case of `workspace-run` or `workspace-test` MAY supply a
 test and for each backend. A world that fails to decode against this schema is
 `@data.invalid-shape`, `@data.invalid-value`, or the other data diagnostics of its
 violation, at the document. A user-supplied world for `vibra test`, and replay of
-a recorded run, come after v1.
+a recorded run, are outside the test contract.
 
 ## The audit trace
 
@@ -870,7 +870,8 @@ event...))`, and an **event** is a record:
     payload: (record kind: @bytes values: (array 104u8 105u8))))
 ```
 
-- `kind` is an atom naming the event's family. `@host` is the only kind in v1.
+- `kind` is an atom naming the event's family. This specification defines the
+  kind `@host`.
 - `op` is the registry symbol of the operation, a string.
 - `args` is an array with the canonical value encoding of each argument, in
   parameter order, and `(array)` for an operation with none.
@@ -960,8 +961,8 @@ Traps are not catchable by user code.
 
 ## WebAssembly boundary
 
-A WebAssembly module the toolchain emits is a **v1 module**. It uses only the
-core features of WebAssembly 2.0 that this paragraph names: the MVP
+A WebAssembly module that implements this ABI is a **v1 module**. It uses
+only the core features of WebAssembly 2.0 listed here: the MVP
 instruction set and function tables, multiple results, bulk memory operations,
 sign-extension operators, and non-trapping float-to-integer conversions. It
 does not use the tail-call, garbage-collection, exception-handling, SIMD,
@@ -1112,7 +1113,7 @@ reads. The runtime never reads ambient host state on behalf of an effect-free
 operation, and a toolchain keeps ambient reads in its provider alone, which a
 host test checks.
 
-V1 defines no fuel, host-operation, or handle-count budget, and no portable
+Vibra defines no fuel, host-operation, or handle-count budget, and no portable
 memory limit: the limit that produces `@runtime.memory-exhausted` belongs to the
 embedding host. An embedding host may enforce other external process or
 platform limits, but termination by such a limit is a host event rather than a
@@ -1128,9 +1129,9 @@ must preserve conformance observations.
 
 ## Claims and limits
 
-V1 claims source-level effect checking, closed `@compiler` and `@host`
-registries, a closed compiler-generated host ABI, and interpreter/Wasm
-conformance parity. It does not claim that an effectful program is host-safe,
+The specified runtime claims source-level effect checking, closed `@compiler`
+and `@host` registries, a closed compiler-generated host ABI, and
+interpreter/Wasm conformance parity. It does not claim that an effectful program is host-safe,
 provide a runtime sandbox, police paths within a declared effect, prevent
 nontermination, verify compilation, ensure constant-time execution, prove
 host-provider correctness, isolate native code, or safely execute arbitrary
@@ -1138,4 +1139,4 @@ foreign Wasm.
 
 Running a checked binary target is consent to every host operation covered by
 its declared roots. Deployments that need finer isolation may add an external
-sandbox, but that policy is outside the v1 language and ABI contract.
+sandbox, but that policy is outside the language and ABI contract.

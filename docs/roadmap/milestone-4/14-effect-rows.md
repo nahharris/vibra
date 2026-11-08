@@ -133,7 +133,7 @@ case `matched`.
 ## Excluded
 
 `@host` externals (16b), the target array (15), effectful tests (15), metadata
-(20), row variables and sealed roots (post-v1), any effect inference.
+(20), row variables and sealed roots (unscheduled), any effect inference.
 
 ## Completion evidence
 
@@ -152,7 +152,7 @@ one pull request over the crates below.
   declaration identity, which includes the package, so textually equal roots of two
   packages differ and the derived order is the UTF-8 order of the path, then the
   identity. `EffectRow { roots, tail }` keeps `roots` sorted and duplicate-free and
-  `tail` as `Option<RowTail>` with `RowTail` an empty enum, so v1 has no row
+  `tail` as `Option<RowTail>` with `RowTail` an empty enum, so Vibra has no row
   variable and a later one is one more variant. `FunctionSignature` carries the row;
   equality, `same_shape`, `admits`, the inference unifier, `Display`, and
   `canonical_type` all include it, and the encoding writes `effects: (record roots:

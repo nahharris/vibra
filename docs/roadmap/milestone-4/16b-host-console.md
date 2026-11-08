@@ -73,7 +73,7 @@ re-expected; the cases are `matched` in both backends, with parity rows.
   the builders**), **The host registry**, **The audit trace**, **Traps**,
   **The host world**.
 - [Effects](../../spec/03-effects.md): **Nominal effects** (the `@host` diagnostics)
-  and **V1 standard effect inventory**.
+  and **Standard effect inventory**.
 - [Source language](../../spec/01-source-language.md): **External definitions**.
 - [Diagnostics](../../spec/07-diagnostics-and-conformance.md): **Effect and host
   diagnostics**, the host-operation coverage paragraph.

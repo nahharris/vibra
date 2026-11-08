@@ -1,11 +1,11 @@
 # Pre-M4 specification changes
 
 Status: process guidance; not normative
-Applies between: [Milestone 3](../v1.md#milestone-3--complete-nominal-static-core) and
-[Milestone 4](../v1.md#milestone-4--webassembly-spine-static-effects-and-host-operations)
+Applies between: [Milestone 3](../v0.0.1.md#milestone-3--complete-nominal-static-core) and
+[Milestone 4](../v0.0.1.md#milestone-4--webassembly-spine-static-effects-and-host-operations)
 Last updated: 2026-10-02
 
-Milestone 3 is merged and Milestone 4 has not started. Three changes were
+After Milestone 3 merged and before Milestone 4 began, three changes were
 agreed on 2026-10-02 to land before M4 does. This document records them and the
 decisions behind them. It carries no normative weight over `spec/`; each change
 that alters observable behavior is a specification change under the
@@ -32,7 +32,7 @@ request that has not merged is conditional on that merge.
 | --- | --- | --- |
 | 1 | Bindings, early exit, and `never`: `let` becomes a parent-scope binding form `(let pattern value pattern value ...)` valid only as an element of a body sequence; a new `(let-else pattern value fallback)` refutable binding whose fallback must diverge; a new `(return expr)` early-exit form; and a predeclared uninhabited type `never`; checklist: [`01-bindings-return-never.md`](01-bindings-return-never.md) | `landed`, conditional on [PR #352](https://github.com/nahharris/vibra/pull/352) merging |
 | 2 | Tail-call guarantee: every call in tail position reuses the current activation, whatever the callee, replacing the narrower rule for a recursive group within one module | `landed`, conditional on [PR #351](https://github.com/nahharris/vibra/pull/351) merging; see [`02-tail-calls.md`](02-tail-calls.md) |
-| 3 | Roadmap coverage: this document, the M4 deliverable for deep non-tail recursion, and the beyond-v1 notes | `landed`, conditional on this PR merging |
+| 3 | Roadmap coverage: this document, the M4 deliverable for deep non-tail recursion, and the scratchpad notes | `landed`, conditional on this PR merging |
 
 ## Decisions
 
@@ -55,7 +55,7 @@ A ban also cannot cover recursion through function values or interface values
 without rejecting the standard `iter` adapters, so any ban would be partial.
 The decision is no ban rather than a partial ban. A solver-free recursion
 classification stays available as an informational fact; see
-[verification](../beyond-v1/verification.md#v0--executable-contracts-and-properties).
+[verification](../../scratchpad/verification/README.md#v0--executable-contracts-and-properties).
 
 ### Deep non-tail recursion stays legal, so its outcome is specified first
 
@@ -63,7 +63,7 @@ Because non-tail recursion remains legal, the outcome of exhausting stack depth
 must be specified before the Wasm backend exists. Today it is a host event
 outside interpreter/Wasm parity. Milestone 4 gains a deliverable that replaces
 that rule; see
-[`v1.md`](../v1.md#milestone-4--webassembly-spine-static-effects-and-host-operations).
+[`v0.0.1.md`](../v0.0.1.md#milestone-4--webassembly-spine-static-effects-and-host-operations).
 
 ### `never` is added now, as a real type
 

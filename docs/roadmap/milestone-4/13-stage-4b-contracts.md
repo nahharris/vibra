@@ -22,7 +22,7 @@ and review.
   **Toolchain standard-library input**.
 - [Diagnostics](../../spec/07-diagnostics-and-conformance.md): the registry,
   `@audit-trace.v1`, effect coverage, **Differential execution**.
-- [Beyond v1](../beyond-v1/README.md#what-v1-carries-for-later-lines): the four
+- [Scratchpad milestone dependencies](../../scratchpad/README.md#milestone-dependencies): the four
   obligations M4 carries, which the registry rule, the audit encoding, and the row
   record serve.
 - [The Step 1 guide](01-contracts.md), which this guide follows, and the

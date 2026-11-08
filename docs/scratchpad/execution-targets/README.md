@@ -1,13 +1,13 @@
 # Execution targets
 
 Status: design direction; not normative
-Question: how far does WebAssembly carry Vibra's post-v1 goals, and when is a
+Question: how far can WebAssembly carry these proposals, and when is a
 native backend justified?
 
 ## Summary
 
-WebAssembly limits Vibra less than it first appears to, because v1 already put
-the important boundary somewhere else. Vibra does not use WASI or raw Wasm
+WebAssembly limits Vibra less than it first appears to, because Vibra puts the
+important boundary at the host registry. Vibra does not use WASI or raw Wasm
 imports. It imports only its own closed, versioned `vibra_vN` host registry
 through a scalar-only ABI. **Processes, windows, sockets, and GPUs are
 implemented by the Vibra host runtime, not by Wasm.** Wasm limits only what
@@ -31,8 +31,8 @@ Several Wasm proposals bear on this design: tail calls, garbage collection
 component model, and asynchronous WASI. Their status in browsers and
 standalone engines changes release by release. When a track starts, its
 specification MUST record the proposal status it relies on, verified at that
-time. Vibra's semantics MUST NOT depend on any of them, because the v1 rule
-that the interpreter is the semantic oracle keeps every backend strategy
+time. Vibra's semantics MUST NOT depend on any of them, because the interpreter's role
+as the semantic oracle keeps every backend strategy
 unobservable.
 
 ## Processes over WebAssembly
@@ -62,8 +62,8 @@ the host.
 
 ## Moving values between instances
 
-The v1 ABI already passes composite values as opaque indices into an
-instance-owned arena. Line 2 extends it, as the `vibra_v2` ABI, with:
+The current host ABI passes composite values as opaque indices into an
+instance-owned arena. A candidate `vibra_v2` ABI would extend it with:
 
 - **transfer**, which moves a value graph from one instance's arena to
   another's, as a deep copy or a transfer of an immutable buffer. Because
@@ -73,9 +73,9 @@ instance-owned arena. Line 2 extends it, as the `vibra_v2` ABI, with:
   functions and the scheduler need; and
 - **scheduler events** in the audit trace, which record choices for replay.
 
-The v1 rule that value indices never leak instance identity into typed IR or
+The rule that value indices never leak instance identity into typed IR or
 build output is what makes transfer possible. It is one of the
-[obligations v1 carries for later lines](README.md#what-v1-carries-for-later-lines).
+[milestone dependencies](../README.md#milestone-dependencies).
 
 ## Parallel pure computation
 
@@ -89,7 +89,7 @@ immutable buffers can lower the copy cost later without changing semantics.
 
 In the browser, Wasm is at home. The host registry maps UI operations to the
 DOM or a canvas, as described in
-[Interactive applications](interactive-apps.md#hosts). On the desktop and in
+[Interactive applications](../interactive-apps/README.md#hosts). On the desktop and in
 the terminal, the Vibra host runtime owns the window or terminal and renders the
 UI tree it receives. Neither case needs anything from Wasm beyond passing
 values across the ABI.
@@ -120,7 +120,7 @@ is conformance-tested.
 
 ## Pass ordering
 
-V1 ships no optimization or hardening pass. When either arrives, on any
+The v0.0.1 toolchain ships no optimization or hardening pass. When either arrives, on any
 backend, two constraints apply from the start because they are cheap to adopt
 and expensive to retrofit:
 
@@ -130,8 +130,17 @@ and expensive to retrofit:
   test fails when it changes.
 - **Two claims stay separate.** A pass may claim that it preserves conformance
   observations. It never claims, and documentation never implies, that it stops
-  an attack. The v1 runtime chapter already makes no verified-compilation or
+  an attack. The runtime chapter already makes no verified-compilation or
   host-safety claim.
 
-The scalar-only ABI that such work would rely on is already a v1 rule in the
+The scalar-only ABI that such work would rely on is already specified in the
 runtime chapter.
+
+## Other compiler research
+
+- Tail recursion modulo constructor would guarantee constant stack for a
+  recursive call whose only remaining work is completing a data constructor.
+  It matters less for Vibra than for cons-list languages because Vibra
+  collections are arrays walked through `iter`.
+- Verified or translation-validated compilation.
+- Self-hosting.

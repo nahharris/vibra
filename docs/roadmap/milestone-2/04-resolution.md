@@ -20,7 +20,7 @@ as values**, source **Declarations**, and diagnostics **Recovery**:
    own target's private module-level `defn` without creating an import edge.
 4. Enforce flat top-level spelling collisions across namespaces and reserved
    value spellings. Keep namespace selection separate from canonical identity.
-   Record unavailable later-v1 declarations without treating them as calls.
+   Record unavailable declarations assigned to later milestones without treating them as calls.
 5. Resolve supported body references into IDs. Establish reusable lexical-scope
    operations for Step 6; no discard ID, declaration, or reference is created.
 6. Produce canonical resolved snapshots through the static handler. Resolution

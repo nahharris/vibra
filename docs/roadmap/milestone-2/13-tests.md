@@ -1,7 +1,7 @@
 # Step 13 — pure tests and assertions
 
 Requires Step 12 and C8/C9/C10/C11. Read projects **Tests**, source
-**Declarations**, tooling **V1 CLI**, runtime **Evaluation** and
+**Declarations**, tooling **CLI commands**, runtime **Evaluation** and
 **Determinism and observability**: [projects](../../spec/04-programs-and-packages.md),
 [source](../../spec/01-source-language.md), [tooling](../../spec/05-tooling.md),
 [runtime](../../spec/06-runtime.md).

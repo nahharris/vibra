@@ -12,7 +12,7 @@ Prerequisite: Step 14b merged. Stage 3B behavior step.
 
 1. **Laws.** The type chapter states the algebraic laws of `equatable`,
    `ordered`, and `iter`, each with a conformance example. `hashable` has none,
-   since v1 does not declare it. The toolchain cannot check a law; the chapter
+   since Vibra does not declare it. The toolchain cannot check a law; the chapter
    says what a program that breaks one may still rely on.
 2. **The role check.** Every role of the closed table is now claimed, `@iter`
    by a `defint`, so the loader's missing-role check, deferred since Step 4b,

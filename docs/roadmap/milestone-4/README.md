@@ -1,9 +1,9 @@
 # Milestone 4 step plan
 
-Status: complete on `m4`; M4's exit gate is evidenced in the
-[exit evidence](exit-evidence.md), conditional on Step 22's pull request merging
-(the merge of `m4` into `main` is the maintainer's). Stage 4A, the WebAssembly
-spine, is complete ([Stage 4A evidence](stage-4a-evidence.md), Step 12, PR #370).
+Status: shipped in [v0.0.1](../v0.0.1.md) after the merge of `m4` into `main`
+(PR #353). The [exit evidence](exit-evidence.md) records the M4 gate.
+Stage 4A, the WebAssembly spine, is complete
+([Stage 4A evidence](stage-4a-evidence.md), Step 12, PR #370).
 Stage 4B, static effects and host operations, has landed: Step 13 froze the
 contracts (PR #371), Steps 14 to 21 implemented them in both backends (PRs #372 to
 #381; the host console is [Step 16b](16b-host-console.md)), and Step 21b (PR #382) fixed a defect that Step 22's demo sweep found in the
@@ -12,7 +12,7 @@ indirect call-flow analysis before the gate was evidenced.
 Decision ledger: [decision-ledger.md](decision-ledger.md)
 Surface inventory: [supported-surface.md](supported-surface.md)
 Validation: [validation.md](validation.md)
-Milestone: [Milestone 4 — WebAssembly spine, static effects, and host operations](../v1.md#milestone-4--webassembly-spine-static-effects-and-host-operations)
+Milestone: [Milestone 4 — WebAssembly spine, static effects, and host operations](../v0.0.1.md#milestone-4--webassembly-spine-static-effects-and-host-operations)
 Execution model: [execution.md](../execution.md)
 Integration branch: `m4`
 
@@ -44,7 +44,7 @@ acceptance, and those are the executable cases the parity inventory covers; a
 rejected case reaches no backend and has no row.
 
 1. Read `AGENTS.md`, [the charter](../../spec/00-charter.md), the M4 section of
-   [`v1.md`](../v1.md), this plan, and the chosen step's guide. Read the exact
+   [`v0.0.1.md`](../v0.0.1.md), this plan, and the chosen step's guide. Read the exact
    specification sections the guide names before editing code.
 2. Fetch `origin/m4` and branch from its current head. Do not start from
    `main`, `m3`, or a previous step's unmerged branch.
@@ -120,7 +120,7 @@ evidences every exit-gate clause.
   on the heap by the same plan (Step 3). Arena frames were chosen over a counted
   limit because a limit would make every non-tail call a counted, trapping
   operation and tie the lowering to the engine's stack, and because arena frames
-  are the representation the post-v1 process model needs, where a process's
+  are the representation the proposed process model needs, where a process's
   stack is part of its heap and preemption counts function calls.
 - **The arena is the module's own linear memory (D2).** It is managed by
   compiler-emitted code. Inside a module values refer to each other by offset,
@@ -132,14 +132,15 @@ evidences every exit-gate clause.
   exported once under the reserved name `vibra_v1_memory` for toolchain-owned
   native code only. A Stage 4A module imports only the pure native import module
   and has no `@host` import. An ID that is not an address
-  lets a later ABI move values between instances and threads, as the beyond-v1
-  obligations require, and lets the host read nothing it was not given.
+  lets a later ABI move values between instances and threads, as discussed in
+  [the scratchpad](../../scratchpad/execution-targets/README.md#moving-values-between-instances),
+  and lets the host read only values it was given.
 - **Reclamation is precise reference counting (D3).** The specification states
   the rule only: liveness, unobservable release, a bounded live arena for an
   allocating tail loop, bounded-stack release, and that values cannot form
   cycles ([the premises are verified](decision-ledger.md#d34-the-no-cycle-premises)).
-  The implementation is Perceus-style and non-atomic, because v1 and the post-v1
-  plan are share-nothing with one instance per thread. M4 ships plain `dup` and
+  The implementation is Perceus-style and non-atomic, because M4 and the proposed
+  process model are share-nothing with one instance per thread. M4 ships plain `dup` and
   `drop` with no elision. Borrow inference, count fusion, and in-place reuse of
   unshared values are M7 optimizations measured against the Step 21 baseline.
   Freeing walks an explicit worklist, so the engine stack stays bounded for any
@@ -330,7 +331,7 @@ each by the ledger rows its last column names.
 
 | ID | Gap | Why it blocks | Owner |
 | --- | --- | --- | --- |
-| G1 | The runtime chapter still says v1 defines no portable stack-depth limit and that exhausting the host stack is a host event outside parity, reported as `@runtime.host-stack-exhausted` and `@command.operational-failure`. The roadmap requires that rule replaced by either (a) a counted activation-depth limit both backends trap on identically, or (b) activations held in the arena. The interpreter's current bound is an implementation constant of 4,096 activations. | The choice decides how the Wasm backend lowers every non-tail call, whether it depends on the engine's stack, and which diagnostic, command result, and exit code three chapters name. It is a maintainer decision. | Closed by [D1.1–D1.4](decision-ledger.md); implemented by Steps 3 and 6 |
+| G1 | The runtime chapter then said Vibra defined no portable stack-depth limit and that exhausting the host stack is a host event outside parity, reported as `@runtime.host-stack-exhausted` and `@command.operational-failure`. The roadmap requires that rule replaced by either (a) a counted activation-depth limit both backends trap on identically, or (b) activations held in the arena. The interpreter's current bound is an implementation constant of 4,096 activations. | The choice decides how the Wasm backend lowers every non-tail call, whether it depends on the engine's stack, and which diagnostic, command result, and exit code three chapters name. It is a maintainer decision. | Closed by [D1.1–D1.4](decision-ledger.md); implemented by Steps 3 and 6 |
 | G2 | The runtime chapter names an instance-owned value arena of opaque indices only in **WebAssembly boundary**. It does not say where compound values live, what an index denotes, which kinds exist, or how a host reads a compound value when no guest pointer crosses the boundary. Stage 4A allows no import, so the arena cannot be a set of host functions the module calls. | Every compound value in the Wasm backend depends on it, and the Stage 4B host ABI is designed against it. | Closed by [D2.1–D2.3](decision-ledger.md); implemented by Step 5a |
 | G3 | The arena reclamation rule does not exist. The roadmap fixes its constraints: reclamation is unobservable apart from memory use, an index is never reused within an instance, and a tail-recursive loop that allocates per iteration holds a bounded live arena. Nothing states how wide an index is, what happens when the index space or the memory is exhausted, or that releasing a deeply nested value must not recurse on the engine stack. | The arena cannot be implemented first and given a rule later; the exit gate measures the live size. | Closed by [D3.1–D3.5](decision-ledger.md); implemented by Steps 5a and 6 |
 | G4 | The conformance chapter lists "Wasm result and ordered audit trace where executable" but defines no operation, snapshot key, or reporting rule for it, and the closed operation list has only interpreter selectors. `wasm-v1` does not include `interpreter-v1`, so no declared profile runs both backends on one case. | The differential harness is a deliverable and the Stage 4A sub-gate; it needs a contract before it has a handler. | Closed by [D6.1–D6.4](decision-ledger.md); implemented by Step 4 |
@@ -349,7 +350,7 @@ each by the ledger rows its last column names.
 | G17 | Several effect conditions have no diagnostic: an unknown or repeated root in a target's `effects` array ("project errors"), a binary target with no `effects` field, a `@host` declaration outside a `deffect`, a `@host` operation with an additive row, a registry entry whose owner is not the enclosing root, and `effects:` written on a `deffect`. The call-witness shape that `@effect.outside-ceiling` must report is not defined, and neither is whether `@contract.unused-effect` applies to a target array. | The exit gate names the witness, and each rejection needs a stable code, level, and span before its case is written. | Closed by [D23.1–D23.2](decision-ledger.md#stage-4b-contracts-step-13); implemented by Steps 14, 15, and 16 |
 | G18 | A performed row is computed over the function-call graph, but a call through a function value or an interface value has no statically known callee. The row such a call contributes, from the function type's row or the contract ceiling, is implied and not stated. | M3 made an unknown call target stand for every escaping function; effects need the stated rule instead, or the performed row is not least. | Closed by [D24.1](decision-ledger.md#stage-4b-contracts-step-13); implemented by Step 14 |
 | G19 | Effect rows in typed IR, query schemas, and build metadata must not assume a row is a closed literal set. No representation rule exists. | It is a forward-compatibility obligation that is cheap now and breaking later. | Closed by [D25.1](decision-ledger.md#stage-4b-contracts-step-13); implemented by Steps 14 and 20 |
-| G20 | `never` has no terminating source in v1 other than `return`. The pre-M4 revision left a host `exit` or a pure intrinsic as an M4 decision; the charter excludes processes. | Decide once, so the standard effect inventory is closed. Recommendation: add none. | Closed by [D26.1](decision-ledger.md#stage-4b-contracts-step-13); no step adds a terminating source |
+| G20 | `never` has no terminating source other than `return`. The pre-M4 revision left a host `exit` or a pure intrinsic as an M4 decision; the charter excludes processes. | Decide once, so the standard effect inventory is closed. Recommendation: add none. | Closed by [D26.1](decision-ledger.md#stage-4b-contracts-step-13); no step adds a terminating source |
 | G21 | `@stdlib-manifest.v1` is a closed record with `compiler`, `native`, and `assertions` lists and no list for `@host` symbols, and the embedded module set has no `io`, `fs`, `env`, `time`, or `random` module. | Host declarations need the same closed authority as `@compiler` ones. | Closed by [D27.1](decision-ledger.md#stage-4b-contracts-step-13); implemented by Steps 16–18 |
 | G22 | The position envelope and `@index.v1` have no fields for performed, enclosing, and target effect rows, effect-operation witnesses, or effect roots and operations as indexed entities. `V1-TOOL-index-unavailable` pins their absence in the M3 form, which Step 20 replaces. | Steps 14 and 20 emit them. | Closed by [D28.1](decision-ledger.md#stage-4b-contracts-step-13); implemented by Step 20 |
 | G23 | The performance baseline has no definition: which programs, which measures, where the numbers are recorded, and whether CI checks them. | M7 compares against it, so it must be reproducible. | Closed by [D29.1](decision-ledger.md#stage-4b-contracts-step-13); implemented by Step 21 |

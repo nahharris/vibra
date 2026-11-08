@@ -7,7 +7,7 @@ never here.
 
 ## Read before editing
 
-- [Roadmap](../v1.md#milestone-4--webassembly-spine-static-effects-and-host-operations):
+- [Roadmap](../v0.0.1.md#milestone-4--webassembly-spine-static-effects-and-host-operations):
   the demo gate and the exit gate.
 - [README](README.md#deliverable-and-gate-coverage) and the
   [M3 deferral inventory](README.md#m3-deferral-inventory).

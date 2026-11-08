@@ -55,7 +55,7 @@ then chooses the shortest containing node with deterministic depth/source-order
 ties. Trivia is unavailable; recovery is recovered; valid siblings remain
 exact in a recovered document.
 
-The reviewed v1 wire contract is published as
+The reviewed JSON wire contract is published as
 `urn:vibra:schema:v1:source-position-query` with these camel-case fields:
 `schemaVersion`, `offset`, `span`, `mode`, `syntaxKind`, `category`, `status`,
 `permittedForms`, and `permittedLabels`. The category vocabulary is

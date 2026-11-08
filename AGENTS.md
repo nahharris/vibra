@@ -7,15 +7,16 @@ Guidance for contributors working on the Vibra soft reboot.
 The active tree is specification-first. Do not restore, copy, or incrementally
 repair the pre-v1 implementation. It is preserved under `archive/pre-v1/` only
 for archaeology. New implementation work begins only through an active
-milestone in `docs/roadmap/v1.md` and must target the active specification.
+milestone in a release plan indexed by `docs/roadmap/README.md` and must
+target the active specification.
 
 ## Authority order
 
 1. `docs/spec/00-charter.md`
 2. the topic-specific documents in `docs/spec/`
-3. `docs/roadmap/v1.md`
-4. implementation and tests, once they exist
-5. `archive/pre-v1/`, which is never normative
+3. the release roadmaps indexed by `docs/roadmap/README.md`
+4. implementation and tests
+5. `docs/scratchpad/` and `archive/pre-v1/`, which are non-normative
 
 If active documents disagree, stop and correct the specification before
 implementing either interpretation.

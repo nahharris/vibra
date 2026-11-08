@@ -13,7 +13,7 @@ needs to prove the pipeline end to end.
 - [Diagnostics](../../spec/07-diagnostics-and-conformance.md): **Conformance
   corpus**, **Conformance profiles** and **Differential execution**,
   **Required implementation suites**.
-- [Roadmap architecture boundary](../v1.md#architecture-boundary) and
+- [Roadmap architecture boundary](../README.md#architecture-boundary) and
   `crates/vibra-conformance/tests/architecture_boundary.rs`.
 - [README](README.md#fixed-implementation-decisions): the engine and encoder
   decision and the dependency evidence; [M4 ledger](decision-ledger.md) rows

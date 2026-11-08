@@ -54,7 +54,7 @@ alone is not the corpus oracle. Variadic array/dict construction, generics,
 methods and collection application remain assigned by C1 to later work.
 Recursive execution remains unavailable until Step 9; function values must not
 bypass that admission boundary through an indirect call. Step 1's admission
-contract must cover this restriction without reinterpreting valid v1 source.
+contract must cover this restriction without reinterpreting valid source.
 
 Run [common validation](validation.md) and focused resolver/type/interpreter/fmt
 tests. Done includes resolved function/type/value observations, capture lifetime

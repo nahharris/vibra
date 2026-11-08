@@ -24,7 +24,7 @@ Requires Step 4 and C1/C4/C11/C12. Read types **Model**, **Application**,
    an arbitrary parsed AST is not executable input.
 6. Wire real static and interpreter handlers, canonical value observations and
    explicit empty audit traces. Keep the reader handler and broaden corpus CI
-   labelling to describe the actual profiles without claiming complete v1.
+   labelling to describe the actual profiles without claiming full conformance.
 
 | Positive | Negative / boundary |
 | --- | --- |

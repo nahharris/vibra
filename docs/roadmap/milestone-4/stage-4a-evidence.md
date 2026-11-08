@@ -158,7 +158,7 @@ The workspace test suite reports 1,178 passed and 0 failed (`cargo test --worksp
 
 ## Stage 4A exit clauses
 
-Each deliverable of the Stage 4A rows in `docs/roadmap/v1.md`, and each
+Each deliverable of the Stage 4A rows in `docs/roadmap/v0.0.1.md`, and each
 exit-gate clause that Stage 4A owns, maps to cases (interpreter plus Wasm
 through the differential), host tests, and ledger rows. Case IDs are corpus
 cases and run in both backends; host tests are in

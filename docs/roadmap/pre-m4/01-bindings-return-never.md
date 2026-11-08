@@ -1,7 +1,7 @@
 # Pre-M4 step 1: bindings, `return`, and `never`
 
 Status: implemented in the pre-M4 bindings PR
-Applies to: the pre-M4 language revision in [`../v1.md`](../v1.md)
+Applies to: the pre-M4 language revision in [`../v0.0.1.md`](../v0.0.1.md)
 
 This is the behavior checklist that [`../execution.md`](../execution.md) step 4
 asks for, plus the implementation order, the migration plan, and the contract
@@ -468,5 +468,5 @@ the ones the Stage B rows depend on:
 - `vibra fmt` reports `@project.io-error: formatted document did not reparse
   cleanly` for a document that carries an AST-level error. This revision does
   not change that contract.
-- `never` has no terminating source in v1; a host `exit` or pure intrinsic is
+- `never` has no terminating source; a host `exit` or pure intrinsic is
   left to M4.

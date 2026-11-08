@@ -1,7 +1,7 @@
 # Step 14 — reproducible M2 demo and exit audit
 
 Requires Step 13. This is an evidence step. Read the complete
-[M2 gate](../v1.md#milestone-2--executable-pure-core), the
+[M2 gate](../v0.0.1.md#milestone-2--executable-pure-core), the
 [coverage table](README.md#deliverable-and-gate-coverage), diagnostics
 **Required implementation suites**, and runtime **Tail calls** /
 **Determinism and observability**:
@@ -45,7 +45,7 @@ unresolved gates. Fix small audit defects in this PR with regression evidence;
 if a promised slice is materially absent, repair its plan and implementation
 explicitly before continuing the gate.
 
-Update `README.md`, `docs/index.md`, `docs/roadmap/v1.md` and affected topic
+Update `README.md`, `docs/index.md`, `docs/roadmap/v0.0.1.md` and affected topic
 implementation-status prose to the exact implemented subset. Planning is not
 execution evidence; green reader tests alone are not M2 completion. Only after
 the evidence passes may the standing `m2 -> main` draft become ready for review.
