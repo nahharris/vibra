@@ -140,7 +140,7 @@ The active specification excludes the following features.
   claims.
 
 An excluded feature MUST receive a specification change before implementation.
-The [scratchpad](../scratchpad/README.md) holds unscheduled proposals.
+The [scratchpad](../roadmap/scratchpad/README.md) holds unscheduled proposals.
 
 ## Compatibility policy
 

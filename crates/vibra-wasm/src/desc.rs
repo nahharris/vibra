@@ -1,7 +1,7 @@
 //! Run-time type descriptors, and the table that names them.
 //!
 //! A generic activation and an interface value carry types at run time as
-//! **descriptors** (`docs/roadmap/milestone-4/decision-ledger.md`, D9.2 and
+//! **descriptors** (`docs/roadmap/v0.0.1/m4/decision-ledger.md`, D9.2 and
 //! D9.5, and [`crate::layout`], "Type arguments"). A descriptor is an arena
 //! `tuple` whose first cell is the **head** of the type's constructor and whose
 //! other cells are the descriptors of its arguments, so two descriptors are the

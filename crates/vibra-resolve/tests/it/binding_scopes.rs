@@ -1,4 +1,4 @@
-//! Scope of `let` and `let-else` bindings (`docs/roadmap/pre-m4/01-bindings-return-never.md`,
+//! Scope of `let` and `let-else` bindings (`docs/roadmap/v0.0.1/pre-m4/01-bindings-return-never.md`,
 //! section B).
 
 use vibra_diagnostics::DiagnosticCode;

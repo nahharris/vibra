@@ -19,7 +19,7 @@
 //!
 //! # Status
 //!
-//! Milestone 1 step 2. Complete. See `docs/roadmap/milestone-1/README.md`.
+//! Milestone 1 step 2. Complete. See `docs/roadmap/v0.0.1/m1/execution.md`.
 
 // Tests assert by panicking and index fixtures they just built. The library
 // itself is still checked against these lints, because clippy builds the lib

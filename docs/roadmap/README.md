@@ -2,8 +2,8 @@
 
 | Release | Phase | Scope |
 | --- | --- | --- |
-| [v0.0.1](v0.0.1.md) | Pre-alpha, shipped | M1–M4 |
-| [v0.0.2](v0.0.2.md) | Pre-alpha, provisional | M5–M7, subject to substantial revision |
+| [v0.0.1](v0.0.1/README.md) | Pre-alpha, shipped | M1–M4 |
+| [v0.0.2](v0.0.2/README.md) | Pre-alpha, provisional | M1–M3, provisional |
 | Later v0.0.x | Pre-alpha | Scope will be assigned as proposals mature |
 | v0.1.0 | First alpha | Goal to be defined during pre-alpha |
 | v0.2.0 | First beta | Scope to be defined |
@@ -15,7 +15,7 @@ tags, including `v0.1.0`, belong to the
 schema, and ABI versions are independent of toolchain release versions.
 Conformance profiles identify supported surfaces.
 
-The [scratchpad](../scratchpad/README.md) holds unscheduled research. When a
+The [scratchpad](scratchpad/README.md) holds unscheduled research. When a
 proposal is ready to schedule, it moves into a specific release roadmap. Use
 the [milestone execution model](execution.md) to plan and record delivery.
 Milestone step plans live in their respective directories under this one.
@@ -36,11 +36,8 @@ Roadmaps schedule work against the active specification.
    ABI shims, and automatic migrations.
 6. When implementation exposes a design gap, specification review happens
    before more code.
-7. Milestone numbers are stable identities. Plans, ledgers, and diagnostics
-   assign deferred work by number, so a milestone is never renumbered or
-   inserted; a large milestone is delivered in ordered stages instead, each
-   with its own demo and corpus sub-gate, and its exit gate stays the only
-   merge gate.
+7. Milestone numbers identify work within a release. A large milestone may be
+   delivered in ordered stages, each with its own demo and corpus sub-gate.
 
 ## Architecture boundary
 

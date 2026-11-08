@@ -106,8 +106,8 @@ vibra check
 vibra run
 ```
 
-The repository also contains [example projects](examples/), including a
-[console example](examples/m4-console/) and a [file-processing demo](examples/m4-demo/).
+The repository also contains [example projects](examples), including a
+[console example](examples/m4-console) and a [file-processing demo](examples/m4-demo).
 The CLI currently supports project initialization, formatting, checking,
 running, and testing. Use `vibra help` to see the available commands.
 
@@ -137,13 +137,13 @@ access. It also has the beginnings of a standard library and workspace tooling.
 
 Vibra is developed specification-first. The [charter](docs/spec/00-charter.md)
 and [language specifications](docs/index.md) define the language contracts.
-[v0.0.1](docs/roadmap/v0.0.1.md) shipped M1–M4 in pre-alpha. The provisional
-[v0.0.2 roadmap](docs/roadmap/v0.0.2.md) starts from M5–M7: reproducible
+[v0.0.1](docs/roadmap/v0.0.1/README.md) shipped M1–M4 in pre-alpha. The provisional
+[v0.0.2 roadmap](docs/roadmap/v0.0.2/README.md) starts from v0.0.2 M1–M3: reproducible
 dependencies, agent-facing tooling, and WebAssembly build products. The
-[scratchpad](docs/scratchpad/README.md) collects unscheduled research on
+[scratchpad](docs/roadmap/scratchpad/README.md) collects unscheduled research on
 verification, concurrency, interactive applications, and other topics.
 
-An earlier implementation is preserved in [the archive](archive/pre-v1/) as
+An earlier implementation is preserved in [the archive](archive/pre-v1) as
 part of the project's history. The current implementation is a fresh start and
 does not promise compatibility with that version.
 

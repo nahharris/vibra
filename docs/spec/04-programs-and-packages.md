@@ -4,7 +4,7 @@ Status: normative target
 Implementation status: M1 supplies generic VIBON data and structural query
 metadata; M2 decodes projects, resolves local modules, and supports init,
 check, run, and test; M3 embeds the standard library as the toolchain input.
-Ordinary dependency delivery (M5) and build products (M7) remain unimplemented,
+Ordinary dependency delivery (v0.0.2 M1) and build products (v0.0.2 M3) remain unimplemented,
 and `run` and `test` execute the reference interpreter. Milestone 4 Step 13 closes
 the Stage 4B contracts of this chapter, the `host` list and effect modules of the
 standard-library manifest, the test host world, and the target `effects`
@@ -227,7 +227,7 @@ declared dependency. The `@tests` unit has kind `@lib` in the graph snapshot,
 but it is not a project target or a dependency and has no target entry. A
 dependency edge retains its alias, kind, target value, and source span. Graph
 construction MUST NOT resolve, fetch, inspect, or silently discard a dependency;
-because ordinary dependency delivery is deferred to M5, each unsupported edge
+because ordinary dependency delivery is deferred to v0.0.2 M1, each unsupported edge
 reports `@tool.unavailable` at its dependency alias while remaining present in
 the graph. The graph accepts only the immutable snapshot produced by this
 workspace boundary; later resolver phases receive no ambient filesystem handle.
@@ -675,6 +675,6 @@ checks source targets before execution, while another Wasm host is responsible
 for its own embedding policy. Identical toolchain, project snapshot, target,
 and build options MUST produce byte-identical outputs.
 
-[Distribution research](../scratchpad/foundations/README.md#other-distribution-work)
+[Distribution research](../roadmap/scratchpad/foundations/README.md#other-distribution-work)
 covers signing, publishing build products, and multi-artifact application
 containers.

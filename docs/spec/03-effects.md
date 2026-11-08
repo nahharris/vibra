@@ -390,7 +390,7 @@ The owner root of an operation is `@std.<module>.<root>`, so `fs.read.file` is
 owned by `@std.fs.read`. Append, remove, and create-directory are deferred to
 later registry minors. Environment writes, sleep/timers, networking, processes,
 signals, streaming handles, and async operations are
-[unscheduled proposals](../scratchpad/foundations/README.md#other-effect-and-host-extensions).
+[unscheduled proposals](../roadmap/scratchpad/foundations/README.md#other-effect-and-host-extensions).
 Convenience functions compose the roots above instead of acquiring hidden effects.
 
 Vibra has no terminating source. No host operation, intrinsic, or standard

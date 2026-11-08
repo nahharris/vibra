@@ -1,6 +1,6 @@
 //! The performance baseline (milestone 4 Step 21; ledger D29.1).
 //!
-//! The checked-in `docs/roadmap/milestone-4/performance-baseline.vibon` records
+//! The checked-in `docs/roadmap/v0.0.1/m4/performance-baseline.vibon` records
 //! the exact metrics of ten programs in both backends. This test regenerates
 //! them and fails on any difference, naming the program and the metric, so a
 //! change that moves one is reviewed as a baseline change: regenerate the file

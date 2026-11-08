@@ -16,7 +16,7 @@ target the active specification.
 2. the topic-specific documents in `docs/spec/`
 3. the release roadmaps indexed by `docs/roadmap/README.md`
 4. implementation and tests
-5. `docs/scratchpad/` and `archive/pre-v1/`, which are non-normative
+5. `docs/roadmap/scratchpad/` and `archive/pre-v1/`, which are non-normative
 
 If active documents disagree, stop and correct the specification before
 implementing either interpretation.

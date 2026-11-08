@@ -19,7 +19,7 @@
 //! order complete attribute/value groups before bodies; comments continue
 //! through the lossless CST path. Project-specific VIBON schemas arrive in
 //! later steps; see
-//! `docs/roadmap/milestone-1/README.md`.
+//! `docs/roadmap/v0.0.1/m1/execution.md`.
 //!
 //! A recovered document is returned byte-for-byte unchanged because applying
 //! canonical whitespace to incomplete or opaque leaf text would be a guess.

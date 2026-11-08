@@ -1,5 +1,5 @@
 //! The operand of `return` is a tail call in the reference interpreter
-//! (`docs/roadmap/pre-m4/01-bindings-return-never.md`, section F07).
+//! (`docs/roadmap/v0.0.1/pre-m4/01-bindings-return-never.md`, section F07).
 //!
 //! The results of the rest of section F are corpus cases that run in both
 //! backends: `V1-RUNTIME-let-binds-in-order`, `V1-RUNTIME-let-else`,

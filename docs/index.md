@@ -24,19 +24,19 @@ illustrative.
 ## Delivery
 
 - [Release roadmap and versioning](roadmap/README.md)
-- [v0.0.1 (shipped, M1–M4)](roadmap/v0.0.1.md)
-- [v0.0.2 (provisional, M5–M7)](roadmap/v0.0.2.md)
+- [v0.0.1 (shipped, M1–M4)](roadmap/v0.0.1/README.md)
+- [v0.0.2 (provisional, M1–M3)](roadmap/v0.0.2/README.md)
 - [Milestone execution model](roadmap/execution.md)
-- [Milestone 1 step plan](roadmap/milestone-1/README.md)
-- [Milestone 2 step plan](roadmap/milestone-2/README.md)
-- [Milestone 3 step plan](roadmap/milestone-3/README.md)
-- [Pre-M4 specification changes](roadmap/pre-m4/README.md)
-- [Milestone 4 step plan](roadmap/milestone-4/README.md), including Step 21b
-  and the [M4 exit evidence](roadmap/milestone-4/exit-evidence.md)
-- [Research scratchpad](scratchpad/README.md) (unscheduled, non-normative)
+- [Milestone 1 step plan](roadmap/v0.0.1/m1/execution.md)
+- [Milestone 2 step plan](roadmap/v0.0.1/m2/execution.md)
+- [Milestone 3 step plan](roadmap/v0.0.1/m3/execution.md)
+- [Pre-M4 specification changes](roadmap/v0.0.1/pre-m4/README.md)
+- [Milestone 4 step plan](roadmap/v0.0.1/m4/execution.md), including Step 21b
+  and the [M4 exit evidence](roadmap/v0.0.1/m4/exit-evidence.md)
+- [Research scratchpad](roadmap/scratchpad/README.md) (unscheduled, non-normative)
 
-The M2 [supported and deferred surface inventory](roadmap/milestone-2/supported-surface.md)
-and [Step 14 exit-evidence report](roadmap/milestone-2/14-exit-evidence.md)
+The M2 [supported and deferred surface inventory](roadmap/v0.0.1/m2/supported-surface.md)
+and [Step 14 exit-evidence report](roadmap/v0.0.1/m2/14-exit-evidence.md)
 record the implemented subset, implementation revisions, and gate results.
 
 The roadmap orders implementation. It cannot weaken the specification. If a

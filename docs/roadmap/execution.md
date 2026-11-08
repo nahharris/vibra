@@ -145,7 +145,7 @@ A step pull request is not merged with red CI.
 
 ### Milestone 2 handoff
 
-The [M2 plan](milestone-2/README.md) fixes the default sequence at one PR per
+The [M2 plan](v0.0.1/m2/execution.md) fixes the default sequence at one PR per
 numbered step, each based on the refreshed `origin/m2` after its predecessor
 merges. The branch bootstrap contains planning documents only; no step is
 landed by creating the branch. Its standing draft into `main` may open at that
@@ -159,7 +159,7 @@ the plan explicitly before starting it and preserve complete vertical coverage.
 Each active or completed milestone has a directory:
 
 ```text
-docs/roadmap/milestone-<n>/
+docs/roadmap/<release>/m<n>/
   README.md
 ```
 

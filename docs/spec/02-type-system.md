@@ -5,7 +5,7 @@ Implementation status: M3 checks and runs this chapter for pure programs:
 nominal and generic types, unions, patterns and exhaustive matching,
 interfaces, conversion, and iteration, and the pre-M4 revision of binding
 sequences, `let-else`, `return`, and `never` is implemented by
-[`../roadmap/pre-m4/01-bindings-return-never.md`](../roadmap/pre-m4/01-bindings-return-never.md).
+[`../roadmap/pre-m4/01-bindings-return-never.md`](../roadmap/v0.0.1/pre-m4/01-bindings-return-never.md).
 The forms the M3 exit evidence reassigned to Milestone 4, an abstract contract
 member with its own generic parameters, labelled operands and written `types:`
 arguments on a contract member call, a dict variadic tail on a contract member,
@@ -816,7 +816,7 @@ declaration site. An `impl` block is not a binding site: it has no `where:`
 clause, so an `impl` nested in a `deftype` passes that type's names through
 unchanged, and the target of an `impl` nested in a `defint` MUST be a closed
 type expression. A free generic name in an `impl` target is
-`@name.unknown-symbol`. The [generic implementations proposal](../scratchpad/type-system/README.md#generic-implementations)
+`@name.unknown-symbol`. The [generic implementations proposal](../roadmap/scratchpad/type-system/README.md#generic-implementations)
 is unscheduled.
 
 A `lambda` sees every generic name of its enclosing declarations and lambdas,
@@ -1693,7 +1693,7 @@ and `try-from` only; there is no `into`.
 The error type is fixed rather than chosen per implementation, because Vibra has no
 associated types on an interface contract. A conversion needing a richer error
 is an ordinary `defn` returning `(result t e)`, which requires no new machinery.
-The [scratchpad](../scratchpad/type-system/README.md#associated-types-and-per-implementation-errors)
+The [scratchpad](../roadmap/scratchpad/type-system/README.md#associated-types-and-per-implementation-errors)
 records the proposal for per-implementation error types.
 
 The builtin number types implement both contracts with written
