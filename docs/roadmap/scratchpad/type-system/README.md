@@ -3,6 +3,29 @@
 These proposals explore type-system extensions against the
 [active type system specification](../../../spec/02-type-system.md).
 
+## Stronger guarantees for agents
+
+**Unscheduled.** Which additional guarantees catch concrete bugs with
+source-local repairs an agent can act on? Start with nominal types, written
+expected types, local inference, and static effects. [GitHub #409](https://github.com/nahharris/vibra/issues/409)
+
+| Candidate | Comparison and evidence |
+| --- | --- |
+| Dependent or refinement types | Start with executable contracts, invariant newtypes, and solver-backed verification. Find an API, such as a buffer with dimension constraints, that needs a value relationship to survive across calls before considering size indices. |
+| Affine handles and typestate | Model an at-most-once Nexus reply. A double-send diagnostic should point to the consumption and the later use. Test branch joins, capture, and transfer. |
+| Linear handles | Find a protocol that needs exactly-once local consumption. Compare cancellation and cleanup with affine handles and runtime cleanup. Measure delivery guarantees separately. |
+| Subtyping and widening | Compare effect-row polymorphism and widening against written expected types with a broader subtyping proposal. Record inference and completion behavior for the same expressions. |
+| Monads and higher-kinded abstraction | Collect concrete composition patterns where `result`, `option`, `try`, and effect rows are insufficient. Evaluate a real library API before extending the abstraction model. |
+
+Use a request parser feeding a Nexus actor with a one-shot reply. Seed an
+invariant violation, a duplicate reply, and an unexpected effect. At a fixed
+model and tool budget, compare successful repairs, attempts, and tool calls
+against the current language. Record whether diagnostics point to a local
+repair, show a counterexample, or report an unproven obligation when proof
+work is exhausted. Link any proposed changes to the
+[verification](../verification/README.md) and
+[Nexus](../execution-targets/nexus.md) tracks.
+
 ## Generic implementations
 
 **Current restriction.** An `impl` target must be closed, so `(impl (from t) ...)`

@@ -1,40 +1,55 @@
-# Milestone 2 — agent-native workspace tooling
+# Milestone 2 — Queries, edits, formatting, and lint
 
-Outcome: an agent can understand and safely change a project without scraping
-human terminal text.
+An agent can understand a definition, propose a structured change,
+and publish it with evidence that the proposed revision checks.
 
-Deliverables:
+## Delivery order
 
-- complete versioned JSON output for all CLI and MCP command results;
-- one `query <subject>` interface with metadata projections and relation
-  expansions over one snapshot, covering every entity kind introduced through
-  v0.0.2 M1, including implementations, unions, effect operations, and
-  dependency units;
-- application-kind metadata and completion for functions, constructors,
-  tuple/record selectors, collection indices/keys, and patterns;
-- explicit atom-value, entity-reference, and code-reference roles selected by
-  source grammar or typed VIBON schema slots;
-- transactional format, fix, rename, organize-imports, and project plans;
-- CLI preview/write flows with atomic postcondition checking;
-- MCP tools mirroring the shared engine; and
-- read/write/test/run/sync action separation and workspace confinement.
+1. Expose the existing query and position facts through CLI and read-only
+   MCP. Accept a source position, canonical entity, or addressed definition in
+   a pinned revision. Return source, definition location, type, expected type,
+   performed and allowed effects with witnesses, token roles, diagnostics,
+   references, calls, and structured S-expression nodes with source origins.
+   Distinguish exact, recovered, and unavailable facts.
+   Bound and deterministically order relation expansions.
+2. Start with replacing one declaration from Vibra forms. Then add typed
+   plans to insert or remove a declaration, replace a selected expression,
+   rename across modules, and organize imports. Identify a node by its role
+   and address within the selected definition and base revision. Check the
+   replacement against the grammar and semantic context. Preview source and
+   definition-address diffs, affected declarations, and check diagnostics.
+   Publish uses the codebase transaction. File-backed writes use the
+   workspace's revision-checked file plan. Both paths revalidate their
+   postconditions and reject stale, ambiguous, or escaping changes.
+3. Extend the canonical formatter into format plans. Start lint with unused
+   imports and one semantic rule with a safe repair, such as a redundant
+   ascription proven removable by rechecking. A lint finding includes its rule,
+   severity, evidence spans, explanation, and action when available. Distinguish
+   validated edits from suggestions requiring judgment. Use the same plan
+   engine for code actions and fixes.
 
-Demo gate: through MCP alone, inspect a project, discover the expected type and
-effects at a location through the same query interface, preview a cross-module
-rename, reject a stale apply, and atomically apply a fresh plan. No tool starts
-a shell, adds a target effect, or executes code unless its server action is
-enabled.
+## Specification and gates
 
-A second, agent-loop demo exercises the purpose of the milestone: starting from
-a failing test, an agent uses only query results, diagnostics with safe fixes,
-and edit plans to repair the program, and every intermediate write is revision
-checked.
+Close the subject grammar, typed operations, diagnostic registry, schema
+versions, and postcondition policy before implementing them. Define whether a
+plan may improve an invalid draft and what it must prove before publish.
+Resolve the effect identity spelling discrepancy recorded in the
+[M4 evidence](../../v0.0.1/m4/exit-evidence.md#open-items-for-later) before
+exposing the query schema through CLI and MCP.
+Reuse the one workspace engine and versioned JSON shapes. Read-only MCP can
+inspect and preview without persistent writes or execution. Apply is explicit
+and separately enabled. MCP tools accept typed data and run no shell.
 
-Exit gate:
+- **Demo.** Resolve an application to its definition by hash, inspect its type
+  and effect witnesses, preview a cross-module change and explained fix, then
+  apply a fresh plan after rejecting a stale one.
+- **Exit.** CLI and MCP facts and action results agree for the same revision.
+  Plans preserve unrelated forms and comments. Invalid or conflicting plans
+  produce no partial publish. Formatting is idempotent, and every validated
+  fix satisfies its advertised postconditions. Test authorization, traversal
+  and symlink/junction escapes, and schema validation on positive and negative
+  cases.
 
-- tooling-v1 conformance passes against CLI and MCP renderings of the same
-  workspace results;
-- all writes are revision checked, reparsed, retyped, and atomic;
-- read-only MCP cannot mutate or execute; and
-- producer tests validate every rendered interchange document against its
-  published JSON Schema, which is the consumer contract.
+The [editor milestone](../m4/README.md) consumes these facts and plans
+through LSP. General AST patch languages and automatic edits on read are
+outside this milestone.

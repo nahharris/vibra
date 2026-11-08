@@ -8,13 +8,20 @@ illustrative.
 
 | Topic | What it explores |
 | --- | --- |
-| [Foundations](foundations/README.md) | Shared effect extensions, resources, budgets, host operations, and package publishing |
-| [Type system](type-system/README.md) | Generic implementations, associated types, interface narrowing, and type-scoped constants |
+| [Foundations](foundations/README.md) | Shared effect extensions, resources, budgets, host operations, and reproducible dependencies |
+| [Type system](type-system/README.md) | Agent-facing type guarantees, generic implementations, associated types, interface narrowing, and type-scoped constants |
 | [Verification](verification/README.md) | Executable contracts, property tests, static verification, and proofs |
 | [Concurrency and distribution](concurrency/README.md) | Isolated processes, supervision, simulation, parallelism, and clusters |
 | [Interactive applications](interactive-apps/README.md) | Terminal, browser, and desktop UIs, accessibility, and graphics |
-| [Execution targets](execution-targets/README.md) | WebAssembly, native backends, compiler strategies, and backend parity |
-| [Agent tooling](agent-tooling/README.md) | Type-constrained decoding for source generation |
+| [Execution targets](execution-targets/README.md) | Nexus follow-ons, earlier WebAssembly alternatives, compiler strategies, and backend parity |
+| [Agent tooling](agent-tooling/README.md) | Live debugging, codebase extensions, and type-constrained decoding for source generation |
+
+## Open issue intake
+
+| Issue | Scheduled work | Scratchpad |
+| --- | --- | --- |
+| [#409](https://github.com/nahharris/vibra/issues/409) | The [release map](../README.md) adopts versioned outcomes and exit gates. v0.0.2 leads with the agent workflow and v0.0.3 owns the native transition. | [Stronger type guarantees for agents](type-system/README.md#stronger-guarantees-for-agents) and [full dependency delivery](foundations/dependencies.md) |
+| [#408](https://github.com/nahharris/vibra/issues/408) | [Portable build inputs](../v0.0.2/m5/README.md), [Nexus and the cutover](../v0.0.3/README.md), then [local actors](../v0.0.4/README.md). | [Nexus rationale and follow-on research](execution-targets/nexus.md) |
 
 ## North star
 
@@ -81,8 +88,8 @@ roadmaps and specification own those obligations.
 | New host operations | Registry minor-version rule and recorded registry requirement | M4 |
 | Scheduling and delivery replay | Versioned audit encoding that tolerates new event kinds | M4 |
 | Effect-row polymorphism | No closed-literal assumption on rows in IR, queries, or build data | M4 |
-| New target kinds and fields | Evolution rule for project, lock, and build formats | [v0.0.2 M1](../v0.0.2/m1/README.md) |
-| New expression forms | Decision on reserved spellings, defaulting to none | [v0.0.2 M3](../v0.0.2/m3/README.md) |
+| New target kinds and fields | Evolution rule for project, lock, and build formats | [Dependency research](foundations/dependencies.md) and the [native build contract](../v0.0.3/m3/README.md) |
+| New expression forms | Review reserved spellings before a source change | Owning specification proposal |
 
 Labelled additions such as `for-all:` on `test` need no reservation because
 an unknown label is already rejected and accepting it later is additive.

@@ -17,10 +17,10 @@ first, then that milestone's step plan.
 1. Read `AGENTS.md`, the charter, the active milestone in its release
    roadmap, and the milestone README. Read the topic specification sections
    named by the chosen step before editing code. Archived code is not an implementation template.
-2. Inspect the working tree; preserve unrelated work. Fetch the integration
-   branch and create a short-lived branch from its refreshed remote head.
-   Milestone 1 starts from `origin/m1`; Milestone 2 starts from `origin/m2`.
-   Only the initial integration-branch bootstrap starts from refreshed `main`.
+2. Inspect the working tree and preserve unrelated work. Fetch the release's
+   milestone integration branch and create a short-lived branch from its
+   refreshed remote head. Bootstrap a new integration branch from refreshed
+   `main` after the preceding milestone exits.
 3. Select the earliest unfinished step whose prerequisites are satisfied.
    Verify the prerequisite code and merge history; a status row alone is not
    evidence. Run the existing focused tests and the independent corpus runner.
@@ -120,9 +120,9 @@ step. It is never advertised as complete.
 
 ## Branch and pull request model
 
-Each milestone has one long-lived **integration branch** named for the
-milestone: `m1`, `m2`, and so on. It is created from `main` when the milestone
-starts.
+Each milestone has one long-lived **integration branch**. Qualify new branch
+names by release, for example `v0.0.2/m1`, because milestone numbers restart
+in each release. The v0.0.1 branches used unqualified milestone names.
 
 - Every step is developed on its own short-lived branch and merged into the
   integration branch through one pull request.
