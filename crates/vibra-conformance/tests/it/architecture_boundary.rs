@@ -1,7 +1,7 @@
 //! Enforces the roadmap's architecture boundary as a test rather than a
 //! convention.
 //!
-//! `docs/roadmap/v1.md` states that crate boundaries may evolve but that
+//! `docs/roadmap/README.md` states that crate boundaries may evolve but that
 //! dependency arrows may not point from language semantics into CLI, MCP,
 //! filesystem UI, or a backend. This test reads every workspace manifest and
 //! fails when the real dependency graph disagrees with the declared

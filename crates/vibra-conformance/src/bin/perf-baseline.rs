@@ -6,7 +6,7 @@
 //!
 //! With no option it measures the exact metrics and the medians and prints the
 //! `@perf-baseline.v1` document. `--write` writes it to
-//! `docs/roadmap/milestone-4/performance-baseline.vibon` once every program has
+//! `docs/roadmap/v0.0.1/m4/performance-baseline.vibon` once every program has
 //! completed, and writes nothing if any program fails. `--check` measures only
 //! the exact metrics and compares them with the checked-in document, exiting 1
 //! with a message for each difference. `--runs N` sets the runs behind each

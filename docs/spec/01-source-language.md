@@ -1,4 +1,4 @@
-# Vibra v1 source language
+# Vibra source language
 
 Status: normative target
 Implementation status: M1 supplies the lossless source structure and position
@@ -106,7 +106,7 @@ also a float. Unsuffixed literals receive a type from their expression context.
 An unknown suffix, an integer suffix on a float body, or trailing token text is
 an invalid numeric literal. Numeric range belongs to type checking, not lexing;
 for example, `-1u8` is lexically one `u8` literal and is rejected as out of
-range. V1 has no numeric separators, non-decimal bases, `isize`, or `usize`.
+range. Vibra has no numeric separators, non-decimal bases, `isize`, or `usize`.
 Character and maximal numeric recognition take precedence over symbol
 recognition; `-` followed immediately by a digit starts a numeric token, while
 the standalone `-` remains the discard symbol.
@@ -208,7 +208,7 @@ projects component zero from the tuple returned by `make-tuple`. The third
 projects a function from a tuple and calls it. The callee expression is
 evaluated exactly once before any runtime operand; compile-time tuple and
 record selectors are not evaluated as values. The type chapter defines the
-closed set of applicable categories and their operand rules; v1 has no
+closed set of applicable categories and their operand rules; Vibra has no
 user-defined call operator or callable interface.
 
 The recovery parser accepts labelled operands interleaved with a variadic tail
@@ -247,7 +247,7 @@ evaluated, and a later duplicate key replaces the earlier value.
 
 ## Declarations
 
-V1 has exactly these user top-level forms:
+Vibra has exactly these user top-level forms:
 
 ```ebnf
 top-form = import | deftype | defint | deffect | def | defn | test ;
@@ -324,7 +324,7 @@ function that keeps its Vibra body; both are admissible only in the embedded
 standard library, as the type and runtime chapters state.
 
 `def` introduces an immutable module value. There is no separate `const` form
-in v1.
+in Vibra.
 
 Every required positional parameter is written directly as a pattern/type
 pair; there is no wrapper list around each parameter. The pattern MUST be
@@ -467,7 +467,7 @@ row on a `deffect` are each `@syntax.invalid-attribute`, and a `@host` symbol wh
 registry owner is not the enclosing `deffect` is `@external.owner-mismatch`. Every
 external function is applied through its declared Vibra name and ordinary
 function-application syntax—there is no `external`, `primitive`, or `host-op`
-expression. V1 has no WebAssembly external provider and no source-level Wasm
+expression. Vibra has no WebAssembly external provider and no source-level Wasm
 FFI.
 
 ## Types, interfaces, and methods
@@ -588,7 +588,7 @@ pattern = binding-name | literal
         | "(", "as", type-expr, pattern, ")" ;
 ```
 
-V1 has no `while`, `for`, `break`, `continue`, or assignment form; the four
+Vibra has no `while`, `for`, `break`, `continue`, or assignment form; the four
 loop and jump forms are retired and emit `@syntax.retired-form`. Early exit is
 written with `return`, defined below, or with `try`, which the type chapter
 defines as the propagation form.
@@ -629,7 +629,7 @@ The names a pair's pattern introduces are visible to the values of every later
 pair of the same form and to every later element of the directly enclosing body
 sequence. They are never visible to the pair's own value, to an earlier pair or
 element, or after the sequence ends. There is no assignment or shared mutable
-state in v1. `let` and positional function or lambda parameters accept
+state in Vibra. `let` and positional function or lambda parameters accept
 patterns, but each such binding pattern MUST be irrefutable for its expected
 type. `match` accepts refutable patterns.
 

@@ -1,14 +1,13 @@
-# Vibra v1 documentation
+# Vibra documentation
 
-This index is the source-of-truth dict for the Vibra soft reboot. The active
-documents specify the language that will be built; they do not describe the
-archived compiler.
+This index covers the active Vibra implementation, its specification, and
+its release roadmaps.
 
 ## Normative specification
 
 Read the chapters in order:
 
-1. [Charter and v1 boundary](spec/00-charter.md)
+1. [Charter and specification boundary](spec/00-charter.md)
 2. [Source language](spec/01-source-language.md)
 3. [Type system](spec/02-type-system.md)
 4. [Effects](spec/03-effects.md)
@@ -24,19 +23,20 @@ illustrative.
 
 ## Delivery
 
-- [Roadmap to a usable v1](roadmap/v1.md)
+- [Release roadmap and versioning](roadmap/README.md)
+- [v0.0.1 (shipped, M1–M4)](roadmap/v0.0.1/README.md)
+- [v0.0.2 (provisional, M1–M3)](roadmap/v0.0.2/README.md)
 - [Milestone execution model](roadmap/execution.md)
-- [Milestone 1 step plan](roadmap/milestone-1/README.md)
-- [Milestone 2 step plan](roadmap/milestone-2/README.md)
-- [Milestone 3 step plan](roadmap/milestone-3/README.md)
-- [Pre-M4 specification changes](roadmap/pre-m4/README.md)
-- [Milestone 4 step plan](roadmap/milestone-4/README.md), including Step 21b
-  and the [M4 exit evidence](roadmap/milestone-4/exit-evidence.md)
-- [Beyond v1: long-term release lines and design tracks](roadmap/beyond-v1/README.md)
-  (non-normative direction)
+- [Milestone 1 step plan](roadmap/v0.0.1/m1/execution.md)
+- [Milestone 2 step plan](roadmap/v0.0.1/m2/execution.md)
+- [Milestone 3 step plan](roadmap/v0.0.1/m3/execution.md)
+- [Pre-M4 specification changes](roadmap/v0.0.1/pre-m4/README.md)
+- [Milestone 4 step plan](roadmap/v0.0.1/m4/execution.md), including Step 21b
+  and the [M4 exit evidence](roadmap/v0.0.1/m4/exit-evidence.md)
+- [Research scratchpad](roadmap/scratchpad/README.md) (unscheduled, non-normative)
 
-The M2 [supported and deferred surface inventory](roadmap/milestone-2/supported-surface.md)
-and [Step 14 exit-evidence report](roadmap/milestone-2/14-exit-evidence.md)
+The M2 [supported and deferred surface inventory](roadmap/v0.0.1/m2/supported-surface.md)
+and [Step 14 exit-evidence report](roadmap/v0.0.1/m2/14-exit-evidence.md)
 record the implemented subset, implementation revisions, and gate results.
 
 The roadmap orders implementation. It cannot weaken the specification. If a
@@ -45,9 +45,9 @@ and reviewed before implementation continues.
 
 The execution model and the per-milestone step plans record how roadmap work
 is decomposed, branched, and tracked. They are process guidance and carry no
-normative weight over `spec/`. The beyond-v1 documents record post-v1 direction
-and design sketches only; nothing in them is part of v1 or authorizes
-implementation.
+normative weight over `spec/`. The scratchpad holds research proposals.
+Implementation begins once an approved specification change and a release
+roadmap define the work.
 
 ## Historical material
 
@@ -62,11 +62,11 @@ archive do not imply compatibility.
 A proposal that changes observable language behavior must:
 
 1. update the affected specification chapters;
-2. state whether the change alters the v1 boundary or a roadmap gate;
+2. state whether the change alters the specification boundary or a roadmap gate;
 3. add or update conformance cases once the harness exists;
 4. update CLI/MCP schemas when a machine contract changes; and
 5. avoid implementing two accepted spellings or a silent migration bridge.
 
-The specification remains the authority when code is incomplete. After v1 is
-released, implementation divergence is a defect in the implementation, not an
-implicit amendment to the language.
+The specification remains authoritative when code is incomplete. For
+behavior a release claims to support, divergence from the specification is
+an implementation defect.

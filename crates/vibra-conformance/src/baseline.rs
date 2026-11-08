@@ -7,7 +7,7 @@
 //!
 //! **Exact metrics** are deterministic: two runs, on any machine, give the same
 //! numbers. A host test regenerates them and fails on any difference from the
-//! checked-in `docs/roadmap/milestone-4/performance-baseline.vibon`, so a change
+//! checked-in `docs/roadmap/v0.0.1/m4/performance-baseline.vibon`, so a change
 //! that moves one is reviewed as a baseline change.
 //!
 //! | Backend | Metric | Where it comes from |
@@ -43,7 +43,7 @@ use crate::runner::{interpreter_budget, wasm_memory_limit};
 pub const FORMAT: &str = "perf-baseline.v1";
 
 /// The document's path from the repository root.
-pub const BASELINE_PATH: &str = "docs/roadmap/milestone-4/performance-baseline.vibon";
+pub const BASELINE_PATH: &str = "docs/roadmap/v0.0.1/m4/performance-baseline.vibon";
 
 /// The fewest runs a recorded median is taken over.
 pub const MIN_RUNS: usize = 11;

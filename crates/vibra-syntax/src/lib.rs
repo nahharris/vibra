@@ -19,7 +19,7 @@
 //! generic VIBON data decoding, hand-rolled lossless recovery CST, and
 //! extension-selected document modes. Project schemas, resolution, and
 //! semantic checking remain later-step concerns; see
-//! `docs/roadmap/milestone-1/README.md`.
+//! `docs/roadmap/v0.0.1/m1/execution.md`.
 
 mod ast;
 mod data;

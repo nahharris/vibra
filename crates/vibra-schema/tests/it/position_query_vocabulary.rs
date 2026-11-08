@@ -1,5 +1,5 @@
 //! The closed position-query vocabulary after the pre-M4 binding revision
-//! (`docs/roadmap/pre-m4/01-bindings-return-never.md`, rows E32 and G06).
+//! (`docs/roadmap/v0.0.1/pre-m4/01-bindings-return-never.md`, rows E32 and G06).
 
 const SCHEMA: &str = include_str!("../../schemas/v1/workspace-position-query.json");
 

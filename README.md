@@ -1,6 +1,6 @@
 # Vibra
 
-[![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-cba6f7)](docs/roadmap/v1.md)
+[![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-cba6f7)](docs/roadmap/README.md)
 [![CI](https://github.com/nahharris/vibra/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/nahharris/vibra/actions/workflows/ci.yml)
 [![Rust 1.96+](https://img.shields.io/badge/rust-1.96%2B-dea584?logo=rust)](https://www.rust-lang.org/)
 [![License: MIT or Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](LICENSE)
@@ -16,7 +16,7 @@ language and tooling are still evolving and are not ready for production.
 
 [Read the introduction](https://www.harrisonn.dev/series/vibra/introducing-vibra/) ·
 [Explore the documentation](docs/index.md) ·
-[See the roadmap](docs/roadmap/v1.md) ·
+[See the roadmap](docs/roadmap/README.md) ·
 [Releases](https://github.com/nahharris/vibra/releases)
 
 ## ✨ Why Vibra?
@@ -106,8 +106,8 @@ vibra check
 vibra run
 ```
 
-The repository also contains [example projects](examples/), including a
-[console example](examples/m4-console/) and a [file-processing demo](examples/m4-demo/).
+The repository also contains [example projects](examples), including a
+[console example](examples/m4-console) and a [file-processing demo](examples/m4-demo).
 The CLI currently supports project initialization, formatting, checking,
 running, and testing. Use `vibra help` to see the available commands.
 
@@ -136,13 +136,14 @@ and host operations for console, filesystem, environment, clock, and random
 access. It also has the beginnings of a standard library and workspace tooling.
 
 Vibra is developed specification-first. The [charter](docs/spec/00-charter.md)
-and [language specifications](docs/index.md) define the target; the
-[roadmap](docs/roadmap/v1.md) tracks the work toward a usable toolchain.
-Reproducible dependencies, fuller agent-facing tooling, and WebAssembly build
-products are still to come. The [post-v1 direction](docs/roadmap/beyond-v1/README.md)
-explores ideas such as verification, concurrency, and interactive applications.
+and [language specifications](docs/index.md) define the language contracts.
+[v0.0.1](docs/roadmap/v0.0.1/README.md) shipped M1–M4 in pre-alpha. The provisional
+[v0.0.2 roadmap](docs/roadmap/v0.0.2/README.md) starts from v0.0.2 M1–M3: reproducible
+dependencies, agent-facing tooling, and WebAssembly build products. The
+[scratchpad](docs/roadmap/scratchpad/README.md) collects unscheduled research on
+verification, concurrency, interactive applications, and other topics.
 
-An earlier implementation is preserved in [the archive](archive/pre-v1/) as
+An earlier implementation is preserved in [the archive](archive/pre-v1) as
 part of the project's history. The current implementation is a fresh start and
 does not promise compatibility with that version.
 

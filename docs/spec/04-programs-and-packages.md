@@ -1,10 +1,10 @@
-# Vibra v1 programs and packages
+# Vibra programs and packages
 
 Status: normative target
 Implementation status: M1 supplies generic VIBON data and structural query
 metadata; M2 decodes projects, resolves local modules, and supports init,
 check, run, and test; M3 embeds the standard library as the toolchain input.
-Ordinary dependency delivery (M5) and build products (M7) remain unimplemented,
+Ordinary dependency delivery (v0.0.2 M1) and build products (v0.0.2 M3) remain unimplemented,
 and `run` and `test` execute the reference interpreter. Milestone 4 Step 13 closes
 the Stage 4B contracts of this chapter, the `host` list and effect modules of the
 standard-library manifest, the test host world, and the target `effects`
@@ -57,7 +57,7 @@ resolved entity MUST exist and MUST have the kind its slot requires. An
 atom-value slot is never resolved in either phase.
 
 The source graph MUST reject `.vibon` as a module extension, and a persistent
-data loader MUST reject `.vib`. V1 has no extension fallback, content sniffing,
+data loader MUST reject `.vib`. Vibra has no extension fallback, content sniffing,
 or compatibility bridge between the two grammars. A document presented to the
 wrong loader emits `@data.invalid-extension` before its contents are parsed.
 
@@ -227,7 +227,7 @@ declared dependency. The `@tests` unit has kind `@lib` in the graph snapshot,
 but it is not a project target or a dependency and has no target entry. A
 dependency edge retains its alias, kind, target value, and source span. Graph
 construction MUST NOT resolve, fetch, inspect, or silently discard a dependency;
-because ordinary dependency delivery is deferred to M5, each unsupported edge
+because ordinary dependency delivery is deferred to v0.0.2 M1, each unsupported edge
 reports `@tool.unavailable` at its dependency alias while remaining present in
 the graph. The graph accepts only the immutable snapshot produced by this
 workspace boundary; later resolver phases receive no ambient filesystem handle.
@@ -235,7 +235,7 @@ workspace boundary; later resolver phases receive no ambient filesystem handle.
 ## Packages and targets
 
 A package has a kebab-case name and semantic version used as source identity.
-V1 does not solve version ranges; dependency selection is exact. The package
+Vibra does not solve version ranges; dependency selection is exact. The package
 name and version are provenance and never appear in a reference position, so
 they are strings rather than atoms.
 
@@ -367,7 +367,7 @@ module that declares it, `@std.bool`, is in every checked graph.
 
 ## Dependencies and lock
 
-V1 supports:
+Vibra supports the following forms.
 
 - local dependencies whose record has `kind: @path` and `path:`; and
 - Git dependencies whose record has `kind: @git`, an HTTPS `git:` URL, and a
@@ -485,7 +485,7 @@ type chapter states, because their members are reached by the same dotted path
 an alias would start.
 
 There is no registry, version range, lock auto-upgrade, lifecycle script, or
-dependency-provided executable in v1.
+dependency-provided executable.
 
 ## Tests
 
@@ -549,7 +549,7 @@ tests runnable. A module that declares a test MUST explicitly import
 imports use ordinary unit aliases and ordinary public-visibility rules; no
 test-only prelude or private-access exception exists.
 
-The full v1 test language permits declared effect ceilings. Since Milestone 4
+The test language permits declared effect ceilings. Since Milestone 4
 Step 14 a test is checked against its written ceiling like a function, an
 omitted `effects:` is empty, and a test whose ceiling holds only operations with
 Vibra bodies runs. Selecting and running a test is consent to the roots of its written row, with no
@@ -637,10 +637,10 @@ test's audit trace, and a test supplies no provider, response, or mode of its
 own. The world's clock, random generator, filesystem, environment, arguments,
 and standard input are fields of one `@host-world.v1` document, and the default
 world, empty and fixed, is what a test sees when nothing supplies another. A
-conformance case may supply a world; the project has no field for one, and a
-user-supplied world, like replay of a recorded run, comes after v1. There is no
-failure for a dependency on a nondeterministic provider, because a test cannot
-name one.
+conformance case may supply a world. User-supplied worlds and recorded-run
+replay are outside the test contract, and the project has no field for a world.
+Tests cannot name a nondeterministic provider, so there is no failure for a
+dependency on one.
 
 ### M3 assertion contract
 
@@ -675,5 +675,6 @@ checks source targets before execution, while another Wasm host is responsible
 for its own embedding policy. Identical toolchain, project snapshot, target,
 and build options MUST produce byte-identical outputs.
 
-Packaging, signing, publishing, and multi-artifact application containers are
-post-v1 concerns.
+[Distribution research](../roadmap/scratchpad/foundations/README.md#other-distribution-work)
+covers signing, publishing build products, and multi-artifact application
+containers.

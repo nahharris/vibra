@@ -1,7 +1,7 @@
 # Milestone execution model
 
 Status: process guidance
-Applies to: every milestone in [`v1.md`](v1.md)
+Applies to every milestone in the [release roadmaps](README.md).
 
 This document records how roadmap milestones are broken into work and how
 progress is tracked. It is process guidance, not specification. It cannot
@@ -14,9 +14,9 @@ first, then that milestone's step plan.
 
 ## Start every implementation session here
 
-1. Read `AGENTS.md`, the charter, the active milestone row in `v1.md`, and the
-   milestone README. Read the topic specification sections named by the chosen
-   step before editing code. Archived code is not an implementation template.
+1. Read `AGENTS.md`, the charter, the active milestone in its release
+   roadmap, and the milestone README. Read the topic specification sections
+   named by the chosen step before editing code. Archived code is not an implementation template.
 2. Inspect the working tree; preserve unrelated work. Fetch the integration
    branch and create a short-lived branch from its refreshed remote head.
    Milestone 1 starts from `origin/m1`; Milestone 2 starts from `origin/m2`.
@@ -145,7 +145,7 @@ A step pull request is not merged with red CI.
 
 ### Milestone 2 handoff
 
-The [M2 plan](milestone-2/README.md) fixes the default sequence at one PR per
+The [M2 plan](v0.0.1/m2/execution.md) fixes the default sequence at one PR per
 numbered step, each based on the refreshed `origin/m2` after its predecessor
 merges. The branch bootstrap contains planning documents only; no step is
 landed by creating the branch. Its standing draft into `main` may open at that
@@ -159,7 +159,7 @@ the plan explicitly before starting it and preserve complete vertical coverage.
 Each active or completed milestone has a directory:
 
 ```text
-docs/roadmap/milestone-<n>/
+docs/roadmap/<release>/m<n>/
   README.md
 ```
 
@@ -204,8 +204,8 @@ decision. It is a specification change and follows the change protocol in
 When the last step lands, an evidence step verifies every exit-gate clause and
 records the evidence in the milestone `README.md`. Only then does the
 integration branch merge to `main`, together with the status updates to
-`v1.md`, `README.md`, and any other active document whose claims the milestone
-changed.
+the release roadmap, the repository README, and any other active document
+whose claims the milestone changed.
 
 ## Review and handoff evidence
 

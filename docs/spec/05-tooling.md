@@ -1,11 +1,11 @@
-# Vibra v1 CLI, MCP, and code tooling
+# Vibra CLI, MCP, and code tooling
 
 Status: normative target
 Implementation status: `project init`, `fmt`, `check`, `run`, and `test` run
 through the shared workspace engine, with `run` and `test` executing the
 reference interpreter for the complete pure language. M3 adds the index
 records and the workspace position envelope as library projections. MCP, the
-public `query` command, and the remaining v1 tooling commands remain
+public `query` command, and the remaining specified tooling commands remain
 unavailable. Milestone 4 Step 13 closes the Stage 4B contracts of this chapter,
 program arguments, the `@command.program-failed` result, the audit-event
 payloads, and the effect fields of the position envelope and the index, and
@@ -32,9 +32,9 @@ owns no persistent JSON file: project, lock, and build data use the canonical
 `.vibon` data grammar. Human output is for terminals; program stdout from `run`
 remains program-owned.
 
-## V1 CLI
+## CLI commands
 
-The stable v1 command surface is:
+The specification defines the following command surface.
 
 ```text
 vibra project init|inspect|add|remove|sync
@@ -52,9 +52,9 @@ vibra mcp
 The M2 implementation profile admits only `project init`, `fmt`, `check`,
 `run`, and `test`, with the exact flags and result envelopes closed by the
 milestone's Step 1 contract before those commands are implemented. The other
-v1 command names remain reserved and produce `@tool.unavailable` in M2;
+specified command names remain reserved and produce `@tool.unavailable` in M2;
 unknown spellings remain invalid input. This capability status does not alter
-the stable v1 command surface or create a profile-specific source language.
+the specified command surface or create a profile-specific source language.
 
 ### M2 command contract
 
@@ -301,7 +301,7 @@ Query subjects are a source position such as `src/main.vib:120`, an atom entity
 reference such as `@std.fs.read`, a built-in diagnostic code such as
 `@type.argument-mismatch`, or `@workspace`. Types, effects, context,
 diagnostics, references, and index records are metadata projections from that
-subject, not separate query kinds. V1 has no `query effects`, `query index`,
+subject, not separate query kinds. Vibra has no `query effects`, `query index`,
 `vibra effects`, `vibra index`, or generic `vibra code` command.
 
 Commands that can change files preview by default. `--write` is required to
@@ -347,7 +347,7 @@ Project tooling edits `project.vibon` through its typed project-data AST. `add`
 and `remove` produce the same transactional plan format as source edits. They
 preserve comments when possible and always finish with canonical formatting.
 
-`sync` is the only v1 command that performs dependency network access. It
+`sync` is the only command that performs dependency network access. It
 accepts only declared HTTPS Git sources and exact revisions, exports no Git
 metadata, executes no dependency code, and atomically replaces the vendor tree
 and `project-lock.vibon` only after all hashes validate.
@@ -397,7 +397,7 @@ The published `source-position-query` schema carries `schemaVersion`, the
 queried `offset`, its nullable `sourceId`, a byte/display `span`, `mode`,
 `syntaxKind`, `category`,
 `status`, `permittedForms`, and `permittedLabels`. Categories are the closed
-v1 vocabulary `module`, `declaration`, `type`, `pattern`, `expression`,
+vocabulary `module`, `declaration`, `type`, `pattern`, `expression`,
 `declaration-attribute`, `effect-row`, `data-field`, `trivia`, and `recovery`.
 An empty array means the slot is known and has no entries; JSON `null` means
 the fact is unavailable. This milestone publishes structural grammar facts
@@ -771,9 +771,9 @@ code graph alone decides which entity its path denotes.
 
 ## Transactional edit plans
 
-Supported v1 semantic changes are format, safe diagnostic fix, semantic rename,
+Supported semantic changes are format, safe diagnostic fix, semantic rename,
 and organize imports. Project add/remove and generated module scaffolding use
-the same plan envelope. V1 does not expose arbitrary AST patterns, text search
+the same plan envelope. Vibra does not expose arbitrary AST patterns, text search
 and replace, or a general patch language as a trusted compiler operation.
 
 An edit plan is a JSON response and contains at least:
@@ -836,7 +836,7 @@ returned by a prior plan call.
 
 ## Schemas and errors
 
-The v1 implementation publishes JSON Schemas for CLI command results, MCP
+The toolchain publishes JSON Schemas for CLI command results, MCP
 project inspection, diagnostics, normalized query results and expansions, edit
 plans/results, test reports, external-registry inspection, and MCP envelopes.
 Persistent project, lock, and build-data record schemas are

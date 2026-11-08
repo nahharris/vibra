@@ -1,4 +1,4 @@
-# Vibra v1 effects
+# Vibra effects
 
 Status: normative target
 Implementation status: empty effect ceilings and pure execution are admitted
@@ -16,7 +16,7 @@ adds the query and index metadata, read from the same graph.
 
 ## Static contract
 
-An effect answers “what may this code attempt?” during checking. V1 effects are
+An effect answers “what may this code attempt?” during checking. Vibra effects are
 static and erased; they are not runtime permissions, capability values, or a
 sandbox.
 
@@ -138,15 +138,15 @@ relates the first.
   written or default-empty ceiling MUST contain the performed row.
 - An unused declared effect is a warning because it weakens local reasoning.
 - An interface method MUST remain within its contract ceiling. An
-  implementation member writes exactly its contract member's row, since v1 has
+  implementation member writes exactly its contract member's row, since Vibra has
   no row subtyping, and its performed row MUST be within that row.
 
 Rows are order-insensitive semantically and sorted by canonical identity in
 formatter and machine output. Source formatting preserves each lexical symbol
 reference required by its imports while ordering the resolved roots. A
 function type includes its closed effect row.
-Effect variables and polymorphic rows are excluded from v1; a higher-order
-function therefore declares the exact callback effect row it accepts. The
+Effect variables and polymorphic rows are excluded. A higher-order function
+therefore declares the exact callback effect row it accepts. The
 standard `iter` default methods `map` and `filter` accept callbacks with
 `effects: ()` only.
 
@@ -176,7 +176,7 @@ contributes to the body that applies it:
   is chosen at run time or by a type that may change.
 
 Creating a function value, such as naming a function, writing a `lambda`, or
-using a contract member as a value, performs nothing; only applying it does. V1
+using a contract member as a value, performs nothing; only applying it does. Vibra
 has **no row subtyping**: two function types are equal only when their rows are
 equal, so a function value is never accepted where a function type with a
 different row is expected, in either direction. A caller that holds a function
@@ -185,7 +185,7 @@ and an unused declared root is then the warning above.
 
 Effectful iteration is written as a recursive module-level function that calls
 `(iter.next it)` and declares its complete host ceiling explicitly. There is no
-effectful higher-order iterator combinator in v1.
+effectful higher-order iterator combinator in Vibra.
 
 Nominal constructor application, tuple and record projection,
 array/dict/string/byte lookup, and the `tupleof`, `recordof`, and `enumof`
@@ -242,8 +242,8 @@ callers.
 Because a caller's row grows when a library adds an additive root, widening an
 operation's additive row is a breaking change for consumers. That cost is
 accepted: it is the same observable break as adding a failure mode to a
-declared result type, and v1 resolves dependencies from local paths or exact
-Git revisions, so it can only surface on a deliberate revision bump.
+declared result type. Dependencies resolve from local paths or exact Git
+revisions, so the break can only surface on a deliberate revision bump.
 
 ### The witness of `@effect.outside-ceiling`
 
@@ -339,7 +339,7 @@ the target array. It MUST also prove that the performed row fits that
 declaration's written or default-empty ceiling. These are static admission
 rules and the target array is the user's blanket consent for the selected run.
 It does not constrain paths, environment keys, output destinations, invocation
-counts, or data volume within a declared root. V1 has no runtime narrowing,
+counts, or data volume within a declared root. Vibra has no runtime narrowing,
 prompt, denial result, or embedding API that silently adds roots.
 
 A root in the target array that is absent from the entry's performed row weakens
@@ -369,9 +369,9 @@ since a test is not the entry of a target. A pure test may omit the row. Library
 targets are not execution entries and do not declare a target effect array;
 their public function ceilings report their requirements to consumers.
 
-## V1 standard effect inventory
+## Standard effect inventory
 
-The v1 toolchain reserves these standard roots, each declared by an embedded
+The toolchain reserves these standard roots, each declared by an embedded
 standard-library module whose operations are the registry entries of the runtime
 chapter:
 
@@ -389,10 +389,11 @@ chapter:
 The owner root of an operation is `@std.<module>.<root>`, so `fs.read.file` is
 owned by `@std.fs.read`. Append, remove, and create-directory are deferred to
 later registry minors. Environment writes, sleep/timers, networking, processes,
-signals, streaming handles, and async operations are post-v1. Convenience
-functions compose the roots above instead of acquiring hidden effects.
+signals, streaming handles, and async operations are
+[unscheduled proposals](../roadmap/scratchpad/foundations/README.md#other-effect-and-host-extensions).
+Convenience functions compose the roots above instead of acquiring hidden effects.
 
-V1 has no terminating source. No host operation, intrinsic, or standard
+Vibra has no terminating source. No host operation, intrinsic, or standard
 function has the result `never`, and none is added: an activation ends by
 returning, a program ends by its entry returning or by a trap or host event of
 the runtime chapter, and the charter excludes processes. The only expressions of
@@ -432,12 +433,12 @@ tooling chapter closes the fields of the position envelope and of the index.
 
 ## Claims and limits
 
-V1 effects are not exceptions, algebraic handlers, resumptions, runtime values,
+Vibra effects are not exceptions, algebraic handlers, resumptions, runtime values,
 permission prompts, path filters, or security capabilities. Sealed effect
 roots and a declared dominance or sub-effect relation between roots are
-excluded and require a post-v1 specification; flat rows are that design with
-an empty relation, so adding one later relaxes existing programs rather than
-breaking them. Ordinary host failures remain the typed errors declared by
+excluded. They require a specification change. Flat rows have an empty
+relation, so adding a relation later could relax the rules for existing
+programs. Ordinary host failures remain the typed errors declared by
 operations; an ABI or runtime invariant failure is a trap.
 
 The effect system guarantees static containment of performed roots in written

@@ -1,4 +1,4 @@
-# Vibra v1 diagnostics and conformance
+# Vibra diagnostics and conformance
 
 Status: normative target
 Implementation status: reader, static, interpreter, and tooling observations
@@ -119,8 +119,9 @@ table governs.
 | `@contract.unused-effect` | `@warning` |
 | `@tool.unavailable` | `@error` |
 
-Codes are stable within the v1 line and are atoms in Vibra data. JSON output
-serializes the exact atom spelling as a string. A code need not be renamed if
+Diagnostic codes are stable under the charter's compatibility policy. In
+Vibra data they are atoms. JSON output serializes the exact atom spelling as a
+string. A code need not be renamed if
 its registered level changes in a future language version.
 
 The compiler owns a closed diagnostic registry that maps each code to one
@@ -132,12 +133,12 @@ may fail on warnings by policy without changing their registered level.
 
 A code's domain is the first component of its spelling. Its fix capability is
 one of exactly two atoms: `@safe`, meaning the compiler can offer a fix that
-`vibra edit fix` may apply, and `@none`, meaning it never offers one. V1 has
+`vibra edit fix` may apply, and `@none`, meaning it never offers one. Vibra has
 no capability for a fix that requires human review, because it has no command
 that would apply one. A code's summary is compiler data and is not fixed by
 this chapter.
 
-V1 has no language form or `.vibon` catalog for declaring diagnostics. The
+Vibra has no language form or `.vibon` catalog for declaring diagnostics. The
 registry is compiler data: queryable and covered by schemas and conformance
 tests, but not loaded from or executed as Vibra source.
 
@@ -152,7 +153,7 @@ declare whether they are safe and carry expected document revisions.
 Messages help people; codes and fields help tools. Tests assert codes, levels,
 spans, related identities, and fix results, not incidental English punctuation.
 
-`@tool.unavailable` is emitted when a syntactically valid v1 command or language
+`@tool.unavailable` is emitted when a syntactically valid command or language
 surface is outside the selected implementation profile. It is distinct from a
 malformed-input diagnostic and from the conformance runner's `unavailable`
 status: a real handler reports the diagnostic through its result contract,
@@ -511,7 +512,7 @@ kebab-case suffix such as `V1-SRC-CALLS-labelled-after-variadic`:
 
 | Prefix | Normative section |
 | --- | --- |
-| `V1-CHARTER` | v1 mission, boundary, commitments, and exclusions |
+| `V1-CHARTER` | mission, boundary, commitments, and exclusions |
 | `V1-SRC-READER` | reader, tokens, names, and trivia |
 | `V1-SRC-CALLS` | general application, labels, variadics, and binding |
 | `V1-SRC-DECL` | declarations, nested methods and impls, and visibility |
@@ -592,7 +593,7 @@ Effect coverage also includes the rows themselves: a call through a function
 value contributing its type's row, a call of a contract member contributing the
 contract ceiling whatever the implementation performs, creating a function value
 performing nothing, and the rejection of a function value where a function type
-of another row is expected, in both directions, because v1 has no row
+of another row is expected, in both directions, because Vibra has no row
 subtyping; an effect root that is a target `effects` atom resolved through the
 ordinary resolution diagnostics, a duplicate root, and a root in the array that
 the entry does not perform, as the table of **Effect and host diagnostics**
@@ -886,8 +887,8 @@ conversion cases belong to `V1-TYPE-CONVERT`.
 
 ## Conformance profiles
 
-An implementation may report a development profile, but only `full-v1` may be
-called Vibra v1:
+The implementation reports its supported surface through conformance profiles.
+Profile names are independent of toolchain release versions.
 
 | Profile | Required surfaces |
 | --- | --- |
@@ -902,11 +903,11 @@ Profiles are capability statements, not source dialects. The same source is
 never reinterpreted differently by a smaller profile; unsupported execution is
 reported as unavailable.
 
-For an implementation profile narrower than v1, a valid source or command
-surface that is outside the admitted subset emits `@tool.unavailable` through
-the normal diagnostic result. A corpus handler with no implementation remains
-an `unavailable` observation and fails the relevant gate; it must not be turned
-into a passing case by selecting a smaller profile.
+A valid source or command surface outside the selected profile emits
+`@tool.unavailable` through the normal diagnostic result. A corpus handler
+with no implementation remains an `unavailable` observation and fails the
+relevant gate. Selecting a smaller profile MUST NOT turn it into a passing
+case.
 
 ### Differential execution
 
@@ -988,11 +989,11 @@ decoders, CLI/MCP input decoders, external-registry boundary, and typed IR
 deserialization. A fuzz finding is not closed until reduced into a regression
 case.
 
-## V1 release gate
+## Full conformance gate
 
 The `full-v1` claim requires:
 
-- every roadmap milestone complete with linked evidence;
+- every milestone required by the release complete with linked evidence;
 - no unresolved contradiction or placeholder marker in normative documents;
 - all normative examples classified and tested;
 - all CLI and MCP JSON schemas versioned, with every document a producer

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use vibra_syntax::{DocumentMode, parse_data, parse_source};
 
-const INVENTORY_PATH: &str = "docs/roadmap/milestone-1/syntax-examples.tsv";
+const INVENTORY_PATH: &str = "docs/roadmap/v0.0.1/m1/syntax-examples.tsv";
 const INVENTORY_HEADER: &str = "kind\tpath\tstart\tend\theading\texcerpt\tmode\tclassification\tevidence\tcontext\tdeferred\tcount\tdigest";
 const ALL_CLASSIFICATIONS: &str =
     "reader-positive|reader-negative|recovery|non-source grammar/schema illustrations";

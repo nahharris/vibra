@@ -16,7 +16,7 @@
 //! This is provisional: the intended home is an HTTPS identifier once the
 //! project's domain exists. Because identifiers are contracts, that switch
 //! must be made across every published schema at once and before v1 is
-//! released. See design decision D5 in `docs/roadmap/milestone-1/README.md`.
+//! released. See design decision D5 in `docs/roadmap/v0.0.1/m1/execution.md`.
 //!
 //! The `v1` in an identifier and in [`SCHEMA_VERSION`] is the schema's major
 //! version, not the language's. The charter versions machine schemas

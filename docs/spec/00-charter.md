@@ -1,12 +1,9 @@
-# Vibra v1 charter
+# Vibra charter
 
 Status: normative target
-Implementation status: M1's lossless reader, M2's executable pure subset, and
-M3's complete nominal static core are implemented, with the reference
-interpreter running the complete pure language. The WebAssembly backend,
-nominal effects, host operations, dependency delivery, and build products
-remain unimplemented; the full v1 target remains incomplete.
-Version: 1.0 design line
+Delivery status is tracked in the [release roadmap](../roadmap/README.md).
+The active specification includes contracts for work scheduled after the
+shipped release.
 
 ## Mission
 
@@ -17,8 +14,8 @@ small, explicit programming language that gives an agent enough local,
 machine-readable constraint to produce correct changes reliably.
 
 The language is one product with five surfaces: syntax, static types, static
-effects, agent-facing tooling, and runtime behavior. A feature is not part of
-v1 unless all affected surfaces agree.
+effects, agent-facing tooling, and runtime behavior. All affected surfaces
+must agree on each feature.
 
 ## Decision order
 
@@ -29,15 +26,16 @@ When two designs conflict, prefer the design that:
 3. exposes type, effect, and namespace boundaries explicitly;
 4. permits precise context queries and transactional edits;
 5. is deterministic across checker, interpreter, and compiled runtime; and
-6. keeps the v1 implementation small enough to finish and verify.
+6. keeps the implementation small enough to finish and verify.
 
 Canonical syntax is a means, not the thesis. Most generation failures are
 semantic. Vibra therefore spends complexity on the type/effect checker and its
 query service before adding surface convenience.
 
-## Definition of a usable v1
+## Usable toolchain target
 
-V1 is usable when a fresh installation can, without the pre-v1 tree:
+A fresh installation of the complete toolchain can do the following using
+only the active implementation.
 
 - create a project and resolve pinned dependencies;
 - format, check, test, run, and build it;
@@ -55,7 +53,7 @@ V1 is usable when a fresh installation can, without the pre-v1 tree:
 The release gate is evidence, not feature count. Every normative rule needs a
 conformance case or an explicit review-only invariant.
 
-## V1 commitments
+## Commitments
 
 - Vibra is expression-oriented and functional: bindings and values are
   immutable, functions are first-class values, and there is no assignment or
@@ -91,7 +89,7 @@ conformance case or an explicit review-only invariant.
   `never` types an expression that does not complete, and it is admitted at
   any expected type without becoming a subtype or a computed join.
 - Effects describe possible operations statically. A binary target's declared
-  effect roots are its complete execution consent; v1 has no runtime grants.
+  effect roots are its complete execution consent. Runtime grants are excluded.
 - Project and compiler-owned persistent data use canonical, non-executable
   `.vibon` literal data. JSON is reserved for CLI and MCP interoperability.
 - The language core is minimal. The compiler owns the scalar types, `(array t)`,
@@ -109,9 +107,9 @@ conformance case or an explicit review-only invariant.
 - The runtime is deterministic for fixed source, inputs, and ordered host
   responses.
 
-## Deliberate v1 exclusions
+## Deliberate exclusions
 
-The following are not partially implemented in v1:
+The active specification excludes the following features.
 
 - pre-v1 source, CLI, schema, package, or ABI compatibility;
 - macros, reader extensions, compiler plugins, and runtime plugins;
@@ -141,17 +139,17 @@ The following are not partially implemented in v1:
 - self-hosting, JIT compilation, optimization promises, or verified-compiler
   claims.
 
-An excluded feature requires a post-v1 specification. It MUST NOT appear as an
-undocumented experimental branch in the active v1 implementation.
+An excluded feature MUST receive a specification change before implementation.
+The [scratchpad](../roadmap/scratchpad/README.md) holds unscheduled proposals.
 
 ## Compatibility policy
 
-Before the first 1.0 release, the v1 design may break deliberately, but every
-break changes the specification, conformance corpus, and roadmap together.
+Before the first stable release (v1.0.0), the design may break deliberately.
+Each break changes the specification, conformance corpus, and roadmap together.
 There is no compatibility bridge from pre-v1. Migration tools may exist as
 separate, one-shot utilities; the compiler MUST NOT auto-detect or accept a
 retired surface.
 
-After 1.0, the source language, project-data format, machine schemas, artifact
+Starting with the stable release, the source language, project-data format, machine schemas, artifact
 format, and host ABI are independently versioned. A reader MUST reject a newer
 major version it cannot interpret rather than guessing.

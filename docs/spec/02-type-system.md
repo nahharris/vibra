@@ -1,11 +1,11 @@
-# Vibra v1 type system
+# Vibra type system
 
 Status: normative target
 Implementation status: M3 checks and runs this chapter for pure programs:
 nominal and generic types, unions, patterns and exhaustive matching,
 interfaces, conversion, and iteration, and the pre-M4 revision of binding
 sequences, `let-else`, `return`, and `never` is implemented by
-[`../roadmap/pre-m4/01-bindings-return-never.md`](../roadmap/pre-m4/01-bindings-return-never.md).
+[`../roadmap/pre-m4/01-bindings-return-never.md`](../roadmap/v0.0.1/pre-m4/01-bindings-return-never.md).
 The forms the M3 exit evidence reassigned to Milestone 4, an abstract contract
 member with its own generic parameters, labelled operands and written `types:`
 arguments on a contract member call, a dict variadic tail on a contract member,
@@ -155,7 +155,7 @@ destructuring/constructor patterns, `match`, `try`, `option`, `result`,
 ascription, widening, narrowing, and conversion remain valid syntax but are
 outside that profile and produce `@tool.unavailable` when semantic support is
 requested. This is an implementation capability boundary, not a second source
-dialect; the full rules below remain the v1 authority for later milestones.
+dialect; the full rules below remain authoritative for later milestones.
 
 M3 widens the profile in two stages. The Stage 3A profile adds `deftype`
 declarations of every body form with their constructors, projections, and
@@ -174,7 +174,7 @@ of this chapter. Each behavior step moves forms from unavailable to supported;
 none reclassifies a valid form as malformed.
 
 M2 function declarations and `fn` types have no variadic slot. A variadic
-parameter declaration or variadic function type is valid v1 syntax but is
+parameter declaration or variadic function type is valid syntax but is
 outside the M2 profile and produces `@tool.unavailable`. Applications of a
 variadic signature are likewise unavailable, including calls with no tail
 operands. Extra operands supplied to a fixed signature remain ordinary
@@ -185,13 +185,13 @@ suffixes select one of `i8` through `i64` or `u8` through `u64`; float suffixes
 select `f32` or `f64`. A suffixed literal MUST fit the selected type. An
 unsuffixed integer or float is constrained by its local expected type and is an
 ambiguity error when no unique numeric type follows. Suffixes never request an
-implicit conversion, and platform-sized numeric types do not exist in v1.
+implicit conversion, and platform-sized numeric types do not exist in Vibra.
 
 For width `N`, `iN` contains the integers from `-2^(N-1)` through
 `2^(N-1)-1`, and `uN` contains `0` through `2^N-1`. `f32` and `f64` are the
 IEEE 754 binary32 and binary64 formats. Decimal float literals are rounded to
 the selected format using round-to-nearest, ties-to-even; a finite source
-literal that overflows to infinity is out of range. V1 has no source spelling
+literal that overflows to infinity is out of range. Vibra has no source spelling
 for infinity or NaN. Character equality and ordering use Unicode scalar value,
 and conversion between `char` and an integer is always explicit.
 
@@ -234,7 +234,7 @@ A `deftype` whose body is a structural type expression, such as
 structure. There are no transparent aliases and no implicit conversion between
 a declared type and its body.
 
-V1 type constructors are:
+Vibra has the following type constructors.
 
 ```ebnf
 type-expr = primitive | type-name | "(", type-name, type-expr+, ")"
@@ -263,7 +263,7 @@ names and types, optional array or dict variadic type, result, and exact closed
 effect row. Effect-row entries are lexical symbols resolved in the effect
 namespace to nominal roots. Defaults belong to the function value and are not
 repeated in its type. An omitted function-type `effects:` row is empty. Two
-function types are equal only when their rows are equal as well: v1 has no row
+function types are equal only when their rows are equal as well: Vibra has no row
 subtyping, so a function value is never accepted where a function type with
 another row is expected, as the effects chapter states.
 
@@ -316,7 +316,7 @@ repeats.
 
 Dict keys must implement the standard `ordered` interface. A dict is ordered by
 its keys, so `compare` alone decides both where a key goes and whether two keys
-are the same key; v1 has no hashed collection and therefore no `hashable`
+are the same key; Vibra has no hashed collection and therefore no `hashable`
 interface. `@std.core` declares the two comparison contracts as ordinary nominal
 interfaces. They play the `@equatable` and `@ordered` roles, so they belong to
 the prelude and every module applies `(equatable.equal a b)` and
@@ -350,7 +350,7 @@ of the implementing type:
 Every member is pure, so the same operands always give the same answer. The
 toolchain cannot check these laws. A program whose implementation breaks them
 still evaluates deterministically, but which entry of a dict a lookup finds is
-then not defined by this specification. V1 declares no `hashable`, so it has no
+then not defined by this specification. Vibra declares no `hashable`, so it has no
 law. The following types receive closed toolchain
 conformance to both, keyed by type identity in the same way as the closed
 `iter` registry; they are admissible dict keys without a written
@@ -490,7 +490,7 @@ finite-size check on the same terms as records and enums.
 ## Application
 
 Every non-reserved executable list is an application whose behavior is fixed
-by the statically resolved callee. V1 has this closed set of applicable value
+by the statically resolved callee. Vibra has this closed set of applicable value
 categories:
 
 | Callee type | Required operand | Result | Application kind |
@@ -509,7 +509,7 @@ no labelled or variadic operands.
 A tuple index is an unsuffixed decimal integer literal written canonically
 without a leading zero except for `0`. It is checked at compile time, MUST be
 within the tuple arity, and cannot be supplied by a variable or computed
-expression. V1 has no `value.0` postfix spelling. A record selector is exactly
+expression. Vibra has no `value.0` postfix spelling. A record selector is exactly
 one written unqualified atom such as `@name`; it is resolved contextually to a
 field identity and MUST name a visible field of the statically known record
 type. In this position the atom is a selector, not an entity reference or an
@@ -525,7 +525,7 @@ no effect and no function-call edge.
 An enum value, union value, atom, number, or `void` is not applicable. A wrapper
 value does not delegate applicability to its representation, and a union value
 does not delegate applicability to the member it holds. A value whose static
-type is an unconstrained generic is not applicable; v1 has no callable
+type is an unconstrained generic is not applicable; Vibra has no callable
 interface or user-defined applicability bound. Tuples and records are not
 subtypes of `fn`; producing an accessor as a higher-order value requires an
 explicit `lambda`.
@@ -796,7 +796,7 @@ Generic arguments are invariant. Function and constructor applications infer
 the complete argument list when unique; otherwise `types: (type...)` supplies
 every type argument in `where:` order. Partial application, named type
 arguments, specialization by value, multiple bounds on one parameter, and
-runtime type tests are not in v1.
+runtime type tests are not in Vibra.
 
 A bound is one name, so it cannot apply a generic interface: `where: (t iter)`
 emits `@type.type-argument-mismatch`. A parameter typed as the interface value,
@@ -816,7 +816,8 @@ declaration site. An `impl` block is not a binding site: it has no `where:`
 clause, so an `impl` nested in a `deftype` passes that type's names through
 unchanged, and the target of an `impl` nested in a `defint` MUST be a closed
 type expression. A free generic name in an `impl` target is
-`@name.unknown-symbol`, and generic implementations are a post-v1 concern.
+`@name.unknown-symbol`. The [generic implementations proposal](../roadmap/scratchpad/type-system/README.md#generic-implementations)
+is unscheduled.
 
 A `lambda` sees every generic name of its enclosing declarations and lambdas,
 and its own `where:` declares only additional ones under the same
@@ -911,7 +912,7 @@ acquires an implementation implicitly, and the exception is fixed to this one
 predeclared name rather than extended to any empty interface a package might
 declare.
 
-`never` satisfies the bound `any` and no other interface in v1. This is an
+`never` satisfies the bound `any` and no other interface in Vibra. This is an
 explicit exclusion, not an omission: it has no value to dispatch on, so no
 implementation can be written for it, none is supplied by a closed registry,
 and a destination-dispatched member such as `from.convert`, selected from an
@@ -938,7 +939,7 @@ prohibition.
 The two positions carry opposite information and are not interchangeable. A
 generic parameter bound by `any` keeps its concrete type at every instantiation.
 An `any` in type position is an interface value that erases which type it holds,
-and because the contract is empty and v1 has no runtime type test, such a value
+and because the contract is empty and Vibra has no runtime type test, such a value
 can only be passed along, never inspected. A signature that needs the concrete
 type MUST use a generic parameter.
 
@@ -1002,7 +1003,7 @@ as an effect operation is identified by its root and operation.
 The applied target belongs in both keys rather than being a detail of either. A
 receiver carrying both `(from i16)` and `(from i8)` has two blocks and two
 `convert` members; without the target each pair would collapse to one identity.
-These are the only v1 entity kinds that no single atom addresses, and they need
+These are the only entity kinds that no single atom addresses, and they need
 no atom: an implementation is never named at a use site, because dispatch
 selects it from the receiver or from a written expected type.
 
@@ -1057,7 +1058,7 @@ condition rather than the absence of the spelling, because a rejected member may
 still contain `self`: it covers `(defn version () str)`, which never mentions
 `self`, and equally `(defn count-all () u64 variadic: (rest (array self)))`,
 which mentions it only in a tail that may arrive empty. This is what `defint`
-declaring method signatures **over `self`** already means; v1 adds no third
+declaring method signatures **over `self`** already means; Vibra adds no third
 selection rule and no interface-level static member.
 
 Within an interface contract, a `deftype` method, or an `impl` block, `self`
@@ -1095,7 +1096,7 @@ are available to every conforming type without being written again in each
 specialization is not a second source method and is not overridable.
 
 There is no inheritance between concrete types. Interface values use explicit
-widening at a typed boundary and static, closed-world dispatch in v1. Operator
+widening at a typed boundary and static, closed-world dispatch in Vibra. Operator
 overloading is absent. Arithmetic, comparison, and conversion use ordinary
 resolved functions or interface methods. Application-based tuple/record
 projection and array/dict/string/byte lookup are the closed indexing surface
@@ -1228,10 +1229,10 @@ keyed by constructor identity:
 | `str` | `char` | Unicode scalar order |
 | `(option t)` | `t` | On `none`, `next` returns `none`; on `some v`, one step yields `(tuple v none)` where the remaining iterator is the exhausted `none` value |
 
-`(result t e)` does not implement `iter` in v1. Iterating a fallible value
+`(result t e)` does not implement `iter` in Vibra. Iterating a fallible value
 requires an explicit `match` or conversion to `(option t)` first.
 
-Heterogeneous tuples do not implement `iter` in v1. Users cannot add methods or
+Heterogeneous tuples do not implement `iter` in Vibra. Users cannot add methods or
 `impl` blocks to `array` or `dict`. The associative `dict` type MUST NOT declare a
 method named `dict`.
 
@@ -1240,8 +1241,8 @@ block supplying only `next`. The `impl` target MUST spell the full application
 `(iter item)`; bare `iter` is invalid. The item is a concrete type, as in
 `(impl (iter u64) …)`, or a generic parameter the owner declares in its
 `where:` clause. The `next` member MUST name that same item in its result
-type. Generic `impl` targets such as `(array t)` inside a `defint`
-remain post-v1.
+type. Generic `impl` targets such as `(array t)` inside a `defint` remain
+outside the specified surface.
 
 ## Control flow and failure
 
@@ -1541,7 +1542,7 @@ is not in tail position.
 
 ## Type ascription and widening
 
-V1 has exactly three widening relations. A concrete type widens to an interface
+Vibra has exactly three widening relations. A concrete type widens to an interface
 it conforms to, a member type widens to a union that lists it, and the singleton
 type of a written atom widens to `atom`.
 
@@ -1675,8 +1676,8 @@ Placing the implementation on the destination is what makes the orphan rule
 work. Because the receiver is the destination, a package converting a foreign
 type into its own type owns the receiver and may write the `impl` in its own
 `deftype`. The reverse spelling, an `into` interface dispatching on the source,
-would leave exactly that case unwritable, and v1 has no blanket implementations
-with which to derive one direction from the other. V1 therefore declares `from`
+would leave exactly that case unwritable, and Vibra has no blanket implementations
+with which to derive one direction from the other. Vibra therefore declares `from`
 and `try-from` only; there is no `into`.
 
 `conversion-error` is a public standard-library enum with a closed variant set:
@@ -1689,10 +1690,11 @@ and `try-from` only; there is no `into`.
   visibility: @public)
 ```
 
-The error type is fixed rather than chosen per implementation, because v1 has no
+The error type is fixed rather than chosen per implementation, because Vibra has no
 associated types on an interface contract. A conversion needing a richer error
 is an ordinary `defn` returning `(result t e)`, which requires no new machinery.
-Per-implementation error types are a post-v1 concern recorded in the roadmap.
+The [scratchpad](../roadmap/scratchpad/type-system/README.md#associated-types-and-per-implementation-errors)
+records the proposal for per-implementation error types.
 
 The builtin number types implement both contracts with written
 implementations in `@std.builtin`, each member bound to its registry row as the
@@ -1706,7 +1708,7 @@ There is no other spelling of these conversions: a number type has no `to-U`,
 its own, so where more than one source converts to the destination the call is
 `@type.ambiguous-implementation`, whatever the literal's value. The
 floating-point types convert between each other and the integers through no
-contract in v1.
+contract in Vibra.
 
 Across `from` and `try-from` together, a receiver's source targets MUST be
 pairwise non-unifiable, as the overlap section defines. The same written source
@@ -1717,11 +1719,11 @@ other, and offering both spellings would give one idea two canonical forms.
 
 ## Host values
 
-V1 host operations accept and return ordinary Vibra values. The language has
+Vibra host operations accept and return ordinary Vibra values. The language has
 no `resource` type constructor, lexical host-handle scope, user-visible close
 protocol, or ownership rule for host objects. APIs that would require a
-long-lived file, socket, or stream handle are deferred; the v1 filesystem and
-console APIs are value-in/value-out operations.
+long-lived file, socket, or stream handle are deferred. The standard
+filesystem and console APIs are value-in/value-out operations.
 
 ## Value semantics
 
@@ -1729,5 +1731,5 @@ Bindings and ordinary values are immutable. Passing a value preserves the
 logical value for the caller. An implementation may share immutable storage or
 apply copy-on-write as long as identity is not observable.
 
-V1 has no user-visible references, pointers, object identity, destructors, or
+Vibra has no user-visible references, pointers, object identity, destructors, or
 shared mutable cells.
