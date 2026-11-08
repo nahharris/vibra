@@ -39,6 +39,8 @@
 
 pub mod arena;
 pub mod number;
+#[cfg(kani)]
+mod proofs;
 mod utf8;
 
 use std::cmp::Ordering;

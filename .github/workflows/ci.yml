@@ -121,6 +121,25 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cargo run --locked --offline -p vibra-conformance --bin m1-fuzz -- --profile ci-smoke
 
+  # Bounded proofs of host code: the `#[cfg(kani)]` harnesses, which every other
+  # build leaves out. Kani runs on Linux only, so one operating system checks
+  # them, in parallel with the jobs above. Each package that has harnesses is
+  # named here: a `--workspace` run would push Wasmtime through Kani's compiler.
+  # The version is pinned so that a clean checkout and CI agree.
+  kani:
+    name: kani proofs
+    runs-on: ubuntu-latest
+    # A harness whose bound is too large runs for hours, not seconds; fail it
+    # early instead of holding a runner.
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: model-checking/kani-github-action@v1
+        with:
+          kani-version: '0.68.0'
+          args: -p vibra-native -p vibra-diagnostics --output-format=terse
+
   archive-isolation:
     name: archive stays out of the build
     runs-on: ubuntu-latest

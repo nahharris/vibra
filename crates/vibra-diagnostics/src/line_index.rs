@@ -164,6 +164,38 @@ impl<'source> LineIndex<'source> {
     }
 }
 
+/// Bounded proofs, checked by `cargo kani`; every other build leaves them out.
+/// See the `kani` job of `.github/workflows/ci.yml`.
+#[cfg(kani)]
+mod proofs {
+    use super::LineIndex;
+
+    /// For every short document: every offset, in range or not, has a
+    /// one-based position inside the document, and every line has its text.
+    // Four bytes hold one scalar of every width, a CRLF, and an empty last
+    // line. Offsets past the end clamp to it, so one past is enough.
+    #[kani::proof]
+    #[kani::unwind(6)]
+    fn every_offset_has_a_position_and_every_line_has_text() {
+        let bytes: [u8; 4] = kani::any();
+        let len: usize = kani::any_where(|len| *len <= bytes.len());
+        let Ok(source) = std::str::from_utf8(bytes.get(..len).unwrap_or(&[])) else {
+            return;
+        };
+        let index = LineIndex::new(source);
+
+        let position = index.position(kani::any_where(|offset| *offset <= len + 1));
+        assert!(position.line >= 1 && position.column >= 1);
+        assert!(position.line <= source.len() + 1);
+        assert!(position.column <= source.chars().count() + 1);
+
+        for line in 1..=index.line_count() {
+            assert!(index.line_text(line).is_some());
+        }
+        assert!(index.line_text(0).is_none());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{LineIndex, Position};
