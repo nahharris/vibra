@@ -1,45 +1,40 @@
-# Milestone 4 — Agent debugger and DAP
+# Milestone 4 — Editor integrations
 
-Vibra ships a debugger interface for agents, with the kind of interactive
-control a GDB MCP offers. Editors drive the same debugger through DAP.
+Ship maintained Vibra integrations for Vim, Neovim, Zed, VS Code, and Cursor.
+A developer can inspect and edit code, send forms to a persistent REPL, and
+run a selected test from the editor.
 
-Close the debugger state and stop contracts in tooling, runtime, and
-conformance before implementation. Review the charter's JSON interoperability
-boundary for DAP. Keep protocol-specific identifiers and position conversions
-in the adapter.
+## Delivery order
 
-## Scope
+1. Inventory the current and recoverable editor branches. Record each candidate
+   revision and its compatibility with the active specification. Start from the
+   active workspace service and the current `.vib`, `.vibon`, and
+   `project.vibon` contracts. Treat work predating the soft reboot as archaeology.
+2. Add one local LSP adapter over M2. Include diagnostics, completion, hover
+   with type and effect facts, go to definition, references, formatting, and
+   code actions with revision-checked edits. Close the contract for unsaved
+   buffers, position encoding, stale responses, and publishing edits.
+3. Connect editor actions to M3. Send the selection or enclosing
+   top-level form to a named project session, show its value and output, rerun
+   a selected test against the session revision. Carry revision and source
+   identity into evaluation results and test diagnostics.
+4. Ship syntax and filetype configuration, toolchain discovery, and tested
+   setup and session instructions for each client. Share configuration and
+   extension code where clients support it.
 
-- Add a debugger service over the interpreter and session engine. Pin the
-  debuggee's revision, map breakpoints to executable source locations, and
-  provide pause, continue, step in, step over, step out, and terminate. Report
-  mapped traps and test assertion failures with their stop reason and origin.
-- Return logical frames, source addresses, typed locals, and bounded
-  read-only value inspection. Define breakpoint binding, stop-scoped value
-  handles, and stepping across tail transfers. Show the live activation
-  rather than keeping discarded frames alive.
-- Ship Vibra-owned MCP tools and a machine CLI interface for launching a
-  named run or test from a project or evaluation revision, setting and
-  clearing breakpoints, controlling execution, waiting for a stop with a
-  bounded wait, and inspecting frames, locals, nested values, and output.
-  Define session ownership, cancellation, and cleanup on disconnect. Use the
-  corresponding run or test permission and keep the debuggee's static effect
-  consent.
-- Ship a local, launch-only DAP adapter for editor breakpoint, step, stack,
-  and variable inspection. Advertise only supported capabilities.
-  [Debug Adapter Protocol overview](https://microsoft.github.io/debug-adapter-protocol/overview.html)
+| Clients | Integration path to qualify |
+| --- | --- |
+| Vim and Neovim | Maintain filetype and form-evaluation commands. Qualify a supported LSP setup for Vim and exercise Neovim's LSP client. |
+| Zed | Package language registration and connect the shared LSP and evaluation services. |
+| VS Code and Cursor | Qualify one shared extension or package for both clients. Register language tooling and session commands. [VS Code language server guide](https://code.visualstudio.com/api/language-extensions/language-server-extension-guide) |
 
 ## Gates
 
-- **Demo.** Over MCP, launch a selected failing test, bind a breakpoint
-  inside its callee, wait for the stop, inspect a typed argument and the
-  source revision, step, and reach the failing assertion. Run the same
-  sequence through DAP and compare the stop reasons and source locations.
-- **Exit.** A source edit during a stop cannot remap the running revision.
-  Resuming invalidates stale frame/value handles. Stepping across a tail call
-  observes replacement of the activation, and pausing and resuming produces
-  the same canonical outcome and ordered host audit as ordinary execution.
-  A read-only MCP server cannot start or control a debuggee.
-
-Remote attach, writable locals, arbitrary evaluation in a stopped frame,
-reverse stepping, and native executable debugging stay outside v0.0.2.
+- **Demo.** On a clean install in each supported editor, open the same project,
+  follow a definition, preview and apply a lint action, evaluate a changed form
+  in a persistent session, rerun its test, and follow a failure to its
+  source location. Include an unsaved edit and a stale code action in the fixture.
+- **Exit.** Record tested client versions, platform coverage, and install
+  steps. Exercise Windows without WSL, including editor-to-tool launch and a
+  project path with spaces. Run protocol conformance for LSP and session
+  operations independently of the editor smoke runs.

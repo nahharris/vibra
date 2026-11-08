@@ -139,7 +139,7 @@ Vibra is developed specification-first. The [charter](docs/spec/00-charter.md)
 and [language specifications](docs/index.md) define the language contracts.
 [v0.0.1](docs/roadmap/v0.0.1/README.md) shipped M1–M4 in pre-alpha.
 [v0.0.2](docs/roadmap/v0.0.2/README.md) plans a content-addressed codebase and
-agent tooling for queries, edits, evaluation, tests, and debugging.
+agent tooling for queries, edits, evaluation, and tests.
 [v0.0.3](docs/roadmap/v0.0.3/README.md) plans native executables with Nexus
 and the gates for replacing WebAssembly.
 [v0.0.4](docs/roadmap/v0.0.4/README.md) plans typed local actors, multicore

@@ -50,6 +50,6 @@ and separately enabled. MCP tools accept typed data and run no shell.
   and symlink/junction escapes, and schema validation on positive and negative
   cases.
 
-The [editor milestone](../m5/README.md) consumes these facts and plans
+The [editor milestone](../m4/README.md) consumes these facts and plans
 through LSP. General AST patch languages and automatic edits on read are
 outside this milestone.

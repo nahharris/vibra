@@ -1,6 +1,6 @@
 # Nexus and native execution
 
-The [v0.0.2 handoff](../../v0.0.2/m6/README.md) and
+The [v0.0.2 handoff](../../v0.0.2/m5/README.md) and
 [v0.0.3 roadmap](../../v0.0.3/README.md) schedule the initial compiler and
 runtime work. [v0.0.4](../../v0.0.4/README.md) schedules local actors,
 message capabilities, and multicore scheduling. This note captures the

@@ -1,41 +1,41 @@
-# Milestone 5 — Editor integrations
+# Milestone 5 — Native foundations and release
 
-Ship maintained Vibra integrations for Vim, Neovim, Zed, VS Code, and Cursor.
-A developer can inspect and edit code, send forms to a persistent REPL, run a
-selected test, and debug it from the editor.
+v0.0.3 can introduce Nexus and a native backend without changing
+the codebase, query, or edit model and without losing the interpreter oracle.
 
-## Delivery order
+## Handoff
 
-1. Inventory the current and recoverable editor branches. Record each candidate
-   revision and its compatibility with the active specification. Start from the
-   active workspace service and the current `.vib`, `.vibon`, and
-   `project.vibon` contracts. Treat work predating the soft reboot as archaeology.
-2. Add one local LSP adapter over M2. Include diagnostics, completion, hover
-   with type and effect facts, go to definition, references, formatting, and
-   code actions with revision-checked edits. Close the contract for unsaved
-   buffers, position encoding, stale responses, and publishing edits.
-3. Connect editor actions to M3 and M4. Send the selection or enclosing
-   top-level form to a named project session, show its value and output, rerun
-   a selected test against the session revision, and launch the shared DAP
-   adapter for an entry or test. Carry revision and source identity into
-   result locations and breakpoints.
-4. Ship syntax and filetype configuration, toolchain discovery, and tested
-   setup and launch instructions for each client. Share configuration and
-   extension code where clients support it.
-
-| Clients | Integration path to qualify |
-| --- | --- |
-| Vim and Neovim | Maintain the filetype and form-evaluation commands. Document a supported LSP and DAP setup for Vim and exercise Neovim's LSP client with nvim-dap. [Vimspector](https://github.com/puremourning/vimspector) · [nvim-dap](https://github.com/mfussenegger/nvim-dap) |
-| Zed | Package language registration and launch configuration for the shared LSP and DAP services. [Zed debugger integration](https://zed.dev/docs/debugger) |
-| VS Code and Cursor | Qualify one shared extension or package for both clients. Register language tooling, session commands, and launch configurations. [VS Code language server guide](https://code.visualstudio.com/api/language-extensions/language-server-extension-guide) |
+- Project a backend-neutral build input from one admitted checked revision.
+  Record canonical source and resolved graph identities, stdlib and registry
+  provenance, the selected project target, its effects, and source origins.
+  Define and test its semantic digest. Keep it separate from workspace
+  revisions, checked object hashes, and native artifact cache keys.
+- Specify the native artifact key inputs for v0.0.3, including the platform
+  triple, CPU baseline, compiler and linker identities, normalized flags,
+  runtime ABI, and selected executable target. Specify the build-result
+  envelope and diagnostics for unsupported targets, missing tools, and
+  incompatible artifacts before adding producers that can claim those results.
+- Review the Nexus execution boundary against the checked IR and interpreter.
+  Carry forward source origins, checked calls, closed effect rows, registry
+  requirements, canonical outcomes, and audit events. Record the proposed
+  frame, resume, and host-call contracts and their proof cases for v0.0.3.
+  Keep the execution IR, code generator, and production Nexus implementation
+  in v0.0.3.
+- Confirm the native target matrix and identify the object, linker, and
+  platform adapter prerequisites for Windows x64, Linux x86-64, and macOS
+  arm64. Check Windows first to surface PE/COFF and SDK constraints early.
+- Freeze the v0.0.1 execution baseline and make its fixtures reusable for
+  interpreter/native differential testing. Include indirect cross-module tail
+  transfer, non-tail memory exhaustion, module initialization, mapped traps,
+  and ordered host events. Keep interpreter/Wasm differential coverage active
+  during the transition.
 
 ## Gates
 
-- **Demo.** On a clean install in each supported editor, open the same project,
-  follow a definition, preview and apply a lint action, evaluate a changed form
-  in a persistent session, rerun its test, and stop at a breakpoint to inspect
-  locals. Include an unsaved edit and a stale code action in the fixture.
-- **Exit.** Record tested client versions, platform coverage, and install
-  steps. Exercise Windows without WSL, including editor-to-tool launch and a
-  project path with spaces. Run protocol conformance for LSP, DAP, and session
-  operations independently of the editor smoke runs.
+- The same admitted project inputs produce the same semantic digest from
+  different checkout locations. Source, graph, trusted stdlib, or semantic
+  registry changes invalidate the relevant identity. Platform and linker
+  changes affect the native key independently.
+- The v0.0.3 roadmap links the reviewed contract decisions, fixture inventory,
+  and native cutover criteria. The release audit reviews the supported tooling
+  inventory and the integrated agent workflow in the v0.0.2 release gate.

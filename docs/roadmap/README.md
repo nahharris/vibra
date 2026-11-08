@@ -63,7 +63,7 @@ The interpreter and Wasm backend consume the same typed IR. v0.0.2 adds the
 content-addressed store behind the workspace service. v0.0.3 adds verified
 execution lowering and Nexus downstream of checked IR and retires the Wasm
 backend at cutover. v0.0.4 adds local actors over the checked interpreter and
-Nexus execution paths. CLI, MCP, LSP, and DAP adapt shared services.
+Nexus execution paths. CLI, MCP, and LSP adapt shared services.
 
 Crate/module boundaries may evolve, but dependency arrows may not point from
 language semantics into CLI, MCP, filesystem UI, or a backend.

@@ -31,7 +31,7 @@ auditable inputs and reproducible outputs.
   mapping, and release metadata. Deliberate changes to the linker, target,
   or ABI affect artifact identity and leave the portable input identity
   intact.
-- Verify that ordinary `run`, `test`, and session/debug behavior still use
+- Verify that ordinary `run`, `test`, and interactive evaluation still use
   the interpreter. Review native packaging and release evidence before
   tagging. Track any requirements for the broader full conformance profile
   separately from the pre-alpha support claim.

@@ -1,5 +1,10 @@
 # Agent tooling
 
+## Live debugging
+
+The [debugger proposal](debugger.md) covers MCP and DAP over one stop and
+inspection contract after the native and actor runtime releases.
+
 ## Beyond the local codebase
 
 The [v0.0.2 codebase](../../v0.0.2/m1/README.md) starts with one local store

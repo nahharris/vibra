@@ -47,6 +47,8 @@ separate designs. Reopen them when a concrete protocol requires authority
 that cannot be forwarded, must be withdrawn, or must constrain the host
 operation itself. Distribution, live migration, general mutable references,
 and a separate CPU fork/join API are also follow-on work.
+[Live debugging](../scratchpad/agent-tooling/debugger.md) will use the
+execution and actor contracts proved by this release.
 
 ## Release gate
 

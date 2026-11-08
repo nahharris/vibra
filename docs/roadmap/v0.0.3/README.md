@@ -12,7 +12,7 @@ interactive tooling from [v0.0.2](../v0.0.2/README.md).
 
 ## Scope and priorities
 
-Start after the [v0.0.2 handoff](../v0.0.2/m6/README.md) covers build inputs,
+Start after the [v0.0.2 handoff](../v0.0.2/m5/README.md) covers build inputs,
 provenance, source origins, and conformance.
 The first compiled product is a binary project target over the admitted
 project surface. Each native target ships with a pinned link environment and
@@ -52,7 +52,7 @@ Require full interpreter parity for every executable case in the supported
 release profile and repeatable native artifacts on all three platforms. An
 unavailable native case counts as a gap for that profile. Run the host suite
 and the independent Vibra corpus. Require v0.0.2 tooling regressions to pass
-and keep run, test, and interactive/debug sessions interpreter-backed.
+and keep run, test, and interactive evaluation sessions interpreter-backed.
 Retire the active Wasm path only after all three native targets pass. If one
 platform slips, keep Wasm coverage and treat the native slice as preview
 evidence pending a revised release decision.
