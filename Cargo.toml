@@ -50,6 +50,9 @@ unsafe_code = "forbid"
 missing_docs = "warn"
 missing_debug_implementations = "warn"
 unreachable_pub = "warn"
+# `cargo kani` compiles the `#[cfg(kani)]` proof harnesses; every other build
+# leaves them out. See the `kani` job of `.github/workflows/ci.yml`.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(kani)"] }
 
 [workspace.lints.clippy]
 # The reader runs on untrusted, incomplete input. A panic there is a defect,
