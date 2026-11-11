@@ -12,6 +12,7 @@ repository = "https://github.com/nahharris/vibra"
 publish = false
 
 [workspace.dependencies]
+vibra-actors = { path = "crates/vibra-actors" }
 vibra-conformance = { path = "crates/vibra-conformance" }
 vibra-diagnostics = { path = "crates/vibra-diagnostics" }
 vibra-exec = { path = "crates/vibra-exec" }

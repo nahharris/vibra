@@ -120,6 +120,9 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         "vibra-wasm-run",
         &["vibra-host", "vibra-ir", "vibra-native"],
     ),
+    // The actor kernel is generic over an executor and knows no language, no
+    // value layout, and no backend: it needs no other crate (N19).
+    ("vibra-actors", &[]),
     // The execution IR sits downstream of checked IR and knows no runtime, no
     // value layout, and no target (docs/roadmap/nexus/decisions.md, N4). Its
     // tests build source origins, which need a span.
@@ -380,6 +383,7 @@ const SEMANTIC_CRATES: &[&str] = &[
     "vibra-wasm",
     "vibra-native",
     "vibra-exec",
+    "vibra-actors",
     "vibra-nexus",
     "vibra-nexus-eval",
 ];
@@ -607,6 +611,63 @@ fn semantic_crates_do_not_touch_the_filesystem() {
         "semantic crates must accept explicit inputs:\n{}",
         found.join("\n")
     );
+}
+
+/// What the actor kernel must not name: it is deterministic by construction.
+const KERNEL_FORBIDDEN: &[&str] = &[
+    "unsafe",
+    "std::thread",
+    "thread::",
+    "std::time",
+    "Instant",
+    "SystemTime",
+    "std::sync",
+    "std::process",
+    "std::env",
+];
+
+fn kernel_forbidden_references(source: &str) -> Vec<&'static str> {
+    KERNEL_FORBIDDEN
+        .iter()
+        .copied()
+        .filter(|pattern| source.contains(pattern))
+        .collect()
+}
+
+#[test]
+fn the_actor_kernel_has_no_unsafe_no_thread_and_no_clock() {
+    let root = workspace_root();
+    let crate_root = root.join("crates").join("vibra-actors");
+    let mut sources = Vec::new();
+    rust_sources(&crate_root.join("src"), &mut sources);
+    assert!(!sources.is_empty(), "vibra-actors has no sources");
+    let mut found = Vec::new();
+    for path in sources {
+        let source = std::fs::read_to_string(&path).expect("readable source");
+        for pattern in kernel_forbidden_references(&source) {
+            found.push(format!("{} names `{pattern}`", path.display()));
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "the actor kernel is single-threaded, clockless, and safe:\n{}",
+        found.join("\n")
+    );
+
+    let manifest = read_manifest(&crate_root.join("Cargo.toml"));
+    assert!(
+        all_dependencies(&manifest).is_empty(),
+        "the actor kernel has no dependency of any kind"
+    );
+}
+
+#[test]
+fn a_thread_or_clock_reference_in_the_actor_kernel_is_reported() {
+    assert_eq!(
+        kernel_forbidden_references("use std::time::Instant;"),
+        ["std::time", "Instant"]
+    );
+    assert!(kernel_forbidden_references("let t = Time(0);").is_empty());
 }
 
 #[test]
