@@ -30,6 +30,10 @@ name = "vibra-conformance"
 path = "src/bin/conformance.rs"
 
 [dev-dependencies]
+vibra-exec.workspace = true
+vibra-lower.workspace = true
+vibra-nexus.workspace = true
+vibra-nexus-eval.workspace = true
 wasmparser.workspace = true
 
 [lints]
