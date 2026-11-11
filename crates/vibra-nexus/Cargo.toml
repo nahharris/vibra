@@ -11,6 +11,7 @@ publish.workspace = true
 [dependencies]
 vibra-host.workspace = true
 vibra-ir.workspace = true
+vibra-native.workspace = true
 
 [lints]
 workspace = true

@@ -1513,6 +1513,7 @@ version = "0.0.1"
 dependencies = [
  "vibra-host",
  "vibra-ir",
+ "vibra-native",
 ]
 
 [[package]]
