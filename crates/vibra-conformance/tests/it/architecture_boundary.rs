@@ -121,8 +121,9 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         &["vibra-host", "vibra-ir", "vibra-native"],
     ),
     // The execution IR sits downstream of checked IR and knows no runtime, no
-    // value layout, and no target (docs/roadmap/nexus/decisions.md, N4).
-    ("vibra-exec", &["vibra-ir"]),
+    // value layout, and no target (docs/roadmap/nexus/decisions.md, N4). Its
+    // tests build source origins, which need a span.
+    ("vibra-exec", &["vibra-diagnostics", "vibra-ir"]),
     // Nexus owns execution state and reaches the host provider. It does not
     // depend on the execution IR or on a code generator: whatever executes a
     // program's blocks drives it through its transfers (N5).
