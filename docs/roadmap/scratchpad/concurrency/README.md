@@ -210,11 +210,13 @@ needs no effect root and no process:
 - The runtime chooses chunking and may run sequentially. The interpreter
   always runs sequentially.
 
-Parallel points are explicit in the first design. Bend and HVM show that pure
-functional code can be parallelized automatically, through interaction nets.
-Automatic parallel evaluation remains a research question. An explicit `par` keeps a
-predictable cost model, which matters most when each worker is a separate Wasm
-instance and values are copied between instances.
+Parallel points are explicit in the first design. Bend 1 and HVM2 showed that
+pure functional code can be parallelized automatically, through interaction
+nets. Bend 2 has since moved to explicit fork/join over compiled code.
+Automatic parallel evaluation remains a research question, examined in the
+[interaction nets note](../execution-targets/interaction-nets.md). An explicit
+`par` keeps a predictable cost model, which matters most when each worker is a
+separate Wasm instance and values are copied between instances.
 
 ## Distribution
 

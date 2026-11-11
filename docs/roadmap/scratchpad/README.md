@@ -13,7 +13,7 @@ illustrative.
 | [Verification](verification/README.md) | Executable contracts, property tests, static verification, and proofs |
 | [Concurrency and distribution](concurrency/README.md) | Isolated processes, supervision, simulation, parallelism, and clusters |
 | [Interactive applications](interactive-apps/README.md) | Terminal, browser, and desktop UIs, accessibility, and graphics |
-| [Execution targets](execution-targets/README.md) | Nexus follow-ons, earlier WebAssembly alternatives, compiler strategies, and backend parity |
+| [Execution targets](execution-targets/README.md) | Nexus follow-ons, interaction nets, earlier WebAssembly alternatives, compiler strategies, and backend parity |
 | [Agent tooling](agent-tooling/README.md) | Live debugging, codebase extensions, and type-constrained decoding for source generation |
 
 ## Open issue intake
