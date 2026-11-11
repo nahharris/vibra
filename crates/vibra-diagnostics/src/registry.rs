@@ -393,12 +393,20 @@ diagnostic_registry! {
         "a value that holds a function reached an observation, which has no encoding for one";
     RuntimeMemoryExhausted => "@runtime.memory-exhausted", Runtime, Error, None,
         "execution exhausted the memory or the value-ID space of the instance, a host event rather than a trap";
+    RuntimeIncompatibleArtifact => "@runtime.incompatible-artifact", Runtime, Error, None,
+        "a native executable was refused at admission: its runtime ABI version, registry minor, or a required symbol is not one the runtime implements";
     StyleArgumentOrder => "@style.argument-order", Style, Warning, Safe,
         "operands are in a noncanonical but unambiguous order";
     ContractUnusedEffect => "@contract.unused-effect", Contract, Warning, None,
         "a declared effect root is never performed";
     ToolUnavailable => "@tool.unavailable", Tool, Error, None,
         "a valid v1 surface is not available in the selected implementation profile";
+    ToolUnsupportedTarget => "@tool.unsupported-target", Tool, Error, None,
+        "the native target triple of a build is not one the installed toolchain supports";
+    ToolMissingLinkTool => "@tool.missing-link-tool", Tool, Error, None,
+        "the linker, or a system library or SDK input its link needs, cannot be located";
+    ToolLinkFailed => "@tool.link-failed", Tool, Error, None,
+        "the linker ran and did not produce an executable";
 }
 
 impl fmt::Display for DiagnosticCode {
@@ -413,7 +421,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 94;
+    const REGISTERED_CODES: usize = 98;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

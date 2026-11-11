@@ -10,6 +10,8 @@ unavailable. Milestone 4 Step 13 closes the Stage 4B contracts of this chapter,
 program arguments, the `@command.program-failed` result, the audit-event
 payloads, and the effect fields of the position envelope and the index, and
 implements none of them; Steps 16, 18, 19, and 20 do.
+The native `build` command is specified for release v0.0.3 Milestone 3 and not
+implemented.
 
 ## One workspace engine
 
@@ -340,6 +342,40 @@ provider is not a language mode and not an option of either command.
 A host event ends `run` or `test` with an unlocated error diagnostic. The `run`
 payload then has a null `programResult` and a null `trap`; the `test` payload
 has zero `selected`, `passed`, and `failed` and an empty `tests` array.
+
+### Native build command
+
+Implementation status: specified for release v0.0.3 Milestone 3 and not yet
+implemented. Until then `build` is the reserved command above and reports
+`@tool.unavailable`.
+
+The command takes `build TARGET [--target TRIPLE]` after the global options.
+`TARGET` is the canonical atom of one binary target, and `TRIPLE` is a native
+target triple such as `x86_64-pc-windows-msvc`; the option is spelled `--target`
+and names a platform, not a project target. When `--target` is omitted the
+triple is that of the host the toolchain runs on. A triple the installed
+toolchain does not support is `@tool.unsupported-target`, not
+`@tool.unavailable`. A missing or unknown `TARGET` is
+`@command.invalid-input`, and a library target is `@tool.unavailable`.
+
+`build` checks the selected target as `check` does and produces no product when
+that check reports an error-level diagnostic. Otherwise it emits the native
+executable and the manifest of the packages chapter. It reports
+`@tool.missing-link-tool` when the link environment of the triple cannot be
+located and `@tool.link-failed` when the linker fails, and in either case it
+leaves no executable at the output path.
+
+The result is `@command.ok` on success, `@command.diagnostics` (exit 1) for a
+check diagnostic, `@command.unavailable` (exit 4) for
+`@tool.unsupported-target`, and `@command.operational-failure` (exit 3) for
+`@tool.missing-link-tool` and `@tool.link-failed`. The `build` payload is
+`{ "target": string, "triple": string, "executable": string|null, "manifest":
+string|null, "semanticIdentity": string|null, "artifactIdentity": string|null
+}`, with workspace-relative paths and `null` when no product was produced.
+
+`run`, `test`, and interactive evaluation execute the reference interpreter, as
+the section above states, and MUST NOT require a linker or any other part of the
+native toolchain.
 
 ## Project operations
 
