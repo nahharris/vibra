@@ -3,6 +3,8 @@
 A linked program proves the boundary between the
 compiler, Nexus, and the closed host registry on a small fixture.
 
+Toolchain and target feasibility record: [feasibility.md](feasibility.md).
+
 ## Delivery order
 
 1. Review the transition specification. Close execution IR verification,
