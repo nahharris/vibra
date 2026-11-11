@@ -6,7 +6,8 @@
 //! - **V1** the program has a function, and the entry and every module-value
 //!   initializer name a function with no parameter and no environment;
 //! - **V2** every function has a block, every block is reachable from block
-//!   `0`, and the frame holds the function's entry slots;
+//!   `0`, and the frame holds the function's entry slots and at most
+//!   [`MAX_SLOTS`] slots;
 //! - **V3** every block, slot, function, constant, module value, and origin an
 //!   instruction or terminator names exists;
 //! - **V4** a direct call names a function without an environment and passes
@@ -23,7 +24,8 @@
 use std::fmt;
 
 use crate::{
-    Block, BlockId, Callee, FuncId, Function, Inst, OriginId, Program, Slot, Terminator,
+    Block, BlockId, Callee, FuncId, Function, Inst, MAX_SLOTS, OriginId, Program, Slot,
+    Terminator,
 };
 
 /// Why a program was rejected, and where.
@@ -50,6 +52,8 @@ pub enum VerifyErrorKind {
     NoBlocks,
     /// V2: the frame is smaller than the parameters and the environment.
     FrameTooSmall,
+    /// V2: the frame is larger than [`MAX_SLOTS`].
+    FrameTooLarge,
     /// V2: no path from the entry block reaches the block.
     UnreachableBlock,
     /// V3: a block that does not exist.
@@ -162,6 +166,11 @@ impl Checker<'_> {
         }
         if self.function.slots < self.function.entry_slots() {
             return Err(at(None)(VerifyErrorKind::FrameTooSmall));
+        }
+        // Before any per-slot state exists: the verifier must be total in
+        // bounded memory on a program it does not trust.
+        if self.function.slots > MAX_SLOTS {
+            return Err(at(None)(VerifyErrorKind::FrameTooLarge));
         }
         let slots = usize::try_from(self.function.slots).unwrap_or(usize::MAX);
         let entry_slots =

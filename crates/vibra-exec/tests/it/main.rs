@@ -11,8 +11,8 @@
 )]
 
 use vibra_exec::{
-    Block, BlockId, Callee, ConstId, FuncId, Function, GlobalId, Inst, OriginId,
-    Program, ScalarClass, ScalarOp, Slot, Terminator, VerifyErrorKind, verify,
+    Block, BlockId, Callee, ConstId, FuncId, Function, GlobalId, Inst, MAX_SLOTS,
+    OriginId, Program, ScalarClass, ScalarOp, Slot, Terminator, VerifyErrorKind, verify,
 };
 use vibra_ir::boundary::TrapCode;
 use vibra_ir::external::host::host_row;
@@ -141,6 +141,20 @@ fn v2_a_function_has_reachable_blocks_and_a_frame_for_its_operands() {
         ],
     );
     assert_eq!(rejected(&unreachable), VerifyErrorKind::UnreachableBlock);
+}
+
+#[test]
+fn a_frame_larger_than_the_bound_is_rejected_without_allocating_it() {
+    // Were any per-slot state allocated first, this would try to take
+    // gigabytes; it must answer at once.
+    let huge = entry(u32::MAX, vec![block(vec![scalar(0, 0)], ret(0))]);
+    assert_eq!(rejected(&huge), VerifyErrorKind::FrameTooLarge);
+
+    let just_over = entry(MAX_SLOTS + 1, vec![block(vec![scalar(0, 0)], ret(0))]);
+    assert_eq!(rejected(&just_over), VerifyErrorKind::FrameTooLarge);
+
+    let at_the_bound = entry(MAX_SLOTS, vec![block(vec![scalar(0, 0)], ret(0))]);
+    assert_eq!(verify(&at_the_bound), Ok(()));
 }
 
 #[test]

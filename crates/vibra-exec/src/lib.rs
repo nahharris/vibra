@@ -81,6 +81,11 @@ index_type! {
     ConstId
 }
 
+/// The most slots a [`Function`]'s frame may declare. A toolchain limit, not a
+/// language rule: [`verify`] rejects a larger frame before it allocates any
+/// state for it, so verification is total in bounded memory.
+pub const MAX_SLOTS: u32 = 65_536;
+
 /// A source origin of a [`Program`], by ordinal. Ordinal `0` is "no origin",
 /// so ordinal `n` names `Program::origins[n - 1]`, exactly as the origin table
 /// of the runtime chapter's "Traps" section numbers them.
