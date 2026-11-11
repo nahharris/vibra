@@ -1,0 +1,15 @@
+[package]
+name = "vibra-exec"
+description = "The verified execution IR between checked Vibra IR and the Nexus runtime."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+vibra-ir.workspace = true
+
+[lints]
+workspace = true

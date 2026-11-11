@@ -120,6 +120,26 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         "vibra-wasm-run",
         &["vibra-host", "vibra-ir", "vibra-native"],
     ),
+    // The execution IR sits downstream of checked IR and knows no runtime, no
+    // value layout, and no target (docs/roadmap/nexus/decisions.md, N4).
+    ("vibra-exec", &["vibra-ir"]),
+    // Nexus owns execution state and reaches the host provider. It does not
+    // depend on the execution IR or on a code generator: whatever executes a
+    // program's blocks drives it through its transfers (N5).
+    ("vibra-nexus", &["vibra-host", "vibra-ir"]),
+    // The reference stepper joins the two: verified execution IR, run on
+    // Nexus with no generated code (N6). It is a test instrument, and its
+    // tests supply a host world and spans.
+    (
+        "vibra-nexus-eval",
+        &[
+            "vibra-diagnostics",
+            "vibra-exec",
+            "vibra-host",
+            "vibra-ir",
+            "vibra-nexus",
+        ],
+    ),
     // The harness. Legitimately sits above every node.
     (
         "vibra-conformance",
@@ -358,6 +378,9 @@ const SEMANTIC_CRATES: &[&str] = &[
     "vibra-fmt",
     "vibra-wasm",
     "vibra-native",
+    "vibra-exec",
+    "vibra-nexus",
+    "vibra-nexus-eval",
 ];
 
 /// The one crate that may depend on the WebAssembly engine, and the engine's
@@ -504,6 +527,10 @@ fn only_the_backends_and_the_harness_depend_on_the_host_provider() {
         "vibra-cli",
         "vibra-conformance",
         "vibra-interp",
+        // Nexus performs a native program's host operations, and the
+        // reference stepper's tests hand it a host world.
+        "vibra-nexus",
+        "vibra-nexus-eval",
         "vibra-wasm-run",
         "vibra-workspace",
     ]);

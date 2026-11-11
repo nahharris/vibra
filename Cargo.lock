@@ -1457,6 +1457,13 @@ name = "vibra-diagnostics"
 version = "0.0.1"
 
 [[package]]
+name = "vibra-exec"
+version = "0.0.1"
+dependencies = [
+ "vibra-ir",
+]
+
+[[package]]
 name = "vibra-fmt"
 version = "0.0.1"
 dependencies = [
@@ -1497,6 +1504,25 @@ name = "vibra-native"
 version = "0.0.1"
 dependencies = [
  "vibra-ir",
+]
+
+[[package]]
+name = "vibra-nexus"
+version = "0.0.1"
+dependencies = [
+ "vibra-host",
+ "vibra-ir",
+]
+
+[[package]]
+name = "vibra-nexus-eval"
+version = "0.0.1"
+dependencies = [
+ "vibra-diagnostics",
+ "vibra-exec",
+ "vibra-host",
+ "vibra-ir",
+ "vibra-nexus",
 ]
 
 [[package]]

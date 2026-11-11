@@ -14,11 +14,14 @@ publish = false
 [workspace.dependencies]
 vibra-conformance = { path = "crates/vibra-conformance" }
 vibra-diagnostics = { path = "crates/vibra-diagnostics" }
+vibra-exec = { path = "crates/vibra-exec" }
 vibra-fmt = { path = "crates/vibra-fmt" }
 vibra-host = { path = "crates/vibra-host" }
 vibra-interp = { path = "crates/vibra-interp" }
 vibra-ir = { path = "crates/vibra-ir" }
 vibra-native = { path = "crates/vibra-native" }
+vibra-nexus = { path = "crates/vibra-nexus" }
+vibra-nexus-eval = { path = "crates/vibra-nexus-eval" }
 vibra-schema = { path = "crates/vibra-schema" }
 vibra-syntax = { path = "crates/vibra-syntax" }
 vibra-resolve = { path = "crates/vibra-resolve" }
