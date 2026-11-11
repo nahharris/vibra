@@ -18,7 +18,7 @@ syntax -> resolved AST -> checked IR ──────────────>
 | Crate | Responsibility | Depends on | State |
 | --- | --- | --- | --- |
 | `vibra-exec` | Execution IR, verifier | `vibra-ir` | Exists (foundation) |
-| `vibra-nexus` | Contexts, value store, frames, transfers, dispatcher, traps, host dispatch, admission; later actors' executor and workers | `vibra-host`, `vibra-ir`, later `vibra-native` | Core exists |
+| `vibra-nexus` | Contexts, value store, frames, transfers, dispatcher, traps, host dispatch, admission; later actors' executor and workers | `vibra-host`, `vibra-ir`, `vibra-native` | Core exists |
 | `vibra-nexus-eval` | Reference stepper: execution IR run on Nexus by a loop | `vibra-exec`, `vibra-nexus`, `vibra-ir` | Exists for the foundation's instruction set |
 | `vibra-lower` | Checked IR to execution IR. The only crate that knows both | `vibra-ir`, `vibra-exec` | X3-03, then X3-10 to X3-18 |
 | `vibra-codegen` | Execution IR to a target object with Cranelift. The only crate that depends on `cranelift-*` | `vibra-exec` | X3-06 |
