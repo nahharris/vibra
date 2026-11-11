@@ -298,7 +298,7 @@ in `@runtime.division-by-zero`), its corpus cases, and the M1 evidence in
 
 | Clause | Evidence |
 | --- | --- |
-| G3.M1.8 demo | On Windows, the linked fixture's result, trap code, origin span, and audit trace equal the interpreter's, from one expectation |
+| G3.M1.8 demo | On Windows, the linked fixture's result, trap code, origin, and audit trace equal the interpreter's, from one expectation. The runtime chapter gives `@runtime.division-by-zero` no origin, so the expected origin of that variant is none; an origin that maps to a span is evidenced by a second variant, a test that ends in `@runtime.unobservable-function` |
 | G3.M1.9 | The same run with quota 1 has exactly one `io.stdout-text` event and the yield count is at least the number of checkpoints |
 | G3.M1.10 | With the loop count at 10,000 and 100,000, peak frame count is equal and peak live size differs by at most 64 bytes |
 | G3.M1.11 | Three refused inputs: a program mutated after verification is rejected by `verify`; an object with another `abi` is refused by the launcher; a descriptor naming an unknown symbol is refused. None performs a host operation |
