@@ -17,6 +17,10 @@ use vibra_exec::{
 use vibra_ir::boundary::TrapCode;
 use vibra_ir::external::host::host_row;
 
+mod fuzz;
+mod kinds;
+mod text;
+
 fn scalar(dst: u32, bits: u64) -> Inst {
     Inst::Scalar {
         dst: Slot(dst),

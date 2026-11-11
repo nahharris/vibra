@@ -32,6 +32,7 @@
 //! This crate knows no value layout, no runtime, and no target. It depends on
 //! `vibra-ir` for source origins and the closed registries only.
 
+mod text;
 mod verify;
 
 use std::collections::BTreeSet;
