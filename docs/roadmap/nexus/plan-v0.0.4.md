@@ -97,6 +97,38 @@ Address scope and the schedule document wait for it.
   exactly once.
 - The crate has no `unsafe`, no thread, and no clock: an architecture test.
 
+**Status, 2026-11-11:** the part no open question touches is merged
+(`crates/vibra-actors`, 15 tests). Address scope, narrowing, and the schedule
+document are not started. The kernel made these choices where the plan was
+silent. Each is provisional, and X4-S1 confirms or replaces it:
+
+1. A reply slot travels as a field of the send, never inside the payload; the
+   kernel never inspects a payload.
+2. An actor holds a slot only once a message carrying it is delivered to it. A
+   reply to a slot one does not hold, or a wait on a slot one does not own, is
+   an invalid request (a defect of the executor), not an outcome.
+3. A slot is attached to at most one accepted send; a refused send does not
+   attach it.
+4. A mailbox bound of 0 is refused at spawn. A self-send is allowed.
+5. A send to a receiver parked in a receive is queued and delivered at once:
+   send-accepted, deliver, wake, in that order.
+6. A reply to a slot whose owner has exited is the outcome "owner exited" and
+   the payload is dropped. A reply after the waiter timed out still fills the
+   slot, and the owner may wait again.
+7. A wait on a filled or closed slot returns at once with no park or wake. A
+   successful wait consumes the slot; a timeout does not.
+8. On exit or trap, the actor's queued messages are dropped with no event per
+   message, and every unanswered slot it held or had queued is closed; an
+   owner parked on one is woken with "exited".
+9. Virtual time moves only on a scheduler decision. Waits due at or before the
+   new time fire in (deadline, actor) order. A timeout of 0 fires at once.
+10. A run ends completed (all exited) or blocked (none runnable, no deadline).
+    A replay with decisions left over, or cut short, is invalid.
+11. An actor cannot spawn an actor by a kernel action: spawn is not in the
+    plan's action list. X4-S1 must say whether it is.
+12. The executor is handed the result of its last action when it is resumed,
+    and "create a reply slot" and "wait on a slot" are kernel actions beside
+    the six the sketch above lists.
 ## X4-02 · Checker: actors, addresses, and effects
 
 **Goals:** G4.7, G4.9, G4.G3. Split by the specification's sections: (1)
