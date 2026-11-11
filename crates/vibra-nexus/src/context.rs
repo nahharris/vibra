@@ -135,6 +135,12 @@ impl<'h> Context<'h> {
         self.store.live_size()
     }
 
+    /// The most bytes of values and frames that have been live at once.
+    #[must_use]
+    pub const fn peak_size(&self) -> u64 {
+        self.store.peak_size()
+    }
+
     /// The number of frames now held.
     #[must_use]
     pub const fn depth(&self) -> usize {

@@ -47,6 +47,15 @@ pub enum StoreError {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Ref(u32);
 
+impl Ref {
+    /// The offset of the value's block in its store, which is how the
+    /// toolchain-owned native code names an arena object.
+    #[must_use]
+    pub const fn offset(self) -> u32 {
+        self.0
+    }
+}
+
 /// One cell: what a frame slot or a component of an object holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cell {
@@ -112,6 +121,8 @@ pub struct Store {
     /// The head of the free list of each size class, `0` when it is empty.
     free: [u32; CLASSES],
     live: u64,
+    /// The greatest value `live` has had. It never falls.
+    peak: u64,
     limit: u64,
 }
 
@@ -124,6 +135,7 @@ impl Store {
             bump: BASE,
             free: [0; CLASSES],
             live: 0,
+            peak: 0,
             limit,
         }
     }
@@ -133,6 +145,21 @@ impl Store {
     #[must_use]
     pub const fn live_size(&self) -> u64 {
         self.live
+    }
+
+    /// The most bytes [`Store::live_size`] has been since the store was made.
+    /// It is monotone: releasing a value does not lower it.
+    #[must_use]
+    pub const fn peak_size(&self) -> u64 {
+        self.peak
+    }
+
+    /// A view of the store's bytes for `vibra_native::arena`, the native code
+    /// that implements `vibra_native::Source` and `vibra_native::Sink` over
+    /// arena objects. A [`Ref::offset`] names an object in it. The store
+    /// shares the layout with that code through `vibra_ir::arena` alone.
+    pub fn native_memory(&mut self) -> vibra_native::arena::Memory<'_> {
+        vibra_native::arena::memory(&mut self.memory)
     }
 
     /// Counts `bytes` held outside the store, such as a frame, against the
@@ -147,6 +174,7 @@ impl Store {
             return Err(StoreError::Exhausted);
         }
         self.live = live;
+        self.peak = self.peak.max(live);
         Ok(())
     }
 
@@ -613,5 +641,376 @@ mod tests {
         let wide = tuple(&mut store, &children);
         store.release(wide).unwrap();
         assert_eq!(store.live_size(), 0);
+    }
+
+    // The tests below are the arena host tests of milestone 4
+    // (`crates/vibra-conformance/tests/it/arena_runtime.rs` and the unit tests
+    // of `vibra-wasm`'s layout), driven on the store directly. A constant
+    // that differs from the M4 one says so, and why.
+
+    /// A block of `len` bytes that is allocated and released at once.
+    fn bytes_round_trip(store: &mut Store, len: u32) -> Done<()> {
+        let value = store.alloc(kind::BYTES, STRIDE_BYTES, len, 0)?;
+        store.release(value)
+    }
+
+    /// Runs `body` on a thread with the 64 KiB stack that the M4 deep-release
+    /// tests gave the engine, so a release that recursed could not finish.
+    fn on_a_small_stack(body: impl FnOnce() + Send + 'static) {
+        std::thread::Builder::new()
+            .stack_size(64 * 1024)
+            .spawn(body)
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
+    fn blocks_are_the_smallest_power_of_two_class_from_32_bytes() {
+        // M4 `size_classes_round_up_to_a_power_of_two`, observed as the bytes
+        // a value of that request size makes live.
+        let live_after = |len: u32| {
+            let mut store = Store::new(MIB);
+            store.alloc(kind::BYTES, STRIDE_BYTES, len, 0).unwrap();
+            store.live_size()
+        };
+        let header = header::SIZE;
+        assert_eq!(live_after(0), 32, "the smallest class holds a bare header");
+        assert_eq!(live_after(32 - header), 32, "a request of exactly 32");
+        assert_eq!(
+            live_after(33 - header),
+            64,
+            "one byte more is the next class"
+        );
+        assert_eq!(live_after(64 - header), 64);
+        assert_eq!(live_after(65 - header), 128);
+    }
+
+    #[test]
+    fn payload_sizes_follow_the_stride() {
+        // M4 `payload_sizes_follow_the_stride`: the request is the header and
+        // the payload of the layout, and the live size is its class.
+        let live_after = |stride: u32, len: u32| {
+            let mut store = Store::new(MIB);
+            store.alloc(kind::TUPLE, stride, len, 0).unwrap();
+            store.live_size()
+        };
+        let header = u64::from(header::SIZE);
+        let request = |payload: u64| (header + payload).next_power_of_two();
+        assert_eq!(live_after(STRIDE_CELLS, 0), request(0));
+        assert_eq!(live_after(STRIDE_CELLS, 1), request(8 + 8));
+        assert_eq!(live_after(STRIDE_CELLS, 9), request(16 + 72));
+        assert_eq!(live_after(STRIDE_CHARS, 3), request(12));
+        assert_eq!(live_after(STRIDE_BYTES, 5), request(5));
+        assert_eq!(live_after(STRIDE_CELLS, 9), 128, "112 bytes in a 128 class");
+        assert_eq!(
+            Store::new(MIB).alloc(kind::TUPLE, STRIDE_CHARS + 1, 1, 0),
+            Err(StoreError::Fault),
+            "a stride that is no layout is a defect, never a block"
+        );
+    }
+
+    #[test]
+    fn dup_and_drop_balance_to_a_live_size_equal_to_the_start() {
+        // M4 `dup_and_drop_balance_to_a_live_size_equal_to_the_start`: fifty
+        // extra references taken and dropped leave the object live with its
+        // one, and its last drop returns the store to its start.
+        let mut store = Store::new(MIB);
+        let object = tuple(&mut store, &[Cell::i64(1), Cell::i64(2), Cell::i64(3)]);
+        let held = store.live_size();
+        assert_eq!(held, 64, "24 + 8 + 3 * 8 bytes in a 64-byte class");
+        for _ in 0..50 {
+            store.dup(object).unwrap();
+        }
+        for _ in 0..50 {
+            store.release(object).unwrap();
+        }
+        assert_eq!(store.live_size(), held, "the count is back to one");
+        assert_eq!(store.cell(object, 2).unwrap(), Cell::i64(3));
+        store.release(object).unwrap();
+        assert_eq!(store.live_size(), 0);
+    }
+
+    #[test]
+    fn the_free_list_serves_its_own_class_and_only_partly_satisfies_a_larger_request() {
+        // M4 test of the same name.
+        let mut store = Store::new(MIB);
+        let header = header::SIZE;
+        // A 32-byte block, freed.
+        let a = store.alloc(kind::BYTES, STRIDE_BYTES, 8, 0).unwrap();
+        store.release(a).unwrap();
+        // A request one class up cannot use it.
+        let b = store
+            .alloc(kind::BYTES, STRIDE_BYTES, 64 - header - 10, 0)
+            .unwrap();
+        assert_ne!(a, b);
+        assert_eq!(store.live_size(), 64);
+        // A request of its own class takes it back.
+        let c = store.alloc(kind::BYTES, STRIDE_BYTES, 8, 0).unwrap();
+        assert_eq!(a, c);
+        store.release(b).unwrap();
+        store.release(c).unwrap();
+        assert_eq!(store.live_size(), 0);
+    }
+
+    /// A chain of `depth` tuples, each holding the one before, the first
+    /// holding a scalar. The answer is the head.
+    fn chain(store: &mut Store, depth: u32) -> Done<Ref> {
+        let mut head = store.alloc(kind::TUPLE, STRIDE_CELLS, 1, 0)?;
+        for _ in 0..depth {
+            let node = store.alloc(kind::TUPLE, STRIDE_CELLS, 1, 0)?;
+            store.set_cell(node, 0, Cell::reference(head))?;
+            head = node;
+        }
+        Ok(head)
+    }
+
+    #[test]
+    fn a_value_nested_deep_releases_with_bounded_stack() {
+        // M4 `a_value_nested_deep_releases_with_bounded_engine_stack`: 5,000
+        // and 100,000 levels on a 64 KiB stack. A node is a 64-byte block. The
+        // M4 live size while held was `(depth + 1) * 64 + 256`
+        // (320,320 and 6,400,320): the 256 bytes were the Wasm handle table,
+        // which a native context does not have (N7), so the Nexus live size is
+        // 320,064 and 6,400,064.
+        on_a_small_stack(|| {
+            for (depth, held) in [(5_000_u32, 320_064_u64), (100_000, 6_400_064)] {
+                let mut store = Store::new(64 * MIB);
+                let head = chain(&mut store, depth).unwrap();
+                assert_eq!(store.live_size(), held, "depth {depth}: held");
+                assert_eq!(store.peak_size(), held);
+                store.release(head).unwrap();
+                assert_eq!(store.live_size(), 0, "depth {depth}: released");
+                assert_eq!(store.peak_size(), held, "the peak is not lowered");
+            }
+        });
+    }
+
+    #[test]
+    fn a_worklist_that_grows_past_a_page_releases_and_returns_every_byte() {
+        // M4 test of the same name: one block of 100,000 references to blocks
+        // that die with it, so all of them wait at once.
+        const WIDTH: u32 = 100_000;
+        on_a_small_stack(|| {
+            let mut store = Store::new(64 * MIB);
+            let root = store.alloc(kind::ARRAY, STRIDE_CELLS, WIDTH, 0).unwrap();
+            for index in 0..WIDTH {
+                let leaf = store.alloc(kind::BYTES, STRIDE_BYTES, 0, 0).unwrap();
+                store.set_cell(root, index, Cell::reference(leaf)).unwrap();
+            }
+            assert_eq!(store.len(root), Ok(WIDTH));
+            let held = store.live_size();
+            assert!(held > 4 * u64::from(WIDTH) * 8, "{held}");
+            // The root is a 1 MiB block (the 100,000 class bytes, the same
+            // number of cells, and the header) and each leaf a 32-byte block.
+            assert_eq!(held, 1_048_576 + u64::from(WIDTH) * 32);
+            store.release(root).unwrap();
+            assert_eq!(store.live_size(), 0);
+        });
+    }
+
+    /// The live size and the peak after a loop of `count` iterations that
+    /// builds a fresh tuple and drops the previous one: the allocating tail
+    /// loop of "Reclamation".
+    fn allocating_loop(count: u32) -> (u64, u64) {
+        let mut store = Store::new(MIB);
+        let mut kept = tuple(&mut store, &[Cell::EMPTY, Cell::EMPTY]);
+        for _ in 0..count {
+            let fresh = tuple(&mut store, &[Cell::EMPTY, Cell::EMPTY]);
+            store.release(kept).unwrap();
+            kept = fresh;
+        }
+        (store.live_size(), store.peak_size())
+    }
+
+    #[test]
+    fn an_allocating_loop_has_a_live_size_that_does_not_grow_with_its_iterations() {
+        let [small, large] = [10_000_u32, 100_000].map(allocating_loop);
+        assert_eq!(
+            small.0, large.0,
+            "the live size after 100,000 iterations equals the one after 10,000"
+        );
+        // M4 held 320 bytes at both counts: the 64-byte tuple and the 256-byte
+        // handle table. A native context has no handle table (N7), so it
+        // holds the tuple alone.
+        assert_eq!(large.0, 64);
+        assert_eq!(small.1, large.1, "the peak does not grow either");
+        assert_eq!(large.1, 128, "the old tuple and the new one, at once");
+    }
+
+    #[test]
+    fn running_out_of_memory_is_the_host_event_and_never_a_defect() {
+        // M4 `running_out_of_memory_is_the_host_event_and_never_a_trap`: a
+        // chain that is never released, in a 1 MiB store.
+        let mut store = Store::new(MIB);
+        assert_eq!(chain(&mut store, 1_000_000), Err(StoreError::Exhausted));
+        // The store still answers, holds what it built, and the limit is
+        // exactly reached: 16,384 nodes of 64 bytes.
+        assert_eq!(store.live_size(), MIB);
+        assert_eq!(store.peak_size(), MIB);
+        // A fresh store runs normally.
+        let mut fresh = Store::new(MIB);
+        let head = chain(&mut fresh, 10).unwrap();
+        fresh.release(head).unwrap();
+        assert_eq!(fresh.live_size(), 0);
+    }
+
+    #[test]
+    fn a_store_that_ran_out_of_memory_recovers_when_values_are_released() {
+        // The recovery half of the M4 test: the nodes that were built are
+        // still values, and releasing them makes room.
+        let mut store = Store::new(MIB);
+        let mut heads = Vec::new();
+        while let Ok(head) = store.alloc(kind::TUPLE, STRIDE_CELLS, 1, 0) {
+            heads.push(head);
+        }
+        assert_eq!(
+            store.alloc(kind::TUPLE, STRIDE_CELLS, 1, 0),
+            Err(StoreError::Exhausted)
+        );
+        let last = heads.pop().unwrap();
+        store.release(last).unwrap();
+        assert!(store.alloc(kind::TUPLE, STRIDE_CELLS, 1, 0).is_ok());
+    }
+
+    #[test]
+    fn the_largest_size_class_is_allocated_or_exhausts_and_nothing_above_it_exists() {
+        // M4 test of the same name. The limit is 64 MiB, as in M4.
+        let largest = (1_u32 << MAX_SHIFT) - header::SIZE;
+        let mut store = Store::new(64 * MIB);
+        // 2^25 bytes fit the limit and are returned to the free list.
+        bytes_round_trip(&mut store, (1 << 25) - header::SIZE).unwrap();
+        assert_eq!(store.live_size(), 0);
+        // The largest class is a class: the limit refuses it.
+        assert_eq!(
+            bytes_round_trip(&mut store, largest),
+            Err(StoreError::Exhausted)
+        );
+        // One byte more has no class at all, and stops the same way, whatever
+        // the limit: a store that admits everything has no larger block.
+        assert_eq!(
+            bytes_round_trip(&mut store, largest + 1),
+            Err(StoreError::Exhausted)
+        );
+        let mut unlimited = Store::new(u64::MAX);
+        assert_eq!(
+            bytes_round_trip(&mut unlimited, largest + 1),
+            Err(StoreError::Exhausted),
+            "nothing is above the largest class"
+        );
+        // A length whose size overflows 32 bits is no wrapped small request.
+        assert_eq!(
+            bytes_round_trip(&mut store, u32::MAX),
+            Err(StoreError::Exhausted)
+        );
+        assert_eq!(
+            bytes_round_trip(&mut unlimited, u32::MAX),
+            Err(StoreError::Exhausted)
+        );
+        assert_eq!(store.live_size(), 0, "a refused request charges nothing");
+        assert_eq!(unlimited.live_size(), 0);
+    }
+
+    #[test]
+    fn a_block_that_exactly_fills_the_limit_runs_and_one_byte_under_does_not() {
+        // M4 `a_block_that_exactly_fills_the_limit_runs_and_one_page_under_does_not`
+        // measured three 64 KiB pages: the page of the module's own state, and
+        // the 128 KiB block that a 64 KiB request (its header spills over a
+        // page) is rounded to. The store keeps no state in its bytes (N7), so
+        // the limit that admits the request is the block alone, 131,072
+        // bytes, and the step is a byte, not a page.
+        const NEED: u64 = 131_072;
+        let runs = |limit: u64| {
+            let mut store = Store::new(limit);
+            bytes_round_trip(&mut store, 1 << 16)
+        };
+        assert_eq!(runs(NEED - 1), Err(StoreError::Exhausted), "one byte under");
+        assert_eq!(runs(NEED), Ok(()), "exactly at the need");
+        assert_eq!(runs(NEED + 1), Ok(()));
+        // The limit counts the block, not the request.
+        let mut store = Store::new(NEED);
+        let value = store.alloc(kind::BYTES, STRIDE_BYTES, 1 << 16, 0).unwrap();
+        assert_eq!(store.live_size(), NEED);
+        store.release(value).unwrap();
+    }
+
+    #[test]
+    fn the_peak_is_monotone_and_at_least_the_live_size() {
+        let mut store = Store::new(MIB);
+        let mut peaks = vec![store.peak_size()];
+        let mut check = |store: &Store| {
+            assert!(store.peak_size() >= store.live_size());
+            peaks.push(store.peak_size());
+        };
+        check(&store);
+        let first = tuple(&mut store, &[Cell::i64(1)]);
+        check(&store);
+        let second = tuple(&mut store, &[Cell::reference(first), Cell::i64(2)]);
+        check(&store);
+        let high = store.live_size();
+        assert_eq!(store.peak_size(), high);
+        store.release(second).unwrap();
+        check(&store);
+        assert_eq!(store.live_size(), 0);
+        assert_eq!(store.peak_size(), high, "release does not lower the peak");
+        store.charge(10).unwrap();
+        check(&store);
+        assert_eq!(store.peak_size(), high, "10 bytes stay below the old peak");
+        store.charge(high).unwrap();
+        check(&store);
+        assert_eq!(store.peak_size(), high + 10, "charged bytes raise it");
+        store.uncharge(high + 10);
+        check(&store);
+        assert_eq!(store.peak_size(), high + 10);
+        assert!(peaks.windows(2).all(|pair| pair[0] <= pair[1]), "{peaks:?}");
+    }
+
+    #[test]
+    fn the_native_arena_reads_a_store_value() {
+        use vibra_ir::external::CompilerIntrinsic;
+        use vibra_native::arena::{Fault, call};
+
+        let row = |intrinsic: CompilerIntrinsic| intrinsic.native_import().unwrap();
+        let text = "héllo, wörld";
+        let mut store = Store::new(MIB);
+        let value = store.new_text(kind::STR, text).unwrap();
+        let equal = store.new_text(kind::STR, text).unwrap();
+        let other = store.new_text(kind::STR, "héllo").unwrap();
+        let bytes = store.new_bytes(kind::BYTES, b"abc").unwrap();
+        let at = |value: Ref| i64::from(value.offset());
+        let live = store.live_size();
+
+        let memory = store.native_memory();
+        let chars = i64::try_from(text.chars().count()).unwrap();
+        assert_eq!(
+            call(&row(CompilerIntrinsic::StrLength), memory, &[at(value)]),
+            Ok(chars)
+        );
+        let compare = |a: Ref, b: Ref| {
+            call(&row(CompilerIntrinsic::StrEqual), memory, &[at(a), at(b)])
+        };
+        assert_eq!(compare(value, equal), Ok(1));
+        assert_eq!(compare(value, other), Ok(0));
+        // An object of another layout is refused, never misread.
+        assert_eq!(
+            call(&row(CompilerIntrinsic::StrLength), memory, &[at(bytes)]),
+            Err(Fault::WrongObject)
+        );
+        // The text itself: the row that builds `bytes` from a `str` measures
+        // with a destination of 0 and then fills the destination.
+        let to_utf8 = row(CompilerIntrinsic::StrToUtf8);
+        let measured = call(&to_utf8, memory, &[at(value), 0]).unwrap();
+        assert_eq!(measured, i64::try_from(text.len()).unwrap());
+
+        let destination = store.new_bytes(kind::BYTES, &vec![0; text.len()]).unwrap();
+        let memory = store.native_memory();
+        assert_eq!(
+            call(&to_utf8, memory, &[at(value), at(destination)]),
+            Ok(measured)
+        );
+        assert_eq!(store.byte_values(destination).unwrap(), text.as_bytes());
+        assert_eq!(store.text(value).unwrap(), text, "the store reads it too");
+        let after = store.live_size();
+        assert!(after > live, "only the destination was added");
     }
 }

@@ -126,7 +126,7 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // Nexus owns execution state and reaches the host provider. It does not
     // depend on the execution IR or on a code generator: whatever executes a
     // program's blocks drives it through its transfers (N5).
-    ("vibra-nexus", &["vibra-host", "vibra-ir"]),
+    ("vibra-nexus", &["vibra-host", "vibra-ir", "vibra-native"]),
     // The reference stepper joins the two: verified execution IR, run on
     // Nexus with no generated code (N6). It is a test instrument, and its
     // tests supply a host world and spans.
@@ -484,8 +484,9 @@ fn only_the_two_backends_run_the_native_code_and_it_reaches_neither_the_engine_n
         .collect::<BTreeSet<_>>();
     assert_eq!(
         dependents,
-        BTreeSet::from(["vibra-interp", "vibra-wasm-run"]),
-        "the reference interpreter and the runner call the native code, and nothing else does"
+        // Nexus hands the native code a view of its value store (N7).
+        BTreeSet::from(["vibra-interp", "vibra-nexus", "vibra-wasm-run"]),
+        "the reference interpreter, the runner, and Nexus call the native code, and nothing else does"
     );
     let own = graph.get(NATIVE_CRATE).expect("the native crate exists");
     assert_eq!(
