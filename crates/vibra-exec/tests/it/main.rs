@@ -12,7 +12,8 @@
 
 use vibra_exec::{
     Block, BlockId, Callee, ConstId, FuncId, Function, GlobalId, Inst, MAX_SLOTS,
-    OriginId, Program, ScalarClass, ScalarOp, Slot, Terminator, VerifyErrorKind, verify,
+    OriginId, Program, ScalarClass, ScalarOp, Slot, Terminator, VerifyErrorKind,
+    verify,
 };
 use vibra_ir::boundary::TrapCode;
 use vibra_ir::external::host::host_row;
