@@ -28,7 +28,9 @@ M2 (X3-22).
 ## X4-S1 · Actor and message-authority specification
 
 **Kind:** specification prerequisite. **Goals:** G4.1, G4.7–G4.10.
-**Settles:** O1, O2, O3, O4. **Lands:** N19–N22 where they are observable.
+**Settles:** O4, which is still open and is Hannah's to design. **Lands:** the
+answers to O1–O3 (receive loop, actor-first forms, redesigned providers), N25,
+and N19–N22 where they are observable.
 
 **Deliver** a draft for Hannah, as one change across the charter (the
 exclusion of tasks, channels, and threads is narrowed, and the new provider or

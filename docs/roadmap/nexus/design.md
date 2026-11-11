@@ -329,9 +329,8 @@ paths on one target.
 ## 10. The actor layer (v0.0.4)
 
 The source surface is Hannah's to specify in X4-S1. This section fixes only
-the runtime shape that surface will sit on, and it holds for either a
-turn-based handler or a receive-loop surface ([decisions.md](decisions.md),
-open question O1).
+the runtime shape that surface will sit on. The surface is a receive loop
+([decisions.md](decisions.md), O1), so an actor parks inside a receive.
 
 - **One kernel, two executors** (N19). `vibra-actors` owns actor identity,
   mailboxes, addresses and their scope checks, reply slots, exit, timeouts,

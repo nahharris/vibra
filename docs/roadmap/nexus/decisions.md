@@ -10,8 +10,8 @@ dispositions:
   stands until she revises it;
 - **proposed** — needs specification text, so it is not in force until the
   named package lands it with Hannah's approval;
-- **open** — a question only Hannah can settle, in the
-  [last table](#open-for-hannah).
+- **open** — a question only Hannah can settle. One remains: O4, in the
+  [last table](#answered-by-hannah).
 
 Every row names the package that proves it. A package that finds a row wrong
 stops and reports; it does not work around the row.
@@ -44,21 +44,23 @@ stops and reports; it does not work around the row.
 | N22 | proposed (X4-S1) | A fixed worker pool; an actor is pinned to its worker before initialization; no stealing or migration; mailboxes use `std` synchronization | G4.6 asks for placement before initialization and rules migration out. It also keeps the scheduler free of `unsafe` | X4-07, X4-09 |
 | N23 | recorded | `Step` and `Outcome` are `non_exhaustive`, and status code 4 is reserved for `Wait` | v0.0.4 adds waiting without reshaping the boundary | X4-05 |
 | N24 | recorded | This plan lives in `docs/roadmap/nexus/`, at the roadmap's authority level, and spans two releases. Milestone step tables in `v0.0.3/m*/README.md` are written from it when each milestone's integration branch is bootstrapped | The execution model wants a step plan per milestone; Nexus needs one design across milestones. Both exist, and this one is the source | The bootstrap PR of each integration branch |
+| N25 | decided, Hannah, 2026-11-11 | A rule, representation, or provider shape that existed only because of WebAssembly may be changed freely where native execution makes it pointless. This extends N1 | The host registry, the provider split, and several runtime-chapter rules were shaped for a Wasm module with an outside host. A package that finds such a rule in its way names it, proposes the change in the specification package it belongs to (X3-S1 or X4-S1), and does not preserve it for compatibility. The interpreter stays the oracle | X3-S1, X4-S1 |
+| N26 | decided, Hannah, 2026-11-11 | Sandboxing is not a goal of this track for now. The claims and limits of the runtime chapter stand: effects are static and erased, the runtime takes no grant table, and Nexus adds no policy check | Asked on PR #413. Recorded so a later review starts from what is true today: root-level confinement holds only for source compiled by a trusted toolchain; a native executable from elsewhere has no guarantee; a fine-grained policy needs a runtime check at `Context::host`, the single place every host operation passes. It returns with O4 | — |
 
-## Open for Hannah
+## Answered by Hannah
 
-None of these blocks the next packages of v0.0.3 M1 except O5. Each names the
-package that waits on it and the answer the design currently assumes.
+Answered on PR #413, 2026-11-11. A question with no comment was agreed as
+proposed. **O4 is still open.**
 
-| ID | Question | Assumed until answered | Blocks |
+| ID | Question | Answer | Lands in |
 | --- | --- | --- | --- |
-| O1 | Is an actor a turn-based handler over carried state (the v0.0.4 roadmap's wording: "one message handler at a time", "carry immutable state between turns") or a receive loop holding an inbox (the concurrency scratchpad)? | Turn-based handlers. The runtime design holds for either | X4-S1 |
-| O2 | How does a caller wait for a one-shot reply: does it block mid-activation, or does the reply arrive as a later turn? The gate's "actor exit while a caller waits" and "edit while the write is pending" read as both existing | Both: an actor receives a reply as a turn; a non-actor entry may block. `Step::Wait` serves the second | X4-S1 |
-| O3 | The charter excludes tasks, channels, and threads, and admits only the `@compiler` and `@host` providers. Is messaging a new provider, new `@host` rows under a `process`/`actor` root, or a language form? | A charter change plus a new closed provider, because a send is not a host operation and must not appear as one in the audit trace | X4-S1 |
-| O4 | What does issuing a narrower address look like in source, and what is a "resource scope" in the type system: a bound value compared at dispatch, or a type-level index? | A bound value the kernel compares at dispatch | X4-S1, X4-02 |
-| O5 | Does the specification mention quota and yielding at all, or only say that execution may be suspended at checkpoints without observable effect? | The second: the runtime chapter states the unobservability rule, and quota stays a toolchain term | X3-S1 |
-| O6 | The CLI shape of native build: `vibra build <target> --target <triple>`, default triple, output directory, and whether a non-host triple is `@tool.unavailable` or a new diagnostic | Host triple by default; another triple is a new unsupported-target diagnostic | X3-S1, X3-23 |
-| O7 | CI for Linux x86-64 and macOS arm64: hosted GitHub runners for every PR, or only on the integration branch's draft? | Every PR for Windows, the draft PR for the other two | X3-S2, X3-08 |
-| O8 | May the baseline unbox `bool` and other all-`void` enums, as representation latitude allows? | No: keep the M4 representation until the baseline is measured | X3-22 |
-| O9 | Is a 4 GiB ceiling per context acceptable for pre-alpha? | Yes. Widening handles to 64 bits is a layout change private to Nexus | X3-02 |
-| O10 | Does the M1 "indirect cross-module tail call" need two source modules in one package, or two packages? | Two modules of one package, which is all the v0.0.2 minimum fixture admits | X3-09 |
+| O1 | Is an actor a turn-based handler over carried state or a receive loop holding an inbox? | **Receive loop.** "Concurrency is a dependency for true actors." An actor's activation therefore parks inside a receive, so `Step::Wait` (N23) is the ordinary path of every actor and not only of a blocked caller. Where the v0.0.4 roadmap says "one message handler at a time" and "state between turns", X4-S1 rewrites it | X4-S1 |
+| O2 | How does a caller wait for a one-shot reply? | As proposed, read under O1: a waiting activation parks until the reply, the exit, or the timeout | X4-S1 |
+| O3 | Is messaging a new provider, new `@host` rows, or a language form? | **Free to redesign.** Vibra is to be actor-first: X4-S1 may redesign language forms, and may redesign the providers, which were shaped for Wasm (N25). The charter change is expected | X4-S1 |
+| O4 | What does issuing a narrower address look like in source, and what is a "resource scope" in the type system? | **Open.** Hannah has no answer yet. Requirements she stated: bounds must be expressive enough for "network requests to a specific set of endpoints, with a specific protocol and specific verbs" and "read-only access to just `.txt` files under a folder the user provides at runtime"; that points to policies, capabilities, and effects being compound and expressed as values in a DSL that does not pollute the code. Until settled, the kernel keeps the scope check behind one function so its representation can change | X4-S1, X4-02 |
+| O5 | Does the specification mention quota and yielding? | As proposed: it states only that execution may be suspended at checkpoints without observable effect. Quota stays a toolchain term | X3-S1 |
+| O6 | The CLI shape of native build | As proposed: `vibra build <target> --target <triple>`, host triple by default, another triple is a new unsupported-target diagnostic | X3-S1, X3-23 |
+| O7 | CI for Linux x86-64 and macOS arm64 | As proposed: every PR for Windows, the draft PR for the other two | X3-S2, X3-08 |
+| O8 | May the baseline unbox `bool` and other all-`void` enums? | As proposed: no, until the baseline is measured | X3-22 |
+| O9 | Is a 4 GiB ceiling per context acceptable for pre-alpha? | As proposed: yes | X3-02 |
+| O10 | Does the M1 "indirect cross-module tail call" need two modules or two packages? | As proposed: two modules of one package | X3-09 |
