@@ -3,6 +3,36 @@
 An agent can open a checked codebase revision, find a definition by
 name, and retrieve that exact version by content address after a restart.
 
+Planning draft: [execution sequence and design proposals](execution.md),
+[Step 1 contract review](01-contracts.md), and
+[validation and handoff](validation.md). These documents propose the work;
+they do not approve new contracts or claim implementation support.
+
+## Proposed execution sequence
+
+All steps are `not started`. The proposed integration branch is `v0.0.2/m1`;
+it has not been created by this planning change. Follow the
+[milestone execution model](../../execution.md) for one PR per step and a
+standing draft PR into `main`.
+
+| Step | Slice | Status | Guide |
+| --- | --- | --- | --- |
+| 1 | Close identity, persistence, and import/export contracts | not started | [Contract review](01-contracts.md) |
+| 2 | Encode and address a checked graph deterministically | not started | [Step 2](execution.md#step-2--checked-graph-addressing) |
+| 3 | Import, publish, reopen, and retrieve a checked revision | not started | [Step 3](execution.md#step-3--first-durable-revision) |
+| 4 | Resolve names and read revision-scoped relations | not started | [Step 4](execution.md#step-4--revision-scoped-reads) |
+| 5 | Export exact source with destination revision checks | not started | [Step 5](execution.md#step-5--source-export) |
+| 6 | Prove publication under contention and interruption | not started | [Step 6](execution.md#step-6--publication-failure-paths) |
+| 7 | Verify integrity, version rejection, and index rebuilding | not started | [Step 7](execution.md#step-7--integrity-and-recovery) |
+| 8 | Back up and restore an independently usable store | not started | [Step 8](execution.md#step-8--backup-and-restore) |
+| 9 | Measure the local store and select journal settings | not started | [Step 9](execution.md#step-9--local-store-measurements) |
+| 10 | Sweep the demo, exit gate, and M2 handoff | not started | [Step 10](execution.md#step-10--exit-evidence) |
+
+The design proposals and gate-to-step mapping live in the execution plan.
+Steps 2–9 need their contract-specific detailed implementation instructions
+before execution; the linked guides currently define boundaries, invariants,
+and evidence. Step 1 is the first actionable planning task.
+
 ## Specification prerequisite
 
 Define the object model and the import/export boundary in the source,
