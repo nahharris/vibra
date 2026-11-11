@@ -19,6 +19,7 @@ vibra-exec = { path = "crates/vibra-exec" }
 vibra-fmt = { path = "crates/vibra-fmt" }
 vibra-host = { path = "crates/vibra-host" }
 vibra-interp = { path = "crates/vibra-interp" }
+vibra-lower = { path = "crates/vibra-lower" }
 vibra-ir = { path = "crates/vibra-ir" }
 vibra-native = { path = "crates/vibra-native" }
 vibra-nexus = { path = "crates/vibra-nexus" }

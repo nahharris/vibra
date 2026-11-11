@@ -20,6 +20,7 @@ fn name(kind: &VerifyErrorKind) -> &'static str {
         VerifyErrorKind::RootTakesOperands(_) => "RootTakesOperands",
         VerifyErrorKind::NoBlocks => "NoBlocks",
         VerifyErrorKind::FrameTooSmall => "FrameTooSmall",
+        VerifyErrorKind::FrameTooLarge => "FrameTooLarge",
         VerifyErrorKind::UnreachableBlock => "UnreachableBlock",
         VerifyErrorKind::UnknownBlock(_) => "UnknownBlock",
         VerifyErrorKind::UnknownSlot(_) => "UnknownSlot",
@@ -39,12 +40,13 @@ fn name(kind: &VerifyErrorKind) -> &'static str {
 }
 
 /// Every name [`name`] can answer: one per variant.
-const NAMES: [&str; 18] = [
+const NAMES: [&str; 19] = [
     "NoFunctions",
     "MissingRoot",
     "RootTakesOperands",
     "NoBlocks",
     "FrameTooSmall",
+    "FrameTooLarge",
     "UnreachableBlock",
     "UnknownBlock",
     "UnknownSlot",
@@ -189,6 +191,10 @@ fn rejected_programs() -> Vec<(Program, VerifyErrorKind)> {
         ),
         (entry(0, Vec::new()), VerifyErrorKind::NoBlocks),
         (frame_too_small, VerifyErrorKind::FrameTooSmall),
+        (
+            entry(u32::MAX, vec![block(vec![scalar(0, 0)], ret(0))]),
+            VerifyErrorKind::FrameTooLarge,
+        ),
         (unreachable_block, VerifyErrorKind::UnreachableBlock),
         (
             entry(1, vec![block(Vec::new(), Terminator::Jump(BlockId(3)))]),

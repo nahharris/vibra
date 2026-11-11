@@ -127,6 +127,10 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // value layout, and no target (docs/roadmap/nexus/decisions.md, N4). Its
     // tests build source origins, which need a span.
     ("vibra-exec", &["vibra-diagnostics", "vibra-ir"]),
+    // The lowering is the one crate that knows both the checked IR and the
+    // execution IR (docs/roadmap/nexus/design.md, section 1). It reaches no
+    // runtime and no checker; its differential tests live in the harness.
+    ("vibra-lower", &["vibra-exec", "vibra-ir"]),
     // Nexus owns execution state and reaches the host provider. It does not
     // depend on the execution IR or on a code generator: whatever executes a
     // program's blocks drives it through its transfers (N5).
@@ -156,9 +160,13 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-wasm",
             "vibra-wasm-run",
             "vibra-workspace",
+            "vibra-exec",
             "vibra-host",
             "vibra-interp",
             "vibra-ir",
+            "vibra-lower",
+            "vibra-nexus",
+            "vibra-nexus-eval",
             "vibra-types",
         ],
     ),
@@ -384,6 +392,7 @@ const SEMANTIC_CRATES: &[&str] = &[
     "vibra-native",
     "vibra-exec",
     "vibra-actors",
+    "vibra-lower",
     "vibra-nexus",
     "vibra-nexus-eval",
 ];

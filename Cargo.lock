@@ -1442,10 +1442,14 @@ dependencies = [
  "serde_json",
  "toml",
  "vibra-diagnostics",
+ "vibra-exec",
  "vibra-fmt",
  "vibra-host",
  "vibra-interp",
  "vibra-ir",
+ "vibra-lower",
+ "vibra-nexus",
+ "vibra-nexus-eval",
  "vibra-resolve",
  "vibra-schema",
  "vibra-syntax",
@@ -1502,6 +1506,14 @@ name = "vibra-ir"
 version = "0.0.1"
 dependencies = [
  "vibra-diagnostics",
+]
+
+[[package]]
+name = "vibra-lower"
+version = "0.0.1"
+dependencies = [
+ "vibra-exec",
+ "vibra-ir",
 ]
 
 [[package]]

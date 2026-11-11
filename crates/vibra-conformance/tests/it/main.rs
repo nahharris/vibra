@@ -41,6 +41,7 @@ mod host_single_source;
 mod host_world_corpus;
 mod initializer_calls;
 mod interfaces_matrix;
+mod lowering_slice;
 mod lowers_every_form;
 mod native_bodies;
 mod native_differential;
