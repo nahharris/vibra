@@ -1,9 +1,11 @@
 //! The text form of a program: exact, complete, and deterministic.
 
+use vibra_diagnostics::ByteSpan;
 use vibra_exec::{
     Block, BlockId, Callee, ConstId, Constant, FuncId, Function, GlobalId, Inst,
     ObjectKind, OriginId, Program, ScalarClass, ScalarOp, Slot, Terminator,
 };
+use vibra_ir::SourceOrigin;
 use vibra_ir::boundary::TrapCode;
 use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::external::host::{HOST_ROWS, host_row};
@@ -154,7 +156,10 @@ fn everything() -> Program {
             Constant::Bytes(vec![1, 255]),
             Constant::Atom("ok".to_owned()),
         ],
-        origins: Vec::new(),
+        origins: vec![
+            SourceOrigin::new("a.vib", ByteSpan::new(0, 4)),
+            SourceOrigin::new("dir/b.vib", ByteSpan::new(10, 12)),
+        ],
     }
 }
 
@@ -164,6 +169,8 @@ const EXPECTED: &str = r#"program entry=f0 globals=[f0]
     c1 bytes [1, 255]
     c2 atom "ok"
   origins
+    o1 "a.vib" 0..4
+    o2 "dir/b.vib" 10..12
 fn f0 "main" params=0 env=false slots=6
   b0:
     s0 = scalar I64 7
@@ -236,6 +243,18 @@ fn changes() -> Vec<(&'static str, Change)> {
         }),
         ("constant count", |p| {
             p.constants.pop();
+        }),
+        ("origin source", |p| {
+            p.origins[0] = SourceOrigin::new("b.vib", ByteSpan::new(0, 4));
+        }),
+        ("origin span start", |p| {
+            p.origins[1] = SourceOrigin::new("dir/b.vib", ByteSpan::new(11, 12));
+        }),
+        ("origin span end", |p| {
+            p.origins[1] = SourceOrigin::new("dir/b.vib", ByteSpan::new(10, 13));
+        }),
+        ("origin count", |p| {
+            p.origins.pop();
         }),
         ("function name", |p| main(p).name = "main2".to_owned()),
         ("function params", |p| main(p).params = 1),

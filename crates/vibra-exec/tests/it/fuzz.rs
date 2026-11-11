@@ -10,10 +10,12 @@
 use std::collections::BTreeSet;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+use vibra_diagnostics::ByteSpan;
 use vibra_exec::{
     Block, BlockId, Callee, ConstId, Constant, FuncId, Function, GlobalId, Inst,
     ObjectKind, OriginId, Program, ScalarClass, ScalarOp, Slot, Terminator, verify,
 };
+use vibra_ir::SourceOrigin;
 use vibra_ir::boundary::TrapCode;
 use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::external::host::{HOST_ROWS, HostRow, host_row};
@@ -208,6 +210,10 @@ fn intrinsic(rng: &mut Rng) -> CompilerIntrinsic {
         2 => CompilerIntrinsic::CharToU32,
         _ => CompilerIntrinsic::StrEqual,
     }
+}
+
+fn origin(source: &str, start: usize, end: usize) -> SourceOrigin {
+    SourceOrigin::new(source, ByteSpan::new(start, end))
 }
 
 fn host_symbols() -> Vec<&'static str> {
@@ -580,10 +586,15 @@ fn generate(rng: &mut Rng) -> Program {
             _ => Constant::Atom(format!("a{index}")),
         })
         .collect();
-    // A `SourceOrigin` needs a `ByteSpan`, which this crate cannot name
-    // without a dependency, so the generated origin table is empty and only
-    // `OriginId::NONE` is valid.
-    let origins = Vec::new();
+    // Half of the programs have an origin table, so their origin ordinals
+    // can name entries.
+    let origins: Vec<SourceOrigin> = if rng.one_in(2) {
+        (0..1 + rng.below(3))
+            .map(|index| origin(&format!("src{index}.vib"), index, index + 3))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let context = Context {
         signatures,
         constants: u32::try_from(constants.len()).unwrap_or(0),
@@ -831,7 +842,21 @@ fn mutate(program: &mut Program, rng: &mut Rng) {
         origins: count(&program.origins),
     };
     match rng.below(10) {
-        0 => match rng.below(7) {
+        0 => match rng.below(9) {
+            7 => {
+                let at = rng.below(program.origins.len());
+                if let Some(entry) = program.origins.get_mut(at) {
+                    let start = rng.below(20);
+                    let end = start + rng.below(5);
+                    let source = if rng.one_in(2) {
+                        entry.source_id().to_owned()
+                    } else {
+                        format!("other{}.vib", rng.below(3))
+                    };
+                    *entry = origin(&source, start, end);
+                }
+            }
+            8 => program.origins.push(origin("added.vib", 0, 1)),
             0 => program.entry = FuncId(rng.wild(function_count)),
             1 => program.globals.push(FuncId(rng.wild(function_count))),
             2 => {

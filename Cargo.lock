@@ -1460,6 +1460,7 @@ version = "0.0.1"
 name = "vibra-exec"
 version = "0.0.1"
 dependencies = [
+ "vibra-diagnostics",
  "vibra-ir",
 ]
 
