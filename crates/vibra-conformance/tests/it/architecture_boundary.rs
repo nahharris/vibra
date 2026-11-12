@@ -166,6 +166,19 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-nexus-eval",
         ],
     ),
+    // The code generator: verified execution IR in, a native object out. It
+    // is written against the bridge's contract (the ABI constants, the
+    // descriptor types, and the routine table) and is the only crate that
+    // names Cranelift (N12). Its tests build spans for the origin table.
+    (
+        "vibra-codegen",
+        &[
+            "vibra-diagnostics",
+            "vibra-exec",
+            "vibra-ir",
+            "vibra-nexus-bridge",
+        ],
+    ),
     // The harness. Legitimately sits above every node.
     (
         "vibra-conformance",
@@ -411,6 +424,10 @@ const SEMANTIC_CRATES: &[&str] = &[
     "vibra-exec",
     "vibra-actors",
     "vibra-lower",
+    // It maps the execution IR to machine code from explicit inputs (the
+    // verified program, a target, and two numbers) and writes no file: the
+    // caller receives the object's bytes.
+    "vibra-codegen",
     "vibra-nexus",
     "vibra-nexus-bridge",
     "vibra-nexus-eval",
@@ -1033,4 +1050,123 @@ fn the_bridge_carries_no_compiler_ir() {
 #[test]
 fn the_runtime_and_the_execution_ir_agree_on_the_frame_bound() {
     assert_eq!(vibra_nexus::MAX_FRAME_SLOTS, vibra_exec::MAX_SLOTS);
+}
+
+/// The one crate that may depend on Cranelift (decision N12). The Wasm runner
+/// reaches it only through Wasmtime, which is not a `cranelift-*` dependency
+/// of any manifest here.
+const CODEGEN_CRATE: &str = "vibra-codegen";
+
+/// The Cranelift packages the generator names, all pinned to one version.
+const CRANELIFT_PACKAGES: &[&str] = &[
+    "cranelift-codegen",
+    "cranelift-frontend",
+    "cranelift-module",
+    "cranelift-object",
+];
+
+#[test]
+fn only_codegen_depends_on_cranelift() {
+    let mut checked = 0;
+    for (path, manifest) in crate_manifests(&workspace_root()) {
+        let name = package_name(&manifest).to_owned();
+        let cranelift = all_dependencies(&manifest)
+            .into_iter()
+            .filter(|dependency| dependency.starts_with("cranelift"))
+            .collect::<BTreeSet<_>>();
+        if name == CODEGEN_CRATE {
+            assert_eq!(
+                cranelift,
+                CRANELIFT_PACKAGES
+                    .iter()
+                    .map(|package| (*package).to_owned())
+                    .collect::<BTreeSet<_>>(),
+                "{}: the generator names the four Cranelift packages",
+                path.display()
+            );
+        } else {
+            assert!(
+                cranelift.is_empty(),
+                "{}: `{name}` names {cranelift:?}; only `{CODEGEN_CRATE}` depends on Cranelift",
+                path.display()
+            );
+        }
+        checked += 1;
+    }
+    assert!(
+        checked >= 15,
+        "the scan covers the workspace ({checked} crates)"
+    );
+}
+
+/// The locked versions of every package called `name`.
+fn locked_versions(lock: &toml::Table, name: &str) -> Vec<String> {
+    lock.get("package")
+        .and_then(toml::Value::as_array)
+        .expect("a lock file with packages")
+        .iter()
+        .filter(|package| {
+            package.get("name").and_then(toml::Value::as_str) == Some(name)
+        })
+        .filter_map(|package| package.get("version").and_then(toml::Value::as_str))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn the_lock_file_holds_one_cranelift_and_the_generator_pins_it() {
+    let root = workspace_root();
+    let lock = read_manifest(&root.join("Cargo.lock"));
+    let manifest =
+        read_manifest(&root.join("crates").join(CODEGEN_CRATE).join("Cargo.toml"));
+    let dependencies = manifest
+        .get("dependencies")
+        .and_then(toml::Value::as_table)
+        .expect("dependencies");
+    let locked = locked_versions(&lock, "cranelift-codegen");
+    assert_eq!(
+        locked.len(),
+        1,
+        "one version of `cranelift-codegen`: {locked:?}"
+    );
+    for package in CRANELIFT_PACKAGES {
+        let requirement = dependencies
+            .get(*package)
+            .and_then(toml::Value::as_str)
+            .unwrap_or_else(|| panic!("`{package}` is a plain version string"));
+        assert_eq!(
+            requirement.strip_prefix('='),
+            Some(locked[0].as_str()),
+            "`{package}` is pinned with `=` to the locked `cranelift-codegen`"
+        );
+        assert_eq!(
+            locked_versions(&lock, package),
+            locked,
+            "`{package}` is locked once, at the version of `cranelift-codegen`"
+        );
+    }
+    // The packages the object writer shares with Wasmtime's graph are not
+    // duplicated by the generator.
+    let all = lock
+        .get("package")
+        .and_then(toml::Value::as_array)
+        .expect("packages")
+        .iter()
+        .filter_map(|package| package.get("name").and_then(toml::Value::as_str))
+        .filter(|name| name.starts_with("cranelift-"))
+        .collect::<BTreeSet<_>>();
+    for name in all {
+        assert_eq!(
+            locked_versions(&lock, name).len(),
+            1,
+            "`{name}` is locked once"
+        );
+    }
+    for shared in ["object", "gimli", "target-lexicon"] {
+        assert_eq!(
+            locked_versions(&lock, shared).len(),
+            1,
+            "`{shared}` is locked once"
+        );
+    }
 }

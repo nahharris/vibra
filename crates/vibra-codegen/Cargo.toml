@@ -1,0 +1,30 @@
+[package]
+name = "vibra-codegen"
+description = "Generates a native object file from verified execution IR with Cranelift."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+vibra-exec.workspace = true
+vibra-ir.workspace = true
+vibra-nexus-bridge.workspace = true
+# The one crate of the workspace that names Cranelift (decision N12). All four
+# are pinned to the version of `cranelift-codegen` that Wasmtime already locks,
+# so the lock file holds one Cranelift. No ISA feature is enabled here: the
+# ISAs available are the ones the existing graph provides.
+cranelift-codegen = "=0.136.2"
+cranelift-frontend = "=0.136.2"
+cranelift-module = "=0.136.2"
+cranelift-object = "=0.136.2"
+
+[dev-dependencies]
+vibra-diagnostics.workspace = true
+# The version already in the lock file, to read the emitted objects back.
+object = { version = "=0.40.0", default-features = false, features = ["read"] }
+
+[lints]
+workspace = true
