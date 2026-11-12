@@ -2784,6 +2784,7 @@ pub struct CheckedFunction {
     slot_count: usize,
     external_wrapper: bool,
     native_body: Option<NativeBody>,
+    semantic_body: Option<NativeBody>,
     test_assertion: Option<TestAssertion>,
     implements: Option<Implements>,
     effect_owner: Option<EffectRoot>,
@@ -3045,6 +3046,7 @@ impl CheckedFunction {
             slot_count,
             external_wrapper,
             native_body: None,
+            semantic_body: None,
             test_assertion,
             implements: None,
             effect_owner: None,
@@ -3067,6 +3069,34 @@ impl CheckedFunction {
     #[must_use]
     pub const fn body(&self) -> &Expr {
         &self.body
+    }
+
+    /// Retains the checked source meaning of an accelerated function for
+    /// immutable semantic projection. Runtime and module lowering keep their
+    /// existing bodies.
+    ///
+    /// # Errors
+    ///
+    /// The source body or its activation slots do not fit this signature.
+    pub fn with_semantic_body(
+        mut self,
+        body: Expr,
+        slot_count: usize,
+    ) -> Result<Self, IrError> {
+        self.validate_body(&body, slot_count)?;
+        self.semantic_body = Some(NativeBody { body, slot_count });
+        Ok(self)
+    }
+
+    /// The exact checked source body and its activation slot count when
+    /// retained, otherwise the existing module body. This accessor does not
+    /// select or change the body used to execute the function.
+    #[must_use]
+    pub fn semantic_body(&self) -> (&Expr, usize) {
+        self.semantic_body.as_ref().map_or_else(
+            || self.module_body(),
+            |source| (&source.body, source.slot_count),
+        )
     }
 
     /// The declaration origin.
