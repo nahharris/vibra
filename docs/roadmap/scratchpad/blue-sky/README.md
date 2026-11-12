@@ -9,10 +9,12 @@ a human would enjoy writing. It ignores the
 purpose. Nothing here is supported, scheduled, or a proposal for a release.
 The sketches are illustrative and their syntax is not a commitment.
 
-Two companion notes go deeper. The [field notes](paradigms.md) record the
+Three companion notes go deeper. The [field notes](paradigms.md) record the
 evidence for each paradigm considered, including the ones rejected. The
 [syntax note](syntax.md) asks whether S-expressions are the right surface
-for an agent and what could replace them.
+for an agent and what could replace them. The [tooling note](tooling.md)
+asks which agent tools are worth building: structured edits, structured
+inspection, or interactive evaluation.
 
 ## The premise: the author changed
 
@@ -487,7 +489,8 @@ prototype, and each can fail.
 E4 and E7 test the two ideas that are new to Vibra, the journal and the
 ownership split. E2 needs the least machinery and is the best first step.
 The [syntax note](syntax.md#experiments) adds experiments S1 to S7 on the
-surface itself.
+surface itself, and the [tooling note](tooling.md#experiments) adds T1 to
+T7 on the tools.
 
 ## Sources
 
