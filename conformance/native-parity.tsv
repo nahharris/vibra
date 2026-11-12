@@ -1,0 +1,174 @@
+case	stepper	windows	linux	macos
+V1-RUNTIME-activation-depth	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-activation-depth-counter	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-activation-exhaustion	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-activation-exhaustion-discarded-call	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-anonymous-enum	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-anonymous-record	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-array-fold	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-atom-labelled-default	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-bindings	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-bounded-deftype-lambda	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-closure-captures	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-compound-constant-defaults	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-constant-defaults	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-constant-patterns	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-constructor-patterns	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-continuation-chain	pending X3-10	pending X3-10	pending X3-10	pending X3-10
+V1-RUNTIME-continuation-chain-mutual	pending X3-10	pending X3-10	pending X3-10	pending X3-10
+V1-RUNTIME-continuation-chain-non-tail	pending X3-10	pending X3-10	pending X3-10	pending X3-10
+V1-RUNTIME-contract-member-dict-tail	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-contract-member-form-values	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-contract-member-generics	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-contract-member-labelled	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-contract-member-values	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-conversion	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-dict-compare-nesting	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-dict-order	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-dict-repeated-key	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-direct-calls	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-division-by-zero-trap	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-effect-function-values	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-effect-operations	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-entry-outcome-memory-holding-err	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-entry-outcome-own-err	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-entry-outcome-trap-holding-err	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-enum-payload-classes	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-env-demo-args-name-a-file	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-env-error-propagates-with-try	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-env-read-args-default-empty	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-env-read-args-from-the-world	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-env-read-var	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-external-std-text-concat	pending X3-16	pending X3-16	pending X3-16	pending X3-16
+V1-RUNTIME-external-std-text-length	pending X3-16	pending X3-16	pending X3-16	pending X3-16
+V1-RUNTIME-factory-self-tail	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-forward-global	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-fs-demo-path-from-stdin	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-fs-error-propagates-with-try	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-fs-errors-are-values	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-fs-invalid-text	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-fs-metadata-stat	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-fs-read-entries-sorted	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-fs-read-file-and-text	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-fs-test-world-writes-are-fresh	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-fs-write-then-read	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-function-value-kinds	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-functions-closures	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-generic-closure-type-arguments	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-generic-dispatch	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-generic-functions	pending X3-13	pending X3-13	pending X3-13	pending X3-13
+V1-RUNTIME-generic-interface-pass-along	pending X3-13	pending X3-13	pending X3-13	pending X3-13
+V1-RUNTIME-generic-lambda	pending X3-13	pending X3-13	pending X3-13	pending X3-13
+V1-RUNTIME-generic-payload-in-generic-code	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-generic-types	pending X3-13	pending X3-13	pending X3-13	pending X3-13
+V1-RUNTIME-generic-void-payload	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-if-selected	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-inference-order	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-interface-containers	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-interface-dispatch	pending X3-13	pending X3-13	pending X3-13	pending X3-13
+V1-RUNTIME-interface-result-nesting	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-interface-values	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-interface-widening-positions	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-io-effectful-iter-walk	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-io-error-propagates-with-try	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-io-invalid-text	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-io-stdin-bytes-twice	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-io-stdin-text-twice	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-io-test-world-stdin	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-io-write-text-and-bytes	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-iter-defaults	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-iter-next	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-iter-option-void-item	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-iter-skip-filter-depth	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-key-contracts	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-let-binds-in-order	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-let-else	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-library-composites	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-library-dict	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-library-roles	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-literal	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-literal-patterns	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-lookups	pending X3-14	pending X3-14	pending X3-14	pending X3-14
+V1-RUNTIME-match-patterns	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-module-value-initializer-call	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-module-value-once	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-nested-data	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-never-type-encoding	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-never-unreached	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-nominal-enum	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-nominal-enum-payload	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-nominal-method	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-nominal-record	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-nominal-wrapper	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-random-seeded-bytes	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-random-state-continues	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-record-projection	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-registry-floats	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-registry-integers	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-registry-modules	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-registry-saturating	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-return	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-return-tail-call	pending X3-14	pending X3-14	pending X3-14	pending X3-14
+V1-RUNTIME-sequence	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-tail-calls-through-flow	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-tail-closure-captured-loop	pending X3-10	pending X3-10	pending X3-10	pending X3-10
+V1-RUNTIME-tail-contract-member-forms	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-tail-contract-member-interface-value	pending X3-15	pending X3-15	pending X3-15	pending X3-15
+V1-RUNTIME-tail-counter-closure-captured-loop	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-tail-counter-direct	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-tail-counter-field-and-binding	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-tail-counter-function-value-parameter	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-tail-counter-method	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-tail-counter-mutual	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-tail-counter-unrelated-function-loop	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-tail-cross-module-mutual	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-tail-function-value-parameter	pending X3-10	pending X3-10	pending X3-10	pending X3-10
+V1-RUNTIME-tail-mutual	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-tail-negative	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-tail-unrelated-function-loop	pending X3-10	pending X3-10	pending X3-10	pending X3-10
+V1-RUNTIME-time-monotonic-steps	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-time-monotonic-unavailable-at-the-top	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-time-wall-from-the-world	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-try-and-never	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-try-propagation	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-tuple-user-key	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-tuples	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-unicode	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-union-atom-member	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-union-converted-member	pending X3-15	pending X3-15	pending X3-15	pending X3-15
+V1-RUNTIME-union-injection	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-union-keys	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-union-narrowing	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-union-values	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-user-dict-keys	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-variadics	pending X3-13	pending X3-13	pending X3-13	pending X3-13
+V1-RUNTIME-void	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-void-payload-shapes	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-widened-tail-call	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-workspace-run	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-workspace-run-activation-exhaustion	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-workspace-run-effect-operations	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-workspace-run-higher-order-entry	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-workspace-run-tail-module-values	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-workspace-run-uninvoked-higher-order-closure	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-workspace-run-unused-imported-higher-order-helper	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-workspace-test-activation-exhaustion	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-workspace-test-assert-equal	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-workspace-test-contract-laws	pending X3-11	pending X3-11	pending X3-11	pending X3-11
+V1-RUNTIME-workspace-test-effect-operation	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-workspace-test-empty	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-workspace-test-failure	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-workspace-test-hidden-function	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-workspace-test-interface-encoding	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-workspace-test-interfaces	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-workspace-test-iter	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-workspace-test-iter-defaults	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-workspace-test-key-contracts	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-workspace-test-nominal-imports	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-workspace-test-passing	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-workspace-test-patterns	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-workspace-test-selected-member-values	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-workspace-test-structural-key-equal	pending X3-18	pending X3-18	pending X3-18	pending X3-18
+V1-RUNTIME-world-sets-env-args-clock-random	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-wrong-trace	matched	pending X3-09	pending X3-09	pending X3-09
+V1-TYPE-CONTROL-return-in-test-lambda	pending X3-18	pending X3-18	pending X3-18	pending X3-18

@@ -45,6 +45,7 @@ mod lowering_slice;
 mod lowers_every_form;
 mod native_bodies;
 mod native_differential;
+mod native_parity_inventory;
 mod natives;
 mod numbers;
 mod patterns;
