@@ -144,6 +144,33 @@ pub fn verify(program: &Program) -> Result<(), VerifyError> {
     Ok(())
 }
 
+/// A [`Program`] that passed [`verify`]. The only way to build one is
+/// [`verified`], so a consumer that takes `Verified` (the code generator) is
+/// handed a checked program by the compiler, not by convention.
+///
+/// It borrows the program, so the program cannot change while the proof is
+/// held.
+#[derive(Clone, Copy, Debug)]
+pub struct Verified<'p>(&'p Program);
+
+impl<'p> Verified<'p> {
+    /// The verified program.
+    #[must_use]
+    pub const fn program(self) -> &'p Program {
+        self.0
+    }
+}
+
+/// Verifies `program` and, when it passes, wraps it as [`Verified`].
+///
+/// # Errors
+///
+/// The first violation, exactly as [`verify`] reports it.
+pub fn verified(program: &Program) -> Result<Verified<'_>, VerifyError> {
+    verify(program)?;
+    Ok(Verified(program))
+}
+
 struct Checker<'p> {
     program: &'p Program,
     function: &'p Function,

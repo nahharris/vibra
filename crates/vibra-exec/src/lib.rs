@@ -42,7 +42,7 @@ use vibra_ir::boundary::TrapCode;
 use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::external::host::{HostRow, derived_registry_minor};
 
-pub use verify::{VerifyError, VerifyErrorKind, verify};
+pub use verify::{Verified, VerifyError, VerifyErrorKind, verified, verify};
 
 macro_rules! index_type {
     ($(#[$meta:meta])* $name:ident) => {
