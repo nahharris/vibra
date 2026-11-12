@@ -34,6 +34,10 @@ const TOOLING_EXCEPTIONS: &[(&str, &str)] = &[
         "reads the conformance corpus and its fixtures",
     ),
     (
+        "vibra-build",
+        "reads the environment, the registry through `reg.exe`, and the filesystem to find the linker, and starts it, all in its module `system` (`the_build_driver_reads_the_machine_in_one_module`)",
+    ),
+    (
         "vibra-nexus-bridge",
         "its launcher `main` reads the process arguments and standard streams of the executable, and its harness profile reads standard input, then hands them to the host provider",
     ),
@@ -178,6 +182,26 @@ fn the_tooling_exceptions_and_the_provider_crate_exist_and_the_provider_does_rea
             "the provider crate no longer reads through `{api}`: {provider:?}"
         );
     }
+}
+
+/// The build driver is exempt from the scan above as a crate, and held to a
+/// narrower rule here: every ambient read, process, and filesystem call of the
+/// crate is in its module `system`.
+#[test]
+fn the_build_driver_reads_the_machine_in_one_module() {
+    let found = scan(&workspace_root(), "vibra-build");
+    assert!(
+        found.iter().any(|line| line.contains("system.rs:")),
+        "the audit is not vacuous: the module `system` reads the machine"
+    );
+    let outside = found
+        .iter()
+        .filter(|line| !line.contains("system.rs:"))
+        .collect::<Vec<_>>();
+    assert!(
+        outside.is_empty(),
+        "ambient reads outside the module `system`:\n{outside:?}"
+    );
 }
 
 #[test]

@@ -13,6 +13,7 @@ publish = false
 
 [workspace.dependencies]
 vibra-actors = { path = "crates/vibra-actors" }
+vibra-build = { path = "crates/vibra-build" }
 vibra-codegen = { path = "crates/vibra-codegen" }
 vibra-conformance = { path = "crates/vibra-conformance" }
 vibra-diagnostics = { path = "crates/vibra-diagnostics" }

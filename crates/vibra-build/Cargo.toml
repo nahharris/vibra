@@ -1,0 +1,18 @@
+[package]
+name = "vibra-build"
+description = "Toolchain discovery and the link driver: a checked program in, a native executable out."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+vibra-codegen.workspace = true
+vibra-exec.workspace = true
+vibra-ir.workspace = true
+vibra-lower.workspace = true
+
+[lints]
+workspace = true

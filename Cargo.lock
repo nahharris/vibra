@@ -1445,6 +1445,16 @@ name = "vibra-actors"
 version = "0.0.1"
 
 [[package]]
+name = "vibra-build"
+version = "0.0.1"
+dependencies = [
+ "vibra-codegen",
+ "vibra-exec",
+ "vibra-ir",
+ "vibra-lower",
+]
+
+[[package]]
 name = "vibra-cli"
 version = "0.0.1"
 dependencies = [
@@ -1484,6 +1494,7 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+ "vibra-build",
  "vibra-diagnostics",
  "vibra-exec",
  "vibra-fmt",

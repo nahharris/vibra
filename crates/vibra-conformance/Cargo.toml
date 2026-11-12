@@ -34,6 +34,8 @@ name = "vibra-conformance"
 path = "src/bin/conformance.rs"
 
 [dev-dependencies]
+# The link driver, for the tests that run generated code (X3-07).
+vibra-build.workspace = true
 wasmparser.workspace = true
 
 [lints]
