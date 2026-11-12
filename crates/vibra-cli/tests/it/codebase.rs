@@ -537,6 +537,12 @@ fn backup_restore_reopens_an_independent_store() {
 fn separate_publisher_processes_compare_the_same_expected_head_atomically() {
     use std::process::Stdio;
     let root = demo("codebase-process-cas");
+    // System temporary directories can have linked ancestors (macOS /var).
+    // Match `call` so both children reach publication through a confined root.
+    let workspace = root
+        .path()
+        .canonicalize()
+        .expect("canonical temporary workspace");
     init(root.path());
     let imported = successful_import(root.path(), "absent");
     let expected = imported["revision"].as_str().expect("initial revision");
@@ -545,7 +551,7 @@ fn separate_publisher_processes_compare_the_same_expected_head_atomically() {
         crate::support::vibra()
             .args([
                 "--workspace",
-                root.path().to_str().expect("UTF-8 fixture"),
+                workspace.to_str().expect("UTF-8 fixture"),
                 "--format",
                 "json",
                 "codebase",
@@ -570,7 +576,8 @@ fn separate_publisher_processes_compare_the_same_expected_head_atomically() {
             .iter()
             .filter(|output| output.status.success())
             .count(),
-        1
+        1,
+        "publisher outputs: {outputs:?}"
     );
     for output in outputs {
         let envelope = json(&output);

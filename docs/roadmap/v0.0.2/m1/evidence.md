@@ -161,6 +161,19 @@ parent tests, five existing Windows source-loader symlink fixtures requiring
 unavailable privileges, and the manual measurement test executed separately.
 M1's junction-based export rejection test ran successfully on this host.
 
+The first CI matrix passed the Windows and Linux host suites and all three
+independent corpus jobs. The macOS host suite exposed a publisher-process
+fixture that bypassed `call`'s canonical temporary workspace path. Its
+exactly-one-winner assertion instead saw zero successful children. Reproducing
+with `TMP` and `TEMP` set to a Windows directory junction made both children
+return `@store.unsafe-path`; the focused test failed before the fixture repair.
+The children now receive the canonical workspace, matching the other codebase
+process tests. The same linked-temporary-directory run passes (one test,
+182.57 seconds), retaining the exactly-one-winner, original-expectation retry,
+and two-revision verification assertions. Strict workspace Clippy and formatting
+also pass after the repair. Production path confinement and publication logic
+are unchanged; final-head CI remains the platform gate.
+
 The independent corpus totals are reader 89, static 305, interpreter 181, and
 tooling 27. All 173 executable cases passed in the interpreter and matched in
 Wasm. The final runner was built by the full workspace test build and executed
