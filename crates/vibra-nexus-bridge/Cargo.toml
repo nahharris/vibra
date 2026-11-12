@@ -1,0 +1,49 @@
+[package]
+name = "vibra-nexus-bridge"
+description = "The C ABI between generated code and Nexus, the launcher, and the static archive. The only crate of the workspace with unsafe code."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[features]
+# The `harness` launcher profile: it takes a host world and a quota and writes
+# one observation document (N18). It is absent from the default build, so the
+# shipped archive has no way to select a host world.
+harness = []
+
+[dependencies]
+vibra-host.workspace = true
+vibra-ir.workspace = true
+vibra-nexus.workspace = true
+
+[dev-dependencies]
+vibra-diagnostics.workspace = true
+vibra-exec.workspace = true
+vibra-nexus-eval.workspace = true
+
+# Every workspace lint is restated here, because `[lints] workspace = true`
+# cannot be combined with an override. The architecture test
+# `the_bridge_lints_are_the_workspace_lints_except_for_unsafe` fails when this
+# copy drifts from `[workspace.lints]`: only `unsafe_code` differs, and the two
+# `unsafe` lints are added.
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+indexing_slicing = "warn"
+panic = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+todo = "warn"
+unimplemented = "warn"

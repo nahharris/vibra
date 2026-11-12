@@ -33,7 +33,7 @@ pub mod store;
 use vibra_ir::boundary::TrapCode;
 use vibra_ir::external::host::{HOST_REGISTRY_MINOR, host_row};
 
-pub use context::{Context, Halt, Stats, Trap};
+pub use context::{Context, Halt, ScalarOp, Stats, Trap};
 pub use store::{Cell, Ref, Store, StoreError};
 
 /// The version of the boundary between generated code and this runtime.
@@ -43,6 +43,12 @@ pub use store::{Cell, Ref, Store, StoreError};
 /// transfer, a layout, or a status code, and a program built for another
 /// version is refused by [`admit`].
 pub const ABI_VERSION: u32 = 0;
+
+/// The most slots a function's frame may declare. A program that declares a
+/// larger frame is refused at admission, before any of it runs. It is a
+/// toolchain limit restated here because the runtime does not carry the
+/// compiler IR; a host test checks it equals `vibra_exec::MAX_SLOTS`.
+pub const MAX_FRAME_SLOTS: u32 = 65_536;
 
 /// A quota that never runs out.
 pub const UNBOUNDED: u64 = u64::MAX;

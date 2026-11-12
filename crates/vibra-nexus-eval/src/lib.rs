@@ -20,13 +20,11 @@
 
 use vibra_exec::{
     BlockId, Callee, Constant, FuncId, Function, Inst, ObjectKind, Program,
-    ScalarClass, ScalarOp, Slot, Terminator, VerifyError, verify,
+    ScalarClass, ScalarOp as ExecOp, Slot, Terminator, VerifyError, verify,
 };
-use vibra_ir::arena::{STRIDE_CELLS, class, kind};
+use vibra_ir::arena::{class, kind};
 use vibra_ir::boundary::TrapCode;
-use vibra_nexus::{
-    ABI_VERSION, Cell, Code, Context, Halt, Requirements, Step, StoreError,
-};
+use vibra_nexus::{ABI_VERSION, Code, Context, Halt, Requirements, ScalarOp, Step};
 
 /// Why a program cannot be executed by the stepper.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -141,53 +139,34 @@ impl<'p> Evaluator<'p> {
                     ScalarClass::F32 => class::F32,
                     ScalarClass::F64 => class::F64,
                 };
-                ctx.set_slot(dst.0, Cell { class, bits: *bits })
+                ctx.scalar(dst.0, class, *bits)
             }
             Inst::Constant { dst, constant } => {
-                let built = match self.program.constants.get(constant.index()) {
-                    Some(Constant::Str(text)) => ctx.store().new_text(kind::STR, text),
+                match self.program.constants.get(constant.index()) {
+                    Some(Constant::Str(text)) => {
+                        ctx.constant_text(dst.0, kind::STR, text)
+                    }
                     Some(Constant::Atom(text)) => {
-                        ctx.store().new_text(kind::ATOM, text)
+                        ctx.constant_text(dst.0, kind::ATOM, text)
                     }
-                    Some(Constant::Bytes(bytes)) => {
-                        ctx.store().new_bytes(kind::BYTES, bytes)
-                    }
-                    None => Err(StoreError::Fault),
-                };
-                let value = ctx.check(built)?;
-                ctx.set_slot(dst.0, Cell::reference(value))
-            }
-            Inst::Copy { dst, src } => {
-                let cell = ctx.slot(src.0)?;
-                let kept = ctx.store().dup_cell(cell);
-                ctx.check(kept)?;
-                ctx.set_slot(dst.0, cell)
-            }
-            Inst::Move { dst, src } => {
-                let cell = ctx.take_slot(src.0)?;
-                ctx.set_slot(dst.0, cell)
-            }
-            Inst::Drop { slot } => {
-                let cell = ctx.take_slot(slot.0)?;
-                let dropped = ctx.store().drop_cell(cell);
-                ctx.check(dropped)
-            }
-            Inst::Op { dst, op, args } => {
-                let mut operands = [0_u64; 2];
-                for (operand, slot) in operands.iter_mut().zip(args) {
-                    *operand = ctx.slot(slot.0)?.bits;
+                    Some(Constant::Bytes(bytes)) => ctx.constant_bytes(dst.0, bytes),
+                    None => Err(ctx.trap(TrapCode::InvalidCheckedProgram, 0)),
                 }
-                let [left, right] = operands;
-                let signed = |bits: u64| i64::from_ne_bytes(bits.to_ne_bytes());
-                let cell = match op {
-                    ScalarOp::I64Add => Cell::i64(left.wrapping_add(right)),
-                    ScalarOp::I64Sub => Cell::i64(left.wrapping_sub(right)),
-                    ScalarOp::I64Eq => Cell::i32(u32::from(left == right)),
-                    ScalarOp::I64LtS => {
-                        Cell::i32(u32::from(signed(left) < signed(right)))
-                    }
+            }
+            Inst::Copy { dst, src } => ctx.copy(dst.0, src.0),
+            Inst::Move { dst, src } => ctx.move_slot(dst.0, src.0),
+            Inst::Drop { slot } => ctx.drop_slot(slot.0),
+            Inst::Op { dst, op, args } => {
+                let op = match op {
+                    ExecOp::I64Add => ScalarOp::I64Add,
+                    ExecOp::I64Sub => ScalarOp::I64Sub,
+                    ExecOp::I64Eq => ScalarOp::I64Eq,
+                    ExecOp::I64LtS => ScalarOp::I64LtS,
                 };
-                ctx.set_slot(dst.0, cell)
+                let (Some(left), Some(right)) = (args.first(), args.get(1)) else {
+                    return Err(ctx.trap(TrapCode::InvalidCheckedProgram, 0));
+                };
+                ctx.scalar_op(dst.0, op, left.0, right.0)
             }
             // `Evaluator::new` rejects a program that has one.
             Inst::Intrinsic { .. } => Err(ctx.trap(TrapCode::InvalidCheckedProgram, 0)),
@@ -205,61 +184,26 @@ impl<'p> Evaluator<'p> {
                     ObjectKind::Wrapper => kind::WRAPPER,
                     ObjectKind::Union => kind::UNION,
                 };
-                let mut taken = Vec::with_capacity(cells.len());
-                for slot in cells {
-                    taken.push(ctx.take_slot(slot.0)?);
-                }
-                let store = ctx.store();
-                let built = (|| {
-                    let len = u32::try_from(taken.len())
-                        .map_err(|_| StoreError::Exhausted)?;
-                    let value = store.alloc(kind, STRIDE_CELLS, len, *variant)?;
-                    for (index, cell) in (0..len).zip(taken) {
-                        store.set_cell(value, index, cell)?;
-                    }
-                    Ok(Cell::reference(value))
-                })();
-                let cell = ctx.check(built)?;
-                ctx.set_slot(dst.0, cell)
+                ctx.build(dst.0, kind, *variant, &slots(cells))
             }
-            Inst::Cell { dst, object, index } => {
-                let object = ctx.slot(object.0)?;
-                let store = ctx.store();
-                let read = (|| {
-                    let cell = store
-                        .cell(object.as_ref().ok_or(StoreError::Fault)?, *index)?;
-                    store.dup_cell(cell)?;
-                    Ok(cell)
-                })();
-                let cell = ctx.check(read)?;
-                ctx.set_slot(dst.0, cell)
-            }
-            Inst::Variant { dst, object } => {
-                let object = ctx.slot(object.0)?;
-                let read = object
-                    .as_ref()
-                    .ok_or(StoreError::Fault)
-                    .and_then(|value| ctx.store().variant(value));
-                let variant = ctx.check(read)?;
-                ctx.set_slot(dst.0, Cell::i32(variant))
-            }
+            Inst::Cell { dst, object, index } => ctx.cell(dst.0, object.0, *index),
+            Inst::Variant { dst, object } => ctx.variant_of(dst.0, object.0),
             Inst::Function {
                 dst,
                 function,
                 captures,
             } => {
                 let body = self.function(ctx, *function)?;
-                let cell = ctx.function_value(
+                ctx.make_function(
+                    dst.0,
                     function.0,
                     body.slots,
                     body.params,
                     &slots(captures),
-                )?;
-                ctx.set_slot(dst.0, cell)
+                )
             }
         }
     }
-
     fn terminator(&self, ctx: &mut Context<'_>, term: &Terminator) -> Done<Next> {
         Ok(match term {
             Terminator::Jump(target) => Next::Block(*target),
@@ -267,21 +211,16 @@ impl<'p> Evaluator<'p> {
                 cond,
                 then_block,
                 else_block,
-            } => Next::Block(if ctx.slot(cond.0)?.bits == 0 {
-                *else_block
-            } else {
-                *then_block
-            }),
+            } => {
+                Next::Block(BlockId(ctx.branch(cond.0, then_block.0, else_block.0)?))
+            }
             Terminator::Switch {
                 value,
                 targets,
                 default,
             } => {
-                let value = ctx.slot(value.0)?.bits;
-                let target = usize::try_from(value)
-                    .ok()
-                    .and_then(|index| targets.get(index));
-                Next::Block(*target.unwrap_or(default))
+                let targets = targets.iter().map(|block| block.0).collect::<Vec<_>>();
+                Next::Block(BlockId(ctx.switch(value.0, &targets, default.0)?))
             }
             Terminator::Call {
                 callee,

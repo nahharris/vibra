@@ -68,3 +68,31 @@ Counts at X3-04 (173 cases):
 | `windows` | 0 | 19 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
 | `linux` | 0 | 19 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
 | `macos` | 0 | 19 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
+
+
+
+## Bridge archive record (X3-05)
+
+Recorded 2026-11-12 on the branch `nexus/x3-05`, Windows
+`x86_64-pc-windows-msvc`, `rustc 1.96.1`. The contract is the crate
+documentation of `crates/vibra-nexus-bridge`; it is provisional until the
+native-execution chapter of the runtime specification is approved.
+
+- **Archive.** `cargo build --locked --offline -p vibra-nexus-bridge --release`
+  writes `target/release/vibra_nexus_bridge.lib`, 18,725,154 bytes. It holds
+  Nexus, the host providers, the native code, and the launcher's `main`.
+- **Native static libraries.** `cargo rustc -p vibra-nexus-bridge --release
+  --crate-type staticlib -- --print native-static-libs` prints
+  `kernel32.lib ntdll.lib userenv.lib ws2_32.lib dbghelp.lib
+  /defaultlib:msvcrt`. That is the list the [feasibility record](feasibility.md)
+  observed for its std-using stand-in archive: no difference.
+- **Exported symbols.** `main`, and the routines `nexus_call`,
+  `nexus_call_value`, `nexus_tail_call`, `nexus_tail_call_value`, `nexus_ret`,
+  `nexus_host`, `nexus_global`, `nexus_trap`, `nexus_scalar`, `nexus_constant`,
+  `nexus_copy`, `nexus_move`, `nexus_drop`, `nexus_op`, `nexus_build`,
+  `nexus_cell`, `nexus_variant`, `nexus_function`, `nexus_branch`, and
+  `nexus_switch`. The one data symbol a program defines is `vibra_program`.
+- **`unsafe` blocks.** 22 in `src`: 20 in the default build and 2 more behind
+  the `harness` feature. The crate's lint tables deny an undocumented one.
+- **Not run.** Linux and macOS archives, and a link of the archive with an
+  object from the code generator, which does not exist yet.

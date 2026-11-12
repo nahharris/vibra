@@ -148,6 +148,24 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-nexus",
         ],
     ),
+    // The bridge joins generated code to Nexus: the C ABI, the launcher, and the
+    // static archive, and the only crate with `unsafe` (N10). Its normal
+    // dependencies are exactly `vibra-host`, `vibra-ir`, and `vibra-nexus`
+    // (`the_bridge_carries_no_compiler_ir`): the archive linked into user
+    // programs carries no compiler IR. Its tests drive hand-written step
+    // functions against the reference stepper, which needs the execution IR
+    // and the stepper, and spans for the origin table.
+    (
+        "vibra-nexus-bridge",
+        &[
+            "vibra-diagnostics",
+            "vibra-exec",
+            "vibra-host",
+            "vibra-ir",
+            "vibra-nexus",
+            "vibra-nexus-eval",
+        ],
+    ),
     // The harness. Legitimately sits above every node.
     (
         "vibra-conformance",
@@ -394,6 +412,7 @@ const SEMANTIC_CRATES: &[&str] = &[
     "vibra-actors",
     "vibra-lower",
     "vibra-nexus",
+    "vibra-nexus-bridge",
     "vibra-nexus-eval",
 ];
 
@@ -545,6 +564,9 @@ fn only_the_backends_and_the_harness_depend_on_the_host_provider() {
         // Nexus performs a native program's host operations, and the
         // reference stepper's tests hand it a host world.
         "vibra-nexus",
+        // The launcher's `system` profile builds the system provider, and
+        // its `harness` profile a world provider.
+        "vibra-nexus-bridge",
         "vibra-nexus-eval",
         "vibra-wasm-run",
         "vibra-workspace",
@@ -727,4 +749,288 @@ fn shipped_crates_do_not_depend_on_their_build_checkout() {
         "build-checkout paths in:\n{}",
         found.join("\n")
     );
+}
+
+/// The one crate that contains `unsafe` code and `extern "C"` items (decision
+/// N10). Its lint tables restate the workspace's.
+const BRIDGE_CRATE: &str = "vibra-nexus-bridge";
+
+/// `source` with comments, string literals, and character literals blanked
+/// out, so a scan sees code only.
+fn code_only(source: &str) -> String {
+    let chars = source.chars().collect::<Vec<_>>();
+    let mut out = String::with_capacity(source.len());
+    let mut at = 0;
+    while at < chars.len() {
+        let current = chars[at];
+        let next = chars.get(at + 1).copied();
+        if current == '/' && next == Some('/') {
+            while at < chars.len() && chars[at] != '\n' {
+                at += 1;
+            }
+        } else if current == '/' && next == Some('*') {
+            let mut depth = 0;
+            while at < chars.len() {
+                if chars[at] == '/' && chars.get(at + 1) == Some(&'*') {
+                    depth += 1;
+                    at += 2;
+                } else if chars[at] == '*' && chars.get(at + 1) == Some(&'/') {
+                    depth -= 1;
+                    at += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    at += 1;
+                }
+            }
+            out.push(' ');
+        } else if current == 'r' && matches!(next, Some('"' | '#')) && {
+            let mut hashes = at + 1;
+            while chars.get(hashes) == Some(&'#') {
+                hashes += 1;
+            }
+            chars.get(hashes) == Some(&'"')
+        } {
+            let mut hashes = 0;
+            at += 1;
+            while chars.get(at) == Some(&'#') {
+                hashes += 1;
+                at += 1;
+            }
+            at += 1;
+            while at < chars.len() {
+                if chars[at] == '"'
+                    && (0..hashes)
+                        .all(|offset| chars.get(at + 1 + offset) == Some(&'#'))
+                {
+                    at += 1 + hashes;
+                    break;
+                }
+                at += 1;
+            }
+            out.push(' ');
+        } else if current == '"' {
+            at += 1;
+            while at < chars.len() && chars[at] != '"' {
+                at += if chars[at] == '\\' { 2 } else { 1 };
+            }
+            at += 1;
+            out.push(' ');
+        } else if current == '\''
+            && (next == Some('\\') || chars.get(at + 2) == Some(&'\''))
+        {
+            at += 1;
+            while at < chars.len() && chars[at] != '\'' {
+                at += if chars[at] == '\\' { 2 } else { 1 };
+            }
+            at += 1;
+            out.push(' ');
+        } else {
+            out.push(current);
+            at += 1;
+        }
+    }
+    out
+}
+
+/// Whether `code` contains `word` as a whole identifier.
+fn names_token(code: &str, word: &str) -> bool {
+    let is_identifier = |c: char| c.is_alphanumeric() || c == '_';
+    code.match_indices(word).any(|(start, _)| {
+        !code[..start].chars().next_back().is_some_and(is_identifier)
+            && !code[start + word.len()..]
+                .chars()
+                .next()
+                .is_some_and(is_identifier)
+    })
+}
+
+fn package_name(manifest: &toml::Table) -> &str {
+    manifest
+        .get("package")
+        .and_then(|package| package.get("name"))
+        .and_then(toml::Value::as_str)
+        .expect("a package name")
+}
+
+#[test]
+fn only_the_bridge_contains_unsafe() {
+    let root = workspace_root();
+    let mut checked = 0;
+    let mut found = Vec::new();
+    for (path, manifest) in crate_manifests(&root) {
+        let name = package_name(&manifest).to_owned();
+        if name == BRIDGE_CRATE {
+            continue;
+        }
+        checked += 1;
+        let lints = manifest.get("lints").and_then(toml::Value::as_table);
+        let inherits = lints.is_some_and(|lints| {
+            lints.len() == 1
+                && lints.get("workspace").and_then(toml::Value::as_bool) == Some(true)
+        });
+        if !inherits {
+            found.push(format!(
+                "{} does not inherit the workspace lints (`[lints] workspace = true`)",
+                path.display()
+            ));
+        }
+        let mut sources = Vec::new();
+        rust_sources(path.parent().expect("a crate directory"), &mut sources);
+        for source_path in sources {
+            let source =
+                std::fs::read_to_string(&source_path).expect("readable source");
+            if names_token(&code_only(&source), "unsafe") {
+                found.push(format!("{} contains `unsafe`", source_path.display()));
+            }
+        }
+    }
+    assert!(
+        checked >= 15,
+        "the scan covers the workspace ({checked} crates)"
+    );
+    assert!(
+        found.is_empty(),
+        "only `{BRIDGE_CRATE}` may contain `unsafe` or its own lint table:\n{}",
+        found.join("\n")
+    );
+}
+
+#[test]
+fn the_unsafe_scan_reads_code_only() {
+    assert!(names_token(&code_only("let x = unsafe { f() };"), "unsafe"));
+    assert!(names_token(
+        &code_only("unsafe extern \"C\" fn f() {}"),
+        "unsafe"
+    ));
+    for harmless in [
+        "// unsafe is not used",
+        "/* unsafe /* nested */ still a comment */",
+        "let s = \"unsafe\";",
+        "let s = r#\"unsafe \"quoted\"\"#;",
+        "let c = 'u'; let t: &'static str = \"\";",
+        "#![forbid(unsafe_code)]",
+        "let unsafe_count = 0;",
+    ] {
+        assert!(
+            !names_token(&code_only(harmless), "unsafe"),
+            "`{harmless}` is not unsafe code"
+        );
+    }
+}
+
+#[test]
+fn the_bridge_lints_are_the_workspace_lints_except_for_unsafe() {
+    let root = workspace_root();
+    let workspace = read_manifest(&root.join("Cargo.toml"));
+    let bridge =
+        read_manifest(&root.join("crates").join(BRIDGE_CRATE).join("Cargo.toml"));
+    let table = |manifest: &toml::Table, outer: &str, tool: &str| -> toml::Table {
+        manifest
+            .get(outer)
+            .and_then(|lints| lints.get(tool))
+            .and_then(toml::Value::as_table)
+            .cloned()
+            .unwrap_or_else(|| panic!("`[{outer}.{tool}]` is missing"))
+    };
+    let string = |value: &str| toml::Value::String(value.to_owned());
+    for (tool, replaced, added) in [
+        (
+            "rust",
+            ("unsafe_code", "allow"),
+            ("unsafe_op_in_unsafe_fn", "deny"),
+        ),
+        (
+            "clippy",
+            // No workspace clippy lint is replaced; the pair below is a no-op
+            // placeholder that keeps the shape of the check uniform.
+            ("", ""),
+            ("undocumented_unsafe_blocks", "deny"),
+        ),
+    ] {
+        let mut expected = table(&workspace, "workspace", "lints")
+            .get(tool)
+            .and_then(toml::Value::as_table)
+            .cloned()
+            .expect("workspace lints");
+        if !replaced.0.is_empty() {
+            assert!(
+                expected.contains_key(replaced.0),
+                "the workspace sets `{}`",
+                replaced.0
+            );
+            expected.insert(replaced.0.to_owned(), string(replaced.1));
+        }
+        expected.insert(added.0.to_owned(), string(added.1));
+        assert_eq!(
+            table(&bridge, "lints", tool),
+            expected,
+            "the bridge's `[lints.{tool}]` must be the workspace's, except for `unsafe`"
+        );
+    }
+    let workspace_rust = table(&workspace, "workspace", "lints");
+    assert_eq!(
+        workspace_rust
+            .get("rust")
+            .and_then(|rust| rust.get("unsafe_code"))
+            .and_then(toml::Value::as_str),
+        Some("forbid"),
+        "the workspace keeps `unsafe_code = \"forbid\"`"
+    );
+    assert!(
+        bridge
+            .get("lints")
+            .and_then(|lints| lints.get("workspace"))
+            .is_none(),
+        "the bridge states its own lints"
+    );
+}
+
+#[test]
+fn the_bridge_carries_no_compiler_ir() {
+    let root = workspace_root();
+    let manifest =
+        read_manifest(&root.join("crates").join(BRIDGE_CRATE).join("Cargo.toml"));
+    let section = |name: &str| -> BTreeSet<String> {
+        manifest
+            .get(name)
+            .and_then(toml::Value::as_table)
+            .map(|table| table.keys().cloned().collect())
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        section("dependencies"),
+        BTreeSet::from([
+            "vibra-host".to_owned(),
+            "vibra-ir".to_owned(),
+            "vibra-nexus".to_owned()
+        ]),
+        "the archive's dependencies are the runtime, the host provider, and the closed registries"
+    );
+    assert!(section("build-dependencies").is_empty());
+    assert!(
+        section("dev-dependencies").is_subset(&BTreeSet::from([
+            "vibra-diagnostics".to_owned(),
+            "vibra-exec".to_owned(),
+            "vibra-nexus-eval".to_owned()
+        ])),
+        "tests may use the stepper, the execution IR, and spans"
+    );
+    let compiler = ["vibra-exec", "vibra-lower", "vibra-types", "vibra-syntax"];
+    for (name, edges) in workspace_graph(&root) {
+        if name == "vibra-nexus" {
+            assert!(
+                compiler
+                    .iter()
+                    .all(|crate_name| !edges.contains(*crate_name)),
+                "the runtime depends on no compiler crate"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_runtime_and_the_execution_ir_agree_on_the_frame_bound() {
+    assert_eq!(vibra_nexus::MAX_FRAME_SLOTS, vibra_exec::MAX_SLOTS);
 }
