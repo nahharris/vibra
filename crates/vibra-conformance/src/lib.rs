@@ -29,6 +29,7 @@ mod corpus;
 mod format;
 mod graph;
 mod manifest;
+mod native;
 mod profile;
 mod project;
 mod reader;
@@ -52,6 +53,11 @@ pub use manifest::{
     CaseExpectations, CaseInputs, CaseManifest, ConformanceOperation,
     ExpectedDiagnostic, ExpectedExecution, ExpectedFix, ExpectedQuery,
     ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError, NORMATIVE_SECTION_IDS,
+};
+pub use native::{
+    COLUMNS as NATIVE_PARITY_COLUMNS, INVENTORY_FILE as NATIVE_PARITY_FILE, Inventory,
+    InventoryCell, InventoryRow, NativeCounts, NativeObservation, NativeStatus,
+    StepperRun, owning_package,
 };
 pub use profile::{ConformanceProfile, UnknownProfile};
 pub use project::StaticV1ProjectHandler;

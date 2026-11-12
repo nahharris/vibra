@@ -7,6 +7,7 @@ use vibra_diagnostics::Diagnostic;
 
 use crate::corpus::{Case, Corpus};
 use crate::manifest::{CaseExpectations, ExpectedExecution};
+use crate::native::{NativeCounts, NativeObservation, NativeStatus};
 use crate::profile::ConformanceProfile;
 
 /// The one finite memory limit, in bytes, the runner applies to every instance
@@ -131,6 +132,8 @@ pub struct CaseObservation {
     /// executable case sets it for every program it runs. A rejected program
     /// is no executable case, so a handler leaves it unset.
     pub wasm: Option<BackendObservation<WasmObservation>>,
+    /// What the reference stepper did with the case, set wherever `wasm` is.
+    pub native: Option<NativeObservation>,
 }
 
 impl CaseObservation {
@@ -411,6 +414,8 @@ pub struct BackendStatuses {
     /// handler took part in the case, or the case never reached a backend
     /// because its handler failed or was unavailable.
     pub wasm: Option<WasmStatus>,
+    /// The reference stepper's status, under the same conditions as `wasm`.
+    pub native: Option<NativeStatus>,
 }
 
 /// One case's result in a run report.
@@ -491,6 +496,41 @@ impl RunReport {
                 CaseStatus::Passed => counts.passed += 1,
                 CaseStatus::Failed { .. } => counts.failed += 1,
                 CaseStatus::Unavailable { .. } => counts.unavailable += 1,
+            }
+        }
+        counts
+    }
+
+    /// The reference stepper's status on every executable case, by case id. A
+    /// case that never reached the stepper, because its handler failed or was
+    /// unavailable, counts as a failure of it.
+    #[must_use]
+    pub fn native_statuses(&self) -> Vec<(String, NativeStatus)> {
+        self.reports
+            .iter()
+            .filter_map(|report| {
+                let backends = report.backends.as_ref()?;
+                let status =
+                    backends
+                        .native
+                        .clone()
+                        .unwrap_or_else(|| NativeStatus::Failed {
+                            reason: "the case never reached the stepper".to_owned(),
+                        });
+                Some((report.case_id.clone(), status))
+            })
+            .collect()
+    }
+
+    /// The reference stepper's counts over the executable cases.
+    #[must_use]
+    pub fn native_counts(&self) -> NativeCounts {
+        let mut counts = NativeCounts::default();
+        for (_, status) in self.native_statuses() {
+            match status {
+                NativeStatus::Matched => counts.matched += 1,
+                NativeStatus::Pending(_) => counts.pending += 1,
+                NativeStatus::Failed { .. } => counts.failed += 1,
             }
         }
         counts
@@ -638,12 +678,21 @@ impl ConformanceRunner {
                     };
                 }
                 let wasm = wasm_status(case, &observation);
+                let native = native_status(case, &observation);
                 CaseReport {
                     case_id,
                     required_profile: required,
                     provided_profile: Some(provided),
-                    status: differential_status(&interpreter, wasm.as_ref()),
-                    backends: Some(BackendStatuses { interpreter, wasm }),
+                    status: differential_status(
+                        &interpreter,
+                        wasm.as_ref(),
+                        native.as_ref(),
+                    ),
+                    backends: Some(BackendStatuses {
+                        interpreter,
+                        wasm,
+                        native,
+                    }),
                 }
             }
             DispatchResult::Unavailable { required, reason } => {
@@ -655,6 +704,7 @@ impl ConformanceRunner {
                     backends: executable.then(|| BackendStatuses {
                         interpreter: status.clone(),
                         wasm: None,
+                        native: None,
                     }),
                     status,
                 }
@@ -674,6 +724,7 @@ impl ConformanceRunner {
                     backends: executable.then(|| BackendStatuses {
                         interpreter: status.clone(),
                         wasm: None,
+                        native: None,
                     }),
                     status,
                 }
@@ -902,13 +953,55 @@ impl CaseExpectations {
 /// in the case, so that only the interpreter judges it.
 fn wasm_status(case: &Case, observation: &CaseObservation) -> Option<WasmStatus> {
     let wasm = observation.wasm.as_ref()?;
-    Some(wasm_outcome_status(case, observation, wasm))
+    Some(executor_status(
+        case,
+        observation,
+        wasm,
+        "wasm",
+        "the module",
+    ))
 }
 
-fn wasm_outcome_status(
+/// The stepper's status: each of its runs, held to the comparison the Wasm
+/// backend is held to.
+fn native_status(case: &Case, observation: &CaseObservation) -> Option<NativeStatus> {
+    Some(match observation.native.as_ref()? {
+        NativeObservation::Pending { package, .. } => {
+            NativeStatus::Pending(package.clone())
+        }
+        NativeObservation::Ran(runs) => {
+            for run in runs {
+                if let WasmStatus::Failed { reason } = executor_status(
+                    case,
+                    observation,
+                    &run.observation,
+                    "stepper",
+                    "the stepper",
+                ) {
+                    let quota = if run.quota == u64::MAX {
+                        "unbounded".to_owned()
+                    } else {
+                        format!("quota {}", run.quota)
+                    };
+                    return Some(NativeStatus::Failed {
+                        reason: format!("{reason} ({quota})"),
+                    });
+                }
+            }
+            NativeStatus::Matched
+        }
+    })
+}
+
+/// An executor that reports in the terms of [`WasmObservation`], held to the
+/// case's one expectation. `name` is how a comparison names it and `subject`
+/// how a reason refers to it.
+fn executor_status(
     case: &Case,
     observation: &CaseObservation,
     wasm: &BackendObservation<WasmObservation>,
+    name: &str,
+    subject: &str,
 ) -> WasmStatus {
     let expectations = &case.manifest().expectations;
     match &wasm.outcome {
@@ -916,7 +1009,7 @@ fn wasm_outcome_status(
             if let Some(event) = &expectations.host_event {
                 return WasmStatus::Failed {
                     reason: format!(
-                        "host event mismatch: expected {event}, but the module completed"
+                        "host event mismatch: expected {event}, but {subject} completed"
                     ),
                 };
             }
@@ -928,7 +1021,7 @@ fn wasm_outcome_status(
             }) {
                 return WasmStatus::Failed {
                     reason: format!(
-                        "trap mismatch: expected {}, but the module completed",
+                        "trap mismatch: expected {}, but {subject} completed",
                         trap.code.as_atom()
                     ),
                 };
@@ -943,7 +1036,7 @@ fn wasm_outcome_status(
             {
                 return WasmStatus::Failed {
                     reason: format!(
-                        "command outcome mismatch: the interpreter's entry {} err, the module's {}",
+                        "command outcome mismatch: the interpreter's entry {} err, {subject}'s {}",
                         if interpreter {
                             "returned"
                         } else {
@@ -955,7 +1048,7 @@ fn wasm_outcome_status(
             }
             compare_execution(
                 case,
-                "wasm",
+                name,
                 expectations.interpreter.as_ref(),
                 Some(actual),
             )
@@ -977,7 +1070,7 @@ fn wasm_outcome_status(
             } else {
                 WasmStatus::Failed {
                     reason: format!(
-                        "trap mismatch: the module trapped with {code}, which the case does not expect"
+                        "trap mismatch: {subject} trapped with {code}, which the case does not expect"
                     ),
                 }
             }
@@ -1002,6 +1095,7 @@ fn wasm_outcome_status(
 fn differential_status(
     interpreter: &CaseStatus,
     wasm: Option<&WasmStatus>,
+    native: Option<&NativeStatus>,
 ) -> CaseStatus {
     let mut reasons = Vec::new();
     match interpreter {
@@ -1017,6 +1111,9 @@ fn differential_status(
     }
     if let Some(WasmStatus::Failed { reason }) = wasm {
         reasons.push(format!("wasm backend: {reason}"));
+    }
+    if let Some(NativeStatus::Failed { reason }) = native {
+        reasons.push(format!("native backend: stepper: {reason}"));
     }
     if reasons.is_empty() {
         CaseStatus::Passed

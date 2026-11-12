@@ -59,6 +59,10 @@ impl ProfileHandler for InterpreterV1Handler {
                         program,
                         &vibra_host::HostWorld::default(),
                     )),
+                    native: Some(crate::native::observe_entry(
+                        program,
+                        &vibra_host::HostWorld::default(),
+                    )),
                     ..CaseObservation::default()
                 });
             }
@@ -75,6 +79,10 @@ impl ProfileHandler for InterpreterV1Handler {
                 program_failed: Some(execution.program_failed()),
             }),
             wasm: Some(crate::wasm::observe_entry(
+                program,
+                &vibra_host::HostWorld::default(),
+            )),
+            native: Some(crate::native::observe_entry(
                 program,
                 &vibra_host::HostWorld::default(),
             )),

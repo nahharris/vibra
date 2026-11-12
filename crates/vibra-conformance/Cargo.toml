@@ -13,10 +13,14 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 vibra-diagnostics.workspace = true
+vibra-exec.workspace = true
 vibra-fmt.workspace = true
 vibra-host.workspace = true
 vibra-interp.workspace = true
 vibra-ir.workspace = true
+vibra-lower.workspace = true
+vibra-nexus.workspace = true
+vibra-nexus-eval.workspace = true
 vibra-resolve.workspace = true
 vibra-schema.workspace = true
 vibra-syntax.workspace = true
@@ -30,10 +34,6 @@ name = "vibra-conformance"
 path = "src/bin/conformance.rs"
 
 [dev-dependencies]
-vibra-exec.workspace = true
-vibra-lower.workspace = true
-vibra-nexus.workspace = true
-vibra-nexus-eval.workspace = true
 wasmparser.workspace = true
 
 [lints]

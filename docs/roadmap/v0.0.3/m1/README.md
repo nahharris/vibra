@@ -46,3 +46,25 @@ Toolchain and target feasibility record: [feasibility.md](feasibility.md).
 
 This slice proves the native path. General native support starts at the
 parity and release gates.
+
+## Native parity inventory
+
+The inventory is [`conformance/native-parity.tsv`](../../../../conformance/native-parity.tsv):
+one row for each of the 173 executable cases and the columns `stepper`,
+`windows`, `linux`, and `macos`. A cell is `matched` or `pending <package>`.
+Only the `stepper` column is executable today; the platform columns are
+checked for form. The conformance runner prints
+`native backend: stepper N matched, P pending, F failed`; a cell the stepper
+contradicts fails the run, and a pending cell is a gap that fails the M2 gate.
+`vibra-conformance --root conformance/cases --write-native-parity <path>` writes
+the table the current executors produce; the committed file is the source of
+truth and the test suite never writes it.
+
+Counts at X3-04 (173 cases):
+
+| Column | matched | pending X3-09 | X3-10 | X3-11 | X3-12 | X3-13 | X3-14 | X3-15 | X3-16 | X3-18 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `stepper` | 19 | 0 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
+| `windows` | 0 | 19 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
+| `linux` | 0 | 19 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
+| `macos` | 0 | 19 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |

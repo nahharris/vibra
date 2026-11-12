@@ -8,8 +8,17 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use vibra_conformance::{
-    ConformanceProfile, ConformanceRunner, Corpus, standard_dispatcher,
+    ConformanceProfile, ConformanceRunner, Corpus, Inventory, NATIVE_PARITY_FILE,
+    standard_dispatcher,
 };
+
+/// What the command line asks for.
+struct Options {
+    root: PathBuf,
+    /// Where to write the native parity inventory the current executors
+    /// produce, instead of checking the committed one.
+    write_native_parity: Option<PathBuf>,
+}
 
 fn main() -> ExitCode {
     match run() {
@@ -22,7 +31,10 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), String> {
-    let root = parse_root(std::env::args_os().skip(1))?;
+    let Options {
+        root,
+        write_native_parity,
+    } = parse_options(std::env::args_os().skip(1))?;
     let corpus = Corpus::discover(&root).map_err(|error| error.to_string())?;
     if corpus.is_empty() {
         return Err("corpus is empty".to_owned());
@@ -78,6 +90,43 @@ fn run() -> Result<(), String> {
         "wasm backend: {} matched, {} failed",
         wasm.matched, wasm.failed
     );
+    // The reference stepper, against the committed inventory when the corpus
+    // has one beside it. Pending cells are gaps and do not fail the run; a cell
+    // the stepper contradicts does.
+    let statuses = report.native_statuses();
+    if let Some(path) = write_native_parity {
+        let text = Inventory::generated(&statuses).render();
+        std::fs::write(&path, text)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        println!("native parity inventory written to {}", path.display());
+    }
+    let mut disagreements = Vec::new();
+    let table = root
+        .parent()
+        .map(|parent| parent.join(NATIVE_PARITY_FILE))
+        .filter(|path| path.is_file());
+    if let Some(path) = table {
+        let text = std::fs::read_to_string(&path)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let inventory = Inventory::parse(&text)
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        let executable = statuses
+            .iter()
+            .map(|(case, _)| case.clone())
+            .collect::<Vec<_>>();
+        disagreements.extend(inventory.problems(&executable));
+        disagreements.extend(inventory.stepper_disagreements(&statuses));
+    }
+    for disagreement in &disagreements {
+        println!("NATIVE {disagreement}");
+    }
+    let native = report.native_counts();
+    println!(
+        "native backend: stepper {} matched, {} pending, {} failed",
+        native.matched,
+        native.pending,
+        native.failed.max(disagreements.len())
+    );
     println!(
         "conformance total: {} passed, {} failed, {} unavailable",
         report.passed(),
@@ -85,34 +134,47 @@ fn run() -> Result<(), String> {
         report.unavailable()
     );
 
-    if report.is_success() {
+    if report.is_success() && disagreements.is_empty() {
         Ok(())
     } else {
         Err("one or more cases did not pass".to_owned())
     }
 }
 
-fn parse_root<I>(mut arguments: I) -> Result<PathBuf, String>
+fn parse_options<I>(mut arguments: I) -> Result<Options, String>
 where
     I: Iterator<Item = std::ffi::OsString>,
 {
-    let Some(first) = arguments.next() else {
-        return Ok(vibra_conformance::corpus_root());
+    let mut options = Options {
+        root: vibra_conformance::corpus_root(),
+        write_native_parity: None,
     };
-    if first == "--root" {
-        let Some(root) = arguments.next() else {
-            return Err("--root requires a path".to_owned());
-        };
-        if arguments.next().is_some() {
-            return Err("unexpected arguments after --root".to_owned());
+    let mut positional = false;
+    let mut named_root = false;
+    while let Some(argument) = arguments.next() {
+        if argument == "--root" {
+            let Some(root) = arguments.next() else {
+                return Err("--root requires a path".to_owned());
+            };
+            if positional || named_root {
+                return Err("expected one corpus root path".to_owned());
+            }
+            named_root = true;
+            options.root = PathBuf::from(root);
+        } else if argument == "--write-native-parity" {
+            let Some(path) = arguments.next() else {
+                return Err("--write-native-parity requires a path".to_owned());
+            };
+            options.write_native_parity = Some(PathBuf::from(path));
+        } else if argument.to_string_lossy().starts_with('-') {
+            return Err(format!("unknown option `{}`", argument.to_string_lossy()));
+        } else {
+            if positional || named_root {
+                return Err("expected one corpus root path".to_owned());
+            }
+            positional = true;
+            options.root = PathBuf::from(argument);
         }
-        return Ok(PathBuf::from(root));
     }
-    if first.to_string_lossy().starts_with('-') {
-        return Err(format!("unknown option `{}`", first.to_string_lossy()));
-    }
-    if arguments.next().is_some() {
-        return Err("expected one corpus root path".to_owned());
-    }
-    Ok(PathBuf::from(first))
+    Ok(options)
 }

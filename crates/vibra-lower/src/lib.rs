@@ -25,7 +25,8 @@
 //! to a later package. `lower` answers [`LowerError::NotLowered`] with the
 //! name of the first such form it meets, never a partial program:
 //!
-//! - `External`, a call to a compiler intrinsic (X3-10, X3-16);
+//! - `External`, a call to a compiler intrinsic: `External numeric` (X3-10)
+//!   or `External collection` (X3-16);
 //! - `Record`, `Tuple`, `Variant`, `Wrap`, `Array`, `Widen`, `Project`,
 //!   `TupleProject` (X3-11);
 //! - `Match` and `Try` (X3-12);
@@ -92,6 +93,7 @@ use vibra_exec::{
     Block, BlockId, Callee, ConstId, Constant, FuncId, Function, GlobalId, Inst,
     MAX_SLOTS, ObjectKind, OriginId, Program, ScalarClass, Slot, Terminator,
 };
+use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::{
     CallTarget, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Value,
 };
@@ -99,6 +101,80 @@ use vibra_ir::{
 /// The cell of a function value that holds its first capture: the function,
 /// its frame size, and its parameter count come first.
 const FIRST_CAPTURE: usize = 3;
+
+/// Defines the names of [`form`] and the list of all of them together, so the
+/// list cannot omit one.
+macro_rules! forms {
+    ($($(#[$meta:meta])* $name:ident = $text:literal;)*) => {
+        /// The names of the forms [`lower`] refuses, as [`LowerError::NotLowered`]
+        /// carries them. The lowering names a form only through these
+        /// constants, so [`form::ALL`] is every name it can return, and a
+        /// consumer that maps a name to the work that will lower it can be
+        /// checked against the list.
+        pub mod form {
+            $($(#[$meta])* pub const $name: &str = $text;)*
+
+            /// Every name of this module, in declaration order.
+            pub const ALL: &[&str] = &[$($name),*];
+        }
+    };
+}
+
+forms! {
+    /// An entry that takes a parameter.
+    ENTRY_WITH_PARAMETERS = "entry with parameters";
+    /// A labelled parameter or a variadic tail.
+    LABELLED_OR_VARIADIC_PARAMETER = "labelled or variadic parameter";
+    /// A generic function, closure, or activation.
+    GENERIC_ACTIVATION = "generic activation";
+    /// A test assertion function.
+    TEST_ASSERTION = "test assertion";
+    /// A call to a compiler intrinsic of a numeric primitive or a `char`.
+    EXTERNAL_NUMERIC = "External numeric";
+    /// A call to any other compiler intrinsic: text, bytes, arrays, dicts.
+    EXTERNAL_COLLECTION = "External collection";
+    /// An omitted labelled argument.
+    DEFAULT = "Default";
+    /// A `match`.
+    MATCH = "Match";
+    /// A `widen` to a union or an interface.
+    WIDEN = "Widen";
+    /// A `try`.
+    TRY = "Try";
+    /// A record literal.
+    RECORD = "Record";
+    /// An enum variant literal.
+    VARIANT = "Variant";
+    /// A wrapper literal.
+    WRAP = "Wrap";
+    /// A record projection.
+    PROJECT = "Project";
+    /// A tuple literal.
+    TUPLE = "Tuple";
+    /// A tuple projection.
+    TUPLE_PROJECT = "TupleProject";
+    /// An array literal.
+    ARRAY = "Array";
+    /// A dict literal.
+    DICT = "Dict";
+    /// A dict lookup.
+    LOOKUP = "Lookup";
+    /// A call whose target is a contract member.
+    CONTRACT_CALL = "Call of a contract member";
+}
+
+/// Whether `intrinsic` is an operation of a numeric primitive or a `char`
+/// (package X3-10), and not of text, bytes, arrays, or dicts (X3-16).
+const fn is_numeric(intrinsic: CompilerIntrinsic) -> bool {
+    matches!(
+        intrinsic,
+        CompilerIntrinsic::Integer(..)
+            | CompilerIntrinsic::Float(..)
+            | CompilerIntrinsic::Convert(..)
+            | CompilerIntrinsic::CharToU32
+            | CompilerIntrinsic::CharFromU32
+    )
+}
 
 /// Why a checked program was not lowered.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -145,7 +221,7 @@ pub fn lower(program: &CheckedProgram) -> Lowered<Program> {
     let entry = lowering.module_function(program.entry_index())?;
     let takes = program.entry().signature().slot_types().len();
     if takes != 0 {
-        return Err(LowerError::NotLowered("entry with parameters"));
+        return Err(LowerError::NotLowered(form::ENTRY_WITH_PARAMETERS));
     }
     lowering.drain()?;
     lowering.finish(entry)
@@ -205,10 +281,10 @@ impl<'p> Lowering<'p> {
     /// The parameter count of a signature the slice can lower.
     fn parameters(signature: &FunctionSignature) -> Lowered<u32> {
         if !signature.labelled().is_empty() || signature.variadic().is_some() {
-            return Err(LowerError::NotLowered("labelled or variadic parameter"));
+            return Err(LowerError::NotLowered(form::LABELLED_OR_VARIADIC_PARAMETER));
         }
         if signature.has_params() {
-            return Err(LowerError::NotLowered("generic activation"));
+            return Err(LowerError::NotLowered(form::GENERIC_ACTIVATION));
         }
         u32::try_from(signature.parameters().len())
             .map_err(|_| LowerError::Malformed("too many parameters"))
@@ -225,7 +301,7 @@ impl<'p> Lowering<'p> {
                     "a call of a function that does not exist",
                 ))?;
         if function.test_assertion().is_some() {
-            return Err(LowerError::NotLowered("test assertion"));
+            return Err(LowerError::NotLowered(form::TEST_ASSERTION));
         }
         Self::parameters(function.signature())
     }
@@ -651,20 +727,28 @@ impl<'a, 'p> Body<'a, 'p> {
                 *slot_count,
                 dest,
             ),
-            Expr::External { .. } => Err(LowerError::NotLowered("External")),
-            Expr::Default { .. } => Err(LowerError::NotLowered("Default")),
-            Expr::Match { .. } => Err(LowerError::NotLowered("Match")),
-            Expr::Widen { .. } => Err(LowerError::NotLowered("Widen")),
-            Expr::Try { .. } => Err(LowerError::NotLowered("Try")),
-            Expr::Record { .. } => Err(LowerError::NotLowered("Record")),
-            Expr::Variant { .. } => Err(LowerError::NotLowered("Variant")),
-            Expr::Wrap { .. } => Err(LowerError::NotLowered("Wrap")),
-            Expr::Project { .. } => Err(LowerError::NotLowered("Project")),
-            Expr::Tuple { .. } => Err(LowerError::NotLowered("Tuple")),
-            Expr::TupleProject { .. } => Err(LowerError::NotLowered("TupleProject")),
-            Expr::Array { .. } => Err(LowerError::NotLowered("Array")),
-            Expr::Dict { .. } => Err(LowerError::NotLowered("Dict")),
-            Expr::Lookup { .. } => Err(LowerError::NotLowered("Lookup")),
+            Expr::External { intrinsic, .. } => {
+                Err(LowerError::NotLowered(if is_numeric(*intrinsic) {
+                    form::EXTERNAL_NUMERIC
+                } else {
+                    form::EXTERNAL_COLLECTION
+                }))
+            }
+            Expr::Default { .. } => Err(LowerError::NotLowered(form::DEFAULT)),
+            Expr::Match { .. } => Err(LowerError::NotLowered(form::MATCH)),
+            Expr::Widen { .. } => Err(LowerError::NotLowered(form::WIDEN)),
+            Expr::Try { .. } => Err(LowerError::NotLowered(form::TRY)),
+            Expr::Record { .. } => Err(LowerError::NotLowered(form::RECORD)),
+            Expr::Variant { .. } => Err(LowerError::NotLowered(form::VARIANT)),
+            Expr::Wrap { .. } => Err(LowerError::NotLowered(form::WRAP)),
+            Expr::Project { .. } => Err(LowerError::NotLowered(form::PROJECT)),
+            Expr::Tuple { .. } => Err(LowerError::NotLowered(form::TUPLE)),
+            Expr::TupleProject { .. } => {
+                Err(LowerError::NotLowered(form::TUPLE_PROJECT))
+            }
+            Expr::Array { .. } => Err(LowerError::NotLowered(form::ARRAY)),
+            Expr::Dict { .. } => Err(LowerError::NotLowered(form::DICT)),
+            Expr::Lookup { .. } => Err(LowerError::NotLowered(form::LOOKUP)),
         }
     }
 
@@ -841,7 +925,7 @@ impl<'a, 'p> Body<'a, 'p> {
                 (Callee::Indirect(held), Some(held))
             }
             CallTarget::Contract { .. } => {
-                return Err(LowerError::NotLowered("Call of a contract member"));
+                return Err(LowerError::NotLowered(form::CONTRACT_CALL));
             }
         };
         let args = self.operands(arguments)?;
@@ -942,5 +1026,24 @@ impl<'a, 'p> Body<'a, 'p> {
         });
         self.release_to(mark);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::form;
+
+    /// The lowering names a refused form only through `form`, so the list of
+    /// names cannot drift from the places that return one.
+    #[test]
+    fn every_not_lowered_site_names_its_form_through_the_constants() {
+        let source = include_str!("lib.rs");
+        let code = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(!code.contains("NotLowered(\""), "a literal form name");
+        let mut seen = std::collections::BTreeSet::new();
+        for name in form::ALL {
+            assert!(seen.insert(*name), "{name} is listed twice");
+        }
+        assert_eq!(form::ALL.len(), 20);
     }
 }
