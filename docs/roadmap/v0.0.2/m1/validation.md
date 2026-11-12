@@ -1,8 +1,8 @@
 # v0.0.2 M1 validation and handoff
 
-Status: proposed validation policy. Commands below name current workspace
-entry points; new focused store tests are added once Step 1 freezes their
-placement and contracts. No test result is recorded by writing this document.
+Status: active validation policy. Commands below name current workspace
+entry points and apply to the cumulative M1 draft. Actual results belong in
+the milestone evidence; this policy does not itself record a passing result.
 
 Run from the repository root with `rust-toolchain.toml`. Inspect each native
 command's `$LASTEXITCODE` immediately in PowerShell; a later successful command
@@ -12,7 +12,7 @@ neither a passing test nor evidence that the implementation is broken.
 
 ## Planning documents
 
-For this planning-only change, review scope and the gate mapping, validate
+For planning-only changes, review scope and the gate mapping, validate
 local Markdown link targets/anchors, and run:
 
 ```powershell

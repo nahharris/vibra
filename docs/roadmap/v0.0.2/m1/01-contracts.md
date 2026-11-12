@@ -1,120 +1,38 @@
-# Step 1 — Codebase contract prerequisite
+# Step 1 — Approved codebase contracts
 
-Status: not started. This guide begins the design review; its proposals are
-not accepted source, data, CLI, or schema contracts.
+Status: the C1–C12 behavioral design is approved for M1 implementation. Normative source is in the linked specification chapters; implementation, schema/registry evidence, reviewed address vectors, and corpus coverage remain in progress. This step defines contracts and evidence, not shipped support.
 
-This is the specification-prerequisite exemption in the
-[execution model](../../execution.md#decomposition-rule). No database,
-encoder, public command, or language feature is implemented by this step.
+The codebase store extends the data and tooling contracts under the charter. Runtime execution semantics do not change in M1. The store reuses the workspace's existing acquisition, resolver, checker, and source facts. Its graph projection and storage are separate workspace-owned services; neither adds another checker or resolver.
 
-## Read first
+## C1–C12 decision ledger
 
-- [Charter](../../../spec/00-charter.md), especially persistent data,
-  nominal declarations, deterministic behavior, and compatibility.
-- [Source language](../../../spec/01-source-language.md), Reader,
-  Declarations, Types/interfaces/methods, and Canonical format.
-- [Type system](../../../spec/02-type-system.md), Nominal declarations,
-  Namespaces and resolution, Generics, and Interfaces and methods.
-- [Effects](../../../spec/03-effects.md), Nominal effects, Performed rows,
-  Target consent, and Query metadata.
-- [Programs and packages](../../../spec/04-programs-and-packages.md), VIBON,
-  project snapshots, modules, trusted stdlib input, and tests.
-- [Tooling](../../../spec/05-tooling.md), the workspace engine, command
-  results, queries, edit plans, and authorization boundaries.
-- [Diagnostics and conformance](../../../spec/07-diagnostics-and-conformance.md),
-  the closed registry, corpus format, profiles, and required suites.
-- [M1 scope](README.md) and [proposed design](execution.md).
-
-## Contract decisions to close
-
-Record each accepted decision with its canonical section, rejected
-alternative, reason, rule/case coverage, and downstream owner. New observable
-rules use MUST, SHOULD, and MAY under the charter. Do not freeze public
-spellings in implementation tests before this review.
-
-| ID | Decision | Required resolution |
+| ID | Approved decision | Canonical contract |
 | --- | --- | --- |
-| C1 | Portable records and SQLite container | State explicitly whether SQLite is a permitted private container for canonical VIBON payloads; define inspect/interchange obligations and the distinction from `.vibon` files. Update the charter and data chapter together if wording changes. |
-| C2 | Entity and nominal identity | Preserve all resolver provenance fields and type-keyed implementation identities. Define rename, package-version change, same-name/different-body, and same-body/different-nominal behavior. Audit the different effect identity spellings noted in M4 before freezing hash inputs; coordinate its M2 owner if the fix belongs there. |
-| C3 | Checked-object granularity | Inventory every declaration/member/test kind, resolved edge kind, and trusted external/stdlib reference. Decide which are objects or owned parts and how reference closure includes type, interface dispatch, effect, initializer, and body dependencies. |
-| C4 | Canonical encoding and addresses | Specify domains, version tags, exact bytes, algorithm and text spelling; encode every supported checked node, generic/local binder and literal. Define SCC ordering, internal references, component/member addresses, provenance, and collision/integrity behavior. |
-| C5 | Four identities and source attachment | Distinguish checked object, exact source attachment, codebase revision, and file workspace revision. Specify full-document ownership, span units, comments, project/test attachments, source moves, malformed drafts, and source-to-object mapping. |
-| C6 | Revisions and heads | Close membership ordering, target/project/trust input capture, revision digest and lineage, named-head grammar, initial creation, expected absence, same-content republish, and missing revision/entity/object outcomes. |
-| C7 | File/codebase authority | Define explicit import/export and the selected mode, snapshot freshness, external edits, destination policy, preview/apply, creates/deletes, unrelated destination files, and complete round-trip expectations. |
-| C8 | Multi-file export failure boundary | Specify stale-check timing, path confinement, rollback, interruption/restart recovery, and what other processes may observe. Decide the necessary journal/staging protocol or a narrower reviewed export contract before promising atomicity. |
-| C9 | Store open, publish and readers | Close database placement, read-only open behavior, local filesystem support, transaction visibility, expected-head compare-and-publish, bounded busy handling, cancellation/interruption, and uncertain commit responses. |
-| C10 | Integrity, versions and lifecycle | Specify validation boundaries, corruption outcomes, version rejection/upgrades, index rebuild authority, backup consistency, restore/replacement, and supported recovery without silent data loss. |
-| C11 | Tool and authorization surface | Close one minimal M1 command/operation grammar, selectors, capability/write boundaries, JSON envelopes, payload limits, ordering/pagination, and process exits. A hash never grants access. General query and MCP remain M2. |
-| C12 | Independent evidence | Allocate canonical rule IDs, profile/operation changes, reviewed payload/hash vectors, diagnostic registry entries with fixed levels/spans, JSON schemas, failure precedence, and actual corpus handler coverage. |
+| C1 | A local SQLite database is a private physical container for authoritative records stored as canonical versioned VIBON bytes. Database and index layout are not portable record contracts or hash inputs. | [Charter](../../../spec/00-charter.md#m1-codebase-container); [data](../../../spec/04-programs-and-packages.md#m1-addressed-codebase-data) |
+| C2 | Resolver canonical identity keeps package name/version, unit, module, ownership path, and name; the structured entity key also records its kind. Entity identity is distinct from object address. Same-body nominal declarations remain distinct. Effects use that same full canonical identity. Implementations use receiver plus applied interface; members use contract member plus both. | [Types](../../../spec/02-type-system.md#codebase-entity-identity); [effects](../../../spec/03-effects.md#codebase-identity-of-effects) |
+| C3 | Objects are top-level declaration forms, tests, and explicit implementation blocks. Nested declarations and implementation members are owned parts with separate entity mappings and part paths, not separate objects. Semantic edge kinds are closed and call edges remain distinct. Trusted external references are explicit. | [Data](../../../spec/04-programs-and-packages.md#m1-addressed-codebase-data) |
+| C4 | Canonical VIBON schemas define checked definition trees, SCC ordering, internal member ordinals, component/member addresses, and exact domain-separated SHA-256 bytes. Lexical and generic binders use introduction-order indices; resolved references are pinned. | [Data](../../../spec/04-programs-and-packages.md#canonical-checked-graph-and-addresses); [encoding](../../../spec/codebase-encoding.md) |
+| C5 | Exact UTF-8 source and project documents are VIBON-wrapped attachments. Raw-byte hash, attachment address, checked-object address, codebase revision, and existing file workspace revision are distinct. Source origins/spans are separate from checked identity. Drafts cannot publish. | [Source](../../../spec/01-source-language.md#exact-source-attachments); [data](../../../spec/04-programs-and-packages.md#source-attachments-and-revision-manifests); [tooling](../../../spec/05-tooling.md#m1-codebase-commands) |
+| C6 | A revision hashes a complete sorted project/trust/object/source manifest, excluding publication lineage/time. Heads are lowercase kebab-case mutable pointers; M1 defaults to <code>main</code>. Import requires expected absence or exact revision. Reads resolve a head once or name an exact revision. | [Data](../../../spec/04-programs-and-packages.md#source-attachments-and-revision-manifests); [tooling](../../../spec/05-tooling.md#import-and-expected-heads) |
+| C7 | Import/export are explicit. Existing file commands stay file-authoritative; codebase reads never refresh from files. Export materializes exact stored source into an absent destination only. It does not update, overwrite, delete, or merge into an existing tree. | [Tooling](../../../spec/05-tooling.md#source-export-and-multi-file-failure-boundary) |
+| C8 | Export preview returns an address over the selected revision, absent destination, and sorted file list. Apply requires that address and uses a staged same-filesystem exclusive no-replace directory publication. Interruption leaves the destination absent or complete; no in-place multi-file rollback is claimed. | [Tooling](../../../spec/05-tooling.md#source-export-and-multi-file-failure-boundary) |
+| C9 | Create and open are separate service operations. Read-only open never creates store paths or journals. Publication checks the head before writes in one SQLite transaction. Bounded busy is retryable and distinct from stale; no silent rebase/retry occurs. | [Data](../../../spec/04-programs-and-packages.md#store-publication-and-recovery); [tooling](../../../spec/05-tooling.md#command-grammar-and-paths) |
+| C10 | Verify is read-only; reindex rebuilds only derived indexes from verified authority. Unknown versions are rejected without opportunistic migration. SQLite backup creates a consistent copy; restore verifies and creates an absent destination. Neither overwrites. | [Data](../../../spec/04-programs-and-packages.md#store-publication-and-recovery); [tooling](../../../spec/05-tooling.md#integrity-indexes-backup-and-restore) |
+| C11 | The CLI is limited to init, head, import, lookup, read, export, verify, reindex, backup, and restore. Every read selects one authorized store and pinned revision/head. A hash never grants access. No SQL, generic query, MCP, LSP, REPL, or dependency delivery is added. | [Tooling](../../../spec/05-tooling.md#m1-codebase-commands) |
+| C12 | The existing versioned command envelope is extended with closed per-operation payloads and registered fixed-level diagnostics. The tooling conformance profile adds a <code>codebase</code> operation with a closed scenario record and independently authored expected VIBON snapshot; actual handlers must run it. | [Tooling](../../../spec/05-tooling.md#json-results-and-diagnostics); diagnostics and schema work is owned in [Diagnostics and conformance](../../../spec/07-diagnostics-and-conformance.md) |
 
-## Files and responsibilities
+## Reviewed invariants and limitations
 
-Modify affected `docs/spec/00-charter.md` through
-`docs/spec/05-tooling.md` and `docs/spec/07-diagnostics-and-conformance.md`
-together; chapters without a behavior change receive an explicit reviewed
-invariant in the decision record. Review `docs/spec/06-runtime.md` only for
-checked-input/runtime-identity boundaries; M1 changes no execution semantics.
+The source-path spelling and the canonical resolver identity are different values. For example, <code>@app.main.run</code> resolves to identity <code>@demo@0.1.0/app.main.run</code>. CLI lookup accepts exactly its canonical entity-key record, including the resolver kind: <code>(record kind: @declaration identity: "@demo@0.1.0/app.main.run" entity-kind: @function)</code>. Test and implementation keys use the other closed records in the encoding chapter.
 
-Record accepted decisions and rationale in this milestone's `README.md`,
-with a linked ledger if the table becomes too large. Update `execution.md`
-and the release roadmap if a contract decision changes a scheduled gate.
-Keep the release described as planned until exit evidence exists.
+The canonical component frame is hashed as canonical VIBON, with members sorted by complete key. Acyclic dependencies are addressed before dependents. Internal SCC references use sorted member indices, so self and mutual recursion do not require a hash fixed point. Changing a dependency body changes its object address and the address of every dependent that pins it. An unrelated component remains reusable.
 
-Use `crates/vibra-schema/schemas/v1/command-result.json` and its existing
-serializers/tests as the baseline for machine output changes. Inspect
-`crates/vibra-diagnostics/src/registry.rs`,
-`crates/vibra-conformance/src/`, and `conformance/cases/` before assigning
-diagnostics and operations. New schema/corpus file names follow the approved
-formats, not invented names from this planning draft.
+The source attachment wrapper excludes source origin; its raw byte hash and wrapper address are both distinct from object and revision addresses. The revision binds source ID/origin, project/target inputs, trusted module hashes, canonical entity-to-object mappings, and attachments. Reimporting the same full snapshot yields the same revision, regardless of head history.
 
-## Ordered review tasks
+Export's absent-destination restriction is the accepted M1 conflict policy. A destination created after preview is stale and remains untouched. M1 makes no claim of exporting over an existing tree. This restriction avoids implicit deletion or merging of user files; an implementation MUST still use an exclusive no-replace publication primitive, never a check-then-overwrite rename.
 
-- [ ] Confirm the v0.0.1 exit and current branch baseline without disturbing
-  untracked or uncommitted work.
-- [ ] Compare C1–C12 with existing canonical rules and record conflicts before
-  proposing changes; old future milestone assignments are not current scope.
-- [ ] Review the graph/identity proposal first: C2–C6. Show worked recursive,
-  nominal, local-binder, and changed-dependency examples, including exact
-  candidate payloads and manually reviewed expected addresses.
-- [ ] Review C1 and C7–C10 against those identities. State file-export and
-  store-publication atomicity separately and explain each failure boundary.
-- [ ] Review C11 and C12: close command grammar, failure/result precedence,
-  registry levels/spans, JSON shapes, and the independent corpus operation.
-- [ ] Update all affected normative chapters in one specification change;
-  retain explicit exclusions and one canonical spelling for each identity.
-- [ ] Add schema/registry evidence and contract fixtures that the existing
-  harness can validate without advertising an unimplemented store. Distinguish
-  reviewed vectors from passing execution coverage. Add executable corpus
-  behavior alongside its real handler in the owning implementation step.
-- [ ] Expand Steps 2–9 into detailed implementation instructions with exact
-  files, approved types/payloads, test cases, commands, and failure outcomes.
-  Reconcile every C1–C12 decision with the gate mapping before approval.
-- [ ] Run the applicable [validation](validation.md), record what ran and
-  what remains review-only, and submit the contract prerequisite for approval.
+## Coverage and handoff
 
-## Required example and failure matrix
+The milestone demo/exit gates map to execution Steps 2–10. The required focused evidence includes recursive and mutually recursive graphs, traversal-order independence, alpha-renaming and rejected shadowing, trivia-only edits, nominal identity, dependency invalidation, source attachment round-trip, old/new revision reads, CAS race/busy/interruption, stale export, corruption/version rejection, index rebuilding, and backup/restore.
 
-| Area | Positive example | Negative, boundary, or recovery example |
-| --- | --- | --- |
-| Binder normalization | Rename a parameter and all its local uses | Shadowed binders must retain different binding positions; labels retain their names |
-| Recursion | Self-call and two mutually recursive functions imported in different traversal orders | Repoint one member's resolved dependency; addresses must reflect the change |
-| Nominality | Same entity and same admitted graph across two imports | Equal bodies under two nominal identities cannot substitute for each other |
-| Graph closure | Change a callee body and observe affected dependents | Keep an unrelated component unchanged; distinguish reference and call edges |
-| Source | Add a comment between top-level declarations | Checked hashes stay fixed, source hash changes, spans remain tied to exact source |
-| Versions and provenance | Reload exact trusted stdlib/project inputs | Reject changed trust evidence, unsupported payload version, or malformed record |
-| Publication | Two complete revisions survive reopen | Same expected head races, interrupted transaction, busy writer, uncertain response |
-| Export | Round trip source, project data, tests, and comments | External edit, added/deleted file, stale plan, escaping junction, interrupted apply |
-| Read authority | Read an old object in an explicitly selected authorized store | Known hash from another store confers no access; no fallback to current head |
-| Recovery | Rebuild indexes and restore an independent backup | Corrupt object, partial backup, interrupted restore, valid operation after a rejected input |
-
-For every failure, specify result precedence, fixed diagnostic level, primary
-and related spans or their explicit absence, and whether persistent bytes may
-change. Formatter expectations cover canonical record ordering, LF/newline
-rules, literal encoding, and exact-source export without implicit formatting.
-
-## Completion evidence
-
-Step 1 is complete only with approved C1–C12 decisions, affected canonical
-prose, schema/registry evidence, reviewed vectors, a complete gate mapping,
-and detailed downstream guides. It does not demonstrate a working codebase.
-Do not mark any later step landed or enable a CLI capability from this step.
+Reviewed hash vectors must be fixed from the exact schemas and independently checked before the graph-addressing step is claimed complete; generated-and-blessed outputs do not qualify. The command schema, diagnostic registry, and codebase scenario handler are being implemented with their owning components. Until these and both future required suites are green, M1 remains in progress and no release support claim is implied.
