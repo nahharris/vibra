@@ -28,10 +28,6 @@ const SLOT_BYTES: u64 = 16;
 /// size, and its parameter count.
 const FUNCTION_HEADER: u32 = 3;
 
-/// The variant index of `err` in a `(result t e)` value, the one
-/// `vibra_host::build_reply` builds for a failed host call.
-const RESULT_ERR: u32 = 1;
-
 /// A machine-level operation over scalar cells: none traps and none allocates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ScalarOp {
@@ -836,15 +832,16 @@ impl<'h> Context<'h> {
         Ok(*target.unwrap_or(&default))
     }
 
-    /// Whether the entry's result, once the program is done, is the `err` of a
-    /// `(result t e)`: the program failed, which is neither a trap nor a host
-    /// event. A `void` result and an `ok` are not a failure.
+    /// Whether the entry's result, once the program is done, is the enum
+    /// value whose variant index is `err_variant`. Only the compiler knows
+    /// whether the entry returns a `result` and which variant is its `err`,
+    /// so the caller says: the context guesses nothing.
     #[must_use]
-    pub fn program_failed(&self) -> bool {
+    pub fn result_is_variant(&self, err_variant: u32) -> bool {
         let Some(value) = self.result.as_ref() else {
             return false;
         };
         self.store.kind(value) == Ok(kind::ENUM)
-            && self.store.variant(value) == Ok(RESULT_ERR)
+            && self.store.variant(value) == Ok(err_variant)
     }
 }
