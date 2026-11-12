@@ -179,6 +179,16 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-nexus-bridge",
         ],
     ),
+    // The build driver: toolchain discovery and the link driver (X3-07). It
+    // lowers, verifies, generates, and links, so it names the lowering, the
+    // execution IR, the generator, and the checked IR for the entry's result
+    // type. It is not a semantic crate: it reads the environment, starts the
+    // linker, and writes files, in one module (`system`). No command depends on
+    // it yet (`vibra-cli` is not changed until the specification is approved).
+    (
+        "vibra-build",
+        &["vibra-codegen", "vibra-exec", "vibra-ir", "vibra-lower"],
+    ),
     // The harness. Legitimately sits above every node.
     (
         "vibra-conformance",

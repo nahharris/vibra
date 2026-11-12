@@ -1445,6 +1445,16 @@ name = "vibra-actors"
 version = "0.0.1"
 
 [[package]]
+name = "vibra-build"
+version = "0.0.1"
+dependencies = [
+ "vibra-codegen",
+ "vibra-exec",
+ "vibra-ir",
+ "vibra-lower",
+]
+
+[[package]]
 name = "vibra-cli"
 version = "0.0.1"
 dependencies = [
