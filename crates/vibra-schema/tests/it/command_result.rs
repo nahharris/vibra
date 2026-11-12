@@ -11,6 +11,34 @@ fn validator() -> Validator {
 }
 
 #[test]
+fn codebase_results_close_payloads_addresses_and_failure_shapes() {
+    let validator = validator();
+    let address = format!("sha256:{}", "a".repeat(64));
+    let read = json!({
+        "schemaVersion": 1, "command": "codebase-read", "result": "@command.ok", "diagnostics": [],
+        "payload": { "revision": address, "object": address, "component": address,
+            "memberIndex": 0, "payload": "(record format: @checked-component.v1 members: (array))\n",
+            "references": [{ "part": [], "kind": "call", "target": 0 }] }
+    });
+    assert!(validator.is_valid(&read));
+    let mut invalid = read.clone();
+    invalid["payload"]["object"] = json!("sha256:bad");
+    assert!(!validator.is_valid(&invalid));
+    invalid = read.clone();
+    invalid["payload"]["references"][0]["target"] = json!(-1);
+    assert!(!validator.is_valid(&invalid));
+    invalid = read.clone();
+    invalid["payload"]["extra"] = json!(true);
+    assert!(!validator.is_valid(&invalid));
+    let mut failed = read;
+    failed["result"] = json!("@command.operational-failure");
+    failed["payload"] = json!({});
+    assert!(validator.is_valid(&failed));
+    failed["payload"] = json!({ "revision": address });
+    assert!(!validator.is_valid(&failed));
+}
+
+#[test]
 fn command_result_schema_closes_init_and_fmt_payloads() {
     let validator = validator();
     let init = json!({

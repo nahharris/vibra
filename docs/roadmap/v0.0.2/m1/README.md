@@ -1,70 +1,44 @@
 # Milestone 1 — Content-addressed codebase
 
-An agent can open a checked codebase revision, find a definition by
-name, and retrieve that exact version by content address after a restart.
+M1 imports a checked local project into a durable codebase, publishes safe immutable revisions, and lets an authorized reader find a definition by canonical identity and retrieve its exact checked version after a restart.
 
-## Specification prerequisite
+**Status:** active on integration branch <code>v0.0.2/m1</code>. C1–C12 decisions are approved. Local implementation, schema/registry updates, independent conformance scenarios, reviewed address vectors, measurements, and evidence are recorded in [M1 evidence](evidence.md). Delivery remains in progress until the cumulative draft merges with green CI. No release support claim is made before the milestone is merged.
 
-Define the object model and the import/export boundary in the source,
-programs-and-packages, tooling, and conformance chapters. Review the type and
-effect chapters for identity and provenance assumptions. Review the charter's
-persistent-data rule explicitly. The proposed portable records use canonical
-VIBON. An embedded database would be their private physical container.
+This run uses focused commits and one cumulative draft PR into <code>main</code>, as explicitly requested for the full M1 delivery. That is the delivery exception to the repository's usual one-PR-per-step model. A step may have complete local evidence while the cumulative PR is open, but it is not landed or complete until that PR merges.
 
-- Store immutable checked definition objects and their resolved dependency
-  edges. A revision maps canonical entities to objects and records source
-  origins. A named head selects one revision. Preserve canonical nominal
-  identities for types, interfaces, implementations, and effects. Matching
-  structure alone cannot merge two distinct nominal declarations.
-- Hash versioned, domain-separated canonical payloads. Define how local
-  binders are normalized, resolved references are pinned, and mutually
-  recursive components are encoded and addressed deterministically. Freeze
-  vectors for recursion, nominal references, changed dependency bodies,
-  alpha-renamed local binders, and formatting-only changes. A changed
-  dependency must be visible in the dependent checked graph.
-- Keep the checked object hash, exact source attachment hash, codebase
-  revision, and existing file workspace revision distinct. Preserve comments
-  and spans in source attachments. Unchecked or recovered forms can be read
-  and diagnosed in a draft but cannot be published as checked objects.
-- In codebase mode, the published revision is authoritative. File projects
-  remain an ordinary entry point. Import captures a file snapshot explicitly.
-  Export materializes a selected revision through a revision-checked file
-  plan. Define round-trip behavior, external edits, and conflict diagnostics.
+## Execution sequence
 
-## Local storage
+| Step | Slice | Status | Guide |
+| --- | --- | --- | --- |
+| 1 | Freeze identity, persistence, import/export, schemas, and evidence contracts | in progress | [Approved contract ledger](01-contracts.md) |
+| 2 | Encode and address a checked graph deterministically | in progress | [Step 2](execution.md#step-2--checked-graph-addressing) |
+| 3 | Import, publish, reopen, and retrieve a checked revision | in progress | [Step 3](execution.md#step-3--first-durable-revision) |
+| 4 | Resolve names and read revision-scoped relations | in progress | [Step 4](execution.md#step-4--revision-scoped-reads) |
+| 5 | Export exact source into an absent destination | in progress | [Step 5](execution.md#step-5--source-export) |
+| 6 | Prove publication under contention and interruption | in progress | [Step 6](execution.md#step-6--publication-failure-paths) |
+| 7 | Verify integrity, version rejection, and index rebuilding | in progress | [Step 7](execution.md#step-7--integrity-and-recovery) |
+| 8 | Back up and restore an independently usable store | in progress | [Step 8](execution.md#step-8--backup-and-restore) |
+| 9 | Measure the local store and select journal settings | in progress | [Step 9](execution.md#step-9--local-store-measurements) |
+| 10 | Sweep the demo, exit gate, and M2 handoff | in progress | [Step 10](execution.md#step-10--exit-evidence) |
 
-Use SQLite as the preferred first implementation. Keep immutable objects,
-source attachments, revision membership, and named heads in one project-local
-database. Index declarations, source origins, references, and call edges by
-revision. Derive those rows from the existing workspace facts so the database
-can answer joins without introducing a second checker or resolution model.
-SQLite row IDs, insertion order, pages, and database bytes stay outside the
-hash and interchange contracts. [SQLite transaction model](https://sqlite.org/lang_transaction.html)
+## Approved design
 
-Check and stage outside the write transaction. Within one transaction, verify
-the expected head, persist missing objects and index rows, and publish the
-new head. Bound lock contention and expose a retryable busy outcome separately
-from a stale head. Specify local filesystem support, corruption diagnostics,
-schema upgrade and recovery, and a consistent way to back up the store.
-Measure indexed lookups and publish latency under overlapping CLI and MCP
-use before choosing journal settings. A blob directory with a separate index
-would need its own coordination and crash recovery across both stores.
-[SQLite WAL](https://sqlite.org/wal.html) · [SQLite backup API](https://www.sqlite.org/backup.html)
+The workspace engine projects an immutable checked graph from its existing snapshot, resolver, and checker. The workspace-owned implementation is split into the pure <code>workspace::codebase::graph</code>, the SQLite <code>store</code>, and the explicit <code>export</code> boundary. Graph encoding performs no I/O or resolution. Persistence validates canonical records; workspace recovery replays exact attachments through the existing engine to verify and rebuild derived facts. Neither service defines a second checker or resolver.
 
-## Gates
+The store is one project-local SQLite file at <code>.vibra/codebase.sqlite</code> by default. It contains exact canonical VIBON payloads and private derived indexes. Domain-separated SHA-256 addresses cover canonical checked-component records, source wrappers, and complete revision manifests. Checked objects, entity identities, raw source hashes, source-attachment addresses, codebase revisions, and file-workspace revisions are distinct.
 
-- **Demo.** Import a multi-module project with mutually recursive definitions.
-  Publish a second checked revision, reopen the store, and retrieve both
-  versions and their resolved dependency edges by address.
-- **Exit.** Independent imports produce the same object hashes. A trivia-only
-  change alters its source attachment while preserving checked object hashes.
-  An unchanged component deduplicates. A nominal identity mismatch cannot be
-  resolved by a matching body. Export preserves source attachments and refuses
-  stale destinations. At most one publisher can advance a given head.
-  An interrupted transaction and corrupt or unknown-version inputs expose
-  no partial revision. Rebuilt indexes agree with the workspace facts.
-  A restore preserves head and object addresses.
+Objects are top-level declarations, tests, and explicit implementation blocks. Nested members are owned parts with their own entity mappings and part paths. References include resolved types, interfaces, effects, values, calls, initializers, and implementation contracts. SCCs sort members by complete canonical key and encode internal references by member index. Named heads publish a revision with expected-absence or expected-address compare-and-publish. A busy store is retryable; a stale head is not silently rebased.
 
-Distributed sync, automatic merge, arbitrary database access through tools,
-and history pruning are outside this milestone. A hash identifies an object
-inside an authorized codebase and grants no access on its own.
+Import is explicit. File project commands remain file-authoritative. Codebase reads pin one head or explicit revision and never refresh from files. Export writes exact stored project and source attachments to an absent destination only. It previews a canonical plan and applies it with an exclusive no-replace directory publication. M1 does not overwrite, delete, update, or merge into an existing destination tree.
+
+See [the accepted contract ledger](01-contracts.md) and the normative [program data](../../../spec/04-programs-and-packages.md#m1-addressed-codebase-data) and [tooling](../../../spec/05-tooling.md#m1-codebase-commands) chapters for the complete schemas, grammar, outcomes, and boundaries.
+
+Local validation and the remaining integration evidence are tracked in [M1 evidence](evidence.md).
+
+## Gates and exclusions
+
+**Demo:** Import a multi-module project with mutually recursive definitions, publish a second checked revision, reopen the store, and retrieve both versions and their resolved dependency edges by address.
+
+**Exit:** Independent imports and reordered traversal produce the same object addresses; alpha-renaming and trivia-only edits preserve checked objects while exact source addresses change; dependent addresses change with dependency bodies; unrelated components deduplicate; nominal identities remain distinct; old and new revisions read independently; stale/busy CAS behavior is distinct; export preserves exact source and refuses a destination created after preview; interrupted publication exposes no partial revision; verify/reindex and backup/restore preserve authoritative addresses.
+
+No distributed sync, automatic merge, pruning, arbitrary SQL, general query CLI, MCP, LSP, semantic editing, REPL, ordinary dependency delivery, Wasm build products, native code generation, or optimization promise enters M1. A content address identifies an object only within an authorized opened codebase and grants no access by itself.

@@ -120,6 +120,8 @@ pub struct CaseObservation {
     pub effects: Option<String>,
     /// The `@index.v1` document, if the handler provides it.
     pub index: Option<String>,
+    /// A codebase scenario observation from the real workspace service.
+    pub codebase: Option<String>,
     /// Structural source-position query observations.
     pub queries: Vec<QueryObservation>,
     /// Reference-interpreter observation.
@@ -848,6 +850,12 @@ impl CaseExpectations {
             "index",
             self.index.as_deref(),
             observation.index.as_deref(),
+        )?;
+        compare_snapshot(
+            case,
+            "codebase",
+            self.codebase.as_deref(),
+            observation.codebase.as_deref(),
         )?;
         if self.queries.len() != observation.queries.len() {
             return Err(format!(

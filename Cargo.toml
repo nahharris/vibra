@@ -38,6 +38,13 @@ rustix = { version = "1.1.4", features = ["fs"] }
 # the engine's dependencies.
 getrandom = "0.3"
 
+# M1's local codebase container. Build the same native SQLite on supported
+# hosts, with online backup and no extension loading or WASM backend.
+rusqlite = { version = "0.42.0", default-features = false, features = ["libsqlite3-sys", "bundled", "backup"] }
+# Stable Rust's rename may replace an existing directory on Windows. This
+# safe wrapper provides exclusive publication without a non-atomic fallback.
+renamore = "0.3.2"
+
 # The WebAssembly backend (milestone 4, Step 4). The engine is Wasmtime with
 # Cranelift only, and only `vibra-wasm-run` may depend on it. `wasm-encoder`
 # emits modules, and `wasmparser` validates them under the v1 feature baseline.

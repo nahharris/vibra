@@ -1,0 +1,1 @@
+(record format: @codebase-observation.v1 scenario: @lifecycle facts: (dict @dependent-changed true @new-readable true @old-readable true @source-changed true @unrelated-deduplicated true))

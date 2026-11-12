@@ -50,6 +50,37 @@ fn the_step_three_corpus_has_a_case_manifest() {
 }
 
 #[test]
+fn codebase_manifest_requires_its_explicit_tooling_scenario_and_snapshot() {
+    let manifest = r#"
+id = "V1-TOOL-codebase-lifecycle"
+rule = "V1-TOOL"
+profile = "tooling-v1"
+operation = "codebase"
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+data = ["scenario.vibon"]
+[expect]
+accepted = true
+codebase = "expected.vibon"
+"#;
+    assert!(CaseManifest::from_str(manifest).is_ok());
+    assert!(
+        CaseManifest::from_str(&manifest.replace("tooling-v1", "static-v1")).is_err()
+    );
+    assert!(
+        CaseManifest::from_str(
+            &manifest.replace("data = [\"scenario.vibon\"]", "data = []")
+        )
+        .is_err()
+    );
+    assert!(
+        CaseManifest::from_str(&manifest.replace("codebase = \"expected.vibon\"", ""))
+            .is_err()
+    );
+}
+
+#[test]
 fn manifest_decodes_inputs_profile_and_explicit_diagnostic_span() {
     let manifest = CaseManifest::from_str(
         r#"

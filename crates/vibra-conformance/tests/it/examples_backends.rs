@@ -142,7 +142,10 @@ fn the_tests_of_every_example_give_identical_rows_in_both_backends() {
             interpreter.len()
         );
     }
-    assert_eq!(with_tests, 3, "the catalog, the configuration, the console");
+    assert_eq!(
+        with_tests, 4,
+        "the codebase demo, the catalog, the configuration, the console"
+    );
 }
 
 #[test]

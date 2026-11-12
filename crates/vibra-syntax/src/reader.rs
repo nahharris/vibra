@@ -740,6 +740,14 @@ impl Document {
         self.data.as_ref()
     }
 
+    /// Consumes the document and moves out its decoded generic VIBON root.
+    /// This avoids recursively cloning deeply nested records at validation
+    /// boundaries.
+    #[must_use]
+    pub fn into_data(mut self) -> Option<DataNode> {
+        self.data.take()
+    }
+
     /// The native declaration/type AST for a recognized source module.
     #[must_use]
     pub const fn ast(&self) -> Option<&SourceAst> {

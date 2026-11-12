@@ -11,6 +11,10 @@
 )]
 
 mod check_and_run;
+mod codebase_concurrency;
+mod codebase_import;
+mod codebase_measurements;
+mod codebase_store;
 mod effect_metadata;
 mod format_plan;
 mod project_decoder;

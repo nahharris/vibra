@@ -445,3 +445,7 @@ The effect system guarantees static containment of performed roots in written
 ceilings for source accepted by a conforming compiler. It does not make the
 resulting program “host-safe,” constrain a declared root at runtime, prove the
 compiler or host provider secure, or safely execute arbitrary foreign Wasm.
+
+## Codebase identity of effects
+
+An effect row written in source uses source atom paths and imports. The canonical identity used in tooling and codebase data is the resolver's full declaration identity, including package name and version, unit, and ownership path. Thus an effect root declared in package <code>demo</code> version <code>0.1.0</code> and module <code>ops</code> has an identity such as <code>@demo@0.1.0/ops.audit</code>; an imported source alias such as <code>log.audit</code> is not that identity. Each operation's identity uses the same canonical declaration identity for its complete owner path, such as <code>@demo@0.1.0/ops.audit.record</code>. Codebase edges pin these canonical identities and the checked object address that owns them. The nominal root identity remains distinct from source spelling and from any structurally similar root in another package.

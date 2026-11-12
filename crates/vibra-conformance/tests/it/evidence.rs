@@ -82,7 +82,7 @@ fn heading(line: &str) -> Option<String> {
 }
 
 fn is_fence_line(line: &str) -> bool {
-    line.starts_with("```")
+    line.starts_with("```") || line.starts_with("~~~")
 }
 
 fn normalized_excerpt(lines: &[String]) -> String {
@@ -139,6 +139,7 @@ fn scan_document(root: &Path, path: &Path) -> (Vec<Fence>, Vec<Section>) {
     let mut inside_fence = false;
     let mut fence_start = 0;
     let mut language = String::new();
+    let mut delimiter = "```";
     let mut body = Vec::new();
     for (index, line) in lines.iter().enumerate() {
         let line_number = index.saturating_add(1);
@@ -147,13 +148,19 @@ fn scan_document(root: &Path, path: &Path) -> (Vec<Fence>, Vec<Section>) {
             fence_start = line_number;
             language = line
                 .strip_prefix("```")
+                .or_else(|| line.strip_prefix("~~~"))
                 .unwrap_or_default()
                 .trim()
                 .to_owned();
+            delimiter = if line.starts_with("~~~") {
+                "~~~"
+            } else {
+                "```"
+            };
             body.clear();
             continue;
         }
-        if inside_fence && is_fence_line(line) {
+        if inside_fence && line.starts_with(delimiter) {
             let current_heading = headings
                 .iter()
                 .rev()
@@ -502,7 +509,7 @@ fn spec_examples_are_inventoried_and_losslessly_exercised() {
     );
     assert_eq!(
         fences.len(),
-        54,
+        62,
         "active spec fence count changed; review inventory"
     );
     assert!(
@@ -513,6 +520,18 @@ fn spec_examples_are_inventoried_and_losslessly_exercised() {
             > 100,
         "inline inventory unexpectedly became empty"
     );
+}
+
+#[test]
+fn specification_inventory_tracks_tilde_fences_and_matching_delimiters() {
+    let root = crate::support::TempDir::new("tilde-inventory");
+    let path = root.join("example.md");
+    fs::write(&path, "# Example\n~~~vibon\n(record text: \"value\")\n```\n~~~\n\n```vibra\n(defn main () void void)\n```\n").expect("write Markdown fixture");
+    let (fences, _) = scan_document(&root, &path);
+    assert_eq!(fences.len(), 2);
+    assert_eq!(fences[0].language, "vibon");
+    assert_eq!((fences[0].start, fences[0].end), (2, 5));
+    assert_eq!(fences[1].language, "vibra");
 }
 
 #[test]

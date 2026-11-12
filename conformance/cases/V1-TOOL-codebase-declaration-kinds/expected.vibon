@@ -1,0 +1,1 @@
+(record format: @codebase-observation.v1 scenario: @declarations facts: (dict @effect-identified true @generics-checked true @implementation-addressed true @nominal-distinct true @source-preserved true @trusted-references-pinned true))

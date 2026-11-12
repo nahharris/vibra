@@ -118,6 +118,19 @@ table governs.
 | `@style.argument-order` | `@warning` |
 | `@contract.unused-effect` | `@warning` |
 | `@tool.unavailable` | `@error` |
+| `@codebase.stale-head` | `@error` |
+| `@codebase.unknown-head` | `@error` |
+| `@codebase.unknown-revision` | `@error` |
+| `@codebase.unknown-entity` | `@error` |
+| `@codebase.unknown-object` | `@error` |
+| `@codebase.invalid-input` | `@error` |
+| `@codebase.stale-plan` | `@error` |
+| `@store.not-found` | `@error` |
+| `@store.busy` | `@error` |
+| `@store.corrupt` | `@error` |
+| `@store.unsupported-version` | `@error` |
+| `@store.unsafe-path` | `@error` |
+| `@store.io-error` | `@error` |
 
 Diagnostic codes are stable under the charter's compatibility policy. In
 Vibra data they are atoms. JSON output serializes the exact atom spelling as a
@@ -1016,3 +1029,81 @@ The `full-v1` claim requires:
 Passing tests is necessary but not sufficient: review-only invariants such as
 the absence of ambient host operations from effect-free accepted source must
 have an explicit audit checklist.
+
+## M1 codebase diagnostics and corpus operations
+
+The codebase/store codes in the registry have fix capability `@none`.
+Operational diagnostics MUST have no source identity, an empty byte span at
+zero, no related spans, and no fixes. A rejected import instead preserves the
+existing reader, resolver, type, and effect diagnostics and their source spans.
+
+`@store.not-found` means an explicitly opened store does not exist; read-only
+operations MUST NOT create it. `@store.corrupt` covers failed SQLite integrity,
+invalid canonical records, hash mismatch, missing authoritative dependencies,
+or inconsistent membership. `@store.unsupported-version` identifies an
+unsupported store or record format; readers MUST NOT reinterpret it as a
+current format or automatically migrate it. This includes a WAL/non-rollback
+physical journal format: M1 rejects it before opening SQLite and creates no
+sidecar. Truncated/non-SQLite headers are corrupt instead.
+`@store.unsafe-path` covers
+escaping or linked paths and destinations that cannot be published safely.
+`@store.io-error` reports another filesystem or SQLite operational failure.
+This includes a read-only open that SQLite cannot serve until a hot journal is
+recovered; its diagnostic directs the caller to explicit read-write reindex
+and retry. Read-only operations MUST NOT silently perform recovery writes.
+`@store.busy` means bounded lock acquisition failed and is retryable with the
+original expected state. It is distinct from `@codebase.stale-head`, which
+means the expected head failed its compare-and-publish check. Stale outcomes
+MUST NOT cause automatic rebase or publication against another expectation.
+
+Unknown head, revision, entity, and object selectors produce their distinct
+`@codebase.unknown-*` codes; an object outside the selected revision is unknown
+even when some other revision in the store contains it. Malformed codebase
+addresses, head names, or record selections are `@codebase.invalid-input` at
+the service boundary. Invalid process grammar remains the existing
+`@command.invalid-input` with exit 2 and no diagnostics. A malformed export-plan
+address is `@codebase.invalid-input`; a well-formed export plan whose
+digest, source revision, parent identity, or expected destination absence no
+longer holds is `@codebase.stale-plan`. All operational codebase/store errors
+use `@command.operational-failure` and exit 3; source rejection uses the existing
+diagnostics result and exit 1. These operations execute no user source.
+
+The independent corpus admits operation `codebase` only under `tooling-v1`.
+It requires a confined `inputs.tree`, its `inputs.project`, exactly one
+`inputs.data` scenario document, and an `expect.codebase` VIBON snapshot. It
+forbids `inputs.source` and a host world. Other operations MUST NOT accept an
+`expect.codebase` snapshot. The handler MUST copy the declared tree into a
+fresh private temporary workspace and invoke the real workspace codebase
+services. It MUST NOT modify the checked-in input tree or execute tests while
+importing them. This is tooling evidence, not an executable backend case.
+
+The scenario document is a non-executable canonical VIBON record with exactly
+`format: @codebase-case.v1`, `scenario`, and `edits`, in that field order.
+`scenario` is one of `@import`, `@lifecycle`, `@roundtrip`, `@stale`, `@integrity`,
+`@backup`, or `@declarations`. `edits` is an array of records with exactly `path` and `text`;
+paths are unique confined source-file paths and text is the complete replacement
+UTF-8 source. Edits are applied only in the private workspace, after the first
+import and before a second import. Unknown fields, formats, scenarios, duplicate
+paths, unsafe paths, or malformed source are rejected by the corresponding
+real decoder or workspace operation, never interpreted as a shell command.
+
+Each observation has `format: @codebase-observation.v1`, the selected scenario,
+and `facts`, a canonical dict of named measurements. The expected snapshot is
+independently authored. A handler MUST derive every reported fact from the
+actual operation result, reopened authoritative data, or byte comparison;
+merely completing a scenario does not prove a fact. Scenario coverage includes:
+
+| Scenario | Required observations through actual services |
+| --- | --- |
+| `@import` | Publish, reopen, resolve definitions and edges, and compare retained exact source |
+| `@lifecycle` | Publish changed inputs; retrieve both revisions; prove dependent address changes and unrelated component deduplication |
+| `@roundtrip` | Export, reimport, compare source and checked identities; reject destination created after preview |
+| `@stale` | Compete for one expected head and record exactly one successful advancement and a stale refusal |
+| `@integrity` | Reject corrupt and unsupported inputs; rebuild derived indexes and compare workspace facts |
+| `@backup` | Back up, restore independently, and compare heads, objects, sources, and relations |
+| `@declarations` | Check generic signatures, nominal types, explicit implementations, effect ownership, and trusted registry references without executing bodies |
+
+The milestone also requires host tests for deterministic binder normalization,
+recursive components, nominal identity, transaction fault points, bounded busy,
+confinement, interrupted publication, and backup consistency. Passing the
+corpus does not replace those tests or the review of canonical hash vectors.

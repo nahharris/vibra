@@ -153,3 +153,7 @@ retired surface.
 Starting with the stable release, the source language, project-data format, machine schemas, artifact
 format, and host ABI are independently versioned. A reader MUST reject a newer
 major version it cannot interpret rather than guessing.
+
+## M1 codebase container
+
+For M1, a local SQLite file MAY serve as a private physical container for compiler-owned persistent data. The database file is not a VIBON document. Every authoritative record stored in it MUST be canonical non-executable VIBON bytes under a closed versioned schema; its table layout, derived indexes, page bytes, and journal format are private implementation details. The container does not weaken the commitment that compiler-owned persistent records use VIBON, and it does not create a portable database or arbitrary database-query surface. The canonical VIBON records, not the physical database bytes, define portable record meaning and content addresses.
