@@ -49,6 +49,7 @@ mod linked_exe_programs;
 mod linked_exe_support;
 mod lowering_slice;
 mod lowers_every_form;
+mod m1_evidence;
 mod native_bodies;
 mod native_differential;
 mod native_parity_inventory;
