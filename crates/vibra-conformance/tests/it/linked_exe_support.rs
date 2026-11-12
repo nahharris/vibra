@@ -13,8 +13,9 @@
 //! `system` archive (the shipped one) gives the exit code, the real standard
 //! output, and the real standard error; the `harness` archive (cargo feature
 //! `harness`) reads a host world from standard input and writes the
-//! observation document with the outcome, the result kind, the trap, and the
-//! audit trace.
+//! observation document with the outcome, the result kind, the trap, the audit
+//! trace, the counters, and the dump of the result. The reference run writes the
+//! same document with the test writer of the dump (`dump_text`).
 
 use std::ffi::OsString;
 use std::io::{Read, Write};
@@ -257,16 +258,31 @@ pub(crate) struct Reference {
     pub(crate) observation: String,
 }
 
+/// What a run of the reference stepper leaves for the harness document: the
+/// audit trace, the counters, and the dump of the result.
+struct Seen {
+    audit: Vec<AuditEvent>,
+    counters: Option<String>,
+    value: Option<String>,
+}
+
 fn drive(
     code: &Evaluator<'_>,
     host: &mut dyn HostProvider,
     err_variant: Option<u32>,
     quota: u64,
-) -> (Ending, Vec<AuditEvent>) {
+) -> (Ending, Seen) {
     let mut ctx = Context::new(MEMORY_LIMIT, code.globals(), host);
     if let Err(halt) = code.start(&mut ctx) {
         assert_eq!(halt, Halt::Exhausted, "the entry frame could not be pushed");
-        return (Ending::MemoryExhausted, Vec::new());
+        return (
+            Ending::MemoryExhausted,
+            Seen {
+                audit: Vec::new(),
+                counters: None,
+                value: None,
+            },
+        );
     }
     let outcome = loop {
         match run(&mut ctx, code, quota) {
@@ -288,7 +304,24 @@ fn drive(
         Outcome::MemoryExhausted => Ending::MemoryExhausted,
         other => panic!("the stepper ended in {other:?}"),
     };
-    (ending, ctx.audit().to_vec())
+    let stats = ctx.stats();
+    let result = ctx.result();
+    let value = matches!(ending, Ending::Completed | Ending::ProgramFailed)
+        .then(|| crate::dump_text::dump(ctx.store(), result));
+    let counters = format!(
+        "(record yields: {} peak-frames: {} tail-transfers: {} peak-live: {} live: {})",
+        stats.yields,
+        stats.max_depth,
+        stats.tail_transfers,
+        ctx.peak_size(),
+        ctx.live_size()
+    );
+    let seen = Seen {
+        audit: ctx.audit().to_vec(),
+        counters: Some(counters),
+        value,
+    };
+    (ending, seen)
 }
 
 fn origin_text(program: &Program, ordinal: u32) -> Option<String> {
@@ -328,7 +361,7 @@ pub(crate) fn reference(
     // The harness launcher's world: the document it reads from standard input.
     let world = HostWorld::decode("host-world.vibon", WORLD).expect("a host world");
     let mut provider = WorldProvider::new(&world);
-    let (ending, audit) = drive(&code, &mut provider, err_variant, quota);
+    let (ending, seen) = drive(&code, &mut provider, err_variant, quota);
     let stdout = captured.map_or_else(Vec::new, |(system_ending, stdout)| {
         assert_eq!(system_ending, ending, "the two providers end alike");
         stdout
@@ -355,8 +388,10 @@ pub(crate) fn reference(
         Ending::MemoryExhausted => ("memory-exhausted", "none", "@none".to_owned(), 0),
     };
     let observation = format!(
-        "(record outcome: @{outcome} result: @{result} trap: {trap} origin: {origin} audit: {})",
-        vibra_host::trace_to_vibon(&audit)
+        "(record outcome: @{outcome} result: @{result} trap: {trap} origin: {origin} audit: {} counters: {} value: {})",
+        vibra_host::trace_to_vibon(&seen.audit),
+        seen.counters.as_deref().unwrap_or("@none"),
+        seen.value.as_deref().unwrap_or("@none")
     );
     Reference {
         exit_code,

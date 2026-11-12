@@ -8,13 +8,14 @@
 //! farewell with one `io.stdout.text`. The loop count is the constant in the
 //! call of `ticks.count`, which `with_rounds` rewrites.
 //!
-//! What the launchers report limits where each clause is evidenced. The
-//! harness launcher's observation document carries the outcome, the result
-//! kind, the trap, and the audit trace; it reports neither the yield count nor
-//! the peak frame count nor the peak live size. Those two clauses are therefore
-//! evidenced on the reference stepper, which drives the same `Context`,
-//! dispatcher, and transfer routines the linked executable uses, and each test
-//! says so. The refusals are evidenced on linked executables.
+//! The harness launcher's observation document carries the outcome, the result
+//! kind, the trap, the audit trace, the context's counters (yields, peak frames,
+//! tail transfers, peak live size, live size at the end), and the entry's
+//! result. G3.M1.9 and G3.M1.10 are therefore evidenced on the reference
+//! stepper, which drives the same `Context`, dispatcher, and transfer routines
+//! the linked executable uses, and, on Windows, on the linked executable
+//! itself, read from its counters. The refusals are evidenced on linked
+//! executables.
 
 use std::path::PathBuf;
 
@@ -172,11 +173,15 @@ fn the_fixture_case_of_the_corpus_is_the_example() {
 
 #[test]
 fn quota_one_has_one_stdout_event_and_yields_at_every_checkpoint() {
-    // G3.M1.9. The yield count is not reported by either launcher, so it is
-    // counted on the reference stepper, which runs the same dispatcher over the
-    // same `Context` as the linked executable. The linked executable's part is
-    // the audit trace of its quota-1 run: exactly one `io.stdout-text`, and the
-    // whole observation equal to the stepper's.
+    // G3.M1.9. On the reference stepper the checkpoints are the steps the
+    // dispatcher takes (`Counting`) and the yields are `Context::stats()`. The
+    // linked executable's part is its own observation document of the quota-1
+    // run: exactly one `io.stdout-text` event in its audit trace, and its yield
+    // count, which it reports, held to the checkpoint count of the same
+    // program (the stepper's step count: the executable runs the same IR
+    // through the same dispatcher, which takes one step per checkpoint, and
+    // with quota 1 yields after every step but the last). The whole document is
+    // also equal to the stepper's.
     let program = lowered_fixture(1000);
     let unbounded = count(&program, UNBOUNDED);
     let one = count(&program, 1);
@@ -197,11 +202,27 @@ fn quota_one_has_one_stdout_event_and_yields_at_every_checkpoint() {
     );
 
     #[cfg(windows)]
-    linked_quota_one();
+    linked_quota_one(&unbounded, &one);
+}
+
+/// The counter `name` of an observation document.
+#[cfg(windows)]
+fn counter(document: &str, name: &str) -> u64 {
+    let key = format!(" {name}: ");
+    let at = document
+        .find(&key)
+        .unwrap_or_else(|| panic!("no `{name}` in {document}"))
+        + key.len();
+    document[at..]
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>()
+        .parse()
+        .unwrap_or_else(|_| panic!("`{name}` is not a number in {document}"))
 }
 
 #[cfg(windows)]
-fn linked_quota_one() {
+fn linked_quota_one(unbounded: &Counted, one: &Counted) {
     use crate::linked_exe_support::{
         Profile, Scratch, WORLD, archive, options, reference, run_exe,
     };
@@ -224,13 +245,38 @@ fn linked_quota_one() {
     );
     let expected = reference(&lowered, None, 1, false);
     assert_eq!(document, format!("{}\n", expected.observation));
+    // The executable's own counters.
+    let yields = counter(&document, "yields");
+    eprintln!(
+        "linked quota 1: {yields} yields, {} checkpoints",
+        one.checkpoints
+    );
+    assert_eq!(yields, one.yields, "as many yields as the stepper");
+    assert!(
+        yields + 1 >= one.checkpoints,
+        "{yields} yields for {} checkpoints",
+        one.checkpoints
+    );
+    assert_eq!(counter(&document, "peak-frames"), one.max_depth as u64);
+
+    let ran = run_exe(&built.executable, &[], WORLD.as_bytes());
+    assert_eq!(ran.code, Some(0), "link: {}", built.command);
+    let document = String::from_utf8_lossy(&ran.stdout).into_owned();
+    assert_eq!(
+        counter(&document, "yields"),
+        0,
+        "an unbounded run never yields"
+    );
+    assert_eq!(document.matches("op: \"io.stdout-text\"").count(), 1);
+    assert_eq!(unbounded.yields, 0);
 }
 
 #[test]
 fn peak_frames_and_live_size_do_not_grow_with_the_loop_count() {
-    // G3.M1.10, on the reference stepper: the harness launcher reports no peak
-    // counter. `Context::stats().max_depth` is the peak frame count and
-    // `Context::peak_size()` the peak live size in bytes.
+    // G3.M1.10. `Context::stats().max_depth` is the peak frame count and
+    // `Context::peak_size()` the peak live size in bytes; the harness launcher
+    // reports both as `peak-frames` and `peak-live`, so on Windows the linked
+    // executables are measured too, at the same loop counts.
     let small = count(&lowered_fixture(10_000), UNBOUNDED);
     let large = count(&lowered_fixture(100_000), UNBOUNDED);
     eprintln!("10,000 rounds {small:?}\n100,000 rounds {large:?}");
@@ -244,6 +290,45 @@ fn peak_frames_and_live_size_do_not_grow_with_the_loop_count() {
     assert!(
         large.checkpoints > 10 * small.checkpoints / 2,
         "the work grew"
+    );
+
+    #[cfg(windows)]
+    linked_peaks(&small, &large);
+}
+
+#[cfg(windows)]
+fn linked_peaks(small: &Counted, large: &Counted) {
+    use crate::linked_exe_support::{
+        Profile, Scratch, WORLD, archive, options, run_exe,
+    };
+    let _ = archive(Profile::Harness);
+    let mut seen = Vec::new();
+    for (rounds, stepper) in [(10_000, small), (100_000, large)] {
+        let scratch = Scratch::new("m1-peaks", "");
+        let built = vibra_build::build_executable(
+            &checked_fixture(rounds),
+            &options(&scratch, Profile::Harness, "fixture.exe"),
+        )
+        .unwrap_or_else(|error| panic!("{error}"));
+        let ran = run_exe(&built.executable, &[], WORLD.as_bytes());
+        assert_eq!(ran.code, Some(0), "link: {}", built.command);
+        let document = String::from_utf8_lossy(&ran.stdout).into_owned();
+        let frames = counter(&document, "peak-frames");
+        let peak = counter(&document, "peak-live");
+        eprintln!("linked {rounds} rounds: {frames} frames, {peak} bytes peak");
+        assert_eq!(
+            frames, stepper.max_depth as u64,
+            "{rounds}: the stepper's frames"
+        );
+        assert_eq!(peak, stepper.peak_size, "{rounds}: the stepper's peak");
+        seen.push((frames, peak));
+    }
+    assert_eq!(seen[0].0, seen[1].0, "peak frames of the executables");
+    assert!(
+        seen[0].1.abs_diff(seen[1].1) <= 64,
+        "{} against {}",
+        seen[0].1,
+        seen[1].1
     );
 }
 
@@ -472,7 +557,8 @@ mod launcher_refusals {
         assert_eq!(
             String::from_utf8_lossy(&ran.stdout),
             "(record outcome: @refused result: @none trap: @none origin: 0 audit: \
-             (record format: @audit-trace.v1 events: (array)))\n"
+             (record format: @audit-trace.v1 events: (array)) counters: @none \
+             value: @none)\n"
         );
     }
 

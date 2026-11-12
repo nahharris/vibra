@@ -8,9 +8,9 @@ use vibra_diagnostics::Diagnostic;
 use crate::corpus::{Case, Corpus};
 use crate::manifest::{CaseExpectations, ExpectedExecution};
 use crate::native::{
-    EntryJob, NativeCounts, NativeObservation, NativeStatus, StepperRun,
+    EntryJob, NativeCounts, NativeObservation, NativeStatus, OBSERVATION, StepperRun,
 };
-use crate::native_exe::{RESULT_PACKAGE, WindowsExecutor, WindowsRun};
+use crate::native_exe::{WindowsExecutor, WindowsRun};
 use crate::profile::ConformanceProfile;
 
 /// The one finite memory limit, in bytes, the runner applies to every instance
@@ -1076,9 +1076,11 @@ fn native_status(case: &Case, observation: &CaseObservation) -> Option<NativeSta
 /// is held to, and the trap origin held to the stepper's.
 ///
 /// A case the stepper holds stays pending at the same package; one the stepper
-/// fails fails. A case every field of which agrees except the entry's result
-/// value, which the harness launcher does not report, is pending at
-/// [`RESULT_PACKAGE`].
+/// fails fails. The executable's result is read from the launcher's dump of it
+/// and held to the case's snapshot, and to the stepper's result of the same
+/// quota. A run whose result the dump cannot give (it was cut off by a bound of
+/// the launcher, or holds a value the reader has no row for) leaves the case
+/// pending at the package that owns the observation of values.
 fn windows_status(
     executor: &WindowsExecutor,
     case: &Case,
@@ -1102,7 +1104,7 @@ fn windows_status(
             reason: "the case has no entry to build".to_owned(),
         });
     };
-    let runs = match executor.observe(&case.manifest().id, job, stepper_runs) {
+    let runs = match executor.observe(&case.manifest().id, job) {
         Ok(runs) => runs,
         Err(reason) => return Some(NativeStatus::Failed { reason }),
     };
@@ -1132,6 +1134,33 @@ fn windows_runs_status(
                 ),
             };
         }
+        let stepper_execution = stepper_runs
+            .iter()
+            .find(|s| s.quota == run.quota)
+            .and_then(|s| match &s.observation.outcome {
+                WasmObservation::Completed(execution) => {
+                    Some((execution, s.observation.program_failed))
+                }
+                _ => None,
+            });
+        if !run.result_observed {
+            // The result is not observable, so the case cannot be `matched`;
+            // everything else the executable reports is still held to the
+            // stepper's: the command outcome and the audit trace.
+            result_unobserved = true;
+            if let (Some((stepper, stepper_failed)), WasmObservation::Completed(actual)) =
+                (stepper_execution, &run.observation.outcome)
+                && (stepper.audit_trace != actual.audit_trace
+                    || stepper_failed != run.observation.program_failed)
+            {
+                return NativeStatus::Failed {
+                    reason: format!(
+                        "the executable's audit trace or command outcome differs from the stepper's ({quota})"
+                    ),
+                };
+            }
+            continue;
+        }
         if let WasmStatus::Failed { reason } = executor_status(
             case,
             observation,
@@ -1143,7 +1172,19 @@ fn windows_runs_status(
                 reason: format!("{reason} ({quota})"),
             };
         }
-        result_unobserved |= !run.result_observed;
+        // Direct comparison: when both completed, the two canonical results
+        // are the same text, whatever the case's snapshot says.
+        if let (Some((stepper, _)), WasmObservation::Completed(actual)) =
+            (stepper_execution, &run.observation.outcome)
+            && stepper.result != actual.result
+        {
+            return NativeStatus::Failed {
+                reason: format!(
+                    "result mismatch: the stepper's {:?}, the executable's {:?} ({quota})",
+                    stepper.result, actual.result
+                ),
+            };
+        }
     }
     let expects_result = case
         .manifest()
@@ -1151,8 +1192,15 @@ fn windows_runs_status(
         .interpreter
         .as_ref()
         .is_some_and(|expected| expected.result.is_some());
+    unobserved_verdict(result_unobserved, expects_result)
+}
+
+/// The status of an executable whose every field agreed: `matched`, unless a
+/// result the case expects could not be observed, which leaves the case pending
+/// at the package that owns the observation of values, never `matched`.
+fn unobserved_verdict(result_unobserved: bool, expects_result: bool) -> NativeStatus {
     if result_unobserved && expects_result {
-        NativeStatus::Pending(RESULT_PACKAGE.to_owned())
+        NativeStatus::Pending(OBSERVATION.to_owned())
     } else {
         NativeStatus::Matched
     }
@@ -1347,4 +1395,20 @@ fn compare_execution(
 
 fn canonical_audit_snapshot(events: &[vibra_host::AuditEvent]) -> String {
     format!("{}\n", vibra_host::trace_to_vibon(events))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_unobserved_result_the_case_expects_is_pending_never_matched() {
+        assert_eq!(
+            unobserved_verdict(true, true),
+            NativeStatus::Pending("X3-18".to_owned())
+        );
+        assert_eq!(unobserved_verdict(false, true), NativeStatus::Matched);
+        assert_eq!(unobserved_verdict(true, false), NativeStatus::Matched);
+        assert_eq!(unobserved_verdict(false, false), NativeStatus::Matched);
+    }
 }
