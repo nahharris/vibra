@@ -56,9 +56,11 @@ impl Code for Generated {
             (Ok(function), Ok(resume)) => (function, resume),
             _ => return Step::Trap,
         };
-        let step = usize::try_from(function)
+        let info = usize::try_from(function)
             .ok()
-            .and_then(|index| self.admitted.functions.get(index))
+            .and_then(|index| self.admitted.functions.get(index));
+        let step = info
+            .filter(|info| resume < info.blocks)
             .map(|info| info.step);
         let Some(step) = step else {
             ctx.trap(TrapCode::InvalidCheckedProgram, 0);

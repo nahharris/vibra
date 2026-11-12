@@ -41,6 +41,8 @@ pub enum Malformed {
     FrameTooLarge(u32),
     /// A function's frame cannot hold its parameters and environment.
     FrameTooSmall(u32),
+    /// A function has no blocks.
+    NoBlocks(u32),
     /// A function's environment flag is neither `0` nor `1`.
     BadEnvFlag(u32),
     /// The entry is not a function of the program.
@@ -81,6 +83,9 @@ impl fmt::Display for Malformed {
                 formatter,
                 "the frame of function {function} cannot hold its operands"
             ),
+            Self::NoBlocks(function) => {
+                write!(formatter, "function {function} has no blocks")
+            }
             Self::BadEnvFlag(function) => {
                 write!(formatter, "function {function} has a bad environment flag")
             }
@@ -154,6 +159,7 @@ pub(crate) struct FunctionInfo {
     pub(crate) slots: u32,
     pub(crate) params: u32,
     pub(crate) env: bool,
+    pub(crate) blocks: u32,
 }
 
 /// A constant of an admitted program.
@@ -180,6 +186,7 @@ pub struct Origin {
 pub struct Admitted {
     pub(crate) functions: Vec<FunctionInfo>,
     pub(crate) entry: u32,
+    pub(crate) entry_outcome: u32,
     pub(crate) globals: Vec<u32>,
     pub(crate) constants: Vec<ConstantData>,
     pub(crate) rows: Vec<&'static HostRow>,
@@ -199,6 +206,13 @@ impl Admitted {
     #[must_use]
     pub fn globals(&self) -> usize {
         self.globals.len()
+    }
+
+    /// The variant index of `err` when the entry returns a `result`, and
+    /// `None` when the program says its entry's result is not one.
+    #[must_use]
+    pub const fn entry_err_variant(&self) -> Option<u32> {
+        self.entry_outcome.checked_sub(1)
     }
 }
 
@@ -273,9 +287,6 @@ pub unsafe fn admit(program: &VibraProgram) -> Result<Admitted, Refusal> {
         host_symbols: Vec::new(),
     })
     .map_err(Refusal::Requirement)?;
-    if program.reserved != 0 {
-        return Err(Malformed::Reserved.into());
-    }
     // SAFETY: the caller's contract covers every table of the descriptor.
     let functions = unsafe { read(&program.functions, "function", MAX_TABLE_LEN) }?;
     if functions.is_empty() {
@@ -289,8 +300,8 @@ pub unsafe fn admit(program: &VibraProgram) -> Result<Admitted, Refusal> {
         if function.env > 1 {
             return Err(Malformed::BadEnvFlag(index).into());
         }
-        if function.reserved != 0 {
-            return Err(Malformed::Reserved.into());
+        if function.blocks == 0 {
+            return Err(Malformed::NoBlocks(index).into());
         }
         if function.slots > MAX_FRAME_SLOTS {
             return Err(Malformed::FrameTooLarge(index).into());
@@ -305,6 +316,7 @@ pub unsafe fn admit(program: &VibraProgram) -> Result<Admitted, Refusal> {
             slots: function.slots,
             params: function.params,
             env: function.env == 1,
+            blocks: function.blocks,
         });
     }
     let takes_nothing = |function: u32| {
@@ -398,6 +410,7 @@ pub unsafe fn admit(program: &VibraProgram) -> Result<Admitted, Refusal> {
     Ok(Admitted {
         functions: infos,
         entry: program.entry,
+        entry_outcome: program.entry_outcome,
         globals: globals.to_vec(),
         constants: data,
         rows,

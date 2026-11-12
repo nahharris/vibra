@@ -143,8 +143,9 @@ pub struct VibraFunction {
     /// `1` when the function takes an environment (the function value itself,
     /// in the slot after the parameters), `0` when not. Nothing else.
     pub env: u32,
-    /// Zero.
-    pub reserved: u32,
+    /// The number of resume blocks of the function, at least `1`. A resume
+    /// or branch target is below it.
+    pub blocks: u32,
 }
 
 /// A constant of the program. 24 bytes, 8-aligned.
@@ -185,8 +186,11 @@ pub struct VibraProgram {
     pub registry_minor: u32,
     /// The index of the entry function.
     pub entry: u32,
-    /// Zero.
-    pub reserved: u32,
+    /// What the launcher may conclude from the entry's result: `0` when the
+    /// entry's result is not a `result` (the launcher never reports
+    /// `program-failed`), and `n > 0` when the entry returns a `result`
+    /// whose `err` variant index is `n - 1`.
+    pub entry_outcome: u32,
     /// The functions, at least one.
     pub functions: VibraTable<VibraFunction>,
     /// For each module value, the index of its initializer function.

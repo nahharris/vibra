@@ -23,6 +23,8 @@ thread_local! {
     pub static ROUNDS: Counter<u64> = const { Counter::new(0) };
     /// Whether the demo ends in a trap.
     pub static TRAP: Counter<bool> = const { Counter::new(false) };
+    /// The variant the entry of `entry_enum` returns.
+    pub static VARIANT: Counter<u32> = const { Counter::new(0) };
     /// How many step functions were called.
     pub static STEPS: Counter<u64> = const { Counter::new(0) };
 }
@@ -41,6 +43,7 @@ pub struct Fixture {
     pub abi: u32,
     pub registry_minor: u32,
     pub entry: u32,
+    pub entry_outcome: u32,
     pub functions: Vec<VibraFunction>,
     pub globals: Vec<u32>,
     pub constants: Vec<VibraConstant>,
@@ -54,7 +57,7 @@ pub fn function(step: VibraStep, slots: u32, params: u32, env: bool) -> VibraFun
         slots,
         params,
         env: u32::from(env),
-        reserved: 0,
+        blocks: 8,
     }
 }
 
@@ -80,6 +83,7 @@ impl Fixture {
             abi: bridge::ABI_VERSION,
             registry_minor: 0,
             entry: 0,
+            entry_outcome: 0,
             functions,
             globals: Vec::new(),
             constants: Vec::new(),
@@ -102,7 +106,7 @@ impl Fixture {
             abi: self.abi,
             registry_minor: self.registry_minor,
             entry: self.entry,
-            reserved: 0,
+            entry_outcome: self.entry_outcome,
             functions: VibraTable::new(&self.functions),
             globals: VibraTable::new(&self.globals),
             constants: VibraTable::new(&self.constants),
@@ -383,14 +387,41 @@ extern "C" fn traps(ctx: Ctx, _resume: u32) -> u32 {
     )
 }
 
-/// An entry that returns `ok`.
+/// An entry that returns `ok` of a `result` whose `err` is variant 1.
 pub fn entry_ok() -> Fixture {
-    Fixture::new(vec![function(returns_ok, 2, 0, false)])
+    let mut fixture = Fixture::new(vec![function(returns_ok, 2, 0, false)]);
+    fixture.entry_outcome = 2;
+    fixture
 }
 
-/// An entry that returns `err`.
+/// An entry that returns `err` of a `result` whose `err` is variant 1.
 pub fn entry_err() -> Fixture {
-    Fixture::new(vec![function(returns_err, 2, 0, false)])
+    let mut fixture = Fixture::new(vec![function(returns_err, 2, 0, false)]);
+    fixture.entry_outcome = 2;
+    fixture
+}
+
+extern "C" fn returns_enum(ctx: Ctx, _resume: u32) -> u32 {
+    counted();
+    status((|| {
+        ok(sys::build(
+            ctx,
+            0,
+            KIND_ENUM,
+            VARIANT.with(Counter::get),
+            &[],
+        ))?;
+        Ok(sys::ret(ctx, 0))
+    })())
+}
+
+/// An entry that returns a payload-free enum of `variant` (a `bool`-shaped
+/// value for variant 1), whose `entry_outcome` the program declares.
+pub fn entry_enum(variant: u32, entry_outcome: u32) -> Fixture {
+    VARIANT.with(|cell| cell.set(variant));
+    let mut fixture = Fixture::new(vec![function(returns_enum, 1, 0, false)]);
+    fixture.entry_outcome = entry_outcome;
+    fixture
 }
 
 /// An entry that traps at origin 1.

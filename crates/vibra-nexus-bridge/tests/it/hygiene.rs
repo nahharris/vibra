@@ -103,7 +103,7 @@ fn the_descriptor_has_the_documented_layout() {
     assert_eq!(offset_of!(VibraProgram, abi), 0);
     assert_eq!(offset_of!(VibraProgram, registry_minor), 4);
     assert_eq!(offset_of!(VibraProgram, entry), 8);
-    assert_eq!(offset_of!(VibraProgram, reserved), 12);
+    assert_eq!(offset_of!(VibraProgram, entry_outcome), 12);
     assert_eq!(offset_of!(VibraProgram, functions), 16);
     assert_eq!(offset_of!(VibraProgram, globals), 32);
     assert_eq!(offset_of!(VibraProgram, constants), 48);
@@ -115,7 +115,7 @@ fn the_descriptor_has_the_documented_layout() {
     assert_eq!(offset_of!(VibraFunction, slots), 8);
     assert_eq!(offset_of!(VibraFunction, params), 12);
     assert_eq!(offset_of!(VibraFunction, env), 16);
-    assert_eq!(offset_of!(VibraFunction, reserved), 20);
+    assert_eq!(offset_of!(VibraFunction, blocks), 20);
 
     assert_eq!(size_of::<VibraConstant>(), 24);
     assert_eq!(offset_of!(VibraConstant, kind), 0);
@@ -195,4 +195,65 @@ fn the_harness_writes_one_observation_document_in_a_host_world() {
         unsafe { launch_harness(&descriptor, "(((", 1, &mut out, &mut diagnostics) };
     assert_eq!(code, 2);
     assert!(out.is_empty());
+}
+
+/// The patterns of the workspace's ambient-read scan
+/// (`crates/vibra-conformance/tests/it/ambient_reads.rs`), restated.
+const AMBIENT_PATTERNS: &[&str] = &[
+    "std::fs",
+    "fs::",
+    "File::open",
+    "File::create",
+    "read_dir(",
+    "std::env",
+    "env::var",
+    "env::args",
+    "env::current_dir",
+    "SystemTime",
+    "Instant::now",
+    "std::time::Instant",
+    "UNIX_EPOCH",
+    "getrandom",
+    "RandomState",
+    "std::io::stdin",
+    "io::stdin(",
+    "io::stdout(",
+    "io::stderr(",
+    "std::process",
+    "println!",
+    "eprintln!",
+    "print!(",
+    "eprint!(",
+];
+
+/// The crate is exempt from the workspace scan as a whole, because only its
+/// launcher entry reads the process. These files must stay clean of it.
+#[test]
+fn only_the_launcher_entry_and_the_harness_read_the_process() {
+    for file in [
+        "routines.rs",
+        "admission.rs",
+        "generated.rs",
+        "abi.rs",
+        "launcher.rs",
+        "lib.rs",
+    ] {
+        let (_, source) = sources()
+            .into_iter()
+            .find(|(path, _)| path.file_name().is_some_and(|name| name == file))
+            .unwrap();
+        for (index, line) in source.lines().enumerate() {
+            if line.trim_start().starts_with("//") {
+                continue;
+            }
+            let code = line.split("//").next().unwrap_or(line);
+            for pattern in AMBIENT_PATTERNS {
+                assert!(
+                    !code.contains(pattern),
+                    "{file}:{} names `{pattern}`; only entry.rs and harness.rs may read the process",
+                    index + 1
+                );
+            }
+        }
+    }
 }

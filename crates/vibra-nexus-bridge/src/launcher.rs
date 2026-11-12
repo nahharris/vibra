@@ -119,7 +119,11 @@ pub unsafe fn execute(
             match run(&mut ctx, &generated, quota) {
                 Outcome::Yielded => {}
                 Outcome::Completed => {
-                    break if ctx.program_failed() {
+                    let failed = generated
+                        .admitted()
+                        .entry_err_variant()
+                        .is_some_and(|variant| ctx.result_is_variant(variant));
+                    break if failed {
                         Finished::ProgramFailed
                     } else {
                         Finished::Completed

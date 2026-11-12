@@ -201,3 +201,77 @@ fn a_null_handle_is_a_trap_status_and_a_known_pattern_is_a_defect() {
     assert_eq!(sys::ret(std::ptr::null_mut(), 0), STATUS_TRAP);
     assert_eq!(sys::scalar(std::ptr::null_mut(), 0, 0, 0), STATUS_TRAP);
 }
+
+thread_local! {
+    static WHICH: Counter<u32> = const { Counter::new(0) };
+}
+
+/// A step that names a block past the function's two, through the routine
+/// `WHICH` selects.
+extern "C" fn out_of_range_step(ctx: Ctx, _resume: u32) -> u32 {
+    crate::fixture::counted();
+    let named = || -> Result<u32, u32> {
+        match WHICH.with(Counter::get) {
+            0 => Ok(sys::call(ctx, 3, &[], 0, 2)),
+            1 => {
+                sys::ok(sys::function(ctx, 1, 1, &[]))?;
+                Ok(sys::call_value(ctx, 1, &[], 0, u32::MAX))
+            }
+            2 => {
+                sys::ok(sys::constant(ctx, 2, 0))?;
+                Ok(sys::host(ctx, 0, &[2], 3, 2, 0))
+            }
+            3 => Ok(sys::global(ctx, 0, 1, 7)),
+            4 => {
+                sys::ok(sys::scalar(ctx, 0, vibra_nexus_bridge::CLASS_I64, 0))?;
+                sys::block(sys::branch(ctx, 0, 1, 2))?;
+                Ok(0)
+            }
+            _ => {
+                sys::ok(sys::scalar(ctx, 0, vibra_nexus_bridge::CLASS_I64, 1))?;
+                sys::block(sys::switch(ctx, 0, &[0, 9], 0))?;
+                Ok(0)
+            }
+        }
+    };
+    sys::status(named())
+}
+
+extern "C" fn callee_step(_ctx: Ctx, _resume: u32) -> u32 {
+    crate::fixture::counted();
+    STATUS_TRAP
+}
+
+#[test]
+fn a_block_past_the_running_functions_blocks_is_a_toolchain_defect() {
+    use vibra_ir::boundary::TrapCode;
+    use vibra_nexus::Trap;
+
+    for which in 0..6 {
+        WHICH.with(|cell| cell.set(which));
+        let mut fixture = Fixture::new(vec![
+            function(out_of_range_step, 8, 0, false),
+            function(callee_step, 2, 0, true),
+            function(callee_step, 2, 0, false),
+            function(callee_step, 2, 0, false),
+        ])
+        .symbols(&["io.stdout-text"]);
+        fixture.functions[0].blocks = 2;
+        fixture.globals = vec![2];
+        fixture.constants = vec![text(CONSTANT_STR, "x")];
+        let ran =
+            crate::fixture::run_bridge(&fixture, crate::fixture::LIMIT, UNBOUNDED);
+        assert_eq!(
+            ran.outcome,
+            Outcome::Trapped(Trap {
+                code: TrapCode::InvalidCheckedProgram,
+                origin: 0
+            }),
+            "routine {which}"
+        );
+        assert!(
+            ran.audit.is_empty(),
+            "the host operation did not run ({which})"
+        );
+    }
+}

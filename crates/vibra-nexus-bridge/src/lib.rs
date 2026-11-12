@@ -55,7 +55,7 @@
 //! | 0 | 4 | `abi` | must equal [`ABI_VERSION`]; checked before anything else is read |
 //! | 4 | 4 | `registry_minor` | at most the runtime's registry minor |
 //! | 8 | 4 | `entry` | function index of the entry; it takes no operand and no environment |
-//! | 12 | 4 | `reserved` | zero |
+//! | 12 | 4 | `entry_outcome` | `0`: the entry's result is not a `result`, and the launcher never reports `program-failed`; `n > 0`: the entry returns a `result` whose `err` variant index is `n - 1` |
 //! | 16 | 16 | `functions` | `VibraFunction[len @ ptr]`, at least one, at most 2^24 |
 //! | 32 | 16 | `globals` | `u32[len @ ptr]`: for module value *i*, the index of its initializer function (no operand, no environment) |
 //! | 48 | 16 | `constants` | `VibraConstant[len @ ptr]` |
@@ -65,8 +65,8 @@
 //! `VibraFunction`, 24 bytes, alignment 8: offset 0, 8 bytes, `step` (a
 //! non-null [`VibraStep`]); 8, 4, `slots` (at most [`MAX_FRAME_SLOTS`], 65 536);
 //! 12, 4, `params`; 16, 4, `env` (`0` or `1`; `1` means the function value is
-//! passed in the slot after the parameters); 20, 4, `reserved`. Required:
-//! `params + env <= slots`.
+//! passed in the slot after the parameters); 20, 4, `blocks` (the
+//! number of resume blocks, at least 1). Required: `params + env <= slots`.
 //!
 //! `VibraConstant`, 24 bytes, alignment 8: offset 0, 4, `kind`
 //! ([`CONSTANT_STR`] 0, [`CONSTANT_BYTES`] 1, [`CONSTANT_ATOM`] 2); 4, 4,
@@ -85,12 +85,33 @@
 //! runs, a descriptor whose `abi` is not [`ABI_VERSION`], whose
 //! `registry_minor` exceeds the runtime's, or that names a symbol that is not a
 //! registry row, and also one that is malformed ([`Malformed`]): a nonzero
-//! reserved field, a null or empty function table, a table that is null,
+//! reserved field of a constant, a function with no blocks, a null or empty function table, a table that is null,
 //! misaligned, or longer than [`MAX_TABLE_LEN`], a function without a step, an
 //! `env` other than `0` or `1`, a frame larger than [`MAX_FRAME_SLOTS`] or too
 //! small for its operands, an entry or initializer that is out of range or
 //! takes operands, a constant of an undefined kind or that is not UTF-8, and
 //! an origin that ends before it starts.
+//!
+//! A block named to a routine (`resume`, a branch or switch target) must be
+//! below the `blocks` of the running function, and the dispatcher checks the
+//! `resume` it reads from the context the same way; otherwise the toolchain
+//! defect is recorded.
+//!
+//! # Open for the specification
+//!
+//! Provisional choices pending the maintainer's rulings:
+//!
+//! - the exit code of an admission refusal ([EXIT_ADMISSION_REFUSED], the
+//!   operational-failure code `3`; the draft names only the diagnostic
+//!   `@runtime.incompatible-artifact`);
+//! - the memory limit of the `system` profile ([SYSTEM_MEMORY_LIMIT],
+//!   256 MiB, the budget `vibra run` gives the interpreter);
+//! - the text written to standard error for a trap (`<atom> at
+//!   <source>:<start>..<end>`, or the bare atom) and for a refusal
+//!   (`@runtime.incompatible-artifact: <reason>`); and
+//! - `program-failed` writes only the code line `@command.program-failed`,
+//!   because the canonical encoding of the `err` value needs the observation
+//!   of package X3-18, which does not exist yet.
 //!
 //! # Safety argument
 //!

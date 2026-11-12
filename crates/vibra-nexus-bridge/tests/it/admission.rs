@@ -171,8 +171,8 @@ fn a_function_without_a_step_or_with_a_bad_environment_flag_is_refused() {
     program.functions[2].env = 2;
     assert_eq!(malformed(&program), Malformed::BadEnvFlag(2));
     let mut program = demo();
-    program.functions[0].reserved = 1;
-    assert_eq!(malformed(&program), Malformed::Reserved);
+    program.functions[2].blocks = 0;
+    assert_eq!(malformed(&program), Malformed::NoBlocks(2));
 }
 
 #[test]

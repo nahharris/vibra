@@ -92,3 +92,22 @@ fn every_outcome_maps_to_its_code() {
     );
     assert_eq!(Finished::ProgramFailed.exit_code(), 6);
 }
+
+#[test]
+fn a_bool_shaped_entry_is_never_a_program_failure_unless_the_program_says_so() {
+    // `true` is an enum value of variant 1, as `err` of a `result` is.
+    let (code, stderr, _) = launched(&fixture::entry_enum(1, 0), SYSTEM_MEMORY_LIMIT);
+    assert_eq!((code, stderr.as_str()), (0, ""));
+    // The same value, when the entry is declared to return a `result` whose
+    // `err` is variant 1, is a program failure.
+    let (code, stderr, _) = launched(&fixture::entry_enum(1, 2), SYSTEM_MEMORY_LIMIT);
+    assert_eq!((code, stderr.as_str()), (6, "@command.program-failed\n"));
+    // Variant 0 of that `result` is `ok`.
+    let (code, stderr, _) = launched(&fixture::entry_enum(0, 2), SYSTEM_MEMORY_LIMIT);
+    assert_eq!((code, stderr.as_str()), (0, ""));
+    // The `err` variant index is the declared one, not a fixed one.
+    let (code, _, _) = launched(&fixture::entry_enum(1, 1), SYSTEM_MEMORY_LIMIT);
+    assert_eq!(code, 0, "entry_outcome 1 names variant 0 as `err`");
+    let (code, _, _) = launched(&fixture::entry_enum(0, 1), SYSTEM_MEMORY_LIMIT);
+    assert_eq!(code, 6);
+}

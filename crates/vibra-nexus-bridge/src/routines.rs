@@ -13,6 +13,8 @@
 //! - An operand list is `(args, count)`: `args` addresses `count` readable,
 //!   aligned `u32` slot indices, or may be null when `count` is zero. `count`
 //!   may not exceed the frame of the running function.
+//! - A block (`resume`, or the block a branch or switch answers) at or past
+//!   the running function's `blocks` is a defect, like the following.
 //! - A slot, function, constant, symbol, or origin outside its range is a
 //!   defect of the toolchain: the routine records
 //!   `@runtime.invalid-checked-program` and answers [`STATUS_TRAP`]. The
@@ -77,6 +79,21 @@ impl Session<'_, '_> {
         Ok(info)
     }
 
+    /// The running function, whose blocks bound every block a routine names.
+    fn running(&mut self) -> Done<FunctionInfo> {
+        let running = self.ctx.function()?;
+        self.function(running)
+    }
+
+    /// A block of the running function.
+    fn block(&mut self, block: u32) -> Done<u32> {
+        if block < self.running()?.blocks {
+            Ok(block)
+        } else {
+            Err(self.defect())
+        }
+    }
+
     fn origin(&mut self, origin: u32) -> Done<u32> {
         let known = usize::try_from(origin)
             .is_ok_and(|ordinal| ordinal <= self.code.origins.len());
@@ -92,8 +109,7 @@ impl Session<'_, '_> {
         if count == 0 {
             return Ok(&[]);
         }
-        let running = self.ctx.function()?;
-        let frame = self.function(running)?.slots;
+        let frame = self.running()?.slots;
         self.list(args, count, frame)
     }
 
@@ -212,6 +228,7 @@ pub unsafe extern "C" fn nexus_call(
     routine(ctx, |session| {
         let args = session.operands(args, argc)?;
         let info = session.direct(function, args.len())?;
+        let resume = session.block(resume)?;
         session.ctx.call(function, info.slots, args, dst, resume)?;
         Ok(STATUS_CONTINUE)
     })
@@ -235,6 +252,7 @@ pub unsafe extern "C" fn nexus_call_value(
 ) -> u32 {
     routine(ctx, |session| {
         let args = session.operands(args, argc)?;
+        let resume = session.block(resume)?;
         session.ctx.call_value(callee, args, dst, resume)?;
         Ok(STATUS_CONTINUE)
     })
@@ -318,6 +336,7 @@ pub unsafe extern "C" fn nexus_host(
     routine(ctx, |session| {
         let args = session.operands(args, argc)?;
         let origin = session.origin(origin)?;
+        let resume = session.block(resume)?;
         let index = usize::try_from(symbol).unwrap_or(usize::MAX);
         let Some(row) = session.code.rows.get(index).copied() else {
             return Err(session.defect());
@@ -348,6 +367,7 @@ pub unsafe extern "C" fn nexus_global(
             return Err(session.defect());
         };
         let info = session.function(initializer)?;
+        let resume = session.block(resume)?;
         Ok(
             if session
                 .ctx
@@ -602,7 +622,8 @@ pub unsafe extern "C" fn nexus_branch(
     else_block: u32,
 ) -> u64 {
     selector(ctx, |session| {
-        session.ctx.branch(cond, then_block, else_block)
+        let block = session.ctx.branch(cond, then_block, else_block)?;
+        session.block(block)
     })
 }
 
@@ -623,6 +644,7 @@ pub unsafe extern "C" fn nexus_switch(
 ) -> u64 {
     selector(ctx, |session| {
         let targets = session.list(targets, count, MAX_SWITCH_TARGETS)?;
-        session.ctx.switch(value, targets, default)
+        let block = session.ctx.switch(value, targets, default)?;
+        session.block(block)
     })
 }
