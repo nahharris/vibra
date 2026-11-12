@@ -234,42 +234,64 @@ its identity is the manifest's source-map identity.
 
 ## 6. Generated code and the bridge
 
-Each execution-IR function becomes one native function. Its body is a switch
-on the frame's `resume` over the function's blocks; a checkpoint terminator
-calls the matching transfer and returns a status to the dispatcher. No Vibra
-call is a native call, so the native stack holds the dispatcher, one function,
-and one runtime routine at any language depth (N2).
+Each execution-IR function becomes one native function, its **step**. A step is
+a switch on the `resume` block it is given, over the function's blocks.
+Instructions are runtime routine calls. `Jump` is a native jump. `Branch` and
+`Switch` call the routines `nexus_branch` and `nexus_switch`, which read the
+condition and answer the block to continue at, because generated code cannot
+read a slot (N11, N33). `Trap` calls `nexus_trap`. A checkpoint calls its
+transfer routine and returns the status the routine answered. No Vibra call is
+a native call, so the native stack holds the dispatcher, one step, and one
+runtime routine at any language depth (N2).
 
-Proposed C ABI, owned by `vibra-nexus-bridge` (N10). X3-05 fixes the final
-form and versions it with `ABI_VERSION`:
+The contract between generated code and the runtime is owned by
+`vibra-nexus-bridge` (N10, N32). Its
+[crate documentation](../../../crates/vibra-nexus-bridge/src/lib.rs) defines
+the `VibraProgram` layout, the routine table (`ROUTINES`), and the statuses.
+This section describes the design they implement and does not restate the
+tables.
 
-```c
-typedef struct NexusContext NexusContext;            /* opaque */
-typedef uint32_t (*VibraStep)(NexusContext *);       /* 0 continue, 1 done, 2 trap, 3 exhausted, 4 wait (v0.0.4) */
-
-typedef struct {
-  uint32_t abi;              /* must equal the archive's ABI_VERSION */
-  uint32_t registry_minor;
-  uint32_t entry;
-  uint32_t function_count;   const VibraStep *functions;  const uint32_t *frame_slots;
-  uint32_t global_count;     const uint32_t *global_initializers;
-  uint32_t symbol_count;     const char *const *host_symbols;
-  const uint8_t *origins;    uint64_t origins_len;
-  uint8_t identity[32];      /* semantic input identity, for the manifest check */
-} VibraProgram;
-
-extern const VibraProgram vibra_program;             /* the one symbol the launcher needs */
-
-/* one runtime routine per transfer and per instruction, all (ctx, scalars) -> scalar */
-uint32_t nexus_call(NexusContext *, uint32_t function, const uint32_t *args, uint32_t argc, uint32_t dst, uint32_t resume);
-/* ... nexus_tail_call, nexus_call_value, nexus_ret, nexus_host, nexus_global,
-       nexus_scalar, nexus_copy, nexus_move, nexus_drop, nexus_build, nexus_cell, ... */
-```
-
-No pointer into the store or the cell stack crosses the bridge in the
-baseline: generated code names slots by index and the runtime does the rest
-(N11). The bridge validates nothing twice: `vibra_program` is admitted once by
-the launcher, and the execution IR was verified before code generation.
+- **Step.** `uint32_t step(NexusContext *ctx, uint32_t resume_block)`. A step
+  keeps nothing outside the context and returns one status: *continue* (the
+  context has a frame to continue), *done* (the entry returned), *trap* (the
+  trap is recorded in the context), *exhausted* (the host event), or *wait*,
+  which is reserved for v0.0.4 and never answered today (N23). A routine that
+  answers anything but *continue* ends the step with its status.
+  `nexus_global` also answers *proceed* when the module value was already
+  initialized; the step then carries on at its resume block instead of
+  returning. A block named to a routine must be below the function's declared
+  block count, and the dispatcher checks the `resume` it reads the same way;
+  otherwise the toolchain-defect trap is recorded.
+- **Routines.** One routine per transfer (call, call through a value, tail
+  call, tail call through a value, return, host, global) and per instruction
+  (scalar, constant, copy, move, drop, operation, build, cell, variant,
+  function), and the three of N33: `nexus_branch`, `nexus_switch`, and
+  `nexus_trap`. `nexus_branch` and `nexus_switch` answer the block in the low
+  32 bits and a status in the high 32. Operands cross as a pointer to `u32`
+  slot indices and a count that the running frame bounds, and are read-only to
+  the routine. Values never leave the context: no pointer into the store or
+  the cell stack crosses the bridge (N11).
+- **Descriptor.** The object defines one data symbol, `vibra_program`, a
+  `VibraProgram`: the ABI version, the registry minor, the entry,
+  `entry_outcome`, and tables of functions, module-value initializers,
+  constants, host symbols, and origins. A function row carries its step, its
+  frame size, its parameter count, whether it takes an environment, and its
+  block count (`blocks`). `entry_outcome` is `0` when the entry's result is not
+  a `result`, and `n` when it is a `result` whose `err` variant has index
+  `n - 1`; the launcher reports *program-failed* from it and never from the
+  shape of a value. Each host symbol must be a row of the registry, and
+  `nexus_host` names one by its index in the table. The descriptor carries no
+  identity digest: the build identities belong to the manifest (§9).
+- **Admission.** The launcher admits the whole descriptor before any step runs
+  and refuses, with `@runtime.incompatible-artifact`, an ABI other than its
+  own, a registry minor above its own, a symbol that is no registry row, and
+  any malformed table. The execution IR was verified before code generation,
+  so the bridge checks only what a descriptor can get wrong and the operands of
+  each routine against the running frame.
+- **No unwinding.** No unwind crosses the bridge. A routine that is misused
+  records the toolchain-defect trap and answers a status. A panic in an
+  `extern "C"` function aborts the process instead of unwinding into generated
+  code, and the workspace lints deny the constructs that panic (N34).
 
 ## 7. Link and launch
 
@@ -284,12 +306,20 @@ the platform linker on the object and the archive (N13).
 | `x86_64-unknown-linux-gnu` | ELF | The pinned `cc` driver | An explicit path in the toolchain's target profile |
 | `aarch64-apple-darwin` | Mach-O | Apple `ld` through `cc`, with the pinned SDK | `xcrun` |
 
-The launcher has two profiles. **system** ships: the system provider, the
-process arguments, standard streams, and the exit codes of the tooling
-chapter. **harness** exists only in the test archive: it reads a
-`@host-world.v1` document, runs under a quota the harness chooses, and writes
-one observation document (result, trap and origin, audit trace, host event)
-for the conformance runner to compare (N18).
+The launcher has two profiles (N18). **system** ships: the system provider,
+the process arguments, the standard streams, and the exit codes of the tooling
+chapter: `0` for a program that completed, `5` for a trap, `3` for the host
+event `@runtime.memory-exhausted`, and `6` for an entry that returned `err`.
+An admission refusal also exits with `3`, provisionally. The code line of the
+outcome goes to standard error; a trap adds its source span from the origin
+table. **harness** exists only in the test archive. Its first argument is an
+optional quota, it reads a `@host-world.v1` document from standard input, and
+it writes one observation document to standard output for the conformance
+runner to compare: the outcome, the kind of result (`void` or `ok`, `err`, or
+none), the trap and its origin ordinal, and the audit trace. It exits `0`
+whatever the program did and `2` when its input is not a host world. The
+document does not carry the result value, whose observation is X3-18 (N35),
+and it reports no yield count and no peak counter.
 
 ## 8. Parity
 
@@ -372,11 +402,13 @@ the runtime shape that surface will sit on. The surface is a receive loop
 
 | v0.0.3 contract | v0.0.4 extends it by |
 | --- | --- |
-| Checkpoints: the five transfers | Kernel actions become checkpoints too; `Step` gains `Wait` |
+| Checkpoints: the five transfers | Kernel actions become checkpoints too; `Step` gains `Wait`, which a step answers with status 4, reserved today |
+| The step signature `(ctx, resume_block) -> status` | Unchanged. A step that parks answers *wait* and resumes at the block it recorded |
 | Quota is unobservable | Unchanged. Fairness uses it; replay does not |
 | Handles are context-local offsets, layout private | Unchanged. Messages cross as neutral values, so no handle leaves a context |
 | Origins: an ordinal table per program | Message events carry origins of the send and the handler |
 | Host dispatch through the closed registry | Unchanged. An address scopes a *request*; the registry and its adapters keep their own contract |
+| The routine table (`ROUTINES`) and the descriptor | Each kernel action is a new routine, and any new descriptor field is a new `ABI_VERSION`; `entry_outcome` and the per-function block count stay |
 | `ABI_VERSION` | Bumped by the actor transfers |
 
 The proposed split of authority from effect (G3.M1.7): **holding an address is
