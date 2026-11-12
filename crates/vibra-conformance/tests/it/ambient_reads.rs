@@ -33,6 +33,10 @@ const TOOLING_EXCEPTIONS: &[(&str, &str)] = &[
         "vibra-conformance",
         "reads the conformance corpus and its fixtures",
     ),
+    (
+        "vibra-nexus-bridge",
+        "its launcher `main` reads the process arguments and standard streams of the executable, and its harness profile reads standard input, then hands them to the host provider",
+    ),
 ];
 
 /// The ambient APIs: the filesystem, the environment, the clocks, the operating
