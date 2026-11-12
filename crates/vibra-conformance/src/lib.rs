@@ -31,6 +31,7 @@ mod graph;
 mod manifest;
 mod native;
 mod native_exe;
+mod native_read;
 mod profile;
 mod project;
 mod reader;
@@ -60,7 +61,7 @@ pub use native::{
     Inventory, InventoryCell, InventoryRow, NativeCounts, NativeObservation,
     NativeStatus, StepperRun, owning_package,
 };
-pub use native_exe::{RESULT_PACKAGE, WindowsExecutor, WindowsUnavailable};
+pub use native_exe::{WindowsExecutor, WindowsUnavailable};
 pub use profile::{ConformanceProfile, UnknownProfile};
 pub use project::StaticV1ProjectHandler;
 pub use reader::ReaderV1Handler;

@@ -57,6 +57,9 @@ Windows when the runner is given the runtime archive (`--runtime-archive <path>`
 the `harness` archive; the runner neither builds nor searches for it): each case
 the stepper completes is linked and launched twice, unbounded and with quota 1,
 and held to the case's one expectation by the comparison the stepper is held to.
+The executable's result is read from the launcher's structural dump of it by the
+entry's result type, with the reader the stepper uses, and must equal the
+stepper's result; a dump the launcher cut off leaves the case pending at X3-18.
 The `linux` and `macos` columns are checked for form. The conformance runner
 prints `native backend: stepper N matched, P pending, F failed`, then
 `native backend: windows N matched, P pending, F failed` and the time of the
@@ -68,12 +71,12 @@ the table the current executors produce (add `--runtime-archive` for the
 `windows` column); the committed file is the source of truth and the test suite
 never writes it.
 
-Counts at X3-09a (174 cases):
+Counts at X3-09c (174 cases):
 
-| Column | matched | pending X3-09 | X3-10 | X3-11 | X3-12 | X3-13 | X3-14 | X3-15 | X3-16 | X3-18 |
+| Column | matched | pending X3-08 | X3-10 | X3-11 | X3-12 | X3-13 | X3-14 | X3-15 | X3-16 | X3-18 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `stepper` | 20 | 0 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
-| `windows` | 8 | 12 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
+| `windows` | 20 | 0 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
 | `linux` | 0 | 20 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
 | `macos` | 0 | 20 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
 
@@ -95,19 +98,23 @@ runs and the owed rows below.
 | --- | --- | --- |
 | G3.M1.7 Executable corpus recorded by feature and platform | The table above, from `conformance/native-parity.tsv`; the `windows` column is checked by `native_parity_inventory::every_windows_row_matches_its_linked_executable` | Windows recorded; Linux and macOS not run |
 | G3.M1.8 Compared with the interpreter, including the division variant and the unobservable-function variant | The fixture case matches in `stepper` and `windows`. The division variant is owed to X3-09b. The unobservable-function variant cannot be written: an entry result must be `void` or `result void e`, and `result.err` is pending X3-11 | Owed |
-| G3.M1.9 Yielding around the host call does not duplicate its event | `quota_one_has_one_stdout_event_and_yields_at_every_checkpoint`: on the stepper, one `io.stdout-text` event and a yield at every checkpoint; the linked quota-1 run's observation document equals the one derived from the stepper | Passed on the stepper and the linked executable |
-| G3.M1.10 Tail transfers keep activation growth bounded | `peak_frames_and_live_size_do_not_grow_with_the_loop_count`: peak frames and live size on the stepper do not grow with the loop count. The launcher reports no peaks, so the executable is not measured | Passed on the stepper only |
+| G3.M1.9 Yielding around the host call does not duplicate its event | `quota_one_has_one_stdout_event_and_yields_at_every_checkpoint`: on the stepper, one `io.stdout-text` event and a yield at every checkpoint (a checkpoint is a step the dispatcher takes); the linked quota-1 run's observation document equals the one derived from the stepper, holds one `io.stdout-text` event, and reports as many yields as the stepper, at least the stepper's step count less the last step, which completes instead of yielding; the unbounded run reports none | Passed on the stepper and the linked executable |
+| G3.M1.10 Tail transfers keep activation growth bounded | `peak_frames_and_live_size_do_not_grow_with_the_loop_count`: peak frames and live size on the stepper do not grow with the loop count, and the linked executables, at 10,000 and 100,000 rounds, report equal peak frame counts and peak live sizes within 64 bytes, equal to the stepper's | Passed on the stepper and the linked executable |
 | G3.M1.11 Invalid IR, incompatible runtime identity, unknown registry entries fail before they execute | `a_program_mutated_after_verification_is_rejected_by_verify` (four mutations, and on Windows `build_program` answers `BuildError::Verify`), `an_object_with_another_abi_is_refused_by_the_launcher`, `a_descriptor_naming_an_unknown_symbol_is_refused` | Passed |
 | G3.M1.12 Fixture results and remaining corpus recorded by feature and platform | The committed `conformance/native-parity.tsv` and the counts above | Recorded |
 
-- **The `windows` column.** 8 cases matched and 12 pending X3-09; none failed.
-  The column took 30.0 s to run on this machine (the 174 cases, two runs of each
-  linked executable, in the debug profile). The 12 pending cases agree with the
-  stepper in every field the `harness` launcher reports (outcome, trap code and
-  origin, audit trace, under no quota and quota 1) but have an entry result
-  other than `void`, which the launcher does not report; the runner lends the
-  stepper's value and marks the run unobserved, so the cell stays pending
-  rather than matched.
+- **The `windows` column.** 20 cases matched, equal to `stepper`; none pending
+  at the column's own package and none failed. The column took 29.9 s to run on
+  this machine (the 174 cases, two runs of each linked executable, in the debug
+  profile). Each matched case agrees with the stepper in the outcome, the trap
+  code and origin, the audit trace, and the entry's result, under no quota and
+  quota 1; the result is read from the launcher's dump, never lent.
+- **The observation document.** Besides the outcome, the result kind, the trap,
+  and the audit trace, the `harness` launcher writes `counters:` (yields, peak
+  frames, tail transfers, peak live size, live size at the end) and `value:` (the
+  result as a dump that names no type, bounded at 64 levels, 65,536 nodes, and
+  1 MiB of text and bytes). It does not report what the module values keep: the
+  context does not expose it (X3-17).
 - **Not run:** Linux, macOS.
 
 

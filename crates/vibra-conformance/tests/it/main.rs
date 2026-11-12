@@ -29,6 +29,8 @@ mod core_lowering;
 mod corpus;
 mod diagnostic_registry;
 mod differential;
+#[cfg(windows)]
+mod dump_text;
 mod effects;
 mod entry_outcome;
 mod evidence;

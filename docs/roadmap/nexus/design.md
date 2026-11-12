@@ -316,10 +316,16 @@ table. **harness** exists only in the test archive. Its first argument is an
 optional quota, it reads a `@host-world.v1` document from standard input, and
 it writes one observation document to standard output for the conformance
 runner to compare: the outcome, the kind of result (`void` or `ok`, `err`, or
-none), the trap and its origin ordinal, and the audit trace. It exits `0`
-whatever the program did and `2` when its input is not a host world. The
-document does not carry the result value, whose observation is X3-18 (N35),
-and it reports no yield count and no peak counter.
+none), the trap and its origin ordinal, the audit trace, the context's
+counters (yields, peak frames, tail transfers, peak live size, live size at the
+end), and, for a run that completed, the entry's result as a structural dump
+that names no type: a scalar's class and bits, text, bytes, objects with their
+kind, variant, and cells, and function values as opaque (N40). The dump is
+bounded in depth, nodes, and bytes, and says so with a `truncated` node. The
+conformance runner applies the entry's result type to the dump with the reader
+it uses for the stepper. The document does not tell what the module values
+keep (the context does not expose it, N35). The launcher exits `0` whatever the
+program did and `2` when its input is not a host world.
 
 ## 8. Parity
 

@@ -113,6 +113,20 @@
 //!   because the canonical encoding of the `err` value needs the observation
 //!   of package X3-18, which does not exist yet.
 //!
+//! # The harness profile
+//!
+//! With the cargo feature `harness` the launcher takes a host world and a quota
+//! and writes one observation document instead of using the process: see the
+//! documentation of the `harness` module for the document and the grammar of the
+//! dump of the entry's result. The document carries the outcome, the audit
+//! trace, the context's counters (yields, peak frames, tail transfers, peak and
+//! final live size), and the result as a structural dump that names no type: the
+//! bridge reads the value store through the `vibra_nexus` read API and never
+//! learns the type system, and the conformance runner applies the entry's
+//! result type. The shipped `system` launcher does not contain any of it, and
+//! the context does not tell what its module values keep, so that counter is
+//! not reported.
+//!
 //! # Safety argument
 //!
 //! `unsafe` is used for four things only, each a single operation with a

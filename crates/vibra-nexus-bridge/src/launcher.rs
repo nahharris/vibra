@@ -98,18 +98,34 @@ pub unsafe fn execute(
     quota: u64,
 ) -> Execution {
     // SAFETY: forwarded; the caller's contract is that of `admit`.
-    let admitted = match unsafe { admit(program) } {
-        Ok(admitted) => admitted,
-        Err(refusal) => {
-            return Execution {
-                finished: Finished::Refused(refusal),
-                audit: Vec::new(),
-                live_size: 0,
-                trap_origin: None,
-                result_observed: false,
-            };
-        }
-    };
+    match unsafe { admit(program) } {
+        Ok(admitted) => run_admitted(admitted, host, limit, quota, |_, _| ()).0,
+        Err(refusal) => refused(refusal),
+    }
+}
+
+/// The execution of a program that admission refused: nothing ran.
+pub(crate) fn refused(refusal: Refusal) -> Execution {
+    Execution {
+        finished: Finished::Refused(refusal),
+        audit: Vec::new(),
+        live_size: 0,
+        trap_origin: None,
+        result_observed: false,
+    }
+}
+
+/// Runs an admitted program as [`execute`] does, and lets `observe` read the
+/// context once the run has ended and before the context is dropped. The
+/// observer must leave the context's balance as it found it: the execution's
+/// live size is taken after it.
+pub(crate) fn run_admitted<T>(
+    admitted: Admitted,
+    host: &mut dyn HostProvider,
+    limit: u64,
+    quota: u64,
+    observe: impl FnOnce(&mut Context<'_>, &Finished) -> T,
+) -> (Execution, T) {
     let generated = Generated::new(admitted);
     let mut ctx = Context::new(limit, generated.globals(), host);
     let finished = if generated.start(&mut ctx).is_err() {
@@ -141,7 +157,8 @@ pub unsafe fn execute(
         Finished::Trapped(trap) => describe_origin(generated.admitted(), trap.origin),
         _ => None,
     };
-    Execution {
+    let observed = observe(&mut ctx, &finished);
+    let execution = Execution {
         result_observed: matches!(
             finished,
             Finished::Completed | Finished::ProgramFailed
@@ -150,7 +167,8 @@ pub unsafe fn execute(
         live_size: ctx.live_size(),
         trap_origin,
         finished,
-    }
+    };
+    (execution, observed)
 }
 
 fn describe_origin(admitted: &Admitted, ordinal: u32) -> Option<String> {
