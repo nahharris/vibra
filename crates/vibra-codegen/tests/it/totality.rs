@@ -479,3 +479,45 @@ fn an_intrinsic_anywhere_refuses_the_whole_program() {
         );
     }
 }
+
+/// Every scalar operation of the execution IR has a native form: the program
+/// with one of each emits for every target, and the code the generator names is
+/// the code the runtime decodes back to the same operation, in the bridge's own
+/// table.
+#[test]
+fn every_scalar_operation_the_stepper_runs_is_generated() {
+    let all = ScalarOp::all();
+    assert_eq!(all.len(), 4 + 9 * 8);
+    let mut codes = std::collections::BTreeSet::new();
+    let mut insts = vec![scalar(0, 1)];
+    for (index, op) in all.iter().enumerate() {
+        let code = vibra_codegen::op_code(*op);
+        assert!(codes.insert(code), "{op:?} shares a code");
+        // The bridge decodes the code to the runtime's own name for the same
+        // operation (the two enums spell their variants alike).
+        let decoded = vibra_nexus_bridge::decode_scalar_op(code);
+        assert_eq!(
+            decoded.map(|runtime| format!("{runtime:?}")),
+            Some(format!("{op:?}")),
+            "{code:#x}"
+        );
+        insts.push(Inst::Op {
+            dst: Slot(u32::try_from(index).unwrap() + 1),
+            op: *op,
+            args: vec![Slot(0), Slot(0)],
+        });
+    }
+    let slots = u32::try_from(all.len()).unwrap() + 1;
+    let small = program(vec![function(
+        "main",
+        0,
+        false,
+        slots,
+        vec![block(insts, ret(0))],
+    )]);
+    let proof = verified(&small).expect("a verified program");
+    for target in TARGETS {
+        let result = emit(proof, &target, &inputs(&small));
+        assert!(result.is_ok(), "{:?}", result.err());
+    }
+}

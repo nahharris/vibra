@@ -14,9 +14,9 @@ V1-RUNTIME-compound-constant-defaults	pending X3-11	pending X3-11	pending X3-11	
 V1-RUNTIME-constant-defaults	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-constant-patterns	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-constructor-patterns	pending X3-11	pending X3-11	pending X3-11	pending X3-11
-V1-RUNTIME-continuation-chain	pending X3-10	pending X3-10	pending X3-10	pending X3-10
-V1-RUNTIME-continuation-chain-mutual	pending X3-10	pending X3-10	pending X3-10	pending X3-10
-V1-RUNTIME-continuation-chain-non-tail	pending X3-10	pending X3-10	pending X3-10	pending X3-10
+V1-RUNTIME-continuation-chain	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-continuation-chain-mutual	pending X3-12	pending X3-12	pending X3-12	pending X3-12
+V1-RUNTIME-continuation-chain-non-tail	pending X3-12	pending X3-12	pending X3-12	pending X3-12
 V1-RUNTIME-contract-member-dict-tail	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-contract-member-form-values	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-contract-member-generics	pending X3-11	pending X3-11	pending X3-11	pending X3-11
@@ -112,7 +112,7 @@ V1-RUNTIME-return	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-return-tail-call	pending X3-14	pending X3-14	pending X3-14	pending X3-14
 V1-RUNTIME-sequence	matched	matched	pending X3-08	pending X3-08
 V1-RUNTIME-tail-calls-through-flow	pending X3-11	pending X3-11	pending X3-11	pending X3-11
-V1-RUNTIME-tail-closure-captured-loop	pending X3-10	pending X3-10	pending X3-10	pending X3-10
+V1-RUNTIME-tail-closure-captured-loop	pending X3-12	pending X3-12	pending X3-12	pending X3-12
 V1-RUNTIME-tail-contract-member-forms	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-tail-contract-member-interface-value	pending X3-15	pending X3-15	pending X3-15	pending X3-15
 V1-RUNTIME-tail-counter-closure-captured-loop	pending X3-11	pending X3-11	pending X3-11	pending X3-11
@@ -123,10 +123,10 @@ V1-RUNTIME-tail-counter-method	pending X3-11	pending X3-11	pending X3-11	pending
 V1-RUNTIME-tail-counter-mutual	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-tail-counter-unrelated-function-loop	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-tail-cross-module-mutual	pending X3-18	pending X3-18	pending X3-18	pending X3-18
-V1-RUNTIME-tail-function-value-parameter	pending X3-10	pending X3-10	pending X3-10	pending X3-10
+V1-RUNTIME-tail-function-value-parameter	pending X3-12	pending X3-12	pending X3-12	pending X3-12
 V1-RUNTIME-tail-mutual	matched	matched	pending X3-08	pending X3-08
 V1-RUNTIME-tail-negative	matched	matched	pending X3-08	pending X3-08
-V1-RUNTIME-tail-unrelated-function-loop	pending X3-10	pending X3-10	pending X3-10	pending X3-10
+V1-RUNTIME-tail-unrelated-function-loop	pending X3-12	pending X3-12	pending X3-12	pending X3-12
 V1-RUNTIME-time-monotonic-steps	pending X3-12	pending X3-12	pending X3-12	pending X3-12
 V1-RUNTIME-time-monotonic-unavailable-at-the-top	pending X3-12	pending X3-12	pending X3-12	pending X3-12
 V1-RUNTIME-time-wall-from-the-world	pending X3-12	pending X3-12	pending X3-12	pending X3-12

@@ -12,7 +12,8 @@
 //!   instruction or terminator names exists;
 //! - **V4** a direct call names a function without an environment and passes
 //!   exactly its parameters; a function value names a function with one; a
-//!   scalar operation and a host call pass exactly their operands;
+//!   scalar operation and a host call pass exactly their operands, and an
+//!   integer operation names an integer type;
 //! - **V5** no operand list that is consumed names a slot twice; and
 //! - **V6** on every path, a slot is full where it is read and empty where it
 //!   is written.
@@ -23,9 +24,11 @@
 
 use std::fmt;
 
+use vibra_ir::external::NumericType;
+
 use crate::{
-    Block, BlockId, Callee, FuncId, Function, Inst, MAX_SLOTS, OriginId, Program, Slot,
-    Terminator,
+    Block, BlockId, Callee, FuncId, Function, Inst, MAX_SLOTS, OriginId, Program,
+    ScalarOp, Slot, Terminator,
 };
 
 /// Why a program was rejected, and where.
@@ -75,6 +78,8 @@ pub enum VerifyErrorKind {
         /// The count passed.
         found: usize,
     },
+    /// V4: an integer operation at a type that is not an integer type.
+    NotAnIntegerType(NumericType),
     /// V4: a direct call of a function that takes an environment.
     DirectCallNeedsEnvironment(FuncId),
     /// V4: a function value over a function that takes no environment.
@@ -365,6 +370,11 @@ impl Checker<'_> {
                 Ok(())
             }
             Inst::Op { dst, op, args } => {
+                if let ScalarOp::Int(_, numeric) = op
+                    && !numeric.is_integer()
+                {
+                    return Err(VerifyErrorKind::NotAnIntegerType(*numeric));
+                }
                 if args.len() != op.arity() {
                     return Err(VerifyErrorKind::Arity {
                         expected: op.arity(),

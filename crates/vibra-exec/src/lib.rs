@@ -39,8 +39,8 @@ use std::collections::BTreeSet;
 
 use vibra_ir::SourceOrigin;
 use vibra_ir::boundary::TrapCode;
-use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::external::host::{HostRow, derived_registry_minor};
+use vibra_ir::external::{CompilerIntrinsic, NumericType};
 
 pub use verify::{Verified, VerifyError, VerifyErrorKind, verified, verify};
 
@@ -138,9 +138,79 @@ pub enum ObjectKind {
     Union,
 }
 
-/// A machine-level operation over scalar cells. None of these traps, none
-/// allocates, and none is a registry row: they are what a lowering needs to
-/// test a discriminant or count, and a registry row is an [`Inst::Intrinsic`].
+/// An operation over two integers of one type. A shift takes a `u32` amount as
+/// its second operand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum IntOp {
+    /// The sum, saturated at the bounds of the type.
+    Add,
+    /// The difference, saturated at the bounds of the type.
+    Sub,
+    /// The product, saturated at the bounds of the type.
+    Mul,
+    /// The quotient truncated toward zero, saturated, so the signed minimum
+    /// divided by `-1` is the maximum. A zero divisor has no answer.
+    Div,
+    /// The remainder with the dividend's sign, so the signed minimum and `-1`
+    /// give `0`. A zero divisor has no answer.
+    Rem,
+    /// `left * 2^amount`, saturated, for every amount: zero stays zero.
+    ShiftLeft,
+    /// `floor(left / 2^amount)`, for every amount.
+    ShiftRight,
+    /// Equality, answering an `I32` `0` or `1`.
+    Equal,
+    /// Less-than in the order of the type, answering an `I32` `0` or `1`.
+    Less,
+}
+
+impl IntOp {
+    /// Every operation, in declaration order.
+    pub const ALL: [Self; 9] = [
+        Self::Add,
+        Self::Sub,
+        Self::Mul,
+        Self::Div,
+        Self::Rem,
+        Self::ShiftLeft,
+        Self::ShiftRight,
+        Self::Equal,
+        Self::Less,
+    ];
+}
+
+/// The integer types an [`IntOp`] may name, in the order of the wire encoding.
+pub const INTEGER_TYPES: [NumericType; 8] = [
+    NumericType::I8,
+    NumericType::I16,
+    NumericType::I32,
+    NumericType::I64,
+    NumericType::U8,
+    NumericType::U16,
+    NumericType::U32,
+    NumericType::U64,
+];
+
+/// A machine-level operation over scalar cells. Each is total over the values
+/// of its operand types: none traps, none allocates, and none is a registry
+/// row. They are what a lowering needs to test a discriminant or count, and to
+/// compute the unchecked integer family; a registry row is an
+/// [`Inst::Intrinsic`].
+///
+/// # Integer operations
+///
+/// [`ScalarOp::Int`] names one operation at one integer type, so the type is
+/// part of the instruction. That is the smallest table that keeps the
+/// operand classes checkable: the type fixes the cell class of both operands
+/// and of the result (`I32` up to 32 bits, `I64` at 64, and `I32` for a shift
+/// amount or a comparison), and the width, signedness, and saturation bounds the
+/// runtime applies. The alternative, generic 32-bit and 64-bit operations
+/// followed by explicit normalization, needs an extra instruction after every
+/// narrow result, and a program that leaves it out is valid and wrong.
+///
+/// A zero divisor has no answer, so the lowering tests a divisor and ends the
+/// block in a [`Terminator::Trap`] before it divides. The runtime treats a
+/// division it is asked to do by zero as an invalid program.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ScalarOp {
     /// Wrapping 64-bit addition.
@@ -151,6 +221,8 @@ pub enum ScalarOp {
     I64Eq,
     /// Signed 64-bit less-than, answering an `I32` `0` or `1`.
     I64LtS,
+    /// An operation of the unchecked integer family at an integer type.
+    Int(IntOp, NumericType),
 }
 
 impl ScalarOp {
@@ -158,6 +230,19 @@ impl ScalarOp {
     #[must_use]
     pub const fn arity(self) -> usize {
         2
+    }
+
+    /// Every operation, in a fixed order: the four 64-bit operations, then each
+    /// [`IntOp`] at each of [`INTEGER_TYPES`].
+    #[must_use]
+    pub fn all() -> Vec<Self> {
+        let mut all = vec![Self::I64Add, Self::I64Sub, Self::I64Eq, Self::I64LtS];
+        for numeric in INTEGER_TYPES {
+            for op in IntOp::ALL {
+                all.push(Self::Int(op, numeric));
+            }
+        }
+        all
     }
 }
 
