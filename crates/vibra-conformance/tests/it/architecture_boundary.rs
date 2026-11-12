@@ -120,10 +120,80 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         "vibra-wasm-run",
         &["vibra-host", "vibra-ir", "vibra-native"],
     ),
+    // The actor kernel is generic over an executor and knows no language, no
+    // value layout, and no backend: it needs no other crate (N19).
+    ("vibra-actors", &[]),
+    // The execution IR sits downstream of checked IR and knows no runtime, no
+    // value layout, and no target (docs/roadmap/nexus/decisions.md, N4). Its
+    // tests build source origins, which need a span.
+    ("vibra-exec", &["vibra-diagnostics", "vibra-ir"]),
+    // The lowering is the one crate that knows both the checked IR and the
+    // execution IR (docs/roadmap/nexus/design.md, section 1). It reaches no
+    // runtime and no checker; its differential tests live in the harness.
+    ("vibra-lower", &["vibra-exec", "vibra-ir"]),
+    // Nexus owns execution state and reaches the host provider. It does not
+    // depend on the execution IR or on a code generator: whatever executes a
+    // program's blocks drives it through its transfers (N5).
+    ("vibra-nexus", &["vibra-host", "vibra-ir", "vibra-native"]),
+    // The reference stepper joins the two: verified execution IR, run on
+    // Nexus with no generated code (N6). It is a test instrument, and its
+    // tests supply a host world and spans.
+    (
+        "vibra-nexus-eval",
+        &[
+            "vibra-diagnostics",
+            "vibra-exec",
+            "vibra-host",
+            "vibra-ir",
+            "vibra-nexus",
+        ],
+    ),
+    // The bridge joins generated code to Nexus: the C ABI, the launcher, and the
+    // static archive, and the only crate with `unsafe` (N10). Its normal
+    // dependencies are exactly `vibra-host`, `vibra-ir`, and `vibra-nexus`
+    // (`the_bridge_carries_no_compiler_ir`): the archive linked into user
+    // programs carries no compiler IR. Its tests drive hand-written step
+    // functions against the reference stepper, which needs the execution IR
+    // and the stepper, and spans for the origin table.
+    (
+        "vibra-nexus-bridge",
+        &[
+            "vibra-diagnostics",
+            "vibra-exec",
+            "vibra-host",
+            "vibra-ir",
+            "vibra-nexus",
+            "vibra-nexus-eval",
+        ],
+    ),
+    // The code generator: verified execution IR in, a native object out. It
+    // is written against the bridge's contract (the ABI constants, the
+    // descriptor types, and the routine table) and is the only crate that
+    // names Cranelift (N12). Its tests build spans for the origin table.
+    (
+        "vibra-codegen",
+        &[
+            "vibra-diagnostics",
+            "vibra-exec",
+            "vibra-ir",
+            "vibra-nexus-bridge",
+        ],
+    ),
+    // The build driver: toolchain discovery and the link driver (X3-07). It
+    // lowers, verifies, generates, and links, so it names the lowering, the
+    // execution IR, the generator, and the checked IR for the entry's result
+    // type. It is not a semantic crate: it reads the environment, starts the
+    // linker, and writes files, in one module (`system`). No command depends on
+    // it yet (`vibra-cli` is not changed until the specification is approved).
+    (
+        "vibra-build",
+        &["vibra-codegen", "vibra-exec", "vibra-ir", "vibra-lower"],
+    ),
     // The harness. Legitimately sits above every node.
     (
         "vibra-conformance",
         &[
+            "vibra-build",
             "vibra-diagnostics",
             "vibra-fmt",
             "vibra-schema",
@@ -132,9 +202,13 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-wasm",
             "vibra-wasm-run",
             "vibra-workspace",
+            "vibra-exec",
             "vibra-host",
             "vibra-interp",
             "vibra-ir",
+            "vibra-lower",
+            "vibra-nexus",
+            "vibra-nexus-eval",
             "vibra-types",
         ],
     ),
@@ -358,6 +432,16 @@ const SEMANTIC_CRATES: &[&str] = &[
     "vibra-fmt",
     "vibra-wasm",
     "vibra-native",
+    "vibra-exec",
+    "vibra-actors",
+    "vibra-lower",
+    // It maps the execution IR to machine code from explicit inputs (the
+    // verified program, a target, and two numbers) and writes no file: the
+    // caller receives the object's bytes.
+    "vibra-codegen",
+    "vibra-nexus",
+    "vibra-nexus-bridge",
+    "vibra-nexus-eval",
 ];
 
 /// The one crate that may depend on the WebAssembly engine, and the engine's
@@ -461,8 +545,9 @@ fn only_the_two_backends_run_the_native_code_and_it_reaches_neither_the_engine_n
         .collect::<BTreeSet<_>>();
     assert_eq!(
         dependents,
-        BTreeSet::from(["vibra-interp", "vibra-wasm-run"]),
-        "the reference interpreter and the runner call the native code, and nothing else does"
+        // Nexus hands the native code a view of its value store (N7).
+        BTreeSet::from(["vibra-interp", "vibra-nexus", "vibra-wasm-run"]),
+        "the reference interpreter, the runner, and Nexus call the native code, and nothing else does"
     );
     let own = graph.get(NATIVE_CRATE).expect("the native crate exists");
     assert_eq!(
@@ -504,6 +589,13 @@ fn only_the_backends_and_the_harness_depend_on_the_host_provider() {
         "vibra-cli",
         "vibra-conformance",
         "vibra-interp",
+        // Nexus performs a native program's host operations, and the
+        // reference stepper's tests hand it a host world.
+        "vibra-nexus",
+        // The launcher's `system` profile builds the system provider, and
+        // its `harness` profile a world provider.
+        "vibra-nexus-bridge",
+        "vibra-nexus-eval",
         "vibra-wasm-run",
         "vibra-workspace",
     ]);
@@ -580,6 +672,63 @@ fn semantic_crates_do_not_touch_the_filesystem() {
     );
 }
 
+/// What the actor kernel must not name: it is deterministic by construction.
+const KERNEL_FORBIDDEN: &[&str] = &[
+    "unsafe",
+    "std::thread",
+    "thread::",
+    "std::time",
+    "Instant",
+    "SystemTime",
+    "std::sync",
+    "std::process",
+    "std::env",
+];
+
+fn kernel_forbidden_references(source: &str) -> Vec<&'static str> {
+    KERNEL_FORBIDDEN
+        .iter()
+        .copied()
+        .filter(|pattern| source.contains(pattern))
+        .collect()
+}
+
+#[test]
+fn the_actor_kernel_has_no_unsafe_no_thread_and_no_clock() {
+    let root = workspace_root();
+    let crate_root = root.join("crates").join("vibra-actors");
+    let mut sources = Vec::new();
+    rust_sources(&crate_root.join("src"), &mut sources);
+    assert!(!sources.is_empty(), "vibra-actors has no sources");
+    let mut found = Vec::new();
+    for path in sources {
+        let source = std::fs::read_to_string(&path).expect("readable source");
+        for pattern in kernel_forbidden_references(&source) {
+            found.push(format!("{} names `{pattern}`", path.display()));
+        }
+    }
+    assert!(
+        found.is_empty(),
+        "the actor kernel is single-threaded, clockless, and safe:\n{}",
+        found.join("\n")
+    );
+
+    let manifest = read_manifest(&crate_root.join("Cargo.toml"));
+    assert!(
+        all_dependencies(&manifest).is_empty(),
+        "the actor kernel has no dependency of any kind"
+    );
+}
+
+#[test]
+fn a_thread_or_clock_reference_in_the_actor_kernel_is_reported() {
+    assert_eq!(
+        kernel_forbidden_references("use std::time::Instant;"),
+        ["std::time", "Instant"]
+    );
+    assert!(kernel_forbidden_references("let t = Time(0);").is_empty());
+}
+
 #[test]
 fn a_filesystem_reference_is_reported() {
     assert_eq!(
@@ -628,4 +777,407 @@ fn shipped_crates_do_not_depend_on_their_build_checkout() {
         "build-checkout paths in:\n{}",
         found.join("\n")
     );
+}
+
+/// The one crate that contains `unsafe` code and `extern "C"` items (decision
+/// N10). Its lint tables restate the workspace's.
+const BRIDGE_CRATE: &str = "vibra-nexus-bridge";
+
+/// `source` with comments, string literals, and character literals blanked
+/// out, so a scan sees code only.
+fn code_only(source: &str) -> String {
+    let chars = source.chars().collect::<Vec<_>>();
+    let mut out = String::with_capacity(source.len());
+    let mut at = 0;
+    while at < chars.len() {
+        let current = chars[at];
+        let next = chars.get(at + 1).copied();
+        if current == '/' && next == Some('/') {
+            while at < chars.len() && chars[at] != '\n' {
+                at += 1;
+            }
+        } else if current == '/' && next == Some('*') {
+            let mut depth = 0;
+            while at < chars.len() {
+                if chars[at] == '/' && chars.get(at + 1) == Some(&'*') {
+                    depth += 1;
+                    at += 2;
+                } else if chars[at] == '*' && chars.get(at + 1) == Some(&'/') {
+                    depth -= 1;
+                    at += 2;
+                    if depth == 0 {
+                        break;
+                    }
+                } else {
+                    at += 1;
+                }
+            }
+            out.push(' ');
+        } else if current == 'r' && matches!(next, Some('"' | '#')) && {
+            let mut hashes = at + 1;
+            while chars.get(hashes) == Some(&'#') {
+                hashes += 1;
+            }
+            chars.get(hashes) == Some(&'"')
+        } {
+            let mut hashes = 0;
+            at += 1;
+            while chars.get(at) == Some(&'#') {
+                hashes += 1;
+                at += 1;
+            }
+            at += 1;
+            while at < chars.len() {
+                if chars[at] == '"'
+                    && (0..hashes)
+                        .all(|offset| chars.get(at + 1 + offset) == Some(&'#'))
+                {
+                    at += 1 + hashes;
+                    break;
+                }
+                at += 1;
+            }
+            out.push(' ');
+        } else if current == '"' {
+            at += 1;
+            while at < chars.len() && chars[at] != '"' {
+                at += if chars[at] == '\\' { 2 } else { 1 };
+            }
+            at += 1;
+            out.push(' ');
+        } else if current == '\''
+            && (next == Some('\\') || chars.get(at + 2) == Some(&'\''))
+        {
+            at += 1;
+            while at < chars.len() && chars[at] != '\'' {
+                at += if chars[at] == '\\' { 2 } else { 1 };
+            }
+            at += 1;
+            out.push(' ');
+        } else {
+            out.push(current);
+            at += 1;
+        }
+    }
+    out
+}
+
+/// Whether `code` contains `word` as a whole identifier.
+fn names_token(code: &str, word: &str) -> bool {
+    let is_identifier = |c: char| c.is_alphanumeric() || c == '_';
+    code.match_indices(word).any(|(start, _)| {
+        !code[..start].chars().next_back().is_some_and(is_identifier)
+            && !code[start + word.len()..]
+                .chars()
+                .next()
+                .is_some_and(is_identifier)
+    })
+}
+
+fn package_name(manifest: &toml::Table) -> &str {
+    manifest
+        .get("package")
+        .and_then(|package| package.get("name"))
+        .and_then(toml::Value::as_str)
+        .expect("a package name")
+}
+
+#[test]
+fn only_the_bridge_contains_unsafe() {
+    let root = workspace_root();
+    let mut checked = 0;
+    let mut found = Vec::new();
+    for (path, manifest) in crate_manifests(&root) {
+        let name = package_name(&manifest).to_owned();
+        if name == BRIDGE_CRATE {
+            continue;
+        }
+        checked += 1;
+        let lints = manifest.get("lints").and_then(toml::Value::as_table);
+        let inherits = lints.is_some_and(|lints| {
+            lints.len() == 1
+                && lints.get("workspace").and_then(toml::Value::as_bool) == Some(true)
+        });
+        if !inherits {
+            found.push(format!(
+                "{} does not inherit the workspace lints (`[lints] workspace = true`)",
+                path.display()
+            ));
+        }
+        let mut sources = Vec::new();
+        rust_sources(path.parent().expect("a crate directory"), &mut sources);
+        for source_path in sources {
+            let source =
+                std::fs::read_to_string(&source_path).expect("readable source");
+            if names_token(&code_only(&source), "unsafe") {
+                found.push(format!("{} contains `unsafe`", source_path.display()));
+            }
+        }
+    }
+    assert!(
+        checked >= 15,
+        "the scan covers the workspace ({checked} crates)"
+    );
+    assert!(
+        found.is_empty(),
+        "only `{BRIDGE_CRATE}` may contain `unsafe` or its own lint table:\n{}",
+        found.join("\n")
+    );
+}
+
+#[test]
+fn the_unsafe_scan_reads_code_only() {
+    assert!(names_token(&code_only("let x = unsafe { f() };"), "unsafe"));
+    assert!(names_token(
+        &code_only("unsafe extern \"C\" fn f() {}"),
+        "unsafe"
+    ));
+    for harmless in [
+        "// unsafe is not used",
+        "/* unsafe /* nested */ still a comment */",
+        "let s = \"unsafe\";",
+        "let s = r#\"unsafe \"quoted\"\"#;",
+        "let c = 'u'; let t: &'static str = \"\";",
+        "#![forbid(unsafe_code)]",
+        "let unsafe_count = 0;",
+    ] {
+        assert!(
+            !names_token(&code_only(harmless), "unsafe"),
+            "`{harmless}` is not unsafe code"
+        );
+    }
+}
+
+#[test]
+fn the_bridge_lints_are_the_workspace_lints_except_for_unsafe() {
+    let root = workspace_root();
+    let workspace = read_manifest(&root.join("Cargo.toml"));
+    let bridge =
+        read_manifest(&root.join("crates").join(BRIDGE_CRATE).join("Cargo.toml"));
+    let table = |manifest: &toml::Table, outer: &str, tool: &str| -> toml::Table {
+        manifest
+            .get(outer)
+            .and_then(|lints| lints.get(tool))
+            .and_then(toml::Value::as_table)
+            .cloned()
+            .unwrap_or_else(|| panic!("`[{outer}.{tool}]` is missing"))
+    };
+    let string = |value: &str| toml::Value::String(value.to_owned());
+    for (tool, replaced, added) in [
+        (
+            "rust",
+            ("unsafe_code", "allow"),
+            ("unsafe_op_in_unsafe_fn", "deny"),
+        ),
+        (
+            "clippy",
+            // No workspace clippy lint is replaced; the pair below is a no-op
+            // placeholder that keeps the shape of the check uniform.
+            ("", ""),
+            ("undocumented_unsafe_blocks", "deny"),
+        ),
+    ] {
+        let mut expected = table(&workspace, "workspace", "lints")
+            .get(tool)
+            .and_then(toml::Value::as_table)
+            .cloned()
+            .expect("workspace lints");
+        if !replaced.0.is_empty() {
+            assert!(
+                expected.contains_key(replaced.0),
+                "the workspace sets `{}`",
+                replaced.0
+            );
+            expected.insert(replaced.0.to_owned(), string(replaced.1));
+        }
+        expected.insert(added.0.to_owned(), string(added.1));
+        assert_eq!(
+            table(&bridge, "lints", tool),
+            expected,
+            "the bridge's `[lints.{tool}]` must be the workspace's, except for `unsafe`"
+        );
+    }
+    let workspace_rust = table(&workspace, "workspace", "lints");
+    assert_eq!(
+        workspace_rust
+            .get("rust")
+            .and_then(|rust| rust.get("unsafe_code"))
+            .and_then(toml::Value::as_str),
+        Some("forbid"),
+        "the workspace keeps `unsafe_code = \"forbid\"`"
+    );
+    assert!(
+        bridge
+            .get("lints")
+            .and_then(|lints| lints.get("workspace"))
+            .is_none(),
+        "the bridge states its own lints"
+    );
+}
+
+#[test]
+fn the_bridge_carries_no_compiler_ir() {
+    let root = workspace_root();
+    let manifest =
+        read_manifest(&root.join("crates").join(BRIDGE_CRATE).join("Cargo.toml"));
+    let section = |name: &str| -> BTreeSet<String> {
+        manifest
+            .get(name)
+            .and_then(toml::Value::as_table)
+            .map(|table| table.keys().cloned().collect())
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        section("dependencies"),
+        BTreeSet::from([
+            "vibra-host".to_owned(),
+            "vibra-ir".to_owned(),
+            "vibra-nexus".to_owned()
+        ]),
+        "the archive's dependencies are the runtime, the host provider, and the closed registries"
+    );
+    assert!(section("build-dependencies").is_empty());
+    assert!(
+        section("dev-dependencies").is_subset(&BTreeSet::from([
+            "vibra-diagnostics".to_owned(),
+            "vibra-exec".to_owned(),
+            "vibra-nexus-eval".to_owned()
+        ])),
+        "tests may use the stepper, the execution IR, and spans"
+    );
+    let compiler = ["vibra-exec", "vibra-lower", "vibra-types", "vibra-syntax"];
+    for (name, edges) in workspace_graph(&root) {
+        if name == "vibra-nexus" {
+            assert!(
+                compiler
+                    .iter()
+                    .all(|crate_name| !edges.contains(*crate_name)),
+                "the runtime depends on no compiler crate"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_runtime_and_the_execution_ir_agree_on_the_frame_bound() {
+    assert_eq!(vibra_nexus::MAX_FRAME_SLOTS, vibra_exec::MAX_SLOTS);
+}
+
+/// The one crate that may depend on Cranelift (decision N12). The Wasm runner
+/// reaches it only through Wasmtime, which is not a `cranelift-*` dependency
+/// of any manifest here.
+const CODEGEN_CRATE: &str = "vibra-codegen";
+
+/// The Cranelift packages the generator names, all pinned to one version.
+const CRANELIFT_PACKAGES: &[&str] = &[
+    "cranelift-codegen",
+    "cranelift-frontend",
+    "cranelift-module",
+    "cranelift-object",
+];
+
+#[test]
+fn only_codegen_depends_on_cranelift() {
+    let mut checked = 0;
+    for (path, manifest) in crate_manifests(&workspace_root()) {
+        let name = package_name(&manifest).to_owned();
+        let cranelift = all_dependencies(&manifest)
+            .into_iter()
+            .filter(|dependency| dependency.starts_with("cranelift"))
+            .collect::<BTreeSet<_>>();
+        if name == CODEGEN_CRATE {
+            assert_eq!(
+                cranelift,
+                CRANELIFT_PACKAGES
+                    .iter()
+                    .map(|package| (*package).to_owned())
+                    .collect::<BTreeSet<_>>(),
+                "{}: the generator names the four Cranelift packages",
+                path.display()
+            );
+        } else {
+            assert!(
+                cranelift.is_empty(),
+                "{}: `{name}` names {cranelift:?}; only `{CODEGEN_CRATE}` depends on Cranelift",
+                path.display()
+            );
+        }
+        checked += 1;
+    }
+    assert!(
+        checked >= 15,
+        "the scan covers the workspace ({checked} crates)"
+    );
+}
+
+/// The locked versions of every package called `name`.
+fn locked_versions(lock: &toml::Table, name: &str) -> Vec<String> {
+    lock.get("package")
+        .and_then(toml::Value::as_array)
+        .expect("a lock file with packages")
+        .iter()
+        .filter(|package| {
+            package.get("name").and_then(toml::Value::as_str) == Some(name)
+        })
+        .filter_map(|package| package.get("version").and_then(toml::Value::as_str))
+        .map(str::to_owned)
+        .collect()
+}
+
+#[test]
+fn the_lock_file_holds_one_cranelift_and_the_generator_pins_it() {
+    let root = workspace_root();
+    let lock = read_manifest(&root.join("Cargo.lock"));
+    let manifest =
+        read_manifest(&root.join("crates").join(CODEGEN_CRATE).join("Cargo.toml"));
+    let dependencies = manifest
+        .get("dependencies")
+        .and_then(toml::Value::as_table)
+        .expect("dependencies");
+    let locked = locked_versions(&lock, "cranelift-codegen");
+    assert_eq!(
+        locked.len(),
+        1,
+        "one version of `cranelift-codegen`: {locked:?}"
+    );
+    for package in CRANELIFT_PACKAGES {
+        let requirement = dependencies
+            .get(*package)
+            .and_then(toml::Value::as_str)
+            .unwrap_or_else(|| panic!("`{package}` is a plain version string"));
+        assert_eq!(
+            requirement.strip_prefix('='),
+            Some(locked[0].as_str()),
+            "`{package}` is pinned with `=` to the locked `cranelift-codegen`"
+        );
+        assert_eq!(
+            locked_versions(&lock, package),
+            locked,
+            "`{package}` is locked once, at the version of `cranelift-codegen`"
+        );
+    }
+    // The packages the object writer shares with Wasmtime's graph are not
+    // duplicated by the generator.
+    let all = lock
+        .get("package")
+        .and_then(toml::Value::as_array)
+        .expect("packages")
+        .iter()
+        .filter_map(|package| package.get("name").and_then(toml::Value::as_str))
+        .filter(|name| name.starts_with("cranelift-"))
+        .collect::<BTreeSet<_>>();
+    for name in all {
+        assert_eq!(
+            locked_versions(&lock, name).len(),
+            1,
+            "`{name}` is locked once"
+        );
+    }
+    for shared in ["object", "gimli", "target-lexicon"] {
+        assert_eq!(
+            locked_versions(&lock, shared).len(),
+            1,
+            "`{shared}` is locked once"
+        );
+    }
 }

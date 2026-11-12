@@ -1,0 +1,21 @@
+[package]
+name = "vibra-nexus-eval"
+description = "The reference stepper: executes verified execution IR on Nexus without generated code."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+vibra-exec.workspace = true
+vibra-ir.workspace = true
+vibra-nexus.workspace = true
+
+[dev-dependencies]
+vibra-diagnostics.workspace = true
+vibra-host.workspace = true
+
+[lints]
+workspace = true

@@ -299,6 +299,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a2f30ea3fd5a11f7d3473976d3b62b5b3f2b62fa943c85e0331d88bf505082c"
 
 [[package]]
+name = "cranelift-module"
+version = "0.136.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "382105ee9ba862bbca7f7b7119ef507125309764a0ee6cbcf46d1e0958e1dafc"
+dependencies = [
+ "anyhow",
+ "cranelift-codegen",
+ "cranelift-control",
+ "hashbrown 0.17.1",
+]
+
+[[package]]
 name = "cranelift-native"
 version = "0.136.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -306,6 +318,22 @@ checksum = "397508a8d817dc74019603ac5a4c4e40b4df627e5aed4f2f8088345d4c01d401"
 dependencies = [
  "cranelift-codegen",
  "libc",
+ "target-lexicon",
+]
+
+[[package]]
+name = "cranelift-object"
+version = "0.136.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e1d0b304a1a852087669b13a26f341c1984c15ba0f4f2d9b3182e67e69782c4"
+dependencies = [
+ "anyhow",
+ "cranelift-codegen",
+ "cranelift-control",
+ "cranelift-module",
+ "gimli",
+ "log",
+ "object",
  "target-lexicon",
 ]
 
@@ -1413,6 +1441,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
+name = "vibra-actors"
+version = "0.0.1"
+
+[[package]]
+name = "vibra-build"
+version = "0.0.1"
+dependencies = [
+ "vibra-codegen",
+ "vibra-exec",
+ "vibra-ir",
+ "vibra-lower",
+]
+
+[[package]]
 name = "vibra-cli"
 version = "0.0.1"
 dependencies = [
@@ -1431,17 +1473,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "vibra-codegen"
+version = "0.0.1"
+dependencies = [
+ "cranelift-codegen",
+ "cranelift-frontend",
+ "cranelift-module",
+ "cranelift-object",
+ "object",
+ "vibra-diagnostics",
+ "vibra-exec",
+ "vibra-ir",
+ "vibra-nexus-bridge",
+]
+
+[[package]]
 name = "vibra-conformance"
 version = "0.0.1"
 dependencies = [
  "serde",
  "serde_json",
  "toml",
+ "vibra-build",
  "vibra-diagnostics",
+ "vibra-exec",
  "vibra-fmt",
  "vibra-host",
  "vibra-interp",
  "vibra-ir",
+ "vibra-lower",
+ "vibra-nexus",
+ "vibra-nexus-eval",
  "vibra-resolve",
  "vibra-schema",
  "vibra-syntax",
@@ -1455,6 +1517,14 @@ dependencies = [
 [[package]]
 name = "vibra-diagnostics"
 version = "0.0.1"
+
+[[package]]
+name = "vibra-exec"
+version = "0.0.1"
+dependencies = [
+ "vibra-diagnostics",
+ "vibra-ir",
+]
 
 [[package]]
 name = "vibra-fmt"
@@ -1493,10 +1563,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "vibra-lower"
+version = "0.0.1"
+dependencies = [
+ "vibra-exec",
+ "vibra-ir",
+]
+
+[[package]]
 name = "vibra-native"
 version = "0.0.1"
 dependencies = [
  "vibra-ir",
+]
+
+[[package]]
+name = "vibra-nexus"
+version = "0.0.1"
+dependencies = [
+ "vibra-host",
+ "vibra-ir",
+ "vibra-native",
+]
+
+[[package]]
+name = "vibra-nexus-bridge"
+version = "0.0.1"
+dependencies = [
+ "vibra-diagnostics",
+ "vibra-exec",
+ "vibra-host",
+ "vibra-ir",
+ "vibra-nexus",
+ "vibra-nexus-eval",
+]
+
+[[package]]
+name = "vibra-nexus-eval"
+version = "0.0.1"
+dependencies = [
+ "vibra-diagnostics",
+ "vibra-exec",
+ "vibra-host",
+ "vibra-ir",
+ "vibra-nexus",
 ]
 
 [[package]]

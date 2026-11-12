@@ -21,6 +21,8 @@ The [scratchpad](scratchpad/README.md) holds unscheduled research. When a
 proposal is ready to schedule, it moves into a specific release roadmap. Use
 the [milestone execution model](execution.md) to plan and record delivery.
 Milestone step plans live in their respective directories under this one.
+The [Nexus implementation plan](nexus/README.md) holds the design, decision
+ledger, and work packages that span v0.0.3 and v0.0.4.
 The plans above supersede provisional future assignments recorded in the
 shipped v0.0.1 milestone evidence.
 
