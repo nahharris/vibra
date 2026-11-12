@@ -12,6 +12,9 @@ publish.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
+# Authors physical corruption/version fixtures for the closed integrity
+# scenario; no SQL is accepted from a project or exposed by the tool surface.
+rusqlite.workspace = true
 vibra-diagnostics.workspace = true
 vibra-fmt.workspace = true
 vibra-host.workspace = true

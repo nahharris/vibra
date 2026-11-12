@@ -1,0 +1,1 @@
+(record format: @codebase-observation.v1 scenario: @integrity facts: (dict @corrupt-rejected true @indexes-rebuilt true @version-rejected true))

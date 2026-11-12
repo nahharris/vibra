@@ -1,0 +1,3 @@
+(deftype first u32 visibility: @public)
+(deftype second u32 visibility: @public)
+(defn constant () u32 visibility: @public 19u32)

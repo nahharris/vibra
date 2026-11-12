@@ -1,0 +1,2 @@
+(import model @math.model)
+(defn main () void (model.identity 5u32) void)
