@@ -103,6 +103,19 @@ fn a_well_formed_program_verifies() {
 }
 
 #[test]
+fn verified_wraps_exactly_the_programs_that_verify() {
+    let good = entry(1, vec![block(vec![scalar(0, 0)], ret(0))]);
+    let proof = vibra_exec::verified(&good).expect("a valid program");
+    assert!(std::ptr::eq(proof.program(), &good));
+
+    let bad = entry(1, vec![block(Vec::new(), ret(0))]);
+    assert_eq!(
+        vibra_exec::verified(&bad).expect_err("invalid").kind,
+        VerifyErrorKind::ReadOfEmpty(Slot(0))
+    );
+}
+
+#[test]
 fn v1_roots_exist_and_take_no_operands() {
     assert_eq!(rejected(&program(Vec::new())), VerifyErrorKind::NoFunctions);
 

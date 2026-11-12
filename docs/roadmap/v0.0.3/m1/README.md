@@ -96,3 +96,47 @@ native-execution chapter of the runtime specification is approved.
   the `harness` feature. The crate's lint tables deny an undocumented one.
 - **Not run.** Linux and macOS archives, and a link of the archive with an
   object from the code generator, which does not exist yet.
+
+## Code generator record (X3-06)
+
+Recorded 2026-11-12 on the branch `nexus/x3-06`, Windows
+`x86_64-pc-windows-msvc`, `rustc 1.96.1`. `vibra-codegen` turns a
+`vibra_exec::Verified` program into an object file; it links and runs nothing,
+and **no generated code was executed** in this package. Execution evidence is
+owed by X3-07.
+
+- **Cranelift.** `cranelift-codegen`, `cranelift-frontend`, `cranelift-module`,
+  and `cranelift-object`, each pinned `=0.136.2`, the version of
+  `cranelift-codegen` that Wasmtime already locked. Only `vibra-codegen` names
+  them (`only_codegen_depends_on_cranelift`), and the lock file holds one
+  version of each (`the_lock_file_holds_one_cranelift_and_the_generator_pins_it`).
+  No Cranelift feature was enabled: the x86-64 ISA the lookup finds for both
+  targets comes from `host-arch`, so a build machine of another architecture
+  cannot emit either target until the `x86` feature is enabled (see the open
+  points of the [feasibility record](feasibility.md)).
+- **Lock file.** Two packages were added, with the checksums the feasibility
+  record observed, and the workspace crate `vibra-codegen`; no locked package
+  changed version.
+
+  | Package | Version | Checksum |
+  | --- | --- | --- |
+  | `cranelift-module` | 0.136.2 | `382105ee9ba862bbca7f7b7119ef507125309764a0ee6cbcf46d1e0958e1dafc` |
+  | `cranelift-object` | 0.136.2 | `7e1d0b304a1a852087669b13a26f341c1984c15ba0f4f2d9b3182e67e69782c4` |
+- **Flags.** `Target::flags` is the one list, set on `settings::builder()`
+  with the ISA found by `isa::lookup_by_name(<triple>)` and no host CPU
+  detection: `opt_level = none`, `is_pic = true`, `enable_verifier = true`,
+  `unwind_info = true`, and the Cranelift 0.136.2 defaults of the feasibility
+  record restated (`regalloc_algorithm = backtracking`, `tls_model = none`,
+  `libcall_call_conv = isa_default`, `enable_probestack = false`,
+  `probestack_strategy = outline`, `probestack_size_log2 = 12`, the two
+  spectre-mitigation flags `true`, and the rest `false` or `0`).
+- **Object size of the demo program** (`main`, `even`, `odd`; 1000 rounds):
+
+  | Target | Format | Bytes |
+  | --- | --- | --- |
+  | `x86_64-pc-windows-msvc` | PE/COFF | 4,391 |
+  | `x86_64-unknown-linux-gnu` | ELF64 | 4,376 |
+- **COFF indirection.** On Windows, Cranelift reaches each imported routine and
+  each operand list through a read-only pointer slot (`.refptr.<symbol>`), so
+  a call is `call [slot]`. That is one more load than a direct call, and it is
+  part of the unoptimized baseline X3-22 measures.
