@@ -1533,6 +1533,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "vibra-nexus-bridge"
+version = "0.0.1"
+dependencies = [
+ "vibra-diagnostics",
+ "vibra-exec",
+ "vibra-host",
+ "vibra-ir",
+ "vibra-nexus",
+ "vibra-nexus-eval",
+]
+
+[[package]]
 name = "vibra-nexus-eval"
 version = "0.0.1"
 dependencies = [

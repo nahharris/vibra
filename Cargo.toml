@@ -23,6 +23,7 @@ vibra-lower = { path = "crates/vibra-lower" }
 vibra-ir = { path = "crates/vibra-ir" }
 vibra-native = { path = "crates/vibra-native" }
 vibra-nexus = { path = "crates/vibra-nexus" }
+vibra-nexus-bridge = { path = "crates/vibra-nexus-bridge" }
 vibra-nexus-eval = { path = "crates/vibra-nexus-eval" }
 vibra-schema = { path = "crates/vibra-schema" }
 vibra-syntax = { path = "crates/vibra-syntax" }

@@ -28,6 +28,23 @@ const SLOT_BYTES: u64 = 16;
 /// size, and its parameter count.
 const FUNCTION_HEADER: u32 = 3;
 
+/// The variant index of `err` in a `(result t e)` value, the one
+/// `vibra_host::build_reply` builds for a failed host call.
+const RESULT_ERR: u32 = 1;
+
+/// A machine-level operation over scalar cells: none traps and none allocates.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScalarOp {
+    /// Wrapping 64-bit addition.
+    I64Add,
+    /// Wrapping 64-bit subtraction.
+    I64Sub,
+    /// 64-bit equality, answering an `I32` `0` or `1`.
+    I64Eq,
+    /// Signed 64-bit less-than, answering an `I32` `0` or `1`.
+    I64LtS,
+}
+
 /// A recorded trap: its code and the ordinal of its origin, `0` for none.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Trap {
@@ -618,5 +635,216 @@ impl<'h> Context<'h> {
         self.set_resume(resume)?;
         self.audit.push(AuditEvent::completed(&call, &reply));
         Ok(())
+    }
+
+    /// Writes a scalar of arena class `class` to `dst`.
+    ///
+    /// # Errors
+    ///
+    /// A trap for a slot outside the frame.
+    pub fn scalar(&mut self, dst: u32, class: u8, bits: u64) -> Done<()> {
+        self.set_slot(dst, Cell { class, bits })
+    }
+
+    /// Builds a text object of arena kind `kind` (`STR` or `ATOM`) and writes a
+    /// reference to it to `dst`.
+    ///
+    /// # Errors
+    ///
+    /// The host event when the limit does not admit the value.
+    pub fn constant_text(&mut self, dst: u32, kind: u8, text: &str) -> Done<()> {
+        let built = self.store.new_text(kind, text);
+        let value = self.check(built)?;
+        self.set_slot(dst, Cell::reference(value))
+    }
+
+    /// Builds a `bytes` object and writes a reference to it to `dst`.
+    ///
+    /// # Errors
+    ///
+    /// The host event when the limit does not admit the value.
+    pub fn constant_bytes(&mut self, dst: u32, bytes: &[u8]) -> Done<()> {
+        let built = self.store.new_bytes(kind::BYTES, bytes);
+        let value = self.check(built)?;
+        self.set_slot(dst, Cell::reference(value))
+    }
+
+    /// Writes to `dst` another reference to the value of the borrowed slot
+    /// `src`, which stays full.
+    ///
+    /// # Errors
+    ///
+    /// A trap for a slot outside the frame or a count the store cannot raise.
+    pub fn copy(&mut self, dst: u32, src: u32) -> Done<()> {
+        let cell = self.slot(src)?;
+        let kept = self.store.dup_cell(cell);
+        self.check(kept)?;
+        self.set_slot(dst, cell)
+    }
+
+    /// Moves the cell of `src` to `dst`, leaving `src` empty.
+    ///
+    /// # Errors
+    ///
+    /// A trap for a slot outside the frame.
+    pub fn move_slot(&mut self, dst: u32, src: u32) -> Done<()> {
+        let cell = self.take_slot(src)?;
+        self.set_slot(dst, cell)
+    }
+
+    /// Releases whatever `slot` holds and leaves it empty.
+    ///
+    /// # Errors
+    ///
+    /// A trap for a slot outside the frame.
+    pub fn drop_slot(&mut self, slot: u32) -> Done<()> {
+        let cell = self.take_slot(slot)?;
+        let dropped = self.store.drop_cell(cell);
+        self.check(dropped)
+    }
+
+    /// A scalar operation over the borrowed slots `left` and `right`, written
+    /// to `dst`.
+    ///
+    /// # Errors
+    ///
+    /// A trap for a slot outside the frame.
+    pub fn scalar_op(
+        &mut self,
+        dst: u32,
+        op: ScalarOp,
+        left: u32,
+        right: u32,
+    ) -> Done<()> {
+        let left = self.slot(left)?.bits;
+        let right = self.slot(right)?.bits;
+        let signed = |bits: u64| i64::from_ne_bytes(bits.to_ne_bytes());
+        let cell = match op {
+            ScalarOp::I64Add => Cell::i64(left.wrapping_add(right)),
+            ScalarOp::I64Sub => Cell::i64(left.wrapping_sub(right)),
+            ScalarOp::I64Eq => Cell::i32(u32::from(left == right)),
+            ScalarOp::I64LtS => Cell::i32(u32::from(signed(left) < signed(right))),
+        };
+        self.set_slot(dst, cell)
+    }
+
+    /// Assembles an object of arena kind `kind` from the consumed `cells` and
+    /// writes a reference to it to `dst`.
+    ///
+    /// # Errors
+    ///
+    /// The host event when the limit does not admit the object, and a trap for
+    /// slots the frame does not hold.
+    pub fn build(
+        &mut self,
+        dst: u32,
+        kind: u8,
+        variant: u32,
+        cells: &[u32],
+    ) -> Done<()> {
+        let taken = self.take_slots(cells)?;
+        let store = &mut self.store;
+        let built = (|| {
+            let len = u32::try_from(taken.len()).map_err(|_| StoreError::Exhausted)?;
+            let value = store.alloc(kind, STRIDE_CELLS, len, variant)?;
+            for (index, cell) in (0..len).zip(taken) {
+                store.set_cell(value, index, cell)?;
+            }
+            Ok(Cell::reference(value))
+        })();
+        let cell = self.check(built)?;
+        self.set_slot(dst, cell)
+    }
+
+    /// Writes to `dst` another reference to cell `index` of the borrowed
+    /// object in `object`.
+    ///
+    /// # Errors
+    ///
+    /// A trap for a slot that holds no object, or an index outside it.
+    pub fn cell(&mut self, dst: u32, object: u32, index: u32) -> Done<()> {
+        let object = self.slot(object)?;
+        let store = &mut self.store;
+        let read = (|| {
+            let cell = store.cell(object.as_ref().ok_or(StoreError::Fault)?, index)?;
+            store.dup_cell(cell)?;
+            Ok(cell)
+        })();
+        let cell = self.check(read)?;
+        self.set_slot(dst, cell)
+    }
+
+    /// Writes the variant (or member) index of the borrowed object in `object`
+    /// to `dst` as an `I32`.
+    ///
+    /// # Errors
+    ///
+    /// A trap for a slot that holds no object.
+    pub fn variant_of(&mut self, dst: u32, object: u32) -> Done<()> {
+        let object = self.slot(object)?;
+        let read = object
+            .as_ref()
+            .ok_or(StoreError::Fault)
+            .and_then(|value| self.store.variant(value));
+        let variant = self.check(read)?;
+        self.set_slot(dst, Cell::i32(variant))
+    }
+
+    /// Builds a function value (see [`Context::function_value`]) and writes
+    /// it to `dst`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Context::function_value`].
+    pub fn make_function(
+        &mut self,
+        dst: u32,
+        function: u32,
+        slots: u32,
+        params: u32,
+        captures: &[u32],
+    ) -> Done<()> {
+        let cell = self.function_value(function, slots, params, captures)?;
+        self.set_slot(dst, cell)
+    }
+
+    /// The block a `Branch` continues at: `then_block` when the borrowed
+    /// scalar in `cond` is nonzero, and `else_block` otherwise.
+    ///
+    /// # Errors
+    ///
+    /// A trap for a slot outside the frame.
+    pub fn branch(&mut self, cond: u32, then_block: u32, else_block: u32) -> Done<u32> {
+        Ok(if self.slot(cond)?.bits == 0 {
+            else_block
+        } else {
+            then_block
+        })
+    }
+
+    /// The block a `Switch` continues at: `targets[value]` for the borrowed
+    /// scalar in `value`, or `default` past the list.
+    ///
+    /// # Errors
+    ///
+    /// A trap for a slot outside the frame.
+    pub fn switch(&mut self, value: u32, targets: &[u32], default: u32) -> Done<u32> {
+        let value = self.slot(value)?.bits;
+        let target = usize::try_from(value)
+            .ok()
+            .and_then(|index| targets.get(index));
+        Ok(*target.unwrap_or(&default))
+    }
+
+    /// Whether the entry's result, once the program is done, is the `err` of a
+    /// `(result t e)`: the program failed, which is neither a trap nor a host
+    /// event. A `void` result and an `ok` are not a failure.
+    #[must_use]
+    pub fn program_failed(&self) -> bool {
+        let Some(value) = self.result.as_ref() else {
+            return false;
+        };
+        self.store.kind(value) == Ok(kind::ENUM)
+            && self.store.variant(value) == Ok(RESULT_ERR)
     }
 }
