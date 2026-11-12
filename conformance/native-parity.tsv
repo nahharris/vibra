@@ -2,7 +2,7 @@ case	stepper	windows	linux	macos
 V1-RUNTIME-activation-depth	pending X3-12	pending X3-12	pending X3-12	pending X3-12
 V1-RUNTIME-activation-depth-counter	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-activation-exhaustion	pending X3-12	pending X3-12	pending X3-12	pending X3-12
-V1-RUNTIME-activation-exhaustion-discarded-call	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-activation-exhaustion-discarded-call	matched	matched	pending X3-09	pending X3-09
 V1-RUNTIME-anonymous-enum	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-anonymous-record	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-array-fold	pending X3-11	pending X3-11	pending X3-11	pending X3-11
@@ -95,6 +95,7 @@ V1-RUNTIME-module-value-once	pending X3-11	pending X3-11	pending X3-11	pending X
 V1-RUNTIME-nested-data	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-never-type-encoding	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-never-unreached	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-nexus-m1-fixture	matched	matched	pending X3-09	pending X3-09
 V1-RUNTIME-nominal-enum	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-nominal-enum-payload	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-nominal-method	pending X3-11	pending X3-11	pending X3-11	pending X3-11
@@ -142,16 +143,16 @@ V1-RUNTIME-union-narrowing	pending X3-11	pending X3-11	pending X3-11	pending X3-
 V1-RUNTIME-union-values	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-user-dict-keys	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-variadics	pending X3-13	pending X3-13	pending X3-13	pending X3-13
-V1-RUNTIME-void	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-void	matched	matched	pending X3-09	pending X3-09
 V1-RUNTIME-void-payload-shapes	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-widened-tail-call	pending X3-11	pending X3-11	pending X3-11	pending X3-11
-V1-RUNTIME-workspace-run	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-workspace-run	matched	matched	pending X3-09	pending X3-09
 V1-RUNTIME-workspace-run-activation-exhaustion	pending X3-12	pending X3-12	pending X3-12	pending X3-12
-V1-RUNTIME-workspace-run-effect-operations	matched	pending X3-09	pending X3-09	pending X3-09
-V1-RUNTIME-workspace-run-higher-order-entry	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-workspace-run-effect-operations	matched	matched	pending X3-09	pending X3-09
+V1-RUNTIME-workspace-run-higher-order-entry	matched	matched	pending X3-09	pending X3-09
 V1-RUNTIME-workspace-run-tail-module-values	pending X3-11	pending X3-11	pending X3-11	pending X3-11
-V1-RUNTIME-workspace-run-uninvoked-higher-order-closure	matched	pending X3-09	pending X3-09	pending X3-09
-V1-RUNTIME-workspace-run-unused-imported-higher-order-helper	matched	pending X3-09	pending X3-09	pending X3-09
+V1-RUNTIME-workspace-run-uninvoked-higher-order-closure	matched	matched	pending X3-09	pending X3-09
+V1-RUNTIME-workspace-run-unused-imported-higher-order-helper	matched	matched	pending X3-09	pending X3-09
 V1-RUNTIME-workspace-test-activation-exhaustion	pending X3-18	pending X3-18	pending X3-18	pending X3-18
 V1-RUNTIME-workspace-test-assert-equal	pending X3-18	pending X3-18	pending X3-18	pending X3-18
 V1-RUNTIME-workspace-test-contract-laws	pending X3-11	pending X3-11	pending X3-11	pending X3-11

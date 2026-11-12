@@ -50,25 +50,65 @@ parity and release gates.
 ## Native parity inventory
 
 The inventory is [`conformance/native-parity.tsv`](../../../../conformance/native-parity.tsv):
-one row for each of the 173 executable cases and the columns `stepper`,
-`windows`, `linux`, and `macos`. A cell is `matched` or `pending <package>`.
-Only the `stepper` column is executable today; the platform columns are
-checked for form. The conformance runner prints
-`native backend: stepper N matched, P pending, F failed`; a cell the stepper
-contradicts fails the run, and a pending cell is a gap that fails the M2 gate.
+one row for each executable case and the columns `stepper`, `windows`,
+`linux`, and `macos`. A cell is `matched` or `pending <package>`. The
+`stepper` column is always executable. The `windows` column is executable on
+Windows when the runner is given the runtime archive (`--runtime-archive <path>`,
+the `harness` archive; the runner neither builds nor searches for it): each case
+the stepper completes is linked and launched twice, unbounded and with quota 1,
+and held to the case's one expectation by the comparison the stepper is held to.
+The `linux` and `macos` columns are checked for form. The conformance runner
+prints `native backend: stepper N matched, P pending, F failed`, then
+`native backend: windows N matched, P pending, F failed` and the time of the
+column, or `native backend: windows not run (<reason>)` without an archive or
+off Windows. A cell the stepper or the executable contradicts fails the run, and
+a pending cell is a gap that fails the M2 gate.
 `vibra-conformance --root conformance/cases --write-native-parity <path>` writes
-the table the current executors produce; the committed file is the source of
-truth and the test suite never writes it.
+the table the current executors produce (add `--runtime-archive` for the
+`windows` column); the committed file is the source of truth and the test suite
+never writes it.
 
-Counts at X3-04 (173 cases):
+Counts at X3-09a (174 cases):
 
 | Column | matched | pending X3-09 | X3-10 | X3-11 | X3-12 | X3-13 | X3-14 | X3-15 | X3-16 | X3-18 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `stepper` | 19 | 0 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
-| `windows` | 0 | 19 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
-| `linux` | 0 | 19 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
-| `macos` | 0 | 19 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
+| `stepper` | 20 | 0 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
+| `windows` | 8 | 12 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
+| `linux` | 0 | 20 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
+| `macos` | 0 | 20 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
 
+Counts at X3-04 were 173 cases: `stepper` 19 matched, the other columns 19
+pending X3-09.
+
+## M1 evidence (X3-09a)
+
+Recorded 2026-11-12 on the branch `nexus/x3-09a`, Windows
+`x86_64-pc-windows-msvc`. The fixture is [`examples/nexus-m1`](../../../../examples/nexus-m1)
+(two modules, an indirect tail call across them through a function value, a
+module value, one `io.stdout.text`, and a loop whose count is a constant held in
+17 `bool` arguments) and the corpus case `V1-RUNTIME-nexus-m1-fixture`. The
+evidence tests are in `crates/vibra-conformance/tests/it/m1_evidence.rs`. The
+milestone exit gate is not passed by this record: it needs the Linux and macOS
+runs and the owed rows below.
+
+| Gate | Evidence | Status |
+| --- | --- | --- |
+| G3.M1.7 Executable corpus recorded by feature and platform | The table above, from `conformance/native-parity.tsv`; the `windows` column is checked by `native_parity_inventory::every_windows_row_matches_its_linked_executable` | Windows recorded; Linux and macOS not run |
+| G3.M1.8 Compared with the interpreter, including the division variant and the unobservable-function variant | The fixture case matches in `stepper` and `windows`. The division variant is owed to X3-09b. The unobservable-function variant cannot be written: an entry result must be `void` or `result void e`, and `result.err` is pending X3-11 | Owed |
+| G3.M1.9 Yielding around the host call does not duplicate its event | `quota_one_has_one_stdout_event_and_yields_at_every_checkpoint`: on the stepper, one `io.stdout-text` event and a yield at every checkpoint; the linked quota-1 run's observation document equals the one derived from the stepper | Passed on the stepper and the linked executable |
+| G3.M1.10 Tail transfers keep activation growth bounded | `peak_frames_and_live_size_do_not_grow_with_the_loop_count`: peak frames and live size on the stepper do not grow with the loop count. The launcher reports no peaks, so the executable is not measured | Passed on the stepper only |
+| G3.M1.11 Invalid IR, incompatible runtime identity, unknown registry entries fail before they execute | `a_program_mutated_after_verification_is_rejected_by_verify` (four mutations, and on Windows `build_program` answers `BuildError::Verify`), `an_object_with_another_abi_is_refused_by_the_launcher`, `a_descriptor_naming_an_unknown_symbol_is_refused` | Passed |
+| G3.M1.12 Fixture results and remaining corpus recorded by feature and platform | The committed `conformance/native-parity.tsv` and the counts above | Recorded |
+
+- **The `windows` column.** 8 cases matched and 12 pending X3-09; none failed.
+  The column took 30.0 s to run on this machine (the 174 cases, two runs of each
+  linked executable, in the debug profile). The 12 pending cases agree with the
+  stepper in every field the `harness` launcher reports (outcome, trap code and
+  origin, audit trace, under no quota and quota 1) but have an entry result
+  other than `void`, which the launcher does not report; the runner lends the
+  stepper's value and marks the run unobserved, so the cell stays pending
+  rather than matched.
+- **Not run:** Linux, macOS.
 
 
 ## Bridge archive record (X3-05)

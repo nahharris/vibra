@@ -294,6 +294,13 @@ call from one into the other, one `io.stdout.text`, and a variant that ends
 in `@runtime.division-by-zero`), its corpus cases, and the M1 evidence in
 `docs/roadmap/v0.0.3/m1/README.md`.
 
+**Split (N39).** X3-09a delivers the fixture without the division variant, the
+`windows` column of the inventory, and the evidence for G3.M1.7 and
+G3.M1.9 to G3.M1.12. X3-09b follows the first sub-item of X3-10 (integer
+division and its trap), adds the variant that ends in
+`@runtime.division-by-zero`, and closes G3.M1.8. The slice lowers no division
+yet.
+
 **Validation (each maps to one gate clause):**
 
 | Clause | Evidence |

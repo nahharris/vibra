@@ -1,0 +1,34 @@
+(import io @std.io)
+
+(import ticks @app.ticks)
+
+(def farewell str "done\n")
+
+(defn finish () str farewell)
+
+; Counts down 1000 rounds in the other module, which ends by tail-calling
+; `finish` through a function value, and writes the farewell once.
+(defn main () void
+  effects: (io.stdout)
+  (let
+    -
+    (io.stdout.text
+      (ticks.count
+        finish
+        false
+        false
+        false
+        true
+        false
+        true
+        true
+        true
+        true
+        true
+        false
+        false
+        false
+        false
+        false
+        false
+        false))))

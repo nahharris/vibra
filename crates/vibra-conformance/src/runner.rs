@@ -7,7 +7,10 @@ use vibra_diagnostics::Diagnostic;
 
 use crate::corpus::{Case, Corpus};
 use crate::manifest::{CaseExpectations, ExpectedExecution};
-use crate::native::{NativeCounts, NativeObservation, NativeStatus};
+use crate::native::{
+    EntryJob, NativeCounts, NativeObservation, NativeStatus, StepperRun,
+};
+use crate::native_exe::{RESULT_PACKAGE, WindowsExecutor, WindowsRun};
 use crate::profile::ConformanceProfile;
 
 /// The one finite memory limit, in bytes, the runner applies to every instance
@@ -134,6 +137,9 @@ pub struct CaseObservation {
     pub wasm: Option<BackendObservation<WasmObservation>>,
     /// What the reference stepper did with the case, set wherever `wasm` is.
     pub native: Option<NativeObservation>,
+    /// What the `windows` column needs to build and launch the case's entry,
+    /// set wherever `native` is for an entry.
+    pub entry: Option<Box<EntryJob>>,
 }
 
 impl CaseObservation {
@@ -416,6 +422,9 @@ pub struct BackendStatuses {
     pub wasm: Option<WasmStatus>,
     /// The reference stepper's status, under the same conditions as `wasm`.
     pub native: Option<NativeStatus>,
+    /// The linked executable's status (the `windows` column), or `None` when the
+    /// column was not run or the case never reached the stepper.
+    pub windows: Option<NativeStatus>,
 }
 
 /// One case's result in a run report.
@@ -437,11 +446,59 @@ pub struct CaseReport {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RunReport {
     reports: Vec<CaseReport>,
+    windows_ran: bool,
 }
 
 impl RunReport {
-    fn new(reports: Vec<CaseReport>) -> Self {
-        Self { reports }
+    fn new(reports: Vec<CaseReport>, windows_ran: bool) -> Self {
+        Self {
+            reports,
+            windows_ran,
+        }
+    }
+
+    /// Whether the `windows` column was run: the runner had an executor.
+    #[must_use]
+    pub const fn windows_ran(&self) -> bool {
+        self.windows_ran
+    }
+
+    /// The linked executable's status on every executable case, by case id; a
+    /// case that never reached the stepper counts as a failure. Empty when the
+    /// column was not run.
+    #[must_use]
+    pub fn windows_statuses(&self) -> Vec<(String, NativeStatus)> {
+        if !self.windows_ran {
+            return Vec::new();
+        }
+        self.reports
+            .iter()
+            .filter_map(|report| {
+                let backends = report.backends.as_ref()?;
+                let status =
+                    backends
+                        .windows
+                        .clone()
+                        .unwrap_or_else(|| NativeStatus::Failed {
+                            reason: "the case never reached the executable".to_owned(),
+                        });
+                Some((report.case_id.clone(), status))
+            })
+            .collect()
+    }
+
+    /// The linked executables' counts over the executable cases.
+    #[must_use]
+    pub fn windows_counts(&self) -> NativeCounts {
+        let mut counts = NativeCounts::default();
+        for (_, status) in self.windows_statuses() {
+            match status {
+                NativeStatus::Matched => counts.matched += 1,
+                NativeStatus::Pending(_) => counts.pending += 1,
+                NativeStatus::Failed { .. } => counts.failed += 1,
+            }
+        }
+        counts
     }
 
     /// Per-case results in corpus order.
@@ -579,20 +636,33 @@ pub struct WasmCounts {
 #[derive(Debug)]
 pub struct ConformanceRunner {
     dispatcher: ProfileDispatcher,
+    windows: Option<WindowsExecutor>,
 }
 
 impl ConformanceRunner {
-    /// Creates a runner using the supplied profile dispatcher.
+    /// Creates a runner using the supplied profile dispatcher. It does not run
+    /// the `windows` column.
     #[must_use]
     pub fn new(dispatcher: ProfileDispatcher) -> Self {
-        Self { dispatcher }
+        Self {
+            dispatcher,
+            windows: None,
+        }
+    }
+
+    /// Runs the `windows` column with `executor`: every executable case the
+    /// stepper completes is built, linked, and launched as a process.
+    #[must_use]
+    pub fn with_windows(mut self, executor: WindowsExecutor) -> Self {
+        self.windows = Some(executor);
+        self
     }
 
     /// Runs all cases in deterministic corpus order.
     #[must_use]
     pub fn run(&self, corpus: &Corpus) -> RunReport {
         let cases = corpus.cases().iter().collect::<Vec<_>>();
-        RunReport::new(self.run_cases(&cases))
+        RunReport::new(self.run_cases(&cases), self.windows.is_some())
     }
 
     /// Runs `cases` on as many threads as the machine has, and reports them in
@@ -679,19 +749,25 @@ impl ConformanceRunner {
                 }
                 let wasm = wasm_status(case, &observation);
                 let native = native_status(case, &observation);
+                let windows = self.windows.as_ref().and_then(|executor| {
+                    windows_status(executor, case, &observation, native.as_ref())
+                });
+                let status = differential_status(
+                    &interpreter,
+                    wasm.as_ref(),
+                    native.as_ref(),
+                    windows.as_ref(),
+                );
                 CaseReport {
                     case_id,
                     required_profile: required,
                     provided_profile: Some(provided),
-                    status: differential_status(
-                        &interpreter,
-                        wasm.as_ref(),
-                        native.as_ref(),
-                    ),
+                    status,
                     backends: Some(BackendStatuses {
                         interpreter,
                         wasm,
                         native,
+                        windows,
                     }),
                 }
             }
@@ -705,6 +781,7 @@ impl ConformanceRunner {
                         interpreter: status.clone(),
                         wasm: None,
                         native: None,
+                        windows: None,
                     }),
                     status,
                 }
@@ -725,6 +802,7 @@ impl ConformanceRunner {
                         interpreter: status.clone(),
                         wasm: None,
                         native: None,
+                        windows: None,
                     }),
                     status,
                 }
@@ -993,6 +1071,93 @@ fn native_status(case: &Case, observation: &CaseObservation) -> Option<NativeSta
     })
 }
 
+/// The linked executable's status: built and launched when the stepper matched,
+/// each launch held to the case's one expectation by the comparison the stepper
+/// is held to, and the trap origin held to the stepper's.
+///
+/// A case the stepper holds stays pending at the same package; one the stepper
+/// fails fails. A case every field of which agrees except the entry's result
+/// value, which the harness launcher does not report, is pending at
+/// [`RESULT_PACKAGE`].
+fn windows_status(
+    executor: &WindowsExecutor,
+    case: &Case,
+    observation: &CaseObservation,
+    native: Option<&NativeStatus>,
+) -> Option<NativeStatus> {
+    let stepper_runs = match (native?, observation.native.as_ref()) {
+        (NativeStatus::Pending(package), _) => {
+            return Some(NativeStatus::Pending(package.clone()));
+        }
+        (NativeStatus::Failed { .. }, _) => {
+            return Some(NativeStatus::Failed {
+                reason: "the stepper fails the case".to_owned(),
+            });
+        }
+        (NativeStatus::Matched, Some(NativeObservation::Ran(runs))) => runs,
+        (NativeStatus::Matched, _) => return None,
+    };
+    let Some(job) = observation.entry.as_deref() else {
+        return Some(NativeStatus::Failed {
+            reason: "the case has no entry to build".to_owned(),
+        });
+    };
+    let runs = match executor.observe(&case.manifest().id, job, stepper_runs) {
+        Ok(runs) => runs,
+        Err(reason) => return Some(NativeStatus::Failed { reason }),
+    };
+    Some(windows_runs_status(case, observation, &runs, stepper_runs))
+}
+
+fn windows_runs_status(
+    case: &Case,
+    observation: &CaseObservation,
+    runs: &[WindowsRun],
+    stepper_runs: &[StepperRun],
+) -> NativeStatus {
+    let mut result_unobserved = false;
+    for run in runs {
+        let quota = if run.quota == u64::MAX {
+            "unbounded".to_owned()
+        } else {
+            format!("quota {}", run.quota)
+        };
+        if let Some(stepper) = stepper_runs.iter().find(|s| s.quota == run.quota)
+            && stepper.trap_origin != run.trap_origin
+        {
+            return NativeStatus::Failed {
+                reason: format!(
+                    "trap origin mismatch: the stepper's {:?}, the executable's {:?} ({quota})",
+                    stepper.trap_origin, run.trap_origin
+                ),
+            };
+        }
+        if let WasmStatus::Failed { reason } = executor_status(
+            case,
+            observation,
+            &run.observation,
+            "windows",
+            "the executable",
+        ) {
+            return NativeStatus::Failed {
+                reason: format!("{reason} ({quota})"),
+            };
+        }
+        result_unobserved |= !run.result_observed;
+    }
+    let expects_result = case
+        .manifest()
+        .expectations
+        .interpreter
+        .as_ref()
+        .is_some_and(|expected| expected.result.is_some());
+    if result_unobserved && expects_result {
+        NativeStatus::Pending(RESULT_PACKAGE.to_owned())
+    } else {
+        NativeStatus::Matched
+    }
+}
+
 /// An executor that reports in the terms of [`WasmObservation`], held to the
 /// case's one expectation. `name` is how a comparison names it and `subject`
 /// how a reason refers to it.
@@ -1096,6 +1261,7 @@ fn differential_status(
     interpreter: &CaseStatus,
     wasm: Option<&WasmStatus>,
     native: Option<&NativeStatus>,
+    windows: Option<&NativeStatus>,
 ) -> CaseStatus {
     let mut reasons = Vec::new();
     match interpreter {
@@ -1114,6 +1280,9 @@ fn differential_status(
     }
     if let Some(NativeStatus::Failed { reason }) = native {
         reasons.push(format!("native backend: stepper: {reason}"));
+    }
+    if let Some(NativeStatus::Failed { reason }) = windows {
+        reasons.push(format!("native backend: windows: {reason}"));
     }
     if reasons.is_empty() {
         CaseStatus::Passed

@@ -254,3 +254,31 @@ fn an_ambient_read_is_reported_and_comments_and_test_modules_are_not() {
         ambient_references("let x = 1; // std::fs in a trailing comment").is_empty()
     );
 }
+
+/// The runner starts the executables of the `windows` column in one module,
+/// `native_exe`; the only other process it starts is the baseline's.
+#[test]
+fn the_runner_launches_executables_in_one_module() {
+    let mut users = Vec::new();
+    let mut sources = Vec::new();
+    rust_sources(
+        &workspace_root()
+            .join("crates")
+            .join("vibra-conformance")
+            .join("src"),
+        &mut sources,
+    );
+    for path in sources {
+        let source = std::fs::read_to_string(&path).expect("readable source");
+        if source.contains("Command::new") {
+            users.push(
+                path.file_name()
+                    .expect("a file name")
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+    }
+    users.sort();
+    assert_eq!(users, ["baseline.rs", "native_exe.rs"]);
+}

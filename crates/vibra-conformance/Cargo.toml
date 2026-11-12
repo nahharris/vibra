@@ -12,6 +12,7 @@ publish.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
+vibra-build.workspace = true
 vibra-diagnostics.workspace = true
 vibra-exec.workspace = true
 vibra-fmt.workspace = true
@@ -34,8 +35,8 @@ name = "vibra-conformance"
 path = "src/bin/conformance.rs"
 
 [dev-dependencies]
-# The link driver, for the tests that run generated code (X3-07).
-vibra-build.workspace = true
+# The version already in the lock file, to read the emitted objects back.
+object = { version = "=0.40.0", default-features = false, features = ["read"] }
 wasmparser.workspace = true
 
 [lints]

@@ -52,7 +52,7 @@ fn the_table_names_every_executable_case_once() {
     let (executable, report) = report();
     assert_eq!(
         executable.len(),
-        173,
+        174,
         "the executable cases of the baseline"
     );
     let table = table();
@@ -312,15 +312,134 @@ fn the_cells_have_two_forms_and_no_third() {
     // The committed file is in the canonical form.
     let text = std::fs::read_to_string(table_path()).expect("the inventory");
     assert_eq!(table().render(), text);
-    // The platform columns have a package that moves them.
+    // The `linux` and `macos` columns have a package that moves them; the
+    // `windows` column is executable and is held to the executables.
     for (case, cells) in table().rows() {
         assert!(
-            cells[1..]
+            cells[2..]
                 .iter()
                 .all(|cell| matches!(cell, InventoryCell::Pending(_))),
             "{case}"
         );
     }
+}
+
+// -- the windows column ------------------------------------------------------------
+
+#[test]
+fn the_windows_checking_logic_reports_a_wrong_cell_and_a_row_that_should_move() {
+    let (_, report) = report();
+    let statuses = report.native_statuses();
+    let table = table();
+
+    // A `pending` cell whose executable matches: the row should move.
+    let pending_row = table
+        .rows()
+        .iter()
+        .find(|(_, cells)| matches!(cells[1], InventoryCell::Pending(_)))
+        .map(|(case, _)| case.clone())
+        .expect("a row pending in windows");
+    let found =
+        table.windows_disagreements(&[(pending_row.clone(), NativeStatus::Matched)]);
+    assert!(
+        found.iter().any(|line| line.starts_with(&pending_row)
+            && line.contains("but the windows executable matches")),
+        "{found:?}"
+    );
+
+    // A `matched` cell whose executable fails, or is pending.
+    let matched = statuses
+        .iter()
+        .find(|(_, status)| *status == NativeStatus::Matched)
+        .map(|(case, _)| case.clone())
+        .expect("a matched case");
+    let mut wrong = self::table();
+    wrong
+        .rows_mut()
+        .iter_mut()
+        .find(|(row, _)| *row == matched)
+        .expect("a row")
+        .1[1] = InventoryCell::Matched;
+    let failing = [(
+        matched.clone(),
+        NativeStatus::Failed {
+            reason: "audit mismatch".to_owned(),
+        },
+    )];
+    let found = wrong.windows_disagreements(&failing);
+    assert!(
+        found.iter().any(|line| line.contains(
+            "marked matched, but the windows executable fails: audit mismatch"
+        )),
+        "{found:?}"
+    );
+    let found = wrong.windows_disagreements(&[(
+        matched.clone(),
+        NativeStatus::Pending("X3-09".to_owned()),
+    )]);
+    assert!(
+        found.iter().any(|line| line
+            .contains("marked matched, but the windows executable is pending X3-09")),
+        "{found:?}"
+    );
+
+    // A row may be `matched` in `windows` only if it is `matched` in `stepper`.
+    let pending = statuses
+        .iter()
+        .find(|(_, status)| matches!(status, NativeStatus::Pending(_)))
+        .map(|(case, _)| case.clone())
+        .expect("a pending case");
+    let mut forged = self::table();
+    forged
+        .rows_mut()
+        .iter_mut()
+        .find(|(row, _)| *row == pending)
+        .expect("a row")
+        .1[1] = InventoryCell::Matched;
+    assert!(
+        forged
+            .windows_disagreements(&[])
+            .contains(&format!("{pending}: matched in windows but not in stepper"))
+    );
+}
+
+#[cfg(windows)]
+#[test]
+fn every_windows_row_matches_its_linked_executable() {
+    use vibra_conformance::WindowsExecutor;
+
+    use crate::linked_exe_support::{Profile, archive};
+
+    let work = workspace_root().join("target").join("x3-09-windows-test");
+    let executor = WindowsExecutor::new(archive(Profile::Harness).to_path_buf(), work)
+        .unwrap_or_else(|error| panic!("{error}"));
+    let corpus = Corpus::discover(corpus_root()).expect("the corpus");
+    let started = std::time::Instant::now();
+    let report = ConformanceRunner::new(standard_dispatcher())
+        .with_windows(executor)
+        .run(&corpus);
+    eprintln!("windows column: {:?}", started.elapsed());
+    let statuses = report.windows_statuses();
+    let failed = statuses
+        .iter()
+        .filter(|(_, status)| matches!(status, NativeStatus::Failed { .. }))
+        .collect::<Vec<_>>();
+    assert!(failed.is_empty(), "{failed:?}");
+    assert_eq!(report.failed(), 0);
+    // Both directions: a `matched` cell must match, and a `pending` cell whose
+    // case matches is a row that should move. A row is `matched` in `windows`
+    // only if it is `matched` in `stepper`.
+    let table = table();
+    assert_eq!(table.windows_disagreements(&statuses), Vec::<String>::new());
+    let counts = report.windows_counts();
+    let matched = table
+        .rows()
+        .iter()
+        .filter(|(_, cells)| cells[1] == InventoryCell::Matched)
+        .count();
+    assert_eq!(counts.matched, matched);
+    assert!(matched > 0);
+    assert_eq!(counts.failed, 0);
 }
 
 // -- the runner binary ---------------------------------------------------------------
