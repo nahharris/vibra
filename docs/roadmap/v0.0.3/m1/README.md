@@ -140,3 +140,131 @@ owed by X3-07.
   each operand list through a read-only pointer slot (`.refptr.<symbol>`), so
   a call is `call [slot]`. That is one more load than a direct call, and it is
   part of the unoptimized baseline X3-22 measures.
+
+## Link driver record (X3-07)
+
+Recorded 2026-11-12 on the branch `nexus/x3-07`, Windows
+`x86_64-pc-windows-msvc`, `rustc 1.96.1`. `vibra-build` discovers the MSVC
+linker, links the generator's object with the runtime archive, and builds an
+executable from a checked program. These are the first tests that **execute
+generated machine code**: the linked programs below ran as processes and were
+compared with the reference stepper. The typed errors `MissingLinkTool` and
+`LinkFailed` are the planned diagnostics `@tool.missing-link-tool` and
+`@tool.link-failed` of the specification package X3-S1, which is not merged;
+the binding to the diagnostics registry is owed after it.
+
+- **Crate.** `vibra-build` depends on `vibra-codegen`, `vibra-exec`,
+  `vibra-ir`, and `vibra-lower`; it adds no registry crate and no `unsafe`, and
+  the lock file gained the workspace crate and its edges only. It compiles on
+  every platform: on another host, or for another target, it answers
+  `BuildError::Unsupported`. Every environment read, process, and file access
+  is in its module `system`
+  (`ambient_reads::the_build_driver_reads_the_machine_in_one_module`).
+  `vibra-cli` does not depend on it.
+- **Discovery rule.** `Sources::from_machine` is the one function that reads the
+  machine: `ProgramFiles(x86)` (default `C:\Program Files (x86)`),
+  `vswhere.exe` at its documented place under it, run with
+  `-latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64
+  -property installationPath`, and `reg.exe` under `%SystemRoot%\System32`
+  (never through `PATH`) for `KitsRoot10` in the 32-bit registry view. Both are
+  run with an explicit environment: `vswhere.exe` returns nothing without
+  `ProgramData` (observed: empty output with `SystemRoot` alone, the
+  installation path with `SystemRoot` and `ProgramData`). `Toolchain::discover`
+  is then a function of the `Sources` and the filesystem: the toolset is the
+  line of `Microsoft.VCToolsVersion.default.txt` (else the numerically highest
+  directory of `VC\Tools\MSVC`); the SDK is the numerically highest `Lib`
+  version holding `um\x64\kernel32.lib` and `ucrt\x64\ucrt.lib`, under
+  `KitsRoot10` or else `<ProgramFiles(x86)>\Windows Kits\10`. `PATH`,
+  `VCINSTALLDIR`, `LIB`, and `INCLUDE` are never read. Found here: Visual Studio
+  Build Tools 2022, toolset `14.43.34808`, SDK `10.0.22621.0`. The registry and
+  `vswhere.exe` print in the OEM code page, so an installation path with
+  characters outside it would be misread; not exercised.
+- **Link command**, as a value (`link_command`), run without a shell:
+
+  ```text
+  <LINK> /NOLOGO /MACHINE:X64 /SUBSYSTEM:CONSOLE /OUT:<OUT> <OBJECT> <ARCHIVE>
+      /LIBPATH:<MSVC-LIB-X64> /LIBPATH:<SDK-UCRT-X64> /LIBPATH:<SDK-UM-X64>
+      kernel32.lib ntdll.lib userenv.lib ws2_32.lib dbghelp.lib /defaultlib:msvcrt
+  ```
+
+  It is the command of the [feasibility record](feasibility.md) with no
+  difference: the same options, libraries, and order. The libraries are those
+  `rustc --print native-static-libs` printed for the real archive (see the
+  bridge record above). A test asserts the list against this literal
+  (`the_link_command_is_the_recorded_literal_list`, and on a real build
+  `linked_exe::the_link_command_is_the_recorded_one`), and every failure message
+  of a linking test carries the full command. Arguments with spaces and
+  non-ASCII characters reach `link.exe` intact as single arguments (the process
+  is started from an argument list, which Windows quotes): no response file was
+  needed, and none is implemented. A command line over the Windows limit would
+  fail at the start of the process, as a `LinkFailed` with no exit code.
+- **Environment of the linker.** `TMP`, set to the work directory, and nothing
+  else. Observed by linking one object with each environment: empty, and
+  `SystemRoot` alone, both fail with `LNK1104` (the linker cannot create
+  `C:\WINDOWS\lnk{...}.tmp`); `TMP` alone, `TEMP` alone, and `SystemRoot` with
+  both, link. `SystemRoot` is therefore not needed. `link.exe` also does not
+  report a missing library given by a `\\?\` path (the linker drops it and the
+  link fails later on unresolved symbols), so the driver checks that the archive
+  exists and names it as a `BuildError::Io` before it writes or links anything.
+- **The runtime archive is an input** (`BuildOptions::archive`); the tests build
+  it with the `CARGO` of the test run into `target/x3-07-archive-system` and
+  `target/x3-07-archive-harness`, once per process each. Both are built because
+  each exposes what the other cannot: the shipped `system` launcher gives the
+  exit code, the real standard output and the standard error; the `harness`
+  launcher (cargo feature `harness`) reads a host world from standard input and
+  writes the observation document (outcome, result kind, trap code and origin
+  ordinal, audit trace). The `system` archive is 18,731,428 bytes.
+- **Size and time.** The linked demo executable is 247,808 bytes with the
+  `system` archive and 812,032 bytes with the `harness` archive; the other
+  linked programs are 203,264 to 282,624 bytes (`system`). One `link.exe` run
+  took 76 to 87 ms (a PowerShell stopwatch around the process); a whole build
+  (lowering, verification, generation, object write, link) of a small program
+  took about 75 to 150 ms in the test profile.
+- **What is compared.** For the `system` launcher: the exit code, the standard
+  output bytes, and the standard error text (for a trap the code line with the
+  origin, `@runtime.division-by-zero at app/main.vib:20..21`; for an `err` the
+  line `@command.program-failed`), against the stepper's run (the output
+  captured through `SystemProvider::capturing`) and against an expectation
+  written by hand. For the `harness` launcher: the whole observation document,
+  with the audit trace, under no quota and quota 1, against the document built
+  from the stepper's run. Programs of the slice are lowered by
+  `build_executable`; the trap, `err`, and demo programs are execution IR built
+  by hand and linked by `build_program`, because the lowering emits no `Trap`
+  and cannot build a `result.err` yet (`the_slice_cannot_express_an_err_entry_yet`).
+  The deep loops compare the unbounded run only and take their standard output
+  from the hand-written expectation: the unoptimized stepper needs about nine
+  seconds for a 100,000-round loop.
+- **Linked programs** (every row: launcher outputs equal the stepper's):
+
+  | Program | Exit | Standard output |
+  | --- | --- | --- |
+  | The lowering slice's demo (`everything`: module value, closure, module function as a value, three host writes, early `return`) | 0 | `labellateend` |
+  | A scalar; a standard-library module value read twice; a `str` module value; a scalar module value | 0 | none |
+  | Two `io.stdout-text` calls | 0 | `one\ntwo\n` |
+  | An indirect call whose callee comes from a host-writing call | 0 | `first\nsecond\n` |
+  | A tail call of a module function; of a closure; indirect, of a function value in a parameter; indirect, of a module function used as a value; mutual tail calls | 0 | none |
+  | A closure reading its captures; an early `return` in the middle | 0 | none |
+  | 100,000 direct tail calls (17 `bool` parameters) | 0 | none |
+  | 100,000 indirect tail calls through a module value | 0 | none |
+  | The foundation demo: 1,000 indirect tail transfers, one host write, return (hand-built IR) | 0 | `done\n` |
+  | The same, ending in a `DivisionByZero` trap | 5 | `done\n`; standard error `@runtime.division-by-zero at app/main.vib:20..21` |
+  | A trap at once | 5 | none; standard error `... at tests/trap.vib:3..9` |
+  | An entry returning the `err` variant, `entry_outcome` 2 | 6 | none; standard error `@command.program-failed` |
+  | Non-tail recursion 100,000 frames deep (hand-built IR) | 0 | none |
+
+  Neither deep program overflowed the native stack. `entry_outcome` and
+  `registry_minor` are computed from the checked program (`entry_outcome`: `0`
+  unless the entry's result type is an enum with a variant named `err`, then
+  `1` and its index, the rule by which the stepper and the interpreter classify
+  a program failure), and the standard `result` gives 2
+  (`the_entry_outcome_is_computed_from_the_entry_result_type`).
+- **Not observable yet** (so not compared): the entry's result value (the
+  launcher says only `void-or-ok` or `err`; the canonical value is X3-18, ledger
+  N35); the context's live size and the arena balance (neither launcher
+  exposes them; X3-17); the audit trace of the `system` launcher (it has none:
+  the audit is compared through the `harness` launcher only); any host world
+  other than the default one (files, environment, arguments, standard input,
+  clocks); the memory-exhaustion exit (3) and an admission refusal, neither of
+  which the programs here provoke; an exit code from the `harness` launcher
+  (it is 0 whatever the program did).
+- **Not run:** Linux, macOS.
