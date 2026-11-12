@@ -9,8 +9,10 @@ a human would enjoy writing. It ignores the
 purpose. Nothing here is supported, scheduled, or a proposal for a release.
 The sketches are illustrative and their syntax is not a commitment.
 
-The companion [field notes](paradigms.md) record the evidence for each
-paradigm considered, including the ones rejected.
+Two companion notes go deeper. The [field notes](paradigms.md) record the
+evidence for each paradigm considered, including the ones rejected. The
+[syntax note](syntax.md) asks whether S-expressions are the right surface
+for an agent and what could replace them.
 
 ## The premise: the author changed
 
@@ -334,6 +336,11 @@ truth and becomes one projection among several. An agent sees holes and
 claims. A human reviewer sees claims, debts, and evidence grades, and never
 needs a witness body. An auditor sees flows and the trust ledger.
 
+The [syntax note](syntax.md) takes this further. It keeps the S-expression
+tree as the stored form, proposes a flatter line-oriented surface for
+authoring, and adds tables and checked domain notations, each with a proved
+round trip to the tree.
+
 ### Names
 
 Renaming and obfuscation studies agree that models lean on identifiers:
@@ -407,8 +414,8 @@ experiments, not commitments.
   second version off them for performance.
 - Tactic proofs over dependent types as the default surface. Models do far
   worse there than in solver-backed languages.
-- Token-minimal syntax. It optimizes the cost that matters least and removes
-  the names models rely on.
+- Token-minimal syntax. Dropping tokens that carry no information is fine.
+  Dropping names and redundancy that a checker can use is the trap.
 - Natural language as source. It restores every ambiguity the claim exists
   to remove.
 - User-defined effect handlers. They let a program redefine what an intent
@@ -422,18 +429,22 @@ experiments, not commitments.
 - **Proof effort.** Published ratios of proof to code run from
   [3.4 to 1 up to about 27 to 1][dbggr]. Agents make that cheaper, not free.
   The grades exist so that a cell can ship at a lower grade knowingly.
-- **Unfamiliar surface.** Every departure from languages in the training
-  data costs accuracy. The move protocol helps, because the agent chooses
-  among offered moves instead of recalling syntax, but this needs
-  measurement before belief.
+- **Unfamiliar surface.** Models are trained on human code. On languages
+  with a truly foreign paradigm they collapse, and examples in the prompt do
+  not rescue them. "Painful for a human" is therefore not the same as "fine
+  for a model". The alien parts of this design belong in what the kernel
+  checks and how execution works, while the page an agent writes stays near
+  what it knows. The [syntax note](syntax.md#evidence) has the evidence.
 - **Journal overhead.** Recording every event and intent costs time and
   storage. Pure steps can be recomputed instead of recorded, and journals
   can be compacted to snapshots, but hot paths will need care.
 - **Totality limits expression.** Some algorithms have no obvious measure.
   The `diverge` debt keeps them possible and visible.
-- **Complexity.** This is far more machinery than the charter's sixth
-  priority allows. The defense is the LCF one: keep the kernel tiny, and
-  make everything else an untrusted proposer whose output the kernel checks.
+- **Complexity.** This note does not count total machinery as a cost. It
+  is far more than the charter's sixth priority allows, on purpose. The one
+  thing that has to stay small is what is trusted. That is the LCF
+  discipline: a tiny kernel, and everything else an untrusted proposer whose
+  output the kernel checks.
 - **Human review moves, it does not disappear.** Someone still has to read
   claims. They are shorter than code, and nothing guarantees they are easy.
 
@@ -475,6 +486,8 @@ prototype, and each can fail.
 
 E4 and E7 test the two ideas that are new to Vibra, the journal and the
 ownership split. E2 needs the least machinery and is the best first step.
+The [syntax note](syntax.md#experiments) adds experiments S1 to S7 on the
+surface itself.
 
 ## Sources
 

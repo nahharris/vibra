@@ -37,7 +37,7 @@ here.
 | Computed and positional names | Explore | Evidence points both ways |
 | Interaction nets as the runtime | Avoid | Abandoned by their main proponent for performance |
 | Tactic proofs as the default surface | Avoid | Models do several times worse than with solvers |
-| Token-minimal syntax | Avoid | Saves the cheapest resource and removes useful names |
+| Token-minimal syntax | Avoid | Removes the names and redundancy a checker and a model both use |
 | Natural language as source | Avoid | Reintroduces the ambiguity claims exist to remove |
 | User-defined effect handlers | Avoid | Lets a program redefine what the runtime must own |
 
@@ -346,10 +346,12 @@ for the residue, as verification stage V3 already proposes.
 ### Token-minimal syntax
 
 [ilo](https://ilo-lang.ai/) optimizes for "the fewest tokens from intent to
-working code" with prefix notation and single-character names. Tokens are
-the cheapest thing an agent spends, and the naming studies above say short
-opaque identifiers remove information models use. Redundancy that a checker
-can cross-examine is worth more than brevity.
+working code" with prefix notation and single-character names. The naming
+studies above say short opaque identifiers remove information models use,
+and redundancy that a checker can cross-examine is worth more than brevity.
+Token count still matters, because context is scarce. The
+[syntax note](syntax.md#tokens-matter-a-little) separates tokens that carry
+information from tokens that do not.
 
 ### Natural language as source
 
@@ -383,6 +385,7 @@ main ideas.
 | [ilo](https://ilo-lang.ai/) | Minimal token count |
 
 Tern's bet on familiar syntax is the strongest counterargument to this whole
-note: staying inside the training distribution is a guardrail too. The move
-protocol in the rethink is an attempt to get correctness from structure
-instead of familiarity, and experiment E3 is where that claim is tested.
+note: staying inside the training distribution is a guardrail too. The
+[syntax note](syntax.md) takes that argument seriously. It concludes that
+the surface should resemble familiar languages where Vibra behaves like
+them, and experiments E3 and S1 are where the claim is tested.
