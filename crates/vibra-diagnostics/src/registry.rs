@@ -102,6 +102,10 @@ pub enum Domain {
     Tool,
     /// Declared contracts that hold but say more than they need to.
     Contract,
+    /// Checked codebase revisions, selectors, and publication plans.
+    Codebase,
+    /// Local persistent store integrity, locking, and filesystem operations.
+    Store,
 }
 
 impl Domain {
@@ -122,6 +126,8 @@ impl Domain {
             Self::Style => "style",
             Self::Tool => "tool",
             Self::Contract => "contract",
+            Self::Codebase => "codebase",
+            Self::Store => "store",
         }
     }
 }
@@ -211,6 +217,32 @@ macro_rules! diagnostic_registry {
 }
 
 diagnostic_registry! {
+    CodebaseStaleHead => "@codebase.stale-head", Codebase, Error, None,
+        "the selected head no longer matches the expected revision";
+    CodebaseUnknownHead => "@codebase.unknown-head", Codebase, Error, None,
+        "the selected named head does not exist";
+    CodebaseUnknownRevision => "@codebase.unknown-revision", Codebase, Error, None,
+        "the selected revision is not present in this store";
+    CodebaseUnknownEntity => "@codebase.unknown-entity", Codebase, Error, None,
+        "the selected entity is not present in this revision";
+    CodebaseUnknownObject => "@codebase.unknown-object", Codebase, Error, None,
+        "the selected object is not a member of this revision";
+    CodebaseInvalidInput => "@codebase.invalid-input", Codebase, Error, None,
+        "a codebase selector or service input is malformed";
+    CodebaseStalePlan => "@codebase.stale-plan", Codebase, Error, None,
+        "the export plan no longer matches its expected destination";
+    StoreNotFound => "@store.not-found", Store, Error, None,
+        "the explicitly opened store does not exist";
+    StoreBusy => "@store.busy", Store, Error, None,
+        "bounded store lock acquisition failed and can be retried";
+    StoreCorrupt => "@store.corrupt", Store, Error, None,
+        "the store contains corrupt or inconsistent authoritative data";
+    StoreUnsupportedVersion => "@store.unsupported-version", Store, Error, None,
+        "the store or a portable record has an unsupported version";
+    StoreUnsafePath => "@store.unsafe-path", Store, Error, None,
+        "a selected store path or publication destination is unsafe";
+    StoreIoError => "@store.io-error", Store, Error, None,
+        "a persistent store filesystem or database operation failed";
     SyntaxUnmatchedDelimiter => "@syntax.unmatched-delimiter", Syntax, Error, None,
         "a list or quoted leaf has an unmatched delimiter";
     SyntaxMissingSeparator => "@syntax.missing-separator", Syntax, Error, None,
@@ -413,7 +445,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count in the specification's canonical table.
-    const REGISTERED_CODES: usize = 94;
+    const REGISTERED_CODES: usize = 107;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {
@@ -569,6 +601,32 @@ mod tests {
                 .parse()
                 .unwrap_or_else(|_| panic!("{} does not round trip", code.as_atom()));
             assert_eq!(parsed, *code);
+        }
+    }
+
+    #[test]
+    fn codebase_and_store_diagnostics_are_fixed_errors_without_fixes() {
+        for atom in [
+            "@codebase.stale-head",
+            "@codebase.unknown-head",
+            "@codebase.unknown-revision",
+            "@codebase.unknown-entity",
+            "@codebase.unknown-object",
+            "@codebase.invalid-input",
+            "@codebase.stale-plan",
+            "@store.not-found",
+            "@store.busy",
+            "@store.corrupt",
+            "@store.unsupported-version",
+            "@store.unsafe-path",
+            "@store.io-error",
+        ] {
+            let code: DiagnosticCode = atom
+                .parse()
+                .unwrap_or_else(|_| panic!("{atom} is not registered"));
+            assert_eq!(code.level(), Level::Error);
+            assert_eq!(code.fix_capability(), FixCapability::None);
+            assert_eq!(code.domain().as_str(), atom[1..].split('.').next().unwrap());
         }
     }
 

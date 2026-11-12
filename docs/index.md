@@ -16,6 +16,9 @@ Read the chapters in order:
 7. [Runtime and WebAssembly](spec/06-runtime.md)
 8. [Diagnostics and conformance](spec/07-diagnostics-and-conformance.md)
 
+The [checked codebase encoding](spec/codebase-encoding.md) chapter specifies
+the canonical records and addresses used by v0.0.2 M1.
+
 `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` carry their RFC 2119
 meanings where written in uppercase. Examples are normative when introduced
 with “must accept”, “must reject”, or an explicit rule; otherwise they are

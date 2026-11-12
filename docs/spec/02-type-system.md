@@ -1733,3 +1733,11 @@ apply copy-on-write as long as identity is not observable.
 
 Vibra has no user-visible references, pointers, object identity, destructors, or
 shared mutable cells.
+
+## Codebase entity identity
+
+A source atom path is the spelling used by a source reference, such as <code>@app.main.user.name-length</code>. It is not by itself the canonical identity used to address an entity across package and codebase boundaries. The resolver's canonical declaration identity includes package name and version, unit, module path, declaration ownership path, final name, and entity kind. Its canonical text is <code>@&lt;package-name&gt;@&lt;package-version&gt;/&lt;unit&gt;[.&lt;module-segment&gt;...][.&lt;owner-segment&gt;...]</code>. For example, the canonical identity corresponding to a source path in package <code>demo</code> version <code>0.1.0</code> is <code>@demo@0.1.0/app.main.user.name-length</code>. Resolution of an alias or source path produces this full identity before object addressing; source spellings are never hashed in place of the identity.
+
+The kind is retained as structured identity data even when the canonical text does not spell it. Package version, unit, module path, or declaration owner changes yield a different entity identity. A content-addressed definition never replaces nominal identity: two declarations of equal shape under different nominal identities remain different entities, and an identity change does not become a rename-stable alias. An explicit implementation block has no source atom path. Its identity is the pair of its canonical receiver type and its canonical applied interface target. An implementation member is identified by the triple of its contract member, applied target, and receiver type; the applied target is part of both keys.
+
+Codebase storage may group nested declarations or members as owned parts of an object. In that case each member's resolver identity remains distinct and maps to the owner object address plus a canonical part path. Object grouping does not merge identities or make a member addressable by body equality.

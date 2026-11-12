@@ -898,3 +898,7 @@ If recovery inserted an error marker, the formatter MUST preserve the original
 UTF-8 document bytes exactly. Canonical whitespace and line-ending rules apply
 only when the tree has no recovery error; rewriting an incomplete or opaque
 leaf would be a semantic guess.
+
+## Exact source attachments
+
+A codebase source attachment is the exact UTF-8 text of one captured <code>.vib</code> module or project data document. It preserves comments, whitespace, line endings, and every source byte that is valid UTF-8. Source spans in an attachment are half-open UTF-8 byte ranges. The attachment's raw source hash and the address of its canonical VIBON wrapper are distinct identities, and neither is the hash of the normalized checked definition derived from that source. Trivia-only edits change the source attachment while leaving checked identity unchanged when checked meaning and entity identity are unchanged. Codebase export writes the captured attachment text exactly and MUST NOT invoke this chapter's formatter implicitly.

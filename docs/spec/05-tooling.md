@@ -855,3 +855,93 @@ extension. Diagnostic and result atoms are serialized to JSON with their exact
 spelling, for example `"@type.argument-mismatch"`. Errors distinguish invalid input,
 diagnostics found, stale workspace, MCP action denied, dependency failure, host
 operation failure, runtime trap, and internal failure.
+## M1 codebase commands
+
+The M1 codebase commands are the only CLI surface for the addressed store. They use the same workspace engine and command-result envelope as other commands, but operate on a named, explicitly opened local store. File-workspace commands such as <code>check</code>, <code>run</code>, and <code>test</code> keep their file-snapshot authority. They do not read from a codebase. A codebase read never refreshes from files. The address and record contracts are defined in the [M1 addressed codebase data](04-programs-and-packages.md#m1-addressed-codebase-data) section of the programs-and-packages chapter.
+
+### Command grammar and paths
+
+Codebase operations require the [trusted local workspace precondition](04-programs-and-packages.md#codebase-container-and-portable-records): no untrusted principal may concurrently rename or rebind the root or path ancestors while an operation runs. The confinement requirements below reject link traversal within that supported environment; they do not provide isolation against a hostile local actor controlling those directories. A shared writable workspace or privileged operation over an untrusted directory is outside this M1 contract.
+
+The global option prefix remains <code>vibra [--format human|json] [--workspace PATH]</code>. The default workspace is the current directory. <code>--store</code> is a workspace-relative database file path, defaults to <code>.vibra/codebase.sqlite</code>, and MUST remain beneath the canonical workspace root. Backup, restore, and export destinations are also workspace-relative and confined to that root. Paths MUST NOT traverse a symlink or junction. The admitted grammar is closed:
+
+~~~text
+vibra [global options] codebase init [--store PATH]
+vibra [global options] codebase head [--store PATH] [NAME]
+vibra [global options] codebase import [--store PATH] [--head NAME] --expect absent|REVISION
+vibra [global options] codebase lookup [--store PATH] (--head NAME|--revision REVISION) ENTITY
+vibra [global options] codebase read [--store PATH] (--head NAME|--revision REVISION) OBJECT
+vibra [global options] codebase export [--store PATH] (--head NAME|--revision REVISION) --destination PATH [--write --plan PLAN]
+vibra [global options] codebase verify [--store PATH]
+vibra [global options] codebase reindex [--store PATH]
+vibra [global options] codebase backup [--store PATH] DESTINATION
+vibra [global options] codebase restore SOURCE [--store PATH]
+~~~
+
+<code>NAME</code> is a lowercase kebab-case head label; omission selects <code>main</code>. <code>REVISION</code> and <code>OBJECT</code> use the exact <code>sha256:</code> address spelling. <code>ENTITY</code> is the exact canonical VIBON entity-key record string defined by the graph encoding. For example, a declaration selector is <code>(record kind: @declaration identity: "@demo@0.1.0/app.main.run" entity-kind: @function)</code>. Test, implementation-block, and implementation-member selectors use the respective closed key records from that encoding. A source atom path, import alias, or bare declaration identity is not accepted as a codebase key. Exactly one of <code>--head</code> or <code>--revision</code> is required for lookup, read, and export. A head selector is resolved once at command start; the result carries the selected revision address. A requested head that is absent, or a revision, entity, or object not present in the selected store, has its distinct registered outcome. A valid address in another store grants no authority and produces the same not-found outcome as any other nonmember. These operational outcomes use exit 3.
+
+<code>init</code> is the only ordinary command that initializes a store. It creates the database and the default <code>.vibra</code> directory when needed; an existing database is never overwritten. For an explicit nondefault store path, its parent directory must already exist. Every other command that opens a store requires that store to exist. In particular, a read-only open MUST NOT create <code>.vibra</code>, a database, a schema, a lock file, or a journal. The workspace service exposes distinct create and open operations: create takes the canonical workspace root and relative store path; open additionally takes an explicit read-only or read-write access mode. Import and reindex use read-write open; head, lookup, read, verify, export, and backup use read-only open. Restore creates a new store from a verified backup and MUST reject an existing store destination. It may create only the default <code>.vibra</code> parent when using the default store path; parent directories for explicit paths must already exist.
+
+All store, backup, restore, and export paths use a confined local filesystem path. The supported filesystem must provide an exclusive, same-filesystem no-replace publication operation for a newly created export directory or store file. The implementation MUST use that exclusive operation and MUST fail closed when the filesystem cannot provide it; a check-then-overwriting rename is forbidden. Opening, creating, backing up, restoring, and exporting through an unsafe path emits <code>@store.unsafe-path</code>; filesystem failures and unavailable exclusive-publication support emit <code>@store.io-error</code>. Read-write SQLite connections use <code>synchronous=FULL</code>; the store uses a fixed 500 millisecond busy timeout. Publication synchronizes files and containing directories where supported. Process interruption exposes an absent or complete newly published destination; M1 does not promise Windows directory-metadata power-loss durability.
+
+Head labels have the exact ASCII grammar `[a-z][a-z0-9]*(?:-[a-z0-9]+)*`.
+They permit digit endings, reject digit prefixes, and have no consecutive or
+trailing hyphens. This label grammar is distinct from the source-symbol grammar.
+
+### Import and expected heads
+
+<code>import</code> captures the project selected by global <code>--workspace</code>, including its exact <code>project.vibon</code>, all admitted local source and test files, target inputs, and trusted embedded inputs. It parses, resolves, and checks the complete admitted graph before writing. An error-level source or project diagnostic prevents publication and leaves no logically visible candidate object, attachment, revision, index row, or head. Warnings do not reject an otherwise valid graph. No dependency sync, network fetch, arbitrary package, or untrusted external provider is admitted.
+
+The head defaults to <code>main</code>. <code>--expect</code> is mandatory and is either the literal <code>absent</code> or one exact revision address. The requested head must still have exactly that state when the writer transaction begins. A mismatch produces <code>@codebase.stale-head</code> and the command MUST NOT retry against a different head. When the expected head already points at the candidate revision, import succeeds as a no-op and reports <code>published: false</code>. An initial import with an absent head reports <code>published: true</code>. Objects, source attachments, revision membership, derived indexes, and the head advance commit in one transaction. A busy database is separately reported as retryable <code>@store.busy</code>; retrying MUST reuse the original expected state.
+
+### Revision-scoped lookup and read
+
+<code>head</code> returns the current address for exactly the named head; omission selects <code>main</code>. <code>lookup</code> accepts the exact canonical VIBON entity-key record string and resolves it within its pinned revision. It returns that same key, the owning object address, and the owned-part path. <code>read</code> returns the complete canonical component frame containing the selected object, its component member index, and the selected member's direct typed resolved references. It does not follow those edges automatically. Consumers may read a returned dependency address only by issuing another read in the same explicitly selected revision. Results and edge arrays use the canonical ordering of the codebase-data chapter. The response never mixes facts from two revisions.
+
+### Source export and multi-file failure boundary
+
+Export is source materialization into an **absent destination directory only**. M1 does not update an existing tree, replace an existing project, delete files, or merge unrelated/untracked destination content. The exported tree contains the exact project data, source files, and test files held in the selected revision; it does not contain the private database, derived indexes, or embedded trusted source modules. The stored source bytes are written without formatting.
+
+A preview requires the destination path to be absent and emits a complete ordered list of files, their raw source hashes and byte lengths, the selected revision, and a plan address. The plan is the canonical VIBON <code>@codebase-export-plan.v1</code> record with fields in order <code>format</code>, <code>revision</code>, <code>destination</code>, <code>expected</code>, <code>files</code>. <code>expected</code> is exactly <code>@absent</code>; each file record is <code>(record path: string source-hash: string byte-length: u64)</code> in that field order. The file array is sorted by UTF-8 path bytes. The plan address is SHA-256 over ASCII <code>vibra-codebase-export-plan-v1</code>, one <code>0x00</code> byte, and the canonical record bytes, rendered as <code>sha256:</code> plus 64 lowercase hexadecimal digits. The preview changes neither store nor destination.
+
+Application requires both <code>--write</code> and the exact <code>--plan</code> address returned by preview. It recomputes the same plan from the selected revision, rejects a different plan as <code>@codebase.stale-plan</code>, and rechecks confinement and continued destination absence immediately before publication. It writes a private sibling staging tree on the same filesystem, synchronizes its files and directory where supported, then publishes it with an exclusive no-replace directory operation. It MUST NOT use a rename that can replace a concurrently created empty directory. If interrupted before publication, the destination remains absent and a private incomplete staging directory may remain. Once publication succeeds, the entire tree is present. M1 does not claim rollback of a loop of per-file replacements or atomic update of an existing tree. A destination created after preview is stale and MUST remain byte-for-byte untouched. A destination that exists at preview is refused with <code>@store.unsafe-path</code>.
+
+### Integrity, indexes, backup, and restore
+
+The M1 container accepts rollback-journal format only. A WAL/non-rollback
+header is rejected as `@store.unsupported-version` before SQLite is opened,
+preserving the input and preventing creation of `-wal` or `-shm` sidecars.
+This rejection does not offer automatic journal conversion.
+
+Read-only commands do not recover a hot rollback journal by writing. When
+SQLite requires that recovery, they report `@store.io-error` and direct the
+caller to run `codebase reindex`, whose read-write open performs SQLite recovery
+before verifying and rebuilding indexes, then retry the original read. Recovery
+restores committed state; it does not migrate formats or guess missing records.
+
+<code>verify</code> is read-only. It validates database integrity, supported schema version, address/payload agreement, object and reference closure, source wrappers and hashes, revision membership, heads, and trusted-input provenance. It returns no repair plan and changes no authoritative bytes. A corrupt database emits <code>@store.corrupt</code>; a schema version newer than supported emits <code>@store.unsupported-version</code>. Unknown revisions, heads, entities, and objects emit <code>@codebase.unknown-revision</code>, <code>@codebase.unknown-head</code>, <code>@codebase.unknown-entity</code>, and <code>@codebase.unknown-object</code>, respectively.
+
+<code>reindex</code> may replace only derived indexes. Before rebuilding it verifies every authoritative object, source attachment, revision, and head it will use. The records are rebuilt from those canonical sources and MUST reproduce the same revision-scoped lookup and edge results. It never guesses a missing or corrupt authoritative object from an index.
+
+<code>backup</code> uses SQLite's consistent backup facility and writes one standalone database file to an absent destination. The backup is a physical store copy, not VIBON interchange. <code>restore</code> verifies that backup and creates a standalone store at an absent destination. Both stage the new file beside its destination, synchronize it and the containing directory where supported, and publish with an exclusive no-replace file operation. Neither overwrites an existing file. Process interruption leaves the destination absent or a complete verified destination; a private staging file may remain. M1 does not promise Windows directory-metadata durability after power loss. Rejected, corrupt, unsupported, or stale inputs never damage the source store.
+
+### JSON results and diagnostics
+
+JSON mode emits one versioned command-result envelope to stdout and writes diagnostics and operational logs to stderr. It uses the existing envelope fields <code>schemaVersion</code>, <code>command</code>, <code>result</code>, <code>diagnostics</code>, and <code>payload</code>. The command IDs are <code>codebase-init</code>, <code>codebase-head</code>, <code>codebase-import</code>, <code>codebase-lookup</code>, <code>codebase-read</code>, <code>codebase-export</code>, <code>codebase-verify</code>, <code>codebase-reindex</code>, <code>codebase-backup</code>, and <code>codebase-restore</code>. Payloads are closed by command:
+
+| Command | Required payload fields |
+| --- | --- |
+| <code>codebase-init</code> | <code>store: string</code> |
+| <code>codebase-head</code> | <code>head: string, revision: string</code> |
+| <code>codebase-import</code> | <code>head: string, revision: string, published: boolean, objectCount: integer, sourceCount: integer</code> |
+| <code>codebase-lookup</code> | <code>revision: string, entity: string, object: string, part: string[]</code> |
+| <code>codebase-read</code> | <code>revision: string, object: string, component: string, memberIndex: integer, payload: string, references: Reference[]</code> |
+| <code>codebase-export</code> | <code>revision: string, destination: string, plan: string, files: ExportFile[], written: boolean</code> |
+| <code>codebase-verify</code> | <code>valid: true, revisionCount: integer, objectCount: integer, sourceCount: integer</code> |
+| <code>codebase-reindex</code> | <code>revisionCount: integer, entityCount: integer, edgeCount: integer</code> |
+| <code>codebase-backup</code> | <code>destination: string, revisionCount: integer</code> |
+| <code>codebase-restore</code> | <code>store: string, revisionCount: integer, objectCount: integer, sourceCount: integer</code> |
+
+<code>Reference</code> is <code>{ "part": string[], "kind": string, "target": string|integer|TrustedExternal }</code>; an integer target is a nonnegative internal component member index, a string target is an object address, and <code>TrustedExternal</code> is the closed object <code>{ "kind": "@trusted-external", "identity": string, "registry": string }</code> whose identity is <code>@compiler:&lt;symbol&gt;</code> or <code>@host:&lt;symbol&gt;</code> and whose registry is a <code>sha256:</code> fingerprint. <code>ExportFile</code> is <code>{ "path": string, "sourceHash": string, "byteLength": integer }</code>. Arrays are in the canonical record order. The read payload's <code>payload</code> is the exact canonical VIBON text of the complete <code>@checked-component.v1</code> frame; <code>component</code> is its component address, and <code>memberIndex</code> identifies <code>object</code> within it.
+
+Unknown command/option/arity uses <code>@command.invalid-input</code> and exit 2 with an empty diagnostics array. A well-formed codebase command whose service input is a malformed head, revision, address, or entity-key record reports <code>@codebase.invalid-input</code> with result <code>@command.operational-failure</code> and exit 3. Invalid checked source uses <code>@command.diagnostics</code> and exit 1 with the source diagnostics. A missing store, corrupt or unsupported store, unsafe path, filesystem failure, stale head or plan, and busy store use <code>@command.operational-failure</code> and exit 3, with their registered diagnostic code. <code>@store.busy</code> is explicitly retryable; stale outcomes are not. An unknown head, revision, entity, or object uses <code>@command.operational-failure</code> and exit 3 with its distinct code. Every failed codebase command has an empty object payload. Any operational storage diagnostic has no source location, primary span <code>0..0</code>, and no related span. The diagnostic registry and codebase corpus contract are in the diagnostics-and-conformance chapter.
