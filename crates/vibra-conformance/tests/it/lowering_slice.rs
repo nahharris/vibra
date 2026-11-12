@@ -754,7 +754,11 @@ fn a_form_outside_the_slice_is_not_lowered_and_names_the_form() {
     for (name, source, form) in [
         ("tuple", tuple, "Tuple"),
         ("match", matched, "Match"),
-        ("compiler intrinsic", external, "External"),
+        (
+            "compiler intrinsic",
+            external,
+            vibra_lower::form::EXTERNAL_COLLECTION,
+        ),
         // Reached only through a callee.
         (
             "tuple in a callee",
@@ -1015,5 +1019,10 @@ fn code_that_cannot_run_is_lowered_and_discarded() {
         origin(),
     );
     let program = build(after);
-    assert_eq!(lower(&program), Err(LowerError::NotLowered("External")));
+    assert_eq!(
+        lower(&program),
+        Err(LowerError::NotLowered(
+            vibra_lower::form::EXTERNAL_COLLECTION
+        ))
+    );
 }
