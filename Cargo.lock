@@ -1491,6 +1491,7 @@ dependencies = [
 name = "vibra-conformance"
 version = "0.0.1"
 dependencies = [
+ "object",
  "serde",
  "serde_json",
  "toml",

@@ -97,6 +97,14 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
         );
         let accepted =
             result.check().status() == vibra_workspace::semantic::CheckStatus::Accepted;
+        let entry = if accepted {
+            result
+                .check()
+                .program_for_target(target)
+                .and_then(|program| crate::native::entry_job(case, program, true))
+        } else {
+            None
+        };
         let mut host_event = None;
         // Both backends run the one checked program of the target.
         // The reference stepper runs the same program over a fresh world.
@@ -174,6 +182,7 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             host_event,
             wasm,
             native,
+            entry,
             ..CaseObservation::default()
         })
     }

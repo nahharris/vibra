@@ -98,6 +98,39 @@ pub struct StepperRun {
     pub quota: u64,
     /// What the run observed, in the terms the Wasm backend uses.
     pub observation: BackendObservation<WasmObservation>,
+    /// The origin ordinal of the trap that ended the run, when one did.
+    pub trap_origin: Option<u32>,
+}
+
+/// What the `windows` column needs of an accepted executable case: the checked
+/// program to build, and the text of the host world the harness launcher reads
+/// from standard input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntryJob {
+    /// The checked program of the entry.
+    pub program: CheckedProgram,
+    /// The `@host-world.v1` document the executable is given.
+    pub world_text: String,
+}
+
+/// The world of a run that names none: the default world.
+pub(crate) const DEFAULT_WORLD_TEXT: &str = "(record format: @host-world.v1)\n";
+
+/// The job for `program`, in the case's own host world when `case_world`, and
+/// in the default world otherwise.
+pub(crate) fn entry_job(
+    case: &crate::corpus::Case,
+    program: &CheckedProgram,
+    case_world: bool,
+) -> Option<Box<EntryJob>> {
+    let world_text = match (case_world, case.manifest().inputs.host_world.as_deref()) {
+        (true, Some(path)) => case.read_file(path).ok()?,
+        _ => DEFAULT_WORLD_TEXT.to_owned(),
+    };
+    Some(Box::new(EntryJob {
+        program: program.clone(),
+        world_text,
+    }))
 }
 
 /// What the stepper did with an accepted executable case.
@@ -178,7 +211,11 @@ pub(crate) fn observe_entry(
     let mut runs = Vec::new();
     for quota in [UNBOUNDED, 1] {
         match step(&code, program, world, quota) {
-            Ok(observation) => runs.push(StepperRun { quota, observation }),
+            Ok((observation, trap_origin)) => runs.push(StepperRun {
+                quota,
+                observation,
+                trap_origin,
+            }),
             Err(name) => return NativeObservation::pending(OBSERVATION, name),
         }
     }
@@ -211,6 +248,7 @@ fn failed(reason: String) -> NativeObservation {
     NativeObservation::Ran(vec![StepperRun {
         quota: UNBOUNDED,
         observation: BackendObservation::new(WasmObservation::Failed { reason }),
+        trap_origin: None,
     }])
 }
 
@@ -221,6 +259,18 @@ fn step(
     program: &CheckedProgram,
     world: &HostWorld,
     quota: u64,
+) -> Result<(BackendObservation<WasmObservation>, Option<u32>), &'static str> {
+    let mut origin = None;
+    let observation = step_run(code, program, world, quota, &mut origin)?;
+    Ok((observation, origin))
+}
+
+fn step_run(
+    code: &Evaluator<'_>,
+    program: &CheckedProgram,
+    world: &HostWorld,
+    quota: u64,
+    origin: &mut Option<u32>,
 ) -> Result<BackendObservation<WasmObservation>, &'static str> {
     let limit = u64::try_from(INSTANCE_MEMORY_LIMIT_BYTES).unwrap_or(u64::MAX);
     let mut host = WorldProvider::new(world);
@@ -280,6 +330,7 @@ fn step(
             if trap.code == vibra_ir::boundary::TrapCode::InvalidCheckedProgram {
                 return Ok(defect("the stepper trapped on a verified program"));
             }
+            *origin = Some(trap.origin);
             Ok(BackendObservation::new(WasmObservation::Trapped(
                 trap.code.diagnostic_code().as_atom().to_owned(),
             )))
@@ -621,6 +672,17 @@ impl Inventory {
     /// it: the stepper's package, or `X3-09` for a case the stepper matches.
     #[must_use]
     pub fn generated(statuses: &[(String, NativeStatus)]) -> Self {
+        Self::generated_with(statuses, None)
+    }
+
+    /// As [`Self::generated`], with the `windows` cell of each case taken from
+    /// what the linked executables did when they were run: `matched`, or pending
+    /// at the package that holds it.
+    #[must_use]
+    pub fn generated_with(
+        statuses: &[(String, NativeStatus)],
+        windows: Option<&[(String, NativeStatus)]>,
+    ) -> Self {
         let mut rows = statuses
             .iter()
             .map(|(case, status)| {
@@ -637,7 +699,16 @@ impl Inventory {
                     InventoryCell::Matched => "X3-09".to_owned(),
                 };
                 let cell = || InventoryCell::Pending(platform.clone());
-                (case.clone(), [stepper, cell(), cell(), cell()])
+                let windows_cell = match windows
+                    .and_then(|all| all.iter().find(|(name, _)| name == case))
+                {
+                    Some((_, NativeStatus::Matched)) => InventoryCell::Matched,
+                    Some((_, NativeStatus::Pending(package))) => {
+                        InventoryCell::Pending(package.clone())
+                    }
+                    _ => cell(),
+                };
+                (case.clone(), [stepper, windows_cell, cell(), cell()])
             })
             .collect::<Vec<_>>();
         rows.sort_by(|left, right| left.0.cmp(&right.0));
@@ -681,38 +752,66 @@ impl Inventory {
         &self,
         statuses: &[(String, NativeStatus)],
     ) -> Vec<String> {
+        self.column_disagreements(0, "the stepper", statuses)
+    }
+
+    /// As [`Self::stepper_disagreements`] for the `windows` column against what
+    /// the linked executables did, and one more rule: a row `matched` in
+    /// `windows` must be `matched` in `stepper`.
+    #[must_use]
+    pub fn windows_disagreements(
+        &self,
+        statuses: &[(String, NativeStatus)],
+    ) -> Vec<String> {
+        let mut found =
+            self.column_disagreements(1, "the windows executable", statuses);
+        for (case, cells) in &self.rows {
+            if cells[1] == InventoryCell::Matched && cells[0] != InventoryCell::Matched
+            {
+                found.push(format!("{case}: matched in windows but not in stepper"));
+            }
+        }
+        found
+    }
+
+    fn column_disagreements(
+        &self,
+        column: usize,
+        subject: &str,
+        statuses: &[(String, NativeStatus)],
+    ) -> Vec<String> {
         let mut found = Vec::new();
         for (case, status) in statuses {
             let Some((_, cells)) = self.rows.iter().find(|(row, _)| row == case) else {
                 continue;
             };
-            let [recorded, ..] = cells;
+            let Some(recorded) = cells.get(column) else {
+                continue;
+            };
             match (recorded, status) {
                 (InventoryCell::Matched, NativeStatus::Matched) => {}
                 (InventoryCell::Matched, NativeStatus::Pending(package)) => {
                     found.push(format!(
-                        "{case}: marked matched, but the stepper is pending {package}"
+                        "{case}: marked matched, but {subject} is pending {package}"
                     ))
                 }
                 (InventoryCell::Matched, NativeStatus::Failed { reason }) => found
                     .push(format!(
-                        "{case}: marked matched, but the stepper fails: {reason}"
+                        "{case}: marked matched, but {subject} fails: {reason}"
                     )),
-                (InventoryCell::Pending(package), NativeStatus::Matched) => {
-                    found.push(format!(
-                        "{case}: marked pending {package}, but the stepper matches"
-                    ))
-                }
+                (InventoryCell::Pending(package), NativeStatus::Matched) => found.push(
+                    format!("{case}: marked pending {package}, but {subject} matches"),
+                ),
                 (InventoryCell::Pending(recorded), NativeStatus::Pending(actual)) => {
                     if recorded != actual {
                         found.push(format!(
-                            "{case}: marked pending {recorded}, but the stepper is pending {actual}"
+                            "{case}: marked pending {recorded}, but {subject} is pending {actual}"
                         ));
                     }
                 }
                 (InventoryCell::Pending(package), NativeStatus::Failed { reason }) => {
                     found.push(format!(
-                        "{case}: marked pending {package}, but the stepper fails: {reason}"
+                        "{case}: marked pending {package}, but {subject} fails: {reason}"
                     ));
                 }
             }
