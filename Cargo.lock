@@ -1494,6 +1494,7 @@ dependencies = [
  "serde",
  "serde_json",
  "toml",
+ "vibra-build",
  "vibra-diagnostics",
  "vibra-exec",
  "vibra-fmt",

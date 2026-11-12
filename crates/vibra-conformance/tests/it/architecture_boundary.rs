@@ -193,6 +193,7 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     (
         "vibra-conformance",
         &[
+            "vibra-build",
             "vibra-diagnostics",
             "vibra-fmt",
             "vibra-schema",

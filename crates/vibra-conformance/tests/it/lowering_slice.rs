@@ -76,7 +76,7 @@ fn stdout_event(text: &str) -> String {
 
 // -- the two executors ----------------------------------------------------------
 
-fn checked(source: &str) -> CheckedProgram {
+pub(crate) fn checked(source: &str) -> CheckedProgram {
     let result = check_source("lowering-slice.vib", source);
     assert!(result.accepted(), "{:?}\n{source}", result.diagnostics());
     result.program().expect("an accepted program").clone()
@@ -638,7 +638,7 @@ fn a_tail_call_lowers_to_a_tail_transfer_for_every_kind_of_callee() {
 ///
 /// The counter counts down in binary with only `if` over `bool`: bit `i`
 /// flips when every lower bit is clear. The loop ends when every bit is clear.
-fn countdown(rounds: u32, bits: usize, indirect: bool) -> String {
+pub(crate) fn countdown(rounds: u32, bits: usize, indirect: bool) -> String {
     let names: Vec<String> = (0..bits).map(|bit| format!("b{bit}")).collect();
     let mut source = String::new();
     let start: Vec<&str> = (0..bits)
@@ -811,7 +811,7 @@ fn a_form_outside_the_slice_is_not_lowered_and_names_the_form() {
 // -- verification and determinism ----------------------------------------------------
 
 /// Every source of this file that the slice admits.
-fn admitted_sources() -> Vec<(&'static str, String)> {
+pub(crate) fn admitted_sources() -> Vec<(&'static str, String)> {
     vec![
         ("leaf", "(defn main () i32 7i32)".to_owned()),
         (

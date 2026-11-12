@@ -41,6 +41,12 @@ mod host_single_source;
 mod host_world_corpus;
 mod initializer_calls;
 mod interfaces_matrix;
+#[cfg(windows)]
+mod linked_exe;
+#[cfg(windows)]
+mod linked_exe_programs;
+#[cfg(windows)]
+mod linked_exe_support;
 mod lowering_slice;
 mod lowers_every_form;
 mod native_bodies;
