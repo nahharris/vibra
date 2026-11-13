@@ -8,6 +8,9 @@
 
 use std::fmt;
 
+use vibra_ir::external::NumericType;
+use vibra_nexus::{IntOp, ScalarOp};
+
 /// The version of the boundary between generated code and the runtime. It is
 /// the one [`vibra_nexus::admit`] checks.
 pub const ABI_VERSION: u32 = vibra_nexus::ABI_VERSION;
@@ -50,6 +53,143 @@ pub const OP_I64_SUB: u32 = 1;
 pub const OP_I64_EQ: u32 = 2;
 /// `nexus_op`: signed 64-bit less-than, an `I32` `0` or `1`.
 pub const OP_I64_LT_S: u32 = 3;
+
+/// `nexus_op`: the sum of two integers of one type, saturated at the bounds of
+/// the type. This and the eight constants after it are the operations of the
+/// unchecked integer family; the code of one operation at one integer type is
+/// `OP_INT_* | ((INT_TYPE_* + 1) << OP_INT_TYPE_SHIFT)`, so the codes `0` to
+/// `3` above keep their values and an integer operation never collides with
+/// them. The operands are cells of the type's class: `I32` up to 32 bits (a
+/// signed type sign-extended to 32 bits, an unsigned one zero-extended) and
+/// `I64` at 64.
+pub const OP_INT_ADD: u32 = 4;
+/// `nexus_op` integer operation: the difference, saturated.
+pub const OP_INT_SUB: u32 = 5;
+/// `nexus_op` integer operation: the product, saturated.
+pub const OP_INT_MUL: u32 = 6;
+/// `nexus_op` integer operation: the quotient truncated toward zero, saturated.
+/// A zero divisor is a defect of the program; the generator branches to a trap
+/// before it divides.
+pub const OP_INT_DIV: u32 = 7;
+/// `nexus_op` integer operation: the remainder with the dividend's sign. A zero
+/// divisor is a defect of the program.
+pub const OP_INT_REM: u32 = 8;
+/// `nexus_op` integer operation: `left * 2^amount`, saturated; the amount is a
+/// `u32` cell.
+pub const OP_INT_SHIFT_LEFT: u32 = 9;
+/// `nexus_op` integer operation: `floor(left / 2^amount)`; the amount is a
+/// `u32` cell.
+pub const OP_INT_SHIFT_RIGHT: u32 = 10;
+/// `nexus_op` integer operation: equality, an `I32` `0` or `1`.
+pub const OP_INT_EQUAL: u32 = 11;
+/// `nexus_op` integer operation: less-than in the order of the type, an `I32`
+/// `0` or `1`.
+pub const OP_INT_LESS: u32 = 12;
+/// Where the integer type sits in the code of an integer operation.
+pub const OP_INT_TYPE_SHIFT: u32 = 8;
+/// Integer type `i8` of an integer operation's code.
+pub const INT_TYPE_I8: u32 = 0;
+/// Integer type `i16` of an integer operation's code.
+pub const INT_TYPE_I16: u32 = 1;
+/// Integer type `i32` of an integer operation's code.
+pub const INT_TYPE_I32: u32 = 2;
+/// Integer type `i64` of an integer operation's code.
+pub const INT_TYPE_I64: u32 = 3;
+/// Integer type `u8` of an integer operation's code.
+pub const INT_TYPE_U8: u32 = 4;
+/// Integer type `u16` of an integer operation's code.
+pub const INT_TYPE_U16: u32 = 5;
+/// Integer type `u32` of an integer operation's code.
+pub const INT_TYPE_U32: u32 = 6;
+/// Integer type `u64` of an integer operation's code.
+pub const INT_TYPE_U64: u32 = 7;
+
+/// The code of integer operation `operation` (`OP_INT_*`) at integer type
+/// `numeric` (`INT_TYPE_*`).
+#[must_use]
+pub const fn int_op_code(operation: u32, numeric: u32) -> u32 {
+    operation | (numeric.wrapping_add(1) << OP_INT_TYPE_SHIFT)
+}
+
+/// The `nexus_op` code of `op`: the one mapping from the runtime's operation to
+/// the wire, with no wildcard, so a new `ScalarOp` does not compile until it has
+/// a code. [`decode_scalar_op`] is its inverse, and a test holds the two to
+/// every operation and to every code.
+#[must_use]
+pub const fn encode_scalar_op(op: ScalarOp) -> u32 {
+    match op {
+        ScalarOp::I64Add => OP_I64_ADD,
+        ScalarOp::I64Sub => OP_I64_SUB,
+        ScalarOp::I64Eq => OP_I64_EQ,
+        ScalarOp::I64LtS => OP_I64_LT_S,
+        ScalarOp::Int(operation, numeric) => int_op_code(
+            match operation {
+                IntOp::Add => OP_INT_ADD,
+                IntOp::Sub => OP_INT_SUB,
+                IntOp::Mul => OP_INT_MUL,
+                IntOp::Div => OP_INT_DIV,
+                IntOp::Rem => OP_INT_REM,
+                IntOp::ShiftLeft => OP_INT_SHIFT_LEFT,
+                IntOp::ShiftRight => OP_INT_SHIFT_RIGHT,
+                IntOp::Equal => OP_INT_EQUAL,
+                IntOp::Less => OP_INT_LESS,
+            },
+            match numeric {
+                NumericType::I8 => INT_TYPE_I8,
+                NumericType::I16 => INT_TYPE_I16,
+                NumericType::I32 => INT_TYPE_I32,
+                NumericType::I64 => INT_TYPE_I64,
+                NumericType::U8 => INT_TYPE_U8,
+                NumericType::U16 => INT_TYPE_U16,
+                NumericType::U32 => INT_TYPE_U32,
+                // A float type has no integer operation: the verifier refuses
+                // it, and its code is a code no runtime answers.
+                NumericType::U64 => INT_TYPE_U64,
+                NumericType::F32 | NumericType::F64 => INT_TYPE_NONE,
+            },
+        ),
+    }
+}
+
+/// The type field of the code of an integer operation at a floating-point type,
+/// which [`decode_scalar_op`] refuses.
+const INT_TYPE_NONE: u32 = 8;
+
+/// The operation a `nexus_op` code names, or `None` for a code no operation has.
+#[must_use]
+pub fn decode_scalar_op(code: u32) -> Option<ScalarOp> {
+    match code {
+        OP_I64_ADD => return Some(ScalarOp::I64Add),
+        OP_I64_SUB => return Some(ScalarOp::I64Sub),
+        OP_I64_EQ => return Some(ScalarOp::I64Eq),
+        OP_I64_LT_S => return Some(ScalarOp::I64LtS),
+        _ => {}
+    }
+    let operation = match code & ((1 << OP_INT_TYPE_SHIFT) - 1) {
+        OP_INT_ADD => IntOp::Add,
+        OP_INT_SUB => IntOp::Sub,
+        OP_INT_MUL => IntOp::Mul,
+        OP_INT_DIV => IntOp::Div,
+        OP_INT_REM => IntOp::Rem,
+        OP_INT_SHIFT_LEFT => IntOp::ShiftLeft,
+        OP_INT_SHIFT_RIGHT => IntOp::ShiftRight,
+        OP_INT_EQUAL => IntOp::Equal,
+        OP_INT_LESS => IntOp::Less,
+        _ => return None,
+    };
+    let numeric = match (code >> OP_INT_TYPE_SHIFT).checked_sub(1)? {
+        INT_TYPE_I8 => NumericType::I8,
+        INT_TYPE_I16 => NumericType::I16,
+        INT_TYPE_I32 => NumericType::I32,
+        INT_TYPE_I64 => NumericType::I64,
+        INT_TYPE_U8 => NumericType::U8,
+        INT_TYPE_U16 => NumericType::U16,
+        INT_TYPE_U32 => NumericType::U32,
+        INT_TYPE_U64 => NumericType::U64,
+        _ => return None,
+    };
+    Some(ScalarOp::Int(operation, numeric))
+}
 
 /// `nexus_build` kind: tuple.
 pub const KIND_TUPLE: u32 = 0;

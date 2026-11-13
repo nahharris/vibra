@@ -1,0 +1,17 @@
+id = "V1-RUNTIME-nexus-m1-fixture-division-by-zero"
+rule = "V1-RUNTIME"
+profile = "interpreter-v1"
+operation = "workspace-run"
+description = "The division variant of the Nexus Milestone 1 fixture: the counting loop of the second module divides by its counter, so after a thousand tail calls the divisor is zero and the run ends with @runtime.division-by-zero, which has no origin; nothing is written, and the run has the trap diagnostic and no result or trace snapshot."
+
+[inputs]
+project = "tree/project.vibon"
+tree = "tree"
+
+[expect]
+accepted = true
+
+[[expect.diagnostics]]
+code = "@runtime.division-by-zero"
+level = "@error"
+span = [0, 0]

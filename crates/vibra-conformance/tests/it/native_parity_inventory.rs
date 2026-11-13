@@ -52,7 +52,7 @@ fn the_table_names_every_executable_case_once() {
     let (executable, report) = report();
     assert_eq!(
         executable.len(),
-        174,
+        175,
         "the executable cases of the baseline"
     );
     let table = table();

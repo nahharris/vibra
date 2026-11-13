@@ -16,18 +16,61 @@ use cranelift_codegen::ir::{
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_module::Module;
 use vibra_exec::{
-    Block, BlockId, Callee, Function, Inst, ObjectKind, ScalarClass, ScalarOp, Slot,
-    Terminator,
+    Block, BlockId, Callee, Function, Inst, IntOp, ObjectKind, ScalarClass, ScalarOp,
+    Slot, Terminator,
 };
 use vibra_ir::boundary::TrapCode;
+use vibra_ir::external::NumericType;
 use vibra_nexus_bridge::{
-    CLASS_F32, CLASS_F64, CLASS_I32, CLASS_I64, KIND_ARRAY, KIND_ENUM, KIND_RECORD,
-    KIND_TUPLE, KIND_UNION, KIND_WRAPPER, MAX_SWITCH_TARGETS, OP_I64_ADD, OP_I64_EQ,
-    OP_I64_LT_S, OP_I64_SUB, STATUS_PROCEED,
+    CLASS_F32, CLASS_F64, CLASS_I32, CLASS_I64, INT_TYPE_I8, INT_TYPE_I16,
+    INT_TYPE_I32, INT_TYPE_I64, INT_TYPE_U8, INT_TYPE_U16, INT_TYPE_U32, INT_TYPE_U64,
+    KIND_ARRAY, KIND_ENUM, KIND_RECORD, KIND_TUPLE, KIND_UNION, KIND_WRAPPER,
+    MAX_SWITCH_TARGETS, OP_I64_ADD, OP_I64_EQ, OP_I64_LT_S, OP_I64_SUB, OP_INT_ADD,
+    OP_INT_DIV, OP_INT_EQUAL, OP_INT_LESS, OP_INT_MUL, OP_INT_REM, OP_INT_SHIFT_LEFT,
+    OP_INT_SHIFT_RIGHT, OP_INT_SUB, STATUS_PROCEED, int_op_code,
 };
 
 use crate::error::EmitError;
 use crate::services::Services;
+
+/// The `nexus_op` code of `op`: the generator's one mapping, with no wildcard.
+/// The generator's tests hold it to the bridge's decoding, and `vibra-conformance`
+/// holds the stepper's mapping to the same names. A floating-point type has no integer operation, so
+/// its code names no operation (the verifier refuses the program first).
+#[must_use]
+pub const fn op_code(op: ScalarOp) -> u32 {
+    match op {
+        ScalarOp::I64Add => OP_I64_ADD,
+        ScalarOp::I64Sub => OP_I64_SUB,
+        ScalarOp::I64Eq => OP_I64_EQ,
+        ScalarOp::I64LtS => OP_I64_LT_S,
+        ScalarOp::Int(operation, numeric) => int_op_code(
+            match operation {
+                IntOp::Add => OP_INT_ADD,
+                IntOp::Sub => OP_INT_SUB,
+                IntOp::Mul => OP_INT_MUL,
+                IntOp::Div => OP_INT_DIV,
+                IntOp::Rem => OP_INT_REM,
+                IntOp::ShiftLeft => OP_INT_SHIFT_LEFT,
+                IntOp::ShiftRight => OP_INT_SHIFT_RIGHT,
+                IntOp::Equal => OP_INT_EQUAL,
+                IntOp::Less => OP_INT_LESS,
+            },
+            match numeric {
+                NumericType::I8 => INT_TYPE_I8,
+                NumericType::I16 => INT_TYPE_I16,
+                NumericType::I32 => INT_TYPE_I32,
+                NumericType::I64 => INT_TYPE_I64,
+                NumericType::U8 => INT_TYPE_U8,
+                NumericType::U16 => INT_TYPE_U16,
+                NumericType::U32 => INT_TYPE_U32,
+                NumericType::U64 => INT_TYPE_U64,
+                // Unreachable for a verified program.
+                NumericType::F32 | NumericType::F64 => u32::MAX,
+            },
+        ),
+    }
+}
 
 const NO_ARGS: [BlockArg; 0] = [];
 
@@ -291,12 +334,7 @@ impl Translator<'_, '_, '_> {
                 self.checked("nexus_drop", &[ctx, slot])
             }
             Inst::Op { dst, op, args } => {
-                let op = match op {
-                    ScalarOp::I64Add => OP_I64_ADD,
-                    ScalarOp::I64Sub => OP_I64_SUB,
-                    ScalarOp::I64Eq => OP_I64_EQ,
-                    ScalarOp::I64LtS => OP_I64_LT_S,
-                };
+                let op = op_code(*op);
                 let [left, right] = args.as_slice() else {
                     return Err(EmitError::Contract(
                         "a scalar operation without two operands passed verification"

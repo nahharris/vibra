@@ -1,0 +1,12 @@
+; The counting loop of the division variant of the Nexus M1 fixture. It is the
+; loop of the fixture with a test that divides by the counter: the remainder of
+; a number larger than any counter is never the number less one, so the loop
+; runs the counter down to zero, where the division has a zero divisor and the
+; run ends in `@runtime.division-by-zero`, which has no origin. `finish` is
+; never called.
+(defn count (finish (fn () str) remaining u64) str
+  visibility: @public
+  (if
+    (equatable.equal (u64.rem 1000000u64 remaining) 999999u64)
+    (finish)
+    (count finish (u64.sub remaining 1u64))))

@@ -71,6 +71,7 @@ mod trap_origins;
 mod try_tail_loop;
 mod typed_ir_identity;
 mod typed_literals;
+mod unchecked_integers;
 mod wasm_skeleton;
 mod workspace_semantic;
 mod workspace_test;

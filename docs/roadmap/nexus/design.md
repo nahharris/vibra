@@ -115,7 +115,8 @@ count placement; it is active code, not the archive.
 | `Global` | `Global` | X3-03 |
 | `Host` | `Host`, which ends the block | X3-03 |
 | `Return` | `Return` | X3-03 |
-| `External` | `Intrinsic` | X3-10, X3-16 |
+| `External` of an unchecked integer operation | `Op` over the operand type; `neg` is `0 - x`; `div` and `rem` test the divisor against zero and `Branch` to a block that ends in `Trap` `DivisionByZero` with no origin; `equal` and `compare` build their `bool` or `ordering` by branches | X3-10a |
+| `External`, any other | `Intrinsic` | X3-10, X3-16 |
 | `Record`, `Tuple`, `Variant`, `Wrap`, `Array`, `Widen` | `Build` | X3-11 |
 | `Project`, `TupleProject` | `Cell`, then `Drop` of the aggregate | X3-11 |
 | `Match`, `Try` | `Variant`, `Switch` or `Branch`, `Cell` for binders | X3-12 |

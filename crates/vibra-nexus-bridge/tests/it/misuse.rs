@@ -13,7 +13,7 @@ use vibra_host::{HostWorld, WorldProvider};
 use vibra_nexus::{Context, Outcome, UNBOUNDED, run};
 use vibra_nexus_bridge::{
     CONSTANT_ATOM, CONSTANT_BYTES, CONSTANT_STR, Generated, STATUS_PROCEED,
-    STATUS_TRAP, admit,
+    STATUS_TRAP, admit, int_op_code,
 };
 
 use crate::fixture::{Fixture, function, text};
@@ -49,6 +49,17 @@ fn slot() -> u32 {
         0 => below(u32::MAX),
         1 | 2 => 8 + below(8),
         _ => below(8),
+    }
+}
+
+/// A code of `nexus_op`: mostly an operation of the bridge, sometimes an
+/// integer operation at a random type (a float or a missing one included) and
+/// sometimes any code at all.
+fn op_code() -> u32 {
+    match below(4) {
+        0 => below(6),
+        1 | 2 => int_op_code(4 + below(10), below(10)),
+        _ => below(u32::MAX),
     }
 }
 
@@ -105,7 +116,7 @@ extern "C" fn fuzz_step(ctx: Ctx, _resume: u32) -> u32 {
             10 => note(sys::copy(ctx, slot(), slot())),
             11 => note(sys::move_slot(ctx, slot(), slot())),
             12 => note(sys::drop_slot(ctx, slot())),
-            13 => note(sys::op(ctx, slot(), below(6), slot(), slot())),
+            13 => note(sys::op(ctx, slot(), op_code(), slot(), slot())),
             14 => note(sys::build(ctx, slot(), below(8), below(4), list(count))),
             15 => note(sys::cell(ctx, slot(), slot(), below(5))),
             16 => note(sys::variant(ctx, slot(), slot())),

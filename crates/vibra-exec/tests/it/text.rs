@@ -436,6 +436,36 @@ fn changes() -> Vec<(&'static str, Change)> {
 }
 
 #[test]
+fn every_scalar_operation_prints_its_own_line() {
+    let mut lines = std::collections::BTreeSet::new();
+    let all = ScalarOp::all();
+    // Four 64-bit operations, and each integer operation at each integer type.
+    assert_eq!(all.len(), 4 + 9 * 8);
+    for scalar_op in all {
+        let mut program = everything();
+        let function = program.functions.first_mut().unwrap();
+        let Inst::Op { op, .. } = &mut function.blocks[0].insts[5] else {
+            panic!("the sixth instruction is an operation");
+        };
+        *op = scalar_op;
+        let text = program.to_string();
+        let line = text
+            .lines()
+            .find(|line| line.starts_with("    s2 = op "))
+            .unwrap()
+            .to_owned();
+        assert!(line.ends_with(" [s0, s0]"), "{line}");
+        assert!(lines.insert(line.clone()), "{line} is printed twice");
+        if let ScalarOp::Int(int, numeric) = scalar_op {
+            assert_eq!(
+                line,
+                format!("    s2 = op Int({int:?}, {numeric:?}) [s0, s0]")
+            );
+        }
+    }
+}
+
+#[test]
 fn text_form_is_deterministic() {
     let program = everything();
     let text = program.to_string();
