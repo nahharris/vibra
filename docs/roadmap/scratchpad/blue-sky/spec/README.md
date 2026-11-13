@@ -27,6 +27,7 @@ diagnostics, `.vib` for source text, and `.vibon` for stored data.
 | [06 Runtime](06-runtime.md) | Journal format, drivers, scheduling, memory, replay, simulation, targets |
 | [07 Compiler](07-compiler.md) | Pipeline, kernel, core language, readings, backends, validation |
 | [08 Tooling](08-tooling.md) | Commands, staging, holes, queries, evaluation, diagnostics, conformance |
+| [09 Sample](09-sample.md) | One system written out in full, in every surface |
 
 ## The language in one page
 
@@ -51,26 +52,20 @@ A complete cell:
 ```text
 fn fib-fast
   takes n: int
-  returns value: int
+  returns int
   requires (int.ge n 0)
   means (fib n)
+  example (fib-fast 10) = 55
   cost (bound.linear n)
 body
-  var previous: int = 0
-  var current: int = 1
-  for step in (int.range 0 n)
-    invariant (int.eq previous (fib step))
-    invariant (int.eq current (fib (int.add step 1)))
-    let next: int = (int.add previous current)
-    set previous = current
-    set current = next
-  return previous
+  return (fib-from step: 0 previous: 0 current: 1 limit: n)
 end fib-fast
 ```
 
 Everything above `body` is the claim. Everything below is the witness. The
 claim says the result equals the slow reference `fib` and costs linear
-steps. The loop invariants let a solver confirm it.
+steps. The [sample](09-sample.md) has `fib`, the helper `fib-from`, and a
+whole system around them.
 
 ## Paradigms and where they are specified
 
@@ -134,20 +129,20 @@ Dependencies inside the layers:
 | S-expression source files | Stored trees with a line-oriented text projection |
 | `defn` | `fn`: claim and witness with separate owners |
 | Effect rows and ceilings | `uses` clauses naming ports; effects are intents |
-| No mutation, no loops | Local `var` and loops inside a body; values stay immutable |
-| `option` from indexing | Indexing carries a proof obligation; `get` returns `option` |
+| No mutation, no loops | Kept. Transforms and recursion, with tail calls |
+| `lambda` | Named nested `fn` |
+| Patterns with binders in `match` | `match` narrows a named value by case |
+| `option` from indexing | `at` carries a proof obligation; `get` returns `option` |
 | Tests | Examples in claims, plus graded evidence |
 | Host calls | Drivers behind ports, each with a model |
 | Interpreter and Wasm parity tests | Translation validation against the reference evaluator |
 | Nexus checkpoints | Journal boundaries |
 | Local actors | Machines with logical time |
 
-Two commitments of the current charter are changed. Run-time failure of
+One commitment of the current charter is changed. Run-time failure of
 pure code is removed instead of typed, because an obligation is a stronger
-guardrail than a handled error. Local variables and loops are allowed
-inside a body, whose effect on the outside is still a pure function. That
-second change is provisional. No direct evidence supports it, and some
-evidence is against it: see open question 7.
+guardrail than a handled error. Immutability and the absence of loops are
+kept: see open question 7 for the evidence weighed.
 
 ## Open questions
 
@@ -165,9 +160,9 @@ These are undecided and marked where they arise.
    Journals shared across nodes are not.
 6. **Model training.** A surface per model family and a generated corpus
    are possible and unspecified.
-7. **Loops and local variables.** This draft allows `var`, `set`, `for`,
-   and `while` in a body. Today's Vibra allows none of them, and nothing
-   found so far shows that to be a mistake.
+7. **Loops and local variables.** This draft has neither, as today's
+   Vibra has neither. An earlier revision added them. Nothing found
+   shows their absence to be a mistake.
    - For loops: models pass fewer tasks in Haskell and OCaml than in Java
      (42% and 52% against 61% for one model) and write imperative
      patterns in functional languages 80% to 94% of the time
@@ -182,9 +177,11 @@ These are undecided and marked where they arise.
    - No study found compares loops with recursion while holding the
      language fixed.
 
-   The alternative keeps today's rule: no `var`, `set`, or `while`, and
-   iteration by standard transforms and recursion. The same tasks written
-   both ways should decide it.
+   The same tasks written both ways would settle it. Until then the
+   rule with fewer proof obligations and one way to iterate stands.
+8. **Surface shapes.** Brackets, separators, and closers are listed with
+   their alternatives in [02](02-syntax.md#shape-decisions) and are
+   awaiting review.
 
 ## Reading order
 

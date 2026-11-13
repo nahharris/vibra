@@ -54,7 +54,7 @@ fn split-cents
   ensures (int.le (cents.spread shares) 1)
   ensures (list.descending shares)
   example (split-cents (cents.of 100) (part-count.of 3)) =
-      (list.of (cents.of 34) (cents.of 33) (cents.of 33))
+      [(cents.of 34), (cents.of 33), (cents.of 33)]
   cost (bound.linear parts.value)
 ```
 
@@ -81,10 +81,9 @@ scope there.
 | --- | --- |
 | A call | The callee's `requires` hold |
 | `(t.of e)` | The `where` clauses of `t` hold of `e` |
-| `x[i]`, `(int.div a b)`, fixed-width arithmetic, `T.from` | The operation is defined |
+| `(array.at x i)`, `(int.div a b)`, fixed-width arithmetic, `T.from` | The operation is defined |
 | `return e` | Every `ensures` holds, and `e` equals `means` |
-| A recursive call, a `while` iteration | The measure decreases and is not negative |
-| A loop | Each `invariant` holds on entry and is preserved |
+| A recursive call | The measure decreases and is not negative |
 | `assert p` | `p` holds |
 | `impossible` | The point is unreachable |
 | `cost b` | The inferred bound is within `b` |
@@ -92,8 +91,8 @@ scope there.
 | `impl` | Each law of the interface holds |
 | An `example` | The witness and the meaning both give the stated value |
 
-Type checking, exhaustiveness, totality of `for`, ownership, labels, and
-`uses` are decided by the kernel directly and are not obligations.
+Type checking, exhaustiveness, ownership, labels, and `uses` are decided
+by the kernel directly and are not obligations.
 
 ## Evidence
 
@@ -222,7 +221,7 @@ end fib-grows
   after establishing its `requires`. Induction is a lemma applying itself
   under a decreasing measure.
 - A lemma body is never executed. It contains `let`, `if`, `match`,
-  `for`, `assert`, `apply`, and `pass`.
+  `assert`, `apply`, and `pass`.
 - A **law** is a lemma stated in an interface. Each `impl` proves it.
 - There is no tactic language. A proof is a body with assertions, and a
   solver fills the steps between them.
@@ -234,7 +233,7 @@ A **debt** records that something was not shown.
 | Kind | Created by | Records |
 | --- | --- | --- |
 | `assume` | An `assume p` statement | The assumed fact |
-| `diverge` | A recursion or loop admitted without a measure | The cell |
+| `diverge` | A recursion admitted without a measure | The cell |
 | `extern` | A witness of the form `body extern "symbol"` | The symbol and the claim it is trusted to meet |
 | `release` | A `releases l` clause | The label and the function |
 | `open` | An obligation left without evidence at admission | The obligation |

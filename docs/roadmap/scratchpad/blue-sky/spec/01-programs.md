@@ -35,7 +35,8 @@ Cell kinds and what their two parts are:
 | `lemma` | A statement over cells | `body`, a proof |
 | `interface` | Member signatures and laws | None |
 | `impl` | The interface and the type it is for | Member bodies |
-| `port` | Operations, outcomes, delivery, model | None in the language; a driver outside it |
+| `port` | Operations, signals, outcomes, delivery, model | None in the language; a driver outside it |
+| `model` | The port it plays and its state | One handler per operation |
 | `proc` | Parameters, result, `uses`, `ensures` over outcomes | `body` |
 | `machine` | State, accepted events, `uses`, invariants | `on` handlers |
 | `notation` | Grammar and the type it produces | Elaboration and printer |

@@ -57,9 +57,9 @@ end ledger
   expected to handle. There is no other error channel.
 - A **signal** arrives unrequested: a request from a client, a message, a
   tick.
-- A port MUST name a **model**: a machine, written in Vibra, that plays
-  the port in simulation and exploration, including its failures. A port
-  without a model cannot be used.
+- A port MUST name a **model**, written in Vibra, that plays the port in
+  simulation and exploration, including its failures. A port without a
+  model cannot be used.
 - A procedure or machine may address only the ports in its `uses`
   clause. A `fn` has no `uses` clause and cannot address any.
 - Outside the language, a **driver** implements each port for a target
@@ -67,6 +67,23 @@ end ledger
 
 The standard library defines ports for the console, files, environment,
 network, clock timers, and randomness. They have no special status.
+
+### Models
+
+A model is a cell with a state and one handler per operation.
+
+- In a handler, `state` is the model's state and `request` is a record of
+  the operation's arguments.
+- A handler is pure. It returns a non-empty list of **answers**, each
+  written `(sim.answer next: s outcome: o)`: every outcome the real port
+  is permitted to give for that request and history, with the model
+  state that follows it.
+- Simulation chooses one answer by seed. Exploration tries each. A driver
+  conforms when every outcome it gives is among the answers
+  ([06](06-runtime.md#drivers)).
+
+The [sample](09-sample.md#a-port-and-its-model) has a complete model.
+Open: how a model produces signals.
 
 ### Delivery
 
@@ -94,7 +111,8 @@ An intent is a value of type `(intent t)`, where `t` is its outcome type.
 | Combinator | Outcome |
 | --- | --- |
 | `(intent.both a b)` | `(pair x y)`, when both have answered |
-| `(intent.all items)` | A list of outcomes, in the order of `items` |
+| `(intent.all items)` | A list of outcomes, in the order of `items`. The parts run concurrently |
+| `(intent.in-order items)` | A list of outcomes. Each part starts when the one before has answered |
 | `(intent.first a b)` | The outcome that arrives first. The other is cancelled |
 | `(intent.within duration a)` | `(option x)`: `none` if the duration passes first |
 
@@ -146,39 +164,37 @@ machine transfer
   starts (transfer-state.idle)
   accepts transfer-command
   uses ledger
-  invariant (implies (transfer-state.is-idle state) (int.eq (pending ledger.debit) 0))
+  invariant (bool.implies (transfer-state.is-idle state) (int.eq (pending ledger.debit) 0))
   on idle, begin
     emit (ledger.debit request.source request.amount)
-    set state = (transfer-state.debiting)
+    return (transfer-state.debiting)
   on idle, ledger.debit
     impossible
   on debiting, begin
-    pass
+    return state
   on debiting, ledger.debit
     let outcome: (uncertain debit-outcome) = event.outcome
     match outcome
       case unknown
-        set state = (transfer-state.review)
+        return (transfer-state.review)
       case known
-        set state = (next-after-debit outcome.value)
+        return (next-after-debit outcome.value)
   // The remaining pairs are elided in this example.
 end transfer
 ```
 
 - The state type MUST be a variant.
-- An **event source** is a case of the `accepts` type, an operation of a
-  used port whose outcome the machine receives, or a signal of a used
-  port.
+- An **event source** is a case of the `accepts` type, an operation or
+  procedure whose intent the machine emits, or a signal of a used port.
 - There MUST be exactly one handler for every pair of state case and
   event source. A pair the author believes cannot occur is written
   `impossible`, which is an obligation and not an assertion at run time.
-- In a handler, `state` is a variable of the state type narrowed to the
-  handler's case, and `event` is the event. For an outcome, `event` has
-  the fields `request` and `outcome`. Machine parameters are visible and
-  immutable.
+- In a handler, `state` is the current state narrowed to the handler's
+  case, and `event` is the event. For an outcome, `event` has the fields
+  `request` and `outcome`. Machine parameters are visible.
 - `emit e` requests intent `e`. Its outcome returns later as an event.
-- A handler is one step. It ends when its block ends. `pass` does
-  nothing.
+- A handler is one step. It returns the next state. `return state` keeps
+  the current one.
 - `(pending p.op)` is the number of requested and unanswered intents of
   that operation. It is available only in claims.
 

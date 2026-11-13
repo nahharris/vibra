@@ -62,13 +62,13 @@ base is allowed to be large.
 
 **Pure code**
 
-- Functions are total. Recursion and `while` loops carry a decreasing
-  measure.
+- Functions are total. Recursion carries a decreasing measure.
 - Pure code cannot fail at run time. Division, indexing, narrowing, and
   fixed-width arithmetic either carry a proof obligation or return an
   `option`.
-- Values are immutable. A body may use local variables and loops. Nothing
-  outside the body can observe them.
+- Values and bindings are immutable. There is no assignment and no loop
+  form. Iteration is by standard transforms and recursion, and a call in
+  tail position uses no stack.
 - There are no exceptions, no null, no implicit conversions, no
   overloading, no inheritance, and no reflection.
 

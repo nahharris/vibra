@@ -109,7 +109,7 @@ A hole `?` or `?name` may stand for a leaf, a type, or a block.
 
 - the expected type;
 - the facts in scope: bindings with their types, known `where` clauses,
-  the current `case`, loop invariants;
+  the current `case`, the `requires` in force;
 - the claim the enclosing cell must meet;
 - the **moves** available.
 
@@ -176,11 +176,11 @@ A diagnostic is a record with a stable code, and is printed as text.
 ```text
 error obligation.failed
   cell      bank.money.split-cents
-  at        body line 7: return built
-  goal      ensures-4 (list.descending shares)
+  at        body: return (list.build parts.value share-at)
+  goal      ensures-4 (list.is-descending (list.map shares cents.value))
   input     total: (cents.of 100), parts: (part-count.of 3)
-  result    (list.of (cents.of 33) (cents.of 33) (cents.of 34))
-  facts     built has length 3; extra is 1
+  result    [(cents.of 33), (cents.of 33), (cents.of 34)]
+  facts     base is 33; extra is 1; share-at gives 34 only at index 2
   fix       the larger shares must come first
 ```
 

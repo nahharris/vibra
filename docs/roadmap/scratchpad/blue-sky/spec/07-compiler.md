@@ -25,7 +25,7 @@ core ──lower──▶ machines ──optimize──▶ backend ──▶ art
 | Elaborate | Surface tree to core | No | The kernel checks the core |
 | Kernel | Core to verdict and obligations | Yes | Review. It is small |
 | Checkers | Obligations to evidence | Only for grade `solved` | The kernel, when a certificate is produced |
-| Lower | Procedures to machines, variables to bindings | No | Validation |
+| Lower | Procedures to machines | No | Validation |
 | Optimize | Core to core | No | Validation |
 | Backend | Core to target code | No | Validation and replay |
 | Reference evaluator | Core to values | Yes | Review. It is the definition |
@@ -43,7 +43,7 @@ term = name | literal
      | (case term (k term)*)      exhaustive choice by variant case
      | (if term term term)
      | (let name type term term)
-     | (loop name params measure term term)   local recursion
+     | (local name params measure term term)  nested function
      | (intent op term*)
 ```
 
@@ -51,8 +51,9 @@ Elaboration removes:
 
 | Surface | Core |
 | --- | --- |
-| `var`, `set`, `for`, `while` | A `loop` whose parameters are the changed variables |
+| Nested `fn` | `local` |
 | Early `return`, `else if` | Nested `if` and `case` with one result |
+| `[…]` and `{…}` literals | Calls to the constructors of the expected type |
 | `match` with narrowing | `case` with `read` |
 | `try` | `case` that returns the failure |
 | Labeled arguments | Positional arguments |
@@ -61,8 +62,8 @@ Elaboration removes:
 | Generic calls | Calls with explicit type arguments |
 | Notations | The declarations they elaborate to |
 
-- A body with variables and loops MUST denote the same function as its
-  elaboration. This is the definition of what such a body means.
+- A body MUST denote the same function as its elaboration. This is the
+  definition of what a body means.
 - Core has no `await`, no `emit`, and no statements. Procedures and
   handlers become functions that return a state and a list of intents.
 
@@ -183,7 +184,8 @@ Every backend MUST:
   call, including `f64` and the iteration order of maps and sets;
 - produce journals that the reference runtime verifies by replay, and
   verify journals the reference runtime produces;
-- charge steps consistently enough that budgets fault in the same step.
+- charge steps consistently enough that budgets fault in the same step;
+- run a call in tail position without consuming stack.
 
 ## Incrementality
 
