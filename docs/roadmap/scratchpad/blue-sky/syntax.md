@@ -303,7 +303,7 @@ defn sequence
 end sequence
 ```
 
-The [draft specification](spec/02-syntax.md#a-longer-example) keeps this
+The [draft specification](spec/09-sample.md) keeps this
 shape and uses more familiar words: `fn`, `returns`, `return`, `if`,
 `else if`, and `else`.
 
