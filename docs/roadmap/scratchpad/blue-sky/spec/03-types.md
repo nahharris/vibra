@@ -171,6 +171,8 @@ debt ([04](04-claims.md#debts)).
 ## Local state
 
 A body may declare variables with `var` and reassign them with `set`.
+This section is provisional: see
+[open question 7](README.md#open-questions).
 
 - A variable is visible only in its body. It cannot be captured, stored,
   or passed by reference. Passing it passes its current value.

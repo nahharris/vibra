@@ -142,12 +142,12 @@ Dependencies inside the layers:
 | Nexus checkpoints | Journal boundaries |
 | Local actors | Machines with logical time |
 
-Two commitments of the current charter are reversed on purpose. Local
-mutation and loops are allowed inside a body, because they are what models
-write best and what solvers verify best, and a body's effect on the
-outside is still a pure function. Run-time failure of pure code is removed
-instead of typed, because an obligation is a stronger guardrail than a
-handled error.
+Two commitments of the current charter are changed. Run-time failure of
+pure code is removed instead of typed, because an obligation is a stronger
+guardrail than a handled error. Local variables and loops are allowed
+inside a body, whose effect on the outside is still a pure function. That
+second change is provisional. No direct evidence supports it, and some
+evidence is against it: see open question 7.
 
 ## Open questions
 
@@ -165,6 +165,26 @@ These are undecided and marked where they arise.
    Journals shared across nodes are not.
 6. **Model training.** A surface per model family and a generated corpus
    are possible and unspecified.
+7. **Loops and local variables.** This draft allows `var`, `set`, `for`,
+   and `while` in a body. Today's Vibra allows none of them, and nothing
+   found so far shows that to be a mistake.
+   - For loops: models pass fewer tasks in Haskell and OCaml than in Java
+     (42% and 52% against 61% for one model) and write imperative
+     patterns in functional languages 80% to 94% of the time
+     ([FPEval](https://arxiv.org/html/2601.02060)). The comparison is
+     confounded by how much of each language models have seen.
+   - Against loops: a loop invariant that is not maintained is the most
+     common verifier error in generated Dafny
+     ([study](https://arxiv.org/html/2503.14183)), and models repaired a
+     wrong invariant at most 16% of the time
+     ([study](https://arxiv.org/html/2511.06552)). A `map` or a `fold`
+     needs no invariant at its call site.
+   - No study found compares loops with recursion while holding the
+     language fixed.
+
+   The alternative keeps today's rule: no `var`, `set`, or `while`, and
+   iteration by standard transforms and recursion. The same tasks written
+   both ways should decide it.
 
 ## Reading order
 
