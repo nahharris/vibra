@@ -11,7 +11,10 @@ Toolchain and target feasibility record: [feasibility.md](feasibility.md).
    runtime frame ownership, resume and quota semantics, source origin
    mapping, the ABI and bridge boundary, and the native parity profile.
    Record toolchain and target feasibility for Windows, Linux, and macOS
-   early, including their link and launcher requirements.
+   early, including their link and launcher requirements. The draft is the
+   [Native execution](../../../spec/06-runtime.md#native-execution) section; it
+   states resume semantics without defining a quota, which stays a toolchain
+   control.
 2. Lower a checked program into explicit blocks, frame slots, direct and
    indirect calls, tail transfer, resume points, and host calls. Verify
    layouts and transfers before emission. Emit target objects with Cranelift

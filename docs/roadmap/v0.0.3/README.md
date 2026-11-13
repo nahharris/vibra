@@ -48,9 +48,23 @@ tooling, runtime, diagnostics, and conformance contracts together at cutover.
 Review source/effect chapters for backend references and preserve the shared
 language semantics.
 
+The specification now carries the native contract beside the Wasm one, marked
+as specified for this release and not implemented: the
+[Native execution](../../spec/06-runtime.md#native-execution) section, the
+`native-v1` profile and the native parity inventory in
+[Native transition](../../spec/07-diagnostics-and-conformance.md#native-transition),
+the [native build command](../../spec/05-tooling.md#native-build-command) and
+[native build products](../../spec/04-programs-and-packages.md#build-products),
+and the diagnostics for an unsupported target, a missing link tool, a link
+failure, and an incompatible artifact. It states that execution may be
+suspended and resumed at checkpoints without observable effect and defines no
+quota. Until the maintainer approves it, the runtime ABI and the parity
+inventory it describes are provisional.
+
 Require full interpreter parity for every executable case in the supported
 release profile and repeatable native artifacts on all three platforms. An
-unavailable native case counts as a gap for that profile. Run the host suite
+unavailable native case counts as a gap for that profile, and a `pending` cell
+of the native parity inventory fails the M2 gate. Run the host suite
 and the independent Vibra corpus. Require v0.0.2 tooling regressions to pass
 and keep run, test, and interactive evaluation sessions interpreter-backed.
 Retire the active Wasm path only after all three native targets pass. If one

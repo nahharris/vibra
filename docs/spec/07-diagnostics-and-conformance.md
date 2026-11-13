@@ -10,6 +10,9 @@ which lowers every form of a checked program. Milestone 4
 Step 13 closes the Stage 4B contracts of this chapter, the effect and host
 diagnostics, the host-world corpus input, the audit-event snapshots, and the
 registry invariants, and implements none of them; Steps 14 to 20 do.
+The `native-v1` profile, the transition rules of **Native transition**, and the
+diagnostics of native builds are specified for release v0.0.3 and implemented by
+none of the runners.
 
 ## Diagnostics are a language surface
 
@@ -115,9 +118,13 @@ table governs.
 | `@runtime.division-by-zero` | `@error` |
 | `@runtime.unobservable-function` | `@error` |
 | `@runtime.memory-exhausted` | `@error` |
+| `@runtime.incompatible-artifact` | `@error` |
 | `@style.argument-order` | `@warning` |
 | `@contract.unused-effect` | `@warning` |
 | `@tool.unavailable` | `@error` |
+| `@tool.unsupported-target` | `@error` |
+| `@tool.missing-link-tool` | `@error` |
+| `@tool.link-failed` | `@error` |
 
 Diagnostic codes are stable under the charter's compatibility policy. In
 Vibra data they are atoms. JSON output serializes the exact atom spelling as a
@@ -158,6 +165,25 @@ surface is outside the selected implementation profile. It is distinct from a
 malformed-input diagnostic and from the conformance runner's `unavailable`
 status: a real handler reports the diagnostic through its result contract,
 while a missing handler remains an unavailable corpus observation.
+
+The native build and the native runtime add four codes, all with fixed level
+`@error` and fix capability `@none`. Each is unlocated: its primary span is the
+empty span `0..0` with no source ID, because none concerns a source form, and a
+note carries the facts named below. They are specified for release v0.0.3.
+
+- `@tool.unsupported-target` is emitted when the native target triple of
+  `build` is not one the installed toolchain supports. It is not
+  `@tool.unavailable`, which reports a surface outside the implementation
+  profile, and a note names the requested triple.
+- `@tool.missing-link-tool` is emitted when the linker, or a system library or
+  SDK input that the link of the selected triple needs, cannot be located. A note
+  names what is missing.
+- `@tool.link-failed` is emitted when the linker ran and did not produce an
+  executable. A note carries its exit status.
+- `@runtime.incompatible-artifact` is emitted by the admission of a native
+  executable, as the runtime chapter states, when its runtime ABI version, its
+  derived registry minor, or a required registry symbol is not one the runtime
+  implements. A note names the check that failed.
 
 ### M2 unavailable-form spans
 
@@ -897,6 +923,7 @@ Profile names are independent of toolchain release versions.
 | `interpreter-v1` | Static profile plus reference execution and external registries |
 | `tooling-v1` | Static profile plus schemas, queries, plans, CLI, MCP |
 | `wasm-v1` | Static profile plus deterministic Wasm and runtime |
+| `native-v1` | Static profile plus deterministic native executables and runtime |
 | `full-v1` | All profiles, stdlib, projects, and release gates |
 
 Profiles are capability statements, not source dialects. The same source is
@@ -953,6 +980,78 @@ interpreter running the body, and the module calling the native import agree. Fo
 a primitive row with no body, both backends call the same native code and are
 checked against the shared sample vectors.
 
+### Native transition
+
+Implementation status: specified for release v0.0.3 and not yet implemented.
+
+`native-v1` is the profile of a runner that executes native executables. Like
+`wasm-v1` it does not include `interpreter-v1`, and `full-v1` includes it. A
+runner reports `native-v1` only when it has a native execution handler.
+
+An executable case is compared against every executor a runner has. A runner
+with a native execution handler runs every executable case in it as well as in
+the interpreter and, when it has one, the Wasm backend, against the one
+expectation of the case. A case passes only when every executor matches it, and a
+disagreement from any executor fails the case, with a failure reason that names
+the executor. No case carries a second expectation for a native executor, and no
+operation selector, snapshot key, or case field is added for one. Each executor
+is given its own fresh copy of the host world of the case and runs under the one
+finite memory limit of the runner.
+
+The native executors of a runner are the reference stepper, which runs a
+verified execution IR on Nexus without generated code and so exists on every
+platform, and a native executable on each platform that has a runner. The
+reference stepper has no profile, command, or build product. Every comparison of
+a native executor runs twice, without suspension and with execution suspended
+and resumed at every checkpoint, and both runs MUST match the expectation. The
+native-implementation harness above also holds a native executable to the body of
+each native symbol: for every sample input, the executable calling the native
+code, or running the body when the meaning of the native applies a function
+value, agrees with the interpreter running the body.
+
+The runner reports one count line for the native executors over the executable
+cases, as matched, pending, and failed cells.
+
+The **native parity inventory** is the checked-in table
+`conformance/native-parity.tsv`. It has one row for each executable case and one
+column for each native executor, `stepper`, `windows`, `linux`, and `macos`. A
+cell is `matched`, or `pending` followed by the identifier of the planned work
+that will move it, and has no third value. A host test fails when the table and
+the corpus disagree: a case with no row, a row with no case, a `matched` cell
+whose executor does not match the expectation, or a `pending` cell whose
+executor does. A `pending` cell is a gap and never a pass. It fails the exit gate
+of Milestone 2 of release v0.0.3, which requires none, and removing a case or
+lowering its profile does not clear it. The inventory exists for the transition:
+the Wasm backend has no such table because it lowers every checked form.
+
+### Native coverage
+
+Each requirement of the **Native execution** section of the runtime chapter has
+the evidence below. Cases are in `V1-RUNTIME`; a name that does not yet exist is
+created by the release work that adds the executor. An invariant that no case
+can observe is review-only and is checked by the release audit.
+
+| Requirement | Evidence |
+| --- | --- |
+| Native behavior equals the interpreter's | Every executable case, through the transition rule and the inventory above |
+| An operation outside the supported profile reports `@tool.unavailable` and nothing is lowered in part | Host tests `a_form_outside_the_slice_is_not_lowered_and_names_the_form` and `every_lowered_program_verifies` |
+| The execution IR is verified before code is generated | Host tests `every_verify_error_kind_has_a_rejected_program` and, for emission, that the code generator accepts only a verified program by type |
+| Suspension has no observable effect | A host test that runs the whole executable corpus with execution suspended and resumed at every checkpoint, as the transition rule requires of every comparison |
+| A host operation is performed once however execution is suspended | Case `V1-RUNTIME-native-host-event-once` |
+| Native stack does not grow with activations, and tail calls reuse the activation | The cases `V1-RUNTIME-activation-depth` and `V1-RUNTIME-tail-counter-direct`, `V1-RUNTIME-tail-cross-module-mutual`, `V1-RUNTIME-tail-function-value-parameter`, and `V1-RUNTIME-tail-contract-member-interface-value`, and host test `non_tail_recursion_a_hundred_thousand_deep_completes_natively` on a thread with a small stack |
+| Storage is reclaimed | Host test `an_allocating_loop_has_a_live_size_that_does_not_grow_with_its_iterations` at two iteration counts a factor of ten apart |
+| Exhausting memory is the host event | The cases `V1-RUNTIME-activation-exhaustion`, `V1-RUNTIME-workspace-run-activation-exhaustion`, and `V1-RUNTIME-workspace-test-activation-exhaustion`, and host test `a_recursion_with_no_base_case_is_the_host_event_natively` |
+| A trap has the interpreter's code and origin | The cases `V1-RUNTIME-division-by-zero-trap`, `V1-RUNTIME-workspace-test-hidden-function`, and `V1-RUNTIME-entry-outcome-trap-holding-err` |
+| Process exit codes and program arguments | Host tests `smoke_<target>_arguments` and `smoke_<target>_exit_codes` on each platform that has a runner |
+| An executable that fails admission is refused before it runs | Host tests `a_program_built_for_another_abi_is_refused_by_the_launcher`, `a_registry_minor_above_the_runtimes_is_refused_by_the_launcher`, and `a_program_naming_an_unknown_symbol_is_refused_by_the_launcher`, each asserting that no host operation is performed |
+| `@runtime.incompatible-artifact` and the three `@tool` codes of native builds carry their level and span | One case or host test for each code, asserting code, level, and span |
+| `build` reports its result, payload, and failures as the tooling chapter states, and `run`, `test`, and evaluation need no native toolchain | Host tests of the `build` envelope against its published schema, the link driver's missing-tool and link-failure tests, `the_cli_does_not_depend_on_codegen_for_run_or_test`, and a test that `run` works with no linker installed |
+| Identical inputs give a byte-identical executable and manifest | Host test `two_clean_offline_builds_from_different_paths_are_byte_identical` on each platform that has a runner |
+| The identities move as the packages chapter states | Host tests `a_source_change_moves_the_semantic_identity_and_the_artifact_hash`, `a_linker_flag_change_moves_only_the_artifact_identity`, and `an_abi_bump_moves_only_the_artifact_identity` |
+| The runtime ABI version is independent of the registry version and the build format | Review-only: it is a property of how the versions are defined, which the admission tests above exercise one at a time |
+| The ABI is closed and no source can name it | Review-only: it follows from the closed providers of the charter and is checked by the audit of the host bridge |
+| The shipped executable uses the system provider only | Review-only: the release audit checks that the shipped runtime does not contain the runner's host-world input |
+
 ## Required implementation suites
 
 The future implementation has two independent suites:
@@ -1004,6 +1103,9 @@ The `full-v1` claim requires:
 - all persistent `.vibon` data formats validated and canonically round-tripped;
 - both suites green on every supported platform;
 - reference interpreter and Wasm parity across the executable corpus;
+- when it claims `native-v1`, reference interpreter and native parity across the
+  executable corpus on every supported platform, with no `pending` cell in the
+  native parity inventory;
 - byte-identical rebuilds across two clean environments;
 - formatter idempotence across stdlib, examples, and conformance source;
 - every diagnostic code is unique and its queryable registered level matches

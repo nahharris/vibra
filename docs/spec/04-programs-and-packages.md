@@ -4,7 +4,7 @@ Status: normative target
 Implementation status: M1 supplies generic VIBON data and structural query
 metadata; M2 decodes projects, resolves local modules, and supports init,
 check, run, and test; M3 embeds the standard library as the toolchain input.
-Ordinary dependency delivery and build products remain unimplemented.
+Ordinary dependency delivery and build products, native ones included, remain unimplemented.
 See the [release roadmap](../roadmap/README.md) for delivery status.
 `run` and `test` execute the reference interpreter. Milestone 4 Step 13 closes
 the Stage 4B contracts of this chapter, the `host` list and effect modules of the
@@ -679,3 +679,36 @@ and build options MUST produce byte-identical outputs.
 [Distribution research](../roadmap/scratchpad/foundations/README.md#other-distribution-work)
 covers signing, publishing build products, and multi-artifact application
 containers.
+
+**Native build products.** Implementation status: specified for release v0.0.3
+Milestone 3 and not yet implemented. The products above remain the contract of
+the WebAssembly module. The native build command of the tooling chapter emits
+the products below, and the cutover of that milestone reconciles the two sets.
+
+For a binary target and a native target triple, `vibra build` emits:
+
+- `<target>`, the native executable, with the executable suffix of the platform;
+- `<target>.build.vibon`, the canonical `@native-build.v1` manifest; and
+- optional human-readable diagnostics on stderr.
+
+The manifest records the semantic input identity; the artifact identity; the
+target triple and CPU baseline; the versions of the code generator and the
+linker and the normalized link flags; the runtime ABI version; the exact
+required registry symbols and the derived registry minor of the runtime chapter;
+the required effects; and the identity of the origin table. The executable
+carries its own runtime ABI version, required symbols, and origin table, so the
+manifest is not needed to run it.
+
+The **semantic input identity** is the digest of the backend-neutral build input
+and does not depend on the target triple, the linker, or the runtime ABI
+version. The **artifact identity** is a digest of the bytes of the executable
+and of the target, CPU baseline, code-generator and linker versions, normalized
+flags, runtime ABI version, registry symbols, required effects, and origin
+table. A change of source moves both identities. A change of linker, flags, or
+runtime ABI version moves the artifact identity and leaves the semantic input
+identity unchanged.
+
+The metadata is descriptive and not executable policy. Identical toolchain,
+project snapshot, target triple, link environment, and build options MUST
+produce a byte-identical executable and manifest, whatever the absolute path of
+the checkout.

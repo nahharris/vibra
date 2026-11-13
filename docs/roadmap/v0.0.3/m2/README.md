@@ -28,6 +28,8 @@ corpus with the same observable behavior as the reference interpreter.
   forced yields, a mapped trap variant, and the same canonical outcomes and
   audit as the interpreter.
 - **Exit.** The complete supported executable corpus passes on all three targets.
-  An emission failure on an admitted case is a parity failure. Existing Wasm
+  An emission failure on an admitted case is a parity failure, and a `pending`
+  cell of the [native parity inventory](../../../spec/07-diagnostics-and-conformance.md#native-transition)
+  fails the gate. Existing Wasm
   coverage and the v0.0.2 agent workflow still pass. Record runtime and
   compiler boundary audits and an unoptimized performance baseline.

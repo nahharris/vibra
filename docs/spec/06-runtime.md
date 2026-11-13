@@ -12,6 +12,8 @@ encoding, the host world, the entry outcome, and the host ABI, and implements
 none of them. Milestone 4 Step 14 implements the effect row of the canonical
 function type encoding and effect checking, and Steps 16 to 18 the host operations in both backends; the entry outcome and the effect metadata remain specified and
 unimplemented until Milestone 4 Steps 19 and 20.
+The **Native execution** section specifies the native contract of release v0.0.3
+beside the WebAssembly one and implements none of it.
 
 ## Semantic reference
 
@@ -244,7 +246,7 @@ that lasts until the call returns, and the depth of nested activations is
 bounded only by the memory available to the instance, exactly as the size of
 any other value is. A conforming backend MUST NOT consume host or engine stack
 per language activation: it holds activations in the instance's own storage
-(the arena of **The value arena**), so a program that recurses to any depth the
+(for a WebAssembly module, the arena of **The value arena**), so a program that recurses to any depth the
 instance's memory admits behaves as if depth were unbounded, in both backends.
 A call in tail position replaces its caller's activation in that storage, as
 the **Tail calls** section requires.
@@ -1095,6 +1097,115 @@ selected target's source-level effect ceiling.
 An incompatible import signature, custom-section shape, value representation,
 or entry contract requires `vibra_v2`; a runtime MUST NOT reinterpret it as v1.
 
+## Native execution
+
+Implementation status: specified for release v0.0.3 and not yet implemented.
+Until then no shipped command produces or runs a native executable, and the
+reference interpreter and the WebAssembly backend are the only executors.
+
+An **executor** is a component that runs a checked program: the reference
+interpreter, the WebAssembly backend, or a native executable. A **native
+executable** is a binary target whose checked IR is lowered to a verified
+**execution IR**, translated to machine code for one native target, and linked
+with **Nexus**, the toolchain-owned runtime that holds the activations, the
+value storage, and the host dispatch of an instance. Only `build` produces one.
+`run`, `test`, and interactive evaluation execute the reference interpreter. A
+native executable runs the entry of its target, and only a conformance runner
+runs tests natively, for comparison.
+
+A native executable consumes only successfully checked IR. The reference
+interpreter remains the oracle, and a native executable is compared with it on
+results, canonical value encodings, ordered audit traces, trap codes with their
+origins, and the host events of **Activations and memory**, and on nothing else.
+A native executable MUST produce the same observable behavior as the
+interpreter for every executable case of the profile it supports. A valid
+operation outside that profile reports `@tool.unavailable` before code is
+generated and produces no executable: a program is never lowered in part, and a
+case a native executable cannot run is a gap and not a pass.
+
+The execution IR of a program MUST be verified before any code is generated for
+it. Verification checks that every function, block, constant, module value, and
+origin the program names exists, that every call passes exactly the parameters
+of its callee, and that every value is defined before it is used and is not used
+after its ownership has ended. A program that fails verification is a defect of
+the toolchain and is never emitted or run.
+
+### Checkpoints and suspension
+
+Execution reaches a **checkpoint** at exactly five kinds of transfer: a call, a
+tail call, a return, a host operation, and an access to a module value. A
+runtime MAY suspend execution at a checkpoint and resume it later. Suspending
+and resuming execution has no observable effect:
+the result, the trap and its origin, the audit trace, and the host event are
+those of the same execution never suspended. In particular a host operation is
+performed once, and its audit event is appended once, however execution is
+suspended before or after it.
+
+The language defines neither when a runtime suspends nor any quantity that
+bounds execution between suspensions, and **Determinism and observability**
+still defines no fuel.
+
+### Storage, activations, and host operations
+
+A native executable holds its activations in storage the instance owns, not on
+the native stack of the process. The native stack it uses MUST NOT
+grow with the number of language activations, and every call in tail position
+MUST reuse the current activation, as **Activations and memory** and **Tail
+calls** state for every executor. Storage is reclaimed as **Reclamation**
+requires, and exhausting the memory available to the instance is the host event
+`@runtime.memory-exhausted`, the event the other executors report.
+
+A native executable has no value IDs, no handle table, no accessors, and no
+builders: the host is not outside the instance. A host operation is the single
+operation of **Host calls and the builders**, written once; Nexus supplies its
+interface for reading arguments and building results directly over the values of
+the instance, and the audit event is built by the code that builds it for the
+other executors, so the trace is identical. The executable that `build`
+produces uses the system provider of **The host world** and no argument,
+environment variable, or input selects another. A conformance runner supplies a
+host world to a separate build of the runtime that is not a product of `build`.
+
+The arguments of the process after the program name are the program arguments
+of the tooling chapter, and `env.read.args` returns them in order. The process
+ends with the exit code that the process exit mapping of the tooling chapter
+assigns to the outcome of the entry: `0` when it completes, `6` when it returns
+`err`, whose canonical encoding is then written to standard error as human `run`
+does, `5` for a trap, and `3` for a host event.
+
+### Origins
+
+A native executable embeds its **origin table**, the source-origin mapping: it
+maps each origin ordinal to one source span, and ordinal `0` is no origin. A trap
+names its origin by ordinal as **Traps** states, so a native executable needs
+nothing beside itself to report it. A native executable MUST report for every
+registered trap the same code and the same origin as the interpreter. It has no
+value ID to invalidate, so `@runtime.invalid-host-value` is not a trap of a
+native executable; the other trap codes of **Traps** are.
+
+### Runtime ABI and admission
+
+A native executable is generated for one **runtime ABI version**, a number that
+names the contract between generated code and the runtime it is linked with.
+That contract is closed: the toolchain owns it, no source can name or extend it,
+and it is not a foreign-function interface. The runtime ABI version is
+independent of the registry version of **Registry versioning** and of the format
+of the build manifest, so a change of one does not change the others. A native
+executable states its runtime ABI version, the exact set of registry symbols it
+requires, and their derived registry minor.
+
+Before any code of a native executable runs, the runtime **admits** it. Admission
+checks that the runtime ABI version of the executable is the one the runtime
+implements, that the derived registry minor of the executable is at most the
+registry minor the runtime implements, and that every symbol the executable
+requires is a row of the registry the runtime implements. An executable that
+fails a check MUST be refused with the unlocated error diagnostic
+`@runtime.incompatible-artifact` before any of its code runs and before any host
+operation, and a runtime MUST NOT reinterpret a runtime ABI version it does not
+implement as another.
+
+The evidence for each requirement of this section is stated in **Native
+coverage** of the conformance chapter.
+
 ## Determinism and observability
 
 Given the same typed program and the same host world, a run produces the same:
@@ -1136,6 +1247,8 @@ provide a runtime sandbox, police paths within a declared effect, prevent
 nontermination, verify compilation, ensure constant-time execution, prove
 host-provider correctness, isolate native code, or safely execute arbitrary
 foreign Wasm.
+A native executable adds the claim of interpreter/native conformance parity and
+no other, and every limit above applies to it.
 
 Running a checked binary target is consent to every host operation covered by
 its declared roots. Deployments that need finer isolation may add an external
