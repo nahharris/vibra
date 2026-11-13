@@ -82,7 +82,7 @@ Shapes to notice:
 
 - `fib` has `means` and no `body`. `fib-fast` has both.
 - All four parameters of `fib-from` are `int`, so every argument is
-  labeled. `int.add` is a built-in scalar function and is positional.
+labeled. `int.add` is a built-in scalar function and is positional.
 - The tail call in `fib-from` uses no stack.
 
 ## Types, claims, transforms, an implementation, a label
@@ -192,14 +192,14 @@ end masked-name
 Shapes to notice:
 
 - `(list.first items)` is admitted because the `if` above it returned
-  when the list was empty. `(int.div total.value parts.value)` is
-  admitted because a `part-count` is at least 1.
+when the list was empty. `(int.div total.value parts.value)` is
+admitted because a `part-count` is at least 1.
 - `cents.value` without parentheses is the field reader passed as a
-  function. `share-at` is a nested function that reads `base` and
-  `extra`.
+function. `share-at` is a nested function that reads `base` and
+`extra`.
 - The first `example` is longer than 100 columns and breaks after `=`.
 - `split-cents` states its meaning by properties. Remove the fourth
-  `ensures` and the claim is rejected as indeterminate.
+`ensures` and the claim is rejected as indeterminate.
 
 ## A port and its model
 
@@ -304,11 +304,11 @@ end ledger-model
 Shapes to notice:
 
 - `{}` is an empty map because `book` has one field of map type. A
-  constructor with one field takes it unlabeled.
+constructor with one field takes it unlabeled.
 - `held.value.value` reads the `cents` inside `some`, then the `int`
-  inside the `cents`.
+inside the `cents`.
 - The `credit` handler returns two answers. A simulation picks one and an
-  exploration tries both: an account may be closed at any moment.
+exploration tries both: an account may be closed at any moment.
 
 ## Procedures
 
@@ -377,10 +377,10 @@ Shapes to notice:
 
 - `await` is the whole right-hand side of a `let` or a `return`.
 - `debit` and `credit` are `once` operations, so their outcomes are
-  `uncertain` and the `unknown` case must be written. `refund` is
-  `repeatable` and returns its outcome directly.
+`uncertain` and the `unknown` case must be written. `refund` is
+`repeatable` and returns its outcome directly.
 - `match` narrows the name it is given. Inside `case refused`,
-  `outcome.reason` exists.
+`outcome.reason` exists.
 
 ## A second port
 
@@ -510,12 +510,12 @@ end desk
 Shapes to notice:
 
 - Three state cases and four event sources give twelve handlers, and all
-  twelve are written. The sources are the two cases of `desk-command`,
-  the procedure the machine emits, and the port operation it emits.
+twelve are written. The sources are the two cases of `desk-command`,
+the procedure the machine emits, and the port operation it emits.
 - A handler returns the next state. `return state` keeps the current
-  one.
+one.
 - `on shut, transfer.move-money` is `impossible`. The first invariant
-  proves it: a shut desk has no transfer pending.
+proves it: a shut desk has no transfer pending.
 
 The same machine in the table surface:
 
