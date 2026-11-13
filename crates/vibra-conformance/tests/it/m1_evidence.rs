@@ -2,11 +2,12 @@
 //! for each gate clause G3.M1.9 to G3.M1.11.
 //!
 //! The fixture is `examples/nexus-m1`: two modules of one package. The loop of
-//! `app.ticks` counts a binary counter down in `bool` parameters (the lowering
-//! slice has no integer arithmetic) and ends with an indirect tail call of
-//! `finish`, a function value that `app.main` defined; `app.main` writes the
-//! farewell with one `io.stdout.text`. The loop count is the constant in the
-//! call of `ticks.count`, which `with_rounds` rewrites.
+//! `app.ticks` counts a `u64` down by one each round and ends with an indirect
+//! tail call of `finish`, a function value that `app.main` defined; `app.main`
+//! writes the farewell with one `io.stdout.text`. The loop count is the one
+//! constant in the call of `ticks.count`, which `with_rounds` rewrites. The
+//! division variant is a second corpus case whose loop divides by the counter
+//! and so ends in `@runtime.division-by-zero`.
 //!
 //! The harness launcher's observation document carries the outcome, the result
 //! kind, the trap, the audit trace, the context's counters (yields, peak frames,
@@ -17,7 +18,7 @@
 //! itself, read from its counters. The refusals are evidenced on linked
 //! executables.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use vibra_exec::{BlockId, Callee, Program, Slot, Terminator, VerifyErrorKind, verify};
 use vibra_ir::CheckedProgram;
@@ -34,42 +35,24 @@ fn fixture_directory() -> PathBuf {
     workspace_root().join("examples").join("nexus-m1")
 }
 
+/// The loop count of the fixture's call of `ticks.count`, as the committed text
+/// writes it.
+const COUNT: &str = "1000u64";
+
 /// The fixture's `app.main`, with the loop count of its call of `ticks.count`
-/// set to `rounds`. The counter is 17 `bool` arguments, lowest bit first, each
-/// on a line of its own after `finish`; `rounds` may not exceed 131,071.
+/// set to `rounds`. The count is the one constant in the file.
 fn with_rounds(main: &str, rounds: u32) -> String {
-    assert!(rounds < 1 << 17, "the counter has 17 bits");
-    let mut lines = main.lines().map(str::to_owned).collect::<Vec<_>>();
-    let start = lines
-        .iter()
-        .position(|line| line.trim() == "finish")
-        .expect("the call of ticks.count passes finish");
-    for bit in 0..17 {
-        let line = &mut lines[start + 1 + bit];
-        let trimmed = line.trim_start();
-        let indent = line.len() - trimmed.len();
-        let closing = trimmed.len() - trimmed.trim_end_matches(')').len();
-        let word = if (rounds >> bit) & 1 == 1 {
-            "true"
-        } else {
-            "false"
-        };
-        *line = format!("{}{word}{}", " ".repeat(indent), ")".repeat(closing));
-    }
-    let mut text = lines.join("\n");
-    text.push('\n');
-    text
+    assert_eq!(
+        main.matches(COUNT).count(),
+        1,
+        "the loop count is one constant"
+    );
+    main.replace(COUNT, &format!("{rounds}u64"))
 }
 
-fn checked_fixture(rounds: u32) -> CheckedProgram {
-    let scratch = TempDir::new("nexus-m1");
-    copy_directory(&fixture_directory(), scratch.path());
-    let main = scratch.path().join("src").join("app").join("main.vib");
-    let source = std::fs::read_to_string(&main).expect("the fixture's main");
-    std::fs::write(&main, with_rounds(&source.replace("\r\n", "\n"), rounds))
-        .expect("a rewritten main");
-    let snapshot =
-        WorkspaceSnapshot::load_confined(scratch.path()).expect("a workspace");
+/// Checks the workspace at `root` and answers the program of its binary target.
+fn check_tree(root: &Path) -> CheckedProgram {
+    let snapshot = WorkspaceSnapshot::load_confined(root).expect("a workspace");
     let stdlib = vibra_types::load_stdlib().expect("the standard library");
     let target = snapshot
         .project()
@@ -90,6 +73,16 @@ fn checked_fixture(rounds: u32) -> CheckedProgram {
         .program_for_target(&target)
         .cloned()
         .expect("the entry's program")
+}
+
+fn checked_fixture(rounds: u32) -> CheckedProgram {
+    let scratch = TempDir::new("nexus-m1");
+    copy_directory(&fixture_directory(), scratch.path());
+    let main = scratch.path().join("src").join("app").join("main.vib");
+    let source = std::fs::read_to_string(&main).expect("the fixture's main");
+    std::fs::write(&main, with_rounds(&source.replace("\r\n", "\n"), rounds))
+        .expect("a rewritten main");
+    check_tree(scratch.path())
 }
 
 fn lowered_fixture(rounds: u32) -> Program {
@@ -168,6 +161,137 @@ fn the_fixture_case_of_the_corpus_is_the_example() {
                 .replace("\r\n", "\n")
         };
         assert_eq!(read(&case), read(&fixture_directory()), "{file}");
+    }
+}
+
+const VARIANT: &str = "V1-RUNTIME-nexus-m1-fixture-division-by-zero";
+
+fn case_directory(id: &str) -> PathBuf {
+    workspace_root().join("conformance").join("cases").join(id)
+}
+
+fn read_text(path: &Path) -> String {
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()))
+        .replace("\r\n", "\n")
+}
+
+#[test]
+fn the_division_variant_differs_from_the_fixture_only_in_the_test_of_its_loop() {
+    let variant = case_directory(VARIANT).join("tree");
+    for file in ["project.vibon", "src/app/main.vib"] {
+        assert_eq!(
+            read_text(&variant.join(file)),
+            read_text(&fixture_directory().join(file)),
+            "{file}"
+        );
+    }
+    let ticks = |root: &Path| read_text(&root.join("src/app/ticks.vib"));
+    let (fixture, divides) = (ticks(&fixture_directory()), ticks(&variant));
+    assert_ne!(fixture, divides);
+    assert!(divides.contains("u64.rem 1000000u64 remaining"));
+    assert!(!fixture.contains("u64.rem"));
+}
+
+#[test]
+fn the_linked_fixture_equals_the_interpreter_on_result_trap_origin_and_trace() {
+    // G3.M1.8. The expectation is the corpus case's own files: the fixture's
+    // result and trace, and the variant's trap diagnostic, whose origin the
+    // runtime chapter leaves out. The interpreter must meet the expectation
+    // first; the linked executable is then held to the interpreter's result,
+    // trap, origin, and trace, and to the reference stepper's whole document.
+    let completed_case = case_directory("V1-RUNTIME-nexus-m1-fixture");
+    let completed = check_tree(&completed_case.join("tree"));
+    let execution =
+        vibra_interp::Interpreter::run(&completed).expect("the fixture runs");
+    assert_eq!(
+        read_text(&completed_case.join("result.vibon")).trim_end(),
+        execution.canonical_result().trim_end()
+    );
+    let trace = vibra_host::trace_to_vibon(execution.audit_trace());
+    assert_eq!(
+        read_text(&completed_case.join("audit.vibon")).trim_end(),
+        trace
+    );
+    assert_eq!(execution.audit_trace().len(), 1, "one write");
+
+    let variant_case = case_directory(VARIANT);
+    let variant = check_tree(&variant_case.join("tree"));
+    let error =
+        vibra_interp::Interpreter::run(&variant).expect_err("the variant traps");
+    let (code, origin) = error.program_trap().expect("a trap, not a host event");
+    assert_eq!(origin, None, "the runtime chapter gives the trap no origin");
+    let atom = code.as_atom();
+    assert_eq!(atom, "@runtime.division-by-zero");
+    let case = read_text(&variant_case.join("case.toml"));
+    assert!(case.contains(&format!("code = \"{atom}\"")), "{case}");
+    assert!(case.contains("span = [0, 0]"), "{case}");
+    let silent = vibra_host::trace_to_vibon(&[]);
+
+    // The stepper meets the same expectation.
+    let lowered = lower(&variant).expect("the variant lowers");
+    let ran = crate::lowering_slice::stepped(&lowered, 64 * 1024 * 1024, UNBOUNDED);
+    assert_eq!(
+        ran.outcome,
+        Outcome::Trapped(vibra_nexus::Trap {
+            code: vibra_ir::boundary::TrapCode::DivisionByZero,
+            origin: 0
+        })
+    );
+    assert!(ran.audit.is_empty(), "the variant writes nothing");
+
+    #[cfg(windows)]
+    {
+        use crate::linked_exe_support::{
+            Profile, Scratch, WORLD, archive, options, reference, run_exe,
+        };
+        let _ = (archive(Profile::Harness), archive(Profile::System));
+        for (label, program, outcome, result, trap, origin, audit, exit) in [
+            (
+                "fixture",
+                &completed,
+                "completed",
+                "void-or-ok",
+                "@none",
+                0,
+                &trace,
+                0,
+            ),
+            ("variant", &variant, "trapped", "none", atom, 0, &silent, 5),
+        ] {
+            let lowered = lower(program).expect("lowers");
+            let scratch = Scratch::new("m1-equal", "");
+            let harness = vibra_build::build_executable(
+                program,
+                &options(&scratch, Profile::Harness, "harness.exe"),
+            )
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
+            let ran = run_exe(&harness.executable, &[], WORLD.as_bytes());
+            assert_eq!(ran.code, Some(0), "{label}: {}", harness.command);
+            let document = String::from_utf8_lossy(&ran.stdout).into_owned();
+            let head = format!(
+                "(record outcome: @{outcome} result: @{result} trap: {trap} origin: {origin} audit: {audit} counters: "
+            );
+            assert!(document.starts_with(&head), "{label}: {document}");
+            let expected = reference(&lowered, None, UNBOUNDED, false);
+            assert_eq!(document, format!("{}\n", expected.observation), "{label}");
+
+            // The shipped launcher: the exit code of the tooling chapter and the
+            // trap's atom on standard error.
+            let shipped = vibra_build::build_executable(
+                program,
+                &options(&scratch, Profile::System, "system.exe"),
+            )
+            .unwrap_or_else(|error| panic!("{label}: {error}"));
+            let ran = run_exe(&shipped.executable, &[], b"");
+            assert_eq!(ran.code, Some(exit), "{label}: {}", shipped.command);
+            if exit == 5 {
+                assert_eq!(String::from_utf8_lossy(&ran.stderr), format!("{trap}\n"));
+                assert!(ran.stdout.is_empty());
+            } else {
+                assert_eq!(String::from_utf8_lossy(&ran.stdout), "done\n");
+            }
+        }
     }
 }
 

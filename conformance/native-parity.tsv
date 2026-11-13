@@ -96,6 +96,7 @@ V1-RUNTIME-nested-data	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-never-type-encoding	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-never-unreached	matched	matched	pending X3-08	pending X3-08
 V1-RUNTIME-nexus-m1-fixture	matched	matched	pending X3-08	pending X3-08
+V1-RUNTIME-nexus-m1-fixture-division-by-zero	matched	matched	pending X3-08	pending X3-08
 V1-RUNTIME-nominal-enum	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-nominal-enum-payload	pending X3-11	pending X3-11	pending X3-11	pending X3-11
 V1-RUNTIME-nominal-method	pending X3-11	pending X3-11	pending X3-11	pending X3-11

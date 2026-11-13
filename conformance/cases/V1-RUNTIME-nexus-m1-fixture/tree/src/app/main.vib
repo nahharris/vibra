@@ -10,25 +10,4 @@
 ; `finish` through a function value, and writes the farewell once.
 (defn main () void
   effects: (io.stdout)
-  (let
-    -
-    (io.stdout.text
-      (ticks.count
-        finish
-        false
-        false
-        false
-        true
-        false
-        true
-        true
-        true
-        true
-        true
-        false
-        false
-        false
-        false
-        false
-        false
-        false))))
+  (let - (io.stdout.text (ticks.count finish 1000u64))))

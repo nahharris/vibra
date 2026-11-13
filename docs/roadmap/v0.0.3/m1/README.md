@@ -71,15 +71,21 @@ the table the current executors produce (add `--runtime-archive` for the
 `windows` column); the committed file is the source of truth and the test suite
 never writes it.
 
-Counts at X3-09c (174 cases):
+Counts at X3-09b (175 cases):
 
 | Column | matched | pending X3-08 | X3-10 | X3-11 | X3-12 | X3-13 | X3-14 | X3-15 | X3-16 | X3-18 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `stepper` | 20 | 0 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
-| `windows` | 20 | 0 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
-| `linux` | 0 | 20 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
-| `macos` | 0 | 20 | 6 | 89 | 27 | 6 | 2 | 2 | 2 | 20 |
+| `stepper` | 21 | 0 | 0 | 89 | 33 | 6 | 2 | 2 | 2 | 20 |
+| `windows` | 21 | 0 | 0 | 89 | 33 | 6 | 2 | 2 | 2 | 20 |
+| `linux` | 0 | 21 | 0 | 89 | 33 | 6 | 2 | 2 | 2 | 20 |
+| `macos` | 0 | 21 | 0 | 89 | 33 | 6 | 2 | 2 | 2 | 20 |
 
+Counts at X3-09c were 174 cases: `stepper` and `windows` 20 matched, X3-10 6 and
+X3-12 27 pending in every column. At X3-10a the six cases that waited on X3-10
+(the continuation chains and the tail loops that call a function value) turned
+out to wait on `match` as well, so they now name X3-12, and the new case of the
+division variant is `matched` in `stepper` and `windows`. No cell moved from
+`matched` to `pending`.
 Counts at X3-04 were 173 cases: `stepper` 19 matched, the other columns 19
 pending X3-09.
 
@@ -88,8 +94,9 @@ pending X3-09.
 Recorded 2026-11-12 on the branch `nexus/x3-09a`, Windows
 `x86_64-pc-windows-msvc`. The fixture is [`examples/nexus-m1`](../../../../examples/nexus-m1)
 (two modules, an indirect tail call across them through a function value, a
-module value, one `io.stdout.text`, and a loop whose count is a constant held in
-17 `bool` arguments) and the corpus case `V1-RUNTIME-nexus-m1-fixture`. The
+module value, one `io.stdout.text`, and a loop whose count is one constant; at
+X3-09a the count was held in 17 `bool` arguments, and X3-09b replaced it with an
+ordinary `u64` counter) and the corpus case `V1-RUNTIME-nexus-m1-fixture`. The
 evidence tests are in `crates/vibra-conformance/tests/it/m1_evidence.rs`. The
 milestone exit gate is not passed by this record: it needs the Linux and macOS
 runs and the owed rows below.
@@ -97,7 +104,7 @@ runs and the owed rows below.
 | Gate | Evidence | Status |
 | --- | --- | --- |
 | G3.M1.7 Executable corpus recorded by feature and platform | The table above, from `conformance/native-parity.tsv`; the `windows` column is checked by `native_parity_inventory::every_windows_row_matches_its_linked_executable` | Windows recorded; Linux and macOS not run |
-| G3.M1.8 Compared with the interpreter, including the division variant and the unobservable-function variant | The fixture case matches in `stepper` and `windows`. The division variant is owed to X3-09b. The unobservable-function variant cannot be written: an entry result must be `void` or `result void e`, and `result.err` is pending X3-11 | Owed |
+| G3.M1.8 Compared with the interpreter, including the division variant and the unobservable-function variant | The fixture case matches in `stepper` and `windows`. The division variant was owed to X3-09b and is recorded below. The unobservable-function variant cannot be written: an entry result must be `void` or `result void e`, and `result.err` is pending X3-11 | Division variant recorded at X3-09b; the unobservable-function variant is owed |
 | G3.M1.9 Yielding around the host call does not duplicate its event | `quota_one_has_one_stdout_event_and_yields_at_every_checkpoint`: on the stepper, one `io.stdout-text` event and a yield at every checkpoint (a checkpoint is a step the dispatcher takes); the linked quota-1 run's observation document equals the one derived from the stepper, holds one `io.stdout-text` event, and reports as many yields as the stepper, at least the stepper's step count less the last step, which completes instead of yielding; the unbounded run reports none | Passed on the stepper and the linked executable |
 | G3.M1.10 Tail transfers keep activation growth bounded | `peak_frames_and_live_size_do_not_grow_with_the_loop_count`: peak frames and live size on the stepper do not grow with the loop count, and the linked executables, at 10,000 and 100,000 rounds, report equal peak frame counts and peak live sizes within 64 bytes, equal to the stepper's | Passed on the stepper and the linked executable |
 | G3.M1.11 Invalid IR, incompatible runtime identity, unknown registry entries fail before they execute | `a_program_mutated_after_verification_is_rejected_by_verify` (four mutations, and on Windows `build_program` answers `BuildError::Verify`), `an_object_with_another_abi_is_refused_by_the_launcher`, `a_descriptor_naming_an_unknown_symbol_is_refused` | Passed |
@@ -118,6 +125,49 @@ runs and the owed rows below.
 - **Not run:** Linux, macOS.
 
 
+## M1 evidence (X3-09b)
+
+Recorded 2026-11-12 on the branch `nexus/x3-10a`, Windows
+`x86_64-pc-windows-msvc`, after the unchecked integer operations (X3-10a, N41).
+The milestone exit gate is not passed by this record: it needs the Linux and
+macOS runs and the owed rows.
+
+- **The fixture.** [`examples/nexus-m1`](../../../../examples/nexus-m1) keeps its
+  two modules, its indirect tail call of `finish` (a function value that
+  `app.main` defined), its one module value, and its one `io.stdout.text`. The
+  counter is an ordinary `u64`: `app.ticks.count` tests it with `equatable.equal`,
+  subtracts one with `u64.sub`, and calls itself in tail position. The loop count
+  is the one constant `1000u64` in the call in `app.main`, which the evidence
+  tests rewrite. `V1-RUNTIME-nexus-m1-fixture` is byte-equal to the example
+  (`the_fixture_case_of_the_corpus_is_the_example`).
+- **The division variant.** `V1-RUNTIME-nexus-m1-fixture-division-by-zero` is the
+  same project with a loop that divides by the counter
+  (`u64.rem 1000000u64 remaining`), so after 1,000 tail calls the divisor is
+  zero. It writes nothing and ends in `@runtime.division-by-zero`, which has no
+  origin. Its case is `matched` in `stepper` and `windows`.
+- **G3.M1.8.** `the_linked_fixture_equals_the_interpreter_on_result_trap_origin_and_trace`
+  holds the interpreter to the corpus case's own files (the result, the trace,
+  and the trap diagnostic with its empty span), and then holds the linked
+  executables to the interpreter. The fixture's linked `harness` document says
+  `completed`, no trap, origin 0, and the interpreter's one-event trace, and
+  equals the stepper's document; its `system` executable exits 0 and writes
+  `done`. The variant's `harness` document says `trapped`, the trap
+  `@runtime.division-by-zero`, origin 0, and an empty trace, and equals the
+  stepper's; its `system` executable exits 5, writes only the trap's atom to
+  standard error, and nothing to standard output. The origin of an
+  `@runtime.unobservable-function` trap would map to a span; that variant is
+  owed to later packages (X3-11 for a `result.err` entry, X3-18 for the
+  observation).
+- **G3.M1.9 and G3.M1.10, re-derived on the new fixture.** At 1,000 rounds the
+  stepper takes 5,012 steps (checkpoints) and, with quota 1, yields 5,011 times;
+  the linked quota-1 executable reports the same 5,011 yields. At 10,000 and at
+  100,000 rounds both the stepper and the linked executables report 3 peak
+  frames and a peak live size of 512 bytes (50,012 and 500,012 steps), so the
+  bounds of the tests (equal peak frames, peak live sizes within 64 bytes, and
+  the work growing at least fivefold) hold with no change to the tests.
+  G3.M1.11 is unchanged: its four mutations still find their tail call, branch,
+  and host call in the new fixture.
+- **Not run:** Linux, macOS.
 ## Bridge archive record (X3-05)
 
 Recorded 2026-11-12 on the branch `nexus/x3-05`, Windows
