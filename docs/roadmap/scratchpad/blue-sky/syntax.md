@@ -303,6 +303,10 @@ defn sequence
 end sequence
 ```
 
+The [draft specification](spec/02-syntax.md#a-longer-example) keeps this
+shape and uses more familiar words: `fn`, `returns`, `return`, `if`,
+`else if`, and `else`.
+
 Leaves are still parenthesized prefix calls. The spine is lines. This is
 not a re-spelling of the tree above: the guard chain is flat and the inner
 `match` became a `try` and a named step. It is the same function in the

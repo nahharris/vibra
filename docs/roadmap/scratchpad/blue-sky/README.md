@@ -16,6 +16,11 @@ for an agent and what could replace them. The [tooling note](tooling.md)
 asks which agent tools are worth building: structured edits, structured
 inspection, or interactive evaluation.
 
+The [draft specification](spec/README.md) turns all four notes into one
+language design: syntax, types, claims, execution, runtime, compiler, and
+tooling. Where it differs from a sketch in these notes, the specification
+is the later decision.
+
 ## The premise: the author changed
 
 Programming languages are shaped around what their authors find hard. Human
