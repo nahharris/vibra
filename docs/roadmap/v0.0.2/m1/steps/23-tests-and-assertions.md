@@ -17,11 +17,9 @@ were step 15; their per-run initialization is re-verified under the runner.
   initialization"; [tooling chapter](../../../../spec/05-tooling.md) "Tests and
   selection", `TestItem`; [diagnostics
   chapter](../../../../spec/07-diagnostics-and-conformance.md) `@testRun.v2`
-  under "Persistent observations".
-- Open question: the source form of the three declarations of
-  `@std.assert` ([specification questions](../spec-questions.md)). It
-  must be answered before `stdlib/src/std/assert.vib` is written; every
-  other task of this step is independent of it.
+  under "Persistent observations"; [runtime
+  chapter](../../../../spec/06-runtime.md#assertion-operations) "Assertion
+  operations".
 
 ## Entry points
 
@@ -37,14 +35,20 @@ declaration checks).
 
 ## Ordered tasks
 
-1. `@std.assert` declares exactly `true` and `false`, each a
-   `Fn({Bool} Void)`, and `equal(T)`, a `Fn({T T} Void)` with the expected
-   value first. An assertion is an ordinary typed call: it has no registry
-   symbol and no language role, and its module entry in the manifest has
-   an empty `languageRoles`. The checker knows the three declarations by
-   their declaration identities and lowers a call of one to the assertion
-   node of the checked IR (step 12). They are usable only from `@tests`
-   (`@module.assertionOutsideTests` at a reference from a target).
+1. `stdlib/src/std/assert.vib` declares exactly three module-level
+   functions, each `external @compiler` with no body: `true` and `false`,
+   each a `Fn({Bool} Void)`, with `symbol "assert.true"` and
+   `symbol "assert.false"`, and `equal(T)`, a `Fn({T T} Void)` with the
+   expected value first and `symbol "assert.equal"`. The three rows are in
+   the registry of step 12 and run in the interpreter of step 13, so the
+   loader's external check admits them like every other intrinsic, and a
+   call lowers to an ordinary intrinsic call. The manifest's `compiler`
+   list gains the three symbols; the module entry has an empty
+   `languageRoles`. Outside `@tests`, a use of a declaration bound to an
+   assertion row, as a callee or as a value, is
+   `@module.assertionOutsideTests` at the use. The check asks the registry
+   whether the bound row's owner is `assert`; it names no module and no
+   declaration.
 2. Test declarations: only in `@tests` (`@module.testOutsideTests`); a
    module declaring a test contains an import that resolves to the module
    `@std.assert`, under any local name
@@ -97,7 +101,8 @@ declaration checks).
 | `V2-PROJECT-test-fresh-state` | positive, workspaceTest | two tests, each asserting that one module value equals its constant | both pass; a host test on the runner's instrumentation asserts the initializer ran once per test |
 | `V2-PROJECT-test-missing-assert-import` | negative | a test module without `use @std.assert enduse` | `@module.missingRequiredImport` at the first test's name; every item `@test.invalid` |
 | `V2-PROJECT-test-outside-tests` | negative | `src/app/main.vib` containing a `test` | `@module.testOutsideTests` |
-| `V2-PROJECT-assert-outside-tests` | negative | `src/app/main.vib` calling `assert.true(true)` | `@module.assertionOutsideTests` |
+| `V2-PROJECT-assert-outside-tests` | negative | `src/app/main.vib` calling `assert.true(true)` | `@module.assertionOutsideTests` at the callee |
+| `V2-PROJECT-assert-value-outside-tests` | negative | `src/app/main.vib` with `let f: Fn({Bool} Void) be assert.true endlet` in a `fn` | `@module.assertionOutsideTests` at `assert.true` |
 | `V2-PROJECT-test-duplicate-name` | negative | two tests `"adds"` in one module | `@name.redeclaration` |
 | `V2-PROJECT-test-return` | negative | `test "x" do return void endtest` | `@type.invalidReturn` |
 | `V2-PROJECT-test-try` | negative | `test "x" do let v be try f() endlet endtest` | `@type.invalidTry` |
@@ -138,7 +143,10 @@ Read: all cases pass; the fresh-state host test asserts two initializations.
 ## Completion evidence
 
 - [ ] `stdlib/manifest.vibon` lists `@std.assert` with an empty
-      `languageRoles`, and its `symbols` lists are unchanged by this step.
+      `languageRoles`, and its `compiler` list has `assert.equal`,
+      `assert.false`, and `assert.true`.
+- [ ] No source of `vibra-types` or `vibra-resolve` contains the module
+      path of `@std.assert` except the required-import check.
 - [ ] `conformance/rules.tsv` has one `active` row per case id above.
 - [ ] Every `@test.*` result value has a case.
 - [ ] Validation commands exit 0.

@@ -569,7 +569,7 @@ type I32 of Intrinsic(@i32)
 endtype
 ```
 
-`@compiler` selects a pure compiler intrinsic and is valid only on a `fn`.
+`@compiler` selects a compiler intrinsic and is valid only on a `fn`.
 `@host` selects a typed host operation and is valid only on a `proc` member
 of the operation interface that owns that operation; such a member MUST NOT
 write `performs`. `native` names a toolchain native implementation of a `fn`

@@ -17,10 +17,9 @@ parse in step 07.
   format"; [diagnostics
   chapter](../../../../spec/07-diagnostics-and-conformance.md) "Binding, return
   and pattern diagnostics" (the `@syntax.misplacedBinding` row).
-- The leaf kind of the discard `_` in `@tree.v2` is item S1 of the
-  [specification questions](../spec-questions.md). It blocks no task
-  here: no case of this step with a `_` in its input carries a `tree`
-  snapshot until it is answered.
+- In `@tree.v2` the discard `_` is a `@punctuation` leaf, and so is each
+  character that starts no token, inside its `@error` node. The `tree`
+  snapshots of this step's cases with a `_` in their input show it.
 
 ## Entry points
 

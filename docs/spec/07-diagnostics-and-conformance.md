@@ -230,7 +230,7 @@ command-line context.
 | a repeated type parameter; an associated type with the name of a visible type parameter | `@name.genericRedeclaration`, the later parameter, the associated type, or the `impl` head |
 | a reserved word in a label position | `@name.reservedLabel`, the word |
 | a test module without an import that resolves to `@std.assert` | `@module.missingRequiredImport`, at its first test's name |
-| a test outside `@tests`; an assertion used outside `@tests` | `@module.testOutsideTests`; `@module.assertionOutsideTests` |
+| a test outside `@tests`; outside `@tests`, a use of a declaration bound to an [assertion row](06-runtime.md#assertion-operations) | `@module.testOutsideTests`; `@module.assertionOutsideTests`, the use |
 
 Resolution reads only the captured source graph.
 
@@ -538,6 +538,8 @@ One rule decides which productions of the
 - A lexical production is a leaf. A leaf `kind` is `@identifier`,
   `@reservedWord`, `@integer`, `@float`, `@atom`, `@string`, `@docString`,
   `@character`, `@punctuation`, `@whitespace`, `@comment`, or `@missing`.
+  The discard `_` is a `@punctuation` leaf, and so is each character that
+  starts no token.
 - Recovery is recorded with two kinds, never with flags. An `@error` node is
   interior and holds, as their ordinary token leaves, the tokens a recovery
   step consumed without building a form; an unmatched closer is its
@@ -677,7 +679,10 @@ resolution failed).
 An obligation record has `declaration` (`Str`); `kind` (`@requires`,
 `@ensures`, or `@where`); `span` (the predicate's span record); `status`
 (`@passed`, `@refuted`, `@unknown`, or `@unsupported`); `rules` (list of
-`Str`, the discharge rule identifiers used, in order); `dependencies` (list
+`Str`, the identifiers of the discharge rules used, in order: `GUARD-1` to
+`GUARD-7` of [Bare guards](02-type-system.md#bare-guards), and after a
+`GUARD-6` the `INT` identifiers of the [integer facts](#integer-facts) it
+used); `dependencies` (list
 of `Str` declaration identities, sorted); and `counterexample` (optional
 `Str`, the canonical VIBON text of the refuting values). A module value is
 never generic, so its `typeInfo` is a closed type encoding.

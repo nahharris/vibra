@@ -1121,26 +1121,33 @@ operations.
 | `ensures C` | `C` holds for the returned value | every `return` of the body |
 | `where P` | `P` holds for the assembled representation | every construction |
 
-The checker discharges an obligation with these rules and no others:
+The checker discharges an obligation with these rules and no others. Each
+has the identifier shown, which an
+[obligation record](07-diagnostics-and-conformance.md#persistent-observations)
+lists when the rule is used:
 
-1. **Constants.** The predicate over constant operands evaluates to `true`.
-2. **Type invariant.** A value of a type with an invariant supplies that
-   type's own predicate over its representation.
-3. **Dominating branch.** Inside the true branch of an `if`, its condition
+1. **Constants (`GUARD-1`).** The predicate over constant operands
+   evaluates to `true`.
+2. **Type invariant (`GUARD-2`).** A value of a type with an invariant
+   supplies that type's own predicate over its representation.
+3. **Dominating branch (`GUARD-3`).** Inside the true branch of an `if`,
+   its condition
    holds; inside the false branch, its negation. A `match` arm supplies the
    case and field facts of its pattern. Facts hold only within the branch.
-4. **Substitution.** Renaming, immutable `let` aliases, literal equality, and
-   substitution of actual arguments. Two predicates match only when their
-   resolved callee, type arguments, and operands are the same; equal source
-   text is not enough.
-5. **Boolean structure.** Introduction and projection of `Bool.and`, and the
-   branch rules of the fixed `Bool` operations.
-6. **Listed integer facts.** The exact-width comparison facts the
-   [conformance chapter](07-diagnostics-and-conformance.md#integer-facts)
+4. **Substitution (`GUARD-4`).** Renaming, immutable `let` aliases, literal
+   equality, and substitution of actual arguments. Two predicates match
+   only when their resolved callee, type arguments, and operands are the
+   same; equal source text is not enough.
+5. **Boolean structure (`GUARD-5`).** Introduction and projection of
+   `Bool.and`, and the branch rules of the fixed `Bool` operations.
+6. **Listed integer facts (`GUARD-6`).** The exact-width comparison facts
+   the [conformance chapter](07-diagnostics-and-conformance.md#integer-facts)
    lists, such as `Ordered.greater(x y)` implying that `x` and `y` are not
-   equal.
-7. **Certified results.** After a call returns, the callee's proven `ensures`
-   holds for the result, provided its `requires` was discharged.
+   equal. The record lists `GUARD-6` and then the identifiers of the facts
+   used.
+7. **Certified results (`GUARD-7`).** After a call returns, the callee's
+   proven `ensures` holds for the result, provided its `requires` was
+   discharged.
 
 A discharged guard leaves no code. An obligation the rules refute is
 `@contract.refuted`; one they cannot establish is `@contract.unproved`, and

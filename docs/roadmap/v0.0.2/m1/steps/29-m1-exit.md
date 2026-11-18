@@ -19,8 +19,6 @@ implementation except to close a defect the audit exposes.
   "Guards"; [runtime chapter](../../../../spec/06-runtime.md) "Tail calls",
   "Callable contract execution"; the registered pilot draft that M0 keeps
   current.
-- Every item of the [specification questions](../spec-questions.md) is
-  answered in the specification, and the file is deleted with its links.
 
 ## Entry points
 
@@ -128,6 +126,5 @@ running the pilot (M2); native execution (M4); the `fullV2` claim.
 - [ ] `docs/roadmap/v0.0.2/m1/gate-rejections.md` exists; an empty list is
       stated as empty with the gate modules it covers.
 - [ ] `owner_coverage` passes with no exemption list.
-- [ ] `docs/roadmap/v0.0.2/m1/spec-questions.md` no longer exists and no
-      document links to it.
+- [ ] No step of M1 has an open specification question.
 - [ ] Validation commands exit 0.

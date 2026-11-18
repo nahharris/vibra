@@ -781,8 +781,12 @@ it in its fake world only; no test reaches a real host resource.
 
 ### Assertions
 
-`@std.assert` declares exactly these members, usable only from `@tests`; a
-reference from a target is `@module.assertionOutsideTests`.
+`@std.assert` declares exactly these members. Each is an
+`external @compiler` declaration bound to one of the
+[assertion rows](06-runtime.md#assertion-operations) of the compiler
+intrinsic registry. Outside `@tests`, a use of a declaration bound to an
+assertion row, as a callee or as a value, is
+`@module.assertionOutsideTests` at the use.
 
 | Member | Signature | Passes when |
 | --- | --- | --- |
