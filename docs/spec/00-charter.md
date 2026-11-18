@@ -3,8 +3,8 @@
 Status: normative target
 Delivery status is tracked in the [release roadmap](../roadmap/README.md).
 This specification defines the language that v0.0.2 and later releases
-implement. The shipped v0.0.1 release implements an earlier surface; nothing
-in these chapters is implemented unless a chapter's status line says so.
+implement. Nothing in these chapters is implemented unless a chapter's
+status line says so.
 
 ## Mission
 
@@ -119,8 +119,8 @@ conformance case or an explicit review-only invariant.
 - **Two executions, one meaning.** The interpreter is permanent: it is the
   reference for semantics and the evaluator the compiler uses at compile
   time. The native compiler and runtime produce standalone executables. The
-  WebAssembly backend of v0.0.1 is retired when native execution reaches
-  parity; it is not extended to the features this specification adds.
+  WebAssembly backend runs pure code only and stays until native execution
+  is qualified; it gains no grant, entry, or host support.
 - **Machine contracts.** Diagnostic, query, edit-plan, test, and command
   results have versioned schemas. The parser recovers; the formatter defines
   one canonical representation.

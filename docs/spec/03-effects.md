@@ -1,10 +1,8 @@
 # Vibra effects and authority
 
 Status: normative target
-Implementation status: none of this chapter is implemented. The shipped
-v0.0.1 toolchain implements effect roots declared with a dedicated form and
-checked against a target's root list, with no grant values. This chapter
-replaces that design. Delivery is scheduled in
+Implementation status: none of this chapter is implemented. Delivery is
+scheduled in
 [v0.0.2](../roadmap/v0.0.2/README.md). The Windows file-scope adapter that
 [Filesystem policies](#filesystem-policies) requires has not been shown
 feasible; that check is the first item of the release.

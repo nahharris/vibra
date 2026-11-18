@@ -1,10 +1,9 @@
 # Vibra source language
 
 Status: normative target
-Implementation status: none of this chapter is implemented. The shipped
-v0.0.1 toolchain implements the previous S-expression surface, which this
-chapter replaces. The [release roadmap](../roadmap/README.md) schedules the
-surface defined here. Only a small subset of it (declaration keywords, typed
+Implementation status: none of this chapter is implemented. The
+[release roadmap](../roadmap/README.md) schedules the surface defined here.
+Only a small subset of it (declaration keywords, typed
 closers, application, `if`, `match`, `let`, `return`) has been exercised in a
 model-writing pilot; nothing here is claimed to be measured beyond that.
 
@@ -423,7 +422,10 @@ callable body, so an empty one is `@type.missingReturn`. A nested
 implementation chooses; it is a member of the interface, and the
 [type chapter](02-type-system.md#associated-types) defines it. An interface
 whose members include a `proc` is an operation interface, which the
-[effects chapter](03-effects.md) defines.
+[effects chapter](03-effects.md) defines. When an interface is checked, the
+written result type of each member may place `Self` only where the
+[type chapter](02-type-system.md#interfaces) allows; any other position is
+`@type.unsupportedSelfPosition`.
 
 ```vibra
 interface Printable

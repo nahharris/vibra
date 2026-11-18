@@ -1,9 +1,8 @@
 # Vibra CLI, MCP, and code tooling
 
 Status: normative target
-Implementation status: this chapter describes the tool contract of the
-rewritten language. The shipped v0.0.1 tool implements an earlier contract.
-A tool MUST report which commands, profiles, and schema versions it actually
+Implementation status: none of this chapter is implemented. A tool MUST
+report which commands, profiles, and schema versions it actually
 supports, as
 [Conformance profiles](07-diagnostics-and-conformance.md#conformance-profiles)
 requires.
@@ -172,7 +171,7 @@ written order of entries. It previews by default; `--write` applies.
 
 | Outcome | `changed` | `written` | `text` |
 | --- | --- | --- | --- |
-| preview | input bytes differ from canonical bytes | `false` | the canonical text |
+| preview | input bytes differ from the formatted bytes | `false` | the formatted text |
 | written | `true` | `true` | `null` |
 | diagnostics prevent writing | as computed | `false` | the planned text |
 
@@ -322,8 +321,8 @@ in the
 | `TestItem.failure` | `kind`: `assertion` or `observation`; `assertion`, `expected`, `actual`: canonical text or null; `primarySpan`: `SpanDocument`; `observationError`: null for an assertion |
 | `TrapRecord` | `trapCode`; `origin` (nullable) |
 | `ObservationError` | `code`: `unsupportedValue`; `type` and `origin`: nullable |
-| `StartupRecord` | `status`: `notStarted`, `acquired`, or `failed`; `bindings`; `auditTrace`; `failure`: null or `{binding, code, origin}` |
-| `StartupRecord.bindings[]` | `name`; `recipeIdentity`: `sha256:` and the SHA-256 of `vibraRecipeIdentityV2`, a zero byte, and the canonical bytes of the recipe with its policy normalized; `providerIdentity`: `{provider, version}`; `status`: `acquired`, `refused`, `failed`, or `released`; `grantProjection` (nullable), in acquisition order |
+| `StartupRecord` | `status`: `notStarted`, `acquired`, or `failed`; `bindings`; `auditTrace`; `failure`: null or `{binding, code, origin}`, where `code` is `@grant.requiredUnavailable` for a refused required leaf and `@grant.acquisitionFailed` for a failed acquisition |
+| `StartupRecord.bindings[]` | one per processed leaf, in processing order: `name`; `recipeIdentity`: `sha256:` and the SHA-256 of `vibraRecipeIdentityV2`, a zero byte, and the canonical bytes of the recipe with its policy normalized; `providerIdentity`: `{provider, version}`; `status`: `acquired`, `refused`, or `failed`, the three outcomes of the [startup order](04-programs-and-packages.md#startup-order), or `released` for an acquired leaf after its release; `grantProjection` (nullable) |
 
 A summary never executes an acquisition. A grant projection is data that
 describes a grant; it cannot be turned back into one, and its schema and
@@ -339,7 +338,9 @@ passed, failed, and selected counts. Its exact wording is not a contract.
 
 **Workspace revision.** `workspaceRevision` is `sha256:` and 64 lower-case
 hexadecimal digits. It hashes captured input bytes, never timestamps or
-absolute paths. The hashed bytes are, in order:
+absolute paths, and deliberately not canonical bytes: an edit that changes
+only a comment or a spelling is a new revision. The hashed bytes are, in
+order:
 
 1. the ASCII text `vibraWorkspaceRevisionV2`;
 2. one zero byte;
@@ -363,7 +364,7 @@ Test vector (raw bytes, no trailing newline): `project/project.vibon` holds
 `project`; `source/src/main.vib` holds
 `fn f returns answer: Str do return "ok" endfn`; `toolchain/@toolchain`
 holds `toolchain`. The revision is
-`sha256:33d677dc829d6e953467ca5c9f3ffe396839cb1184fbeaba1e34703ee2fa4ff1`.
+`sha256:5fdc01744c45544c5765d4ec386b7a45bb990bc4b4c0ca415493546c7f36c8ec`.
 The vector tests the framing only; its contents are not a valid project.
 Host tests MUST cover it and an edit of equal length.
 
@@ -399,30 +400,55 @@ text, one zero byte, and the canonical bytes of a record.
 
 | Identity | Framing text | Record | Covers |
 | --- | --- | --- | --- |
-| claim | `vibraClaimIdentityV2` | `@claim.v2` | public signatures, nominal anchors, representations and their visibility, guard predicates and consequences, implementations with their choices, and approved binding and policy interfaces |
-| witness | `vibraWitnessIdentityV2` | `@witness.v2` | the checked body and its exact admitted dependencies |
+| claim | `vibraClaimIdentityV2` | `@claim.v2` | public signatures with their binders and bounds, labelled defaults, nominal anchors, representations and their visibility, guard predicates and consequences, implementations with their choices, and the approved bindings and policies of every target the declaration is the entry of |
+| witness | `vibraWitnessIdentityV2` | `@witness.v2` | the checked bodies of one recursive group and the witnesses of everything they resolve to |
 
-A `@claim.v2` record has `format`; `declaration` (`Str`, the declaration's
-identity); `kind` (a declaration kind atom of the
-[type chapter](02-type-system.md#declared-types)); `access` (`@public` or
-`@private`); `representation` (optional, `@public` or `@private`, for a
-type); `signature` (optional, the [type encoding](06-runtime.md#types) of a
-callable's type, of a type's representation, or of a module value's type);
-`guards` (list of `{kind: Atom predicate: Str consequence: Str}` with
-`consequence` optional, `kind` one of `@requires`, `@ensures`, `@where`,
-and each text the canonical source of the expression); and
-`implementations` (list of `{contract: T choices: Dict(Str T)}` sorted by
-the canonical bytes of `contract`, where `T` is an interface descriptor and
-`choices` maps each associated type name to the chosen type encoding).
+A `@claim.v2` record has these fields, in this order:
 
-A `@witness.v2` record has `format`; `declaration`; `body` (`Str`, the
-canonical source text of the whole declaration); and `dependencies` (list of
-`{declaration: Str claim: Str}` sorted by `declaration`, one per declaration
-the body resolves to).
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `@claim.v2` | required |
+| `declaration` | `Str` | the declaration's identity |
+| `kind` | atom | a declaration kind atom of the [type chapter](02-type-system.md#declared-types) |
+| `access` | atom | `@public` or `@private` |
+| `representation` | optional atom | `@public` or `@private`, for a type |
+| `signature` | optional [signature record](06-runtime.md#open-signatures) | for a callable, a type, or a module value: its binders with their bounds, its receiver slot, and its type |
+| `defaults` | dict from `Str` label to `Str` | the canonical source text of the constant default of each labelled parameter; written even when empty |
+| `guards` | list of `{kind: Atom predicate: Str consequence: Str}` in written order | `consequence` optional; `kind` one of `@requires`, `@ensures`, `@where`; each text the canonical source of the expression |
+| `implementations` | list of [implementation records](06-runtime.md#open-signatures) | every implementation written in the declaration, sorted by the canonical bytes of `contract`, then of `receiver` |
+| `targets` | list of target facts sorted by `target` | one per binary target whose `entry` is this declaration; written even when empty |
 
-Test vectors. The claim record below, as the exact bytes shown with LF
-endings and one trailing newline, hashes to
-`sha256:d17e48d85c7888cf4ed1143b085c84c2819310c7db3970e9ebaef4cd795ae03c`:
+A **target fact** is `{target: Atom effects: E bindings: B}`: the target's
+name; its admission ceiling `E`, a list of entity reference records sorted
+by `path`; and `B`, a list of `{leaf: Atom recipe: Str}` sorted by the
+UTF-8 bytes of the leaf's spelling, where `recipe` is the recipe identity
+of [Command payloads](#command-payloads). The recipe identity covers the
+provider, the resource, the normalized policy, the limits, and `after`, so
+changing what a target binds or permits changes its entry's claim.
+
+A `@witness.v2` record covers one **recursive group**: a maximal set of
+declarations each of whose bodies reaches every other through resolved
+references. A declaration that is not recursive is a group of one. The
+group is hashed as one unit, so no witness depends on itself, and every
+member has the group's witness identity.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `@witness.v2` | required |
+| `members` | list of `{path: Atom declaration: Str body: Str}` sorted by the UTF-8 bytes of the spelling of `path` | every member, by name: its canonical path, its identity, and the canonical source text of the whole declaration |
+| `dependencies` | list of `{declaration: Str witness: Str}` sorted by `declaration` | one per declaration outside the group that a member's body resolves to, with the witness identity of that declaration's own group |
+
+A dependency is pinned by its witness, so a change to the body of anything
+a declaration resolves to, however far, changes the declaration's witness.
+The groups form an acyclic graph, because a cycle of references is one
+group.
+
+Test vectors. Both hash the record's canonical bytes: one line, with no
+trailing newline. The records are shown laid out for reading. The vectors
+test the framing and the serialization only; their identities are
+placeholders and their lists are not those of a real program. The claim
+record below has 436 canonical bytes and hashes to
+`sha256:ee7305039b18bffa7745b5a96ed3790419bb8d26782a75558a3c5a354004302a`:
 
 ```vibon
 {
@@ -431,30 +457,42 @@ endings and one trailing newline, hashes to
   kind: @proc
   access: @public
   signature: {
-    kind: @proc
-    parameters: []
-    labels: [:]
-    result: {
-      kind: @declared
-      path: @std.process.ExitCode
-      seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
-      arguments: []
+    binders: []
+    typeInfo: {
+      kind: @proc
+      parameters: []
+      labels: [:]
+      result: {
+        kind: @declared
+        path: @std.process.ExitCode
+        seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+        arguments: []
+      }
+      effects: {roots: []}
     }
-    effects: {roots: []}
   }
+  defaults: [:]
   guards: []
   implementations: []
+  targets: []
 }
 ```
 
-The witness record below hashes to
-`sha256:fd75a164dc3910dbdc95a357f4f04f20faa970bb1d57f6eecfccc184e8827544`:
+Its canonical bytes begin `{format: @claim.v2 declaration: "sha256:213e`
+and end `implementations: [] targets: []}`. The witness record below has
+234 canonical bytes and hashes to
+`sha256:241dbcd0700fd2be1dab30d65e0fc9ed4c1d28eed647399a21969fd70f235e33`:
 
 ```vibon
 {
   format: @witness.v2
-  declaration: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
-  body: "proc main returns code: ExitCode do return ExitCode(0u8) endproc"
+  members: [
+    {
+      path: @hello.main.main
+      declaration: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+      body: "proc main returns code: ExitCode do return ExitCode(0u8) endproc"
+    }
+  ]
   dependencies: []
 }
 ```
@@ -544,8 +582,11 @@ empty. Structural facts do not imply the source checked.
   candidate where it is not visible.
 
 **Type document:** the JSON projection of the
-[canonical type encoding](06-runtime.md#types), with one addition: a type
-parameter in scope is `{"kind": "param", "name": "T"}`. A declared type is
+[canonical type encoding](06-runtime.md#types). At a position inside an
+open declaration it is the projection of the
+[open type encoding](06-runtime.md#open-signatures), whose binder
+references index the binders of the enclosing declaration's signature
+record; there is no other spelling of a type parameter. A declared type is
 referenced by its path and identity, never expanded; an interface value
 carries its fixed `choices`; a callable carries its `labels` and, for a
 `proc` or `intent`, its complete `effects`.
@@ -559,10 +600,10 @@ resultType, dispatch}`.
   declaration.
 - A constructor's `resultType` is `T` for a bare `where` and
   `Result(T E)` for `where … else`, whatever the checker can fold.
-- `dispatch` is `null` or `{interface, member, receiver, selection,
+- `dispatch` is `null` or `{contract, member, receiver, selection,
   destination}`. `selection` is `static`, `default`, `dynamic`, or
-  `closed`. `destination` is `true` for a member with no receiver that was
-  chosen by the written expected type.
+  `closed`. `destination` is `true` for a member with no receiver slot that
+  was chosen by the written expected type.
 - Applying a `proc` member builds a plan and performs nothing. An `await` is
   reported separately, with the plan's type, its complete row, and its
   witness.
@@ -613,22 +654,32 @@ and storage are not compiler services.
 | `format` | `@index.v2` | required |
 | `revision` | `Str` | the workspace revision |
 | `declarations` | list of declaration records sorted by the UTF-8 bytes of `id` | every declaration of the local package |
-| `implementations` | list of implementation records sorted by `receiver`, then `contract` | every implementation of the local package |
+| `implementations` | list of index implementation records sorted by the canonical bytes of `implementation.contract`, then of `implementation.receiver` | every implementation of the local package |
 | `references` | list of reference records sorted by `source`, then `start`, then `end` | every resolved reference |
 
 | Record | Fields |
 | --- | --- |
 | declaration | `id` (`Str`, the identity); `kind` (a declaration kind atom of the [type chapter](02-type-system.md#declared-types)); `module` (atom); `owner` (optional `Str`, the owner's identity; absent at top level); `access` (`@public` or `@private`); `source` (a span record); `text` (`Str`, the formatted source); `binding` (optional record `provider: Atom`, `wireSymbol: Str`, present for an external declaration); `facts` (optional, absent when not established) |
-| `facts` | `signature` (a type encoding); `ceiling` and `effects` (rows, `{roots: […]}` of [entity reference records](06-runtime.md#types)); `errors` (list of type encodings, the ordinary result error types); `applications` (list of application facts); `contracts` (list of `{kind: Atom predicate: Str consequence: Str}` with `consequence` optional, distinguishing bare guards from guards with a consequence); `claimIdentity` and `witnessIdentity` (`Str`) |
-| implementation | `receiver` (a type encoding); `contract` (an interface descriptor with its positional arguments and no choices); `choices` (dict from `Str` associated type name to type encoding, in name order); `source`; `text`; `members`, a list of `{member: Str source: span signature: T text: Str}` where `member` is the contract member's identity |
+| `facts` | in this order: `signature` (optional [signature record](06-runtime.md#open-signatures); absent for a module, an interface, and an associated type); `ceiling` (optional row, the written `performs`; present for a `proc` and a test); `effects` (optional row, the performed row; present with `ceiling`); `errors` (list of open type encodings, the ordinary result error types, in written order, written even when empty); `applications` (list of application facts sorted by `source`, written even when empty); `contracts` (list of `{kind: Atom predicate: Str consequence: Str}` in written order, with `consequence` optional, distinguishing bare guards from guards with a consequence; written even when empty); `claimIdentity` (`Str`, required); `witnessIdentity` (`Str`, required) |
+| application fact | in this order: `source` (a span record); `kind` (`@function`, `@procPlan`, `@constructor`, `@contract`, `@recordProjection`, or `@collectionLookup`); `callee` (optional `Str` identity, absent without one resolved declaration); `calleeType` (an open type encoding); `positional` (list of open type encodings, the operand types in written order); `labels` (dict from `Str` label to open type encoding); `resultType` (an open type encoding); `dispatch` (optional dispatch fact) |
+| dispatch fact | in this order: `contract` (`Str`, the interface's identity); `member` (`Str`, the member's identity); `receiver` (an open type encoding); `selection` (`@static`, `@default`, `@dynamic`, or `@closed`); `destination` (`Bool`, `true` for a member with no receiver slot chosen by the written expected type) |
+| index implementation | in this order: `implementation` (an [implementation record](06-runtime.md#open-signatures): its binders, its positional interface key `contract`, its `receiver`, and its `choices`); `source` (a span record); `text` (`Str`); `members` (list, in written order, of `{member: Str source: S signature: G text: Str}`, where `member` is the contract member's identity, `S` a span record, and `G` a signature record over the implementation's binders) |
 | reference | `from` (`Str`, the identity of the enclosing declaration); `written` (`Str`); `source` (a span record); `to` (optional `Str`, absent when it depends on failed checking) |
 
-A span record is `{sourceId: Str start: U64 end: U64}`.
+A span record is `{sourceId: Str start: U64 end: U64}`. A row is
+`{roots: R}`, with `R` a list of
+[entity reference records](06-runtime.md#types). Every open type encoding
+inside a `facts` record refers to the binders of that record's `signature`.
+A `facts` record always holds its two identities, so it is never empty.
+
+The example's `id` is the declaration identity test vector of the
+[type chapter](02-type-system.md#declared-types), which matches its module
+and name. The record has no `facts`:
 
 ```vibon
 {
   format: @index.v2
-  revision: "sha256:33d677dc829d6e953467ca5c9f3ffe396839cb1184fbeaba1e34703ee2fa4ff1"
+  revision: "sha256:5fdc01744c45544c5765d4ec386b7a45bb990bc4b4c0ca415493546c7f36c8ec"
   declarations: [
     {
       id: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"

@@ -1,13 +1,8 @@
 # Vibra programs and packages
 
 Status: normative target
-Implementation status: the shipped v0.0.1 toolchain implements VIBON data,
-project discovery, the source snapshot, local module resolution, the embedded
-standard library, and tests, all for the previous source surface and the
-`@project.v1` record. The `@project.v2` record, grant bindings, the entry
-signature, test worlds obtained through `TestWorld`, dependency delivery, and
-build products defined here are not implemented. See the
-[release roadmap](../roadmap/README.md).
+Implementation status: none of this chapter is implemented. The
+[release roadmap](../roadmap/README.md) schedules it.
 
 ## VIBON data documents
 
@@ -58,8 +53,13 @@ key type; and for every number slot, its exact width. There is no null
 value: an absent optional field is omitted from the document, and the
 [JSON projection](05-tooling.md#machine-contracts) of a document writes
 `null` for it. A field map that may be empty is a dict, never a record,
-because `{}` is the empty tuple. A schema may give an optional field a
-default, which the reader supplies when the field is absent.
+because `{}` is the empty tuple. For the same reason a record whose fields
+are all optional has no all-absent spelling: every such schema requires a
+present record to hold at least one field, and the enclosing field is
+omitted when there is nothing to say. A schema may give an optional field a
+default, which the reader supplies when the field is absent, so a document
+that omits the field and one that writes the default decode to the same
+value.
 
 A reader validates a document in this order, and reports one fault once:
 
@@ -67,10 +67,12 @@ A reader validates a document in this order, and reports one fault once:
    [source language](01-source-language.md#lexical-structure)'s codes:
    `@syntax.invalidEncoding`, the literal codes, `@syntax.unmatchedDelimiter`,
    and `@syntax.invalidForm` for a form outside the data grammar;
-2. a repeated record field, `@data.duplicateField` at the later field, and a
-   repeated dict key after decoding, `@data.duplicateKey` at the later key;
-3. a `format` the reader does not implement, `@data.invalidValue` at the
-   `format` field; a reader never guesses or upgrades;
+2. a repeated record field, `@data.duplicateField` at the later field. A
+   field name is compared as written, so this needs no schema;
+3. format selection: a `format` the reader does not implement is
+   `@data.invalidValue` at the `format` field; a reader never guesses or
+   upgrades. The selected schema types every slot, each dict's key slot
+   included;
 4. shape, field by field in schema order: a required field missing, an
    unknown field, a value of the wrong form (a list where a record is
    required, a tuple of the wrong arity), `@data.invalidShape` at the field
@@ -79,7 +81,11 @@ A reader validates a document in this order, and reports one fault once:
    `@data.invalidValue` at the value. This covers a number of the wrong
    width or out of range, an unsuffixed number in a slot with no number
    type, an atom outside a closed set, a string that fails a stated
-   constraint, and a document whose fields relate wrongly.
+   constraint, and a document whose fields relate wrongly. Dict keys are
+   validated here like any other value;
+6. a repeated dict key, `@data.duplicateKey` at the later key. Keys are
+   compared as decoded values of the key slot's type, so the comparison
+   happens only after steps 3 to 5 have typed and accepted them.
 
 An unsuffixed number is accepted by the grammar and typed by the schema slot
 it lands in. A slot with no number type rejects it. In canonical output every
@@ -99,22 +105,28 @@ by its spelling. A string or character decodes to its scalar sequence, so
 `"a"` and `"\u{61}"` are one key; a number decodes to its type and value, so
 `1` and `1u8` are one `U8` key once the schema types the slot and `0.0f64`
 and `-0.0f64` are two `F64` values; an atom decodes to its parts; a compound
-decodes recursively, a record with its fields in canonical name order. Two
-dict keys are duplicates when their decoded values are equal under the key
-type's canonical order of the
-[type chapter](02-type-system.md#dict-keys-equality-and-order). A
-grammar-only reader, which has no schema, compares decoded values with the
-written suffix as part of a number's value.
+decodes recursively, a record to its set of named fields, with every absent
+defaulted field holding its default. Two dict keys are duplicates when their
+decoded values are equal under the key type's `Ordered` implementation. A
+grammar-only reader, which has no schema, has no steps 3 to 5: it compares
+decoded keys with the written suffix as part of a number's value.
+
+**Dict order.** A VIBON dict has one normative order: its entries ascend by
+the `Ordered` order of the key slot's type, which is the canonical key order
+of the [type chapter](02-type-system.md#dict-keys-equality-and-order). The
+keys are compared as typed values, never as text or encoded bytes, so `2u8`
+precedes `10u8`. Canonical serialization and every tool that renders or
+traverses a decoded dict use this order.
 
 **Canonical serialization** is defined for a document validated against a
-schema, and it is what every identity hash covers and what the toolchain
-writes for every document that has no human author: lock files, build
-records, snapshots, and value encodings. It is comment-free and fully
-determined by the decoded value and the schema:
+schema. Its output, the document's **canonical bytes**, is fully determined
+by the decoded value and the schema, has no comment, and has no layout:
 
-- UTF-8, LF line endings, one trailing newline, no trailing whitespace;
-- one space between tokens; none inside brackets, before `(`, or before
-  `:`; one after `:`;
+- UTF-8, on one line: the bytes contain no LF and no CR, and end with the
+  document's closing token, with no trailing newline;
+- exactly one space between two adjacent elements of a compound, and one
+  after each `:`; no other whitespace, so none inside brackets or before
+  `:`;
 - a string as the shortest literal: `\"`, `\\`, `\n`, `\r`, and `\t` for
   those scalars, `\u{H}` with the fewest upper-case hexadecimal digits for
   any other scalar below U+0020 and for U+007F, and every other scalar
@@ -123,19 +135,34 @@ determined by the decoded value and the schema:
   the [canonical text](06-runtime.md#floating-point-operations) of the
   runtime chapter and its exact suffix; `true` and `false`; an atom as its
   parts;
-- a record's fields in schema order, with absent optional fields omitted; a
-  dict's entries in the canonical order of its key type; a list's elements
-  in their order;
-- an empty compound as `{}`, `[]`, or `[:]`; any other compound on one line
-  when the whole line fits within 88 columns, otherwise its opener, each
-  entry on its own line one step of two spaces in, and its closer on its own
-  line at the opener's indentation.
+- a record's fields in schema order. An absent optional field is omitted,
+  and so is a field whose value equals its schema default, whatever the
+  input spelled;
+- a record no schema describes, such as an audit event of an unknown kind
+  that a consumer keeps opaque, with its fields in the order of the UTF-8
+  bytes of their names and nothing omitted;
+- a dict's entries in dict order; a list's elements in their order;
+- an empty compound as `{}`, `[]`, or `[:]`.
+
+Every identity hash defined over a record covers its canonical bytes. The
+hashes of exact input bytes are deliberate exceptions: the
+[workspace revision](05-tooling.md#snapshot-claim-and-witness-identity),
+the lock's `project` digest, the [content hash](#content-hash) of a file
+tree, the source and output digests of a build record, and the artifact
+identity. They cover the bytes as captured and canonicalize nothing.
+
+A file the toolchain writes for a document with no human author (a lock
+file, a build record, a snapshot) is the document's canonical text laid out
+by the formatter's layout rules and ended with one LF. Laying out changes
+whitespace only, so reading the file and serializing it gives the canonical
+bytes again. No hash covers the laid-out file.
 
 The **source-preserving formatter** is a different operation. `vibra fmt`
 and the project edits of the [tooling chapter](05-tooling.md#formatting)
 keep comments, written spellings, and the written order of dict entries, and
-apply only the layout rules; they never produce canonical bytes, and a
-hash is never taken over their output.
+apply only the layout rules, the 88-column limit among them, which belong
+to the formatter alone; they never produce canonical bytes, and a hash is
+never taken over their output.
 
 Project files, lock files, build metadata, host worlds, and canonical value
 encodings use VIBON. JSON is the interchange format of CLI and MCP responses
@@ -200,7 +227,8 @@ output.
 | project | `format`, `package`, `targets`, `dependencies` | all required; `targets` a list with at least one target; `dependencies` a dict from `Str` name to dependency, possibly empty |
 | package | `name`, `version` | strings; `name` satisfies the source identifier grammar, is not a reserved word, and is camelCase; `version` is one semantic version, never a range |
 | target | `name`, `kind`, `root`, `entry`, `effects`, `grants` | `name` is a one-part atom whose part is not a reserved word; `kind` is `@bin` or `@lib`; `root` a `Str`; a binary requires `entry` (an entity reference), `effects` (a list of entity references), and `grants` (a dict from leaf atom to grant binding); a library omits all three |
-| grant binding | `provider`, `resource`, `policy`, `limits`, `after` | `provider`, `resource`, `after` required; `policy` and `limits` optional; see [Targets](#targets) |
+| grant binding | `provider`, `resource`, `policy`, `limits`, `after` | `provider`, `resource`, `after` required; `policy` and `limits` optional; a present `limits` holds at least one bound; see [Targets](#targets) |
+| limits | `invocations`, `inputBytes`, `outputBytes` | each an optional `U64`; at least one present |
 | path dependency | `kind`, `path`, `target` | `kind` is `@path`; `path` a `Str` confined beneath the project root; `target` an optional atom |
 | Git dependency | `kind`, `git`, `rev`, `target` | `kind` is `@git`; `git` is an HTTPS URL without userinfo; `rev` is 40 lower-case hexadecimal digits; `target` an optional atom |
 
@@ -356,7 +384,10 @@ A recipe has:
   authorizes nothing by itself.
 - `limits`: optional record of `invocations`, `inputBytes`, and
   `outputBytes`, each an optional `U64` upper bound for the life of the
-  process.
+  process. A present record holds at least one bound; a grant with no limit
+  omits `limits`, exactly as its
+  [projection](06-runtime.md#audit-trace) does. A `limits` with no field
+  is the empty tuple and `@data.invalidShape`.
 - `after`: a list, without repeats, of leaves this recipe must be acquired
   after. It MUST contain the recipe's `source` leaf when it has one. Every
   name in it MUST be a key of `grants`. The `after` relation MUST be
@@ -392,31 +423,43 @@ build, for a required and an optional leaf alike.
 
 ### Startup order
 
-The runtime acquires the leaves one at a time. A leaf is **ready** when
-every leaf in its `after` list has been acquired or bound absent. Repeatedly,
-among the ready leaves not yet acquired, the runtime acquires the one whose
-full canonical atom spelling (`@notes`, `@logs.reader`) is smallest in
-UTF-8 byte order, and recomputes readiness after each acquisition. Because
-`after` is acyclic, the sequence reaches every leaf. This is the only
-startup order; the project file's written order plays no part. The effects,
-tooling, and runtime chapters refer to it.
+The runtime processes the leaves one at a time. Every leaf starts
+**unprocessed**. A leaf is **ready** when every leaf in its `after` list is
+processed. Repeatedly, among the unprocessed ready leaves, the runtime takes
+the one whose full canonical atom spelling (`@notes`, `@logs.reader`) is
+smallest in UTF-8 byte order, attempts to acquire it, and marks it
+**processed** whether it was acquired or bound absent. Readiness is
+recomputed after each leaf. A processed leaf is never selected again, and
+because `after` is acyclic the sequence reaches every leaf unless startup
+fails first. This is the only startup order; the project file's written
+order plays no part. The effects, tooling, and runtime chapters refer to
+it.
 
-An issuer **refuses** a leaf in exactly these cases:
+Each attempt has exactly one of three outcomes, decided by the issuer's
+row. Anything the row does not list as acquired or refused is a failure:
 
-| Provider | Refusal |
-| --- | --- |
-| `@host.fs.directory` | the path does not name a directory the process can open; the path is not Unicode; an `@argumentPath` index at or beyond the end of the argument list, which `index` counts from zero without the executable's path; a `@variablePath` variable that is not present |
-| `@host.io.stdin`, `@host.io.stdout`, `@host.io.stderr` | the process has no such stream |
-| `@host.env.vars`, `@host.env.args`, `@host.time.wall`, `@host.time.monotonic`, `@host.random` | never |
+| Provider | Refused | Failed |
+| --- | --- | --- |
+| `@host.fs.directory` | the path names nothing; the path names something that is not a directory; the operating system denies the process permission to open the directory; the path is not Unicode; an `@argumentPath` index at or beyond the end of the argument list, which `index` counts from zero without the executable's path; a `@variablePath` variable that is not present | any other error opening the directory; a directory on which the driver cannot enforce the leaf's policy |
+| `@host.io.stdin`, `@host.io.stdout`, `@host.io.stderr` | the process has no such stream | any other error obtaining the stream |
+| `@host.env.vars`, `@host.env.args`, `@host.time.wall`, `@host.time.monotonic`, `@host.random` | never | the operating system cannot provide the resource |
 
-A leaf whose `source` leaf was bound absent is refused as well, because its
-read cannot happen. A refused optional leaf is bound to `Option.none()`. A
-refused required leaf stops the sequence: startup fails with
-`@grant.requiredUnavailable` and the entry does not run. Any other failure
-to acquire (a driver that cannot enforce the grant on this platform, an
-operating-system error) is not a refusal: it fails startup for a required
-and an optional leaf alike, and a driver the platform does not support is
-rejected at admission, as `@tool.unavailable`, before any leaf is acquired.
+- **Acquired.** The leaf is bound to its grant.
+- **Refused.** A leaf whose `source` leaf was bound absent is refused as
+  well, because its read cannot happen. A refused optional leaf is bound to
+  `Option.none()` and the sequence continues. A refused required leaf stops
+  the sequence: startup fails with `@grant.requiredUnavailable`.
+- **Failed.** A failure stops the sequence for a required and an optional
+  leaf alike: startup fails with `@grant.acquisitionFailed`. A failure never
+  becomes an absence.
+
+Both diagnostics are startup results with the leaf's binding recipe in the
+project file as their primary span, and the entry does not run. The
+`@startup` events of the [audit trace](06-runtime.md#audit-trace) and the
+startup record of the [tooling chapter](05-tooling.md#command-payloads)
+report each leaf with these same three outcomes. A driver the platform does
+not support at all is a different case: it is rejected at admission, as
+`@tool.unavailable`, before any leaf is processed.
 
 On every ending of the process, including a failed startup, the acquired
 grants are released in reverse acquisition order. The
@@ -485,7 +528,7 @@ snapshot.
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `format` | `@projectLock.v2` | required |
-| `project` | `Str` digest | `sha256:` and the SHA-256 of the exact bytes of `project.vibon` when the lock was written |
+| `project` | `Str` digest | `sha256:` and the SHA-256 of the exact bytes of `project.vibon` when the lock was written; a hash of input bytes, not of canonical bytes |
 | `dependencies` | dict from `Str` name to lock entry | one entry per declared dependency, no more and no fewer |
 
 A lock entry has `kind` (`@path` or `@git`); for `@path`, `path` (`Str`);
@@ -494,6 +537,10 @@ for `@git`, `git` (`Str`), `rev` (`Str`, 40 lower-case hexadecimal digits),
 `contentHash` (`Str`, the [content hash](#content-hash) of the vendored
 tree); then `target` (optional atom) and `dependencies` (list of `Str`, the
 names the dependency's own project declares, sorted by UTF-8 bytes).
+
+The example shows the shape. Its `project` digest is a placeholder, not the
+digest of any project file in this chapter; its `contentHash` is the test
+vector of [Content hash](#content-hash).
 
 ```vibon
 {
@@ -693,7 +740,9 @@ test's world are unusable in another. The members behave as follows:
   [runtime chapter](06-runtime.md#host-registry), bound with
   `external @host` in `@std.test`. A call reaches no external resource and
   appends no `@host` event to the test's trace; the operations a test then
-  performs with the derived grants do.
+  performs with the derived grants do. In those events a grant derived from
+  a `TestWorld` projects its origin as `{kind: @testWorld}`, never as a
+  startup leaf, as the [audit trace](06-runtime.md#audit-trace) defines.
 - Each grant `directory` returns permits its own action everywhere in the
   new directory, with no limits: a `files` rule with `prefix: []`,
   `depth: @tree`, and `anyName` for the read and write grants, a
@@ -763,8 +812,21 @@ target, platform, and options MUST produce byte-identical outputs.
 | `grants` | dict from leaf atom to grant binding | the target's `grants` dict, as validated |
 | `registry` | record `major: U32`, `minor: U32`, `symbols: List(Str)` sorted | the host registry version the executable requires and the wire symbols it binds |
 | `outputs` | list of `{path: Str digest: Str}` sorted by `path` | every emitted file |
-| `semanticIdentity` | `Str` | `sha256:` and the SHA-256 of `vibraSemanticIdentityV2`, a zero byte, and the canonical bytes of this record with `outputs`, `semanticIdentity`, and `artifactIdentity` absent |
-| `artifactIdentity` | `Str` | `sha256:` and the SHA-256 of the executable's exact bytes |
+| `semanticIdentity` | `Str` | `sha256:` and the SHA-256 of `vibraSemanticIdentityV2`, a zero byte, and the canonical bytes of the build's `@buildIdentity.v2` record |
+| `artifactIdentity` | `Str` | `sha256:` and the SHA-256 of the executable's exact bytes; a hash of input bytes |
+
+The semantic identity has its own preimage schema, so that the bytes it
+hashes validate against a schema of their own. A `@buildIdentity.v2` record
+has `format: @buildIdentity.v2` and then exactly the fields `toolchain`,
+`revision`, `target`, `triple`, `sources`, `dependencies`, `effects`,
+`grants`, and `registry`, each with the type, order, and sorting it has in
+`@build.v2`. It has no `outputs` and no identity field, so it depends on no
+emitted byte. The toolchain forms it from the same validated inputs as the
+build record and never stores it.
+
+The example shows the shape. Its identities and digests are placeholders,
+except `revision`, which is the workspace revision test vector of the
+[tooling chapter](05-tooling.md#snapshot-claim-and-witness-identity).
 
 ```vibon
 {
@@ -779,7 +841,7 @@ target, platform, and options MUST produce byte-identical outputs.
     policy: "scopePolicyV1"
     registry: {major: 2u32 minor: 0u32}
   }
-  revision: "sha256:33d677dc829d6e953467ca5c9f3ffe396839cb1184fbeaba1e34703ee2fa4ff1"
+  revision: "sha256:5fdc01744c45544c5765d4ec386b7a45bb990bc4b4c0ca415493546c7f36c8ec"
   target: @hello
   triple: "x86_64-pc-windows-msvc"
   sources: [
@@ -804,8 +866,8 @@ target, platform, and options MUST produce byte-identical outputs.
 }
 ```
 
-The runtime chapter defines native execution and the conditions under which
-the WebAssembly transition backend remains available until it is removed.
+The runtime chapter defines native execution and what the WebAssembly
+transition backend supports.
 
 ## Exclusions
 

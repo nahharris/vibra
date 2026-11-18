@@ -2,9 +2,7 @@
 
 Status: normative target
 Implementation status: this chapter defines the diagnostics and the evidence
-a release of the rewritten language needs. None of that evidence exists yet.
-The shipped v0.0.1 evidence describes the earlier language and is not
-relabelled.
+a release needs. None of that evidence exists yet.
 
 ## Diagnostics are a language surface
 
@@ -120,6 +118,7 @@ its level MUST agree with it.
 | `@grant.invalidBinding` | `@error` |
 | `@grant.bindingCycle` | `@error` |
 | `@grant.requiredUnavailable` | `@error` |
+| `@grant.acquisitionFailed` | `@error` |
 | `@grant.invalidPolicy` | `@error` |
 | `@grant.policyTooComplex` | `@error` |
 | `@tool.unavailable` | `@error` |
@@ -240,7 +239,7 @@ Resolution reads only the captured source graph.
 | Condition | Code and primary span |
 | --- | --- |
 | a byte-order mark, invalid UTF-8, or NUL | `@syntax.invalidEncoding`, the offending bytes |
-| two adjacent tokens with nothing between them | `@syntax.missingSeparator`, a zero-width span at the second token |
+| two adjacent tokens, each of the classes identifier, reserved word, number, atom, string, character, or doc string, with nothing between them; a bracket or `:` beside a token never triggers it | `@syntax.missingSeparator`, a zero-width span at the second token |
 | an empty, multi-scalar, or surrogate character literal | `@syntax.invalidCharacterLiteral`, the token |
 | a terminated string with a malformed or unsupported escape | `@syntax.invalidStringLiteral`, the token |
 | an unknown numeric suffix, an integer suffix on a float body, or trailing token text | `@syntax.invalidNumericLiteral`, the token |
@@ -256,7 +255,7 @@ Resolution reads only the captured source graph.
 
 | Condition | Code and primary span |
 | --- | --- |
-| an argument that does not fit its slot, a wrong arity, an unknown, duplicate, or missing label; a constructor pattern of the wrong shape | `@type.argumentMismatch`, the argument, the application, or the pattern |
+| an argument that does not fit its slot, a wrong arity, an unknown, duplicate, or missing label; a constructor pattern of the wrong shape; an argument for a `Self` parameter outside the receiver slot that does not have the receiver's type, or that is supplied through an interface value | `@type.argumentMismatch`, the argument, the application, or the pattern |
 | a wrong type-argument count, an unknown or repeated label, a label in an `impl` target, or an interface value type with an open associated type | `@type.typeArgumentMismatch`, the label or the type application |
 | application of a value that is not applicable | `@type.notApplicable`, the callee |
 | a field read of a value without that field | `@type.unknownRecordField`, the field name |
@@ -272,12 +271,12 @@ Resolution reads only the captured source graph.
 | an abstract member or an associated type an implementation does not supply | `@type.missingAbstractMember`, the `impl` head, related to the contract member |
 | two implementations of one receiver whose targets unify | `@type.overlappingImplementation`, the later `impl` head, related to the earlier |
 | two implementations still candidates at a call | `@type.ambiguousImplementation`, the application |
-| a contract member selectable by neither dispatch rule | `@type.undispatchableContractMember`, the member's name |
-| a contract member whose result places `Self` outside the `Self` map | `@type.unsupportedSelfPosition`, the result type |
+| a contract member with no receiver slot whose written result type does not contain `Self` | `@type.undispatchableContractMember`, the member's name |
+| a contract member whose written result type places `Self` outside the [`Self` map](02-type-system.md#interfaces), found when the interface declaration is checked, whether or not the interface is used as a value | `@type.unsupportedSelfPosition`, the result type |
 | a destination-dispatched call with no written expected type | `@type.ambiguousDestination`, the application |
 | `From` and `TryFrom` sources of one receiver that unify | `@type.redundantConversion`, the later `impl` head, related to the earlier |
 | a receiver or destination with no implementation for the selected key; a label-bound parameter that fails its own bound | `@type.unsatisfiedBound`, the operand or the expected type, related to the interface or bound |
-| an implementation member whose signature differs from the contract; a widening whose label differs from the implementation's choice; a label-bound parameter fixed to two types | `@type.mismatch`, the differing type or expression |
+| an implementation member whose signature differs from the contract; a widening whose label differs from the implementation's choice; a label-bound parameter fixed to two types; a deferred associated equality or a complete result that disagrees after selection | `@type.mismatch`, the differing type or expression |
 
 ### Binding, return and pattern diagnostics
 
@@ -303,7 +302,7 @@ Every row is an error with no automatic fix.
 | a `match` that does not cover its type | `@pattern.nonExhaustive`, the `match`, with one uncovered shape |
 | coverage the checker cannot decide for this type | `@pattern.unsupportedCoverage`, the `match` |
 | an arm that is repeated, already covered, or uninhabited | `@pattern.unreachableArm`, the arm's pattern |
-| a type argument the call does not determine | `@type.ambiguousInference`, the application |
+| a type argument the call does not determine, including one still undetermined when no bound is resolvable | `@type.ambiguousInference`, the application |
 | a type argument that does not meet its bound | `@type.unsatisfiedBound`, the actual type, related to the bound |
 | an `impl` for `Never` or for an anonymous type | `@name.wrongEntityKind`, the `impl` |
 
@@ -338,7 +337,8 @@ Every row is an error with no automatic fix.
 | an `effects` entry that neither the entry nor a startup step performs | `@contract.unusedEffect` (warning), that entry of the list |
 | a missing, extra, ill-typed, or unapproved grant binding; an unknown, repeated, or missing `after` name; a `source` leaf of the wrong kind | `@grant.invalidBinding`, the binding, its field, or the `grants` record |
 | a cycle in `after` | `@grant.bindingCycle`, the later edge, related along the cycle |
-| a required grant refused at startup | `@grant.requiredUnavailable`, the binding; a startup result, not a check result |
+| a required grant refused at startup, in a case its issuer lists as a refusal | `@grant.requiredUnavailable`, the leaf's binding recipe in the project file; a startup result, not a check result |
+| an acquisition that fails at startup, in a case its issuer lists as a failure, for a required or an optional grant | `@grant.acquisitionFailed`, the leaf's binding recipe in the project file; a startup result, not a check result |
 | an invalid policy, or a policy naming another root | `@grant.invalidPolicy`, the policy value |
 | a policy over the size or depth limit | `@grant.policyTooComplex`, the policy |
 
@@ -563,7 +563,8 @@ resolution failed).
 | --- | --- | --- |
 | `format` | `@types.v2` | required |
 | `moduleValues` | list of `{declaration: Str typeInfo: T}` sorted by `declaration` | the type of every module value |
-| `callables` | list of `{declaration: Str signature: T}` sorted by `declaration` | the complete callable type, with its row, of every `fn`, `proc`, and member |
+| `callables` | list of `{declaration: Str signature: G}` sorted by `declaration` | for every `fn`, `proc`, and member, `G` is its [signature record](06-runtime.md#open-signatures): its binders with their bounds, its receiver slot, and its complete callable type with its row, open where the declaration is |
+| `implementations` | list of [implementation records](06-runtime.md#open-signatures) sorted by the canonical bytes of `contract`, then of `receiver` | every implementation, with its positional key and its choices |
 | `obligations` | list of obligation records sorted by `declaration`, then `span` | every bare guard obligation |
 
 An obligation record has `declaration` (`Str`); `kind` (`@requires`,
@@ -571,7 +572,10 @@ An obligation record has `declaration` (`Str`); `kind` (`@requires`,
 (`@passed`, `@refuted`, `@unknown`, or `@unsupported`); `rules` (list of
 `Str`, the discharge rule identifiers used, in order); `dependencies` (list
 of `Str` declaration identities, sorted); and `counterexample` (optional
-`Str`, the canonical VIBON text of the refuting values).
+`Str`, the canonical VIBON text of the refuting values). A module value is
+never generic, so its `typeInfo` is a closed type encoding.
+
+The example is shape only; the identity of `ExitCode` is a placeholder:
 
 ```vibon
 {
@@ -581,19 +585,23 @@ of `Str` declaration identities, sorted); and `counterexample` (optional
     {
       declaration: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
       signature: {
-        kind: @proc
-        parameters: []
-        labels: [:]
-        result: {
-          kind: @declared
-          path: @std.process.ExitCode
-          seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
-          arguments: []
+        binders: []
+        typeInfo: {
+          kind: @proc
+          parameters: []
+          labels: [:]
+          result: {
+            kind: @declared
+            path: @std.process.ExitCode
+            seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+            arguments: []
+          }
+          effects: {roots: []}
         }
-        effects: {roots: []}
       }
     }
   ]
+  implementations: []
   obligations: []
 }
 ```
@@ -624,7 +632,7 @@ A test record has `name` (`Str`, the selector); `result` (a `@test.*` atom);
       result: @test.passed
       auditTrace: {
         format: @auditTrace.v2
-        revision: "sha256:33d677dc829d6e953467ca5c9f3ffe396839cb1184fbeaba1e34703ee2fa4ff1"
+        revision: "sha256:5fdc01744c45544c5765d4ec386b7a45bb990bc4b4c0ca415493546c7f36c8ec"
         drivers: [{provider: @hostWorld.v2 version: "0.0.2"}]
         policies: [:]
         redaction: @none

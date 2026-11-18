@@ -1,13 +1,8 @@
 # Vibra type system
 
 Status: normative target
-Implementation status: none of this chapter is implemented in the surface it
-is written in. The shipped v0.0.1 toolchain implements the previous
-surface's nominal types, generics, interfaces, patterns, conversion, and
-iteration; the rules marked "carried over" below restate that behavior.
-Guards, type invariants, representation visibility, typed local bindings,
-contextual `try`, and the removal of unions and ascription are new and
-unimplemented. The [release roadmap](../roadmap/README.md) schedules them.
+Implementation status: none of this chapter is implemented. The
+[release roadmap](../roadmap/README.md) schedules it.
 
 ## Model
 
@@ -514,6 +509,20 @@ endfn
   choice. If another operand or the expected type also fixes `T`, the two
   MUST agree, or the operand is `@type.mismatch`; and `T` MUST then satisfy
   its own bound, or the application is `@type.unsatisfiedBound`.
+- A positional argument of a bound may likewise name a parameter of the same
+  header: `given {T: From(S)}`. The bound's implementation is selected by
+  its [key](#implementations): the interface, the actual type of the bounded
+  parameter as receiver, and the actual positional arguments.
+- At each use, bounds are resolved after the ordinary
+  [inference](#inference-and-checking) of type arguments from the operands
+  and the expected type. A bound is **resolvable** when its parameter and
+  every parameter in its positional arguments are determined. Resolving it
+  selects one implementation by key, and that implementation's choices
+  determine every parameter the bound's labels name, which may make another
+  bound resolvable. The set of implementations never determines a receiver
+  or a positional argument: a parameter still undetermined when no bound is
+  resolvable is `@type.ambiguousInference` at the application. A resolvable
+  bound with no implementation for its key is `@type.unsatisfiedBound`.
 - Inside the generic, a parameter has exactly the members of its bound, and
   a call on it dispatches to the actual type's implementation. The evidence
   for that dispatch, including every choice taken from it, is part of the
@@ -543,6 +552,24 @@ tuples and records of
 [Dict keys, equality, and order](#dict-keys-equality-and-order). `Never`
 satisfies `Any` and no other interface.
 
+`Self` may be written anywhere in a contract member's parameter types. In a
+member's written result type it may appear only in a position of the
+**`Self` map**: the result itself, and recursively a component of a tuple or
+record, an argument of `Option`, `Result`, or `List`, and the result of the
+`Intent` a `proc` member builds. A `Self` written anywhere else in a result
+type, such as in `Dict(Str Self)`, in an argument of another generic type,
+or in a callable type, is `@type.unsupportedSelfPosition` at the result
+type. The check runs when the interface declaration is checked, on the
+written occurrences and before any substitution, for abstract and default
+members alike, whether or not the interface is ever used as an
+[interface value](#interface-values).
+
+The **receiver slot** of a contract member is its first positional parameter
+whose written type is exactly `Self`. A member has at most one receiver
+slot; a later parameter whose type is or contains `Self` is an ordinary
+input. A member with no receiver slot has none, however its other parameter
+types mention `Self`.
+
 ### Implementations
 
 An implementation is an `impl` block nested in the `type` that owns the
@@ -555,13 +582,26 @@ type, never an anonymous structural type or an interface. The other kind is
 `@name.wrongEntityKind`. An `impl` inside an `interface` that targets a
 type of the same module is `@type.redundantImplementation`.
 
-A generic interface is keyed by its applied type, so one receiver may
-implement `From(I16)` and `From(I8)`. The **key** of an implementation is
-its receiver together with the positional arguments of its target; the
-target admits no label (`@type.typeArgumentMismatch` at the label), so a key
-is always visibly positional. The applied targets of one receiver MUST be
-pairwise non-unifiable (see [Overlap](#overlap)), or the later
-implementation is `@type.overlappingImplementation`, related to the earlier.
+The **key** of an implementation has three parts: the interface, the
+receiver type, and the interface's positional arguments. Both nesting forms
+give all three:
+
+| Written in | Interface | Receiver | Positional arguments |
+| --- | --- | --- | --- |
+| a `type` | the head of the target | the enclosing type, applied to its own parameters | the arguments written in the target |
+| an `interface` | the enclosing interface | the target | the interface's own parameters, passed through |
+
+So `impl From(I16)` in `type Cents` has the key `From`, `Cents`, `I16`, and
+one receiver may implement `From(I16)` and `From(I8)`. An implementation
+written in a generic interface covers every application of that interface
+to its receiver. A key may be open in the parameters of its enclosing
+declaration and in nothing else. A target admits no label
+(`@type.typeArgumentMismatch` at the label), so a key is always visibly
+positional. Two keys of the same interface whose receivers and positional
+arguments unify [overlap](#overlap): the later implementation is
+`@type.overlappingImplementation`, related to the earlier. Keys of
+different interfaces never overlap, so `Iter` and `Ordered` on one receiver
+are two keys.
 
 For each implementation the checker MUST find every abstract contract member
 exactly once and verify that, under the implementation's
@@ -590,15 +630,21 @@ second member.
 ### Substitution
 
 Every rule that relates a contract member to a use goes through one closed
-**substitution**, formed from a selected implementation:
+**substitution**, formed from a selected implementation. Selecting an
+implementation unifies its key with a closed receiver and closed positional
+arguments, which fixes every parameter the key is open in. Under that
+instantiation:
 
-- `Self` maps to the receiver type;
+- `Self` maps to the key's receiver;
 - each parameter of the interface maps to the corresponding positional
-  argument of the implementation's target;
+  argument of the key;
 - each associated type maps to the implementation's choice.
 
 Nothing else is substituted, and the result contains no open name of the
-interface. The substitution is used, and only it, for signature conformance
+interface or of the implementation's enclosing declaration. Where an
+implementation is checked rather than used, the same three maps are taken
+with the enclosing declaration's parameters left open. The substitution is
+used, and only it, for signature conformance
 of implementation members, for instantiating default members, for
 [dispatch](#dispatch), for [widening](#widening) to an interface value, and
 as the run-time evidence the
@@ -668,36 +714,55 @@ projection path through a type or a parameter:
 `Self` is the receiver type inside an interface, a `type`, and an `impl`. It
 is not visible in a module-level callable.
 
-Dispatch selects one implementation by its key and then checks the call
-under that implementation's [substitution](#substitution):
+A call of a contract member on a concrete type selects one implementation
+by its [key](#implementations) and only then checks the call under that
+implementation's [substitution](#substitution). Selection never looks at an
+associated type, because no choice exists before an implementation is
+selected.
 
-1. **Receiver dispatch.** A contract member that takes `Self` as the type of
-   a required positional parameter is dispatched on that argument: the
-   argument's type is the receiver.
-2. **Destination dispatch.** A member with no such parameter whose result
-   type contains `Self` is dispatched on the written expected type at the
-   call: the checker unifies that type with the member's result type and
-   takes `Self` from it. With no written expected type the call is
+1. **Receiver constraint.** A member with a
+   [receiver slot](#interfaces) is dispatched on that argument (receiver
+   dispatch): the argument's type is the receiver. A member with no
+   receiver slot is dispatched on the written expected type at the call
+   (destination dispatch): the checker matches that type against the
+   member's written result type, structurally and only through the
+   positions of the `Self` map, and takes the receiver from the position
+   where `Self` is written. With no written expected type the call is
    `@type.ambiguousDestination`.
-3. The interface's positional arguments are taken from the operands and the
-   expected type by the ordinary [inference](#inference-and-checking) of
-   type arguments.
-4. The receiver and positional arguments select the implementation by key.
-   A receiver with no implementation for that key is
+2. **Positional constraints.** Wherever a parameter of the interface is
+   written in the member's parameter types or result type, the matching
+   operand type or part of the expected type constrains it, by the ordinary
+   [inference](#inference-and-checking) of type arguments. Wherever an
+   associated type is written, nothing is constrained: the position is
+   recorded as a **deferred equality** between the choice and the type
+   found there.
+3. **Selection.** The receiver and the positional constraints select the
+   implementations of this interface whose key unifies with them. None is
    `@type.unsatisfiedBound` at the receiver operand or the expected type,
-   related to the interface. When two implementations remain candidates, the
-   call is `@type.ambiguousImplementation`.
-5. The complete signature is instantiated under the selected
-   implementation's substitution, choices included, and the operands and the
-   expected type are checked against it like any other call. So in
-   `let port: U16 be try TryFrom.convert(text) endlet`, the expected type
-   `Result(U16 ConversionError)` of the `try` operand fixes `Self` as
-   `U16`, `text` fixes `Source` as `Str`, the implementation `TryFrom(Str)`
-   on `U16` is selected, and its choice of `Error` makes the result
-   `Result(U16 ConversionError)`, which is compared whole with the expected
-   type.
+   related to the interface. More than one, which happens only when a
+   positional argument is still undetermined, is
+   `@type.ambiguousImplementation` at the application.
+4. **Checking.** The selected implementation's closed substitution is
+   applied to the complete signature. Then, and only then, every operand is
+   checked against its parameter type, every deferred equality is compared,
+   and the complete result type is compared with the expected type, like
+   any other call. A parameter outside the receiver slot whose written type
+   is `Self` therefore requires an argument of the receiver's type, and an
+   argument of another type is `@type.argumentMismatch` at that argument. A
+   deferred equality or a result that disagrees is `@type.mismatch`.
 
-A member selectable by neither rule is
+So in `let port: U16 be try TryFrom.convert(text) endlet`, `convert` has no
+receiver slot, and its written result type is `Result(Self Error)`. The
+expected type `Result(U16 ConversionError)` of the `try` operand gives the
+receiver `U16` from the position of `Self`, and defers the equality of
+`Error` with `ConversionError`. The operand `text` constrains `Source` to
+`Str`. The key `TryFrom`, `U16`, `Str` selects one implementation. Its
+substitution turns the result type into `Result(U16 ConversionError)`, its
+choice of `Error` satisfies the deferred equality, and the result is
+compared whole with the expected type.
+
+A member with no receiver slot whose written result type does not contain
+`Self` can be selected by neither constraint and is
 `@type.undispatchableContractMember` at its declaration.
 
 A member is called through its path: `User.nameLength(value)`,
@@ -713,22 +778,30 @@ associated type MUST be fixed by label, since the value hides the type that
 chose it: `Iter(Item: U8)`. An interface value type that leaves one open is
 `@type.typeArgumentMismatch` at the type.
 
-- A contract member is called through an interface value by its receiver;
-  the implementation is that of the held type, and the call is checked under
-  the interface value's own substitution: `Self` maps to the interface value
-  type, the positional arguments to the written ones, and each associated
-  type to its fixed label.
-- `Self` in a member's result type is replaced through the **`Self` map**:
-  at the result itself, and recursively in the components of a tuple or
-  record, in the arguments of `Option`, `Result`, and `List`, and in the
-  result of the `Intent` a `proc` member builds. So `Iter.next` called
+- **The public view.** A contract member is called through an interface
+  value in its receiver slot. The call is checked against the member's
+  **public view**: its signature with `Self` replaced by the interface value
+  type, each parameter of the interface by the written positional argument,
+  and each associated type by its fixed label. The view is what the call
+  site sees and checks. It selects no implementation and is not the
+  substitution any activation runs under.
+- **Unboxing.** The value holds a concrete value together with the closed
+  [substitution](#substitution) of the implementation selected when it was
+  [widened](#widening). The call passes the held value in the receiver slot
+  and runs the member under that substitution alone. Because widening
+  required the positional arguments and every label to equal that
+  implementation's key and choices, every part of the view that does not
+  mention `Self` is the same type under both.
+- **Reboxing.** Each `Self` in the member's result type stands in a position
+  of the [`Self` map](#interfaces), so the activation's result holds a value
+  of the held type there. The call widens each such value again to the same
+  interface value type, with the same implementation. So `Iter.next` called
   through an `Iter(Item: U8)` returns `Option({U8 Iter(Item: U8)})`, and the
-  remainder never shows the hidden type. A contract member whose result
-  type contains `Self` anywhere else, such as `Dict(Str Self)`, an argument
-  of a user generic type, or a callable type, is
-  `@type.unsupportedSelfPosition` at its result type.
-- A member that takes `Self` in a parameter other than the receiver cannot
-  be called through an interface value; the call is `@type.mismatch` at that
+  remainder never shows the hidden type.
+- A member with no receiver slot cannot be called through an interface
+  value. A parameter outside the receiver slot whose type is or contains
+  `Self` cannot be supplied through one either, since no argument is known
+  to hold the same type: the call is `@type.argumentMismatch` at that
   argument.
 - An interface value type implements no interface, itself included. It
   satisfies only the bound `Any`, and it never widens again.
@@ -743,9 +816,10 @@ Two type expressions are **unifiable** when some substitution of the type
 parameters in scope makes them the same type. Unification ignores bounds, and
 a type expression contains no associated type unless a label fixes it, so an
 overlap decision never depends on implementations written elsewhere. Two
-rules require a set to be pairwise non-unifiable: the applied interface
-targets of one receiver, and the source types of one receiver's `From` and
-`TryFrom` implementations taken together.
+rules require a set to be pairwise non-unifiable: the
+[keys](#implementations) of one interface, each taken as its receiver
+together with its positional arguments, and the source types of one
+receiver's `From` and `TryFrom` implementations taken together.
 
 ## Iteration
 

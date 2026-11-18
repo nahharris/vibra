@@ -1,9 +1,8 @@
 # Vibra runtime and native execution
 
 Status: normative target
-Implementation status: this chapter describes how the rewritten language
-executes. It does not claim that the new language, the native profile, the
-static guard checker, or the scoped drivers exist. The
+Implementation status: none of this chapter is implemented. The native
+profile, the static guard checker, and the scoped drivers do not exist. The
 [roadmap](../roadmap/README.md) schedules them, and the
 [conformance gate](07-diagnostics-and-conformance.md#full-conformance-gate)
 decides when a release may claim them.
@@ -33,9 +32,9 @@ The meaning of a program does not depend on what executes it.
 - **Pure means pure.** A pure operation MUST NOT read the filesystem, the
   environment, a clock, a random source, or the network.
 
-WebAssembly is a transition backend only. It is removed at the native
-cutover, and [Wasm transition](#wasm-transition) states what it owes until
-then. Source has no Wasm provider, no Wasm or WASI import, and no
+WebAssembly is a transition backend only. It runs pure code, and
+[Wasm transition](#wasm-transition) states what it owes while it is part of
+the toolchain. Source has no Wasm provider, no Wasm or WASI import, and no
 interoperability bridge.
 
 ## Evaluation
@@ -226,7 +225,9 @@ The first native profile passes type descriptors at run time. A later
 optimization MAY specialize instead, only if no observation changes.
 Dispatch through an interface value MUST keep the concrete implementation,
 within the restrictions of the
-[type chapter](02-type-system.md#interface-values). It MUST NOT invent a
+[type chapter](02-type-system.md#interface-values): the call unboxes the
+receiver, runs under the held implementation's substitution alone, and
+reboxes each `Self` position of the result. It MUST NOT invent a
 conformance, and MUST NOT lose the row of a procedure or a plan.
 
 ## Tail calls
@@ -626,7 +627,8 @@ as the bare atom `@any`. These are protocol tags, not source spellings.
 
 Every other type is a closed record whose first field `kind` names its
 form. A declared type is described by its canonical path, its identity, and
-its type arguments; its body is not expanded:
+its type arguments; its body is not expanded. The example is shape only;
+its identity is a placeholder:
 
 ```vibon
 {
@@ -663,17 +665,21 @@ and `R` a row.
   with their declared identities.
 - An interface value type names the interface and fixes every associated
   type, exactly as source must. `Iter(Item: U8)` and `Iter(Item: Str)` are
-  two descriptors. An associated type never appears unfixed, because a
-  checked signature names one only through a label or a type parameter
-  bound to it, and a type parameter does not survive checking. Associated
-  types therefore reach checked IR in exactly two places: the `choices` of
-  an interface value type and the choices of an implementation.
+  two descriptors.
+- This encoding is **closed**: it describes a value or an activation, where
+  every type is known, so it holds no type parameter, no `Self`, and no
+  unfixed associated type. A declaration that is still open is described by
+  a [signature record](#open-signatures) instead.
 - A row `R` is a closed record with one field, `roots`: a list of entity
   reference records of operation interfaces, sorted by the UTF-8 bytes of
   `path`. It is written even when empty. `Fn` has no row.
 - `labels` is a dict because it may be empty, and `{}` is a tuple.
-- Default values belong to callable values, not to this description. No
-  variadic or union descriptor exists.
+- A callable type does not hold default values. The
+  [claim](05-tooling.md#snapshot-claim-and-witness-identity) of a
+  declaration records its defaults beside its signature. No variadic or
+  union descriptor exists.
+
+The example is shape only; its identity is a placeholder:
 
 ```vibon
 {
@@ -695,6 +701,85 @@ and `R` a row.
 }
 ```
 
+### Open signatures
+
+The checker accepts a generic declaration and an interface member before any
+activation exists. Such a declaration is described by a **signature
+record**, which the `@types.v2` observation, the claim, and the index use.
+It is a closed record with these fields, in this order:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `binders` | list of binder records | the type parameters in scope: those of each enclosing declaration, outermost first, then the declaration's own, each group in written order; written even when empty |
+| `receiver` | optional `U64` | for a contract member with a [receiver slot](02-type-system.md#interfaces), the zero-based index of that positional parameter; absent otherwise |
+| `typeInfo` | an open type encoding | a callable's type with its row, a type's representation, or a module value's type |
+
+A **binder record** is `{name: Str bound: B}`. `bound` is optional and is
+absent for the bound `Any`. A **bound record** `B` is
+`{contract: K choices: C}`: the interface key of the bound, and a dict from
+`Str` associated type name to open type encoding holding the labels the
+bound fixes, written even when empty.
+
+An **interface key** `K` names an interface at its positional arguments and
+nothing else. It is the closed record `{path: P seed: S arguments: A}`,
+where `A` is the list of positional type encodings, written even when
+empty. A key has no `kind` and no `choices`, so it is never mistaken for an
+interface value type, which must fix every choice.
+
+An **open type encoding** is the type encoding of [Types](#types) with
+three more records. They are valid only inside a signature record or an
+implementation record:
+
+| Reference | Fields | Valid in |
+| --- | --- | --- |
+| binder reference | `kind: @binder`; `index: U64`, the zero-based position in `binders` | any open type encoding |
+| receiver slot | `kind: @self` | a member of an interface |
+| association slot | `kind: @associated`; `name: Str` | a member of the interface that declares that associated type |
+
+- A binder is referred to by position, never by name or by a path.
+- Inside a `type`, `Self` is the enclosing type applied to its own
+  parameters and is written as that declared type with binder references.
+  `@self` is written only in an interface member, where no receiver is
+  known.
+- An association slot is the bare associated name of the member's own
+  interface. No record names an associated type through a type or a binder,
+  and no binder is implicit: a generic that needs a choice binds it to a
+  binder through a bound's `choices`.
+- An **implementation record** describes one implementation. It is
+  `{binders contract receiver choices}`: the binders its
+  [key](02-type-system.md#implementations) is open in, the interface key
+  `contract`, the open type encoding `receiver`, and `choices`, a dict from
+  `Str` associated type name to open type encoding with one entry per
+  associated type, written even when empty. Its member signatures are
+  written under its substitution, so they hold no `@self` and no
+  association slot.
+
+The signature record of `fn first(T)` of the
+[type chapter](02-type-system.md#generics) is, in shape, with a placeholder
+identity:
+
+```vibon
+{
+  binders: [{name: "T"}]
+  typeInfo: {
+    kind: @fn
+    parameters: [{kind: @list arguments: [{kind: @binder index: 0u64}]}]
+    labels: [:]
+    result: {
+      kind: @declared
+      path: @std.option.Option
+      seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+      arguments: [{kind: @binder index: 0u64}]
+    }
+  }
+}
+```
+
+The signature record of `Iter.next`, whose written type is
+`Fn({Self} Option({Item Self}))`, has `binders: []`, `receiver: 0u64`, a
+parameter `{kind: @self}`, and a result whose argument is
+`{kind: @tuple arguments: [{kind: @associated name: "Item"} {kind: @self}]}`.
+
 ### Values
 
 A scalar is written as its canonical literal, with its exact width suffix
@@ -713,7 +798,7 @@ record. Every other compound value is one of these closed records:
 | record | `kind: @record`; `typeInfo: T`, present only for a declared record; `fields`: record of encoded fields |
 | variant | `kind: @enum`; `typeInfo: T`; `variant`: the case name as an atom; `payload`: a record of the case's encoded fields in declaration order, only for a case that has fields |
 | wrapper | `kind: @wrapper`; `typeInfo: T`; `value`: the encoded representation |
-| interface value | `kind: @interface`; `typeInfo: T`, the held value's concrete type; `value`: the held value's encoding |
+| interface value | `kind: @interface`; `held`: the held value's complete observation, the record `{format: @value.v2 typeInfo: T value: v}` of its concrete type |
 
 - A `@nonFinite` record is valid only where the enclosing type is `@f32` or
   `@f64`. There is one canonical NaN, written `@nan`, whatever the sign or
@@ -726,12 +811,13 @@ record. Every other compound value is one of these closed records:
   use canonical name order. A variant's `payload` has no `kind` and no
   `typeInfo` of its own: `payload: {radius: 1.5f64}`.
 - A case name is the resolved source name.
-- An interface value is encoded with the type it holds, because an
-  observation is for tools, which may see it. Source still cannot: no
-  pattern or conversion reads `typeInfo` back, as the
-  [type chapter](02-type-system.md#interface-values) requires of source
-  only. A decoder checks that the held type conforms to the interface at
-  the descriptor's arguments and choices, and restores no authority.
+- An interface value is encoded as the complete observation of the value it
+  holds, format included, because an observation is for tools, which may
+  see it. Source still cannot: no pattern or conversion reads `held` back,
+  as the [type chapter](02-type-system.md#interface-values) requires of
+  source only. A decoder decodes `held` as an observation in its own right,
+  checks that its type conforms to the interface at the descriptor's
+  arguments and choices, and restores no authority.
 - A decoder MUST check the expected type, every width and scalar invariant,
   the completeness of fields and cases, the nominal identity, and any
   `where`, before it exposes a typed value.
@@ -746,6 +832,13 @@ record. Every other compound value is one of these closed records:
   typeInfo: {kind: @record fields: {ratio: @f32 scale: @f64}}
   value: {kind: @record fields: {ratio: -0.0f32 scale: 1e20f64}}
 }
+```
+
+A value of the interface value type `Any` that holds the `U8` 200 has this
+value encoding:
+
+```vibon
+{kind: @interface held: {format: @value.v2 typeInfo: @u8 value: 200u8}}
 ```
 
 ### What has no encoding
@@ -1102,8 +1195,15 @@ unknown field or an invalid value is rejected.
 | `files` | dict from `Str` canonical rooted virtual path to `Str` or bytes record content | empty |
 | `env` | dict from `Str` name to `Str` value | empty |
 | `args` | list of `Str` | empty |
-| `clock` | record `wall: I64`, `monotonic: U64`, `step: U64`, each optional | `0i64`, `0u64`, `1u64` |
-| `random` | record `seed: U64` | `0u64` |
+| `clock` | record `wall: I64`, `monotonic: U64`, `step: U64`; each member optional, at least one present | `0i64`, `0u64`, `1u64`, member by member |
+| `random` | record `seed: U64`, required | a seed of `0u64` |
+
+A nested record follows the same rule as the document. An absent `clock` and
+a `clock` that omits a member both give that member its default, so
+`{step: 1000u64}` leaves `wall` and `monotonic` at zero. A `clock` or a
+`random` with no member is the empty tuple and `@data.invalidShape`; the
+field is omitted instead. The members of `clock` are written in the order
+`wall`, `monotonic`, `step`.
 
 ```vibon
 {
@@ -1192,9 +1292,12 @@ is `kind`:
 | `kind` | `@startup` |
 | `binding` | the leaf's atom |
 | `provider` | the issuer's atom |
-| `status` | `@acquired`, `@refused` (bound to `Option.none()`), or `@failed` |
+| `status` | `@acquired`, `@refused`, or `@failed`: the three outcomes of the [startup order](04-programs-and-packages.md#startup-order) |
 | `grant` | optional, present when acquired: the grant projection |
-| `failure` | optional, present when failed: `{code: Atom message: Str}` |
+| `failure` | optional, present exactly when this leaf stopped startup: `{code: Atom message: Str}`. `code` is `@grant.requiredUnavailable` for a refused required leaf and `@grant.acquisitionFailed` for a failed one. A refused optional leaf, bound to `Option.none()`, has none |
+
+One `@startup` event is appended for each processed leaf, in processing
+order. A leaf that startup never reached has no event.
 
 | Field | Meaning |
 | --- | --- |
@@ -1205,6 +1308,9 @@ is `kind`:
 | `op` | the exact registered wire symbol, `Str` |
 | `driver` | `{provider: Atom version: Str}`, the bound driver |
 | `origin` | the source-origin ordinal, `U64`; zero means no source origin |
+| `grant` | the grant projection |
+| `args` | list of the canonical argument values after the grant, in parameter order |
+| `result` | the canonical data of the operation's complete `Result` value |
 
 **Invocations.** Every `await` is an invocation, numbered from 1 in the
 order it starts. The startup reads of the recipes come first, each an
@@ -1218,23 +1324,29 @@ order is fixed, every executor numbers a run alike.
 source identity, then start, then end, numbered from 1. The interpreter, the
 lowering, and the trace of a [trap](#traps) all write ordinals of this table,
 so the executors agree on them.
-| `grant` | the grant projection |
-| `args` | list of the canonical argument values after the grant, in parameter order |
-| `result` | the canonical data of the operation's complete `Result` value |
 
-A **grant projection** is a closed record of `binding` (atom, the leaf the
-grant descends from); `policy` (`Str`, the hash of its normalized policy and
-a key of `policies`, or the empty string for a provider without a policy);
-`rights` (a one-entry list of entity reference records, the operation
-interface it permits); `limits` (optional, absent when no bound is set,
-otherwise a record of the bounds that are set among `invocations`,
-`inputBytes`, and `outputBytes`, each `U64`); and `root` (`U64`, a
-run-local ordinal of the root grant whose accounting it shares).
+A **grant projection** is a closed record of `issuedBy` (the origin record
+below); `policy` (`Str`, the hash of its normalized policy and a key of
+`policies`, or the empty string for a provider without a policy); `rights`
+(a one-entry list of entity reference records, the operation interface it
+permits); `limits` (optional, absent when no bound is set, otherwise a
+record of the bounds that are set among `invocations`, `inputBytes`, and
+`outputBytes`, each `U64`); and `root` (`U64`, a run-local ordinal of the
+root grant whose accounting it shares).
+
+The **origin record** says where the grant's authority began, and has
+exactly two forms. A grant that descends from a startup leaf has
+`{kind: @binding leaf: L}`, where `L` is the leaf's atom. A grant that
+descends from a `TestWorld` has `{kind: @testWorld}`: a test has no startup
+leaf, and no leaf name can be mistaken for this form. Narrowing keeps the
+origin record of the grant it narrows.
+
+The example is shape only; its identities are placeholders:
 
 ```vibon
 {
   format: @auditTrace.v2
-  revision: "sha256:33d677dc829d6e953467ca5c9f3ffe396839cb1184fbeaba1e34703ee2fa4ff1"
+  revision: "sha256:5fdc01744c45544c5765d4ec386b7a45bb990bc4b4c0ca415493546c7f36c8ec"
   target: @hello
   drivers: [{provider: @host.io.stdout version: "0.0.2"}]
   policies: [:]
@@ -1246,7 +1358,7 @@ run-local ordinal of the root grant whose accounting it shares).
       provider: @host.io.stdout
       status: @acquired
       grant: {
-        binding: @out
+        issuedBy: {kind: @binding leaf: @out}
         policy: ""
         rights: [{path: @std.io.StdoutText seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"}]
         root: 1u64
@@ -1261,7 +1373,7 @@ run-local ordinal of the root grant whose accounting it shares).
       driver: {provider: @host.io.stdout version: "0.0.2"}
       origin: 1u64
       grant: {
-        binding: @out
+        issuedBy: {kind: @binding leaf: @out}
         policy: ""
         rights: [{path: @std.io.StdoutText seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"}]
         root: 1u64
@@ -1351,9 +1463,11 @@ signature and its binding recipes.
   programs chapter, which also lists each issuer's refusals.
 - A required grant that is refused fails startup before the entry runs,
   with `@grant.requiredUnavailable`.
-- An optional grant that is refused is bound to `Option.none()`. A
-  malformed recipe or an incompatible provider is an error; it never becomes
-  an absence.
+- An optional grant that is refused is bound to `Option.none()`.
+- An acquisition that fails, as the issuer's row of the startup order
+  classifies it, fails startup with `@grant.acquisitionFailed`, for a
+  required and an optional grant alike. A failure, a malformed recipe, and
+  an incompatible provider never become an absence.
 - On every ending of the process (a return, a defect trap, memory
   exhaustion, or a failed startup) every acquired grant is released, in
   reverse acquisition order. Release runs no program code, appends no
@@ -1416,11 +1530,9 @@ runtime is wrong.
 - The observation holds the exact trap code and origin, and every executor
   MUST agree on them.
 
-`@runtime.divisionByZero` and `@runtime.unobservableFunction` are
-removed and MUST NOT be emitted for a checked program. Major-1 transition
-artifacts keep their own versioned contracts and are never reinterpreted
-under these semantics. Memory exhaustion and termination from outside are
-host events, not traps.
+`@runtime.divisionByZero` and `@runtime.unobservableFunction` are not trap
+codes and MUST NOT be emitted. Memory exhaustion and termination from
+outside are host events, not traps.
 
 ## Native execution
 
@@ -1499,20 +1611,19 @@ typed outcomes, and the order of completed events MUST agree.
 
 ## Wasm transition
 
-The major-1 WebAssembly boundary of v0.0.1 is a narrow transition
-substrate. It is not another source language and not a new grant ABI, and
-it stays only until the native cutover.
+The WebAssembly backend is a narrow transition substrate. It is not another
+source language and not a grant ABI, and it is part of the toolchain only
+while the native profile is unqualified.
 
 - It runs checked IR of this language, and only its pure part: a test
   without `takes`, and the evaluation of a pure function. Every binary
   target has the grant-receiving entry and every host operation needs a
   grant, so neither is admitted: a program that needs the entry, a grant
-  receiver, a host operation, or registry major 2 MUST be reported as
+  receiver, a host operation, or the host registry MUST be reported as
   unsupported.
 - It imports no host symbol. Its only imports are the pure native routines
   of `vibra_native_v1`.
-- The roadmap does not require a replacement Wasm ABI to be invented only
-  so that it can be retired.
+- It has no grant ABI and gains none.
 - An unsupported case stays an explicit gap. A compatibility parser, an
   unsafe import shim, and a false parity pass are all forbidden.
 
@@ -1544,13 +1655,13 @@ nothing else. Source chooses no import.
 | `eval` | no parameters, no result: call the module's first function with no parameters, as the `interpret` operation does |
 | `test` | `i32` index, no result: run one test without `takes` in a fresh instance |
 | `status` | to `i32`: 0 none, 1 recorded trap, 2 memory host event, 3 assertion failure |
-| `trap_code` | to `i32`, historical: 1 invalidCheckedProgram, 2 unobservableFunction, 3 invalidHostValue, 4 divisionByZero |
+| `trap_code` | to `i32`: 1 invalidCheckedProgram, 3 invalidHostValue; 2 and 4 are unassigned and never returned |
 | `origin` | to `i32`: zero for no origin, otherwise a table ordinal |
 | `failure` | to `i32`: 1 `assert.true`, 2 `assert.false`, 3 `assert.equal` |
 | `failure_expected`, `failure_actual`, `result` | to `i64`: typed scalar bits or a held value ID, according to the checked type |
 | `live_size` | to `i64`: live arena and handle-table bytes |
 | `release` | `i64` held ID, no result: drop the host's hold |
-| `variant` | `i64` ID to `i32`: the historical variant or member index |
+| `variant` | `i64` ID to `i32`: the variant or member index |
 | `length` | `i64` ID to `i64`: the count of scalars, bytes, elements, entries, or components for the value's kind |
 | `read_i32`, `read_i64`, `read_f32`, `read_f64` | `i64` ID and `i64` index, to the named scalar class |
 | `read_id` | `i64` ID and `i64` index, to a new held child ID, which the host must release |
@@ -1563,13 +1674,11 @@ accessor checks instance, kind, and liveness. The kind codes the boundary
 uses are constants of this boundary alone; the native value arena has its
 own private kinds.
 
-**Removal.** A transition artifact records its ABI and registry
-requirements and its source-origin mapping. Later build metadata MUST NOT
-silently reuse an incompatible custom section or version. At the native
-cutover this substrate, the differential profile, the emitter and runner
-dependencies, and the packaging references leave the active toolchain
-together. The shipped v0.0.1 evidence remains as history. It is not
-rewritten into a claim about this language.
+**Artifacts.** A transition artifact records its ABI and registry
+requirements and its source-origin mapping. Build metadata MUST NOT reuse
+an incompatible custom section or version. The substrate, its differential
+profile, its emitter and runner dependencies, and its packaging references
+are one unit: a toolchain ships all of them or none.
 
 ## Determinism and observability
 
@@ -1626,8 +1735,8 @@ together with reviewed issuers, runtime, and adapters. It is not safe
 execution of arbitrary machine code, and not a proof that a provider is
 correct.
 
-Nothing in the historical wire encodings or the transition description
-restores an untagged union, union injection, a narrowing pattern, a tuple
+Nothing in the wire encodings or the WebAssembly backend provides an
+untagged union, union injection, a narrowing pattern, a tuple
 index, an ascription expression, a variadic call, or unchecked integer
 division and remainder. There is no implicit `await`, no permission prompt,
 no ambient grant, no widening of a resource, no default error substituted
