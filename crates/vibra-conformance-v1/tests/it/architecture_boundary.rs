@@ -1195,8 +1195,13 @@ fn the_lock_file_holds_one_cranelift_and_the_generator_pins_it() {
     for package in CRANELIFT_PACKAGES {
         let requirement = dependencies
             .get(*package)
-            .and_then(toml::Value::as_str)
-            .unwrap_or_else(|| panic!("`{package}` is a plain version string"));
+            // Either the version alone, or a table that also names features.
+            .and_then(|entry| {
+                entry
+                    .as_str()
+                    .or_else(|| entry.get("version").and_then(toml::Value::as_str))
+            })
+            .unwrap_or_else(|| panic!("`{package}` states its version"));
         assert_eq!(
             requirement.strip_prefix('='),
             Some(locked[0].as_str()),
