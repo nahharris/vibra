@@ -226,6 +226,7 @@ fn the_linked_fixture_equals_the_interpreter_on_result_trap_origin_and_trace() {
     let case = read_text(&variant_case.join("case.toml"));
     assert!(case.contains(&format!("code = \"{atom}\"")), "{case}");
     assert!(case.contains("span = [0, 0]"), "{case}");
+    #[cfg(windows)]
     let silent = vibra_host::trace_to_vibon(&[]);
 
     // The stepper meets the same expectation.
