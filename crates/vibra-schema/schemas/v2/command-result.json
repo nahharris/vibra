@@ -1,0 +1,198 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vibra:schema:v2:command-result",
+  "title": "Vibra command result",
+  "description": "The versioned envelope of every structured command response. The payload is keyed by the command; this version publishes the help payload and the empty payload.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "toolVersion",
+    "command",
+    "workspaceRevision",
+    "status",
+    "result",
+    "diagnostics",
+    "limits",
+    "payload"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "description": "Major version of this contract.",
+      "const": 2
+    },
+    "toolVersion": {
+      "description": "The toolchain version.",
+      "type": "string",
+      "minLength": 1
+    },
+    "command": {
+      "description": "The recognized command line, or the empty string when none was recognized.",
+      "enum": [
+        "",
+        "project init",
+        "project inspect",
+        "project add",
+        "project remove",
+        "project sync",
+        "fmt",
+        "check",
+        "lint",
+        "test",
+        "run",
+        "eval",
+        "build",
+        "query",
+        "edit fix",
+        "edit rename",
+        "edit organize-imports",
+        "mcp",
+        "help"
+      ]
+    },
+    "workspaceRevision": {
+      "description": "The workspace revision, or null when no snapshot was taken: help, a command-line error, or failed discovery.",
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      ]
+    },
+    "status": {
+      "description": "The observation requested: passed, refuted, unknown, or unsupported.",
+      "enum": ["passed", "refuted", "unknown", "unsupported"]
+    },
+    "result": {
+      "description": "The command result atom; the exit code follows from it.",
+      "enum": [
+        "@command.ok",
+        "@command.diagnostics",
+        "@command.testFailed",
+        "@command.invalidInput",
+        "@command.operationalFailure",
+        "@command.unavailable",
+        "@command.trap",
+        "@command.programFailed"
+      ]
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "urn:vibra:schema:v2:diagnostic" }
+    },
+    "limits": { "$ref": "#/$defs/limits" },
+    "payload": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "description": "The payload is keyed by the command: help that succeeded carries the help payload, and every other response carries the empty payload.",
+      "if": {
+        "properties": {
+          "command": { "const": "help" },
+          "result": { "const": "@command.ok" }
+        },
+        "required": ["command", "result"]
+      },
+      "then": {
+        "properties": {
+          "status": { "const": "passed" },
+          "workspaceRevision": { "type": "null" },
+          "diagnostics": { "maxItems": 0 },
+          "payload": { "$ref": "#/$defs/helpPayload" }
+        }
+      },
+      "else": {
+        "properties": {
+          "payload": { "$ref": "#/$defs/emptyPayload" }
+        }
+      }
+    },
+    {
+      "description": "A known command the tool does not support is unsupported and carries an unavailable diagnostic.",
+      "if": {
+        "properties": { "result": { "const": "@command.unavailable" } },
+        "required": ["result"]
+      },
+      "then": {
+        "properties": {
+          "status": { "const": "unsupported" },
+          "diagnostics": {
+            "minItems": 1,
+            "contains": {
+              "properties": { "code": { "const": "@tool.unavailable" } },
+              "required": ["code"]
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "Invalid input is a command-line or typed-input error: no snapshot and no diagnostics.",
+      "if": {
+        "properties": { "result": { "const": "@command.invalidInput" } },
+        "required": ["result"]
+      },
+      "then": {
+        "properties": {
+          "workspaceRevision": { "type": "null" },
+          "diagnostics": { "maxItems": 0 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "reached", "complete"],
+      "properties": {
+        "profile": {
+          "description": "The published limit profile.",
+          "type": "string",
+          "minLength": 1
+        },
+        "reached": {
+          "description": "The limits reached, in order.",
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "complete": {
+          "description": "False after truncation or exhaustion.",
+          "type": "boolean"
+        }
+      }
+    },
+    "emptyPayload": {
+      "type": "object",
+      "maxProperties": 0
+    },
+    "helpPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["usage", "capabilities"],
+      "properties": {
+        "usage": { "type": "string", "minLength": 1 },
+        "capabilities": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/commandCapability" }
+        }
+      }
+    },
+    "commandCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "operations", "profiles", "supported", "schemaIds"],
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "operations": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "profiles": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "supported": { "type": "boolean" },
+        "schemaIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^urn:vibra:schema:v2:[a-z][a-z0-9-]*$"
+          }
+        }
+      }
+    }
+  }
+}
