@@ -576,8 +576,9 @@ names and default values, guards, and effect row are those of the contract.
 | a default member supplied again | `@type.defaultOverride`, the member's name, related to the default |
 | a member whose signature differs from the contract under the substitution | `@type.mismatch`, the differing type, related to the contract member |
 
-An implementation member cannot add or strengthen a `requires`, and its
-`ensures` is the contract's.
+An implementation member declares no guard of its own: the contract's
+`requires` and `ensures` are its guards, as
+[Guards and callable types](#guards-and-callable-types) states.
 
 Default members are checked once, against the abstract contract with the
 interface's parameters and associated types open and bounded only as the
@@ -1052,7 +1053,12 @@ arguments the plan captures. A `requires … else` and an `ensures … else` on 
 
 A contract member's guards are part of its contract. Each implementation is
 checked under the contract's `requires` and MUST establish the contract's
-`ensures`.
+`ensures`. A contract guard with `else` runs on every call of every
+implementation, as part of the member: the checker copies it into each
+implementation's checked function, so static and dynamic dispatch behave
+alike. An implementation member declares no guard of its own; a `requires`,
+`ensures`, or `where` section on one is `@syntax.invalidSection`, and the
+checks it needs are written in its body.
 
 ## Widening
 

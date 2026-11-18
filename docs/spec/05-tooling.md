@@ -323,7 +323,7 @@ in the
 | `TrapRecord` | `trapCode`; `origin` (nullable) |
 | `ObservationError` | `code`: `unsupportedValue`; `type` and `origin`: nullable |
 | `StartupRecord` | `status`: `notStarted`, `acquired`, or `failed`; `bindings`; `auditTrace`; `failure`: null or `{binding, code, origin}` |
-| `StartupRecord.bindings[]` | `name`; `recipeIdentity`; `providerIdentity`; `status`; `grantProjection` (nullable), in acquisition order |
+| `StartupRecord.bindings[]` | `name`; `recipeIdentity`: `sha256:` and the SHA-256 of `vibraRecipeIdentityV2`, a zero byte, and the canonical bytes of the recipe with its policy normalized; `providerIdentity`: `{provider, version}`; `status`: `acquired`, `refused`, `failed`, or `released`; `grantProjection` (nullable), in acquisition order |
 
 A summary never executes an acquisition. A grant projection is data that
 describes a grant; it cannot be turned back into one, and its schema and

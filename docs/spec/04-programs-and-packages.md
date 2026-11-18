@@ -290,7 +290,8 @@ module-level `proc` with an **entry signature**:
   type, `Option` of one, or a record whose fields are grant shapes; and
 - the result type is `ExitCode` from `@std.process`, a wrapper over `U8`.
 
-Anything else is `@project.invalidEntrySignature`; a path that resolves to
+Anything else, and a bare `requires` on the entry, which no call site could
+discharge, is `@project.invalidEntrySignature`; a path that resolves to
 another kind of entity is `@name.wrongEntityKind`. The entry need not be
 public or named `main`. Naming it in `entry` creates no import edge and does
 not change its visibility. An `entry` on a library is
@@ -404,7 +405,7 @@ An issuer **refuses** a leaf in exactly these cases:
 
 | Provider | Refusal |
 | --- | --- |
-| `@host.fs.directory` | the path does not name a directory the process can open; an `@argumentPath` index at or beyond the end of the argument list; a `@variablePath` variable that is not present |
+| `@host.fs.directory` | the path does not name a directory the process can open; the path is not Unicode; an `@argumentPath` index at or beyond the end of the argument list, which `index` counts from zero without the executable's path; a `@variablePath` variable that is not present |
 | `@host.io.stdin`, `@host.io.stdout`, `@host.io.stderr` | the process has no such stream |
 | `@host.env.vars`, `@host.env.args`, `@host.time.wall`, `@host.time.monotonic`, `@host.random` | never |
 
@@ -417,10 +418,10 @@ operating-system error) is not a refusal: it fails startup for a required
 and an optional leaf alike, and a driver the platform does not support is
 rejected at admission, as `@tool.unavailable`, before any leaf is acquired.
 
-On a failed startup, and after the entry returns, the acquired grants are
-released in reverse acquisition order. The
-[runtime chapter](06-runtime.md#entry-outcome) defines the outcomes and how
-the exit code is reported.
+On every ending of the process, including a failed startup, the acquired
+grants are released in reverse acquisition order. The
+[runtime chapter](06-runtime.md#entry-outcome) defines the outcomes, the
+release, and how the exit code is reported.
 
 ## Modules and imports
 
@@ -585,7 +586,7 @@ atoms, possibly empty).
     }
   ]
   symbols: {
-    compiler: ["i32.add-checked" "list.length" "list.next"]
+    compiler: ["i32.addChecked" "list.length" "list.next"]
     host: ["io.stdoutText"]
     native: []
   }
@@ -685,9 +686,28 @@ cannot fail.
 | `output` | none | `{stdout: Bytes stderr: Bytes}`: what the test has written so far |
 
 A test takes the grants it needs out of a returned record by pattern and
-narrows them with the ordinary restriction functions. Each call of
-`directory` makes a separate directory. Grants from one test's world are
-unusable in another.
+narrows them with the ordinary restriction functions. Grants from one
+test's world are unusable in another. The members behave as follows:
+
+- Each member is a row of the closed test-world registry of the
+  [runtime chapter](06-runtime.md#host-registry), bound with
+  `external @host` in `@std.test`. A call reaches no external resource and
+  appends no `@host` event to the test's trace; the operations a test then
+  performs with the derived grants do.
+- Each grant `directory` returns permits its own action everywhere in the
+  new directory, with no limits: a `files` rule with `prefix: []`,
+  `depth: @tree`, and `anyName` for the read and write grants, a
+  `directories` rule of `depth: @tree` for `list` and `stat`. A test
+  narrows them with `restrict`, `sub`, and `limit`. A multi-name path in
+  `files` implies its parent directories.
+- `directory` and `streams` make a new resource on every call. `streams`
+  makes new standard streams whose input is its `stdin` argument.
+- `environment`, `clocks`, and `random` return grants over the world's one
+  environment, one clock pair, and one random state, so two calls share
+  state; `environment` sets the world's variables and arguments on each
+  call.
+- `output` returns everything written through every stream grant the
+  test's world issued, per stream, in write order.
 
 A test is checked against its written row. Selecting a test is consent to run
 it in its fake world only; no test reaches a real host resource.

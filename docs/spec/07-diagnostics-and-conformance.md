@@ -220,7 +220,7 @@ command-line context.
 | a lock whose `project` digest or dependency set differs from the project; a missing vendor directory or vendored content whose content hash differs from the lock | `@project.staleLock`, the lock's `format` field or the lock entry |
 | a target `entry` whose first part is not the target's name | `@project.entryOutsideTarget`, the `entry` field |
 | an `entry` on a library target | `@project.entryOnLibrary`, the `entry` field |
-| an `entry` that is not a module-level `proc` with an entry signature | `@project.invalidEntrySignature`, the `entry` field, related to the declaration |
+| an `entry` that is not a module-level `proc` with an entry signature, or that has a bare `requires` | `@project.invalidEntrySignature`, the `entry` field, related to the declaration |
 | a dependency without `target` on a package with several library targets | `@project.ambiguousDependencyTarget`, the dependency entry |
 | access to a private declaration | `@name.privateAccess`, the reference, related to the declaration |
 | use of a hidden constructor, pattern, or field read | `@name.inaccessibleRepresentation`, the use, related to the type |
@@ -388,7 +388,7 @@ change to this table, with a positive case and a nearest negative case.
 | a plan whose workspace or document revision no longer matches | `@tool.stalePlan`, no location |
 | an MCP or tool action the server's permissions deny | `@tool.actionDenied`, no location |
 | a tool limit reached, with an unknown, incomplete status | `@tool.limitExceeded`, no location |
-| a value that cannot be shown: a function, a plan, a grant, or an interface value | `@tool.unsupportedValue`, the observed expression when one exists |
+| a value that cannot be shown: a function, a plan, or a grant, including one an interface value holds | `@tool.unsupportedValue`, the observed expression when one exists |
 | a build for a platform the toolchain does not emit | `@tool.unsupportedTarget`, no location |
 | a missing platform linker | `@tool.missingLinkTool`, no location |
 | a failed link step | `@tool.linkFailed`, no location |
@@ -766,13 +766,18 @@ These are minimum obligations. None of these tests exists yet.
     the source-preserving formatter keeping comments and order where
     canonical serialization does not.
 13. **Runtime and native.** Tail calls through direct, indirect, and
-    cross-module callees, closures, and interface members reuse their
-    activation for at least 100,000 transfers. Non-tail recursion 100,000
-    deep completes within context memory, with no native stack frame per
-    activation. Unbounded recursion ends in the memory host event. Deep
-    release is iterative; live and peak storage are accounted at counts that
-    differ by ten; module values initialize once per run. A pending
-    `ensures … else`, widening, or cleanup prevents a tail transfer.
+    cross-module callees, closures, interface members, and `return await`
+    reuse their activation for at least 100,000 transfers. Non-tail
+    recursion 100,000 deep completes within context memory, with no native
+    stack frame per activation. Unbounded recursion ends in the memory host
+    event. Deep release is iterative; live and peak storage are accounted at
+    counts that differ by ten; module values initialize once per run. A
+    pending `ensures … else`, widening, or cleanup prevents a tail transfer.
+    A built executable on Windows exits with the four fixed statuses for its
+    own endings and passes application codes through; invocation ordinals
+    and origin ordinals agree across executors; an interface value round
+    trips through `@value.v2` with its held type, and one holding a callable
+    gives the observation error.
 14. **Tooling and approvals.** One engine and one revision across CLI and
     MCP; exact, recovered, and unavailable facts; roles by slot; stable
     implementation identities; bounded output; schema validation; stale and

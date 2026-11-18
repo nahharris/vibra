@@ -76,6 +76,12 @@ signature and owner MUST match its registry row. A wrong owner is
 `@external.ownerMismatch`, an unknown symbol `@external.unknownSymbol`,
 and a wrong signature `@external.signatureMismatch`.
 
+A sealed grant is a value of its operation interface's type, and the
+interface's own `external @host` members are its implementation: dispatch
+on a sealed receiver selects the host-bound member, and dispatch on any
+other held value, such as a package's in-memory model of the interface,
+selects that type's `impl`. No hidden carrier type exists.
+
 ## Effect ceilings
 
 A row is a brace-delimited set of names that resolve to operation
@@ -130,8 +136,9 @@ whose row is `{DirWriteText NetSend}`: the types differ, and the call is
 `@type.argumentMismatch`. A procedure that performs less is wrapped in an
 anonymous `proc` that declares the wider row.
 
-In metadata a row is a record with a `roots` list of interface identities,
-sorted by their UTF-8 bytes.
+In metadata a row is a record with a `roots` list of
+[entity reference records](06-runtime.md#types) of the interfaces, sorted by
+the UTF-8 bytes of their `path`.
 
 ## Cold plans and performed rows
 
@@ -259,9 +266,14 @@ endlet
 - No function combines two grants into one stronger grant.
 
 `ScopeError` (`@std.policy`) has the cases `invalidPolicy`,
-`unsupportedVersion`, `policyTooComplex`, and `foreignRoot`.
-`GrantLimits` is a record of `invocations`, `inputBytes`, and `outputBytes`,
-each an `Option(U64)`.
+`unsupportedVersion`, `policyTooComplex`, and `foreignRoot`. `restrict`
+returns `foreignRoot` for a policy whose rules name a grant leaf other than
+the one the grant descends from; the same policy in a recipe is the build
+error `@grant.invalidPolicy`. `GrantLimits` is a record of `invocations`,
+`inputBytes`, and `outputBytes`, each an `Option(U64)`, where
+`Option.none()` leaves that bound as it was. The three members are rows of
+the [compiler intrinsic registry](06-runtime.md#compiler-intrinsic-registry),
+which the broker implements.
 
 ### Brands
 
@@ -304,9 +316,10 @@ At startup the runtime acquires grants in the
 chapter defines. A required grant that cannot be acquired prevents the entry
 from running. An optional grant refused in the way its provider specifies
 becomes `Option.none()`; a malformed recipe or an incompatible driver is an
-error, never an absence. After a failed startup, grants already acquired are
-released in reverse acquisition order. Release is not rollback: an external
-effect that already happened is reported, not undone.
+error, never an absence. On every ending of the process, a failed startup
+included, the acquired grants are released in reverse acquisition order.
+Release is not rollback: an external effect that already happened is
+reported, not undone.
 
 No operation returns `Never`, and none terminates the process. The
 [runtime chapter](06-runtime.md#entry-outcome) defines how a run ends.
@@ -482,12 +495,20 @@ describes the request sent, not what the server does with it.
 ### Limits
 
 A grant's limits count invocations and payload bytes in and out, in encoded
-bytes. They do not bound time, processor use, or metadata traffic. A child
-grant can only tighten a limit, and every copy and descendant of a grant
-draws on the same ancestor counters, which the runtime's broker owns. The
-broker reserves before an action, charges actual progress, and does not
-refund an action whose outcome is unknown. A counter that would overflow
-denies. Exhaustion is the typed error `limitExceeded`.
+bytes. An **invocation** is every call that passed reservation. **Input
+bytes** are the bytes the program receives: file contents, standard input,
+a variable's value, argument text, and random bytes. **Output bytes** are
+the bytes it sends: written file contents and stream writes. Metadata
+results, such as a directory listing or a `stat`, count as an invocation
+only. The limits do not bound time, processor use, or metadata traffic. A
+child grant can only tighten a limit, and every copy and descendant of a
+grant draws on the same ancestor counters, which the runtime's broker owns.
+The broker reserves before an action, charges actual progress, and does not
+refund an action whose outcome is unknown; the
+[runtime chapter](06-runtime.md#closed-operation-semantics) says how a
+read of unknown size is reserved. A counter that would overflow denies. An
+omitted bound, in a recipe or in `GrantLimits`, is unbounded. Exhaustion is
+the typed error `limitExceeded`.
 
 ## Delivery and typed outcomes
 

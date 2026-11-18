@@ -242,16 +242,20 @@ caller of the enclosing activation with no work left to do.
 | a `let` initializer; pattern matching | no |
 | a `return` inside a `let … else` fallback | yes, under the same rule |
 | the operand of `try` | no: the carrier is inspected after the call |
+| the plan of `return await p` | yes, under the same rule as a call: the invocation replaces the activation |
 
 Widening to an interface value is work after the return. A bare `ensures`,
 proved and erased, is none. An `ensures … else` that remains is work.
 
-Every call in tail position MUST replace its activation. This holds for
-module functions, anonymous functions, captured and parameter values,
-functions held in fields or collections, and interface members, dispatched
-statically or through an interface value. The captures and type arguments
-become the callee's. Constructors, field reads, lookups, and primitives
-create no activation and are not calls for this rule.
+Every call in tail position MUST replace its activation, and so MUST every
+`await` in tail position. This holds for module functions, anonymous
+functions, captured and parameter values, functions held in fields or
+collections, and interface members, dispatched statically or through an
+interface value. The captures and type arguments become the callee's.
+Constructors, field reads, lookups, primitives, and the building of a plan
+create no activation and are not calls for this rule. A recursive `proc`
+over `Iter.next` whose recursive `await` is in tail position therefore runs
+in constant activation space.
 
 A backend MUST NOT keep a growing chain alive by moving continuations out
 of the frame. Recursion that has real work after the call is not a tail
@@ -309,28 +313,41 @@ defines. A row alone MUST NOT create a grant or permit a real effect.
 - A false assertion records `@test.assertionFailed` and stops only its own
   test. It is an outcome of the runner. It is not a `Result` and not a trap,
   and source cannot catch it.
-- A type known to contain a function, a plan, a grant, or an interface
-  value is rejected statically wherever a value must be observed. A value
-  that holds one where the static type did not show it gives an explicit
-  observation error, `@tool.unsupportedValue`, and never a trap.
+- A type known to contain a function, a plan, or a grant is rejected
+  statically wherever a value must be observed. An interface value that
+  holds one gives an explicit observation error, `@tool.unsupportedValue`,
+  and never a trap.
 - Defect traps and host events keep their own categories.
 
 ## Compiler intrinsic registry
 
 Only the embedded standard library may bind a symbol of the closed
 `@compiler` registry. Each row has a stable wire symbol, exact generic,
-parameter, and result types, and pure deterministic semantics.
+parameter, and result types, and pure deterministic semantics. The registry
+is major version 2 and starts at 2.0; it is versioned like the
+[host registry](#registry-versioning), and a build records the minor it
+requires.
 
+- A wire symbol is a dotted camelCase string, `<owner>.<member>`, such as
+  `i32.addChecked` or `list.append`; the symbols of both registries follow
+  this one rule.
 - An unknown symbol or provider, or a signature that does not match, MUST
   be rejected before execution.
-- The registry is versioned. Changing the casing of a source name MUST NOT
-  rename a wire string.
+- Within a major, a symbol never changes its spelling. Changing the casing
+  of a source name MUST NOT rename a wire string.
 - A primitive implements what the core cannot express: scalar arithmetic,
-  comparison, and conversion, and storage operations that depend on the
-  representation.
+  comparison, and conversion, storage operations that depend on the
+  representation, and the derivation of a grant from a grant.
 - Every partial operation MUST return an `Option` or a `Result`. Plain
-  integer division and remainder, which trapped on a zero divisor, do not
-  exist in this language.
+  integer division and remainder do not exist in this language.
+
+The three narrowing members of the [effects chapter](03-effects.md#narrowing)
+are the rows `grant.restrict`, `grant.sub`, and `grant.limit`, generic over
+the grant type `G` and bound with `external @compiler` in every standard
+operation interface: `Fn({G FsPolicy} Result(G ScopeError))`,
+`Fn({G RelativePath} Result(G ScopeError))`, and `Fn({G GrantLimits} G)`.
+The broker implements them; they perform no host operation and append no
+event.
 
 Three core types are used below:
 
@@ -347,7 +364,7 @@ A case without fields is constructed by a call with no arguments, such as
 
 `T` is any of `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`. Source
 names are camelCase, and the registry maps each to a fixed wire symbol such
-as `i32.add-checked`. A plain operation **saturates**; it never wraps. `neg`
+as `i32.addChecked`. A plain operation **saturates**; it never wraps. `neg`
 and `negChecked` exist only for signed `T`.
 
 | Member | Signature | Meaning |
@@ -442,7 +459,7 @@ Negative zero is normalized only where an operation says so.
 | dict literal | pairs to `Dict(K V)` | every pair evaluated; key order; a later duplicate wins; the empty literal is `[:]` |
 | `From(List({K V}))` on `Dict(K V)` | | the same ordering and duplicate rule |
 | `Dict.entries` | `Fn({Dict(K V)} List({K V}))` | the entries in key order |
-| dict iteration primitive | | the pure primitive behind `Dict`'s nested `Iter` implementation; its remainder keeps the concrete type |
+| `dict.next` | `Fn({Dict(K V)} Option({{K V} Dict(K V)}))` | the first entry in key order and the remainder; the pure primitive behind `Dict`'s nested `Iter` implementation |
 
 There is no `List.of`, `Dict.of`, or `Dict.fromEntries`.
 
@@ -603,8 +620,9 @@ schema's, are identifiers and never reserved words.
 
 `T` is the canonical type encoding. The compiler-owned scalar types are
 written as the bare fixed wire atoms `@i8` through `@u64`, `@f32`, `@f64`,
-`@char`, `@atom`, `@void`, and `@never`. These are protocol tags, not source
-spellings. `@never` appears only inside a type, since `Never` has no value.
+`@char`, `@atom`, `@void`, and `@never`, and the interface value type `Any`
+as the bare atom `@any`. These are protocol tags, not source spellings.
+`@never` appears only inside a type, since `Never` has no value.
 
 Every other type is a closed record whose first field `kind` names its
 form. A declared type is described by its canonical path, its identity, and
@@ -647,7 +665,9 @@ and `R` a row.
   type, exactly as source must. `Iter(Item: U8)` and `Iter(Item: Str)` are
   two descriptors. An associated type never appears unfixed, because a
   checked signature names one only through a label or a type parameter
-  bound to it, and a type parameter does not survive checking.
+  bound to it, and a type parameter does not survive checking. Associated
+  types therefore reach checked IR in exactly two places: the `choices` of
+  an interface value type and the choices of an implementation.
 - A row `R` is a closed record with one field, `roots`: a list of entity
   reference records of operation interfaces, sorted by the UTF-8 bytes of
   `path`. It is written even when empty. `Fn` has no row.
@@ -691,8 +711,9 @@ record. Every other compound value is one of these closed records:
 | list | `kind: @list`; `values`: list of encoded elements in order |
 | dict | `kind: @dict`; `entries`: list of encoded key and value tuples in `Ordered` key order |
 | record | `kind: @record`; `typeInfo: T`, present only for a declared record; `fields`: record of encoded fields |
-| variant | `kind: @enum`; `typeInfo: T`; `variant`: the case name as an atom; `payload`: the encoded fields, only for a case that has fields |
+| variant | `kind: @enum`; `typeInfo: T`; `variant`: the case name as an atom; `payload`: a record of the case's encoded fields in declaration order, only for a case that has fields |
 | wrapper | `kind: @wrapper`; `typeInfo: T`; `value`: the encoded representation |
+| interface value | `kind: @interface`; `typeInfo: T`, the held value's concrete type; `value`: the held value's encoding |
 
 - A `@nonFinite` record is valid only where the enclosing type is `@f32` or
   `@f64`. There is one canonical NaN, written `@nan`, whatever the sign or
@@ -702,8 +723,15 @@ record. Every other compound value is one of these closed records:
   identity and arguments. An anonymous tuple or record has no `typeInfo`
   field, because the observation's own type already gives its shape.
 - Declared fields and cases keep declaration order. Anonymous record fields
-  use canonical name order.
+  use canonical name order. A variant's `payload` has no `kind` and no
+  `typeInfo` of its own: `payload: {radius: 1.5f64}`.
 - A case name is the resolved source name.
+- An interface value is encoded with the type it holds, because an
+  observation is for tools, which may see it. Source still cannot: no
+  pattern or conversion reads `typeInfo` back, as the
+  [type chapter](02-type-system.md#interface-values) requires of source
+  only. A decoder checks that the held type conforms to the interface at
+  the descriptor's arguments and choices, and restores no authority.
 - A decoder MUST check the expected type, every width and scalar invariant,
   the completeness of fields and cases, the nominal identity, and any
   `where`, before it exposes a typed value.
@@ -727,10 +755,9 @@ encoding, and nothing decodes into one.
 
 - A type statically known to contain one is rejected wherever an encoding
   is required.
-- An interface value has no value encoding either: the type that chose its
-  implementation is hidden, and an observation never recovers it. A value
-  that holds one gives an explicit encoding error. It never gives a trap, a
-  fake null, or a truncated value.
+- An interface value whose held value is one of these gives an explicit
+  encoding error, because its static type did not show it. It never gives a
+  trap, a fake null, or a truncated value.
 - A diagnostic tool MAY emit a separately versioned summary that cannot be
   decoded. It MUST be labelled as a summary, and a value decoder MUST NOT
   accept it.
@@ -766,8 +793,18 @@ declarations of the embedded standard library may bind them.
 ## Host registry
 
 Registry major version 2 has 17 host rows, each with a capability receiver,
-one nominal owner per operation, and typed delivery outcomes. A binary built
-against another major is not reinterpreted.
+one nominal owner per operation, and typed delivery outcomes. Its wire
+symbols are dotted camelCase strings, under the one rule of the
+[intrinsic registry](#compiler-intrinsic-registry). A binary built against
+another major is not reinterpreted.
+
+The members of `TestWorld` form a separate closed **test-world registry**,
+with one row per member: `testWorld.directory`, `testWorld.streams`,
+`testWorld.environment`, `testWorld.clocks`, `testWorld.random`, and
+`testWorld.output`, bound with `external @host` in `@std.test` and owned by
+`TestWorld`. The test runner's world implements them; they reach no external
+resource and append no `@host` event. Admission refuses every one of them
+for a target, since no recipe can name `TestWorld`.
 
 A row is a symbol, an owner, an exact signature, a `since` minor version,
 and a delivery class. Every row below has `since` 0 and delivery `@once`.
@@ -839,7 +876,10 @@ access by itself.
   invalid text. Byte operations never inspect contents.
 - A limit MUST be reserved before an operation could exceed its count or
   byte bound. A driver MUST NOT read, allocate, or send an unbounded
-  payload first and check afterwards.
+  payload first and check afterwards. A read first learns the size of the
+  opened object, reserves it, and reads at most that many bytes; a size
+  over the remaining limit is `limitExceeded` before any content is read.
+  A write reserves the encoded size of its argument before it sends.
 - A driver MUST NOT turn an ordinary failure into a process crash.
 
 **Standard input.**
@@ -895,9 +935,8 @@ access by itself.
 `..` and without the directory's own path, sorted by Unicode scalar.
 
 - It needs a `DirList` grant and that grant's directory selector.
-  Permission to read files does not grant listing.
-- A filtered listing applies its per-entry visibility rule before it
-  exposes any name.
+  Permission to read files does not grant listing, and a directory rule
+  permits listing a directory whole or not at all.
 - A name that is not Unicode is `invalidText`.
 
 **`DirStat.stat`** needs its own grant and selector. It returns the byte
@@ -953,12 +992,20 @@ the runtime MUST do the following, in order:
    lifetime and generation, and the identity of the registered operation.
 2. **Check rights**, and derive the requested resource and action from the
    typed operands. An approval flag supplied by the author is never used.
-3. **Enforce the whole policy**, including every constraint inherited from
-   a parent, and reserve all shared count and byte limits atomically.
-4. **Call only the typed adapter bound to the target**, and keep three
-   outcomes distinct: known not submitted, completed, and may have run.
+3. **Enforce the whole policy** over everything the operands decide,
+   including every constraint inherited from a parent: the path prefix, the
+   requested name against the name test, and that the policy permits at
+   least one of the actions the operation may turn out to perform. Reserve
+   all shared count and byte limits atomically.
+4. **Call only the typed adapter bound to the target.** The adapter
+   enforces what only the opened object decides: the right for the action
+   it found (create or replace) and the name test against the name the
+   filesystem reports. A failure there is `denied`, returned by the adapter
+   as a completed call. Keep three outcomes distinct: known not submitted,
+   completed, and may have run.
 5. **Advance the continuation** consistently with the completion, and then
-   append the completed event, if one is due.
+   append the completed event, if one is due. A refusal in steps 1 to 3
+   appends nothing.
 
 **Suspension.** Suspending and resuming around a submitted host instruction
 MUST NOT submit it again. The first, sequential protocol treats a
@@ -1092,6 +1139,18 @@ unknown field or an invalid value is rejected.
   literal out of range or a malformed field fails data decoding, not
   program execution.
 
+**Recipes under a world.** A binary target run under a world, in the
+interpreter or the harness launcher, acquires its grants from the same
+binding recipes, resolved against the world: a `@fixedPath` is a canonical
+virtual path, with a relative one taken under `/`; an `@argumentPath`
+indexes the world's `args`; a `@variablePath` reads its `env`; and the
+stream, clock, and random providers bind the world's streams, clocks, and
+random source. Policies, limits, the startup order, and the refusals of the
+[programs chapter](04-programs-and-packages.md#startup-order) apply
+unchanged, so a virtual directory that is absent is a refusal. The world's
+`stdin` feeds an entry run under it; a test's streams come from
+`TestWorld.streams`.
+
 A conformance case may supply the path of such a document. The shipped
 launcher has no user-selectable world or replay switch; the harness profile
 is separate, and its observation schema and version are checked.
@@ -1121,19 +1180,32 @@ is `kind`:
 | `kind` | `@startup` |
 | `binding` | the leaf's atom |
 | `provider` | the issuer's atom |
-| `status` | `@acquired`, `@absent` (refused, bound to `Option.none()`), or `@failed` |
+| `status` | `@acquired`, `@refused` (bound to `Option.none()`), or `@failed` |
 | `grant` | optional, present when acquired: the grant projection |
 | `failure` | optional, present when failed: `{code: Atom message: Str}` |
 
 | Field | Meaning |
 | --- | --- |
 | `kind` | `@host` |
-| `invocation` | the invocation's ordinal within the run, `U64` |
-| `parent` | optional: the parent invocation's ordinal, `U64`; absent for a root invocation and for a startup read |
+| `invocation` | the ordinal of the `await` that ran this host-bound member, `U64` |
+| `parent` | optional: the ordinal of the invocation whose body performed that `await`, `U64`; absent for a startup read |
 | `phase` | `@startup` for a read a recipe performs, `@entry` otherwise |
 | `op` | the exact registered wire symbol, `Str` |
 | `driver` | `{provider: Atom version: Str}`, the bound driver |
 | `origin` | the source-origin ordinal, `U64`; zero means no source origin |
+
+**Invocations.** Every `await` is an invocation, numbered from 1 in the
+order it starts. The startup reads of the recipes come first, each an
+invocation with no parent; the launcher's run of the entry's plan is the
+next invocation; and each `await` inside the entry's body is a further one
+whose parent is the invocation whose body performed it. Because evaluation
+order is fixed, every executor numbers a run alike.
+
+**Origins.** The source origins of a checked program form one canonical
+**origin table**: every source origin of the reachable program, sorted by
+source identity, then start, then end, numbered from 1. The interpreter, the
+lowering, and the trace of a [trap](#traps) all write ordinals of this table,
+so the executors agree on them.
 | `grant` | the grant projection |
 | `args` | list of the canonical argument values after the grant, in parameter order |
 | `result` | the canonical data of the operation's complete `Result` value |
@@ -1225,8 +1297,11 @@ run-local ordinal of the root grant whose accounting it shares).
 - A driver that returns `outcomeUnknown` has completed its adapter call.
   That typed result is recorded, without claiming that the external action
   completed.
-- A refusal before the adapter is called MUST NOT fabricate a completed
-  host event.
+- A refusal before the adapter is called (`denied`, `limitExceeded`, or
+  `unsupported` decided in steps 1 to 3 of [host calls](#host-calls))
+  appends nothing: the trace holds no record of it, and conformance compares
+  the typed result the program received. A refusal kind would need its own
+  fields and is not part of this format.
 - A trap, a host event, or an interrupted completion appends no completed
   success to fill the trace.
 - The absence of a completed event MUST NOT be reported as proof that
@@ -1242,8 +1317,10 @@ run-local ordinal of the root grant whose accounting it shares).
 - A consumer MUST keep an unknown kind as an opaque record. Adding a field
   to an existing kind, or changing its meaning, requires a new major
   format.
-- A JSON envelope carries the same facts, with VIBON values in canonical
-  form. It MUST NOT fall back to untyped event strings.
+- A JSON envelope carries the same facts: each field of an event is its own
+  JSON member, an atom is a string keeping its `@`, and a VIBON value such
+  as an argument or a result is its canonical text inside a string. A whole
+  event as one string is forbidden.
 
 ## Entry outcome
 
@@ -1265,9 +1342,16 @@ signature and its binding recipes.
 - An optional grant that is refused is bound to `Option.none()`. A
   malformed recipe or an incompatible provider is an error; it never becomes
   an absence.
-- Grants already acquired are released in reverse acquisition order.
-  Release MUST NOT be presented as rollback of an external effect already
-  dispatched.
+- On every ending of the process (a return, a defect trap, memory
+  exhaustion, or a failed startup) every acquired grant is released, in
+  reverse acquisition order. Release runs no program code, appends no
+  `@host` event, and is reported in the startup record of the
+  [tooling chapter](05-tooling.md#command-payloads) as the binding status
+  `released`. Release MUST NOT be presented as rollback of an external
+  effect already dispatched.
+- The entry MUST NOT have a bare `requires`: no call site exists where it
+  could be discharged, so it is `@project.invalidEntrySignature`. A
+  `requires … else` and either form of `ensures` behave as on any `proc`.
 
 **The run.** After startup the launcher builds the entry's plan and runs it
 under the same contract and authority rules as any procedure.
@@ -1280,8 +1364,21 @@ under the same contract and authority rules as any procedure.
 | `vibra run` | keeps its command statuses 0 to 6. A non-zero code maps to `@command.programFailed`, exit 6, with the actual code in `applicationCode` and no fabricated trap |
 
 Memory exhaustion, startup failure, and tool failure keep their own
-categories and MUST NOT appear as a returned application code. `run`,
-`test`, and `eval` execute on the interpreter and need no linker.
+categories and MUST NOT appear as a returned application code. A built
+executable on Windows, whose exit status has 32 bits, passes application
+codes 0 to 255 unchanged and exits with one of four fixed values for its own
+endings, writing the diagnostic to standard error:
+
+| Ending of a built executable on Windows | Exit status |
+| --- | --- |
+| a defect trap | 1001 |
+| memory exhaustion | 1002 |
+| a failed startup | 1003 |
+| refused admission | 1004 |
+
+Linux and macOS give a process eight bits of exit status; their rule is
+fixed by the native release, v0.0.3, which qualifies those platforms.
+`run`, `test`, and `eval` execute on the interpreter and need no linker.
 
 ## Traps
 
@@ -1394,9 +1491,14 @@ The major-1 WebAssembly boundary of v0.0.1 is a narrow transition
 substrate. It is not another source language and not a new grant ABI, and
 it stays only until the native cutover.
 
-- A program that needs the new entry, a grant receiver, the new error
-  shapes, or registry major 2 is incompatible with it, and MUST be reported
-  as unsupported unless an executor profile supports it explicitly.
+- It runs checked IR of this language, and only its pure part: a test
+  without `takes`, and the evaluation of a pure function. Every binary
+  target has the grant-receiving entry and every host operation needs a
+  grant, so neither is admitted: a program that needs the entry, a grant
+  receiver, a host operation, or registry major 2 MUST be reported as
+  unsupported.
+- It imports no host symbol. Its only imports are the pure native routines
+  of `vibra_native_v1`.
 - The roadmap does not require a replacement Wasm ABI to be invented only
   so that it can be retired.
 - An unsupported case stays an explicit gap. A compatibility parser, an
@@ -1410,9 +1512,8 @@ memory64, or multiple memories. It has one 32-bit linear memory, exported
 as `vibra_v1_memory`, and no exported global. Only toolchain-owned native
 code reads its layout.
 
-**Imports** are closed: the pure native routines of `vibra_native_v1` and,
-where needed, the registry-major-1 host symbols of `vibra_v1`. Source
-chooses no import.
+**Imports** are closed: the pure native routines of `vibra_native_v1`, and
+nothing else. Source chooses no import.
 
 - Scalar parameters use `i32`, `i64`, `f32`, and `f64`. A `Char` is a
   validated `i32` scalar. Smaller integers are sign- or zero-extended into
@@ -1428,8 +1529,8 @@ chooses no import.
 
 | Export | Signature and meaning |
 | --- | --- |
-| `entry` | no parameters, no result: run the old-profile program entry |
-| `test` | `i32` index, no result: run one old-profile test in a fresh instance |
+| `eval` | no parameters, no result: call the module's first function with no parameters, as the `interpret` operation does |
+| `test` | `i32` index, no result: run one test without `takes` in a fresh instance |
 | `status` | to `i32`: 0 none, 1 recorded trap, 2 memory host event, 3 assertion failure |
 | `trap_code` | to `i32`, historical: 1 invalidCheckedProgram, 2 unobservableFunction, 3 invalidHostValue, 4 divisionByZero |
 | `origin` | to `i32`: zero for no origin, otherwise a table ordinal |
@@ -1442,31 +1543,13 @@ chooses no import.
 | `read_i32`, `read_i64`, `read_f32`, `read_f64` | `i64` ID and `i64` index, to the named scalar class |
 | `read_id` | `i64` ID and `i64` index, to a new held child ID, which the host must release |
 
-A program module has `entry` and a test module has `test`, never both.
+An evaluation module has `eval` and a test module has `test`, never both.
 Returning is completion. An engine stop without the matching recorded
-status is a compiler defect. A host import borrows every parameter ID and
-returns one owned, sealed `Result` value ID, which the module adopts. The
-host MUST NOT release the borrowed inputs or the adopted result.
-
-**Builders.** A module that imports host symbols also exports `new`,
-`write_i32`, `write_i64`, `write_f32`, `write_f64`, `write_id`, and `seal`,
-with the same prefix.
-
-- `new` takes an `i32` kind, an `i64` component count, and an `i32` variant
-  or member, and returns a held, unsealed `i64` ID.
-- The historical kind codes are: atom 0, string 1, bytes 2, tuple 3,
-  array 4, record 6, enum 7, wrapper 8, union 9. Code 9 does not bring
-  unions back into source. This interface builds no dict and no function.
-- A write routine takes an ID, an index, and a value of its class, and
-  returns nothing. `write_id` accepts only a sealed child and keeps its own
-  reference. Rewriting a slot releases the old child and keeps the last
-  value.
-- `seal` takes one ID and makes the finished value immutable.
-- Each of these records `invalidHostValue`: a slot outside the kind, a
-  wrong scalar class, an invalid byte or `Char`, a stale or unissued ID, a
-  write to a sealed value, an unsealed child, and an incomplete seal.
-- The host never receives a raw pointer. Every accessor checks instance,
-  kind, and liveness.
+status is a compiler defect. The module has no builder exports, because no
+host value ever enters it. The host never receives a raw pointer, and every
+accessor checks instance, kind, and liveness. The kind codes the boundary
+uses are constants of this boundary alone; the native value arena has its
+own private kinds.
 
 **Removal.** A transition artifact records its ABI and registry
 requirements and its source-origin mapping. Later build metadata MUST NOT

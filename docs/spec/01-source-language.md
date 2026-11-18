@@ -555,7 +555,7 @@ type I32 of Intrinsic(@i32)
     returns sum: Result(Self ArithmeticError)
     visibility @public
     external @compiler
-    symbol "i32.add-checked"
+    symbol "i32.addChecked"
   endfn
 endtype
 ```
