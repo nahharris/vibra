@@ -1,6 +1,5 @@
 //! The dispatcher of the internal corpus runner.
 
-use crate::codebase::ToolingV1CodebaseHandler;
 use crate::format::ToolingV1FormatHandler;
 use crate::graph::StaticV1SourceGraphHandler;
 use crate::profile::ConformanceProfile;
@@ -50,8 +49,4 @@ pub fn standard_dispatcher() -> ProfileDispatcher {
         .with_handler(ConformanceProfile::ToolingV1, ToolingV1QueryHandler)
         .with_additional_handler(ConformanceProfile::ToolingV1, ToolingV1FormatHandler)
         .with_additional_handler(ConformanceProfile::ToolingV1, ToolingV1IndexHandler)
-        .with_additional_handler(
-            ConformanceProfile::ToolingV1,
-            ToolingV1CodebaseHandler,
-        )
 }

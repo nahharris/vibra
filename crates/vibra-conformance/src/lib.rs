@@ -25,7 +25,6 @@
 //! case's one expectation, and a case on which either backend disagrees fails.
 
 pub mod baseline;
-mod codebase;
 mod corpus;
 mod format;
 mod graph;

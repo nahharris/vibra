@@ -1,6 +1,5 @@
 //! Library-owned command parsing, planning, result mapping, and rendering.
 
-mod codebase;
 pub mod init;
 
 use std::ffi::{OsStr, OsString};
@@ -119,7 +118,6 @@ enum Payload {
     Check(CheckPayload),
     Run(RunPayload),
     Test(TestPayload),
-    Codebase(serde_json::Value),
     Empty(EmptyPayload),
 }
 
@@ -218,7 +216,6 @@ enum Action {
     Test {
         selector: Option<TestSelector>,
     },
-    Codebase(codebase::Request),
     Unavailable {
         arguments: Vec<OsString>,
     },
@@ -301,9 +298,6 @@ fn execute<W: Write, E: Write>(
         }
         Action::Test { selector } => {
             execute_test(&invocation, selector.as_ref(), stdout, stderr)
-        }
-        Action::Codebase(request) => {
-            codebase::execute(&invocation, request, stdout, stderr)
         }
         Action::Unavailable { arguments } => {
             let message =
@@ -1205,7 +1199,6 @@ fn parse_invocation(
             None,
         ),
         "project" => parse_project_command(output_format, workspace, remaining),
-        "codebase" => parse_codebase_command(output_format, workspace, remaining),
         "fmt" => parse_fmt_command(output_format, workspace, remaining),
         "check" => parse_check_command(output_format, workspace, remaining),
         "run" => parse_run_command(output_format, workspace, remaining),
@@ -1223,55 +1216,6 @@ fn parse_invocation(
             workspace,
             "invalid",
             &format!("unknown command `{command_name}`"),
-            None,
-        ),
-    }
-}
-
-fn parse_codebase_command(
-    output_format: OutputFormat,
-    workspace: PathBuf,
-    arguments: &[OsString],
-) -> Invocation {
-    let Some(subcommand) = arguments.first().and_then(|value| value.to_str()) else {
-        return invalid_invocation(
-            output_format,
-            workspace,
-            "invalid",
-            "`codebase` requires an M1 subcommand",
-            None,
-        );
-    };
-    let command = format!("codebase-{subcommand}");
-    match codebase::parse(subcommand, arguments.get(1..).unwrap_or_default()) {
-        Ok(request) => Invocation {
-            output_format,
-            workspace,
-            command,
-            action: Action::Codebase(request),
-        },
-        Err(error)
-            if matches!(
-                subcommand,
-                "init"
-                    | "head"
-                    | "import"
-                    | "lookup"
-                    | "read"
-                    | "export"
-                    | "verify"
-                    | "reindex"
-                    | "backup"
-                    | "restore"
-            ) =>
-        {
-            invalid_invocation(output_format, workspace, &command, &error.message, None)
-        }
-        Err(error) => invalid_invocation(
-            output_format,
-            workspace,
-            "invalid",
-            &error.message,
             None,
         ),
     }
