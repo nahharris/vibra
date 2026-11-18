@@ -283,6 +283,8 @@ fn batch(ty: Int, ops: &[&str]) -> (String, usize) {
 struct Tally {
     interpreter: usize,
     stepper: usize,
+    // Only Windows links and runs an executable.
+    #[cfg_attr(not(windows), allow(dead_code))]
     linked: usize,
 }
 
@@ -445,6 +447,8 @@ fn compare_answers_less_equal_and_greater_in_every_executor() {
             run += 1;
             #[cfg(windows)]
             linked_agrees(&label, &program, &lower(&program).expect("lowers"));
+            #[cfg(not(windows))]
+            let _ = program;
         }
     }
     eprintln!("compare programs: {run}");
