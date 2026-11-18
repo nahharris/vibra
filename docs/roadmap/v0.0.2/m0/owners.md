@@ -18,23 +18,6 @@ How to read a row:
 - **Schema** is the persistent observation or machine document a case
   compares. `tree` is the `@tree.v2` document of the `reader` operation.
 
-## Forms without a complete owner
-
-Three forms lack one part of an owner. Each is an item of the
-[specification questions](../m1/spec-questions.md) and blocks the task
-named there, not its step and not the plan.
-
-1. **The `discard` leaf.** `@tree.v2` names no leaf kind for `_`, nor for
-   a character that starts no token, so the `discard` production has its
-   cases and no complete schema owner (S1).
-2. **The `rules` of an obligation record.** The seven discharge rules have
-   no identifier, so the `GUARD` rows below have their cases and
-   diagnostics and an incomplete schema owner (S2). The `GUARD-n`
-   spellings in this table are the recommended ones.
-3. **The declarations of `@std.assert`.** Their behaviour, diagnostics,
-   and observation are owned; the source form of the module is not stated
-   (S3).
-
 ## Lexical productions
 
 Source chapter, "Lexical structure".
@@ -46,7 +29,7 @@ Source chapter, "Lexical structure".
 | `digit` | 03 | `V2-SRC-READER-numeric-suffix`, `V2-SRC-READER-name-invalid` | `@syntax.invalidNumericLiteral`, `@syntax.invalidName` | tree |
 | `atom` | 03 / 17 | `V2-SRC-READER-vibon-literals`, `V2-TYPE-CONTROL-match-atom-singleton`, `V2-TYPE-CONTROL-match-atom-open`, `V2-TYPE-INTERFACE-widen-atom` | `@syntax.invalidName`, `@pattern.nonExhaustive` | tree, `@value.v2` |
 | `atom-part` | 03 | `V2-SRC-READER-name-invalid` | `@syntax.invalidName` | tree |
-| `discard` | 03 / 11 | `V2-SRC-EXPR-patterns`, `V2-TYPE-NAMES-discard-repeats`, `V2-TYPE-CONTROL-discard-fallible` | `@type.unhandledFallible` | tree (leaf kind: item 1 above), `@resolved.v2` |
+| `discard` | 03 / 11 | `V2-SRC-EXPR-patterns`, `V2-TYPE-NAMES-discard-repeats`, `V2-TYPE-CONTROL-discard-fallible` | `@type.unhandledFallible` | tree, `@resolved.v2` |
 | `void` | 03 / 15 | `V2-SRC-READER-vibon-literals`, `V2-SRC-EXPR-pattern-void`, `V2-TYPE-CONTROL-if-statement-void` | `@type.mismatch` | tree, `@value.v2` |
 | `integer` | 03 / 15 | `V2-SRC-READER-numeric-suffix`, `V2-TYPE-INFER-literal-suffix`, `V2-TYPE-INFER-literal-expected`, `V2-TYPE-INFER-literal-ambiguous`, `V2-TYPE-INFER-out-of-range` | `@syntax.invalidNumericLiteral`, `@type.numericOutOfRange`, `@type.ambiguousInference` | tree, `@value.v2` |
 | `float` | 03 / 15 | `V2-SRC-READER-numeric-suffix`, `V2-TYPE-INFER-float-rounds-to-infinity`, `V2-SRC-EXPR-pattern-float` | `@syntax.invalidNumericLiteral`, `@type.numericOutOfRange`, `@syntax.invalidForm` | tree, `@value.v2` |
@@ -223,7 +206,7 @@ Programs chapter.
 | The standard library (embedding, manifest, roles) | 14 | host tests of step 14 | `@external.unknownSymbol`, `@external.signatureMismatch`, `@external.ownerMismatch`, `@runtime.invalidCheckedProgram`, `@module.sourceIdCollision` | `@stdlibManifest.v2` |
 | Tests | 23 / 25 | `V2-PROJECT-test-*`; the host test `check_covers_tests` of step 25 | `@module.testOutsideTests`, `@module.missingRequiredImport`, `@name.redeclaration`, `@type.invalidReturn`, `@type.invalidTry` | `@testRun.v2` |
 | Test worlds and grants | M2 | `V2-PROJECT-test-unavailable-item` (the M1 boundary) | `@tool.unavailable` in M1 | M2 |
-| Assertions | 23 | `V2-PROJECT-test-fails`, `V2-PROJECT-test-stops-at-failure`, `V2-PROJECT-test-assert-renamed`, `V2-PROJECT-test-equal-typed-from-actual`, `V2-PROJECT-assert-outside-tests`, `V2-PROJECT-test-function-not-equatable`, `V2-PROJECT-test-unobservable` | `@module.assertionOutsideTests`, `@type.functionNotEquatable`, `@tool.unsupportedValue` | `@testRun.v2` (source form: item 3 above) |
+| Assertions | 23 | `V2-PROJECT-test-fails`, `V2-PROJECT-test-stops-at-failure`, `V2-PROJECT-test-assert-renamed`, `V2-PROJECT-test-equal-typed-from-actual`, `V2-PROJECT-assert-outside-tests`, `V2-PROJECT-assert-value-outside-tests`, `V2-PROJECT-test-function-not-equatable`, `V2-PROJECT-test-unobservable` | `@module.assertionOutsideTests`, `@type.functionNotEquatable`, `@tool.unsupportedValue` | `@testRun.v2`, `@stdlibManifest.v2` |
 | Build products | not in this release | | | |
 
 ## Standard library modules

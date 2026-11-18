@@ -127,7 +127,12 @@ Edited: the root `Cargo.toml` and `Cargo.lock` (one package);
      `<owner>.<member>` with a lower-case owner and a camelCase member, so
      `i32.add-checked` becomes `i32.addChecked` and `bytes.from-array`
      becomes `bytes.fromList`;
-   - add `list.next` and `dict.next` with the signatures of the chapter.
+   - add `list.next` and `dict.next` with the signatures of the chapter;
+   - add the three assertion rows `assert.true`, `assert.false`, and
+     `assert.equal` (generic over `T`), with owner `assert`. A row carries
+     a flag that says whether it is pure; these three are the only rows
+     that are not, and `is_assertion(symbol)` is the registry's one
+     question about them.
    Each row has its wire symbol, generics, parameter and result types over
    role-bound types, and its sample vectors, ported from `vectors.rs`. The
    three `grant.*` rows belong to M2. Invariant: the snapshot test fails

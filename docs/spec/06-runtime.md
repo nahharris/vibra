@@ -309,8 +309,9 @@ A test obtains fake grants only from the `TestWorld` it takes, as
 [test worlds and grants](04-programs-and-packages.md#test-worlds-and-grants)
 defines. A row alone MUST NOT create a grant or permit a real effect.
 
-- An assertion is an ordinary typed call. It performs no host operation and
-  has no registry symbol.
+- An assertion is an ordinary typed call of a compiler intrinsic, one of
+  the [assertion rows](#assertion-operations). It performs no host
+  operation.
 - A false assertion records `@test.assertionFailed` and stops only its own
   test. It is an outcome of the runner. It is not a `Result` and not a trap,
   and source cannot catch it.
@@ -324,7 +325,9 @@ defines. A row alone MUST NOT create a grant or permit a real effect.
 
 Only the embedded standard library may bind a symbol of the closed
 `@compiler` registry. Each row has a stable wire symbol, exact generic,
-parameter, and result types, and pure deterministic semantics. The registry
+parameter, and result types, and deterministic semantics that perform no
+host operation. Every row is pure except the
+[assertion rows](#assertion-operations). The registry
 is major version 2 and starts at 2.0; it is versioned like the
 [host registry](#registry-versioning), and a build records the minor it
 requires.
@@ -338,7 +341,8 @@ requires.
   of a source name MUST NOT rename a wire string.
 - A primitive implements what the core cannot express: scalar arithmetic,
   comparison, and conversion, storage operations that depend on the
-  representation, and the derivation of a grant from a grant.
+  representation, the derivation of a grant from a grant, and the outcome
+  of a test assertion.
 - Every partial operation MUST return an `Option` or a `Result`. Plain
   integer division and remainder do not exist in this language.
 
@@ -482,6 +486,26 @@ There is no `List.of`, `Dict.of`, or `Dict.fromEntries`.
 - **`Str.trim`** trims the four ASCII whitespace scalars of
   `Char.isAsciiWhitespace` at both ends. It is not a Unicode or grapheme
   algorithm.
+
+### Assertion operations
+
+The **assertion rows** are the three rows whose owner is `assert`. They
+are bound with `external @compiler` by the module-level functions of
+`@std.assert`, and a rule that concerns assertions is stated over these
+rows.
+
+| Wire symbol | Signature | Meaning |
+| --- | --- | --- |
+| `assert.true` | `Fn({Bool} Void)` | returns `void` when the operand is `true` |
+| `assert.false` | `Fn({Bool} Void)` | returns `void` when the operand is `false` |
+| `assert.equal` | generic over `T`: `Fn({T T} Void)`, expected then actual | returns `void` when both operands have the same [canonical value encoding](#canonical-value-encoding) |
+
+Otherwise the row does not return: it records the structured failure of
+[Test assertions](#test-assertions) and ends the body of the running
+test. That outcome is the defined semantics of the row, and it exists only
+in the procedure context of a test, which is why
+[the programs chapter](04-programs-and-packages.md#assertions) rejects a
+use anywhere else.
 
 **Iteration.** `Iter.next` is pure. It returns an item together with an
 immutable remainder of the same concrete type.

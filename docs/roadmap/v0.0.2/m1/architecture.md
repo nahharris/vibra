@@ -474,11 +474,10 @@ v0.0.3 concern. The `host` list is empty until M2.
    diagnostic list so two agents can prepare consecutive steps; a step that
    grows past its guide is split before it is started, per the execution
    model.
-3. **Specification gaps surface mid-step.** Three are known
-   ([spec-questions.md](spec-questions.md)); the guides of steps 06, 22,
-   and 23 name the task each one blocks, and no other step waits on them.
-   Mitigation: an agent that meets a new gap stops and files it rather
-   than choosing.
+3. **Specification gaps surface mid-step.** None is known when the plan
+   is written. Mitigation: an agent that meets one stops and files it
+   rather than choosing; the answer changes the specification, and the
+   guide then follows the chapter.
 4. **Independently authored expectations are expensive and error-prone.**
    Hand-computed spans drift from the input. Mitigation: the guide matrices
    carry the input and the span together; the runner reports the actual

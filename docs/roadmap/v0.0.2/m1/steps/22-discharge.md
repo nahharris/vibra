@@ -16,11 +16,9 @@ rule identifiers.
   `@types.v2`, "Required coverage" item 9;
   [runtime chapter](../../../../spec/06-runtime.md) "Callable contract
   execution" ("Bare guards leave no code").
-- Open question: the strings the `rules` field holds for the seven
-  discharge rules ([specification questions](../spec-questions.md)). The
-  facts have the identifiers `INT-1` to `INT-8`; this guide writes
-  `GUARD-1` to `GUARD-7` for the rules as placeholders, and no snapshot
-  that lists `rules` is committed before the answer.
+- The `rules` field of an obligation record holds the identifiers
+  `GUARD-1` to `GUARD-7` of the type chapter's list, in the order used; a
+  `GUARD-6` is followed by the `INT` identifiers of the facts it used.
 
 ## Entry points
 

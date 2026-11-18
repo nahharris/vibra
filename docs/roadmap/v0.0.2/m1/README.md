@@ -3,9 +3,7 @@
 **Planned.** The pure part of the language, checked and run on the reference
 interpreter.
 
-Design record: [architecture.md](architecture.md). Three open
-specification questions, each blocking one named task:
-[spec-questions.md](spec-questions.md). Owner table for M0:
+Design record: [architecture.md](architecture.md). Owner table for M0:
 [../m0/owners.md](../m0/owners.md). Step guides: [steps/](steps/).
 Integration branch: `v0.0.2/m1`, created from `main` after M0 exits.
 

@@ -79,8 +79,15 @@ evaluate}`.
 10. `evaluate(&CheckedModuleSet, &Expr, &[Value], Limits) -> Evaluation`
     for the checker: `Value`, `LimitReached(limit)`, or `Defect(trap)`; the
     reduction count is the limit.
-11. `run_test`: a `Void` entry; a false assertion stops the test and is
-    returned as `TestAssertionFailure { assertion, expected, actual, origin }`.
+11. `run_test`: a `Void` entry. The assertion rows are intrinsics like the
+    others: `assert.true`, `assert.false`, and `assert.equal` return
+    `void` when they hold; otherwise the row stops the test, which is
+    returned as `TestAssertionFailure { assertion, expected, actual, origin }`
+    with the wire symbol as `assertion`. `assert.equal` compares canonical
+    value encodings, and an operand that cannot be observed gives the
+    observation error. An assertion row reached outside `run_test`, in
+    `run` or `evaluate`, is `InvalidCheckedProgram`: the checker admits
+    none there.
 12. Architecture row: `vibra-interp: [vibra-diagnostics, vibra-ir]`.
 
 ## Test matrix
