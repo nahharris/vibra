@@ -3,7 +3,7 @@
 use vibra_diagnostics::ByteSpan;
 use vibra_diagnostics::DiagnosticCode::{
     DataDuplicateField, DataDuplicateKey, DataInvalidExtension, SyntaxInvalidEncoding,
-    SyntaxInvalidForm, SyntaxInvalidName, SyntaxUnmatchedDelimiter, ToolUnavailable,
+    SyntaxInvalidForm, SyntaxInvalidName, SyntaxUnmatchedDelimiter,
 };
 use vibra_syntax::{
     DataValue, Document, DocumentMode, SyntaxKind, load, parse_data, parse_source,
@@ -316,12 +316,4 @@ fn a_document_presented_to_the_wrong_loader_is_never_read() {
     let document =
         load::<()>("input.vibon", DocumentMode::Data, || Ok(b"{}".to_vec())).unwrap();
     assert!(document.diagnostics().is_empty());
-}
-
-#[test]
-fn the_source_mode_accepts_nothing_yet() {
-    let text = "fn f returns r: I32 do return 1i32 endfn";
-    let document = parse_source(None, text.as_bytes());
-    assert_eq!(codes(document.diagnostics()), [(ToolUnavailable, 0, 40)]);
-    assert_eq!(document.root().unwrap().kind(), SyntaxKind::Source);
 }

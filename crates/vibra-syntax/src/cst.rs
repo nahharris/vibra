@@ -26,8 +26,9 @@ use crate::lexer::{Token, TokenKind};
 ///
 /// Interior kinds are the nodes of the `@tree.v2` observation, named after
 /// the grammar productions; leaf kinds are its leaf kinds. The three bracket
-/// kinds are generic groups for a grammar this crate does not parse yet; the
-/// tree observation writes their children in their place.
+/// kinds, [`SyntaxKind::Construct`], and [`SyntaxKind::Section`] are generic
+/// groups for a grammar this crate does not parse yet; the tree observation
+/// writes their children in their place.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SyntaxKind {
     /// The document node of a `.vibon` document.
@@ -46,6 +47,20 @@ pub enum SyntaxKind {
     Dict,
     /// The `entry` production.
     Entry,
+    /// The `use` production.
+    Use,
+    /// The `type-decl` production, at the top level.
+    TypeDecl,
+    /// The `interface-decl` production, at the top level.
+    InterfaceDecl,
+    /// The `fn-decl` production, at the top level.
+    FnDecl,
+    /// The `proc-decl` production, at the top level.
+    ProcDecl,
+    /// The `module-let` production.
+    ModuleLet,
+    /// The `test` production.
+    Test,
     /// Tokens a recovery step consumed without building a form.
     Error,
     /// A generic `{…}` group.
@@ -54,6 +69,11 @@ pub enum SyntaxKind {
     Bracket,
     /// A generic `(…)` group.
     Paren,
+    /// A generic keyword-led construct below the top level, from its opener
+    /// keyword to its typed closer.
+    Construct,
+    /// A generic section of a construct: its keyword and its operand.
+    Section,
     /// An identifier leaf.
     Identifier,
     /// A reserved word leaf.
@@ -94,8 +114,19 @@ impl SyntaxKind {
             Self::List => "@list",
             Self::Dict => "@dict",
             Self::Entry => "@entry",
+            Self::Use => "@use",
+            Self::TypeDecl => "@typeDecl",
+            Self::InterfaceDecl => "@interfaceDecl",
+            Self::FnDecl => "@fnDecl",
+            Self::ProcDecl => "@procDecl",
+            Self::ModuleLet => "@moduleLet",
+            Self::Test => "@test",
             Self::Error => "@error",
-            Self::Brace | Self::Bracket | Self::Paren => return None,
+            Self::Brace
+            | Self::Bracket
+            | Self::Paren
+            | Self::Construct
+            | Self::Section => return None,
             Self::Identifier => "@identifier",
             Self::ReservedWord => "@reservedWord",
             Self::Integer => "@integer",
@@ -395,39 +426,6 @@ fn close<S: Shaper>(
     frame.items.push(last);
     let item = shaper.group(frame.kind, frame.items);
     current(stack, top).push(item);
-}
-
-/// The shaper of a grammar this crate does not parse: every form is a
-/// generic group.
-#[derive(Debug, Default)]
-pub(crate) struct GenericShaper;
-
-impl Shaper for GenericShaper {
-    type Item = CstNode;
-
-    fn open(&mut self, _kind: GroupKind) {}
-
-    fn token(&mut self, token: Token) -> CstNode {
-        CstNode::leaf(SyntaxKind::of_token(token.kind), token.span)
-    }
-
-    fn missing(&mut self, at: usize) -> CstNode {
-        CstNode::leaf(SyntaxKind::Missing, ByteSpan::empty_at(at))
-    }
-
-    fn unmatched(&mut self, closer: Token) -> CstNode {
-        error_around(closer)
-    }
-
-    fn group(&mut self, kind: GroupKind, items: Vec<CstNode>) -> CstNode {
-        let at = items.first().map_or(0, |item| item.span().start());
-        let kind = match kind {
-            GroupKind::Brace => SyntaxKind::Brace,
-            GroupKind::Bracket => SyntaxKind::Bracket,
-            GroupKind::Paren => SyntaxKind::Paren,
-        };
-        CstNode::interior(kind, items, at)
-    }
 }
 
 /// An `@error` node holding the `@punctuation` leaf of an unmatched closer.

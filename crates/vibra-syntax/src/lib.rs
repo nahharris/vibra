@@ -9,8 +9,10 @@
 //!
 //! A document is parsed by the grammar its extension selects
 //! ([`DocumentMode::from_path`]). [`parse_data`] is complete. [`parse_source`]
-//! lexes and matches brackets and reports the source grammar as
-//! `@tool.unavailable`: the source grammar arrives in a later step.
+//! parses the source grammar's skeleton ([`source`]): the module, the seven
+//! top-level forms recognized by keyword and typed closer, generic sections,
+//! and `use` in full. The bodies of the other six forms are reported
+//! `@tool.unavailable`, once per form.
 //!
 //! # Position in the architecture
 //!
@@ -23,6 +25,7 @@ mod data;
 mod document;
 mod lexer;
 mod literal;
+pub mod source;
 mod tree;
 
 pub use cst::{CstNode, SyntaxKind};
@@ -37,4 +40,5 @@ pub use literal::{
     FloatSuffix, IntegerSuffix, canonical_character, canonical_string,
     decode_character, decode_string,
 };
+pub use source::{Declaration, Module, Use, module};
 pub use tree::{TREE_FORMAT, tree_document, tree_text};
