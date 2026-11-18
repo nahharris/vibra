@@ -851,25 +851,25 @@ impl<'a> DataShaper<'a> {
         let mut unique = true;
         for shaped in values.iter().flatten() {
             match (kind, shaped) {
-                (SyntaxKind::Record, Shaped::Field(field, _)) => {
-                    if !names.insert(field.name.as_str()) {
-                        unique = false;
-                        self.report(
-                            DiagnosticCode::DataDuplicateField,
-                            field.name_span,
-                            "a record's fields are unique",
-                        );
-                    }
+                (SyntaxKind::Record, Shaped::Field(field, _))
+                    if !names.insert(field.name.as_str()) =>
+                {
+                    unique = false;
+                    self.report(
+                        DiagnosticCode::DataDuplicateField,
+                        field.name_span,
+                        "a record's fields are unique",
+                    );
                 }
-                (SyntaxKind::Dict, Shaped::Entry(entry, key, _)) => {
-                    if !keys.insert(*key) {
-                        unique = false;
-                        self.report(
-                            DiagnosticCode::DataDuplicateKey,
-                            entry.key.span,
-                            "a dict's keys are unique as decoded values",
-                        );
-                    }
+                (SyntaxKind::Dict, Shaped::Entry(entry, key, _))
+                    if !keys.insert(*key) =>
+                {
+                    unique = false;
+                    self.report(
+                        DiagnosticCode::DataDuplicateKey,
+                        entry.key.span,
+                        "a dict's keys are unique as decoded values",
+                    );
                 }
                 _ => {}
             }

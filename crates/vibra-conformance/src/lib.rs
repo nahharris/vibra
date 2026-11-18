@@ -17,12 +17,14 @@
 //!
 //! # Handlers
 //!
-//! No handler is registered yet, so every case is unavailable. Handlers
-//! arrive with the steps that make their observations exist.
+//! [`ReaderV2Handler`] runs the `reader` operation under `readerV2`. Every
+//! other case is unavailable until the step that makes its observations
+//! exist registers a handler.
 
 mod corpus;
 mod manifest;
 mod profile;
+mod reader;
 mod rules;
 mod runner;
 mod standard;
@@ -39,6 +41,7 @@ pub use profile::{
     CaseObservation, ConformanceOperation, ConformanceProfile, HandlerError,
     ProfileHandler, UnknownOperation, UnknownProfile,
 };
+pub use reader::ReaderV2Handler;
 pub use rules::{
     IdentityParts, InvalidIdentity, RULE_PREFIXES, RULES_FILE_NAME, RULES_HEADER,
     RuleIndex, RuleRow, RuleStatus, RulesError, parse_identity,

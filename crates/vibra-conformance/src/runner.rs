@@ -381,20 +381,51 @@ fn matches(
         ("testRun", observation.test_run.as_deref()),
     ];
     for (key, path) in expected.snapshots() {
-        let snapshot = case.read_file(path).map_err(|error| {
+        let snapshot = case.read_bytes(path).map_err(|error| {
             format!("{key} snapshot `{path}` cannot be read: {error}")
         })?;
-        let actual = observed
+        let Some(actual) = observed
             .iter()
             .find(|(name, _)| *name == key)
-            .and_then(|(_, actual)| *actual);
-        match actual {
-            None => return Err(format!("the handler produced no {key} observation")),
-            Some(actual) if actual != snapshot => {
-                return Err(format!("{key} snapshot mismatch (`{path}`)"));
-            }
-            Some(_) => {}
+            .and_then(|(_, actual)| *actual)
+        else {
+            return Err(format!("the handler produced no {key} observation"));
+        };
+        let same = if key == "formatted" {
+            actual.as_bytes() == snapshot.as_slice()
+        } else {
+            same_document(path, &snapshot, actual)?
+        };
+        if !same {
+            return Err(format!("{key} snapshot mismatch (`{path}`)"));
         }
     }
     Ok(())
+}
+
+/// Whether a VIBON snapshot and an observation are one decoded value.
+///
+/// The formatted text is the one observation compared byte for byte: it is
+/// the formatter's output, not a persistent observation. Every other snapshot
+/// is a VIBON document of a format of "Persistent observations", compared as
+/// its decoded value, so the layout of a snapshot file is free.
+fn same_document(path: &str, snapshot: &[u8], actual: &str) -> Result<bool, String> {
+    let expected = vibra_syntax::parse_data(Some(path), snapshot);
+    let Some(expected) = expected.value() else {
+        return Err(format!(
+            "snapshot `{path}` is not a valid VIBON document: {:?}",
+            expected
+                .diagnostics()
+                .iter()
+                .map(|diagnostic| (diagnostic.code(), diagnostic.primary_span()))
+                .collect::<Vec<_>>()
+        ));
+    };
+    let observed = vibra_syntax::parse_data(None, actual.as_bytes());
+    let Some(observed) = observed.value() else {
+        return Err(format!(
+            "the observation compared with `{path}` is not a valid VIBON document"
+        ));
+    };
+    Ok(expected.decoded_eq(observed))
 }

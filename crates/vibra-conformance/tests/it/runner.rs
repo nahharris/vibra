@@ -51,15 +51,24 @@ fn the_binary_takes_only_root_and_rejects_a_write_option() {
     assert!(text(&output.stderr).contains("--root"));
 }
 
+/// The one case of `root` moved to `profile`, which no standard handler
+/// covers.
+fn under_profile(root: &Path, profile: &str) {
+    let manifest = root.join("SRC-READER/V2-SRC-READER-x/case.toml");
+    let text = std::fs::read_to_string(&manifest).expect("the manifest");
+    std::fs::write(&manifest, text.replace("readerV2", profile)).expect("rewrite");
+}
+
 #[test]
 fn a_case_with_no_handler_is_unavailable_and_fails_the_run() {
     let root = one_reader_case("");
+    under_profile(&root, "staticV2");
     let output = conformance(&["--root".as_ref(), root.as_os_str()]);
     assert_eq!(output.status.code(), Some(1));
     let stdout = text(&output.stdout);
     assert!(
         stdout.lines().any(|line| line
-            == "readerV2 conformance: 0 passed, 0 failed, 0 unknown, 1 unavailable"),
+            == "staticV2 conformance: 0 passed, 0 failed, 0 unknown, 1 unavailable"),
         "{stdout}"
     );
     assert!(stdout.contains("UNAVAILABLE V2-SRC-READER-x"), "{stdout}");
@@ -76,8 +85,25 @@ fn an_empty_corpus_fails_the_run() {
 }
 
 #[test]
-fn the_standard_dispatcher_registers_no_handler() {
-    let root = one_reader_case("");
+fn the_standard_dispatcher_runs_reader_cases_only() {
+    let root =
+        one_reader_case("tree = \"tree.vibon\"\nformatted = \"formatted.vibon\"\n");
+    write(
+        &root,
+        "SRC-READER/V2-SRC-READER-x/tree.vibon",
+        "{\n  root: {kind: @data children: [{kind: @tuple children: [\
+         {kind: @punctuation text: \"{\"} {kind: @punctuation text: \"}\"}]}]}\n  \
+         format: @tree.v2\n}\n",
+    );
+    write(&root, "SRC-READER/V2-SRC-READER-x/formatted.vibon", "{}\n");
+    let corpus = Corpus::discover(&root).expect("the corpus loads");
+    let report = ConformanceRunner::new(standard_dispatcher()).run(&corpus);
+    assert_eq!(report.cases()[0].status, CaseStatus::Passed);
+    assert_eq!(
+        report.cases()[0].provided_profile,
+        Some(ConformanceProfile::ReaderV2)
+    );
+    under_profile(&root, "staticV2");
     let corpus = Corpus::discover(&root).expect("the corpus loads");
     let report = ConformanceRunner::new(standard_dispatcher()).run(&corpus);
     assert!(matches!(
@@ -85,6 +111,37 @@ fn the_standard_dispatcher_registers_no_handler() {
         CaseStatus::Unavailable { .. }
     ));
     assert!(!report.is_success());
+}
+
+#[test]
+fn a_tree_snapshot_is_compared_as_a_decoded_value() {
+    let root = one_reader_case("tree = \"tree.vibon\"\n");
+    write(
+        &root,
+        "SRC-READER/V2-SRC-READER-x/tree.vibon",
+        "// written by hand\n{root: [\"a\": 1u8 \"b\": 2u8] format: @tree.v2}\n",
+    );
+    let mut observation = CaseObservation::new(Verdict::Accepted);
+    observation.tree =
+        Some("{format: @tree.v2 root: [\"b\": 2u8 \"a\": 1u8]}".to_owned());
+    assert_eq!(
+        status_under(&root, ConformanceProfile::ReaderV2, observation.clone()),
+        CaseStatus::Passed,
+        "fields and entries in another order and another layout are one value"
+    );
+    observation.tree =
+        Some("{format: @tree.v2 root: [\"b\": 2u16 \"a\": 1u8]}".to_owned());
+    let status = status_under(&root, ConformanceProfile::ReaderV2, observation.clone());
+    assert!(
+        matches!(&status, CaseStatus::Failed { reason } if reason.contains("tree snapshot mismatch")),
+        "{status:?}"
+    );
+    observation.tree = Some("{format: @tree.v2".to_owned());
+    let status = status_under(&root, ConformanceProfile::ReaderV2, observation);
+    assert!(
+        matches!(&status, CaseStatus::Failed { reason } if reason.contains("not a valid VIBON document")),
+        "{status:?}"
+    );
 }
 
 /// A handler that returns a fixed observation for every reader case.
