@@ -20,7 +20,7 @@
 //! [`DescriptorTable`] beside it, as it produces the origin table, which maps a
 //! head back to its type for a host that reads an interface value.
 
-use vibra_ir::Type;
+use vibra_ir_v1::Type;
 use wasm_encoder::{BlockType, Instruction as I, ValType};
 
 use crate::layout::{CellClass, header};

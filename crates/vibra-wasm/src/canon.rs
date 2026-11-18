@@ -17,7 +17,7 @@ use wasm_encoder::{BlockType, Instruction as I, ValType};
 
 use crate::layout::header;
 use crate::runtime::{Ins, Routine, Routines, c32, c64, get, ld8, ld32, set, st32};
-use vibra_ir::arena::{class, kind};
+use vibra_ir_v1::arena::{class, kind};
 
 /// The entries the scan's stack holds before it first grows.
 const FIRST_CAPACITY: i32 = 16;
@@ -257,13 +257,13 @@ pub(crate) fn scan_routine(fns: &Routines) -> Routine {
 pub(crate) fn nan_replaced(local: u32, double: bool) -> Vec<Ins> {
     let (canonical, magnitude, infinity) = if double {
         (
-            vibra_ir::CANONICAL_NAN_F64.cast_signed(),
+            vibra_ir_v1::CANONICAL_NAN_F64.cast_signed(),
             0x7FFF_FFFF_FFFF_FFFF,
             0x7FF0_0000_0000_0000,
         )
     } else {
         (
-            i64::from(vibra_ir::CANONICAL_NAN_F32),
+            i64::from(vibra_ir_v1::CANONICAL_NAN_F32),
             0x7FFF_FFFF,
             0x7F80_0000,
         )

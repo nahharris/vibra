@@ -38,8 +38,8 @@
 //! change, a quotient that does not give the factor back, a shifted-out bit).
 //! Division, remainder, negation, and the conversions need no such distinction.
 
-use vibra_ir::external::{CompilerIntrinsic, FloatOp, IntegerOp, NumericType};
-use vibra_ir::{CANONICAL_NAN_F32, CANONICAL_NAN_F64};
+use vibra_ir_v1::external::{CompilerIntrinsic, FloatOp, IntegerOp, NumericType};
+use vibra_ir_v1::{CANONICAL_NAN_F32, CANONICAL_NAN_F64};
 use wasm_encoder::Instruction as I;
 
 use crate::layout::header;

@@ -117,12 +117,13 @@ does not run on them yet.
 To build the CLI from source with the pinned Rust toolchain:
 
 ```sh
-cargo build --release --locked -p vibra-cli
+cargo build --release --locked -p vibra-cli-v1
 ```
 
-The commands are the same in both: `vibra project init`, `vibra fmt`,
-`vibra check`, `vibra test`, and `vibra run`. Use `vibra help` to see what
-your build supports.
+While milestone 1 of v0.0.2 is in progress, the v0.0.1 toolchain is the
+`vibra-v1` binary, built by the command above. The commands are the same in
+both: `vibra project init`, `vibra fmt`, `vibra check`, `vibra test`, and
+`vibra run`. Use `vibra help` to see what your build supports.
 ### Skills for coding agents
 
 This repository is a plugin marketplace for Claude Code, Cursor, and Codex.

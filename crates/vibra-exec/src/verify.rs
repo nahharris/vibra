@@ -24,7 +24,7 @@
 
 use std::fmt;
 
-use vibra_ir::external::NumericType;
+use vibra_ir_v1::external::NumericType;
 
 use crate::{
     Block, BlockId, Callee, FuncId, Function, Inst, MAX_SLOTS, OriginId, Program,

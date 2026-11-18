@@ -7,8 +7,8 @@ use crate::support::{
     GLOBAL_ACTUAL, GLOBAL_EXPECTED, GLOBAL_FAILURE, GLOBAL_RESULT, Spec, module,
     record, runner,
 };
-use vibra_ir::TestAssertion;
-use vibra_ir::boundary::TrapCode;
+use vibra_ir_v1::TestAssertion;
+use vibra_ir_v1::boundary::TrapCode;
 use vibra_wasm_run::{MemoryLimit, Outcome, ResultSlot, Runner, RunnerError};
 use wasm_encoder::Instruction;
 

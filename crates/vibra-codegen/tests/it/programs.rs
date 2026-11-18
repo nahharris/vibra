@@ -1,15 +1,15 @@
 //! Programs the tests emit: the foundation's proof cases, and one program that
 //! uses every instruction and terminator that has a native form.
 
-use vibra_diagnostics::ByteSpan;
+use vibra_diagnostics_v1::ByteSpan;
 use vibra_exec::{
     Block, BlockId, Callee, ConstId, Constant, FuncId, Function, GlobalId, Inst,
     ObjectKind, OriginId, Program, ScalarClass, ScalarOp, Slot, Terminator,
 };
-use vibra_ir::SourceOrigin;
-use vibra_ir::boundary::TrapCode;
-use vibra_ir::external::CompilerIntrinsic;
-use vibra_ir::external::host::host_row;
+use vibra_ir_v1::SourceOrigin;
+use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir_v1::external::CompilerIntrinsic;
+use vibra_ir_v1::external::host::host_row;
 
 pub fn scalar(dst: u32, bits: u64) -> Inst {
     Inst::Scalar {

@@ -1,11 +1,11 @@
 //! Deterministic WebAssembly emission for checked Vibra IR.
 //!
-//! This is the second consumer of [`vibra_ir::CheckedProgram`], beside the
+//! This is the second consumer of [`vibra_ir_v1::CheckedProgram`], beside the
 //! reference interpreter: it has no frontend of its own and lowers the same
-//! typed IR the interpreter runs. It depends on `vibra-ir` and the encoder
+//! typed IR the interpreter runs. It depends on `vibra-ir-v1` and the encoder
 //! only. It reaches no engine, and it does not depend on the native-code
 //! crate: a module names a native only by an import from the pure module whose
-//! name `vibra_ir::boundary` records.
+//! name `vibra_ir_v1::boundary` records.
 //!
 //! # What is lowered
 //!
@@ -56,7 +56,7 @@ mod runtime;
 pub mod support;
 mod types;
 
-use vibra_ir::{CheckedProgram, SourceOrigin, Type};
+use vibra_ir_v1::{CheckedProgram, SourceOrigin, Type};
 
 pub use desc::DescriptorTable;
 pub use error::EmitError;
@@ -357,10 +357,10 @@ fn build(
 /// row that does not loop, which is the integer rows but `to-str` and `parse`,
 /// the integer conversions, the `char` rows, `array.length`, and the float
 /// arithmetic, equality, and order rows. The rows that loop are native imports
-/// (`CompilerIntrinsic::native_import`), and `vibra_ir::external::CompilerIntrinsic::vectors`
+/// (`CompilerIntrinsic::native_import`), and `vibra_ir_v1::external::CompilerIntrinsic::vectors`
 /// holds both kinds to samples. A row it lowers neither way is reported by
 /// [`emit`] as [`EmitError::Malformed`].
 #[must_use]
-pub fn lowers_primitive(intrinsic: vibra_ir::external::CompilerIntrinsic) -> bool {
+pub fn lowers_primitive(intrinsic: vibra_ir_v1::external::CompilerIntrinsic) -> bool {
     primitive::plan(intrinsic).is_some()
 }

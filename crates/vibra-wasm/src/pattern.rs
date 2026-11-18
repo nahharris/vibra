@@ -28,8 +28,8 @@
 //! checker writes its two variants as boolean literals, which the table reads
 //! as the discriminant of the enum `bool` is.
 
-use vibra_ir::external::CompilerIntrinsic;
-use vibra_ir::{Pattern, SourceOrigin, Type, Value};
+use vibra_ir_v1::external::CompilerIntrinsic;
+use vibra_ir_v1::{Pattern, SourceOrigin, Type, Value};
 
 use crate::error::EmitError;
 use crate::runtime::ValueClass;
@@ -331,7 +331,7 @@ pub(crate) fn decompose<'p>(
 #[allow(clippy::expect_used, clippy::indexing_slicing)]
 mod tests {
     use super::*;
-    use vibra_diagnostics::ByteSpan;
+    use vibra_diagnostics_v1::ByteSpan;
 
     fn origin() -> SourceOrigin {
         SourceOrigin::new("input.vib", ByteSpan::new(0, 1))

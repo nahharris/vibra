@@ -2,7 +2,7 @@
 //!
 //! `docs/spec/06-runtime.md`, "The value arena" and "Reclamation". The store is
 //! one growable block of bytes that the context owns. A value is a block of it
-//! with the header and payload layouts recorded in `vibra_ir::arena`, the
+//! with the header and payload layouts recorded in `vibra_ir_v1::arena`, the
 //! layout the toolchain-owned native code already reads, and a [`Ref`] is the
 //! block's offset: a handle that means nothing outside its context, never a
 //! pointer. Nothing moves, so a handle is stable for the life of its value.
@@ -17,7 +17,7 @@
 //! frames, counts against one limit. Reaching it is [`StoreError::Exhausted`],
 //! the host event `@runtime.memory-exhausted`, never a trap.
 
-use vibra_ir::arena::{
+use vibra_ir_v1::arena::{
     STRIDE_BYTES, STRIDE_CELLS, STRIDE_CHARS, cells_offset, class, header,
 };
 
@@ -59,7 +59,7 @@ impl Ref {
 /// One cell: what a frame slot or a component of an object holds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Cell {
-    /// The class byte of `vibra_ir::arena::class`.
+    /// The class byte of `vibra_ir_v1::arena::class`.
     pub class: u8,
     /// The scalar's bits, or a handle in the low 32 bits.
     pub bits: u64,
@@ -154,12 +154,12 @@ impl Store {
         self.peak
     }
 
-    /// A view of the store's bytes for `vibra_native::arena`, the native code
-    /// that implements `vibra_native::Source` and `vibra_native::Sink` over
+    /// A view of the store's bytes for `vibra_native_v1::arena`, the native code
+    /// that implements `vibra_native_v1::Source` and `vibra_native_v1::Sink` over
     /// arena objects. A [`Ref::offset`] names an object in it. The store
-    /// shares the layout with that code through `vibra_ir::arena` alone.
-    pub fn native_memory(&mut self) -> vibra_native::arena::Memory<'_> {
-        vibra_native::arena::memory(&mut self.memory)
+    /// shares the layout with that code through `vibra_ir_v1::arena` alone.
+    pub fn native_memory(&mut self) -> vibra_native_v1::arena::Memory<'_> {
+        vibra_native_v1::arena::memory(&mut self.memory)
     }
 
     /// Counts `bytes` held outside the store, such as a frame, against the
@@ -547,7 +547,7 @@ impl Store {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::indexing_slicing, clippy::unwrap_used)]
 mod tests {
-    use vibra_ir::arena::kind;
+    use vibra_ir_v1::arena::kind;
 
     use super::*;
 
@@ -644,7 +644,7 @@ mod tests {
     }
 
     // The tests below are the arena host tests of milestone 4
-    // (`crates/vibra-conformance/tests/it/arena_runtime.rs` and the unit tests
+    // (`crates/vibra-conformance-v1/tests/it/arena_runtime.rs` and the unit tests
     // of `vibra-wasm`'s layout), driven on the store directly. A constant
     // that differs from the M4 one says so, and why.
 
@@ -967,8 +967,8 @@ mod tests {
 
     #[test]
     fn the_native_arena_reads_a_store_value() {
-        use vibra_ir::external::CompilerIntrinsic;
-        use vibra_native::arena::{Fault, call};
+        use vibra_ir_v1::external::CompilerIntrinsic;
+        use vibra_native_v1::arena::{Fault, call};
 
         let row = |intrinsic: CompilerIntrinsic| intrinsic.native_import().unwrap();
         let text = "héllo, wörld";

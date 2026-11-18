@@ -9,11 +9,11 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-vibra-ir.workspace = true
+vibra-ir-v1.workspace = true
 wasm-encoder.workspace = true
 
 [dev-dependencies]
-vibra-diagnostics.workspace = true
+vibra-diagnostics-v1.workspace = true
 
 [lints]
 workspace = true

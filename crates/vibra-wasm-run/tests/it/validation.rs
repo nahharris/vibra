@@ -233,7 +233,7 @@ fn the_full_export_table_validates_and_so_does_a_subset() {
     // export all of it. Validation admits both and nothing outside it.
     let mut types = TypeSection::new();
     types.ty().function([], []);
-    let names = vibra_ir::boundary::FUNCTION_EXPORTS;
+    let names = vibra_ir_v1::boundary::FUNCTION_EXPORTS;
     let mut functions = FunctionSection::new();
     let mut code = CodeSection::new();
     let mut exports = ExportSection::new();

@@ -11,7 +11,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use vibra_ir::{
+use vibra_ir_v1::{
     CheckedFunction, FunctionSignature, Type, TypeBody, TypeDefinition, TypeId,
 };
 

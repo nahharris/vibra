@@ -12,8 +12,8 @@
 //! and signature, with an operand a checked program cannot produce.
 
 use crate::support::{Spec, module, runner};
-use vibra_ir::arena::{header, kind};
-use vibra_ir::boundary::TrapCode;
+use vibra_ir_v1::arena::{header, kind};
+use vibra_ir_v1::boundary::TrapCode;
 use vibra_wasm_run::{Outcome, ResultSlot};
 use wasm_encoder::{Instruction, MemArg, ValType};
 

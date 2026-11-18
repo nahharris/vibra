@@ -35,7 +35,7 @@
 
 use std::collections::BTreeMap;
 
-use vibra_ir::{Type, TypeBody, TypeId};
+use vibra_ir_v1::{Type, TypeBody, TypeId};
 
 use super::Lowering;
 

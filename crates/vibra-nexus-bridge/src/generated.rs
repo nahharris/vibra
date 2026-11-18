@@ -2,7 +2,7 @@
 //! dispatcher [`vibra_nexus::run`] drives generated code exactly as it drives
 //! the reference stepper.
 
-use vibra_ir::boundary::TrapCode;
+use vibra_ir_v1::boundary::TrapCode;
 use vibra_nexus::{Code, Context, Halt, Step};
 
 use crate::abi::{

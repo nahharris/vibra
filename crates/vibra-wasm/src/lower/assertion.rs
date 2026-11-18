@@ -27,8 +27,8 @@
 //! reference interpreter does when it is not running a test: the trap
 //! `@runtime.invalid-checked-program`.
 
-use vibra_ir::boundary::TrapCode;
-use vibra_ir::{Expr, SourceOrigin, TestAssertion, Type};
+use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir_v1::{Expr, SourceOrigin, TestAssertion, Type};
 use wasm_encoder::Instruction as I;
 
 use super::{Builder, ByteSource, FRAME, Kind, Part, Term};

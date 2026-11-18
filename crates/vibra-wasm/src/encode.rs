@@ -15,11 +15,11 @@
 
 use std::borrow::Cow;
 
-use vibra_ir::boundary::{
+use vibra_ir_v1::boundary::{
     ENTRY_EXPORT, HOST_IMPORT_MODULE, MEMORY_EXPORT, NATIVE_IMPORT_MODULE, TEST_EXPORT,
 };
-use vibra_ir::external::host::{HostRow, HostType};
-use vibra_ir::external::{NativeRow, Scalar};
+use vibra_ir_v1::external::host::{HostRow, HostType};
+use vibra_ir_v1::external::{NativeRow, Scalar};
 use wasm_encoder::{
     CodeSection, ConstExpr, DataCountSection, DataSection, ElementSection, Elements,
     EntityType, ExportKind, ExportSection, Function, FunctionSection, ImportSection,

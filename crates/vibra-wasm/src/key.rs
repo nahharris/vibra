@@ -21,7 +21,7 @@
 //! as any language function is; that is the work of the dict lowering itself and
 //! not of a routine here.
 
-use vibra_ir::Type;
+use vibra_ir_v1::Type;
 use wasm_encoder::{BlockType, Instruction as I, ValType};
 
 use crate::layout::{cells_offset, header};
@@ -112,7 +112,7 @@ pub(crate) enum Order {
 pub(crate) fn order_of(
     env: &TypeEnv<'_>,
     key: &Type,
-    key_order: Option<&vibra_ir::TypeId>,
+    key_order: Option<&vibra_ir_v1::TypeId>,
 ) -> Option<Order> {
     match key_order {
         None => shape(key).map(Order::Closed),
@@ -279,7 +279,7 @@ mod tests {
         assert_eq!(shape(&Type::F64), None);
         assert_eq!(shape(&Type::Array(Box::new(Type::I32))), None);
         assert_eq!(
-            shape(&Type::Declared(vibra_ir::TypeId::new("point", "point"))),
+            shape(&Type::Declared(vibra_ir_v1::TypeId::new("point", "point"))),
             None
         );
     }

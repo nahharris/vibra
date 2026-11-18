@@ -115,11 +115,11 @@ jobs:
       # interpreter and the WebAssembly backend, and exits nonzero on a failed or
       # unavailable case. It prints the counts by profile and by backend.
       - name: Run the corpus in both backends
-        run: cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --root conformance/cases
+        run: cargo run --locked --offline -p vibra-conformance-v1 --bin vibra-conformance-v1 -- --root conformance/v1/cases
 
       - name: Run fuzz smoke
         if: matrix.os == 'ubuntu-latest'
-        run: cargo run --locked --offline -p vibra-conformance --bin m1-fuzz -- --profile ci-smoke
+        run: cargo run --locked --offline -p vibra-conformance-v1 --bin m1-fuzz -- --profile ci-smoke
 
   archive-isolation:
     name: archive stays out of the build

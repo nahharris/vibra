@@ -8,7 +8,7 @@
 
 use std::fmt;
 
-use vibra_ir::external::NumericType;
+use vibra_ir_v1::external::NumericType;
 use vibra_nexus::{IntOp, ScalarOp};
 
 /// The version of the boundary between generated code and the runtime. It is

@@ -30,8 +30,8 @@
 //! program, and [`crate::Context::scalar_op`] records
 //! `@runtime.invalid-checked-program` for every `None`.
 
-use vibra_ir::arena::class;
-use vibra_ir::external::NumericType;
+use vibra_ir_v1::arena::class;
+use vibra_ir_v1::external::NumericType;
 
 use crate::store::Cell;
 
@@ -189,8 +189,8 @@ pub fn apply(op: IntOp, numeric: NumericType, left: Cell, right: Cell) -> Option
     clippy::expect_used
 )]
 mod tests {
-    use vibra_ir::Value;
-    use vibra_ir::external::{CompilerIntrinsic, IntegerOp, Outcome};
+    use vibra_ir_v1::Value;
+    use vibra_ir_v1::external::{CompilerIntrinsic, IntegerOp, Outcome};
 
     use super::*;
 
@@ -224,7 +224,7 @@ mod tests {
         })
     }
 
-    /// The shared sample vectors of `vibra_ir::external::vectors`, which the
+    /// The shared sample vectors of `vibra_ir_v1::external::vectors`, which the
     /// interpreter and the Wasm backend are held to, run through the Nexus
     /// operation. `neg` and `compare` are not operations of their own here: the
     /// lowering writes `neg` as `0 - x` and `compare` as `less` and `equal`, so

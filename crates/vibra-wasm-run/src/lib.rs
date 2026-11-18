@@ -34,9 +34,9 @@ mod validate;
 
 use std::fmt;
 
-use vibra_host::{AuditEvent, HostProvider, HostWorld, WorldProvider};
-use vibra_ir::TestAssertion;
-use vibra_ir::boundary::{
+use vibra_host_v1::{AuditEvent, HostProvider, HostWorld, WorldProvider};
+use vibra_ir_v1::TestAssertion;
+use vibra_ir_v1::boundary::{
     FAILURE_ACTUAL_EXPORT, FAILURE_EXPECTED_EXPORT, FAILURE_EXPORT, LIVE_SIZE_EXPORT,
     ORIGIN_EXPORT, RESULT_EXPORT, STATUS_EXPORT, Status, TRAP_CODE_EXPORT, TrapCode,
 };

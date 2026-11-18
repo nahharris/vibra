@@ -22,14 +22,14 @@ harness = []
 library = []
 
 [dependencies]
-vibra-host.workspace = true
-vibra-ir.workspace = true
+vibra-host-v1.workspace = true
+vibra-ir-v1.workspace = true
 vibra-nexus.workspace = true
 
 [dev-dependencies]
 # The crate's own integration tests link it as a library.
 vibra-nexus-bridge = { path = ".", features = ["library"] }
-vibra-diagnostics.workspace = true
+vibra-diagnostics-v1.workspace = true
 vibra-exec.workspace = true
 vibra-nexus-eval.workspace = true
 
