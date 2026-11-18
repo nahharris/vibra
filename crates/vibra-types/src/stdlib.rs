@@ -221,6 +221,7 @@ impl StdlibModule {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Stdlib {
     package: vibra_resolve::PackageId,
+    manifest_hash: String,
     modules: Vec<StdlibModule>,
     compiler: Vec<String>,
     host: Vec<String>,
@@ -233,6 +234,12 @@ impl Stdlib {
     #[must_use]
     pub const fn package(&self) -> &vibra_resolve::PackageId {
         &self.package
+    }
+
+    /// SHA-256 of the exact verified manifest bytes, with `sha256:` prefix.
+    #[must_use]
+    pub fn manifest_hash(&self) -> &str {
+        &self.manifest_hash
     }
 
     /// The admitted modules in manifest order.
@@ -257,6 +264,12 @@ impl Stdlib {
     #[must_use]
     pub fn native_symbols(&self) -> &[String] {
         &self.native
+    }
+
+    /// The assertion members admitted by the verified test-registry module.
+    #[must_use]
+    pub fn assertion_members(&self) -> &[String] {
+        &self.assertions
     }
 
     /// The admitted modules as the resolver's standard-library overlay.
@@ -478,6 +491,7 @@ pub fn load_stdlib_bytes(inputs: &StdlibInputs<'_>) -> Result<Stdlib, StdlibErro
             manifest.package_name,
             manifest.package_version,
         ),
+        manifest_hash: format!("sha256:{:x}", Sha256::digest(inputs.manifest)),
         modules,
         compiler: manifest.compiler,
         host: manifest.host,

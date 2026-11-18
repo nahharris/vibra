@@ -1,0 +1,3 @@
+(import parity @math.parity)
+
+(defn main () void (parity.even 8u32) void)

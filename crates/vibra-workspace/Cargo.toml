@@ -18,6 +18,8 @@ vibra-ir.workspace = true
 vibra-types.workspace = true
 vibra-interp.workspace = true
 sha2.workspace = true
+rusqlite.workspace = true
+renamore.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 rustix.workspace = true

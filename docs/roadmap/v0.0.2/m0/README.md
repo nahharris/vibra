@@ -16,6 +16,12 @@ implementation relies on them.
   the reason, when the specification merges. This milestone restores the
   registry test against the new table; M1 restores the example inventory
   when the new reader exists.
+- **The code store.** The workspace has a content-addressed codebase store:
+  the `vibra codebase` commands, the `codebase` module of
+  `vibra-workspace`, its SQLite dependency, its conformance cases, and
+  `examples/codebase-demo`. Source files are the authority and nothing
+  stages or publishes code, so the store is removed, with its diagnostic
+  codes and schema fields.
 - **Owners.** For every supported form, name its conformance case, its
   diagnostics, and its schema. A form without all three is not supported.
 - **Frozen contracts.** Grammar and reserved words; the certified predicate

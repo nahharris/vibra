@@ -1832,7 +1832,7 @@ impl ProjectValueSpan for ProjectString {
     }
 }
 
-fn is_kebab_name(value: &str) -> bool {
+pub(crate) fn is_kebab_name(value: &str) -> bool {
     let bytes = value.as_bytes();
     if bytes.first().is_none_or(|byte| !byte.is_ascii_lowercase())
         || bytes.last() == Some(&b'-')
@@ -1859,7 +1859,7 @@ fn is_unit_name(value: &str) -> bool {
     !value.contains('.') && is_kebab_name(value)
 }
 
-fn is_semver(value: &str) -> bool {
+pub(crate) fn is_semver(value: &str) -> bool {
     let (core, build) = value
         .split_once('+')
         .map_or((value, None), |(core, build)| (core, Some(build)));

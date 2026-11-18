@@ -1,0 +1,9 @@
+; The two definitions form one recursive component. Preserve this comment
+; and the exact module bytes when exporting a codebase revision.
+(defn even (value u32) bool
+  visibility: @public
+  (match value 0u32 true - (odd (u32.sub value 1u32))))
+
+(defn odd (value u32) bool
+  visibility: @public
+  (match value 0u32 false - (even (u32.sub value 1u32))))

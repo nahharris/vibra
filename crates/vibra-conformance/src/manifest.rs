@@ -130,6 +130,8 @@ pub enum ConformanceOperation {
     WorkspaceRun,
     /// Discover, check, and run all tests in a confined workspace.
     WorkspaceTest,
+    /// Exercise a durable codebase scenario through the workspace service.
+    Codebase,
 }
 
 impl ConformanceOperation {
@@ -148,6 +150,7 @@ impl ConformanceOperation {
             Self::WorkspaceCheck => "workspace-check",
             Self::WorkspaceRun => "workspace-run",
             Self::WorkspaceTest => "workspace-test",
+            Self::Codebase => "codebase",
         }
     }
 
@@ -255,6 +258,8 @@ pub struct CaseExpectations {
     pub effects: Option<String>,
     /// A relative path to the `@index.v1` document.
     pub index: Option<String>,
+    /// The independently authored codebase scenario observation.
+    pub codebase: Option<String>,
     /// Structural source-position query snapshots.
     pub queries: Vec<ExpectedQuery>,
     /// Expected reference-interpreter output.
@@ -381,6 +386,17 @@ impl TryFrom<RawCaseManifest> for CaseManifest {
         let operation = decode_operation(raw.operation.as_deref(), profile, &inputs)?;
 
         let expectations = decode_expectations(raw.expect)?;
+        if operation == ConformanceOperation::Codebase {
+            if inputs.data.len() != 1 || expectations.codebase.is_none() {
+                return Err(ManifestError::Invalid(
+                    "codebase requires exactly one data scenario and a codebase snapshot".to_owned(),
+                ));
+            }
+        } else if expectations.codebase.is_some() {
+            return Err(ManifestError::Invalid(
+                "a codebase snapshot requires the codebase operation".to_owned(),
+            ));
+        }
         if expectations.host_event.is_some() && !operation.executes_programs() {
             return Err(ManifestError::Invalid(format!(
                 "host_event is valid only on interpret, workspace-run, and workspace-test cases, not {operation}"
@@ -530,6 +546,7 @@ fn decode_operation(
         Some("workspace-check") => ConformanceOperation::WorkspaceCheck,
         Some("workspace-run") => ConformanceOperation::WorkspaceRun,
         Some("workspace-test") => ConformanceOperation::WorkspaceTest,
+        Some("codebase") => ConformanceOperation::Codebase,
         Some(value) => {
             return Err(ManifestError::Invalid(format!(
                 "unknown conformance operation `{value}`"
@@ -579,6 +596,7 @@ const fn input_shape(
             [Required, Required, Free, Free]
         }
         ConformanceOperation::Format => [Required, Required, Required, Forbidden],
+        ConformanceOperation::Codebase => [Required, Required, Forbidden, Required],
         ConformanceOperation::Index
         | ConformanceOperation::Query
         | ConformanceOperation::WorkspaceCheck
@@ -600,7 +618,9 @@ const fn required_profile(
     operation: ConformanceOperation,
 ) -> Option<ConformanceProfile> {
     match operation {
-        ConformanceOperation::Format => Some(ConformanceProfile::ToolingV1),
+        ConformanceOperation::Format | ConformanceOperation::Codebase => {
+            Some(ConformanceProfile::ToolingV1)
+        }
         ConformanceOperation::WorkspaceCheck => Some(ConformanceProfile::StaticV1),
         ConformanceOperation::WorkspaceRun | ConformanceOperation::WorkspaceTest => {
             Some(ConformanceProfile::InterpreterV1)
@@ -880,6 +900,7 @@ fn decode_expectations(
         types: raw.types,
         effects: raw.effects,
         index: raw.index,
+        codebase: raw.codebase,
         queries: raw
             .queries
             .into_iter()
@@ -1046,6 +1067,8 @@ pub(crate) struct RawExpectations {
     pub(crate) effects: Option<String>,
     #[serde(default)]
     pub(crate) index: Option<String>,
+    #[serde(default)]
+    pub(crate) codebase: Option<String>,
     #[serde(default)]
     pub(crate) queries: Vec<RawQuery>,
     #[serde(default)]

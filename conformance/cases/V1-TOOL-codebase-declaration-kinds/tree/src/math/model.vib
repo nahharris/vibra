@@ -1,0 +1,31 @@
+(import io @std.io)
+
+(defn identity (value t) t
+  where: (t any)
+  visibility: @public
+  value)
+
+(defint measured
+  visibility: @public
+  (defn value (item self) u32))
+
+(deftype meter u32
+  visibility: @public
+  (impl measured
+    (defn value (item self) u32
+      (match item (meter amount) amount))))
+
+(deftype first u32 visibility: @public)
+(deftype second u32 visibility: @public)
+
+(deffect audit
+  visibility: @public
+  (defn record (message str) void visibility: @public void))
+
+(defn use-audit () void
+  effects: (audit)
+  (audit.record "checked without execution"))
+
+(defn use-host () (result void io.io-error)
+  effects: (io.stdout)
+  (io.stdout.text "must not be printed by import"))

@@ -1,0 +1,1 @@
+(record format: @codebase-observation.v1 scenario: @stale facts: (dict @one-winner true @only-complete-head true @stale-rejected true))

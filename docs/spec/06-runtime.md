@@ -567,7 +567,8 @@ linked list, no copy-on-write, and no constant-time operation.
 
 ## Canonical value encoding
 
-A persistent observation is VIBON data. It is written with the data forms of source and is never evaluated as source.
+A persistent observation is VIBON data. It is written with the data forms of
+source and is never evaluated as source.
 
 - A complete observation is a closed record with the fields
   `format: @value.v2`, `type: T`, and `value: v`, in that order.

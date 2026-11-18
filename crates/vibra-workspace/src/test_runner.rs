@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, Domain, Level};
 use vibra_host::{AuditEvent, HostWorld, WorldProvider};
@@ -11,6 +12,7 @@ use vibra_resolve::{DeclarationId, EntityKind, ResolvedSnapshot};
 use vibra_syntax::{Declaration, Literal, canonical_string_spelling};
 
 use crate::WorkspaceSnapshot;
+use crate::semantic::CheckStatus;
 
 /// An exact canonical module/name test selector.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -352,6 +354,347 @@ struct TestRef<'a> {
     id: DeclarationId,
 }
 
+/// One test declaration admitted by the check-only test scope.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CheckedTest {
+    identity: DeclarationId,
+    name: String,
+    source_id: String,
+    span: ByteSpan,
+    function_index: Option<usize>,
+}
+
+impl CheckedTest {
+    pub(crate) fn identity(&self) -> &DeclarationId {
+        &self.identity
+    }
+
+    pub(crate) fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn source_id(&self) -> &str {
+        &self.source_id
+    }
+
+    pub(crate) const fn span(&self) -> ByteSpan {
+        self.span
+    }
+
+    pub(crate) const fn function_index(&self) -> Option<usize> {
+        self.function_index
+    }
+}
+
+/// Immutable test declarations and checked facts without executing a test.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TestCheckResult {
+    status: CheckStatus,
+    diagnostics: Vec<Diagnostic>,
+    tests: Vec<CheckedTest>,
+    checked: Option<Arc<vibra_types::ResolvedCheckResult>>,
+}
+
+impl TestCheckResult {
+    pub(crate) const fn status(&self) -> CheckStatus {
+        self.status
+    }
+
+    pub(crate) fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+
+    pub(crate) fn tests(&self) -> &[CheckedTest] {
+        &self.tests
+    }
+
+    pub(crate) fn checked(&self) -> Option<&vibra_types::ResolvedCheckResult> {
+        self.checked.as_deref()
+    }
+}
+
+struct CollectedTests<'a> {
+    selected_modules: Vec<&'a vibra_resolve::ModuleRecord>,
+    tests: Vec<TestRef<'a>>,
+    parse_diagnostics: Vec<Diagnostic>,
+    invalid_selector: bool,
+}
+
+fn collect_tests<'a>(
+    resolved: &'a ResolvedSnapshot,
+    selector: Option<&TestSelector>,
+) -> CollectedTests<'a> {
+    let local = resolved.package();
+    let modules = resolved
+        .modules()
+        .iter()
+        .filter(|module| module.package() == local && module.unit() == "tests")
+        .collect::<Vec<_>>();
+    let selected_modules = if let Some(selector) = selector {
+        let Some(module) = modules
+            .iter()
+            .find(|module| module_atom(module) == selector.module)
+        else {
+            return CollectedTests {
+                selected_modules: Vec::new(),
+                tests: Vec::new(),
+                parse_diagnostics: Vec::new(),
+                invalid_selector: true,
+            };
+        };
+        vec![*module]
+    } else {
+        modules
+    };
+    let parse_sources = selected_modules
+        .iter()
+        .map(|module| module.source_id().to_owned())
+        .collect::<BTreeSet<_>>();
+    let parse_diagnostics = resolved
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic
+                .source_id()
+                .is_some_and(|source| parse_sources.contains(source))
+                && (diagnostic.code().domain() == Domain::Syntax
+                    || diagnostic.code() == DiagnosticCode::ModuleIoError)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let mut tests = Vec::new();
+    for module in &selected_modules {
+        let Some(ast) = module.ast() else {
+            continue;
+        };
+        for declaration in ast.declarations() {
+            let Declaration::Test(test) = declaration else {
+                continue;
+            };
+            let Literal::String(name) = test.name() else {
+                continue;
+            };
+            let id = resolved
+                .declarations()
+                .iter()
+                .find(|resolved| {
+                    resolved.source_id() == module.source_id()
+                        && resolved.span() == test.span()
+                        && resolved.id().kind() == EntityKind::Test
+                })
+                .map(|resolved| resolved.id().clone())
+                .unwrap_or_else(|| {
+                    DeclarationId::new(
+                        local.name(),
+                        local.version(),
+                        "tests",
+                        module.segments().iter().cloned(),
+                        ["$test".to_owned(), name.value().to_owned()],
+                        EntityKind::Test,
+                    )
+                });
+            if selector.is_none_or(|selector| {
+                module_atom(module) == selector.module && name.value() == selector.name
+            }) {
+                tests.push(TestRef {
+                    module,
+                    declaration: test,
+                    id,
+                });
+            }
+        }
+    }
+    tests.sort_by(|left, right| {
+        module_atom(left.module)
+            .as_bytes()
+            .cmp(module_atom(right.module).as_bytes())
+            .then_with(|| {
+                left.declaration
+                    .span()
+                    .start()
+                    .cmp(&right.declaration.span().start())
+            })
+    });
+    CollectedTests {
+        selected_modules,
+        tests,
+        parse_diagnostics,
+        invalid_selector: false,
+    }
+}
+
+/// Checks all test modules in an immutable resolved graph without running any
+/// checked program. This is used by codebase import so test bodies are stored
+/// as checked definitions, while their effects remain unapplied.
+pub(crate) fn check_tests_from_resolved(
+    resolved: &ResolvedSnapshot,
+    verification: Option<&vibra_types::Stdlib>,
+) -> TestCheckResult {
+    let collected = collect_tests(resolved, None);
+    if !collected.parse_diagnostics.is_empty() {
+        return TestCheckResult {
+            status: CheckStatus::Diagnostics,
+            diagnostics: collected.parse_diagnostics,
+            tests: Vec::new(),
+            checked: None,
+        };
+    }
+    if collected.selected_modules.is_empty() {
+        return TestCheckResult {
+            status: CheckStatus::Accepted,
+            diagnostics: Vec::new(),
+            tests: Vec::new(),
+            checked: None,
+        };
+    }
+    let index = SnapshotIndex::new(resolved);
+    let mut module_closures = BTreeMap::new();
+    for module in &collected.selected_modules {
+        module_closures
+            .entry(module.source_id().to_owned())
+            .or_insert_with(|| index.module_import_closure(module.source_id()));
+    }
+    check_collected_tests(
+        resolved,
+        verification,
+        &collected.selected_modules,
+        &collected.tests,
+        &index,
+        &module_closures,
+        true,
+    )
+}
+
+fn check_collected_tests(
+    resolved: &ResolvedSnapshot,
+    verification: Option<&vibra_types::Stdlib>,
+    selected_modules: &[&vibra_resolve::ModuleRecord],
+    tests: &[TestRef<'_>],
+    index: &SnapshotIndex<'_>,
+    module_closures: &BTreeMap<String, BTreeSet<String>>,
+    complete_builtins: bool,
+) -> TestCheckResult {
+    let checking_sources = module_closures
+        .values()
+        .flat_map(|sources| sources.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    let mut diagnostics = duplicate_test_names(selected_modules);
+    diagnostics.extend(
+        resolved
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic
+                    .source_id()
+                    .is_some_and(|source_id| checking_sources.contains(source_id))
+            })
+            .filter(|diagnostic| !index.is_missing_assertion_diagnostic(diagnostic))
+            .cloned(),
+    );
+
+    for module in selected_modules.iter().filter(|module| {
+        tests
+            .iter()
+            .any(|test| test.module.source_id() == module.source_id())
+    }) {
+        let has_exact_import = module.ast().is_some_and(module_imports_assert);
+        if !has_exact_import {
+            if let Some(first_test) = module.ast().and_then(|ast| {
+                ast.declarations().iter().find_map(|declaration| {
+                    if let Declaration::Test(test) = declaration {
+                        Some(test)
+                    } else {
+                        None
+                    }
+                })
+            }) {
+                diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::ModuleMissingRequiredImport,
+                        first_test.name_span(),
+                        "test modules must import @std.assert",
+                    )
+                    .with_source_id(module.source_id()),
+                );
+            }
+        } else if !module_has_verified_assertion_import(resolved, module, verification)
+        {
+            for test in tests
+                .iter()
+                .filter(|test| test.module.source_id() == module.source_id())
+            {
+                diagnostics.push(
+                    Diagnostic::new(
+                        DiagnosticCode::ToolUnavailable,
+                        test.declaration.span(),
+                        "the @std.assert module requires verified bootstrap provenance",
+                    )
+                    .with_source_id(module.source_id()),
+                );
+            }
+        }
+    }
+
+    let check = if complete_builtins {
+        vibra_types::check_resolved_complete
+    } else {
+        vibra_types::check_resolved
+    };
+    let checked = check(
+        resolved,
+        &checking_sources.iter().cloned().collect::<Vec<_>>(),
+        verification,
+    );
+    diagnostics.extend(
+        checked
+            .diagnostics()
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic
+                    .source_id()
+                    .is_some_and(|source_id| checking_sources.contains(source_id))
+            })
+            .cloned(),
+    );
+    sort_and_deduplicate(&mut diagnostics);
+
+    let status = if diagnostics.iter().any(|diagnostic| {
+        diagnostic.level() == Level::Error
+            && diagnostic.code() != DiagnosticCode::ToolUnavailable
+    }) {
+        CheckStatus::Diagnostics
+    } else if diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code() == DiagnosticCode::ToolUnavailable)
+    {
+        CheckStatus::Unavailable
+    } else {
+        CheckStatus::Accepted
+    };
+    let test_records = tests
+        .iter()
+        .filter_map(|test| {
+            let Literal::String(name) = test.declaration.name() else {
+                return None;
+            };
+            Some(CheckedTest {
+                identity: test.id.clone(),
+                name: name.value().to_owned(),
+                source_id: test.module.source_id().to_owned(),
+                span: test.declaration.span(),
+                function_index: checked.function_index(&test.id),
+            })
+        })
+        .collect();
+
+    TestCheckResult {
+        status,
+        diagnostics,
+        tests: test_records,
+        checked: Some(Arc::new(checked)),
+    }
+}
+
 /// Selects and runs the tests admitted by one workspace snapshot.
 pub fn run_tests(
     workspace: &WorkspaceSnapshot,
@@ -411,95 +754,15 @@ fn select_tests(
     budget: MemoryBudget,
     world: &HostWorld,
 ) -> WorkspaceTestResult {
-    let local = resolved.package();
-    let modules = resolved
-        .modules()
-        .iter()
-        .filter(|module| module.package() == local && module.unit() == "tests")
-        .collect::<Vec<_>>();
-    let selected_modules = if let Some(selector) = selector {
-        let Some(module) = modules
-            .iter()
-            .find(|module| module_atom(module) == selector.module)
-        else {
-            return empty_result(TestSuiteStatus::InvalidInput);
-        };
-        vec![*module]
-    } else {
-        modules
-    };
-    let parse_sources = selected_modules
-        .iter()
-        .map(|module| module.source_id().to_owned())
-        .collect::<BTreeSet<_>>();
-    let parse_diagnostics = resolved
-        .diagnostics()
-        .iter()
-        .filter(|diagnostic| {
-            diagnostic
-                .source_id()
-                .is_some_and(|source| parse_sources.contains(source))
-                && (diagnostic.code().domain() == Domain::Syntax
-                    || diagnostic.code() == DiagnosticCode::ModuleIoError)
-        })
-        .cloned()
-        .collect::<Vec<_>>();
-    if !parse_diagnostics.is_empty() {
-        return diagnostics_result(parse_diagnostics);
+    let collected = collect_tests(resolved, selector);
+    if collected.invalid_selector {
+        return empty_result(TestSuiteStatus::InvalidInput);
     }
-    let mut tests = Vec::new();
-    for module in &selected_modules {
-        let Some(ast) = module.ast() else {
-            continue;
-        };
-        for declaration in ast.declarations() {
-            let Declaration::Test(test) = declaration else {
-                continue;
-            };
-            let Literal::String(name) = test.name() else {
-                continue;
-            };
-            let id = resolved
-                .declarations()
-                .iter()
-                .find(|resolved| {
-                    resolved.source_id() == module.source_id()
-                        && resolved.span() == test.span()
-                        && resolved.id().kind() == EntityKind::Test
-                })
-                .map(|resolved| resolved.id().clone())
-                .unwrap_or_else(|| {
-                    DeclarationId::new(
-                        local.name(),
-                        local.version(),
-                        "tests",
-                        module.segments().iter().cloned(),
-                        ["$test".to_owned(), name.value().to_owned()],
-                        EntityKind::Test,
-                    )
-                });
-            if selector.is_none_or(|selector| {
-                module_atom(module) == selector.module && name.value() == selector.name
-            }) {
-                tests.push(TestRef {
-                    module,
-                    declaration: test,
-                    id,
-                });
-            }
-        }
+    if !collected.parse_diagnostics.is_empty() {
+        return diagnostics_result(collected.parse_diagnostics);
     }
-    tests.sort_by(|left, right| {
-        module_atom(left.module)
-            .as_bytes()
-            .cmp(module_atom(right.module).as_bytes())
-            .then_with(|| {
-                left.declaration
-                    .span()
-                    .start()
-                    .cmp(&right.declaration.span().start())
-            })
-    });
+    let selected_modules = collected.selected_modules;
+    let tests = collected.tests;
     if tests.is_empty() {
         return if selector.is_some() {
             empty_result(TestSuiteStatus::InvalidInput)
@@ -514,85 +777,19 @@ fn select_tests(
             .entry(test.module.source_id().to_owned())
             .or_insert_with(|| index.module_import_closure(test.module.source_id()));
     }
-    let checking_sources = module_closures
-        .values()
-        .flat_map(|sources| sources.iter().cloned())
-        .collect::<BTreeSet<_>>();
-
-    let mut diagnostics = duplicate_test_names(&selected_modules);
-    diagnostics.extend(
-        resolved
-            .diagnostics()
-            .iter()
-            .filter(|diagnostic| {
-                diagnostic
-                    .source_id()
-                    .is_some_and(|source_id| checking_sources.contains(source_id))
-            })
-            .filter(|diagnostic| !index.is_missing_assertion_diagnostic(diagnostic))
-            .cloned(),
-    );
-
-    for module in selected_modules.iter().filter(|module| {
-        tests
-            .iter()
-            .any(|test| test.module.source_id() == module.source_id())
-    }) {
-        let has_exact_import = module.ast().is_some_and(module_imports_assert);
-        if !has_exact_import {
-            if let Some(first_test) = module.ast().and_then(|ast| {
-                ast.declarations().iter().find_map(|declaration| {
-                    if let Declaration::Test(test) = declaration {
-                        Some(test)
-                    } else {
-                        None
-                    }
-                })
-            }) {
-                diagnostics.push(
-                    Diagnostic::new(
-                        DiagnosticCode::ModuleMissingRequiredImport,
-                        first_test.name_span(),
-                        "test modules must import @std.assert",
-                    )
-                    .with_source_id(module.source_id()),
-                );
-            }
-        } else if !module_has_verified_assertion_import(resolved, module, verification)
-        {
-            for test in tests
-                .iter()
-                .filter(|test| test.module.source_id() == module.source_id())
-            {
-                diagnostics.push(
-                    Diagnostic::new(
-                        DiagnosticCode::ToolUnavailable,
-                        test.declaration.span(),
-                        "the @std.assert module requires verified bootstrap provenance",
-                    )
-                    .with_source_id(module.source_id()),
-                );
-            }
-        }
-    }
-
-    let checked = vibra_types::check_resolved(
+    let checked_scope = check_collected_tests(
         resolved,
-        &checking_sources.iter().cloned().collect::<Vec<_>>(),
         verification,
+        &selected_modules,
+        &tests,
+        &index,
+        &module_closures,
+        false,
     );
-    diagnostics.extend(
-        checked
-            .diagnostics()
-            .iter()
-            .filter(|diagnostic| {
-                diagnostic
-                    .source_id()
-                    .is_some_and(|source_id| checking_sources.contains(source_id))
-            })
-            .cloned(),
-    );
-    sort_and_deduplicate(&mut diagnostics);
+    let diagnostics = checked_scope.diagnostics().to_vec();
+    let Some(checked) = checked_scope.checked() else {
+        return diagnostics_result(diagnostics);
+    };
 
     let module_diagnostics = diagnostics
         .iter()
@@ -989,7 +1186,7 @@ mod provenance_tests {
 
     use vibra_resolve::{ResolveInput, Resolver, SourceModule, SourceUnit};
 
-    use super::{TestSuiteStatus, select_tests};
+    use super::{TestSuiteStatus, check_tests_from_resolved, select_tests};
 
     #[test]
     fn local_assertion_import_cannot_satisfy_verified_assertion_contract() {
@@ -1040,6 +1237,82 @@ mod provenance_tests {
         assert!(result.items()[0].diagnostics().iter().any(|diagnostic| {
             diagnostic.code() == vibra_diagnostics::DiagnosticCode::ToolUnavailable
         }));
+    }
+
+    #[test]
+    fn check_only_test_scope_keeps_host_output_in_checked_ir_without_running_it() {
+        let test_source = concat!(
+            "(import assert @std.assert)\n",
+            "(import io @std.io)\n",
+            "(test \"writes only when run\"\n",
+            "  effects: (io.stdout)\n",
+            "  (match (io.stdout.text \"must-not-be-emitted-during-import\")\n",
+            "    (result.ok) (assert.true true)\n",
+            "    (result.err -) (assert.true true)))\n",
+        );
+        let verification =
+            vibra_types::load_stdlib().expect("embedded standard library");
+        let resolved = Resolver::resolve(vibra_types::standard_resolve_input(
+            "demo",
+            "0.1.0",
+            vec![SourceUnit::lib(
+                "tests",
+                vec![SourceModule::new(
+                    "tests",
+                    ["math"],
+                    "tests/math.vib",
+                    test_source,
+                )],
+            )],
+            Some(&verification),
+        ));
+
+        let result = check_tests_from_resolved(&resolved, Some(&verification));
+
+        assert_eq!(
+            result.status(),
+            crate::semantic::CheckStatus::Accepted,
+            "{:?}",
+            result.diagnostics()
+        );
+        assert_eq!(result.tests().len(), 1);
+        assert_eq!(result.tests()[0].name(), "writes only when run");
+        assert!(
+            result
+                .checked()
+                .and_then(|checked| checked.modules())
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn check_only_scope_checks_test_helpers_without_test_declarations() {
+        let verification =
+            vibra_types::load_stdlib().expect("embedded standard library");
+        let resolved = Resolver::resolve(vibra_types::standard_resolve_input(
+            "demo",
+            "0.1.0",
+            vec![SourceUnit::lib(
+                "tests",
+                vec![SourceModule::new(
+                    "tests",
+                    ["helpers"],
+                    "tests/helpers.vib",
+                    "(defn broken () i32 missing-name)\n",
+                )],
+            )],
+            Some(&verification),
+        ));
+
+        let result = check_tests_from_resolved(&resolved, Some(&verification));
+
+        assert_eq!(result.status(), crate::semantic::CheckStatus::Diagnostics);
+        assert!(result.checked().is_some());
+        assert!(
+            result.diagnostics().iter().any(|diagnostic| {
+                diagnostic.source_id() == Some("tests/helpers.vib")
+            })
+        );
     }
 }
 

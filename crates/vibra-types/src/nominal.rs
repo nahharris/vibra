@@ -10,6 +10,7 @@
 //! Type expressions carry no source spans, so a failure is reported at the
 //! owning parameter, result, field, or declaration span the caller supplies.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
@@ -22,6 +23,7 @@ use vibra_syntax::{
     DeftypeDeclaration, EffectRowOrder, Name, SourceAst, TypeExpr, TypeMember,
 };
 
+use crate::resolved::{CheckedNamespaceFact, CheckedNamespaceRole};
 use crate::unavailable;
 
 /// Why a type expression could not be lowered.
@@ -252,6 +254,9 @@ pub(crate) struct TypeNames {
     /// The canonical order of each written row, keyed by source identity and
     /// the span of the row's first entry.
     row_orders: std::cell::RefCell<BTreeMap<SpanKey, Vec<usize>>>,
+    /// Successful type-namespace resolutions, keyed later by source spelling
+    /// and role only after the existing checker has selected their identity.
+    namespace_facts: RefCell<Vec<CheckedNamespaceFact>>,
 }
 
 /// What a labelled default written as a name denotes.
@@ -276,6 +281,20 @@ pub(crate) enum ConstructorTarget {
 }
 
 impl TypeNames {
+    fn record_namespace_fact(
+        &self,
+        source_id: &str,
+        written: &str,
+        role: CheckedNamespaceRole,
+        identity: &str,
+    ) {
+        self.namespace_facts
+            .borrow_mut()
+            .push(CheckedNamespaceFact::new(
+                source_id, written, role, identity,
+            ));
+    }
+
     /// Records what the labelled defaults written as names denote.
     pub(crate) fn add_default_constants(
         &mut self,
@@ -469,21 +488,24 @@ impl TypeNames {
                 .and_then(|effects| effects.get(member))
                 .and_then(|index| self.effects.get(*index))
         };
-        match name.segments() {
+        let result = match name.segments() {
             [local] => {
                 if let Some(declared) = in_module(source_id, local) {
-                    return Ok(declared);
-                }
-                // A declaration import binds one top-level declaration of
-                // another module under a local name.
-                let (target, declaration) = scope
-                    .and_then(|scope| scope.declarations.get(local))
-                    .ok_or_else(invalid)?;
-                let declared = in_module(target, declaration).ok_or_else(invalid)?;
-                if declared.public {
                     Ok(declared)
                 } else {
-                    Err(LowerError::PrivateEffect(name.value().to_owned()))
+                    // A declaration import binds one top-level declaration of
+                    // another module under a local name.
+                    let imported = scope
+                        .and_then(|scope| scope.declarations.get(local))
+                        .and_then(|(target, declaration)| {
+                            in_module(target, declaration)
+                        })
+                        .ok_or_else(invalid)?;
+                    if imported.public {
+                        Ok(imported)
+                    } else {
+                        Err(LowerError::PrivateEffect(name.value().to_owned()))
+                    }
                 }
             }
             [alias, member] => {
@@ -498,7 +520,16 @@ impl TypeNames {
                 }
             }
             _ => Err(invalid()),
+        };
+        if let Ok(declared) = &result {
+            self.record_namespace_fact(
+                source_id,
+                name.value(),
+                CheckedNamespaceRole::Effect,
+                declared.root.id(),
+            );
         }
+        result
     }
 
     /// Lowers the row a function type writes. Each entry is reported at its
@@ -966,7 +997,15 @@ impl TypeNames {
         source_id: &str,
         name: &Name,
     ) -> Option<usize> {
-        self.resolve_interface_path(source_id, name.segments())
+        let index = self.resolve_interface_path(source_id, name.segments())?;
+        let interface = self.interfaces.get(index)?;
+        self.record_namespace_fact(
+            source_id,
+            name.value(),
+            CheckedNamespaceRole::Interface,
+            interface.id.id(),
+        );
+        Some(index)
     }
 
     fn resolve_interface_path(
@@ -1034,6 +1073,18 @@ impl TypeNames {
     /// The standard-library type playing `role`, such as `option`.
     pub(crate) fn role(&self, role: &str) -> Option<usize> {
         self.roles.get(role).copied()
+    }
+
+    /// Canonical declaration identities for the roles selected by this check.
+    pub(crate) fn role_type_identities(&self) -> BTreeMap<String, String> {
+        self.roles
+            .iter()
+            .filter_map(|(role, index)| {
+                self.declared
+                    .get(*index)
+                    .map(|declaration| (role.clone(), declaration.id.id().to_owned()))
+            })
+            .collect()
     }
 
     /// The compiler's representation of the declared type `index` when it
@@ -1117,6 +1168,14 @@ impl TypeNames {
         &self.declared
     }
 
+    /// Immutable successful namespace resolutions collected by the checker.
+    pub(crate) fn namespace_facts(&self) -> Vec<CheckedNamespaceFact> {
+        let mut facts = self.namespace_facts.borrow().clone();
+        facts.sort();
+        facts.dedup();
+        facts
+    }
+
     /// One declared type.
     pub(crate) fn get(&self, index: usize) -> Option<&DeclaredType> {
         self.declared.get(index)
@@ -1148,7 +1207,7 @@ impl TypeNames {
         name: &Name,
     ) -> Result<usize, LowerError> {
         let scope = self.scopes.get(source_id);
-        match name.segments() {
+        let result = match name.segments() {
             [local] => scope
                 .and_then(|scope| scope.local.get(local))
                 .copied()
@@ -1173,7 +1232,18 @@ impl TypeNames {
                 }
             }
             _ => Err(LowerError::Unknown(name.value().to_owned())),
+        };
+        if let Ok(index) = &result
+            && let Some(declared) = self.declared.get(*index)
+        {
+            self.record_namespace_fact(
+                source_id,
+                name.value(),
+                CheckedNamespaceRole::Type,
+                declared.id.id(),
+            );
         }
+        result
     }
 
     /// Resolves a value path that names a constructor: `t`, `t.variant`,

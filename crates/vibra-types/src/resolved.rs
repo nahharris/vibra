@@ -30,6 +30,70 @@ pub struct ResolvedCheckResult {
     implementations: Vec<IndexedImplementation>,
     modules: Option<Arc<CheckedModuleSet>>,
     effects: crate::effects::EffectGraph,
+    namespace_facts: Vec<CheckedNamespaceFact>,
+    role_type_identities: BTreeMap<String, String>,
+    source_ids: BTreeSet<String>,
+}
+
+/// Namespace selected by the existing checker for a written type-context
+/// identifier.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CheckedNamespaceRole {
+    /// Declared or compiler-role type.
+    Type,
+    /// Declared interface.
+    Interface,
+    /// Declared nominal effect root.
+    Effect,
+}
+
+/// One successful immutable namespace resolution captured while checking.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CheckedNamespaceFact {
+    source_id: String,
+    written: String,
+    role: CheckedNamespaceRole,
+    identity: String,
+}
+
+impl CheckedNamespaceFact {
+    pub(crate) fn new(
+        source_id: &str,
+        written: &str,
+        role: CheckedNamespaceRole,
+        identity: &str,
+    ) -> Self {
+        Self {
+            source_id: source_id.to_owned(),
+            written: written.to_owned(),
+            role,
+            identity: identity.to_owned(),
+        }
+    }
+
+    /// Source document whose type-context identifier was resolved.
+    #[must_use]
+    pub fn source_id(&self) -> &str {
+        &self.source_id
+    }
+
+    /// Exact written identifier spelling observed by the checker.
+    #[must_use]
+    pub fn written(&self) -> &str {
+        &self.written
+    }
+
+    /// Namespace in which the checker resolved the identifier.
+    #[must_use]
+    pub const fn role(&self) -> CheckedNamespaceRole {
+        self.role
+    }
+
+    /// Canonical identity selected by the checker.
+    #[must_use]
+    pub fn identity(&self) -> &str {
+        &self.identity
+    }
 }
 
 /// The checked type of one value, function, or method, for an index record
@@ -37,6 +101,7 @@ pub struct ResolvedCheckResult {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IndexedSignature {
     signature: String,
+    checked_type: Type,
     row: vibra_ir::EffectRow,
     errors: Vec<String>,
 }
@@ -46,6 +111,12 @@ impl IndexedSignature {
     #[must_use]
     pub fn signature(&self) -> &str {
         &self.signature
+    }
+
+    /// The immutable checked type tree behind the canonical signature.
+    #[must_use]
+    pub const fn checked_type(&self) -> &Type {
+        &self.checked_type
     }
 
     /// The canonical encodings of the error types its result can carry: `e`
@@ -69,6 +140,8 @@ pub struct IndexedImplementation {
     receiver: String,
     interface: String,
     interface_id: String,
+    receiver_type: Type,
+    interface_type: Type,
     source_id: String,
     span: ByteSpan,
     members: Vec<IndexedMember>,
@@ -91,6 +164,19 @@ impl IndexedImplementation {
     #[must_use]
     pub fn interface_id(&self) -> &str {
         &self.interface_id
+    }
+
+    /// The immutable checked receiver type, including nominal identities.
+    #[must_use]
+    pub fn receiver_type(&self) -> &Type {
+        &self.receiver_type
+    }
+
+    /// The immutable checked applied interface type, including nominal
+    /// identities and checked arguments.
+    #[must_use]
+    pub fn interface_type(&self) -> &Type {
+        &self.interface_type
     }
 
     /// The source identity of the block.
@@ -191,6 +277,18 @@ impl ResolvedCheckResult {
         self.signatures.get(declaration)
     }
 
+    /// The checked signature selected for a canonical declaration identity.
+    ///
+    /// This covers abstract interface members, which have a checked signature
+    /// but intentionally have no `CheckedFunction` body.
+    #[must_use]
+    pub fn signature_for_identity(&self, identity: &str) -> Option<&IndexedSignature> {
+        self.signatures
+            .iter()
+            .find(|(declaration, _)| declaration.canonical() == identity)
+            .map(|(_, signature)| signature)
+    }
+
     /// The validated module set of the selected modules: every checked
     /// function, global, and type definition. Absent when a module did not
     /// check or the scope declares no function.
@@ -219,6 +317,26 @@ impl ResolvedCheckResult {
         &self.implementations
     }
 
+    /// Successful type, interface, and effect name resolutions captured by
+    /// the checker. These facts are immutable and contain no source offsets.
+    #[must_use]
+    pub fn namespace_facts(&self) -> &[CheckedNamespaceFact] {
+        &self.namespace_facts
+    }
+
+    /// Canonical checked nominal identities for the primitive-backed roles.
+    #[must_use]
+    pub fn role_type_identities(&self) -> &BTreeMap<String, String> {
+        &self.role_type_identities
+    }
+
+    /// Source identities selected for this accepted checker scope, including
+    /// declaration-only modules that produce no IR functions.
+    #[must_use]
+    pub fn source_ids(&self) -> &BTreeSet<String> {
+        &self.source_ids
+    }
+
     /// The checked function slot for a resolved declaration identity.
     #[must_use]
     pub fn function_index(&self, declaration: &DeclarationId) -> Option<usize> {
@@ -243,6 +361,26 @@ pub fn check_resolved(
     snapshot: &ResolvedSnapshot,
     source_ids: &[String],
     verification: Option<&crate::Stdlib>,
+) -> ResolvedCheckResult {
+    check_resolved_with_scope(snapshot, source_ids, verification, false)
+}
+
+/// Checks the same immutable source scope while retaining every builtin
+/// member's checked facts for complete declaration projection. This opt-in
+/// mode does not change ordinary execution's selected builtin inventory.
+pub fn check_resolved_complete(
+    snapshot: &ResolvedSnapshot,
+    source_ids: &[String],
+    verification: Option<&crate::Stdlib>,
+) -> ResolvedCheckResult {
+    check_resolved_with_scope(snapshot, source_ids, verification, true)
+}
+
+fn check_resolved_with_scope(
+    snapshot: &ResolvedSnapshot,
+    source_ids: &[String],
+    verification: Option<&crate::Stdlib>,
+    complete_builtins: bool,
 ) -> ResolvedCheckResult {
     let mut selected = source_ids.iter().cloned().collect::<BTreeSet<_>>();
     // The modules that declare the prelude are in every checked graph, so
@@ -293,6 +431,9 @@ pub fn check_resolved(
             implementations: Vec::new(),
             modules: None,
             effects: crate::effects::EffectGraph::default(),
+            namespace_facts: Vec::new(),
+            role_type_identities: BTreeMap::new(),
+            source_ids: selected,
         };
     }
     let mut modules = snapshot
@@ -911,6 +1052,9 @@ pub fn check_resolved(
     let referenced_paths: BTreeSet<String> = all_members
         .iter()
         .filter(|member| {
+            if complete_builtins {
+                return true;
+            }
             let id =
                 vibra_resolve::builtin_member_id(&member.type_name, &member.member);
             snapshot.references().iter().any(|reference| {
@@ -928,7 +1072,12 @@ pub fn check_resolved(
         let index = functions.len();
         function_indices.insert(id.clone(), index);
         builtin_indices.insert(member.path(), index);
-        if member.runs_body() {
+        if member.runs_body()
+            || (complete_builtins
+                && member
+                    .intrinsic
+                    .is_some_and(vibra_ir::external::CompilerIntrinsic::is_native))
+        {
             native_bodies.insert(index, member.method);
         }
         functions.push(FunctionHeader {
@@ -1090,14 +1239,23 @@ pub fn check_resolved(
                 };
                 let slot_count = environment.next_slot;
                 let checked = match header.external {
-                    Some(intrinsic) => CheckedFunction::new_external_with_body(
+                    Some(intrinsic) if intrinsic.runs_body() => {
+                        CheckedFunction::new_external_with_body(
+                            header.name,
+                            header.signature,
+                            intrinsic,
+                            body,
+                            slot_count,
+                            origin,
+                        )
+                    }
+                    Some(intrinsic) => CheckedFunction::new_external(
                         header.name,
                         header.signature,
                         intrinsic,
-                        body,
-                        slot_count,
                         origin,
-                    ),
+                    )
+                    .and_then(|checked| checked.with_semantic_body(body, slot_count)),
                     None => CheckedFunction::with_slots(
                         header.name,
                         header.signature,
@@ -1245,12 +1403,45 @@ pub fn check_resolved(
         if let Some(intrinsic) = header.external {
             let origin = SourceOrigin::new(header.source_id.as_str(), function.span());
             let implements = header.implements.clone();
+            let semantic_body = if complete_builtins
+                && function.attributes().items().iter().any(|attribute| {
+                    matches!(attribute, vibra_syntax::Attribute::Native(_))
+                }) {
+                let mut environment = CheckEnvironment::new(
+                    &header.source_id,
+                    &mut diagnostics,
+                    &empty_indices,
+                    &globals,
+                    &functions,
+                    &empty_indices,
+                    &empty_names,
+                    bindings.entry(header.source_id.clone()).or_default(),
+                    &types,
+                );
+                environment.resolved_targets = Some(&resolved_targets);
+                environment.reports_redeclarations = false;
+                let Some(body) = crate::check_function_body(
+                    &mut environment,
+                    function,
+                    &header,
+                    &origin,
+                ) else {
+                    continue;
+                };
+                Some((body, environment.next_slot))
+            } else {
+                None
+            };
             match CheckedFunction::new_external(
                 header.name,
                 header.signature,
                 intrinsic,
                 origin,
-            ) {
+            )
+            .and_then(|checked| match semantic_body {
+                Some((body, slots)) => checked.with_semantic_body(body, slots),
+                None => Ok(checked),
+            }) {
                 Ok(checked) => {
                     // An implementation member bound to the registry is still
                     // the member its dispatch selects.
@@ -1440,6 +1631,7 @@ pub fn check_resolved(
         .map(|declared| declared.id.clone());
     let describe = |value: &Type| IndexedSignature {
         signature: vibra_ir::canonical_type(value),
+        checked_type: value.clone(),
         row: match value {
             Type::Function(signature) => signature.effects().clone(),
             _ => vibra_ir::EffectRow::empty(),
@@ -1504,6 +1696,11 @@ pub fn check_resolved(
                     implementation.arguments.clone(),
                 )),
                 interface_id: interface.id.id().to_owned(),
+                receiver_type: implementation.receiver.clone(),
+                interface_type: Type::Interface(
+                    interface.id.clone(),
+                    implementation.arguments.clone(),
+                ),
                 source_id: implementation.source_id.clone(),
                 span: implementation.span,
                 members: implementation
@@ -1679,6 +1876,9 @@ pub fn check_resolved(
         implementations,
         modules: module_set,
         effects: effect_graph,
+        namespace_facts: types.namespace_facts(),
+        role_type_identities: types.role_type_identities(),
+        source_ids: selected,
     }
 }
 
@@ -1759,4 +1959,238 @@ fn verified_assertion(
         && module.segments() == ["assert"]
         && verification.trusts_module(module))
     .then_some(assertion)
+}
+
+#[cfg(test)]
+mod contract_dispatch_tests {
+    use super::*;
+
+    use crate::interfaces::contract_implementation_is_eligible;
+    use vibra_ir::{CallTarget, ClosedContract, TypeId};
+
+    fn interface_id() -> TypeId {
+        TypeId::new("test:package:unit:module:interface", "test.contract")
+    }
+
+    fn implementation(
+        interface: &TypeId,
+        receiver_type: Type,
+        interface_arguments: Vec<Type>,
+        member: &str,
+    ) -> IndexedImplementation {
+        let interface_type = Type::Interface(interface.clone(), interface_arguments);
+        let signature = FunctionSignature::new(Vec::new(), Type::Void);
+        IndexedImplementation {
+            receiver: vibra_ir::canonical_type(&receiver_type),
+            interface: vibra_ir::canonical_type(&interface_type),
+            interface_id: interface.id().to_owned(),
+            receiver_type,
+            interface_type,
+            source_id: "test:source".to_owned(),
+            span: ByteSpan::empty_at(0),
+            members: vec![IndexedMember {
+                contract: member.to_owned(),
+                span: ByteSpan::empty_at(0),
+                signature: vibra_ir::canonical_type(&Type::Function(Box::new(
+                    signature,
+                ))),
+            }],
+        }
+    }
+
+    fn call(
+        interface: TypeId,
+        arguments: Vec<Type>,
+        receiver: usize,
+        destination: Option<Type>,
+    ) -> CallTarget {
+        CallTarget::Contract {
+            interface,
+            member: "run".to_owned(),
+            receiver,
+            arguments,
+            member_types: Vec::new(),
+            destination,
+            signature: Box::new(FunctionSignature::new(Vec::new(), Type::Void)),
+            closed: None,
+        }
+    }
+
+    #[test]
+    fn concrete_receiver_selects_only_its_interface_implementation() {
+        let interface = interface_id();
+        let receiver_a = Type::Declared(TypeId::new("test:A", "test.a"));
+        let receiver_b = Type::Declared(TypeId::new("test:B", "test.b"));
+        let implementation_a =
+            implementation(&interface, receiver_a.clone(), Vec::new(), "run");
+        let implementation_b =
+            implementation(&interface, receiver_b, Vec::new(), "run");
+        let target = call(interface, Vec::new(), 0, None);
+
+        assert!(contract_implementation_is_eligible(
+            &implementation_a,
+            &target,
+            &[receiver_a]
+        ));
+        assert!(!contract_implementation_is_eligible(
+            &implementation_b,
+            &target,
+            &[Type::Declared(TypeId::new("test:A", "test.a"))]
+        ));
+    }
+
+    #[test]
+    fn contract_identity_and_member_must_match() {
+        let interface = interface_id();
+        let receiver = Type::Declared(TypeId::new("test:A", "test.a"));
+        let target = call(interface.clone(), Vec::new(), 0, None);
+        let other_member =
+            implementation(&interface, receiver.clone(), Vec::new(), "other");
+        let other_interface = implementation(
+            &TypeId::new("test:other-interface", "test.other-interface"),
+            receiver.clone(),
+            Vec::new(),
+            "run",
+        );
+
+        assert!(!contract_implementation_is_eligible(
+            &other_member,
+            &target,
+            std::slice::from_ref(&receiver)
+        ));
+        assert!(!contract_implementation_is_eligible(
+            &other_interface,
+            &target,
+            &[receiver]
+        ));
+    }
+
+    #[test]
+    fn concrete_receiver_selects_only_the_applied_interface_arguments() {
+        let interface = interface_id();
+        let receiver = Type::Declared(TypeId::new("test:box", "test.box"));
+        let implementation_u32 =
+            implementation(&interface, receiver.clone(), vec![Type::U32], "run");
+        let implementation_bool =
+            implementation(&interface, receiver.clone(), vec![Type::Bool], "run");
+        let target = call(interface, vec![Type::U32], 0, None);
+
+        assert!(contract_implementation_is_eligible(
+            &implementation_u32,
+            &target,
+            std::slice::from_ref(&receiver)
+        ));
+        assert!(!contract_implementation_is_eligible(
+            &implementation_bool,
+            &target,
+            &[receiver]
+        ));
+
+        let generic_implementation = implementation(
+            &interface_id(),
+            Type::Array(Box::new(Type::Param("item".to_owned()))),
+            vec![Type::Param("item".to_owned())],
+            "run",
+        );
+        let array_target = call(interface_id(), vec![Type::U32], 0, None);
+        assert!(contract_implementation_is_eligible(
+            &generic_implementation,
+            &array_target,
+            &[Type::Array(Box::new(Type::U32))]
+        ));
+        assert!(!contract_implementation_is_eligible(
+            &generic_implementation,
+            &call(interface_id(), vec![Type::Bool], 0, None),
+            &[Type::Array(Box::new(Type::U32))]
+        ));
+    }
+
+    #[test]
+    fn open_and_erased_receivers_keep_the_potential_dispatch_set() {
+        let interface = interface_id();
+        let implementation_a = implementation(
+            &interface,
+            Type::Declared(TypeId::new("test:A", "test.a")),
+            vec![Type::U32],
+            "run",
+        );
+        let implementation_b = implementation(
+            &interface,
+            Type::Declared(TypeId::new("test:B", "test.b")),
+            vec![Type::Bool],
+            "run",
+        );
+        let generic = call(
+            interface.clone(),
+            vec![Type::Param("item".to_owned())],
+            0,
+            None,
+        );
+        assert!(contract_implementation_is_eligible(
+            &implementation_a,
+            &generic,
+            &[Type::Param("receiver".to_owned())]
+        ));
+        assert!(contract_implementation_is_eligible(
+            &implementation_b,
+            &generic,
+            &[Type::Param("receiver".to_owned())]
+        ));
+
+        let erased = call(interface.clone(), vec![Type::U32], 0, None);
+        assert!(contract_implementation_is_eligible(
+            &implementation_a,
+            &erased,
+            &[Type::Interface(interface.clone(), vec![Type::U32])]
+        ));
+        assert!(contract_implementation_is_eligible(
+            &implementation_b,
+            &erased,
+            &[Type::Interface(interface, vec![Type::U32])]
+        ));
+    }
+
+    #[test]
+    fn destination_type_takes_precedence_over_the_receiver_operand() {
+        let interface = interface_id();
+        let receiver_a = Type::Declared(TypeId::new("test:A", "test.a"));
+        let receiver_b = Type::Declared(TypeId::new("test:B", "test.b"));
+        let implementation_a =
+            implementation(&interface, receiver_a.clone(), Vec::new(), "run");
+        let implementation_b =
+            implementation(&interface, receiver_b.clone(), Vec::new(), "run");
+        let target = call(interface, Vec::new(), 0, Some(receiver_b));
+
+        assert!(!contract_implementation_is_eligible(
+            &implementation_a,
+            &target,
+            &[receiver_a]
+        ));
+        assert!(contract_implementation_is_eligible(
+            &implementation_b,
+            &target,
+            &[Type::Void]
+        ));
+    }
+
+    #[test]
+    fn closed_contract_metadata_does_not_bypass_explicit_matching() {
+        let interface = interface_id();
+        let missing_member = implementation(
+            &interface,
+            Type::Array(Box::new(Type::U32)),
+            Vec::new(),
+            "different-member",
+        );
+        let mut target = call(interface, Vec::new(), 0, None);
+        if let CallTarget::Contract { closed, .. } = &mut target {
+            *closed = Some(ClosedContract::IterNext);
+        }
+
+        assert!(!contract_implementation_is_eligible(
+            &missing_member,
+            &target,
+            &[Type::Array(Box::new(Type::U32))]
+        ));
+    }
 }

@@ -68,7 +68,21 @@ impl ConfinedDir {
                         };
                     }
                     Component::CurDir => {}
-                    Component::ParentDir | Component::Prefix(_) => {
+                    Component::ParentDir => {
+                        let handle = openat(
+                            &current.handle,
+                            "..",
+                            OFlags::RDONLY
+                                | OFlags::DIRECTORY
+                                | OFlags::CLOEXEC
+                                | OFlags::NOFOLLOW,
+                            Mode::empty(),
+                        )
+                        .map_err(to_io_error)?;
+                        current.path.pop();
+                        current.handle = handle;
+                    }
+                    Component::Prefix(_) => {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
                             "confined directory path is not normalized",
@@ -80,18 +94,45 @@ impl ConfinedDir {
         }
         #[cfg(windows)]
         {
-            let canonical = fs::canonicalize(path)?;
-            if !same_windows_path(&canonical, path) {
+            let mut components = path.components();
+            let Some(Component::Prefix(prefix)) = components.next() else {
                 return Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "confined directory path is not canonical",
+                    io::ErrorKind::InvalidInput,
+                    "confined directory path must have an absolute prefix",
+                ));
+            };
+            if !matches!(components.next(), Some(Component::RootDir)) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "confined directory path must be rooted",
                 ));
             }
-            let handle = open_windows_directory(path)?;
-            Ok(Self {
-                path: PathBuf::from(path),
-                handles: vec![handle],
-            })
+
+            // Traverse from the drive or UNC root using held directory
+            // handles. In particular, do not normalize `..` before opening
+            // preceding components: a reparse point followed by `..` must
+            // still be rejected instead of being normalized out of the path.
+            let mut root_path = PathBuf::from(prefix.as_os_str());
+            root_path.push(std::path::MAIN_SEPARATOR.to_string());
+            let root_handle = open_windows_directory(&root_path)?;
+            let mut current = Self {
+                path: root_path,
+                handles: vec![root_handle],
+            };
+            for component in components {
+                match component {
+                    Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
+                    Component::Normal(name) => current = current.open_child(name)?,
+                    Component::ParentDir => {
+                        if current.handles.len() > 1 {
+                            current.handles.pop();
+                            current.path.pop();
+                        }
+                    }
+                }
+            }
+            current.path = fs::canonicalize(&current.path)?;
+            Ok(current)
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -166,6 +207,103 @@ impl ConfinedDir {
         Ok(self.open_file(name)?.metadata()?.permissions())
     }
 
+    /// Reports whether a direct child entry exists without following it.
+    pub fn child_exists(&self, name: &OsStr) -> io::Result<bool> {
+        validate_name(name)?;
+        #[cfg(unix)]
+        {
+            match rustix::fs::statat(
+                &self.handle,
+                name,
+                rustix::fs::AtFlags::SYMLINK_NOFOLLOW,
+            ) {
+                Ok(_) => Ok(true),
+                Err(error) if error == rustix::io::Errno::NOENT => Ok(false),
+                Err(error) => Err(to_io_error(error)),
+            }
+        }
+        #[cfg(windows)]
+        {
+            match fs::symlink_metadata(self.path.join(name)) {
+                Ok(_) => Ok(true),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+                Err(error) => Err(error),
+            }
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            match fs::symlink_metadata(self.path.join(name)) {
+                Ok(_) => Ok(true),
+                Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+                Err(error) => Err(error),
+            }
+        }
+    }
+
+    /// Opens a regular child file without following a symbolic link or
+    /// reparse point. The returned handle remains open for the caller.
+    pub fn open_regular_file(&self, name: &OsStr) -> io::Result<File> {
+        self.open_file(name)
+    }
+
+    /// Opens a regular child file for writing without truncating it or
+    /// following a symbolic link or reparse point.
+    pub fn open_regular_file_write(&self, name: &OsStr) -> io::Result<File> {
+        validate_name(name)?;
+        #[cfg(unix)]
+        {
+            use rustix::fs::{Mode, OFlags, openat};
+            let handle = openat(
+                &self.handle,
+                name,
+                OFlags::WRONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+                Mode::empty(),
+            )
+            .map_err(to_io_error)?;
+            let file = File::from(handle);
+            if !file.metadata()?.is_file() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "confined path is not a regular file",
+                ));
+            }
+            Ok(file)
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+            const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+            const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+            let file = OpenOptions::new()
+                .write(true)
+                .share_mode(0x0000_0001 | 0x0000_0002)
+                .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+                .open(self.path.join(name))?;
+            let metadata = file.metadata()?;
+            if !metadata.is_file()
+                || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "confined path is not a regular non-reparse file",
+                ));
+            }
+            Ok(file)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let path = self.path.join(name);
+            let metadata = fs::symlink_metadata(&path)?;
+            if !metadata.is_file() || metadata.file_type().is_symlink() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "confined path is not a regular file",
+                ));
+            }
+            OpenOptions::new().write(true).open(path)
+        }
+    }
+
     /// Creates a new regular child file exclusively and writes all bytes.
     pub fn write_new_file(
         &self,
@@ -204,6 +342,97 @@ impl ConfinedDir {
         #[cfg(not(any(unix, windows)))]
         {
             fs::rename(self.path.join(from), destination.path.join(to))
+        }
+    }
+
+    /// Renames one direct child entry only when the destination does not exist.
+    ///
+    /// The check and rename are one filesystem operation. Unsupported
+    /// filesystems fail instead of falling back to a check followed by rename.
+    pub fn rename_to_new(
+        &self,
+        from: &OsStr,
+        destination: &Self,
+        to: &OsStr,
+    ) -> io::Result<()> {
+        validate_name(from)?;
+        validate_name(to)?;
+        #[cfg(unix)]
+        {
+            rustix::fs::renameat_with(
+                &self.handle,
+                from,
+                &destination.handle,
+                to,
+                rustix::fs::RenameFlags::NOREPLACE,
+            )
+            .map_err(to_io_error)
+        }
+        #[cfg(windows)]
+        {
+            renamore::rename_exclusive(self.path.join(from), destination.path.join(to))
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = (from, destination, to);
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "filesystem does not support exclusive child rename",
+            ))
+        }
+    }
+
+    /// Returns the ordinary child path used by SQLite's file-based VFS.
+    ///
+    /// The parent has already been traversed without links. SQLite's VFS
+    /// canonicalizes Unix paths, so descriptor pseudo-paths such as
+    /// `/proc/self/fd/N/child` do not remain descriptor-anchored. On Unix this
+    /// path is therefore subject to concurrent parent-directory replacement;
+    /// M1 rejects links during traversal and applies SQLite's no-follow flag
+    /// to the database path, but does not promise immunity to hostile parent
+    /// rebinding. Windows retains the traversed directory handles without
+    /// delete sharing while SQLite uses this path.
+    pub(crate) fn path_for_child(&self, name: &OsStr) -> io::Result<PathBuf> {
+        validate_name(name)?;
+        Ok(self.path.join(name))
+    }
+
+    /// Flushes this directory handle to the filesystem.
+    pub fn sync_all(&self) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            rustix::fs::fsync(&self.handle).map_err(to_io_error)
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+            const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+            const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+            const GENERIC_WRITE: u32 = 0x4000_0000;
+            let file = OpenOptions::new()
+                .write(true)
+                .share_mode(0x0000_0001 | 0x0000_0002)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+                .access_mode(GENERIC_WRITE)
+                .open(&self.path)?;
+            let metadata = file.metadata()?;
+            if !metadata.is_dir()
+                || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "confined path is not a regular directory",
+                ));
+            }
+            file.sync_all()
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "platform does not support directory synchronization",
+            ))
         }
     }
 
@@ -567,13 +796,6 @@ fn open_windows_directory(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
-#[cfg(windows)]
-fn same_windows_path(left: &Path, right: &Path) -> bool {
-    let left = left.to_string_lossy().replace(r"\\?\", "");
-    let right = right.to_string_lossy().replace(r"\\?\", "");
-    left.eq_ignore_ascii_case(&right)
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(
@@ -634,5 +856,28 @@ mod tests {
 
         assert_eq!(error.to_string(), "injected write failure");
         assert!(directory.is_empty().expect("inspect test root"));
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn opens_workspace_dot_and_parent_paths_by_traversing_components() {
+        let current_dir = std::env::current_dir().expect("read current directory");
+        let paths = [
+            (
+                current_dir.join("."),
+                fs::canonicalize(&current_dir).expect("canonical current directory"),
+            ),
+            (
+                current_dir.join(".."),
+                fs::canonicalize(current_dir.join(".."))
+                    .expect("canonical parent directory"),
+            ),
+        ];
+
+        for (path, expected) in paths {
+            let opened = ConfinedDir::open(&path)
+                .expect("open workspace path with a dot component");
+            assert_eq!(opened.path(), expected);
+        }
     }
 }

@@ -8,6 +8,28 @@ use vibra_ir::{
 };
 
 #[test]
+fn accelerated_functions_retain_source_meaning_without_changing_runtime_lowering() {
+    let origin = SourceOrigin::new("native.vib", ByteSpan::new(0, 1));
+    let signature = CompilerIntrinsic::StrLength.signature(&RoleTypes::default());
+    let accelerated = CheckedFunction::new_external(
+        "length",
+        signature,
+        CompilerIntrinsic::StrLength,
+        origin.clone(),
+    )
+    .expect("valid acceleration");
+    let source = Expr::literal(Value::U64(7), origin);
+    let retained = accelerated
+        .clone()
+        .with_semantic_body(source.clone(), 1)
+        .expect("checked source body");
+    assert_eq!(retained.semantic_body(), (&source, 1));
+    assert_eq!(retained.body(), accelerated.body());
+    assert_eq!(retained.module_body(), accelerated.module_body());
+    assert!(retained.native_body().is_none());
+}
+
+#[test]
 fn registry_contains_only_the_reviewed_operations() {
     let symbols = CompilerIntrinsic::all()
         .into_iter()

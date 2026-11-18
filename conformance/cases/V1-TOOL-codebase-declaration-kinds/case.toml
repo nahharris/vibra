@@ -1,0 +1,14 @@
+id = "V1-TOOL-codebase-declaration-kinds"
+rule = "V1-TOOL"
+profile = "tooling-v1"
+operation = "codebase"
+description = "Generic constraints, explicit implementation objects, nominal effects, owned operations and trusted host references survive import without execution."
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+data = ["scenario.vibon"]
+
+[expect]
+accepted = true
+codebase = "expected.vibon"

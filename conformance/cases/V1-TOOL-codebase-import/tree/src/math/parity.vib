@@ -1,0 +1,5 @@
+; A source attachment includes comments between definitions.
+(defn even (value u32) bool visibility: @public (match value 0u32 true - (odd (u32.sub value 1u32))))
+
+; The back-edge must be a component-local reference.
+(defn odd (value u32) bool visibility: @public (match value 0u32 false - (even (u32.sub value 1u32))))

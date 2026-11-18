@@ -36,6 +36,7 @@ pub use effects::{
 };
 mod infer;
 mod interfaces;
+pub use interfaces::contract_implementation_is_eligible;
 mod nominal;
 mod pattern;
 mod resolved;
@@ -45,8 +46,8 @@ mod stdlib;
 mod union;
 
 pub use resolved::{
-    IndexedImplementation, IndexedMember, IndexedSignature, ResolvedCheckResult,
-    check_resolved,
+    CheckedNamespaceFact, CheckedNamespaceRole, IndexedImplementation, IndexedMember,
+    IndexedSignature, ResolvedCheckResult, check_resolved, check_resolved_complete,
 };
 pub use source::{CheckResult, check_source, standard_resolve_input};
 pub use standard::{

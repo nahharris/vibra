@@ -12,6 +12,7 @@
 
 mod call_flow;
 mod check_and_run;
+mod codebase;
 mod demo_evidence;
 mod entry_outcomes;
 mod examples;

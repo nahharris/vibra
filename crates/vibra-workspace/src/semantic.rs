@@ -54,6 +54,8 @@ pub struct WorkspaceCheckResult {
     modules: Option<Arc<CheckedModuleSet>>,
     bindings: BTreeMap<String, Vec<ApplicationBinding>>,
     effect_rows: BTreeMap<String, Vec<EffectRowOrder>>,
+    resolved: Option<Arc<ResolvedSnapshot>>,
+    checked: Option<Arc<vibra_types::ResolvedCheckResult>>,
 }
 
 impl WorkspaceCheckResult {
@@ -100,6 +102,18 @@ impl WorkspaceCheckResult {
             .get(source_id)
             .map_or(&[][..], Vec::as_slice)
     }
+
+    /// Accepted resolver facts retained for pure downstream projections.
+    #[must_use]
+    pub(crate) fn resolved(&self) -> Option<&ResolvedSnapshot> {
+        self.resolved.as_deref()
+    }
+
+    /// Accepted checker facts retained for pure downstream projections.
+    #[must_use]
+    pub(crate) fn checked(&self) -> Option<&vibra_types::ResolvedCheckResult> {
+        self.checked.as_deref()
+    }
 }
 
 /// The result of a target check and its optional pure execution.
@@ -136,7 +150,16 @@ pub fn check_all_with_bootstrap(
     snapshot: &WorkspaceSnapshot,
     verification: Option<&vibra_types::Stdlib>,
 ) -> WorkspaceCheckResult {
-    check_scope(snapshot, None, verification)
+    check_scope(snapshot, None, verification, false)
+}
+
+/// Checks the ordinary package scope with complete builtin declaration facts
+/// for the pure codebase projection.
+pub(crate) fn check_all_for_codebase(
+    snapshot: &WorkspaceSnapshot,
+    verification: &vibra_types::Stdlib,
+) -> WorkspaceCheckResult {
+    check_scope(snapshot, None, Some(verification), true)
 }
 
 /// Checks one already selected local target and all local target units in its
@@ -155,7 +178,7 @@ pub fn check_target_with_bootstrap(
     target: &Target,
     verification: Option<&vibra_types::Stdlib>,
 ) -> WorkspaceCheckResult {
-    check_scope(snapshot, Some(target), verification)
+    check_scope(snapshot, Some(target), verification, false)
 }
 
 /// Checks the module `source_id` of the workspace as `text` writes it, with
@@ -171,7 +194,7 @@ pub fn check_document(
 ) -> Option<WorkspaceCheckResult> {
     let edited = snapshot.with_document_text(source_id, text)?;
     let graph = edited.source_graph().ok()?;
-    let resolved = edited.resolve_graph(&graph, Some(verification)).ok()?;
+    let resolved = Arc::new(edited.resolve_graph(&graph, Some(verification)).ok()?);
     let unit = resolved
         .modules()
         .iter()
@@ -182,11 +205,12 @@ pub fn check_document(
         .to_owned();
     Some(check_resolved_scope(
         &edited,
-        &resolved,
+        resolved,
         &BTreeSet::from([unit]),
         None,
         Some(verification),
         graph.diagnostics().to_vec(),
+        false,
     ))
 }
 
@@ -250,6 +274,7 @@ fn check_scope(
     snapshot: &WorkspaceSnapshot,
     selected_target: Option<&Target>,
     verification: Option<&vibra_types::Stdlib>,
+    complete_builtins: bool,
 ) -> WorkspaceCheckResult {
     let graph = match snapshot.source_graph() {
         Ok(graph) => graph,
@@ -265,7 +290,7 @@ fn check_scope(
         }
     };
     let resolved = match snapshot.resolve_graph(&graph, verification) {
-        Ok(resolved) => resolved,
+        Ok(resolved) => Arc::new(resolved),
         Err(error) => {
             return finish_result(vec![
                 Diagnostic::new(
@@ -306,33 +331,36 @@ fn check_scope(
             .collect::<BTreeSet<_>>();
         return check_resolved_scope(
             snapshot,
-            &resolved,
+            resolved.clone(),
             &units,
             None,
             verification,
             diagnostics,
+            complete_builtins,
         );
     };
     let units = BTreeSet::from([target_unit.clone()]);
     check_resolved_scope(
         snapshot,
-        &resolved,
+        resolved,
         &units,
         Some(&target_unit),
         verification,
         diagnostics,
+        complete_builtins,
     )
 }
 
 fn check_resolved_scope(
     snapshot: &WorkspaceSnapshot,
-    resolved: &ResolvedSnapshot,
+    resolved: Arc<ResolvedSnapshot>,
     initial_units: &BTreeSet<String>,
     selected_unit: Option<&str>,
     verification: Option<&vibra_types::Stdlib>,
     mut diagnostics: Vec<Diagnostic>,
+    complete_builtins: bool,
 ) -> WorkspaceCheckResult {
-    let (units, source_ids) = import_closure(resolved, initial_units, verification);
+    let (units, source_ids) = import_closure(&resolved, initial_units, verification);
     // The atoms of the target slots of `project.vibon` that the selected
     // units own: the entry and each atom of the `effects` array.
     let entry_spans = resolved
@@ -419,11 +447,14 @@ fn check_resolved_scope(
     {
         return finish_result(diagnostics);
     }
-    diagnostics.extend(validate_entries(resolved, &units));
+    diagnostics.extend(validate_entries(&resolved, &units));
 
     let selected_sources = source_ids.iter().cloned().collect::<Vec<_>>();
-    let checked =
-        vibra_types::check_resolved(resolved, &selected_sources, verification);
+    let checked = if complete_builtins {
+        vibra_types::check_resolved_complete(&resolved, &selected_sources, verification)
+    } else {
+        vibra_types::check_resolved(&resolved, &selected_sources, verification)
+    };
     diagnostics.extend(checked.diagnostics().iter().cloned());
     diagnostics.sort_by_key(|diagnostic| {
         (
@@ -491,6 +522,8 @@ fn check_resolved_scope(
         modules,
         bindings,
         effect_rows,
+        resolved: (status == CheckStatus::Accepted).then_some(resolved),
+        checked: (status == CheckStatus::Accepted).then(|| Arc::new(checked)),
     }
 }
 
@@ -694,5 +727,7 @@ fn finish_result(diagnostics: Vec<Diagnostic>) -> WorkspaceCheckResult {
         modules: None,
         bindings: BTreeMap::new(),
         effect_rows: BTreeMap::new(),
+        resolved: None,
+        checked: None,
     }
 }

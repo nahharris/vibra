@@ -1,0 +1,14 @@
+id = "V1-TOOL-codebase-backup"
+rule = "V1-TOOL"
+profile = "tooling-v1"
+operation = "codebase"
+description = "Observe backup through the real durable workspace service without executing source."
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+data = ["scenario.vibon"]
+
+[expect]
+accepted = true
+codebase = "expected.vibon"

@@ -42,6 +42,13 @@ list, and `[:]` the empty dict. A record's fields are unique. A later
 duplicate dict key is an error in VIBON, `@data.duplicateKey`, where source
 would let it replace the earlier one.
 
+This is the only VIBON grammar. Every compiler-owned document is written in
+it: project and lock files, host worlds, audit traces, build manifests,
+conformance snapshots, and canonical value encodings. Their schemas, in this
+and the other chapters, are stated as records, lists, and dicts and mean
+these forms. The parenthesized notation of v0.0.1, such as `(record …)` and
+`(array …)`, is not VIBON and no reader accepts it.
+
 Each compiler-owned format defines a closed record schema and a version atom.
 Unknown, duplicate, or missing fields are errors. A reader MUST reject a
 format version it does not implement; it never guesses or upgrades. Canonical

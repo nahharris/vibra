@@ -23,8 +23,8 @@ use crate::nominal::{
     ContractMember, DeclaredInterface, Implementation, Scope, TypeNames,
 };
 use crate::{
-    CheckEnvironment, GenericCall, GenericOperands, call_contract_error,
-    check_expression, check_generic_operands, mismatch,
+    CheckEnvironment, GenericCall, GenericOperands, IndexedImplementation,
+    call_contract_error, check_expression, check_generic_operands, mismatch,
 };
 
 /// The receiver placeholder a contract signature is written over.
@@ -1691,6 +1691,71 @@ pub(crate) fn covers(pattern: &Type, actual: &Type) -> bool {
     crate::union::unifiable(pattern, &actual.substitute(&rigid))
 }
 
+/// Whether one checked implementation can be selected by this checked
+/// contract call.
+///
+/// `actual_operand_types` is in the order of the enclosing checked call's
+/// evaluated arguments. A concrete receiver narrows by the same receiver
+/// coverage and applied-interface-argument rules used by the checker. A
+/// generic parameter or value erased behind the same interface keeps the
+/// potential dispatch set: its concrete runtime receiver is not available in
+/// checked IR. A closed builtin conformance does not synthesize an explicit
+/// implementation; it is represented by `CallTarget::Contract::closed`.
+#[must_use]
+pub fn contract_implementation_is_eligible(
+    implementation: &IndexedImplementation,
+    target: &CallTarget,
+    actual_operand_types: &[Type],
+) -> bool {
+    let CallTarget::Contract {
+        interface,
+        member,
+        receiver,
+        arguments,
+        destination,
+        ..
+    } = target
+    else {
+        return false;
+    };
+    if implementation.interface_id() != interface.id()
+        || !implementation
+            .members()
+            .iter()
+            .any(|candidate| candidate.contract() == member)
+    {
+        return false;
+    }
+    let Some(receiver_type) = destination
+        .as_ref()
+        .or_else(|| actual_operand_types.get(*receiver))
+    else {
+        return false;
+    };
+    if matches!(receiver_type, Type::Param(_))
+        || matches!(receiver_type, Type::Interface(id, _) if id.id() == interface.id())
+    {
+        return true;
+    }
+    if !covers(implementation.receiver_type(), receiver_type) {
+        return false;
+    }
+    let Type::Interface(indexed_interface, indexed_arguments) =
+        implementation.interface_type()
+    else {
+        return false;
+    };
+    if indexed_interface.id() != interface.id() {
+        return false;
+    }
+    instantiated_pattern_arguments(
+        implementation.receiver_type(),
+        indexed_arguments,
+        receiver_type,
+    )
+    .is_some_and(|candidate_arguments| candidate_arguments == *arguments)
+}
+
 fn parameter_names(value: &Type, names: &mut BTreeSet<String>) {
     if let Type::Param(name) = value {
         names.insert(name.clone());
@@ -2507,19 +2572,30 @@ fn instantiate_arguments(
     implementation: &Implementation,
     receiver: &Type,
 ) -> Option<Vec<Type>> {
+    instantiated_pattern_arguments(
+        &implementation.receiver,
+        &implementation.arguments,
+        receiver,
+    )
+}
+
+fn instantiated_pattern_arguments(
+    pattern: &Type,
+    arguments: &[Type],
+    receiver: &Type,
+) -> Option<Vec<Type>> {
     let mut names = BTreeSet::new();
-    parameter_names(&implementation.receiver, &mut names);
+    parameter_names(pattern, &mut names);
     if names.is_empty() {
-        return Some(implementation.arguments.clone());
+        return Some(arguments.to_vec());
     }
     let names = names.into_iter().collect::<Vec<_>>();
     let mut instantiation = crate::infer::Instantiation::new(&names);
-    let opened = instantiation.open(&implementation.receiver);
+    let opened = instantiation.open(pattern);
     if !instantiation.unify(&opened, receiver) {
         return None;
     }
-    implementation
-        .arguments
+    arguments
         .iter()
         .map(|argument| instantiation.resolved(&instantiation.open(argument)))
         .collect()

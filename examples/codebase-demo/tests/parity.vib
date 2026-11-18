@@ -1,0 +1,7 @@
+(import assert @std.assert)
+
+(import parity @math.parity)
+
+(test "eight is even" (assert.true (parity.even 8u32)))
+
+(test "nine is odd" (assert.true (parity.odd 9u32)))

@@ -9,7 +9,7 @@
   "properties": {
     "schemaVersion": { "const": 1 },
     "command": {
-      "enum": ["help", "init", "fmt", "check", "run", "test", "inspect", "add", "remove", "sync", "lint", "build", "query", "edit", "mcp", "invalid"]
+      "enum": ["help", "init", "fmt", "check", "run", "test", "inspect", "add", "remove", "sync", "lint", "build", "query", "edit", "mcp", "invalid", "codebase-init", "codebase-head", "codebase-import", "codebase-lookup", "codebase-read", "codebase-export", "codebase-verify", "codebase-reindex", "codebase-backup", "codebase-restore"]
     },
     "result": {
       "enum": [
@@ -27,6 +27,785 @@
     "payload": { "type": "object" }
   },
   "allOf": [
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "codebase-init"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "result": {
+            "enum": [
+              "@command.ok",
+              "@command.operational-failure",
+              "@command.diagnostics",
+              "@command.invalid-input"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "result": {
+                  "const": "@command.ok"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "store"
+                  ],
+                  "properties": {
+                    "store": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [],
+                  "properties": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "codebase-head"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "result": {
+            "enum": [
+              "@command.ok",
+              "@command.operational-failure",
+              "@command.diagnostics",
+              "@command.invalid-input"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "result": {
+                  "const": "@command.ok"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "head",
+                    "revision"
+                  ],
+                  "properties": {
+                    "head": {
+                      "type": "string",
+                      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+                    },
+                    "revision": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    }
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [],
+                  "properties": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "codebase-import"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "result": {
+            "enum": [
+              "@command.ok",
+              "@command.operational-failure",
+              "@command.diagnostics",
+              "@command.invalid-input"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "result": {
+                  "const": "@command.ok"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "head",
+                    "revision",
+                    "published",
+                    "objectCount",
+                    "sourceCount"
+                  ],
+                  "properties": {
+                    "head": {
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "published": {
+                      "type": "boolean"
+                    },
+                    "objectCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "sourceCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [],
+                  "properties": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "codebase-lookup"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "result": {
+            "enum": [
+              "@command.ok",
+              "@command.operational-failure",
+              "@command.diagnostics",
+              "@command.invalid-input"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "result": {
+                  "const": "@command.ok"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "revision",
+                    "entity",
+                    "object",
+                    "part"
+                  ],
+                  "properties": {
+                    "revision": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "entity": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "object": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "part": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [],
+                  "properties": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "codebase-read"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "result": {
+            "enum": [
+              "@command.ok",
+              "@command.operational-failure",
+              "@command.diagnostics",
+              "@command.invalid-input"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "result": {
+                  "const": "@command.ok"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "revision",
+                    "object",
+                    "component",
+                    "memberIndex",
+                    "payload",
+                    "references"
+                  ],
+                  "properties": {
+                    "revision": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "object": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "component": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "memberIndex": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "payload": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "references": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "part",
+                          "kind",
+                          "target"
+                        ],
+                        "properties": {
+                          "part": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "kind": {
+                            "enum": ["value-reference", "type-reference", "contract", "implementation", "effect-owner", "initializer", "call"]
+                          },
+                          "target": {
+                            "oneOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^sha256:[0-9a-f]{64}$"
+                              },
+                              {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": false,
+                                "required": ["kind", "identity", "registry"],
+                                "properties": {
+                                  "kind": { "const": "@trusted-external" },
+                                  "identity": { "type": "string", "pattern": "^@(compiler|host):.+$" },
+                                  "registry": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [],
+                  "properties": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "codebase-export"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "result": {
+            "enum": [
+              "@command.ok",
+              "@command.operational-failure",
+              "@command.diagnostics",
+              "@command.invalid-input"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "result": {
+                  "const": "@command.ok"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "revision",
+                    "destination",
+                    "plan",
+                    "files",
+                    "written"
+                  ],
+                  "properties": {
+                    "revision": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "destination": {
+                      "type": "string"
+                    },
+                    "plan": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    },
+                    "files": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                          "path",
+                          "sourceHash",
+                          "byteLength"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "sourceHash": {
+                            "type": "string",
+                            "pattern": "^sha256:[0-9a-f]{64}$"
+                          },
+                          "byteLength": {
+                            "type": "integer",
+                            "minimum": 0
+                          }
+                        }
+                      }
+                    },
+                    "written": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [],
+                  "properties": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "codebase-verify"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "result": {
+            "enum": [
+              "@command.ok",
+              "@command.operational-failure",
+              "@command.diagnostics",
+              "@command.invalid-input"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "result": {
+                  "const": "@command.ok"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "valid",
+                    "revisionCount",
+                    "objectCount",
+                    "sourceCount"
+                  ],
+                  "properties": {
+                    "valid": {
+                      "const": true
+                    },
+                    "revisionCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "objectCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "sourceCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [],
+                  "properties": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "codebase-reindex"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "result": {
+            "enum": [
+              "@command.ok",
+              "@command.operational-failure",
+              "@command.diagnostics",
+              "@command.invalid-input"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "result": {
+                  "const": "@command.ok"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "revisionCount",
+                    "entityCount",
+                    "edgeCount"
+                  ],
+                  "properties": {
+                    "revisionCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "entityCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "edgeCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [],
+                  "properties": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "codebase-backup"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "result": {
+            "enum": [
+              "@command.ok",
+              "@command.operational-failure",
+              "@command.diagnostics",
+              "@command.invalid-input"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "result": {
+                  "const": "@command.ok"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "destination",
+                    "revisionCount"
+                  ],
+                  "properties": {
+                    "destination": {
+                      "type": "string"
+                    },
+                    "revisionCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [],
+                  "properties": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "command": {
+            "const": "codebase-restore"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "result": {
+            "enum": [
+              "@command.ok",
+              "@command.operational-failure",
+              "@command.diagnostics",
+              "@command.invalid-input"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "result": {
+                  "const": "@command.ok"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "store",
+                    "revisionCount",
+                    "objectCount",
+                    "sourceCount"
+                  ],
+                  "properties": {
+                    "store": {
+                      "type": "string"
+                    },
+                    "revisionCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "objectCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "sourceCount": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  }
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "payload": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [],
+                  "properties": {}
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
     {
       "description": "A program failure is an entry that returned err: only run ends so, with the encoding of the result, no trap, and no diagnostic.",
       "if": { "properties": { "result": { "const": "@command.program-failed" } } },

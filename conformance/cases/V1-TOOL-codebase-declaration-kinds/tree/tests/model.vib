@@ -1,0 +1,3 @@
+(import assert @std.assert)
+(import model @math.model)
+(test "implementation dispatch" (assert.equal (model.measured.value (model.meter 3u32)) 3u32))

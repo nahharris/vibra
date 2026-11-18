@@ -1,0 +1,1 @@
+(record format: @codebase-observation.v1 scenario: @import facts: (dict @definitions-readable true @edges-pinned true @reopened true @source-preserved true))
