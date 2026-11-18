@@ -1,10 +1,9 @@
 # Vibra source language
 
 Status: normative target
-Implementation status: none of this chapter is implemented. The shipped
-v0.0.1 toolchain implements the previous S-expression surface, which this
-chapter replaces. The [release roadmap](../roadmap/README.md) schedules the
-surface defined here. Only a small subset of it (declaration keywords, typed
+Implementation status: none of this chapter is implemented. The
+[release roadmap](../roadmap/README.md) schedules the surface defined here.
+Only a small subset of it (declaration keywords, typed
 closers, application, `if`, `match`, `let`, `return`) has been exercised in a
 model-writing pilot; nothing here is claimed to be measured beyond that.
 
@@ -38,7 +37,7 @@ identifier  = letter, { letter | digit } ;
 letter      = "A"…"Z" | "a"…"z" ;
 digit       = "0"…"9" ;
 atom        = "@", atom-part, { ".", atom-part } ;
-atom-part   = letter, { letter | digit | "-" } ;
+atom-part   = letter, { letter | digit } ;
 discard     = "_" ;
 void        = "void" ;
 integer     = [ "-" ], digits, [ integer-suffix ] ;
@@ -65,6 +64,13 @@ digits. Hyphens, underscores, `?`, and `!` are not identifier characters. An
 identifier that fails this production is `@syntax.invalidName` over the whole
 token.
 
+Two adjacent tokens of the classes identifier, reserved word, number, atom,
+string, character, and doc string MUST be separated by whitespace, a bracket,
+or `:`. Two such tokens with nothing between them, as in `"a"b` or
+`1u8"x"`, are `@syntax.missingSeparator` at a zero-width span where the
+second token starts; both tokens are kept. `-` directly before a digit is
+part of the numeric token and never needs separation.
+
 Casing is a convention, never a parse rule. Types, interfaces, and type
 parameters are written in PascalCase; every other name, including a variant
 case, is written in camelCase. `vibra check` reports a name that departs from
@@ -84,10 +90,21 @@ requires return returns role symbol takes test then try type use visibility
 void where
 ```
 
+A reserved word where the grammar requires an identifier is recovered: the
+parser takes the word as the identifier and reports it. In a declaration or
+binder position (a declaration name, a type parameter, a pattern binder, an
+import name) the report is `@name.reservedDeclaration` at the word. In a
+label position (a labelled parameter, a record or case field, a labelled
+argument, a record literal or pattern field, a type-application label) it is
+`@name.reservedLabel` at the word. The recovered name still binds or labels
+for the rest of its scope so that the error does not cascade.
+
 The names of the prelude (the [type chapter](02-type-system.md#the-prelude)
 lists them, for example `Bool`, `Option`, `true`, `false`) are ordinary
-identifiers to the lexer and are reserved by resolution: a declaration or
-binder spelled as one is `@name.reservedDeclaration` at the name, and it
+identifiers to the lexer and are reserved by resolution. A type, interface,
+type parameter, or pattern binder spelled as one is
+`@name.reservedDeclaration` at the name; a module value, `fn`, `proc`, or
+import spelled as one is `@name.reservedValueSpelling` at the name. Either
 still binds for the rest of its scope so that the error does not cascade.
 
 ### Atoms
@@ -119,9 +136,11 @@ literal's exact type: `1u8`, `25i32`, `2.5f64`, `2f64`. An unsuffixed literal
 takes its type from its expression context. An unknown suffix, an integer
 suffix on a float body, or trailing token text is
 `@syntax.invalidNumericLiteral`. Range is checked by the type checker, not
-the lexer: `-1u8` is one `U8` literal and is rejected as out of range. There
-are no numeric separators and no non-decimal bases. `-` immediately followed
-by a digit starts a numeric token; `-` has no other use.
+the lexer: `-1u8` is one `U8` literal and is `@type.numericOutOfRange` at
+the literal, as is an unsuffixed literal that does not fit its expected
+type. There are no numeric separators and no non-decimal bases. `-`
+immediately followed by a digit starts a numeric token; `-` has no other
+use.
 
 A string is double quoted and supports `\"`, `\\`, `\n`, `\r`, `\t`, and
 `\u{HEX}` with one to six hexadecimal digits naming one Unicode scalar; a
@@ -164,7 +183,7 @@ use         = "use", atom, [ "as", identifier ], "enduse" ;
 type-decl   = "type", identifier, [ type-params ],
               ( "of", type-body | case, { case } ),
               { type-item }, "endtype" ;
-type-body   = type-expr | "Intrinsic", "(", atom, ")" ;
+type-body   = "Intrinsic", "(", atom, ")" | type-expr ;
 case        = "case", identifier, [ record-type ] ;
 type-item   = given | where | role | visibility | representation | doc
             | fn-decl | proc-decl | impl ;
@@ -197,7 +216,7 @@ module-let  = "let", identifier, ":", type-expr, { visibility | doc },
 test        = "test", string, [ "takes", params ], [ performs ],
               "do", body, "endtest" ;
 
-given       = "given", "{", { identifier, ":", path }, "}" ;
+given       = "given", "{", { identifier, ":", type-expr }, "}" ;
 requires    = "requires", expr, [ "else", expr ] ;
 ensures     = "ensures", expr, [ "else", expr ] ;
 where       = "where", expr, [ "else", expr ] ;
@@ -238,12 +257,15 @@ anon-proc   = "proc", [ type-params ], signature,
               { given | requires | ensures | performs },
               "do", body, "endproc" ;
 
-pattern     = discard | literal | atom | path
-            | path, "(", { pattern | identifier, ":", pattern }, ")"
+pattern     = discard | pattern-literal | path
+            | path, "(", { pattern }, ")"
+            | path, "(", identifier, ":", pattern,
+                        { identifier, ":", pattern }, ")"
             | "{", { pattern }, "}"
             | "{", identifier, ":", pattern,
                    { identifier, ":", pattern }, "}"
             | "[", { pattern }, "]" ;
+pattern-literal = string | character | integer | atom ;
 
 type-expr   = path, [ "(", { type-expr }, { identifier, ":", type-expr }, ")" ]
             | atom
@@ -264,6 +286,17 @@ Notes on the grammar:
   the form before it, with or without whitespace between them. Any
   expression may be a callee: `choose(c)(x)` calls the result of
   `choose(c)`. `f()` is a nullary call; `f` is the function value.
+- `Fn`, `Proc`, `Intent`, and `Intrinsic` are **reserved type heads**. A
+  `type-expr` or `type-body` that begins with one is parsed by that head's
+  own production and never as an applied path, so `Fn({I32} Bool)` is a
+  callable type even though its operands would also parse as type
+  arguments. The heads name no declaration; declaring one is
+  `@name.reservedDeclaration`.
+- A constructor pattern is positional or labelled, never both. A pattern
+  whose shape does not fit the constructor it names (labels for a wrapper or
+  declared tuple, positional components for a declared record or a case with
+  fields, a wrong arity, or an unknown or repeated field) is
+  `@type.argumentMismatch` at the pattern.
 - A statement never needs a terminator, because no statement can begin with
   `(`, `.`, or `:` and no expression can end with an open form.
 - The `do` that follows a signature opens the declaration's body and is
@@ -285,20 +318,23 @@ Notes on the grammar:
   `@syntax.unmatchedDelimiter`.
 
 The productions above write the sections of a declaration in their canonical
-order, to be readable. The parser accepts them in any order, under three
+order, to be readable. The parser accepts them in any order, under four
 constraints: the keyword, the name, and the type parameters come first; `do`
-and its body come last; and the `case` alternatives of a variant type keep
-their written order among themselves, which is the order of the variants.
-So `fn f returns r: I32 takes {x: I32} do return x endfn` is accepted, and
+and its body come last; the `case` alternatives of a variant type keep
+their written order among themselves, which is the order of the variants;
+and, in a file, every `use` precedes every other top-level form. So
+`fn f returns r: I32 takes {x: I32} do return x endfn` is accepted, and
 the formatter moves `takes` before `returns`. Nested members and `impl`
-blocks may be written between sections.
+blocks may be written between sections. A `use` written after another
+top-level form is `@syntax.invalidForm` at the `use`; the formatter moves no
+top-level form, so it does not repair one.
 
 Every section occurs at most once, `requires` and `ensures` included; a
 repeat is `@syntax.duplicateSection`. A required section that is missing,
-such as `returns`, is `@syntax.invalidForm`. Several conditions are joined with `Bool.and`.
-A section a declaration kind does not admit, such as `performs` on a `fn`,
-is `@syntax.invalidSection`. The
-formatter writes sections in the canonical order given under
+such as `returns`, is `@syntax.invalidForm`. Several conditions are joined
+with `Bool.and`. A section a declaration kind does not admit, such as
+`performs` on a `fn`, is `@syntax.invalidSection`. The formatter writes
+sections in the canonical order given under
 [Canonical format](#canonical-format).
 
 ## Declarations
@@ -338,10 +374,14 @@ endfn
 `use @path enduse` imports one module or one public declaration of a module
 under a local name. The name is the path's last part, or the identifier
 after `as`: `use @billing.cents as money enduse`. The closer is always
-written, as for every other declaration. The [programs chapter](04-programs-and-packages.md#modules-and-imports)
-defines resolution. Two imports that produce the same name, or an import
-whose name is a declaration of the module, are `@name.redeclaration`. An
-import whose name is a prelude name is `@name.reservedValueSpelling`.
+written, as for every other declaration. The
+[programs chapter](04-programs-and-packages.md#modules-and-imports) defines
+resolution; because no module path part and no declaration name is a
+reserved word, the default name is always a valid identifier, and `as` only
+ever renames. Two imports that produce the same name, or an import whose
+name is a declaration of the module, are `@name.redeclaration`. An import
+whose name is a prelude name is `@name.reservedValueSpelling`. The
+formatter and the import organizer keep a written `as`.
 
 ### `type`
 
@@ -366,11 +406,12 @@ endtype
 ```
 
 Type parameters are declared in the header. `given` gives a parameter its
-bound; a parameter without an entry has the bound `Any`. `where` states a type
-invariant and `representation` controls who may construct and take apart the
-type; the [type chapter](02-type-system.md#declared-types) defines all three.
-A `type` may nest `fn` and `proc` declarations, which are its static members,
-and `impl` blocks.
+bound, an interface written as in any type position; a parameter without an
+entry has the bound `Any`. `where` states a type invariant and
+`representation` controls who may construct and take apart the type; the
+[type chapter](02-type-system.md#declared-types) defines all three. A `type`
+may nest `fn` and `proc` declarations, which are its static members, and
+`impl` blocks.
 
 `of Intrinsic(@name)` and the `role` section are admissible only in the
 embedded standard library.
@@ -378,12 +419,16 @@ embedded standard library.
 ### `interface`
 
 An interface declares member signatures. A member without `do` is abstract; a
-member with `do` is a default and its body MUST contain at least one
-statement. A nested `type Name endtype`, with no body, declares an
-associated type, which each implementation chooses; the
+member with `do` is a default, and its body is checked like any other
+callable body, so an empty one is `@type.missingReturn`. A nested
+`type Name endtype`, with no body, declares an associated type, which each
+implementation chooses; it is a member of the interface, and the
 [type chapter](02-type-system.md#associated-types) defines it. An interface
 whose members include a `proc` is an operation interface, which the
-[effects chapter](03-effects.md) defines.
+[effects chapter](03-effects.md) defines. When an interface is checked, the
+written result type of each member may place `Self` only where the
+[type chapter](02-type-system.md#interfaces) allows; any other position is
+`@type.unsupportedSelfPosition`.
 
 ```vibra
 interface Printable
@@ -421,8 +466,12 @@ type User of {name: Str id: UserId}
 endtype
 ```
 
-A member of an `impl` MUST have a body, or be an external declaration, and
-MUST match its contract after `Self` is replaced by the receiver type. The
+A callable member of an `impl` MUST have a body, or be an external
+declaration, and MUST match its contract under the
+[substitution](02-type-system.md#substitution) the type chapter defines. A
+`type Name of T endtype` inside an `impl` chooses the associated type `Name`
+and has no body. The operand of `impl` is positional: a label in it, as in
+`impl Iter(Item: U8)`, is `@type.typeArgumentMismatch` at the label. The
 type chapter defines completeness, overlap, and ownership.
 
 ### `fn` and `proc`
@@ -431,6 +480,10 @@ A `fn` is a pure function. A `proc` is a procedure that may perform
 operations; its `performs` section is its closed effect ceiling, and an
 omitted `performs` is the empty row. The ceiling is never inferred. The
 effects chapter defines rows, plans, and `await`.
+
+A `fn` or `proc` has a body unless it is an abstract member of an
+`interface` or an [external definition](#external-definitions). Any other
+`fn` or `proc` written without `do` is `@syntax.invalidForm` at its closer.
 
 `takes` lists the required positional parameters as `Pattern: Type` entries;
 a bare name is the simplest pattern. Every parameter pattern MUST be
@@ -490,22 +543,30 @@ initializer runs. There is no separate constant form.
 test. `takes` is optional and admits exactly one parameter, of the standard
 type `TestWorld`; any other parameter list is `@syntax.invalidForm`. Its
 body has type `Void`, MUST NOT contain a `return` or `try` outside an
-anonymous callable, and may `await`. The [programs chapter](04-programs-and-packages.md#tests)
-defines discovery and the test world.
+anonymous callable, and may `await`. The
+[programs chapter](04-programs-and-packages.md#tests) defines discovery and
+the test world.
 
 ### External definitions
 
 A toolchain-owned declaration binds a signature to a provider. `external` and
-`symbol` MUST occur together, and such a declaration MUST omit its body.
+`symbol` MUST occur together, and such a declaration MUST omit its body. The
+excerpt below is the `addChecked` member of the `I32` declaration in the
+embedded `@std.builtin` module, whose
+[intrinsic registry](06-runtime.md#compiler-intrinsic-registry) row fixes
+the symbol, the owner, and the signature:
 
 ```vibra
-fn addChecked
-  takes {left: I32 right: I32}
-  returns sum: Result(I32 ArithmeticError)
+type I32 of Intrinsic(@i32)
   visibility @public
-  external @compiler
-  symbol "i32.add-checked"
-endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.addChecked"
+  endfn
+endtype
 ```
 
 `@compiler` selects a pure compiler intrinsic and is valid only on a `fn`.
@@ -517,10 +578,13 @@ registered spelling.
 
 External declarations, `native`, `role`, and `Intrinsic` are accepted only in
 the embedded standard-library modules; elsewhere each is
-`@syntax.invalidSection`. A `@host` symbol whose registry owner is not the
-enclosing interface is `@external.ownerMismatch`. An external function is
-applied through its Vibra name with ordinary application; there is no
-foreign-call expression and no source-level foreign function interface.
+`@syntax.invalidSection`. The operand of `visibility`, `representation`,
+`role`, and `external` is one atom of that section's closed tag set; any
+other atom is `@syntax.invalidForm` over the section. A `@host` symbol whose
+registry owner is not the enclosing interface is `@external.ownerMismatch`.
+An external function is applied through its Vibra name with ordinary
+application; there is no foreign-call expression and no source-level foreign
+function interface.
 
 ## Names and paths
 
@@ -728,7 +792,8 @@ run-time type. The type chapter defines irrefutability and coverage.
 
 - UTF-8, LF line endings, one trailing newline, no trailing whitespace;
 - two-space indentation and a limit of 88 columns;
-- one blank line between top-level forms; imports first, in written order;
+- one blank line between top-level forms, which keep their written order;
+  the imports are already first, as the [grammar](#grammar) requires;
 - one space between tokens on a line; none inside `(`, `)`, `{`, `}`, `[`,
   `]`, before `(`, or before `:`; one after `:`;
 - numeric suffixes, string contents, and name spellings exactly as written;
@@ -737,9 +802,11 @@ run-time type. The type chapter defines irrefutability and coverage.
   step, and its closer on its own line at the opener's indentation;
 - in a multi-line declaration, each section on its own line, one step in, in
   this order: `of` or the `case` list, `takes`, `labelled`, `returns`,
-  `given`, `where`, `requires`, `ensures`, `performs`, `role`, `visibility`, `representation`,
-  `external`, `symbol`, `native`, `doc`, then nested `fn` and `proc`
-  members, then `impl` blocks, then `do`;
+  `given`, `where`, `requires`, `ensures`, `performs`, `role`,
+  `visibility`, `representation`, `external`, `symbol`, `native`, `doc`,
+  then the associated type declarations of an interface or the choices of
+  an `impl`, then nested `fn` and `proc` members, then `impl` blocks, then
+  `do`; within each of these three groups the written order is kept;
 - the statements of a callable body two steps in from the declaration, one
   step in from `do`; a guard's `else` on the next line one step in from its
   guard when both do not fit on one line;
@@ -782,3 +849,9 @@ roadmap.
   bases;
 - rest, alternative, and guarded patterns;
 - macros, reader extensions, and any user-defined syntax.
+
+An excluded spelling has no diagnostic of its own; it is whatever the
+grammar makes of it. In particular, a `(` where a top-level form or a
+statement is expected is `@syntax.invalidForm`, reported once over the
+balanced parenthesized form, and `as` anywhere outside a `use` is
+`@syntax.invalidForm` at the `as`.

@@ -1,10 +1,8 @@
 # Vibra effects and authority
 
 Status: normative target
-Implementation status: none of this chapter is implemented. The shipped
-v0.0.1 toolchain implements effect roots declared with a dedicated form and
-checked against a target's root list, with no grant values. This chapter
-replaces that design. Delivery is scheduled in
+Implementation status: none of this chapter is implemented. Delivery is
+scheduled in
 [v0.0.2](../roadmap/v0.0.2/README.md). The Windows file-scope adapter that
 [Filesystem policies](#filesystem-policies) requires has not been shown
 feasible; that check is the first item of the release.
@@ -76,6 +74,12 @@ signature and owner MUST match its registry row. A wrong owner is
 `@external.ownerMismatch`, an unknown symbol `@external.unknownSymbol`,
 and a wrong signature `@external.signatureMismatch`.
 
+A sealed grant is a value of its operation interface's type, and the
+interface's own `external @host` members are its implementation: dispatch
+on a sealed receiver selects the host-bound member, and dispatch on any
+other held value, such as a package's in-memory model of the interface,
+selects that type's `impl`. No hidden carrier type exists.
+
 ## Effect ceilings
 
 A row is a brace-delimited set of names that resolve to operation
@@ -130,8 +134,9 @@ whose row is `{DirWriteText NetSend}`: the types differ, and the call is
 `@type.argumentMismatch`. A procedure that performs less is wrapped in an
 anonymous `proc` that declares the wider row.
 
-In metadata a row is a record with a `roots` list of interface identities,
-sorted by their UTF-8 bytes.
+In metadata a row is a record with a `roots` list of
+[entity reference records](06-runtime.md#types) of the interfaces, sorted by
+the UTF-8 bytes of their `path`.
 
 ## Cold plans and performed rows
 
@@ -183,9 +188,10 @@ effectful walk over a collection is a recursive `proc` over `Iter.next`.
 ## Capability values
 
 A **grant** is a sealed run-time value issued by the runtime under a target's
-binding recipe or, in a test, by the test's world. It records the operation
-it permits, the resource and policy it is limited to, the world that issued
-it, and the limits it shares with its relatives.
+binding recipe or, in a test, derived from the root grant the runner issues
+for the test's world. It records the operation it permits, the resource and
+policy it is limited to, the world that issued it, and the limits it shares
+with its relatives.
 
 No source expression makes a grant. A path, a policy value, a wrapper type,
 an `impl`, and decoded data are not grants and cannot become one. A grant has
@@ -258,9 +264,14 @@ endlet
 - No function combines two grants into one stronger grant.
 
 `ScopeError` (`@std.policy`) has the cases `invalidPolicy`,
-`unsupportedVersion`, `policyTooComplex`, and `foreignRoot`.
-`GrantLimits` is a record of `invocations`, `inputBytes`, and `outputBytes`,
-each an `Option(U64)`.
+`unsupportedVersion`, `policyTooComplex`, and `foreignRoot`. `restrict`
+returns `foreignRoot` for a policy whose rules name a grant leaf other than
+the one the grant descends from; the same policy in a recipe is the build
+error `@grant.invalidPolicy`. `GrantLimits` is a record of `invocations`,
+`inputBytes`, and `outputBytes`, each an `Option(U64)`, where
+`Option.none()` leaves that bound as it was. The three members are rows of
+the [compiler intrinsic registry](06-runtime.md#compiler-intrinsic-registry),
+which the broker implements.
 
 ### Brands
 
@@ -286,24 +297,27 @@ build MUST reject an entry whose row, or a startup step whose row, is not
 contained in it. An interface in the list that nothing performs is a
 warning. The list authorizes nothing.
 
-Every entry parameter MUST have a binding recipe, defined in the
+Every grant leaf of the entry MUST have a binding recipe, defined in the
 [programs chapter](04-programs-and-packages.md#targets). The toolchain MUST
-reject a missing recipe, a recipe whose provider cannot issue the
-parameter's type, a cyclic `after` relation, and a recipe that reads an
-argument or variable without naming the grant for that read.
+reject a missing recipe, a recipe whose provider cannot issue the leaf's
+type, a cyclic `after` relation, and a recipe that reads an argument or
+variable without naming the grant leaf for that read.
 
 What a target is allowed to do MUST be presentable in plain terms from the
 project file alone: for each grant, the actual resource, the operation, the
 policy, and the limits, and not only an interface name. A recipe that reads
-configuration to choose a resource shows that read.
+configuration to choose a resource shows that read, and that read is a
+startup step whose row counts against the admission ceiling.
 
-At startup the runtime acquires grants in the order `after` requires, with
-ties in the order of their names. A required grant that cannot be acquired prevents the
-entry from running. An optional grant refused in the way its provider
-specifies becomes `Option.none()`; a malformed recipe or an incompatible
-driver is an error, never an absence. After a failed startup, grants already
-acquired are released in reverse order. Release is not rollback: an external
-effect that already happened is reported, not undone.
+At startup the runtime acquires grants in the
+[startup order](04-programs-and-packages.md#startup-order) the programs
+chapter defines. A required grant that cannot be acquired prevents the entry
+from running. An optional grant refused in the way its provider specifies
+becomes `Option.none()`; a malformed recipe or an incompatible driver is an
+error, never an absence. On every ending of the process, a failed startup
+included, the acquired grants are released in reverse acquisition order.
+Release is not rollback: an external effect that already happened is
+reported, not undone.
 
 No operation returns `Never`, and none terminates the process. The
 [runtime chapter](06-runtime.md#entry-outcome) defines how a run ends.
@@ -383,9 +397,9 @@ Unknown fields, kinds, and versions are rejected.
 | `@fileRule` | `root`, `prefix` (list of names), `depth` (`@children`, `@tree`), `actions` (set of `@read`, `@replace`, `@create`, `@stat`), `names` |
 | `@directoryRule` | `root`, `prefix`, `depth` (`@self`, `@children`, `@tree`), `actions` (set of `@list`, `@stat`) |
 
-`root` names the entry parameter whose recipe holds the directory. `names`
-is a record whose `kind` is `@anyName`; `@exact` with `names`; `@suffix`
-with `value`; or `@allOf` or `@anyOf` with `items`.
+`root` names the grant leaf whose recipe holds the directory. `names` is a
+record whose `kind` is `@anyName`; `@exact` with `names`; `@suffix` with
+`value`; or `@allOf` or `@anyOf` with `items`.
 
 A policy is normalized before it is hashed or shown: nested `allOf` or
 `anyOf` of the same kind are flattened, duplicate items removed, items
@@ -416,11 +430,18 @@ selects directories: `self` is `prefix` itself, `children` one name further,
 - **Paths.** A `RelativePath` (`@std.fs`) is a list of names, built by the
   fallible constructor `RelativePath(names)`. A name is non-empty and is
   rejected if it is `.` or `..`, contains `/`, `\`, `:`, NUL, or a control
-  character, ends in a dot or a space, or is a reserved Windows device name
-  with or without an extension. Absolute, drive-relative, UNC, and device
-  paths cannot be represented. Nothing is expanded, decoded, or stripped.
-  Prefixes are compared name by name, never as strings, so `reports` does
-  not cover `reportsOld`.
+  character, ends in a dot or a space, or is a reserved device name.
+  Absolute, drive-relative, UNC, and device paths cannot be represented.
+  Nothing is expanded, decoded, or stripped. Prefixes are compared name by
+  name, never as strings, so `reports` does not cover `reportsOld`.
+- **Reserved device names.** Names are portable: the same closed set is
+  rejected on every platform. A name's **stem** is the part before its
+  first dot, with trailing spaces removed. A name is rejected when its
+  stem, compared without case, is one of `CON`, `PRN`, `AUX`, `NUL`,
+  `CONIN$`, `CONOUT$`, `COM0` through `COM9`, `LPT0` through `LPT9`, or
+  the superscript-digit forms `COM¹`, `COM²`, `COM³`, `LPT¹`, `LPT²`,
+  `LPT³`. So `nul`, `NUL.txt`, and `con .log` are rejected and `nul2` is
+  not.
 - **Names.** A name test compares exact Unicode scalars, with no case
   folding and no normalization. `suffix(".txt")` accepts `notes.txt` and
   `.txt` and rejects `notes.TXT` and `notes.txt.exe`. An empty suffix is
@@ -450,9 +471,11 @@ user is shown when approving a target:
   is renamed, the grant still refers to it; if another directory takes its
   old path, the grant does not refer to that one.
 - **Hard links.** A permitted file name can be a hard link to a file that
-  also has a name elsewhere. A policy does not establish where data came
-  from or that a write is seen only under the permitted name. A read-only
-  grant still cannot write.
+  also has a name elsewhere. Reading such a file is allowed: its content is
+  an entry of the scoped directory, and a policy does not establish where
+  data came from. Replacing it MUST be refused with `denied` when the
+  platform reports a link count above one, because the change would be
+  visible outside the scope. A read-only grant still cannot write.
 
 ### HTTP policies
 
@@ -479,12 +502,20 @@ describes the request sent, not what the server does with it.
 ### Limits
 
 A grant's limits count invocations and payload bytes in and out, in encoded
-bytes. They do not bound time, processor use, or metadata traffic. A child
-grant can only tighten a limit, and every copy and descendant of a grant
-draws on the same ancestor counters, which the runtime's broker owns. The
-broker reserves before an action, charges actual progress, and does not
-refund an action whose outcome is unknown. A counter that would overflow
-denies. Exhaustion is the typed error `limitExceeded`.
+bytes. An **invocation** is every call that passed reservation. **Input
+bytes** are the bytes the program receives: file contents, standard input,
+a variable's value, argument text, and random bytes. **Output bytes** are
+the bytes it sends: written file contents and stream writes. Metadata
+results, such as a directory listing or a `stat`, count as an invocation
+only. The limits do not bound time, processor use, or metadata traffic. A
+child grant can only tighten a limit, and every copy and descendant of a
+grant draws on the same ancestor counters, which the runtime's broker owns.
+The broker reserves before an action, charges actual progress, and does not
+refund an action whose outcome is unknown; the
+[runtime chapter](06-runtime.md#closed-operation-semantics) says how a
+read of unknown size is reserved. A counter that would overflow denies. An
+omitted bound, in a recipe or in `GrantLimits`, is unbounded. Exhaustion is
+the typed error `limitExceeded`.
 
 ## Delivery and typed outcomes
 
@@ -508,21 +539,20 @@ least these cases, in addition to the operation's own:
 
 | Case | Meaning |
 | --- | --- |
-| `denied` | The grant's policy does not permit the request; nothing was attempted |
+| `denied` | The request was refused: no file content was read, created, or changed. The policy may refuse before the adapter runs, or the driver may refuse after opening an entry (a link, a reparse point, a name that fails the real-name check, a replace the hard-link rule forbids); the latter is a completed, traced call |
 | `limitExceeded` | A limit would be exceeded; nothing was attempted |
 | `unsupported` | The platform cannot enforce the grant for this action; nothing was attempted |
 | `outcomeUnknown` | The action was submitted and its result is not known |
 
-"Nothing was attempted", "failed", and "may have happened" stay distinct.
-There is no implicit conversion between error types.
+"Refused", "failed", and "may have happened" stay distinct. There is no
+implicit conversion between error types.
 
 ## Standard operation inventory
 
 Each row of the host registry, major version 2, is one operation interface
-in an embedded module. The wire symbols are those of v0.0.1; the source
-names, the grant receiver, and the error cases are new. The first parameter
-of every member is the grant. The [runtime chapter](06-runtime.md#host-registry)
-gives each signature and its exact behavior.
+in an embedded module. The first parameter of every member is the grant. The
+[runtime chapter](06-runtime.md#host-registry) gives each signature and its
+exact behavior.
 
 | Module | Interface and member | Wire symbol | Resource |
 | --- | --- | --- | --- |

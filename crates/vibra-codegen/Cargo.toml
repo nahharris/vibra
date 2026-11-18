@@ -16,7 +16,9 @@ vibra-nexus-bridge.workspace = true
 # are pinned to the version of `cranelift-codegen` that Wasmtime already locks,
 # so the lock file holds one Cranelift. No ISA feature is enabled here: the
 # ISAs available are the ones the existing graph provides.
-cranelift-codegen = "=0.136.2"
+# The `x86` backend is named explicitly: without it Cranelift builds only the
+# host's backend, and an ARM host could not emit the Windows x86-64 object.
+cranelift-codegen = { version = "=0.136.2", features = ["x86"] }
 cranelift-frontend = "=0.136.2"
 cranelift-module = "=0.136.2"
 cranelift-object = "=0.136.2"
