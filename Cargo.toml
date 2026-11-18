@@ -15,6 +15,7 @@ publish = false
 vibra-actors = { path = "crates/vibra-actors" }
 vibra-build = { path = "crates/vibra-build" }
 vibra-codegen = { path = "crates/vibra-codegen" }
+vibra-cli = { path = "crates/vibra-cli" }
 vibra-conformance = { path = "crates/vibra-conformance" }
 vibra-conformance-v1 = { path = "crates/vibra-conformance-v1" }
 vibra-diagnostics = { path = "crates/vibra-diagnostics" }
@@ -33,6 +34,7 @@ vibra-nexus-eval = { path = "crates/vibra-nexus-eval" }
 vibra-schema-v1 = { path = "crates/vibra-schema-v1" }
 vibra-syntax-v1 = { path = "crates/vibra-syntax-v1" }
 vibra-resolve-v1 = { path = "crates/vibra-resolve-v1" }
+vibra-schema = { path = "crates/vibra-schema" }
 vibra-types-v1 = { path = "crates/vibra-types-v1" }
 vibra-wasm = { path = "crates/vibra-wasm" }
 vibra-wasm-run = { path = "crates/vibra-wasm-run" }

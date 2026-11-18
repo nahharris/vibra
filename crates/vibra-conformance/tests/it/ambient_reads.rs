@@ -26,6 +26,10 @@ const TOOLING_EXCEPTIONS: &[(&str, &str)] = &[
         "reads the command line and the process environment of the `vibra` binary",
     ),
     (
+        "vibra-cli",
+        "reads the command line, the working directory, and the standard streams of the `vibra` binary, in `main.rs`",
+    ),
+    (
         "vibra-workspace-v1",
         "acquires a project's files through the confined filesystem",
     ),

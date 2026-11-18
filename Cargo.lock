@@ -1455,6 +1455,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "vibra-cli"
+version = "0.0.1"
+dependencies = [
+ "serde_json",
+ "vibra-diagnostics",
+ "vibra-schema",
+]
+
+[[package]]
 name = "vibra-cli-v1"
 version = "0.0.1"
 dependencies = [
@@ -1637,6 +1646,16 @@ version = "0.0.1"
 dependencies = [
  "vibra-diagnostics-v1",
  "vibra-syntax-v1",
+]
+
+[[package]]
+name = "vibra-schema"
+version = "0.0.1"
+dependencies = [
+ "jsonschema",
+ "serde",
+ "serde_json",
+ "vibra-diagnostics",
 ]
 
 [[package]]
