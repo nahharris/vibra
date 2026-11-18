@@ -30,6 +30,10 @@ const TOOLING_EXCEPTIONS: &[(&str, &str)] = &[
         "acquires a project's files through the confined filesystem",
     ),
     (
+        "vibra-conformance",
+        "reads the conformance corpus, its rule index, and its fixtures, and its binary reads the command line",
+    ),
+    (
         "vibra-conformance-v1",
         "reads the conformance corpus and its fixtures",
     ),

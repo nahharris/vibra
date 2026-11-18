@@ -78,7 +78,7 @@ the vertical-slice rule.
 | Id | Name | Kind | Depends on | Can run in parallel with | Crates touched | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | 01 | [rename-v1](steps/01-rename-v1.md) | infrastructure | — | — | every existing crate, `Cargo.toml`, CI, `stdlib-v1/`, `examples-v1/`, `fuzz-v1/`, `conformance/v1/` | planned |
-| 02 | [diagnostics-and-harness](steps/02-diagnostics-and-harness.md) | infrastructure, specification prerequisite | 01 | — | `vibra-diagnostics`, `vibra-conformance` (new) | planned |
+| 02 | [diagnostics-and-harness](steps/02-diagnostics-and-harness.md) | infrastructure, specification prerequisite | 01 | — | `vibra-diagnostics`, `vibra-conformance` (new) | landed |
 | 03 | [lexer-and-vibon](steps/03-lexer-and-vibon.md) | vertical | 02 | 12, 13, 24 | `vibra-syntax`, `vibra-fmt` (new), `vibra-conformance`, `conformance/cases`, CI | planned |
 | 04 | [source-skeleton](steps/04-source-skeleton.md) | vertical | 03 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |
 | 05 | [type-declarations](steps/05-type-declarations.md) | vertical | 04 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |

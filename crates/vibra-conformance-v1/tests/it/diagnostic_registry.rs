@@ -1,107 +1,11 @@
-//! Checks the implemented registry against the specification's canonical
-//! table.
+//! Checks the internal consistency of the v1 registry.
 //!
-//! `docs/spec/07-diagnostics-and-conformance.md` carries the canonical table
-//! of codes and levels and requires, under `V1-DIAG`, that the queryable
-//! registry and that table agree on membership, level, domain, and fix
-//! capability. This test is that check. Without it the two could drift, and
-//! the release gate's requirement that a code's registered level match what it
-//! emits would rest on nobody having made a typo.
+//! The specification's table describes the registry of `vibra-diagnostics`,
+//! which `vibra-conformance` checks against it. The v1 registry keeps the
+//! checks that need no table: domain, fix capability, and level population.
 
 // A test asserts by panicking.
-use crate::support::workspace_root;
-
-use std::collections::BTreeMap;
-
 use vibra_diagnostics_v1::{DiagnosticCode, FixCapability, Level};
-
-const CHAPTER: &str = "docs/spec/07-diagnostics-and-conformance.md";
-
-/// The code-to-level table in the specification chapter.
-///
-/// Rows are `| `@code` | `@level` |`. Nothing else in the chapter has that
-/// shape, and an empty result fails the test rather than passing vacuously.
-fn specification_table() -> BTreeMap<String, String> {
-    let path = workspace_root().join(CHAPTER);
-    let text = std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
-
-    let mut table = BTreeMap::new();
-    for line in text.lines() {
-        let cells: Vec<&str> = line.split('|').map(str::trim).collect();
-        // A well-formed row splits into "", code, level, "".
-        if cells.len() != 4 {
-            continue;
-        }
-        let (Some(code), Some(level)) = (
-            cells[1].strip_prefix('`').and_then(|c| c.strip_suffix('`')),
-            cells[2].strip_prefix('`').and_then(|c| c.strip_suffix('`')),
-        ) else {
-            continue;
-        };
-        if !code.starts_with('@') || !matches!(level, "@error" | "@warning") {
-            continue;
-        }
-
-        let previous = table.insert(code.to_owned(), level.to_owned());
-        assert!(previous.is_none(), "{code} appears twice in the table");
-    }
-
-    assert!(
-        !table.is_empty(),
-        "found no code table in {CHAPTER}; the parser or the chapter changed"
-    );
-    table
-}
-
-fn implemented_registry() -> BTreeMap<String, String> {
-    DiagnosticCode::ALL
-        .iter()
-        .map(|code| (code.as_atom().to_owned(), code.level().as_atom().to_owned()))
-        .collect()
-}
-
-#[test]
-#[ignore = "the specification describes the redesigned language; restored by v0.0.2 M0 and M1 (docs/roadmap/v0.0.2/m0/README.md)"]
-fn the_registry_and_the_specification_table_have_the_same_codes() {
-    let specified = specification_table();
-    let implemented = implemented_registry();
-
-    let missing: Vec<&String> = specified
-        .keys()
-        .filter(|code| !implemented.contains_key(*code))
-        .collect();
-    assert!(
-        missing.is_empty(),
-        "specified but not implemented: {missing:?}"
-    );
-
-    let extra: Vec<&String> = implemented
-        .keys()
-        .filter(|code| !specified.contains_key(*code))
-        .collect();
-    assert!(
-        extra.is_empty(),
-        "implemented but not in the specification table: {extra:?}"
-    );
-}
-
-#[test]
-fn every_registered_level_matches_the_specification_table() {
-    let specified = specification_table();
-
-    for code in DiagnosticCode::ALL {
-        let Some(expected) = specified.get(code.as_atom()) else {
-            continue; // Membership is the other test's failure to report.
-        };
-        assert_eq!(
-            code.level().as_atom(),
-            expected,
-            "{} has the wrong level; the specification table governs",
-            code.as_atom()
-        );
-    }
-}
 
 #[test]
 fn every_registered_domain_is_the_first_component_of_its_code() {

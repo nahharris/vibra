@@ -10,5 +10,8 @@
 
 mod support;
 
+mod ambient_reads;
+mod architecture_boundary;
+mod diagnostic_registry;
 mod manifest;
 mod runner;

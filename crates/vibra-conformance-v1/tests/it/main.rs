@@ -15,8 +15,6 @@
 mod support;
 
 mod activations;
-mod ambient_reads;
-mod architecture_boundary;
 mod arena;
 mod arena_emitted;
 mod arena_runtime;
