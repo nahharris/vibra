@@ -459,6 +459,9 @@ pub(crate) struct DataShaper<'a> {
     /// application, which is reported once, at its first token.
     paren_depth: usize,
     interner: Interner,
+    /// Whether repeated dict keys are reported. A schema reader compares keys
+    /// itself, as typed values, after it has typed them.
+    check_keys: bool,
 }
 
 impl<'a> DataShaper<'a> {
@@ -468,6 +471,15 @@ impl<'a> DataShaper<'a> {
             diagnostics: Vec::new(),
             paren_depth: 0,
             interner: Interner::default(),
+            check_keys: true,
+        }
+    }
+
+    /// The shaper of a schema reader: dict keys are left to the schema.
+    pub(crate) fn without_key_check(text: &'a str) -> Self {
+        Self {
+            check_keys: false,
+            ..Self::new(text)
         }
     }
 
@@ -862,7 +874,7 @@ impl<'a> DataShaper<'a> {
                     );
                 }
                 (SyntaxKind::Dict, Shaped::Entry(entry, key, _))
-                    if !keys.insert(*key) =>
+                    if self.check_keys && !keys.insert(*key) =>
                 {
                     unique = false;
                     self.report(

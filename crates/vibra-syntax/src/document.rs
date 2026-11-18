@@ -142,6 +142,21 @@ impl Document {
 /// repeated dict keys.
 #[must_use]
 pub fn parse_data(source_id: Option<&str>, bytes: &[u8]) -> Document {
+    parse_data_with(source_id, bytes, true)
+}
+
+/// Parses a `.vibon` document for a schema reader: as [`parse_data`], except
+/// that repeated dict keys are not reported, because a schema compares keys
+/// as typed values after it has typed them.
+pub(crate) fn parse_data_for_schema(source_id: Option<&str>, bytes: &[u8]) -> Document {
+    parse_data_with(source_id, bytes, false)
+}
+
+fn parse_data_with(
+    source_id: Option<&str>,
+    bytes: &[u8],
+    check_keys: bool,
+) -> Document {
     let (text, mut diagnostics) = check_encoding(bytes);
     let Some(text) = text else {
         return Document::finish(
@@ -155,7 +170,11 @@ pub fn parse_data(source_id: Option<&str>, bytes: &[u8]) -> Document {
     };
     let lexed = lex(text);
     diagnostics.extend(lexed.diagnostics);
-    let mut shaper = DataShaper::new(text);
+    let mut shaper = if check_keys {
+        DataShaper::new(text)
+    } else {
+        DataShaper::without_key_check(text)
+    };
     let items =
         match_brackets(&lexed.tokens, text.len(), &mut shaper, &mut diagnostics);
     let (root, value) = shaper.shape_document(items);

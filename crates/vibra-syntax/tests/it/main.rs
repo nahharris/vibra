@@ -12,4 +12,5 @@ mod support;
 
 mod data;
 mod lexer;
+mod schema;
 mod tree;

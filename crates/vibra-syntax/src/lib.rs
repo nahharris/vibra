@@ -12,6 +12,10 @@
 //! lexes and matches brackets and reports the source grammar as
 //! `@tool.unavailable`: the source grammar arrives in a later step.
 //!
+//! [`decode`] reads a data document under a closed record [`Schema`], in the
+//! validation order of the programs chapter's "Schemas", and
+//! [`TypedDocument::canonical_bytes`] writes its canonical bytes.
+//!
 //! # Position in the architecture
 //!
 //! This crate depends only on `vibra-diagnostics`. It reads no file: callers
@@ -23,6 +27,7 @@ mod data;
 mod document;
 mod lexer;
 mod literal;
+mod schema;
 mod tree;
 
 pub use cst::{CstNode, SyntaxKind};
@@ -36,5 +41,10 @@ pub use lexer::{
 pub use literal::{
     FloatSuffix, IntegerSuffix, canonical_character, canonical_string,
     decode_character, decode_string,
+};
+pub use schema::{
+    Decoded, DefaultValue, FieldSchema, Presence, RecordSchema, Schema, Slot,
+    SpellingRule, TypedDocument, TypedEntry, TypedField, TypedNode, TypedValue,
+    VariantSchema, compare, decode,
 };
 pub use tree::{TREE_FORMAT, tree_document, tree_text};
