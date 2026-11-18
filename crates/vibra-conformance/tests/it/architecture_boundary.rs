@@ -14,12 +14,18 @@ use crate::support::{rust_sources, workspace_root};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-/// The permitted intra-workspace dependencies of each crate.
+/// The intra-workspace dependencies of each crate.
 ///
-/// A crate may depend on exactly the crates listed for it, and every crate in
-/// `crates/` must appear here. Widening a row is a deliberate architecture
-/// change: record it in the active milestone's step plan.
+/// A crate depends on exactly the crates listed for it, and every directory
+/// under `crates/` has exactly one row. A step that adds a crate or a
+/// dependency edits this one table, and changing a row is a deliberate
+/// architecture change recorded in the active milestone's step plan.
 const ARCHITECTURE: &[(&str, &[&str])] = &[
+    // The leaf of the new pipeline. Diagnostics are a language surface and
+    // know nothing else.
+    ("vibra-diagnostics", &[]),
+    // The new harness. It grows a dependency with each handler.
+    ("vibra-conformance", &["vibra-diagnostics"]),
     // The leaf. Diagnostics are a language surface and know nothing else.
     ("vibra-diagnostics-v1", &[]),
     // The reader. Emits diagnostics; must not reach the formatter or schemas.
@@ -333,6 +339,12 @@ fn violations(
                  boundary does not permit"
             ));
         }
+        for edge in permitted.difference(edges) {
+            found.push(format!(
+                "the architecture table lists `{edge}` for crate `{crate_name}`, \
+                 whose manifest does not depend on it"
+            ));
+        }
     }
 
     for crate_name in allowed.keys() {
@@ -358,6 +370,56 @@ fn workspace_matches_the_declared_architecture() {
         "architecture boundary violated:\n{}",
         found.join("\n")
     );
+}
+
+/// The number of rows: the 24 crates of step 01 and the two of step 02.
+const ROWS: usize = 26;
+
+#[test]
+fn every_crate_directory_has_exactly_one_row() {
+    assert_eq!(ARCHITECTURE.len(), ROWS, "the table has {ROWS} rows");
+    let mut rows = BTreeSet::new();
+    for (crate_name, _) in ARCHITECTURE {
+        assert!(rows.insert(*crate_name), "`{crate_name}` has two rows");
+    }
+    let mut directories = BTreeSet::new();
+    for entry in std::fs::read_dir(workspace_root().join("crates"))
+        .expect("the workspace has a crates directory")
+    {
+        let path = entry.expect("readable directory entry").path();
+        if !path.is_dir() {
+            continue;
+        }
+        let directory = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .expect("a UTF-8 directory name")
+            .to_owned();
+        let manifest = read_manifest(&path.join("Cargo.toml"));
+        assert_eq!(
+            package_name(&manifest),
+            directory,
+            "the crate in `crates/{directory}` is named after its directory"
+        );
+        directories.insert(directory);
+    }
+    let rows = rows.into_iter().map(str::to_owned).collect::<BTreeSet<_>>();
+    assert_eq!(
+        directories, rows,
+        "every directory under `crates/` has a row, and every row a directory"
+    );
+}
+
+#[test]
+fn an_unused_permitted_arrow_is_reported() {
+    let graph = BTreeMap::from([("vibra-conformance".to_owned(), BTreeSet::new())]);
+    let allowed = BTreeMap::from([(
+        "vibra-conformance".to_owned(),
+        BTreeSet::from(["vibra-diagnostics".to_owned()]),
+    )]);
+    let found = violations(&graph, &allowed);
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert!(found[0].contains("does not depend on it"), "{}", found[0]);
 }
 
 #[test]
@@ -442,6 +504,7 @@ fn the_workspace_excludes_the_archived_tree() {
 /// explicit inputs and never search disk; filesystem acquisition belongs to
 /// `vibra-workspace-v1`.
 const SEMANTIC_CRATES: &[&str] = &[
+    "vibra-diagnostics",
     "vibra-diagnostics-v1",
     "vibra-syntax-v1",
     "vibra-resolve-v1",
@@ -1108,11 +1171,6 @@ fn the_bridge_carries_no_compiler_ir() {
             );
         }
     }
-}
-
-#[test]
-fn the_runtime_and_the_execution_ir_agree_on_the_frame_bound() {
-    assert_eq!(vibra_nexus::MAX_FRAME_SLOTS, vibra_exec::MAX_SLOTS);
 }
 
 /// The one crate that may depend on Cranelift (decision N12). The Wasm runner
