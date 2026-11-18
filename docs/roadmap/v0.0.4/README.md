@@ -1,67 +1,106 @@
 # Vibra v0.0.4
 
-**Planned pre-alpha release.** Ship typed local actors as the model for
-long-lived private state and effectful services. Separate the authority to
-send a request from the effects its handler can execute. Start after
-[v0.0.3](../v0.0.3/README.md) qualifies Nexus and completes the Wasm cutover.
+**Planned pre-alpha release.** Vibra programs use real dependencies, agents
+reach the toolchain through thin adapters, and programs run bounded local
+concurrency on several CPU workers.
 
-## Delivery order
+| Order | Milestone | Evidence |
+| --- | --- | --- |
+| M1 | [Libraries and tool adapters](m1/README.md) | A real typed dependency is pinned, inspected, integrated, upgraded, and repaired. The adapters return the same facts as the machine CLI. |
+| M2 | [Concurrency semantics and simulation](m2/README.md) | Scoped children, a bounded parallel map, and receive-loop actors run on the interpreter under recorded, replayable schedules. |
+| M3 | [Native workers](m3/README.md) | The same semantics on native code, with two workers making progress at the same time. |
 
-1. **Specify local actors and message authority.** Define typed mailboxes,
-   scoped send addresses, one-shot replies, ownership and transfer, and
-   target effect admission. Define ordering, full and closed mailboxes,
-   actor exit, and timeout semantics. Update the affected charter,
-   language, effects, runtime, tooling, and conformance contracts before
-   implementing them.
-2. **Prove the local model in simulation.** Run one message handler at a
-   time per actor. Carry immutable state between turns and share immutable
-   snapshots. Use bounded mailboxes and deterministic scheduling with
-   recorded park, wake, delivery, reply, and exit events. Surface source
-   origins for the send, handler, and associated host operation.
-3. **Run local actors on Nexus workers.** Use the same actor semantics and
-   replay cases with native execution. Demonstrate that two actors can run
-   concurrently on separate CPU workers while preserving single ownership
-   of each actor's state. Keep actor addresses independent of worker
-   placement. Select placement before initialization and expose actual
-   placement through tooling.
+## What concurrency looks like
 
-## Capabilities and effects
+A shared actor kernel is the substrate. It is not what most programs meet
+first. The first two library paths are:
 
-Define the authority rules during the Nexus design review and implement them
-with actors. The first capability is a typed, unforgeable send address. A
-holder can request the operations exposed by that address. Passing the
-address delegates the same authority. Specify how an actor can issue a
-narrower address and require the dispatch boundary to enforce its operation
-and resource scope.
+- **A scoped child with join.** A scope bounds the children started in it,
+  and defines what join, cancel, and exit do.
+- **A bounded, ordered parallel map.** It has an explicit bound, returns
+  results in input order, and has a sequential fallback with the same
+  result. Its callback is pure.
 
-Use a persistence actor that issues a save address for one document and keeps
-its broader administrative protocol separate. The sender's performed row
-contains the messaging effect. The handler's row contains the filesystem
-write, and the target still declares the host effects of the actor bodies
-it can start. Show both the sender's direct effect and the causal path
-through the handler in tooling. An address scopes the request. The host
-registry and its platform adapters retain their own execution contract.
+A long-lived actor is a receive loop with an explicit lifetime. The author
+of a command-line program is not required to design a mailbox protocol to
+use two cores.
 
-Holder binding, revocation, and general host-resource capabilities are
-separate designs. Reopen them when a concrete protocol requires authority
-that cannot be forwarded, must be withdrawn, or must constrain the host
-operation itself. Distribution, live migration, general mutable references,
-and a separate CPU fork/join API are also follow-on work.
-[Live debugging](../scratchpad/agent-tooling/debugger.md) will use the
-execution and actor contracts proved by this release.
+## Starting point
+
+Host grants and closed effect ceilings exist from
+[v0.0.2](../v0.0.2/README.md). An actor endpoint is one more kind of grant,
+checked by the kernel when a message is dispatched; it is not the language's
+first capability.
+
+M1 needs only the snapshots and tooling of v0.0.2 and does not wait for
+native code. M2 runs on the interpreter and the backend-neutral kernel. M3
+needs the qualified native execution of [v0.0.3](../v0.0.3/README.md) M2.
+Work that overlaps an unfinished release is recorded as such, and nothing
+incomplete is advertised.
+
+The concurrency design and its work packages are in the
+[Nexus plan](../nexus/plan-v0.0.4.md).
+
+## Specification first
+
+Before any concurrency code, the specification gains the exact library and
+source shapes, diagnostics, and schemas, in one reviewed change (package
+X4-S1). The first choice is library types and operation interfaces over the
+existing forms; a new keyword needs its own justification. An implementation
+package does not invent a name the specification left open.
+
+## Boundaries
+
+- **One kernel.** It owns lifetimes, mailboxes, protocol checks, replies,
+  timers, and events. The interpreter and the native runtime both drive it.
+  A parked activation has one owner at a time.
+- **Cancellation is not rollback.** Cancelling after a host action was
+  submitted does not undo it. A late or unknown outcome stays visible.
+- **The parallel map promises order, not speed.** Purity does not promise a
+  speedup or bounded memory. Its callback crosses to another context under
+  its own checked rule for code and captures; the general rule that a
+  function cannot cross in a message does not disable it.
+- **Workers.** A fixed pool of operating-system threads. Placement is chosen
+  before initialization. A context is pinned and has one owner. No work
+  stealing and no migration. Reference counts stay non-atomic.
+- **Transfer.** A message is copied as neutral data. A grant is delegated
+  through the broker. No arena offset crosses a context.
+- **Wait cycles.** An acyclic import graph does not rule out two contexts
+  waiting on each other at run time. A run in which nothing can proceed is
+  reported.
 
 ## Release gate
 
-Use one local document service fixture with a state actor and a persistence
-actor. Send a save for one revision, edit the document while the write is
-pending, and show that the reply cannot mark the newer revision as saved.
-Exercise an attempted out-of-scope save, a full mailbox, a duplicate reply,
-and an actor exit while a caller waits. Reject a direct write outside the
-caller's effect ceiling and reject a target that omits the handler's
-required effect.
+**Libraries.** A real dependency is integrated and then upgraded. The record
+states the costs of conversion, of modelling its behavior, and of the
+assurance it needed, and where its authority begins and ends.
 
-Replay the same recorded fixture schedule in the interpreter and native
-execution on Windows x64, Linux x86-64, and macOS arm64. Compare outcomes,
-message and host events, and source origins. In a separate native fixture,
-show overlapping progress on two CPU workers. Run both the host-language
-suite and the independent Vibra conformance corpus before tagging.
+**Concurrency.** Cases cover nested bounded fan-out, an early failure,
+cancellation before and after dispatch, a late reply, backpressure, a
+timeout, and exit while a caller waits. A full mailbox, a closed mailbox,
+and a duplicate reply are typed outcomes. Nothing proves statically that a
+handler replies.
+
+**Replay.** A recorded simulation schedule replays on the interpreter and on
+all three native targets, with equal outcomes, message and host events, and
+origins. An invalid, truncated, or over-long schedule fails replay
+explicitly. A production run on several cores need not reproduce the
+simulation's event order; it must keep the promised ordering and safety.
+
+**Overlap.** A separate fixture on real hardware shows two workers making
+progress at the same time.
+
+Both suites and the schema, diagnostic, and approval regressions pass before
+tagging.
+
+## Not in this release
+
+Distribution, live migration, work stealing, implicitly shared heaps, a
+linear type that forces a reply, a proof of deadlock freedom, exactly-once
+external effects, and crash recovery. [v0.0.5](../v0.0.5/README.md)
+qualifies service behavior and recovery. Native user interfaces remain
+future work.
+
+Each milestone needs an approved contract and a step plan under the
+[execution model](../execution.md) before its implementation begins. No gate
+of this release is evidenced yet.

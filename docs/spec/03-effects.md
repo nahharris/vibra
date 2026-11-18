@@ -1,447 +1,576 @@
-# Vibra effects
+# Vibra effects and authority
 
 Status: normative target
-Implementation status: empty effect ceilings and pure execution are admitted
-through M3. Milestone 4 Step 13 closed the Stage 4B contracts of this chapter,
-of the host registry, and of the host world in the runtime chapter. Milestone 4
-Step 14 implements the static half of this chapter in the checker, the typed
-IR, and both backends: `deffect` roots and operations with Vibra bodies, effect
-rows on every function, `lambda`, function type, interface contract member, and
-test, performed rows over the function-call graph, `@effect.outside-ceiling`
-with its witness, `@effect.invalid-reference`, `@contract.unused-effect` for a
-written root, and the row in the canonical `fn` type encoding. Step 15 adds the
-target `effects` array and effectful-test consent, and Steps 16 to 18 the `@host`
-externals, `@std.io`, and `@std.fs`, with the environment, clock, and random modules; Step 20
-adds the query and index metadata, read from the same graph.
+Implementation status: none of this chapter is implemented. The shipped
+v0.0.1 toolchain implements effect roots declared with a dedicated form and
+checked against a target's root list, with no grant values. This chapter
+replaces that design. Delivery is scheduled in
+[v0.0.2](../roadmap/v0.0.2/README.md). The Windows file-scope adapter that
+[Filesystem policies](#filesystem-policies) requires has not been shown
+feasible; that check is the first item of the release.
 
-## Static contract
+## Two mechanisms
 
-An effect answers “what may this code attempt?” during checking. Vibra effects are
-static and erased; they are not runtime permissions, capability values, or a
-sandbox.
+Vibra controls what a program does to the world with two mechanisms, and
+both are required for every operation.
 
-- a function application whose performed row exceeds its enclosing effect
-  ceiling is a type error;
-- every host operation belongs to one nominal effect root; and
-- a binary target's declared roots must contain the entry function's complete
-  performed row before that target can run or build.
+- An **effect ceiling** is static. A procedure writes the set of operation
+  interfaces it may perform, and the checker rejects a body that could
+  perform anything outside that set.
+- A **grant** is a value. Performing an operation needs a grant for it,
+  passed as an ordinary argument. A grant is sealed: a program can receive
+  one, pass it on, and narrow it, and can never make one.
 
-The runtime receives no grant table and performs no path-level effect check. If
-a user runs a target that declares `fs.read`, that run consents to `fs.read`
-operations for every path the program supplies. Operating-system access rules
-and failures still apply, but they are not Vibra effect grants.
+A ceiling answers "which kinds of operation can this code perform at all". A
+grant answers "on which resource, and within which limits". Naming an
+interface in a ceiling gives no authority; holding a grant does not widen a
+ceiling.
 
-### Executable effects before the host
+The checker MUST reject a body whose computed row exceeds its written
+ceiling. Host dispatch MUST require a grant and enforce its policy. Missing
+authority MUST NOT fall back to the process's ambient access. A denial, an
+unsupported action, and an exhausted limit are `Result` values; none is
+reported as success and none traps.
 
-Since Milestone 4 Step 14, checking and execution admit nonempty written
-ceilings and nonempty performed rows on function types, `defn`, `lambda`,
-tests, and effect operations. Rows are erased: neither backend consults one, and
-an effect operation with a Vibra body is an ordinary function that both run as
-such. An omitted row is empty as specified below. Since Steps 16 to 18 a `@host`
-external is executable in both backends, and since Step 15 a project target's
-effect-consent array gates an effectful entry.
+These rules constrain code compiled by the toolchain and the runtime and
+drivers it ships. They are not a sandbox for arbitrary machine code or a
+defense against another process with the same privileges. Vibra does not
+track information flow and does not prove that a program holds the least
+authority it needs.
 
-## Nominal effects
+## Operation interfaces
 
-`deffect` introduces a nominal root and interface-like operations. Each
-operation is declared with an unqualified name and is referenced through the
-root that owns it:
+An interface that declares at least one `proc` member is an **operation
+interface**. It is one effect root. Its identity is its declaration's
+identity; an import name or a member name never identifies it. Every
+application of a generic operation interface is the same root.
 
 ```vibra
-(deffect read
-  visibility: @public
-  (defn file (at path) (result bytes fs-error)
-    visibility: @public
-    external: @host
-    symbol: "fs.read-file")
-  (defn text (at path) (result str fs-error)
-    visibility: @public
-    external: @host
-    symbol: "fs.read-text"))
+interface AuditLog
+  visibility @public
+  proc append
+    takes {log: Self entry: Str}
+    returns outcome: Result(Void AuditError)
+  endproc
+endinterface
 ```
 
-When this declaration belongs to module `fs`, its source root is `fs.read` and
-its operations are `fs.read.file` and `fs.read.text`. The defining package and
-module, not an import alias, form the canonical identity. An operation is a
-declaration with its own visibility: as for a `deftype` method, it is private
-unless it writes `visibility: @public`, whatever the visibility of its root.
-Another module applies an operation only when the operation is public, and names
-a root in a row only when the root is public.
+An interface with only `fn` members is not a root. An operation interface
+may also declare `fn` members; they are pure.
 
-The parameter is spelled `at` and not `path` because a lexical binder may not
-repeat a name the module declares (`@name.redeclaration`), and the module `fs`
-declares the type `path` at its top level. The type, value, interface, and
-effect namespaces are separate, but the flat top-level spelling rule and the
-no-shadowing rule of the type chapter apply to every top-level spelling.
+The complete row of an operation member is its owning interface plus the
+member's written `performs`. A member that performs nothing else omits
+`performs`. Writing the owner in a member's own `performs` is
+`@effect.duplicateRoot`. An ordinary `proc` writes its complete ceiling.
 
-`effects:` on an operation lists additive roots performed by its body; the
-owner root is implicit. An omitted additive row is empty. An operation's
-complete row is its owner root together with its additive row, and applying
-that operation as a function performs the complete row rather than the owner
-root alone. A `@host` external operation has no additive row, so its complete
-row is exactly its owner root.
+An implementation of an operation interface is an ordinary `impl`. It MUST
+keep each member's row, types, and guards, and its body MUST fit the member's
+row. Implementing an interface makes no grant: a type that implements
+`DirWriteText` by forwarding to a network grant it holds needs the network
+interface in the member's row, which the contract does not have, so the
+implementation is rejected.
 
-`deffect` itself takes no `effects:` attribute. A root is a name, not a row,
-and additive effects are declared per operation because different operations
-of one root may reach different roots.
+Only the embedded standard library declares members bound to the host with
+`external @host`. Such a member has no body and no `performs`, and its
+signature and owner MUST match its registry row. A wrong owner is
+`@external.ownerMismatch`, an unknown symbol `@external.unknownSymbol`,
+and a wrong signature `@external.signatureMismatch`.
 
-Effect roots and operation names are unique nominal declarations. Textually
-equal roots from different packages are unrelated.
+## Effect ceilings
 
-An `@host` external declaration binds an operation signature to the closed,
-versioned host registry of the runtime chapter. Its string symbol selects one
-registry entry, its exact type is checked, and that entry's owning effect MUST
-match the enclosing operation. Pure low-level behavior uses an `@compiler`
-external declaration with an empty effect row. Both providers are
-toolchain-owned; user packages cannot declare external bindings, extend either
-registry, or use WebAssembly FFI to bypass effect checking.
-
-Three malformed `@host` declarations are `@syntax.invalid-attribute` at the
-offending attribute: `external: @host` on anything but a member of a `deffect`,
-an `effects:` row on a `@host` member (its additive row is always empty), and
-`effects:` on a `deffect` itself. A `@host` member whose registry entry is owned
-by a different root than its enclosing `deffect` is `@external.owner-mismatch`
-at its `symbol:` string, relating the `deffect` name. A `@host` symbol that is
-not in the registry is `@external.unknown-symbol`, and a declared signature that
-differs from the entry's is `@type.type-argument-mismatch`, as for an
-`@compiler` declaration. The three checks are
-independent, so a member that is wrong in two ways is reported for both. Every
-row's owner is a root of an embedded standard-library module, so a `@host` member
-written in any other module is `@external.owner-mismatch`, which is how ordinary
-packages cannot declare one.
-
-## Function effect rows
-
-An effect row is a finite, duplicate-free set of source symbols that resolve
-in the effect namespace to nominal roots. An unqualified symbol resolves in
-the current module. A dotted symbol begins with an explicit import alias, so
-`io.stdout` resolves through `(import io @std.io)`. Source effect rows never
-contain atoms. An atom entry or a symbol that does not resolve to one nominal
-effect root emits `@effect.invalid-reference`. A root named twice in one row,
-by one spelling or two, emits `@effect.duplicate-root` at the second entry and
-relates the first.
-
-- Omitted `effects:` is the empty row on every `defn`, `lambda`, function type,
-  and test. There is no visibility or nesting exception.
-- A `def` initializer cannot write `effects:`, so its ceiling is empty and its
-  performed row must be empty. Effectful work belongs in a function.
-- Every ordinary effectful `defn`, `lambda`, or test MUST write its complete
-  ceiling.
-- Every interface contract has a written or default-empty ceiling.
-- An effect operation declares only its additive ceiling; its owner is
-  implicit.
-- The checker computes the least transitively closed performed row over the
-  resolved function-call graph, but this computation never changes an omitted
-  ceiling from `()`.
-- For an ordinary body, the written or default-empty ceiling MUST contain the
-  performed row. For an effect operation, its owner root plus its additive
-  written or default-empty ceiling MUST contain the performed row.
-- An unused declared effect is a warning because it weakens local reasoning.
-- An interface method MUST remain within its contract ceiling. An
-  implementation member writes exactly its contract member's row, since Vibra has
-  no row subtyping, and its performed row MUST be within that row.
-
-Rows are order-insensitive semantically and sorted by canonical identity in
-formatter and machine output. Source formatting preserves each lexical symbol
-reference required by its imports while ordering the resolved roots. A
-function type includes its closed effect row.
-Effect variables and polymorphic rows are excluded. A higher-order function
-therefore declares the exact callback effect row it accepts. The
-standard `iter` default methods `map` and `filter` accept callbacks with
-`effects: ()` only.
-
-**One representation of a row.** A row is a record of its roots, never a bare
-set, so that a later row variable is one more field and not a new shape. In
-typed IR it is `EffectRow { roots, tail: None }`, where `tail` is the absence of
-a row variable; in VIBON it is `(record roots: (array @root...))`, and in JSON
-it is `{"roots": [...]}`. The roots are canonical identities, sorted by their
-UTF-8 bytes and without duplicates: atoms with `@` in VIBON and spellings
-without `@` in JSON, as the identities of the index. A consumer MUST NOT
-assume that a row has no other field, and MUST preserve a field it does not
-know when it copies a row. The `fn` type encoding of the runtime chapter, the
-type object of the position envelope, and the `effects` field of an index record
-all carry this record.
-
-**Calls and rows.** The **complete row** of a callee is the row that applying it
-contributes to the body that applies it:
-
-- a call of an ordinary module-level `defn` or nested method contributes the
-  callee's performed row;
-- a call of an effect operation contributes the operation's owner root together
-  with its additive row, whatever its body performs;
-- a call through a function value, whose callee is not known statically,
-  contributes the row of the function value's type; and
-- a call of an interface contract member contributes the contract's ceiling,
-  always, and never the row of an implementation, because the implementation
-  is chosen at run time or by a type that may change.
-
-Creating a function value, such as naming a function, writing a `lambda`, or
-using a contract member as a value, performs nothing; only applying it does. Vibra
-has **no row subtyping**: two function types are equal only when their rows are
-equal, so a function value is never accepted where a function type with a
-different row is expected, in either direction. A caller that holds a function
-of a smaller ceiling wraps it in a `lambda` that declares the row it must offer,
-and an unused declared root is then the warning above.
-
-Effectful iteration is written as a recursive module-level function that calls
-`(iter.next it)` and declares its complete host ceiling explicitly. There is no
-effectful higher-order iterator combinator in Vibra.
-
-Nominal constructor application, tuple and record projection,
-array/dict/string/byte lookup, and the `tupleof`, `recordof`, and `enumof`
-forms are pure applications. They add
-no root and no edge to the function-call graph.
-Effects performed while evaluating their callee or operands still contribute
-normally.
-
-A target's entry declaration follows the same rule as every other `defn`:
-omission means `()`, so an effectful entry MUST declare `effects:`. The target
-record independently supplies the project's execution consent ceiling.
-
-## Performed rows are transitively closed
-
-The performed row of a body is the union of the complete rows of everything it
-reaches through the function-call graph. A `let` value, a `let-else` value and
-fallback, and a `return` operand are evaluated by the body that holds them, so
-their rows join that body's row, and a `return` adds no call edge of its own.
-An effect operation is an ordinary
-node in that graph and contributes its complete row, so an additive root
-declared on an operation appears in the performed row of every transitive
-caller and MUST appear in each of their written ceilings.
-
-Effect roots do not hide effects. There is no containment, dominance, or
-sub-effect relation between two nominal roots, so naming an owner root never
-discharges an additive root. Given module `app` with `(import fs @std.fs)`:
+A row is a brace-delimited set of names that resolve to operation
+interfaces. A name that resolves to anything else, or to nothing, is
+`@effect.invalidReference`. A row that names one interface twice, under any
+spelling, is `@effect.duplicateRoot` at the later entry.
 
 ```vibra
-(deffect audit
-  visibility: @public
-  (defn record (target fs.path event str) (result void fs.fs-error)
-    visibility: @public
-    effects: (fs.write)
-    (fs.write.text target event)))
-
-(defn handle-request (target fs.path summary str) (result void fs.fs-error)
-  effects: (audit fs.write)
-  (audit.record target summary))
+proc copyNote
+  takes {reader: DirReadText writer: DirWriteText path: RelativePath}
+  returns outcome: Result(Void FsError)
+  performs {DirReadText DirWriteText}
+  do
+    let text be try await DirReadText.read(reader path) endlet
+    return await DirWriteText.write(writer path text)
+endproc
 ```
 
-Writing `effects: (audit)` alone on `handle-request` is
-`@effect.outside-ceiling`, because its performed row contains `fs.write`. Row
-containment is a plain subset test over canonical identities and is decided
-without consulting any effect declaration.
+- A row is written with `performs` on a `proc`, an anonymous `proc`, an
+  interface `proc` member, and a `test`, and as the last operand of a `Proc`
+  or `Intent` type.
+- An omitted row is empty. A ceiling is never inferred.
+- A `fn` performs nothing. It may build and return a plan.
+- A module-value initializer is pure.
+- The checker computes the row a body can perform and requires it to be a
+  subset of the ceiling. For each interface outside the ceiling it reports
+  one `@effect.outsideCeiling` at the earliest `await` that contributes it,
+  with the chain of calls as related spans.
+- An interface in a ceiling that the body cannot perform is the warning
+  `@contract.unusedEffect`.
+- Callable types compare rows exactly. A `Proc({Str} Void {DirWriteText})`
+  parameter accepts only a procedure with exactly that row. There are no row
+  variables, no row subtyping, and no relation between roots.
 
-This is deliberate. A row answers “what may this code attempt?”, so a root
-that absorbed the roots of its own operations would let any package launder
-`fs.write` or `io.stdout` behind a local name, and would let a target consent
-array admit roots that appear in no source row of the program. An author who
-needs to vary an implementation without exposing its row uses an interface
-contract ceiling, which bounds every implementation while staying visible to
-callers.
+A callback's row is therefore visible in the signature that accepts it:
 
-Because a caller's row grows when a library adds an additive root, widening an
-operation's additive row is a breaking change for consumers. That cost is
-accepted: it is the same observable break as adding a failure mode to a
-declared result type. Dependencies resolve from local paths or exact Git
-revisions, so the break can only surface on a deliberate revision bump.
-
-### The witness of `@effect.outside-ceiling`
-
-A function, `lambda`, operation, or test whose performed row exceeds its
-ceiling emits **one diagnostic for each pair of the offending function and a
-root missing from its ceiling**, in canonical order of root identity within the
-function. A diagnostic reports a **witness**, the chain of calls that carries
-the root from the offending body down to the declaration that introduces it:
-
-- the **primary span** is the complete call site, in the offending body, that
-  comes first in source order among the applications there whose callee's
-  complete row contains the root;
-- the **related spans** are the remaining hops, one for each, in order. A hop is
-  a call site in the body of the previous hop's callee whose own callee's
-  complete row contains the root, and the chain stops at a callee that
-  introduces the root: an effect operation that owns it or lists it in its
-  additive row without a deeper call that performs it, an application of a
-  function value, or an application of a contract member. When the chain can
-  continue through more than one call, it takes the shortest chain by number of
-  hops, and among equal chains the one whose call sites come first in source
-  order;
-- each related span carries the note `performs <root> via <callee>`, where
-  `<callee>` is the callee's canonical identity, or `a function value of type
-  <type>` when the hop applies a function value, or `contract member
-  <identity>` when it applies an interface contract member. The primary span
-  carries the same note for the first hop; and
-- every span carries its own source identity, since a hop may lie in another
-  module or package.
-
-For `handle-request` above, the diagnostic for the missing root `fs.write` has
-the call `(audit.record target summary)` as its primary span and the call
-`(fs.write.text target event)` in `audit.record` as its one related span, noted
-`performs @std.fs.write via @std.fs.write.text`. The witness is a fact of the checked
-program and not of a particular rendering: the diagnostic, `--expand
-effect-witnesses` of a query, and the corpus all report the same chain. A root
-that the offending ceiling already lists produces no diagnostic and no witness.
-
-A body that applies a function value or a contract member whose row contains
-the missing root has a one-hop witness and marks the hop as indirect, since no
-declaration beyond the type's row or the contract's ceiling is known.
-
-## Target consent
-
-Every binary target in `project.vibon` contains an `effects` array:
-
-```vibon
-(record
-  name: @hello
-  kind: @bin
-  root: "src/hello"
-  entry: @hello.main.main
-  effects: (array @std.fs.read @std.io.stdout))
+```vibra
+proc emit
+  takes {
+    line: Str
+    sink: Proc({Str} Result(Void FsError) {DirWriteText})
+  }
+  returns outcome: Result(Void FsError)
+  performs {DirWriteText}
+  do
+    return await sink(line)
+endproc
 ```
 
-Project resolution maps each atom from its target/dependency alias to one
-canonical package/module effect identity. These atoms are entity references
-because the typed `project.vibon` schema declares that role for this field;
-other atoms in VIBON remain data values. An empty array permits only an
-effect-free entry graph.
+A caller can pass a procedure that writes to a directory. It cannot pass one
+whose row is `{DirWriteText NetSend}`: the types differ, and the call is
+`@type.argumentMismatch`. A procedure that performs less is wrapped in an
+anonymous `proc` that declares the wider row.
 
-An atom is resolved exactly as the atom of an `entry:` value is: its first
-component names a unit, the longest module prefix is taken, and the rest names
-a declaration. The project document is a privileged referrer, so it creates no
-import edge and may name a root that is not `@public`, and the reserved
-`@tests` and `@std.builtin` paths are not nameable from it, as from any module
-that is not a test. The atom is written in its canonical form, never through an
-import alias, because `project.vibon` has no imports. The roots of a target
-array are a set: the formatter writes them in the canonical order of their
-identities, as it does for a written row, and the order in which an author lists
-them has no meaning.
+In metadata a row is a record with a `roots` list of interface identities,
+sorted by their UTF-8 bytes.
 
-An atom that names nothing, or an entity of another kind, is rejected by the
-ordinary resolution diagnostics at the atom's span, not by a project code of its
-own: `@module.unknown-path` or `@name.unknown-symbol` when the path resolves to
-no module or declaration, and `@name.wrong-entity-kind`, naming the entity found,
-when it resolves to something that is not an effect root. A root listed twice is
-`@effect.duplicate-root` at the second atom, relating the first, as in any
-written row. A
-binary target with no `effects` field is `@data.invalid-shape`, as the
-projects chapter states for every missing required field.
+## Cold plans and performed rows
 
-Because performed rows are transitively closed, this array is the closure of
-the entry graph. It MUST list every root that graph reaches, including a root
-introduced only by the additive row of an effect operation and never written
-in the entry. Source effect rows and the target array therefore range over one
-vocabulary of canonical identities: when the entry declares no unused root, the
-array is exactly the entry's row rewritten from import aliases to canonical
-package/module atoms, and the toolchain derives both from one computed result.
+Applying a `proc` does not run it. It evaluates the callee and the
+arguments, and returns a **plan**: an immutable value of type
+`Intent(R {Row})` that holds them. `await plan` runs the plan and yields its
+result.
 
-Before `check`, `test`, `run`, or `build` accepts a binary target, the checker
-MUST prove that the performed effect row of its entry declaration is a subset of
-the target array. It MUST also prove that the performed row fits that
-declaration's written or default-empty ceiling. These are static admission
-rules and the target array is the user's blanket consent for the selected run.
-It does not constrain paths, environment keys, output destinations, invocation
-counts, or data volume within a declared root. Vibra has no runtime narrowing,
-prompt, denial result, or embedding API that silently adds roots.
+```vibra
+fn prepareWrite
+  takes {writer: DirWriteText at: RelativePath contents: Str}
+  returns plan: Intent(Result(Void FsError) {DirWriteText})
+  do
+    return DirWriteText.write(writer at contents)
+endfn
 
-A root in the target array that is absent from the entry's performed row weakens
-local reasoning exactly as an unused root of a ceiling does, so it is the warning
-`@contract.unused-effect` at that atom. A root of the performed row that the
-array omits is `@effect.outside-ceiling`, whose primary span is the entry's
-`entry:` reference in `project.vibon` and whose related spans are the witness of
-that root from the entry declaration. The `entry:` value is not a call site, so
-it is not itself a hop: every hop of the witness, the first included, is a
-related span with the source identity of its own module, in the order of the
-chain and noted `performs <root> via <callee>`, and the primary span carries no
-note. One diagnostic is emitted for each omitted root, in the canonical order of
-the roots. An array atom that failed to resolve names no root, so a root that
-only that atom meant to name is omitted from the array and reported here as
-well.
+proc writeTwice
+  takes {writer: DirWriteText at: RelativePath contents: Str}
+  returns outcome: Result(Void FsError)
+  performs {DirWriteText}
+  do
+    let plan be prepareWrite(writer at contents) endlet
+    let _ be try await plan endlet
+    return await plan
+endproc
+```
 
-Admission and the ceiling of the entry are independent facts of one computed
-row. An entry whose performed row exceeds its own written ceiling is reported at
-its call sites by the rule of the witness section, and a root that is also
-absent from the array is reported again at the `entry:` value, since the two
-sets of consent are separate.
+`prepareWrite` is a pure function: it writes nothing. `writeTwice` writes
+twice, because each `await` is a fresh invocation of the plan.
 
-An effectful test writes its complete `effects:` row. Selecting and running
-that test is consent to those roots under the same blanket semantics: the test
-is checked against its own row like any ceiling and no target array takes part,
-since a test is not the entry of a target. A pure test may omit the row. Library
-targets are not execution entries and do not declare a target effect array;
-their public function ceilings report their requirements to consumers.
+- Building a plan MUST NOT enter the body, run a guard that has an `else`,
+  dispatch a host action, or consume any limit.
+- A plan can be stored, passed, returned, and awaited any number of times. It
+  is never a consumed ticket and never a memoized result.
+- A plan's type always carries its complete row, including through an
+  interface value or a stored callable.
+- `await` is valid only in a `proc` body and in a `test` body, which runs in
+  a procedure context the test runner owns. Elsewhere it is
+  `@effect.invalidAwait`.
+- `await plan` contributes the plan's complete row to the enclosing body.
+  Building a plan contributes only what evaluating its arguments performs.
+- A bare `requires` on a `proc` is discharged where the plan is built. A
+  `requires … else` and an `ensures … else` run on each `await`, as the
+  [type chapter](02-type-system.md#guards) defines.
 
-## Standard effect inventory
+Named procedures may recurse; the row analysis closes such cycles. An
+effectful walk over a collection is a recursive `proc` over `Iter.next`.
 
-The toolchain reserves these standard roots, each declared by an embedded
-standard-library module whose operations are the registry entries of the runtime
-chapter:
+## Capability values
 
-| Module | Root | Operations | Purpose |
+A **grant** is a sealed run-time value issued by the runtime under a target's
+binding recipe or, in a test, by the test's world. It records the operation
+it permits, the resource and policy it is limited to, the world that issued
+it, and the limits it shares with its relatives.
+
+No source expression makes a grant. A path, a policy value, a wrapper type,
+an `impl`, and decoded data are not grants and cannot become one. A grant has
+no encoding: it cannot be written to a file, compared, or used as a dict key.
+A grant from another world, or one released at shutdown, is unusable.
+
+The type of a grant is the operation interface it permits. Authority is
+requested in signatures, in three shapes:
+
+```vibra
+proc report
+  takes {
+    notes: DirReadText                 // required
+    metrics: Option(NetSend)           // optional
+    logs: {reader: DirReadText writer: DirWriteText}   // a bundle
+  }
+  returns outcome: Result(Void ReportError)
+  performs {DirReadText DirWriteText NetSend}
+  do
+    match metrics
+      case Option.some(value: sender)
+        let _ be await NetSend.send(sender summary()) endlet
+      case Option.none()
+        // carry on without metrics
+    endmatch
+    return Result.ok(value: void)
+endproc
+```
+
+- A required grant is a plain parameter.
+- An optional grant is an `Option`. `Option.none()` is handled by an ordinary
+  pattern. Holding a grant does not guarantee that an operation succeeds.
+- A bundle is an ordinary record of grants. Passing on one field passes on
+  only that grant:
+
+```vibra
+let {reader: r} be logs endlet
+let _ be await summarize(r) endlet     // summarize cannot write
+```
+
+Viewing a value as an interface never reduces what the value can do. Reduced
+authority is always a narrower grant, obtained in one of the two ways
+below.
+
+### Narrowing
+
+Every standard operation interface declares pure members that return a
+narrower grant of the same type. They perform nothing and open nothing.
+
+| Member | Takes | Returns | On |
 | --- | --- | --- | --- |
-| `io` | `stdin` | `text`, `bytes` | Whole-value console input |
-| `io` | `stdout`, `stderr` | `text`, `bytes` | Whole-value console output |
-| `fs` | `read` | `file`, `text`, `entries` | Whole-value filesystem reads |
-| `fs` | `write` | `file`, `text` | Whole-value filesystem writes |
-| `fs` | `metadata` | `stat` | Filesystem metadata |
-| `env` | `read` | `var`, `args` | Environment variables and program arguments |
-| `time` | `now` | `wall`, `monotonic` | Injected wall and monotonic clocks |
-| `random` | `generate` | `bytes` | Injected random bytes |
+| `restrict` | `{grant: Self policy: FsPolicy}` | `Result(Self ScopeError)` | the six `Dir…` interfaces |
+| `sub` | `{grant: Self prefix: RelativePath}` | `Result(Self ScopeError)` | the six `Dir…` interfaces |
+| `limit` | `{grant: Self limits: GrantLimits}` | `Self` | every standard operation interface |
 
-The owner root of an operation is `@std.<module>.<root>`, so `fs.read.file` is
-owned by `@std.fs.read`. Append, remove, and create-directory are deferred to
-later registry minors. Environment writes, sleep/timers, networking, processes,
-signals, streaming handles, and async operations are
-[unscheduled proposals](../roadmap/scratchpad/foundations/README.md#other-effect-and-host-extensions).
-Convenience functions compose the roots above instead of acquiring hidden effects.
+```vibra
+let onlyReports: DirReadText be
+  try DirReadText.sub(notes try RelativePath(["reports"]))
+endlet
+```
 
-Vibra has no terminating source. No host operation, intrinsic, or standard
-function has the result `never`, and none is added: an activation ends by
-returning, a program ends by its entry returning or by a trap or host event of
-the runtime chapter, and the charter excludes processes. The only expressions of
-type `never` remain `return` and a call of a user function declared `never`.
+- The result's policy is the parent's policy **and** the new one. Narrowing
+  never adds a right, changes the resource, or resets a limit. A policy
+  broader than the parent's changes nothing.
+- `sub` adds a path prefix below the same held directory. It does not check
+  that the directory exists.
+- `limit` keeps the smaller of each bound. Copies and children of a grant
+  draw on the limits of their ancestors.
+- The parent stays valid. There is no revocation and no single-use grant.
+- No function combines two grants into one stronger grant.
 
-Every operation returns `(result t e)`, including the clock and random
-operations, so a provider that cannot supply a value reports `unavailable`
-instead of trapping. The error types are closed enums with `void` payloads,
-declared in the module beside their roots, and the runtime chapter fixes every
-signature, error variant, and meaning.
+`ScopeError` (`@std.policy`) has the cases `invalidPolicy`,
+`unsupportedVersion`, `policyTooComplex`, and `foreignRoot`.
+`GrantLimits` is a record of `invocations`, `inputBytes`, and `outputBytes`,
+each an `Option(U64)`.
 
-Time and random values come from the host provider of the run. A `run` uses the
-system provider. `vibra test` always uses a deterministic in-memory **host
-world**, and a conformance case may supply one, as the runtime chapter's host
-world section defines. A test that depends on a nondeterministic provider has no
-way to name one.
+### Brands
 
-## Query metadata
+A declared type with a private representation over a grant type certifies
+who issued the grant:
 
-Effects are part of the metadata returned by the shared workspace query
-service, not a dedicated query kind. A function or source-position query can
-include:
+```vibra
+type LogDir of DirWriteText
+  visibility @public
+  representation @private
+endtype
+```
 
-- written-or-default ceilings and computed performed rows;
-- resolved function callees and classified non-call applications;
-- effect-operation witnesses that introduced each root, including a root that
-  reached the queried function only through an operation's additive row;
-- the public boundary that covers the row; and
-- the binary target or test ceiling checked for the selected entry.
+Only the module that declares `LogDir` can construct one, so a `LogDir`
+parameter accepts only what that module chose to wrap. A brand says nothing
+about a path at compile time.
 
-Reports use canonical identities rather than import aliases, and every row is
-the record of **Function effect rows**. The checker and query result MUST share
-one function-call graph and performed-row result. Compact queries omit witnesses;
-`--expand effect-witnesses` requests them, with the structure of the witness
-section above, without changing the underlying metadata or admission result. The
-tooling chapter closes the fields of the position envelope and of the index.
+## Target admission
 
-## Claims and limits
+A binary target's `effects` list is its static admission ceiling: the
+operation interfaces the program as a whole may perform. Check, run, and
+build MUST reject an entry whose row, or a startup step whose row, is not
+contained in it. An interface in the list that nothing performs is a
+warning. The list authorizes nothing.
 
-Vibra effects are not exceptions, algebraic handlers, resumptions, runtime values,
-permission prompts, path filters, or security capabilities. Sealed effect
-roots and a declared dominance or sub-effect relation between roots are
-excluded. They require a specification change. Flat rows have an empty
-relation, so adding a relation later could relax the rules for existing
-programs. Ordinary host failures remain the typed errors declared by
-operations; an ABI or runtime invariant failure is a trap.
+Every entry parameter MUST have a binding recipe, defined in the
+[programs chapter](04-programs-and-packages.md#targets). The toolchain MUST
+reject a missing recipe, a recipe whose provider cannot issue the
+parameter's type, a cyclic `after` relation, and a recipe that reads an
+argument or variable without naming the grant for that read.
 
-The effect system guarantees static containment of performed roots in written
-ceilings for source accepted by a conforming compiler. It does not make the
-resulting program “host-safe,” constrain a declared root at runtime, prove the
-compiler or host provider secure, or safely execute arbitrary foreign Wasm.
+What a target is allowed to do MUST be presentable in plain terms from the
+project file alone: for each grant, the actual resource, the operation, the
+policy, and the limits, and not only an interface name. A recipe that reads
+configuration to choose a resource shows that read.
+
+At startup the runtime acquires grants in the order `after` requires, with
+ties in the order of their names. A required grant that cannot be acquired prevents the
+entry from running. An optional grant refused in the way its provider
+specifies becomes `Option.none()`; a malformed recipe or an incompatible
+driver is an error, never an absence. After a failed startup, grants already
+acquired are released in reverse order. Release is not rollback: an external
+effect that already happened is reported, not undone.
+
+No operation returns `Never`, and none terminates the process. The
+[runtime chapter](06-runtime.md#entry-outcome) defines how a run ends.
+
+## Scope policies
+
+A **policy** is plain data that describes which requests a grant permits. It
+is not code: there is no user-written permission predicate and no pattern
+language. A policy describes; only a grant authorizes.
+
+In source, a filesystem policy is a value of the standard types below
+(`@std.policy`). In a project file it is a `@scopePolicy.v1` document.
+
+```vibra
+type FsPolicy
+  case none
+  case allOf {items: List(FsPolicy)}
+  case anyOf {items: List(FsPolicy)}
+  case files {
+    prefix: RelativePath
+    depth: FileDepth          // children | tree
+    actions: List(FileAction) // read | replace | create | stat
+    names: NameTest
+  }
+  case directories {
+    prefix: RelativePath
+    depth: DirDepth           // self | children | tree
+    actions: List(DirAction)  // list | stat
+  }
+  visibility @public
+endtype
+
+type NameTest
+  case anyName
+  case exact {names: List(Str)}
+  case suffix {value: Str}
+  case allOf {items: List(NameTest)}
+  case anyOf {items: List(NameTest)}
+  visibility @public
+endtype
+```
+
+```vibra
+let textOnly be FsPolicy.files(
+  prefix: try RelativePath([])
+  depth: FileDepth.tree()
+  actions: [FileAction.read()]
+  names: NameTest.suffix(value: ".txt")
+) endlet
+let reader be try DirReadText.restrict(notes textOnly) endlet
+```
+
+### Meaning
+
+A policy denotes a set of requests. `allOf` is intersection and `anyOf` is
+union. An empty `allOf` permits everything the parent permits; an empty
+`anyOf`, like `none`, permits nothing. A missing field is an error, never a
+wildcard.
+
+A rule is one whole alternative. Its fields are never separated: a policy
+that permits reading under `a` and replacing under `b` does not permit
+replacing under `a`.
+
+Restriction keeps the parent as a conjunction, so no implementation needs to
+decide whether one policy is a subset of another, and none may drop an
+ancestor's constraint because it believes the child is narrower.
+
+### The wire form
+
+A `@scopePolicy.v1` document is a record of `format`, `family`
+(`@filesystem` or `@http`), and `expression`. An expression is a record
+whose `kind` is `@none`; `@allOf` or `@anyOf` with `items`; or a rule.
+Unknown fields, kinds, and versions are rejected.
+
+| Rule kind | Fields |
+| --- | --- |
+| `@fileRule` | `root`, `prefix` (list of names), `depth` (`@children`, `@tree`), `actions` (set of `@read`, `@replace`, `@create`, `@stat`), `names` |
+| `@directoryRule` | `root`, `prefix`, `depth` (`@self`, `@children`, `@tree`), `actions` (set of `@list`, `@stat`) |
+
+`root` names the entry parameter whose recipe holds the directory. `names`
+is a record whose `kind` is `@anyName`; `@exact` with `names`; `@suffix`
+with `value`; or `@allOf` or `@anyOf` with `items`.
+
+A policy is normalized before it is hashed or shown: nested `allOf` or
+`anyOf` of the same kind are flattened, duplicate items removed, items
+sorted by their canonical bytes, single-item wrappers removed, and sets
+sorted. Sequences such as path components keep their order. The hash
+identifies this normal form; two policies with the same meaning may hash
+differently.
+
+A policy has at most 4,096 nodes and entries in total and a depth of at most
+64, counting ancestors acquired by restriction. A larger one is
+`ScopeError.policyTooComplex`. These numbers are an engineering default of
+the first tool profile, not a measured capacity.
+
+### Filesystem policies
+
+A file rule selects files below `prefix`: `children` means exactly one
+further name, `tree` any positive number of further names. A directory rule
+selects directories: `self` is `prefix` itself, `children` one name further,
+`tree` the prefix and everything below.
+
+- **Actions.** `read` covers `DirReadBytes` and `DirReadText`; `replace` and
+  `create` cover the two write interfaces for an existing and a new file;
+  `list` covers `DirList`; `stat` covers `DirStat` for the kind of rule it
+  appears in. A grant's interface and its policy both have to allow a
+  request. Append, remove, and rename do not exist yet.
+- **A file rule grants no listing.** Permission to read `.txt` files does
+  not permit enumerating a directory.
+- **Paths.** A `RelativePath` (`@std.fs`) is a list of names, built by the
+  fallible constructor `RelativePath(names)`. A name is non-empty and is
+  rejected if it is `.` or `..`, contains `/`, `\`, `:`, NUL, or a control
+  character, ends in a dot or a space, or is a reserved Windows device name
+  with or without an extension. Absolute, drive-relative, UNC, and device
+  paths cannot be represented. Nothing is expanded, decoded, or stripped.
+  Prefixes are compared name by name, never as strings, so `reports` does
+  not cover `reportsOld`.
+- **Names.** A name test compares exact Unicode scalars, with no case
+  folding and no normalization. `suffix(".txt")` accepts `notes.txt` and
+  `.txt` and rejects `notes.TXT` and `notes.txt.exe`. An empty suffix is
+  invalid. A suffix says nothing about a file's contents.
+
+The driver MUST enforce a file rule as follows.
+
+1. Resolve each request from the directory object the grant holds, one name
+   at a time, without following symbolic links, junctions, or other reparse
+   points and without crossing a mount point.
+2. Check the name the filesystem actually reports for the opened entry and
+   its kind. A different-case or short-name alias MUST NOT satisfy a name
+   test the real name fails.
+3. Perform the access on the object that was opened and checked. Checking a
+   path and then reopening it by name is not conforming.
+4. Never truncate or create before authorization. Creating a new file is
+   exclusive: an existing entry, under any alias, is not replaced.
+5. Keep no intermediate directory handle between operations. Every
+   operation walks from the grant's directory again.
+6. Where the platform cannot provide these guarantees, return
+   `FsError.unsupported` before acting. There is no unchecked fallback.
+
+Two limits of this design are part of the contract and MUST appear in what a
+user is shown when approving a target:
+
+- **Authority follows the opened directory, not its path.** If the directory
+  is renamed, the grant still refers to it; if another directory takes its
+  old path, the grant does not refer to that one.
+- **Hard links.** A permitted file name can be a hard link to a file that
+  also has a name elsewhere. A policy does not establish where data came
+  from or that a write is seen only under the permitted name. A read-only
+  grant still cannot write.
+
+### HTTP policies
+
+**Reserved.** No network operation exists in this specification, so this
+section carries no conformance obligation yet. It fixes the policy form a
+network operation MUST use when an integration gate adds one.
+
+An `@httpRule` has `origin` (scheme `@http` or `@https`, a host, and a port
+from 1 to 65535, with default ports written out), `peers` (a set of address
+prefixes the connection may reach; empty denies everything, and a DNS answer
+is never approval by itself), `methods` (a non-empty set of `@GET`, `@HEAD`,
+`@POST`, `@PUT`, `@PATCH`, `@DELETE`, `@OPTIONS`), and `targets` (a
+non-empty list of `@anyTarget`, `@exactTarget`, or `@prefixTarget`, the
+last compared by path components exactly as filesystem prefixes are, with a
+query that is `@anyQuery` or `@exactQuery`).
+
+The four fields of one rule stay together: permitting `GET` on one origin and
+`POST` on another does not permit `POST` on the first. A driver MUST NOT
+follow redirects automatically, use an ambient proxy, cookie store, or
+credentials, or connect to an address outside `peers`; it MUST connect to
+the address it checked, without a second lookup. A target restriction
+describes the request sent, not what the server does with it.
+
+### Limits
+
+A grant's limits count invocations and payload bytes in and out, in encoded
+bytes. They do not bound time, processor use, or metadata traffic. A child
+grant can only tighten a limit, and every copy and descendant of a grant
+draws on the same ancestor counters, which the runtime's broker owns. The
+broker reserves before an action, charges actual progress, and does not
+refund an action whose outcome is unknown. A counter that would overflow
+denies. Exhaustion is the typed error `limitExceeded`.
+
+## Delivery and typed outcomes
+
+Every host-bound operation has a **delivery class** in the host registry. It
+is registry data, not source: a source-declared operation member has none
+and behaves as the operations it awaits.
+
+| Class | Meaning |
+| --- | --- |
+| `@once` | The runtime never dispatches one invocation twice |
+| `@repeatable` | The runtime may retry, only under the duplicate-safety contract the operation states |
+| `@unknown` | No promise; the runtime does not retry after a possible submission |
+
+All seventeen initial operations are `@once`. Two `await`s of one plan are
+two invocations. Suspending and resuming around a host call MUST NOT repeat
+it. `@once` is not exactly-once delivery: there is no deduplication across
+a crash and no rollback.
+
+Every host operation returns a `Result`. Its error type distinguishes at
+least these cases, in addition to the operation's own:
+
+| Case | Meaning |
+| --- | --- |
+| `denied` | The grant's policy does not permit the request; nothing was attempted |
+| `limitExceeded` | A limit would be exceeded; nothing was attempted |
+| `unsupported` | The platform cannot enforce the grant for this action; nothing was attempted |
+| `outcomeUnknown` | The action was submitted and its result is not known |
+
+"Nothing was attempted", "failed", and "may have happened" stay distinct.
+There is no implicit conversion between error types.
+
+## Standard operation inventory
+
+Each row of the host registry, major version 2, is one operation interface
+in an embedded module. The wire symbols are those of v0.0.1; the source
+names, the grant receiver, and the error cases are new. The first parameter
+of every member is the grant. The [runtime chapter](06-runtime.md#host-registry)
+gives each signature and its exact behavior.
+
+| Module | Interface and member | Wire symbol | Resource |
+| --- | --- | --- | --- |
+| `@std.io` | `StdinText.read` | `io.stdinText` | standard input, as text |
+| `@std.io` | `StdinBytes.read` | `io.stdinBytes` | standard input, as bytes |
+| `@std.io` | `StdoutText.write` | `io.stdoutText` | standard output |
+| `@std.io` | `StdoutBytes.write` | `io.stdoutBytes` | standard output |
+| `@std.io` | `StderrText.write` | `io.stderrText` | standard error |
+| `@std.io` | `StderrBytes.write` | `io.stderrBytes` | standard error |
+| `@std.fs` | `DirReadBytes.read` | `fs.readFile` | a file's bytes |
+| `@std.fs` | `DirReadText.read` | `fs.readText` | a file's UTF-8 text |
+| `@std.fs` | `DirList.entries` | `fs.readEntries` | a directory's entries |
+| `@std.fs` | `DirWriteBytes.write` | `fs.writeFile` | create or replace a file |
+| `@std.fs` | `DirWriteText.write` | `fs.writeText` | create or replace a text file |
+| `@std.fs` | `DirStat.stat` | `fs.metadataStat` | metadata of a file or directory |
+| `@std.env` | `EnvReadVar.read` | `env.readVar` | a named set of variables |
+| `@std.env` | `EnvReadArgs.read` | `env.readArgs` | the argument list |
+| `@std.time` | `WallClock.read` | `time.nowWall` | the wall clock |
+| `@std.time` | `MonotonicClock.read` | `time.nowMonotonic` | the monotonic clock |
+| `@std.random` | `RandomBytes.generate` | `random.generateBytes` | the random source |
+
+Examples in this specification that use `NetSend` illustrate types only; no
+such interface is in the inventory.
+
+## Tests and model profiles
+
+A test runs in a fresh, deterministic, in-memory world with its own grants,
+counters, clock, and random source. A row gives a test no grant. A test
+obtains fake grants only from the `TestWorld` it receives, as the
+[programs chapter](04-programs-and-packages.md#test-worlds-and-grants)
+defines; each `TestWorld` member performs `TestWorld` and nothing else, and
+the test's row MUST also name whatever it then performs with the grants. No
+test reaches a real provider.
+
+A package may implement an operation interface in Vibra, for example an
+in-memory directory for its own tests. Such an implementation holds no real
+grant. A comparison of a real driver against its model is sampled evidence
+with a stated domain; it does not prove them equivalent.
+
+## Exclusions
+
+- a dedicated effect declaration, effect handlers, and resumptions;
+- row variables, row subtyping, and any relation between roots;
+- ambient authority, permission prompts, and source-declared host bindings;
+- types that identify a particular resource instance, and proof of least
+  authority;
+- revocation, single-use and linear grants, and information-flow tracking;
+- network, process, signal, timer, and streaming operations; append, remove,
+  rename, and directory creation; filtered directory listing;
+- grants for actor endpoints, which the concurrency release defines;
+- operating-system sandboxing of native code.

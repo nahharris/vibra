@@ -1,73 +1,81 @@
 # Vibra v0.0.2
 
-**Planned pre-alpha release.** An agent can inspect, change, evaluate, and
-test a Vibra project through structured tools. The release also prepares the
-checked inputs and runtime boundary for [v0.0.3](../v0.0.3/README.md).
+**Planned pre-alpha release.** The language of the active specification runs
+on the reference interpreter with written effect ceilings and bound grants,
+an agent can inspect, repair, and retest a project through structured tools,
+and one checked slice runs as native code.
 
 | Order | Milestone | Evidence |
 | --- | --- | --- |
-| M1 | [Content-addressed codebase](m1/README.md) | Import a project, reopen the store, and read old and new checked definitions by hash. |
-| M2 | [Queries, edits, formatting, and lint](m2/README.md) | Follow a reference to its definition, preview an explained code action, and reject a stale publish. |
-| M3 | [Interactive evaluation and tests](m3/README.md) | Keep a project REPL open, evaluate forms from a file, redefine a function, and rerun selected tests in that session. |
-| M4 | [Editor integrations](m4/README.md) | Install the supported integrations for Vim, Neovim, Zed, VS Code, and Cursor and run the editor acceptance fixture in each. |
-| M5 | [Native foundations and release](m5/README.md) | Verify portable inputs and backend-neutral execution evidence against the v0.0.1 baseline. |
+| M0 | [Specification and transition](m0/README.md) | No contradictory active rule; every supported form has a test, diagnostic, and schema owner; Windows file-scope feasibility recorded. |
+| M1 | [Pure language](m1/README.md) | The pure language passes its corpus on the interpreter, including static contract discharge and rejection. |
+| M2 | [Operations and authority](m2/README.md) | A command-line program runs with bound grants; forbidden and unbound operations are rejected or denied as specified. The model-writing pilot is run. |
+| M3 | [Identity and repair loop](m3/README.md) | An agent starts from a seeded defect, inspects, repairs, and retests it; stale and replaced approvals are rejected. |
+| M4 | [First native slice](m4/README.md) | One new checked slice agrees across interpreter, stepper, and a linked Windows executable. |
 
 ## Scope and priorities
 
-The existing workspace snapshot, position facts, formatter, test runner,
-interpreter, and deterministic test host are the starting point. The content
-graph adds durable identity for checked definitions. Queries, edits, and
-sessions use those revisions through one workspace service. Agents use CLI
-and MCP to inspect, change, evaluate, and test code. Editors use LSP for
-language tooling and the shared session service for sending forms and
-running tests.
+The shipped v0.0.1 toolchain is the starting point: its workspace snapshot,
+diagnostics model, test runner, interpreter, deterministic host world, and
+the partial native pipeline in the workspace are kept and adapted. Its
+source surface, project record, entry signature, and effect roots are
+replaced; nothing accepts both.
 
-Settle definition identity and publication first. They govern the query,
-edit, and session contracts. Exercise one declaration edit and
-one selected test through the full loop before widening rule coverage or
-adapter capabilities. The main design risks are deterministic addressing of
-recursive components and safe redefinition across an interpreter session.
+Order of concerns:
 
-The minimum release fixture is an offline project with multiple modules and
-targets in one package and the trusted embedded standard library. Full exact
-Git/path dependency delivery, vendor sync, lock generation, and an external
-stdlib trust model move to the
-[dependency scratchpad](../scratchpad/foundations/dependencies.md). Capture and
-verify every input admitted by this release. Keep ordinary `.vib` projects
-usable with the current CLI and define explicit import/export for the store.
+1. Settle the written contracts first (M0). Implementation packages rely on
+   them, so a gap found later returns to the specification.
+2. Exercise each feature through one complete slice before widening it:
+   parse, check, run, diagnose, format, and test.
+3. The static contract checker is new and its rule set is small. Track every
+   gate program it rejects; a rejection that the rules ought to accept is a
+   specification question, never a reason to add a run-time check.
+4. Reuse what exists below checked IR, but do not assume it is unaffected:
+   plans, grants, guards with consequences, startup acquisition, and the
+   entry result all cross that boundary.
 
-The release uses the interpreter for interactive execution. It carries the
-existing Wasm conformance path through the handoff to v0.0.3. Wasm build
-products, native code emission, and native release packaging are outside this
-release. The editor milestone scopes the supported LSP capabilities.
-[Live debugging](../scratchpad/agent-tooling/debugger.md) follows the Nexus
-cutover and the local actor runtime. A distributed code store and stronger
-types remain separate work.
+After M0, M1 through M3 are ordered by their gates. Native foundation work
+for M4 that depends only on M0's contracts may proceed alongside them; M4's
+gate is claimed last.
+
+The interpreter is the execution path of this release. The WebAssembly
+backend keeps running the v0.0.1 corpus under the fail-closed transition
+profile of the [runtime chapter](../../spec/06-runtime.md#wasm-transition);
+it is not extended to grants, plans, or the new entry contract. This release
+does not ship `vibra build` and does not claim the clean-machine distribution
+gate.
+
+Out of this release: dependency acquisition and locking beyond local inputs,
+MCP and editor adapters, concurrency, network operations, a content-addressed
+store as an authority, persistent sessions with live redefinition, and native
+execution beyond the M4 slice.
 
 ## Release gate
 
-Use one checked-in project and one repeatable agent workflow over MCP, with
-equivalent machine-mode CLI evidence. Start from a failing test. Resolve a
-callee and read its definition and effects by hash. Through MCP, run the test
-and use its structured failure, source location, and query facts to diagnose
-the issue. Stage an S-expression repair in a persistent session,
-preview formatting and a lint action with its reason, evaluate the changed
-definition, and rerun the selected test before publishing. Race a stale
-publish against a successful one and show that only the valid revision becomes
-the head. Reopen the store and retrieve both versions by hash.
+Use one checked-in project: a command-line program that reads text files
+under a directory chosen at run time, writes a log under another, and
+optionally reports a metric.
 
-Pass the editor acceptance fixture on Vim, Neovim, Zed, VS Code, and Cursor.
-From an editor buffer, evaluate a form in a persistent session, rerun the
-selected test, and navigate from a failure to its source location.
+1. Check, format, and test it. Its tests obtain every grant from
+   `TestWorld`.
+2. Run it with `vibra run` under the target's grant bindings. Show: a
+   callback limited to the log grant cannot reach the reader; an unbound
+   optional grant arrives as `Option.none()`; a required grant that cannot
+   be acquired fails startup before the entry runs; a request outside a
+   grant's policy returns a typed denial.
+3. Start from an independently seeded defect and a failing test. Through
+   machine-mode CLI only, read the failure, query the declaration, its type,
+   contracts, and effects, preview a revision-checked edit, apply it, and
+   rerun the selected test. Show that a stale edit, a replaced test, and a
+   changed policy are each rejected.
+4. Run the M4 native fixture and compare its result, exit code, and audit
+   trace with the interpreter's.
 
-Run both the host suite and the independent Vibra corpus for the shipped
-tooling surface and existing supported profiles. Validate machine outputs
-against their schemas and include denied, stale, malformed, interrupted, and
-resource-exhausted paths. Publish the supported command and profile inventory,
-the M5 handoff fixtures, and the release audit before tagging. The
-[full conformance gate](../../spec/07-diagnostics-and-conformance.md#full-conformance-gate)
-is a separate target from this tooling release gate.
+Run both the host suite and the independent Vibra corpus for every supported
+profile. Validate every machine output against its schema, including denied,
+stale, malformed, and exhausted paths. Publish the supported-surface
+inventory, the list of constructs still unavailable, and the release audit
+before tagging.
 
-Begin with the M1 specification prerequisite. Each milestone needs an
-approved contract and a step plan under the
+Each milestone needs an approved contract and a step plan under the
 [execution model](../execution.md) before its implementation begins.

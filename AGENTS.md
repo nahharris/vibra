@@ -28,9 +28,14 @@ implementing either interpretation.
 - Keep one canonical spelling and one canonical machine contract.
 - Update every affected specification chapter and roadmap gate together.
 - Record exclusions explicitly; do not leave design questions hidden in code.
-- Use `.vib` for source, `.vibon` for persistent data, kebab-case symbols,
-  native language forms, nominal effects, and explicit namespaces. Do not add
-  a pre-v1 compatibility bridge.
+- Use `.vib` for source and `.vibon` for persistent data. In source, write
+  types in PascalCase and values in camelCase, with keyword-led forms, typed
+  closers, written effect ceilings, and explicit imports. Registered protocol
+  tags keep their spelling. Do not add a compatibility bridge to an earlier
+  surface.
+- Prefer a compile-time check or an error as a value over a trap. Do not
+  introduce a dependency cycle in imports, packages, initializers, bindings,
+  or crates.
 
 ## Implementation changes
 

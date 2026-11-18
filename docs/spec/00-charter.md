@@ -2,154 +2,167 @@
 
 Status: normative target
 Delivery status is tracked in the [release roadmap](../roadmap/README.md).
-The active specification includes contracts for work scheduled after the
-shipped release.
+This specification defines the language that v0.0.2 and later releases
+implement. The shipped v0.0.1 release implements an earlier surface; nothing
+in these chapters is implemented unless a chapter's status line says so.
 
 ## Mission
 
-Vibra is a general-purpose language for small services, command-line programs,
-local automation, and libraries whose source is primarily written and changed
-by coding agents. It is not a natural-language programming system. It is a
-small, explicit programming language that gives an agent enough local,
-machine-readable constraint to produce correct changes reliably.
+Vibra is a general-purpose language for command-line programs, libraries, and
+small services whose source is primarily written and changed by coding
+agents. It is not a natural-language programming system. It is a small,
+explicit language that gives an agent enough local, machine-readable
+constraint to produce correct changes reliably.
 
 The language is one product with five surfaces: syntax, static types, static
-effects, agent-facing tooling, and runtime behavior. All affected surfaces
-must agree on each feature.
+effects and authority, agent-facing tooling, and runtime behavior. All
+affected surfaces MUST agree on each feature.
+
+Claims about what agents find easy are dated hypotheses about particular
+model populations. A design choice justified by such a claim records the
+evidence it rests on and is reopened when the evidence changes.
+
+## Requirement words
+
+MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY state requirements on a
+conforming toolchain and, where the subject is a program, on a conforming
+program. MUST and MUST NOT are absolute. SHOULD and SHOULD NOT admit a
+documented reason to differ. MAY marks latitude that no program can observe.
 
 ## Decision order
 
 When two designs conflict, prefer the design that:
 
-1. makes invalid programs unrepresentable or locally diagnosable;
-2. gives an agent one canonical way to express an idea;
-3. exposes type, effect, and namespace boundaries explicitly;
-4. permits precise context queries and transactional edits;
-5. is deterministic across checker, interpreter, and compiled runtime; and
-6. keeps the implementation small enough to finish and verify.
+1. makes an invalid program unrepresentable or rejects it at compile time;
+2. reports a failure as a value the program handles, rather than stopping the
+   program;
+3. gives an agent one canonical way to express an idea, built from shapes the
+   language already has;
+4. exposes type, effect, authority, and namespace boundaries explicitly;
+5. permits precise context queries and transactional edits;
+6. is deterministic across the interpreter and compiled code; and
+7. keeps the implementation small enough to finish and verify.
 
-Canonical syntax is a means, not the thesis. Most generation failures are
-semantic. Vibra therefore spends complexity on the type/effect checker and its
-query service before adding surface convenience.
+The surface is kept small: close concepts are collapsed into one, a rule is
+stated once and reused, and every necessary exception is written down where
+the rule is.
 
 ## Usable toolchain target
 
-A fresh installation of the complete toolchain can do the following using
-only the active implementation.
+A fresh installation of the complete toolchain can, using only the active
+implementation:
 
 - create a project and resolve pinned dependencies;
-- format, check, test, run, and build it;
-- express nominal data, interfaces, generics, typed failure, and exhaustive
-  control flow;
-- perform console, filesystem, environment, clock, and random operations whose
-  nominal effects are checked against the selected project target;
+- format, check, test, run, and build it into a native executable;
+- express nominal data, interfaces, generics, typed failure, exhaustive
+  control flow, and statically checked contracts;
+- perform console, filesystem, environment, clock, and random operations
+  whose effects are checked against written ceilings and whose authority
+  comes only from grants bound in the project target;
 - query normalized syntax, identity, type, effect, context, and diagnostic
   metadata from a source position or entity;
-- preview and atomically apply supported semantic code changes through the CLI
-  or MCP; and
-- produce the same observable result in the reference interpreter and the
-  WebAssembly backend for every conforming program.
+- preview and atomically apply supported code changes; and
+- produce the same observable result in the reference interpreter and in
+  native code for every conforming program.
 
 The release gate is evidence, not feature count. Every normative rule needs a
 conformance case or an explicit review-only invariant.
 
 ## Commitments
 
-- Vibra is expression-oriented and functional: bindings and values are
-  immutable, functions are first-class values, and there is no assignment or
-  user-visible mutation.
-- Pure collection transforms use the standard `iter` interface. Effectful walks
-  are recursive functions over `iter.next` with an explicit written effect
-  ceiling. There is no separate loop or foreach form.
-- Every call in tail position MUST reuse the current activation and so MUST NOT
-  consume additional language-level stack, whatever its callee is; the
-  interpreter and WebAssembly backend MUST implement this obligation.
-- Non-tail recursion has no depth limit of its own: neither backend consumes
-  host stack per activation, so depth is bounded only by the memory of the
-  instance, and exhausting that memory is a host event rather than a program
-  result.
-- Source files use `.vib`; compiler-owned persistent data uses `.vibon`. Both
-  are UTF-8 S-expression document grammars over one lexical reader and are
-  never inferred from contents.
-- Names use kebab-case and imports produce explicit aliases.
-- Public boundaries carry complete types and effect ceilings.
-- Declared types, interfaces, their explicit implementations, and effects are
-  nominal: every `deftype` introduces a new identity. Anonymous `tuple`,
-  `record`, `enum`, and `union` type expressions are structural and carry no
-  methods or implementations.
-- Every widening relation is declared and every narrowing is written. A value
-  of a member type widens into a union that lists it, `match` narrows that
-  union back to one member, `as` ascribes a type at any expression, and the
-  `from` and `try-from` interfaces convert. No conversion is implicit.
-- Typed `option` and `result` replace null and exceptions.
-- Bindings are `let` and `let-else` elements of a body sequence, and they last
-  to its end. Early exit is `try`, which propagates a failure, or `return`,
-  which leaves the innermost function with a value; `let-else` states a
-  refutable binding whose mismatch must leave. The predeclared uninhabited type
-  `never` types an expression that does not complete, and it is admitted at
-  any expected type without becoming a subtype or a computed join.
-- Effects describe possible operations statically. A binary target's declared
-  effect roots are its complete execution consent. Runtime grants are excluded.
-- Project and compiler-owned persistent data use canonical, non-executable
-  `.vibon` literal data. JSON is reserved for CLI and MCP interoperability.
-- The language core is minimal. The compiler owns the scalar types, `(array t)`,
-  `fn` types, and the structural type constructors; every other type, including
-  `bool`, `str`, `dict`, `option`, and `result`, and every operation over one, is
-  standard-library Vibra. The compiler knows such a type only by the closed
-  language role it plays, and a toolchain accelerates library code only through
-  native implementations whose meaning stays their Vibra body.
-- Toolchain-owned external declarations use only the closed `@compiler` and
-  `@host` providers; ordinary packages cannot add providers or registry symbols.
-- Diagnostic, query, edit-plan, test, and command results have versioned JSON
-  schemas.
-- The parser is recovery-oriented, while the formatter defines one canonical
-  representation.
-- The runtime is deterministic for fixed source, inputs, and ordered host
-  responses.
+- **Immutable and functional.** Bindings and values are immutable, functions
+  are first-class values, and there is no assignment, loop, or user-visible
+  mutation. Repetition is recursion or the standard `Iter` interface.
+- **One surface.** Source files use `.vib`: keyword-led constructs with typed
+  closers, no commas, no infix operators, parentheses only for application,
+  braces for product shapes, brackets for collections. Compiler-owned
+  persistent data uses `.vibon`, the data subset of the same syntax, which
+  is never executed. Neither is inferred from contents.
+- **Names.** Types are PascalCase and values camelCase, by convention that
+  `check` reports and no rule depends on. Imports produce explicit names.
+- **Nominal declarations.** Declared types, interfaces, and their explicit
+  implementations are nominal. Anonymous tuples and records are structural
+  and carry no members.
+- **Complete public boundaries.** Public declarations carry complete types,
+  effect ceilings, and contracts.
+- **No implicit conversion.** Every widening relation is declared and applies
+  only at a written type. Conversion is a call through `From` or `TryFrom`.
+- **Errors as values.** `Option` and `Result` replace null and exceptions.
+  Partial operations return them. No operation of the language or its
+  standard library traps on user data: arithmetic saturates or returns a
+  `Result`, lookups return an `Option`, and a contract either is proven at
+  compile time or states the value produced when it fails. The traps that
+  remain are toolchain defects; exhausting memory is a host event.
+- **Contracts checked statically.** A `requires`, `ensures`, or type
+  invariant without a stated consequence is an obligation the checker proves
+  or rejects. It leaves no run-time check.
+- **Effects and authority are separate and both explicit.** A procedure's
+  written ceiling states which operations it may perform. Performing one
+  also needs a grant: a sealed value, passed as an ordinary argument, that
+  the program received at entry from a binding the project target declares.
+  No ambient authority exists.
+- **No dependency cycles.** Imports, package dependencies, module-value
+  initializers, startup grant bindings, and build inputs are acyclic.
+  Recursion among the declarations of one module, in functions and in types,
+  is not a dependency cycle.
+- **Tail calls.** A call in tail position reuses the current activation.
+  Recursion has no depth limit of its own.
+- **Library-first core.** The compiler owns the scalar types, `List`, the
+  callable types, and the structural type forms. Every other type is
+  standard-library Vibra, known to the compiler only by a closed language
+  role. Toolchain-owned external declarations use only the closed
+  `@compiler` and `@host` providers.
+- **Two executions, one meaning.** The interpreter is permanent: it is the
+  reference for semantics and the evaluator the compiler uses at compile
+  time. The native compiler and runtime produce standalone executables. The
+  WebAssembly backend of v0.0.1 is retired when native execution reaches
+  parity; it is not extended to the features this specification adds.
+- **Machine contracts.** Diagnostic, query, edit-plan, test, and command
+  results have versioned schemas. The parser recovers; the formatter defines
+  one canonical representation.
+- **Determinism.** The runtime is deterministic for fixed source, inputs,
+  and ordered host responses.
 
 ## Deliberate exclusions
 
-The active specification excludes the following features.
+The active specification excludes:
 
-- pre-v1 source, CLI, schema, package, or ABI compatibility;
+- compatibility with any earlier source, CLI, schema, package, or ABI;
 - macros, reader extensions, compiler plugins, and runtime plugins;
-- algebraic effect handlers, effect polymorphism, sealed effect roots, declared
-  effect dominance or sub-effect relations, runtime grants, permission prompts,
-  path-scoped capabilities, and user-defined host providers;
-- assignment, `while`, `for`, `break`, and `continue` forms;
-- async functions, tasks, channels, threads, and shared mutable state;
-- raw WebAssembly FFI, native FFI, dynamic loading, and a package registry;
-- a SemVer dependency solver; dependencies are local or exact-revision Git;
-- union subtyping and computed least upper bounds; a union is only ever the one
-  an author wrote over a closed, written member set, and it is never inferred;
-  `never` is no exception: it is admitted at an expected type and skipped when
-  branches are compared, it is never inferred for a generic parameter, and it
-  satisfies the bound `any` and no other interface;
-- narrowing an interface value to a concrete type, runtime type tests, and
-  interface-typed `match` arms;
-- associated types on an interface contract, and therefore per-implementation
-  error types on `try-from`;
-- inheritance, implicit interface conformance apart from the predeclared empty
-  interface `any`, dependent or refinement types, and a general
-  ownership/borrowing system;
-- language-defined fuel, memory, or host-operation budgets and scoped host
-  resource or handle lifetimes;
-- network and child-process host APIs;
-- arbitrary syntax-tree patch languages or unauthenticated remote writes;
-- self-hosting, JIT compilation, optimization promises, or verified-compiler
-  claims.
+- algebraic effect handlers, effect polymorphism, row variables, effect
+  subtyping, permission prompts, and user-defined host providers;
+- assignment and loop forms;
+- untagged unions, anonymous variant types, ascription, variadic parameters,
+  call-site type arguments, and tuple index projection, each recorded with
+  the condition that reopens it;
+- narrowing an interface value, run-time type tests,
+  inheritance, and implicit conformance apart from `Any`;
+- quantified contracts, user-written proofs, and an ownership or borrowing
+  system;
+- a language-level budget for time, memory, or host operations;
+- a foreign function interface, dynamic loading, and a package registry;
+- a dependency version solver;
+- concurrency in the first release of this specification; it is added as a
+  library with structured lifetimes, as the roadmap schedules;
+- network and child-process host operations, until an integration gate adds
+  each with its authority and outcome contract;
+- arbitrary syntax-tree patch languages and unauthenticated remote writes;
+- self-hosting, just-in-time compilation, optimization promises, and
+  verified-compiler claims.
 
-An excluded feature MUST receive a specification change before implementation.
-The [scratchpad](../roadmap/scratchpad/README.md) holds unscheduled proposals.
+An excluded feature MUST receive a specification change before
+implementation. The [scratchpad](../roadmap/scratchpad/README.md) holds
+unscheduled proposals and is not normative.
 
 ## Compatibility policy
 
-Before the first stable release (v1.0.0), the design may break deliberately.
-Each break changes the specification, conformance corpus, and roadmap together.
-There is no compatibility bridge from pre-v1. Migration tools may exist as
-separate, one-shot utilities; the compiler MUST NOT auto-detect or accept a
-retired surface.
+Before the first stable release (v1.0.0) the design may break deliberately.
+Each break changes the specification, the conformance corpus, and the roadmap
+together. There is no compatibility bridge: the toolchain MUST NOT detect or
+accept a retired surface. Migration tools may exist as separate, one-shot
+utilities.
 
-Starting with the stable release, the source language, project-data format, machine schemas, artifact
-format, and host ABI are independently versioned. A reader MUST reject a newer
-major version it cannot interpret rather than guessing.
+From the stable release on, the source language, project-data format,
+machine schemas, artifact format, and host interface are versioned
+independently. A reader MUST reject a newer major version it cannot
+interpret.

@@ -9,6 +9,21 @@ The record says, per fact, whether it was **observed** on the machine named
 below or is a **proposal** or **not run**. Nothing here is a decision: choices
 are marked as proposals for the maintainer.
 
+**Note of 2026-11-16.** The language was redesigned after this record was
+written. The record concerns the toolchain only (Cranelift, object formats,
+linkers, the archive), so its observations still describe the workspace. It
+says nothing about the rewritten language's guards, grants, or entry. Linux
+and macOS are still not run. Whether the Windows file adapter can confine
+access to a held directory is a separate question, answered by the
+feasibility check of [v0.0.2 M0](../../v0.0.2/m0/README.md), not here.
+Qualifying a target for release is [M2](../m2/README.md)'s work and needs,
+beyond this record: a launched executable with independently written
+expected observations; an explicit CPU baseline with no detection of the
+build machine's CPU; the failure cases (a missing or wrong linker, an absent
+archive, paths with spaces and non-ASCII characters, long argument lists);
+admission refusals before the entry; and two clean offline builds from
+different checkout paths compared byte for byte.
+
 ## Summary
 
 | Question | Windows `x86_64-pc-windows-msvc` | Linux `x86_64-unknown-linux-gnu` | macOS `aarch64-apple-darwin` |

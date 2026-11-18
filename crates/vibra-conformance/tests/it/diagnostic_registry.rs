@@ -62,6 +62,7 @@ fn implemented_registry() -> BTreeMap<String, String> {
 }
 
 #[test]
+#[ignore = "the specification describes the redesigned language; restored by v0.0.2 M0 and M1 (docs/roadmap/v0.0.2/m0/README.md)"]
 fn the_registry_and_the_specification_table_have_the_same_codes() {
     let specified = specification_table();
     let implemented = implemented_registry();

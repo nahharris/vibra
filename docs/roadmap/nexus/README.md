@@ -1,50 +1,61 @@
 # Nexus implementation plan
 
-Status: planning record, non-normative. Written 2026-11-11 on branch
-`worktree-nexus-design` from `main` at `c81a2836`.
+Status: planning record, non-normative.
 
-This directory is the design and delivery plan for Nexus across
-[v0.0.3](../v0.0.3/README.md) (native executables) and
-[v0.0.4](../v0.0.4/README.md) (local actors). It sits at the roadmap's level
-of the [authority order](../../../AGENTS.md#authority-order): the
+This directory is the design and delivery plan for Nexus, the runtime that a
+native Vibra executable links, and for the compiler path that leads to it. It
+spans [v0.0.2 M4](../v0.0.2/m4/README.md) (a first native slice),
+[v0.0.3](../v0.0.3/README.md) (native executables), and
+[v0.0.4](../v0.0.4/README.md) (local concurrency). It sits at the roadmap's
+level of the [authority order](../../../AGENTS.md#authority-order): the
 specification and the release roadmaps win over it, and where they disagree
 with it this directory is corrected. It changes no observable language
-behavior. Every item that would is listed as a specification prerequisite and
-stays open until Hannah approves the specification text.
+behavior.
 
 | Document | Holds |
 | --- | --- |
-| [goals.md](goals.md) | Every roadmap deliverable and gate clause for Nexus, each with an ID the plans cite |
-| [design.md](design.md) | The architecture: pipeline, crates, execution IR, the step protocol, values, host calls, linking, and the actor layer |
-| [decisions.md](decisions.md) | The decision ledger: what was decided, by whom, why, what was rejected, and what is still open for Hannah |
-| [plan-v0.0.3.md](plan-v0.0.3.md) | Work packages X3-S1 to X3-27, each with its validation criteria |
+| [design.md](design.md) | The architecture: pipeline, crates, execution IR, the step protocol, values, guards, plans, grants, host calls, linking, and the concurrency layer |
+| [decisions.md](decisions.md) | The decision ledger: what was decided, by whom, why, and what was rejected or later replaced |
+| [plan-v0.0.2.md](plan-v0.0.2.md) | Work packages X2-01 to X2-04: the native slice of v0.0.2 M4 |
+| [plan-v0.0.3.md](plan-v0.0.3.md) | Work packages X3-08 to X3-29: the whole language, three platforms, build and cutover |
 | [plan-v0.0.4.md](plan-v0.0.4.md) | Work packages X4-S1 to X4-09, each with its validation criteria |
 | [validation.md](validation.md) | The commands, the standing invariants, and the map from gate clause to evidence |
 
+## The plan in three sentences
+
+The interpreter stays permanently, a native compiler and runtime are built,
+and the Wasm backend is removed at the native cutover (N39). The native
+track follows the release order: one slice in v0.0.2 M4, the whole language
+and three platforms in v0.0.3 (N40). Concurrency in v0.0.4 is built on an
+actor kernel, with scoped children and a bounded parallel map as the first
+things a program author meets (N50).
+
 ## What exists now
 
-The foundation is three crates, in the workspace and covered by the
-architecture test. No command of the CLI reaches them.
+These crates are in the workspace and covered by the architecture test. They
+were built before the language was redesigned (N41), no command of the CLI
+reaches them, and none of them is evidence for a gate. Package X2-01
+classifies each as kept, changed, or removed.
 
-| Crate | What it is | Proof |
-| --- | --- | --- |
-| `vibra-exec` | The execution IR and its verifier (rules V1–V6) | `cargo test -p vibra-exec --test it`: one accepted and one rejected program per rule |
-| `vibra-nexus` | The runtime core: the value store, runtime frames, the five transfers, the dispatcher with quota and yield, traps, host dispatch through `vibra-host`, and admission | `cargo test -p vibra-nexus`: store balance, bounded-stack release, limit as host event |
-| `vibra-nexus-eval` | The reference stepper: runs verified execution IR on Nexus with no generated code | `cargo test -p vibra-nexus-eval --test it`: the M1 demo in execution IR |
+| Crate | What it is |
+| --- | --- |
+| `vibra-exec` | The execution IR, its text form, and its verifier (rules V1–V6, and the frame bound of N27) |
+| `vibra-nexus` | The runtime core: the value store, runtime frames, the five transfers, the dispatcher with quota and yield, traps, host dispatch through `vibra-host`, and admission |
+| `vibra-nexus-eval` | The reference stepper: runs verified execution IR on Nexus with no generated code |
+| `vibra-lower` | Lowering of the core forms: literals, sequences, bindings, `if`, calls and tail calls, function values, module values, host calls, `return` |
+| `vibra-nexus-bridge` | The C ABI, the launcher with its `system` and `harness` profiles, and the static archive |
+| `vibra-codegen` | Cranelift object emission for the slice's instructions, x86-64 only |
+| `vibra-build` | MSVC and SDK discovery and the Windows link driver |
+| `vibra-actors` | The mailbox, lifecycle, reply-slot, and simulation-scheduler core |
 
-The stepper tests already evidence, at the execution-IR level, the M1 clauses
-that do not depend on a code generator: an indirect tail transfer between
-functions with bounded activation growth, a forced yield at every checkpoint
-with no change of observation, exactly one audit event for a host operation
-across those yields, a trap with its origin ordinal, depth bounded only by
-memory with no native stack, the memory host event, and refusal of invalid
-execution IR, an incompatible runtime identity, and an unknown registry
-symbol. [validation.md](validation.md#foundation-evidence) maps test to
-clause.
+The toolchain observations (Cranelift, object formats, the MSVC link) are in
+the [feasibility record](../v0.0.3/m1/feasibility.md). Linux and macOS were
+never run.
 
-What does not exist: lowering from checked IR, the intrinsic and native rows,
-type descriptors, observation of a result, the bridge, code generation,
-linking, the launcher, and everything of v0.0.4. Those are the work packages.
+What does not exist: lowering for the checked IR of the redesigned language,
+guards with consequences, plans, grants and the broker, startup acquisition,
+the new entry contract, registry major 2, type descriptors, observation of a result,
+the Linux and macOS paths, `vibra build`, and the concurrency surface.
 
 ## How to delegate a work package
 
@@ -71,16 +82,18 @@ the sub-items they list, one PR each, in the listed order.
 ## Sequencing in one view
 
 ```text
-v0.0.3  X3-S1 spec ─┬─ X3-01..04 lowering slice on the stepper ─┐
-        X3-S2 feas ─┴─ X3-05..08 bridge, codegen, link ─────────┴─ X3-09 M1 exit
-                       X3-10..22 parity by feature (M2) ── X3-23..27 build, cutover (M3)
+v0.0.2  M0 contracts ── X2-01 rebaseline ── X2-02 guards, plans ─┐
+                                            X2-03 grants, entry ─┴─ X2-04 slice exit (M4)
+
+v0.0.3  X3-10..19, X3-28, X3-29 the whole language (M1)
+        X3-08, X3-20..22 three platforms (M2) ── X3-23..27 build, cutover (M3)
 
 v0.0.4  X4-S1 spec ── X4-01..04 kernel + interpreter simulation ─┐   (independent of v0.0.3)
                        X4-05..07 Nexus executor, workers ────────┴─ X4-08..09 gate
-                       (X4-05 onward needs X3 M2)
+                       (X4-05 onward needs v0.0.3 M2)
 ```
 
-The two releases overlap in one place only: X4-05 onward runs actors on the
-native path that X3 delivers. Stages 1 and 2 of v0.0.4 touch the checker, the
-interpreter, and a new backend-neutral crate, and can proceed while v0.0.3 is
-in flight ([decisions.md](decisions.md), N1).
+X2-01 depends only on the contracts of v0.0.2 M0 and may start while the
+language milestones M1 to M3 are in flight. The v0.0.2 M4 gate is still
+claimed after M3's (N40). Stages 1 and 2 of v0.0.4 touch the checker, the
+interpreter, and the backend-neutral kernel, and need no native code.

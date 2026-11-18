@@ -4,6 +4,10 @@ Status: planning record, non-normative. The reasons behind each choice are in
 the [decision ledger](decisions.md), cited here as N*n*. Names of crates,
 functions, and symbols that do not exist yet are proposals.
 
+The architecture: frames in runtime memory, a verified execution IR, a
+reference stepper, Cranelift, and a static runtime archive. Section numbers
+and titles are stable, because crate documentation cites them.
+
 ## 1. Pipeline and crates
 
 ```text
@@ -20,11 +24,14 @@ syntax -> resolved AST -> checked IR ──────────────>
 | `vibra-exec` | Execution IR, verifier | `vibra-ir` | Exists (foundation) |
 | `vibra-nexus` | Contexts, value store, frames, transfers, dispatcher, traps, host dispatch, admission; later actors' executor and workers | `vibra-host`, `vibra-ir`, `vibra-native` | Core exists |
 | `vibra-nexus-eval` | Reference stepper: execution IR run on Nexus by a loop | `vibra-exec`, `vibra-nexus`, `vibra-ir` | Exists for the foundation's instruction set |
-| `vibra-lower` | Checked IR to execution IR. The only crate that knows both | `vibra-ir`, `vibra-exec` | X3-03, then X3-10 to X3-18 |
-| `vibra-codegen` | Execution IR to a target object with Cranelift. The only crate that depends on `cranelift-*` | `vibra-exec` | X3-06 |
-| `vibra-nexus-bridge` | The C ABI between generated code and Nexus, the launcher, and the static archive. **The only crate with `unsafe`** | `vibra-nexus`, `vibra-host` | X3-05 |
-| `vibra-build` | Toolchain discovery, the link driver, the build manifest | `vibra-codegen`, `vibra-lower`, `vibra-ir` | X3-07, X3-23 |
-| `vibra-actors` | The actor kernel, written once for both executors | `vibra-ir`, `vibra-host` | X4-01 |
+| `vibra-lower` | Checked IR to execution IR. The only crate that knows both | `vibra-ir`, `vibra-exec` | A slice of the core forms exists. Rebased by X2-01 and X2-02, then X3-10 to X3-19, X3-28, X3-29 |
+| `vibra-codegen` | Execution IR to a target object with Cranelift. The only crate that depends on `cranelift-*` | `vibra-exec` | Exists for the slice's instructions, x86-64 only |
+| `vibra-nexus-bridge` | The C ABI between generated code and Nexus, the launcher, and the static archive. **The only crate with `unsafe`** | `vibra-nexus`, `vibra-host` | Exists. Its descriptor and launcher change in X2-03 |
+| `vibra-build` | Toolchain discovery, the link driver, the build manifest | `vibra-codegen`, `vibra-lower`, `vibra-ir` | The Windows link driver exists. The manifest is X3-23 |
+| `vibra-actors` | The actor kernel, written once for both executors | `vibra-ir`, `vibra-host` | The mailbox, lifecycle, reply slot, and scheduler core exist |
+
+"Exists" means the code is in the workspace. It was built before the
+language was redesigned, so it is a starting point and not evidence (N41).
 
 The arrows respect the roadmap's architecture boundary: nothing in language
 semantics depends on a backend, and the checker, workspace, CLI, and MCP are
@@ -93,37 +100,72 @@ accepted and a rejected program for each:
 
 **Extending the IR** is one change with four parts, never fewer: the new
 instruction or terminator, its verification rule with accepted and rejected
-tests, its execution in the stepper, and (once X3-06 exists) its code
+tests, its execution in the stepper, and its code
 generation. A lowering may not emit an instruction the stepper rejects.
 
 ### From checked IR
 
-What `vibra-lower` produces for each `vibra_ir::Expr`. The Wasm lowering
-(`crates/vibra-wasm/src/lower.rs` and its submodules) solved the same problems
-against the same checked IR and is the reference for evaluation order and
-count placement; it is active code, not the archive.
+What `vibra-lower` produces for each `vibra_ir::Expr`. Evaluation order is
+that of the [runtime chapter](../../spec/06-runtime.md#evaluation): operands
+are evaluated in written order. X2-01 aligns the node names of this table
+with the checker of the redesigned language.
 
 | Checked IR | Execution IR | Package |
 | --- | --- | --- |
-| `Literal` | `Scalar`; `Constant` for `str`, `bytes`, atom; `bool` is `Build Enum` with variant 0 or 1 and no cell | X3-03 |
-| `Sequence` | Straight line; each discarded value is dropped | X3-03 |
-| `Variable`, `Captured` | `Copy` from the slot; `Cell` of the environment at `3 + index` | X3-03 |
-| `Let` | Evaluate into the binding's slot; `Drop` when the body ends | X3-03 |
-| `If` | `Variant` of the `bool`, then `Branch` | X3-03 |
-| `Call` direct, indirect; `tail` | `Call` or `TailCall` with `Direct` or `Indirect` | X3-03 |
-| `Function`, `Closure` | `Function` over a body with an environment. A module function used as a value gets a wrapper body that is one tail call (M4 D2.14) | X3-03 |
-| `Global` | `Global` | X3-03 |
-| `Host` | `Host`, which ends the block | X3-03 |
-| `Return` | `Return` | X3-03 |
+| `Literal` | `Scalar`; `Constant` for `Str`, `Bytes`, atom; `Bool` is `Build Enum` with variant 0 or 1 and no cell | exists; X2-01 |
+| `Sequence` | Straight line; each discarded value is dropped | exists; X2-01 |
+| `Variable`, `Captured` | `Copy` from the slot; `Cell` of the environment at `3 + index` | exists; X2-01 |
+| `Let` | Evaluate into the binding's slot; `Drop` when the body ends | exists; X2-01 |
+| `If` | `Variant` of the `Bool`, then `Branch` | exists; X2-01 |
+| `Call` direct, indirect; `tail` | `Call` or `TailCall` with `Direct` or `Indirect` | exists; X2-01 |
+| `Function`, `Closure` | `Function` over a body with an environment. A module function used as a value gets a wrapper body that is one tail call (M4 D2.14) | exists; X2-01 |
+| `Global` | `Global` | exists; X2-01 |
+| `Return` | `Return` | exists; X2-01 |
+| `requires … else`, `ensures … else` | A branch on entry; a candidate slot, one check, and a branch on exit (see [Guards](#guards)) | X2-02, X3-28 |
+| Applying a `proc`; `await` | `Function` with the plan kind; `Call` or `TailCall` through it (see [Plans](#plans)) | X2-02, X3-29 |
+| `Host` | `Host`, which ends the block. Its first operand is the grant | X2-03, X3-19 |
 | `External` | `Intrinsic` | X3-10, X3-16 |
-| `Record`, `Tuple`, `Variant`, `Wrap`, `Array`, `Widen` | `Build` | X3-11 |
-| `Project`, `TupleProject` | `Cell`, then `Drop` of the aggregate | X3-11 |
-| `Match`, `Try` | `Variant`, `Switch` or `Branch`, `Cell` for binders | X3-12 |
+| `Record`, `Tuple`, `Variant`, `Wrap`, `List`, widening to an interface value | `Build` | X3-11 |
+| Construction under `where … else` | The predicate call, then `Build` of the value inside `Result.ok`, or of the constant error inside `Result.err` | X3-11 |
+| `Project` | `Cell`, then `Drop` of the aggregate | X3-11 |
+| `Match`, `Try`, `let … else` | `Variant`, `Switch` or `Branch`, `Cell` for binders | X3-12 |
 | Generic activations | Type descriptors in slots after the environment (M4 D9.5) | X3-13 |
-| `Default`, labelled and variadic operands | Defaults in the function value (M4 D2.14) | X3-14 |
+| `Default` and labelled operands | Defaults in the function value (M4 D2.14) | X3-14 |
 | `Call` contract | A new resolve instruction that yields a function value, then `Indirect` | X3-15 |
 | `Dict`, `Lookup` | Intrinsic and runtime rows | X3-16 |
 | Test assertions | A new assertion instruction | X3-18 |
+
+Removed with the redesign, so no row exists: untagged unions and widening
+into them, `as` narrowing, tuple index projection, and variadic operands
+(N53). A bare guard has no row either: the checker discharges it and nothing
+is lowered.
+
+### Guards
+
+N44. The checker has classified every guard before lowering sees it.
+
+- A bare `requires`, `ensures`, or `where` produces no instruction.
+- `requires C else V` is a branch at the top of the body. The false edge
+  evaluates `V` and returns it. That edge does not pass through the
+  `ensures` check.
+- `ensures C else V` moves every return of the body to one exit block. The
+  candidate is in a slot; `C` is evaluated once; the true edge returns the
+  candidate and the false edge evaluates `V`, with the candidate still
+  bound, and returns it.
+- A call followed by an `ensures … else` check is a `Call`, not a
+  `TailCall`. A call with nothing after it stays a `TailCall`.
+- A proven `… else` guard may be removed with its consequence. The result
+  type does not change.
+
+### Plans
+
+N45. Applying a `proc` evaluates the callee and the operands and builds a
+plan: a function value (N9) of a distinct object kind. It runs no part of the
+procedure. `await` is a call through the plan, so it is a checkpoint like
+any other call, and it may be a tail call. Each `await` pushes a fresh
+activation from the same plan, so a plan is never consumed. A call through a
+plan checks the object kind: calling a plan as a function, or a function as a
+plan, is the defect trap `@runtime.invalidCheckedProgram`.
 
 ## 3. The runtime
 
@@ -144,7 +186,7 @@ header  = function, resume, base, slots, dst, global
 Frames live in a cell stack the context owns, not on the native stack and not
 inside the value store (N8). A frame and its slots are charged against the
 context's memory limit, so recursion exhausts memory as the host event
-`@runtime.memory-exhausted` and never as a native stack overflow.
+`@runtime.memoryExhausted` and never as a native stack overflow.
 
 ### The step protocol
 
@@ -171,8 +213,10 @@ with quota 1 observes exactly what it observes unbounded.
 ### Admission
 
 `vibra_nexus::admit` checks a program's `Requirements` before any of it runs:
-the runtime ABI version, the derived registry minor, and that every host
-symbol is a registry row. With `vibra_exec::verify`, this is G3.M1.11.
+the runtime ABI version, the registry major and the derived minor, and that
+every host symbol is a registry row. With N46 it also checks the entry's
+contract and the driver and policy requirements of the target's bindings.
+With `vibra_exec::verify`, this is the admission clause of the M4 slice.
 
 ## 4. Values
 
@@ -200,7 +244,7 @@ they reach values through `vibra_host::HostValues` over cells.
 
 - A function value is a `FUNCTION` object `[function][slots][params]
   [captures…]`. A call through it checks the operand count (a mismatch is the
-  toolchain-defect trap `@runtime.invalid-checked-program`) and passes the
+  toolchain-defect trap `@runtime.invalidCheckedProgram`) and passes the
   value itself as the callee's environment (N9). Defaults and type arguments
   join the header in X3-13 and X3-14.
 - A module value has three states: unread, evaluating, ready. The first read
@@ -208,6 +252,11 @@ they reach values through `vibra_host::HostValues` over cells.
   reader its own reference. Each execution starts fresh.
 - Generic code receives type descriptors as ordinary values in slots, as the
   interpreter and the Wasm backend pass type arguments at run time (N15).
+- A plan is a function value of a distinct kind (N45).
+- A grant is a sealed value: a reference to a broker entry, with the world
+  and generation that issued it (N42). The store holds the reference; the
+  broker holds the resource, the policy, and the counters. No instruction
+  builds a grant from ordinary data, and observation refuses one.
 
 ### Observation
 
@@ -224,9 +273,37 @@ context's provider, builds the reply, writes `dst`, sets `resume`, and only
 then appends `AuditEvent::completed`: the same operation code and the same
 event code as the interpreter. A call that traps or exhausts memory appends
 nothing. Because the operation and the advance of `resume` happen inside one
-step, a yield before or after cannot repeat it (G3.M1.9).
+step, a yield before or after cannot repeat it.
 
-Traps keep the closed codes of the runtime chapter. Generated code and the
+### Grants
+
+N42, N43. The first operand of every `Host` terminator is a grant. Before
+`vibra_host::perform`, `Context::host` does what the runtime chapter's
+[host calls](../../spec/06-runtime.md#host-calls) lists, in that order:
+
+1. validate the grant: target kind, world and provider, generation, and the
+   registered operation;
+2. derive the requested resource and action from the typed operands;
+3. enforce the whole policy, inherited constraints included, and reserve the
+   shared limits in the broker;
+4. call the adapter bound to the target, and keep "not submitted",
+   "completed", and "may have run" distinct;
+5. advance `resume`, then append the completed event with a safe projection
+   of the grant.
+
+A valid request the policy rejects, a limit that cannot be reserved, and an
+action the platform cannot enforce are values of the operation's error type.
+None is a trap. A stale, foreign, or forged grant is the defect trap
+`@runtime.invalidHostValue`. A refusal before the adapter appends no
+completed event.
+
+The broker is one object per world. It owns resources and counters without a
+strong reference back from them, so a context's reference counts are never
+used to synchronize shared counters. The filesystem adapter starts each
+invocation at the held directory and keeps no intermediate handle between
+invocations.
+
+Traps are the two defect traps of the runtime chapter (N44). Generated code and the
 stepper record a trap as code plus origin ordinal in the context and stop. The
 program carries an origin table (ordinal *n* is entry *n − 1*; 0 is no
 origin). In a build product the table is a data section of the object, and
@@ -240,31 +317,19 @@ calls the matching transfer and returns a status to the dispatcher. No Vibra
 call is a native call, so the native stack holds the dispatcher, one function,
 and one runtime routine at any language depth (N2).
 
-Proposed C ABI, owned by `vibra-nexus-bridge` (N10). X3-05 fixes the final
-form and versions it with `ABI_VERSION`:
+The C ABI is owned by `vibra-nexus-bridge`, and that crate's documentation
+is the contract (N10, N32):
 
-```c
-typedef struct NexusContext NexusContext;            /* opaque */
-typedef uint32_t (*VibraStep)(NexusContext *);       /* 0 continue, 1 done, 2 trap, 3 exhausted, 4 wait (v0.0.4) */
-
-typedef struct {
-  uint32_t abi;              /* must equal the archive's ABI_VERSION */
-  uint32_t registry_minor;
-  uint32_t entry;
-  uint32_t function_count;   const VibraStep *functions;  const uint32_t *frame_slots;
-  uint32_t global_count;     const uint32_t *global_initializers;
-  uint32_t symbol_count;     const char *const *host_symbols;
-  const uint8_t *origins;    uint64_t origins_len;
-  uint8_t identity[32];      /* semantic input identity, for the manifest check */
-} VibraProgram;
-
-extern const VibraProgram vibra_program;             /* the one symbol the launcher needs */
-
-/* one runtime routine per transfer and per instruction, all (ctx, scalars) -> scalar */
-uint32_t nexus_call(NexusContext *, uint32_t function, const uint32_t *args, uint32_t argc, uint32_t dst, uint32_t resume);
-/* ... nexus_tail_call, nexus_call_value, nexus_ret, nexus_host, nexus_global,
-       nexus_scalar, nexus_copy, nexus_move, nexus_drop, nexus_build, nexus_cell, ... */
-```
+- A step function is `(ctx, resume) -> status`. The statuses are continue,
+  done, trap, exhausted, and, from v0.0.4, wait.
+- The linked object exports one symbol the launcher needs, the program
+  descriptor. It carries the ABI version, the registry major and minor with
+  the required host symbols, the entry's contract (N46), the driver and
+  policy requirements of the target's bindings, the functions with their
+  block and frame-slot counts, the module-value initializers, and the origin
+  table. It carries no identity field.
+- There is one runtime routine per transfer and per instruction. Each takes
+  the context and scalars, and returns a scalar.
 
 No pointer into the store or the cell stack crosses the bridge in the
 baseline: generated code names slots by index and the runtime does the rest
@@ -284,12 +349,27 @@ the platform linker on the object and the archive (N13).
 | `x86_64-unknown-linux-gnu` | ELF | The pinned `cc` driver | An explicit path in the toolchain's target profile |
 | `aarch64-apple-darwin` | Mach-O | Apple `ld` through `cc`, with the pinned SDK | `xcrun` |
 
-The launcher has two profiles. **system** ships: the system provider, the
-process arguments, standard streams, and the exit codes of the tooling
-chapter. **harness** exists only in the test archive: it reads a
-`@host-world.v1` document, runs under a quota the harness chooses, and writes
-one observation document (result, trap and origin, audit trace, host event)
-for the conformance runner to compare (N18).
+The launcher has two profiles. **system** ships: the system provider and the
+target's binding recipes. **harness** exists only in the test archive: it
+reads a `@hostWorld.v2` document, runs under a quota the harness chooses,
+and writes one versioned observation document (result, trap and origin,
+audit trace, startup record, host event) for the conformance runner to
+compare (N18, N47).
+
+Startup is the same in both (N46):
+
+1. Admit the program.
+2. Validate the binding recipes carried by the build.
+3. Acquire grants in dependency order, ties in the order of their names. A required
+   grant that cannot be acquired ends the run before the entry, with
+   everything already acquired released in reverse. An optional grant
+   refused in the way its provider specifies is bound to none.
+4. Build the entry's plan and run it.
+5. Release grants in reverse order.
+
+A built executable returns the entry's `ExitCode` to the operating system.
+The harness records it. Memory exhaustion, a startup failure, and a defect
+trap are separate outcomes and never appear as an application code.
 
 ## 8. Parity
 
@@ -307,10 +387,13 @@ the transition a case is executed by up to four executors:
 per executor (`stepper`, `windows`, `linux`, `macos`), each `matched` or
 `pending <package>`. A host test fails when the table and the corpus
 disagree, a package only moves cells toward `matched`, and `pending` is never
-a pass: M2 exits at zero pending cells (N14). This is the record G3.M1.12 asks
-for. The Wasm backend needs no such table any more, because it lowers every
-checked form; the native table reaches that state at the M2 exit and is then
-removed.
+a pass: v0.0.3 M2 exits at zero pending cells (N14).
+
+X2-04 builds this inventory for the corpus of the redesigned language
+(N49). The Wasm backend runs only the v0.0.1 corpus,
+under the transition profile, until X3-26 removes it; a case that needs
+grants, plans, or the new entry is unsupported there and is not a Wasm
+parity failure.
 
 Every native and stepper comparison runs twice: unbounded, and with quota 1.
 
@@ -318,19 +401,25 @@ Every native and stepper comparison runs twice: unbounded, and with quota 1.
 
 `vibra build --target <triple>` writes the executable and
 `<target>.build.vibon`. The manifest's two identities are separate by
-construction: the **semantic input identity** comes from v0.0.2 M5's digest
-(H1) and does not see the target; the **artifact identity** hashes the
+construction: the **semantic input identity** comes from a closed source
+snapshot with its pinned dependency, claim, witness, and policy identities
+(N48) and does not see the target; the **artifact identity** hashes the
 executable and records the triple, CPU baseline, Cranelift and linker
-versions, normalized flags, `ABI_VERSION`, the registry minor and symbols,
-required effects, and the origin table's hash. Reproducibility is byte
+versions, normalized flags, `ABI_VERSION`, the registry version and symbols,
+the admission ceiling and grant bindings, and the origin table's hash.
+Identities are computed in prerequisite order (inputs, object, executable,
+manifest payload, signature), and a payload never includes its own hash. Reproducibility is byte
 equality of both files across two clean offline builds in different checkout
 paths on one target.
 
 ## 10. The actor layer (v0.0.4)
 
-The source surface is Hannah's to specify in X4-S1. This section fixes only
-the runtime shape that surface will sit on. The surface is a receive loop
-([decisions.md](decisions.md), O1), so an actor parks inside a receive.
+The source surface is specified in X4-S1. This section fixes only the
+runtime shape that surface will sit on. The kernel is the substrate. What a
+program author meets first is a scoped child with join and a bounded,
+ordered parallel map; a long-lived actor is a receive loop with an explicit
+lifetime, and parks inside a receive ([decisions.md](decisions.md), O1 and
+N50).
 
 - **One kernel, two executors** (N19). `vibra-actors` owns actor identity,
   mailboxes, addresses and their scope checks, reply slots, exit, timeouts,
@@ -344,10 +433,19 @@ the runtime shape that surface will sit on. The surface is a receive loop
   A message is copied out of the sender's store into a kernel-owned neutral
   value at send and into the receiver's store at delivery. Sharing an
   immutable snapshot is the same copy until measurement asks for more.
-- **Addresses** are a new closed value kind. An address holds the actor, the
-  set of operations it admits, and a bound resource scope. Narrowing builds a
-  new address whose set and scope are no wider. The kernel checks both at the
-  dispatch boundary, before the handler sees the message (G4.8).
+- **Addresses** are grants of the `ActorEndpoint` kind (N42). An address
+  holds the actor, the set of operations it admits, and a bound scope.
+  Narrowing builds a new address whose set and scope are no wider. The
+  kernel checks both at the dispatch boundary, before the handler sees the
+  message. An address never passes through a host adapter, and holding one
+  gives the sender none of the receiver's host grants.
+- **Transfer** (N51). A grant crosses a context by a delegation the broker
+  or kernel checks. The callback of a parallel map crosses as a code
+  identity with its immutable captures, under a rule checked before the map
+  starts.
+- **Scopes.** A scope bounds the children started in it and defines what
+  join, cancel, and exit do. Cancelling after a host action was submitted
+  does not undo it; the late or unknown outcome stays visible.
 - **Waiting** is `Step::Wait`: the step parks the context with a wait token,
   the dispatcher returns it to the kernel, and a wake makes it runnable.
   Nothing about a frame changes, because a frame already is the suspended
@@ -366,7 +464,7 @@ the runtime shape that surface will sit on. The surface is a receive loop
 - **Events.** The audit trace format already admits new `kind` atoms as a
   minor change. Message events (`send`, `deliver`, `reply`, `park`, `wake`,
   `exit`) are new kinds carrying source origins, which is how tooling shows
-  the causal path from a send through a handler to its host operation (G4.9).
+  the causal path from a send through a handler to its host operation.
 
 ## 11. What v0.0.4 extends (the M1 handoff)
 
@@ -377,10 +475,12 @@ the runtime shape that surface will sit on. The surface is a receive loop
 | Handles are context-local offsets, layout private | Unchanged. Messages cross as neutral values, so no handle leaves a context |
 | Origins: an ordinal table per program | Message events carry origins of the send and the handler |
 | Host dispatch through the closed registry | Unchanged. An address scopes a *request*; the registry and its adapters keep their own contract |
+| The sealed authority envelope | The `ActorEndpoint` kind becomes usable, checked at kernel dispatch |
 | `ABI_VERSION` | Bumped by the actor transfers |
 
-The proposed split of authority from effect (G3.M1.7): **holding an address is
-the authority to request; the effect row is what a body may perform.** A
-sender's row gains only the messaging effect. The handler's row carries the
-host effects, and the binary target must declare the host effects of every
-actor body it can start, so target consent stays complete.
+The split of authority from effect: **holding a grant is the authority to
+request; the effect row is what a body may perform.** Both mechanisms exist
+from v0.0.2 for host operations. For actors, a sender's row gains only the
+messaging operation. The handler's row carries the host operations, and the
+binary target's admission ceiling must contain the operations of every body
+it can start, so target consent stays complete.

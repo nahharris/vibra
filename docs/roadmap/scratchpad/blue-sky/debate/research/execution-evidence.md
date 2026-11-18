@@ -1,0 +1,52 @@
+# Execution-design evidence for Vibra
+
+Reading key. **[OPENED]** means I fetched the page this session and the finding is in it. **[MEMORY]** means I am reporting from prior knowledge and did NOT open the URL; check it before relying on it. Facts and opinion are labelled. Several pages I tried gave thin or failed results (noted inline).
+
+## 1. Durable execution and journaled replay
+
+- **Fact [OPENED], Temporal, 2025-26.** Workflow code must issue the same commands in the same order on replay. If replayed commands differ from the stored history, the run fails with a non-determinism error. Adding, removing or reordering timers, activities or child workflows needs explicit versioning (patching or worker versioning). https://docs.temporal.io/workflow-definition. The page said nothing about history-size or payload limits.
+- **Fact [MEMORY].** Temporal enforces hard limits on history (about 51,200 events or 50 MB, with warnings earlier) and about 2 MB per payload. The usual cure is "continue-as-new", which restarts the workflow with carried state. See https://docs.temporal.io/workflows (limits section).
+- **Fact [OPENED], Restate.** Every step, including service calls, state updates and timers, goes into a journal; on failure it replays and skips finished steps. https://docs.restate.dev/concepts/durable_execution. The page did not cover determinism rules or versioning of in-flight work. I did not verify the other products (Azure Durable Functions, DBOS, Resonate, Golem). They share the replay-from-log design and the same code-must-be-deterministic rule [MEMORY].
+- **Why it matters.** This is the strongest evidence for Vibra's journal. The shared pain is that the *workflow code* is replayed against an old journal, so any code edit can break in-flight runs. Vibra's step function `state x event -> state x intents` avoids half of this. Recovery can use a state snapshot plus the tail of the journal, so it does not have to re-execute history from the start. But upgrading the step function while the stored state and old events still exist is the same versioning problem in another form. Vibra needs a state-migration story and a journal compaction/snapshot story from day one.
+
+## 2. Deterministic simulation testing
+
+- **Fact [OPENED], TigerBeetle VOPR, 2023.** The whole cluster runs in one process with mocked network and disk, injected faults, and linearizability checks. They claim 3.3 s of simulation gives about 39 min of real-time testing, with 10 simulators running around the clock. https://tigerbeetle.com/blog/2023-07-11-we-put-a-distributed-database-in-the-browser/. This is vendor-reported.
+- **Fact [MEMORY].** FoundationDB built the simulator *first* and wrote the database inside it. All I/O goes through an interface, and the team attributes its reliability to this (Will Wilson, Strange Loop talk "Testing Distributed Systems w/ Deterministic Simulation", 2014). The FoundationDB paper (SIGMOD 2021) says the same. Turmoil (Tokio) and Madsim (Rust) do the same for Rust async. Antithesis gets determinism with a deterministic hypervisor, so the program does not have to be written to a restricted interface. That is the alternative path (https://antithesis.com, [MEMORY]).
+- **Cost.** Every I/O path must go through the interface from the start, and retrofitting is hard. That is the known failure mode, and it is why Antithesis exists. Fidelity limits the findings: the simulator only finds bugs in faults it models.
+- **Why it matters.** This is the best fit for Vibra. Intents-to-ports is the "all I/O through an interface" rule enforced by the language, so it is not just a convention. Risk: the quality of each port's model decides what simulation can find, and the requirement that every port ship a model puts a large cost on library authors.
+
+## 3. Model checking real implementations
+
+- **Fact [OPENED], P language.** State-machine modelling language; the repo says teams across AWS use it for S3, EBS, DynamoDB, MemoryDB, Aurora, EC2 and IoT, and cites a 2025 CACM article by Brooker and Desai. https://github.com/p-org/P. Note that P is mostly used on *models*, with code-level checks as a secondary use, so the repo does not show real implementations being checked.
+- **Fact [OPENED], Microsoft FAST 2016.** Systematic testing of real code found "numerous" bugs in three Azure storage systems that needed mixed concurrency and failure, and produced full traces. The authors argue this covers more than TLA+ because it checks code. https://www.microsoft.com/en-us/research/publication/uncovering-bugs-in-distributed-storage-systems-during-testing-not-in-production/. The page gave no effort figures.
+- **Fact [MEMORY].** Coyote (successor to P#), Stateright (Rust), and Shuttle (AWS) and Loom (Tokio) for thread schedules. Shuttle uses randomized schedules, not exhaustive search, because exhaustive search does not scale. Loom is exhaustive and works only on small tests. Alloy/TLA+ gap: the model and code drift apart (a point made in the Azure paper above).
+- **Why it matters.** Checking the actual step function removes the model/code gap, which is a real selling point. But expect bounded checking only: state explosion means random or bounded exploration in practice, and it will not prove properties of large programs.
+
+## 4. Actors and alternatives
+
+- **Facts [MEMORY], all not opened.** Erlang/OTP: mailboxes are unbounded, so overload shows up as memory growth, and OTP supervision is the proven answer to crashes (Armstrong thesis, 2003). Orleans virtual actors (Bernstein, 2014) give location transparency, but request-reply cycles deadlock. Swift actors are reentrant at every `await`, so invariants can break across suspension points (SE-0306, https://github.com/swiftlang/swift-evolution/blob/main/proposals/0306-actors.md). Pony's reference capabilities make data-race freedom checkable but are widely reported as hard to learn. E vats and promise pipelining cut round trips (Miller 2006 thesis). My fetch of the Swift docs page failed (connection reset).
+- **Alternatives [MEMORY].** Structured concurrency (Nathaniel Smith, "Notes on structured concurrency, or: Go statement considered harmful", 2018, https://vorpus.org/blog/notes-on-structured-concurrency-or-go-statement-considered-harmful/). Lingua Franca reactors with logical tags give deterministic concurrency and are explicitly designed to remove actor nondeterminism (Lohstroh et al., 2019-2021).
+- **Why it matters.** `await` compiling to machines inherits Swift's reentrancy problem unless the compiler makes suspension points explicit and handlers atomic. Vibra's step function is atomic per event, which helps. Needs a bounded-mailbox and backpressure rule, and a rule against cyclic request-reply. Logical tags are the best-evidenced route to deterministic concurrency here.
+
+## 5. Effects and capabilities
+
+- **Fact [OPENED], Roc and Elm.** My fetches did not answer the question. The Roc platforms page returned only API docs, and the Elm URL I guessed returned 404. I cannot cite them for this.
+- **[MEMORY].** Elm removed effect managers from third-party packages (0.19, 2018), so only ports and the core effects remain. The community complaint is that ports are awkward and the core team gates access to new effects. Elm commands-as-data cannot be composed freely with the pure code that issues them. Roc platforms expose effects as platform-defined tasks; the platform author decides authority, and apps cannot define new effects. Both show the limit that a language with a closed effect set pushes every new capability through the platform author.
+- **[MEMORY], capability systems.** WASI and the Component Model use capability handles. Deno permissions are coarse, process-wide flags. Algebraic effects (Koka, OCaml 5, Effekt, Unison abilities) are more flexible but give no security boundary by themselves. Opinion: object capabilities need unforgeable references and no ambient authority, which typed ports provide.
+- **Why it matters.** Vibra's "no user-defined handlers" is the Elm/Roc choice. Expect pressure to add new port types, so the port-definition path must be open to library authors, with models, or the platform becomes a bottleneck.
+
+## 6. Data parallelism for a pure language
+
+- **[OPENED], Futhark blog index, 2026.** Full flattening now compiles any Futhark program to GPU code "with minor fine print". Irregular arrays are an open design question. The compiler sometimes rejects valid programs, and recursion support is new. https://futhark-lang.org/blog.html. I could not verify the page's authenticity beyond its content.
+- **[MEMORY].** Rayon gives safe data parallelism through Rust's ownership rules. Haskell `par` and strategies give speedups limited by granularity and by GC and spark overhead (Marlow et al., 2009-2010). Bend/HVM promises automatic parallelism, but early releases were slower than single-core CPU code for many programs and showed speedups only on suitable workloads. LVars (Kuper and Newton) give deterministic parallelism through monotonic updates.
+- **Why it matters.** Deterministic parallel *pure* functions fit inside a step. The journal records inputs and outputs, so parallelism within one step does not break replay. Speedups depend on array-shaped, regular workloads, so promise explicit parallel collections, not automatic parallelism.
+
+## 7. Native GUI in a pure/message-driven model
+
+- **[MEMORY].** Iced and Relm port the Elm Architecture to native Rust. Known issue: animation and frame timing need a subscription-to-frame-tick, and large state needs diffing or caching, so Iced is still pre-1.0 with a thin widget set. Immediate mode (Dear ImGui, egui) re-runs the UI code each frame and holds little retained state, which suits a pure `view(state)` but costs CPU and gives poor accessibility. Retained/declarative toolkits (SwiftUI, Flutter, Compose, Slint) diff a view tree. GPU resources (wgpu) are inherently stateful handles, so they must be ports with a model. Opinion: no solid published evidence that LLMs generate UI code better in one paradigm. I found none, so do not assume it.
+- **Why it matters.** Replaying a UI session deterministically needs frame ticks and input as journaled events. A 60 Hz tick event floods the journal unless ticks are not journaled or are compacted. This is a threat to the "journal everything" rule.
+
+## Honest limits
+
+Only 8 pages were opened, and 3 of them (Temporal, Restate, P repo) were thin. Most claims in sections 4-7 are from memory and need checking.

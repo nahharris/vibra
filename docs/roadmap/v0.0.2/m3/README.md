@@ -1,50 +1,45 @@
-# Milestone 3 — Interactive evaluation and tests
+# v0.0.2 M3: identity and repair loop
 
-An agent can evaluate ordinary Vibra forms repeatedly, try a
-definition change, and run selected tests against the exact same session
-revision. The terminal REPL, MCP, and editor clients use one session engine.
+**Planned.** The services an agent needs to inspect, change, and retest a
+project, over ordinary source files.
 
-## Delivery order
+## Scope
 
-1. Open a session against a pinned checked revision and explicit module
-   context. Evaluate expressions and batches of declarations through the
-   existing reader, checker, and reference interpreter. Accept a selection
-   or enclosing top-level form from an editor buffer with its source origin.
-   Return structured values and types, effects, diagnostics, traps, and
-   captured output with revision and source origin.
-2. Stage new and replacement definitions in a private overlay. Recheck
-   affected callers and initializers before advancing the checked session
-   revision. Failed checks
-   retain the last checked revision and report draft diagnostics. Provide
-   explicit inspect, reset, refresh, and close operations. Keep the session
-   alive across submissions, including definitions and results still valid
-   in its checked revision. A session can
-   publish through M2's edit plan using the expected base head.
-3. Run selected project tests or an ordinary test form staged in the session.
-   Use the existing test selection and outcome model and a fresh deterministic
-   host world per test. Keep session output separate from transport messages.
+- **Snapshots and identity.** Source files and pinned snapshots are the
+  authority. Each declaration has its anchor identity; its claim (signature,
+  contracts, effect row) and its witness (body) are hashed separately. A
+  content-addressed store is at most a derived cache that can be deleted.
+- **Protected evidence.** Test bodies, fixtures, and the runner and policy
+  versions are pinned for each run and distinguished from the code under
+  repair. An approval names what it approved; it is void when the test, the
+  policy, or the claim changes.
+- **Queries.** Read-only, bounded, versioned: declaration, references, type,
+  contracts, effect row, grant requirements, and diagnostics at a position
+  or entity. Results name the snapshot they describe.
+- **Bounded evaluation.** Evaluate a pure expression against a snapshot
+  under stated limits. Exhaustion is an incomplete outcome, not a failure of
+  the program.
+- **Edits.** Preview a file edit against a named snapshot revision and apply
+  it atomically. A preview shows identity-affecting changes, such as a
+  rename. A stale revision is rejected.
+- **Structured test results.** Failures carry spans, expected and actual
+  encodings, and the audit trace.
+- **Generated references.** The syntax card, checked examples, and grammar
+  and schema data are generated from the implementation and checked against
+  it.
 
-Close result encoding, initializer and old-value lifetime, concurrent requests,
-cancellation, and resource-limit semantics in the tooling, effects, runtime,
-and conformance chapters. Start with pure expression evaluation. Support
-explicit run and test actions. An effectful run requires the server's execution
-permission and a selected checked target that already admits its effects.
-Test execution requires its own permission and uses the deterministic test
-host. Expression evaluation requires explicit execution permission even for
-pure code.
-An unsuccessful session edit leaves the checked revision intact. Host effects
-already performed by an authorized run remain observable.
+One workspace engine serves the CLI. The command names start from the
+existing hierarchy; `query` and `edit` become available.
 
-- **Demo.** Open a module, send a top-level form from its buffer to the same
-  running session twice with a redefinition, rerun a named test against the
-  overlay, then reset and observe the original result.
-- **Exit.** CLI, MCP, terminal, and editor clients use the same session
-  semantics.
-  A fresh CLI run/test on equivalent checked inputs agrees on observable
-  outcomes. Concurrent sessions cannot see each other's drafts. Invalid forms,
-  denied execution, exhausted budgets, cancellation, and close have defined
-  outcomes. A later request cannot observe a half-applied redefinition.
+## Exit evidence
 
-The REPL takes inspiration from Clojure's interactive development loop.
-Vibra keeps explicit module context and static effect consent.
-[Clojure REPL guide](https://clojure.org/guides/repl/introduction)
+- The repair scenario of the [release gate](../README.md#release-gate), from
+  a defect seeded by someone other than the author of the repair run.
+- Rejections: stale edit, replaced test, changed policy, changed claim under
+  an old approval.
+- Every machine output validates against its schema.
+
+## Not in this milestone
+
+An authoritative code database, a publication workflow, persistent sessions
+with live redefinition, MCP, and editor integrations.

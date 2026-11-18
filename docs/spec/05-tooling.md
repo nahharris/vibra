@@ -1,857 +1,645 @@
 # Vibra CLI, MCP, and code tooling
 
 Status: normative target
-Implementation status: `project init`, `fmt`, `check`, `run`, and `test` run
-through the shared workspace engine, with `run` and `test` executing the
-reference interpreter for the complete pure language. M3 adds the index
-records and the workspace position envelope as library projections. MCP, the
-public `query` command, and the remaining specified tooling commands remain
-unavailable. Milestone 4 Step 13 closes the Stage 4B contracts of this chapter,
-program arguments, the `@command.program-failed` result, the audit-event
-payloads, and the effect fields of the position envelope and the index, and
-implements none of them; Steps 16, 18, 19, and 20 do.
+Implementation status: this chapter describes the tool contract of the
+rewritten language. The shipped v0.0.1 tool implements an earlier contract.
+A tool MUST report which commands, profiles, and schema versions it actually
+supports, as [Conformance profiles](07-diagnostics-and-conformance.md#conformance-profiles)
+requires.
 
 ## One workspace engine
 
-The CLI, MCP server, editor integration, and compiler MUST use one workspace
-engine for parsing, resolution, types, effects, diagnostics, queries, and edit
-planning. A tool may render the result differently; it may not reimplement the
-language or maintain a second symbol index.
+The CLI, the MCP server, editor integrations, and the compiler MUST use one
+workspace engine. That engine acquires source, parses it losslessly, resolves
+names, checks types, guards, and effects, produces diagnostics, answers
+queries, and plans edits. An adapter MAY present the engine's facts
+differently. It MUST NOT contain a second checker or a second symbol index.
 
-There is one checker. A source document that no project holds, as the
-conformance corpus runs for an `interpret` case, is the only
-module of a one-module workspace with the embedded standard library, resolved
-and checked exactly as a module of a project is. It keeps the source ID it was given. It can import the standard
-library and nothing else, because no other module is in that workspace, and the
-verdict, diagnostics, and spans for a source are those the workspace check
-reports for the same module.
+- **Explicit inputs.** Semantic phases consume immutable inputs they are
+  given. They MUST NOT read files, dependencies, environment values, or the
+  network themselves.
+- **One source alone.** A single source given to the checker is one module of
+  a one-module library workspace with the embedded standard library. It keeps
+  the identity it was given, can import only modules captured in that
+  workspace, and MUST receive the same verdict and spans as the same module
+  in a project. No tool uses a weaker checker for snippets.
+- **Files are the authority.** A content-addressed cache MAY hold derived
+  results. Deleting it MUST NOT change source, approvals, identity, or
+  execution. There is no staged codebase, no live redefinition, no
+  publication step, and no second representation of source.
+- **Formats.** JSON is the format of command and MCP responses. Persistent
+  project, lock, approval, policy, and build documents are canonical `.vibon`
+  data. A `.vib` file holds Vibra source. A loader chooses by extension, MUST
+  NOT inspect content to choose, and MUST NOT accept a retired spelling.
 
-Every machine response has a schema version and is deterministic for one
-workspace snapshot. JSON is the general CLI and MCP interchange format. Vibra
-owns no persistent JSON file: project, lock, and build data use the canonical
-`.vibon` data grammar. Human output is for terminals; program stdout from `run`
-remains program-owned.
-
-## CLI commands
-
-The specification defines the following command surface.
-
-```text
-vibra project init|inspect|add|remove|sync
-vibra fmt
-vibra check
-vibra lint
-vibra test
-vibra run [<target>] [-- <arg>...]
-vibra build
-vibra query <subject> [--include <metadata>] [--expand <relations>]
-vibra edit fix|rename|organize-imports
-vibra mcp
-```
-
-The M2 implementation profile admits only `project init`, `fmt`, `check`,
-`run`, and `test`, with the exact flags and result envelopes closed by the
-milestone's Step 1 contract before those commands are implemented. The other
-specified command names remain reserved and produce `@tool.unavailable` in M2;
-unknown spellings remain invalid input. This capability status does not alter
-the specified command surface or create a profile-specific source language.
-
-### M2 command contract
-
-The admitted process grammar is closed and uses one global option prefix:
+## Command surface
 
 ```text
-vibra [--format human|json] [--workspace PATH] project init [DEST]
-vibra [--format human|json] [--workspace PATH] fmt PATH [--write]
-vibra [--format human|json] [--workspace PATH] check [TARGET]
-vibra [--format human|json] [--workspace PATH] run [TARGET] [-- ARG...]
-vibra [--format human|json] [--workspace PATH] test [TEST]
-vibra [--format human|json] help
+vibra [GLOBAL...] project init [DEST]
+vibra [GLOBAL...] project inspect
+vibra [GLOBAL...] project add target|dependency DATA [--write]
+vibra [GLOBAL...] project remove target|dependency NAME [--write]
+vibra [GLOBAL...] project sync
+vibra [GLOBAL...] fmt PATH [--write]
+vibra [GLOBAL...] check [TARGET]
+vibra [GLOBAL...] lint [TARGET] [--write]
+vibra [GLOBAL...] test [TEST]
+vibra [GLOBAL...] run [TARGET] [-- ARG...]
+vibra [GLOBAL...] eval SUBJECT [--arg VIBON]...
+vibra [GLOBAL...] build [TARGET] [--target TRIPLE]
+vibra [GLOBAL...] query SUBJECT [--include METADATA] [--expand RELATIONS]
+vibra [GLOBAL...] edit fix SUBJECT [--write]
+vibra [GLOBAL...] edit rename SUBJECT NEWNAME [--write]
+vibra [GLOBAL...] edit organize-imports PATH [--write]
+vibra [GLOBAL...] mcp [SERVER-PERMISSION...]
+vibra [GLOBAL...] help
 ```
 
-**Program arguments.** `run` takes the program arguments after a literal `--`
-token. Every token after `--` is one argument, in order and verbatim, including a
-token that begins with `-` or is itself `--`; `--` with no argument after it is
-valid and gives none. The arguments are what `env.read.args` returns. `--` is
-accepted only by `run`, after the optional `TARGET`, and only once as the
-separator; `--` on any other command is invalid input. `test`
-takes no arguments: its host world supplies `args`, as the runtime chapter's host
-world section states, so the same test gives the same result wherever it runs. An
-argument that is not Unicode is `not-unicode` to the operation that reads it, not
-an error of the command.
+This is the grammar of a process command line, not Vibra source.
 
-`help` may also be spelled `--help` or `-h` in the command position. It takes
-no arguments, prints this grammar to stdout in human mode, and succeeds with
-`@command.ok`; its JSON payload is `{ "usage": string }` and its `command` is
-`help`. `help` followed by any argument is invalid input.
+| Operand | Meaning |
+| --- | --- |
+| `GLOBAL` | `--format human\|json` (default `human`) and `--workspace PATH` (default: the current directory), each at most once, before the command |
+| `PATH`, `DEST` | a workspace-relative path, written with `/` in results, confined beneath the workspace root |
+| `TARGET` | the atom naming one validated local target, such as `@app`; never a file path |
+| `DATA` | one canonical VIBON value holding the complete typed target or dependency record |
+| `NAME` | the atom naming a target or dependency alias |
+| `SUBJECT` | a [query subject](#workspace-queries) |
+| `NEWNAME` | one valid identifier |
+| `TEST` | a [test selector](#tests-and-selection) |
 
-`--format` defaults to `human` and may occur once before the command. The
-default workspace is the current directory. `PATH` and `DEST` are
-workspace-relative and may not escape its canonical root. `TARGET` is the
-canonical atom of a target's `name`, such as `@app`. `TEST` is an exact
-test selector, not a path. Its grammar is a canonical test-module atom, then
-`::`, then one canonical Vibra string literal containing the decoded test
-name; for example, `@tests.math::"adds one"`. The module atom MUST begin with
-`@tests.` and contain the test module's full dotted path. The selector string
-literal uses the canonical string-literal spelling defined by the projects
-chapter. No whitespace is permitted outside the atom and string literal. A
-malformed or noncanonical selector is
-`@command.invalid-input` with process exit 2 and an empty diagnostic array.
-`DEST` defaults to the workspace for `project init`; it must be absent or
-empty, and the command creates only the canonical `project.vibon`, `src/`, and
-`tests/` layout. `fmt` previews by default; `--write` is its only mutating
-flag. `check`
-checks every target when `TARGET` is omitted. `run` requires one binary target.
-When `TARGET` is omitted, `run` selects the project's only binary target; a
-project with no binary target or with several is `@command.invalid-input`
-(exit 2, empty diagnostic array).
-`test` runs every test in canonical discovery order when `TEST` is omitted and
-otherwise selects the declaration or declarations with exactly that module and
-decoded name; a valid workspace has one because duplicate names are errors. A
-missing or empty `tests/` root is an empty suite; it succeeds only when `TEST`
-is omitted. Project, root, or source-graph diagnostics yield
-`@command.diagnostics` (exit 1), zero selected/passed/failed counts, and an
-empty `tests` array before selector lookup. With no selector, all test modules
-are parsed to discover declarations;
-with an explicit selector, its module is parsed to resolve the literal name.
-Any diagnostic from that required source parsing yields
-`@command.diagnostics` (exit 1) with zero selected/passed/failed counts and an
-empty `tests` array. After these checks, an unknown module or test name is
-`@command.invalid-input` with exit 2 and no diagnostics; semantic checking of a
-nonexistent selection is not performed. A selected suite is fully checked
-before any test body runs. Error-level ordinary syntax, import, type, or
-duplicate test identity diagnostics found during that check yield
-`@command.diagnostics` (exit 1), mark every selected item `@test.invalid`, and
-prevent all execution. Warning-level diagnostics remain in the envelope and
-are attributed to affected test items without blocking execution.
-An otherwise valid selected test whose declaration-dependency closure contains
-an M2-unavailable form is `@test.unavailable` with `@tool.unavailable`; other
-selected tests whose dependency closures do not contain that form still run.
-Overall result precedence is `@command.trap`, then `@command.unavailable`, then
-`@command.test-failed`, then `@command.ok`, after the preflight diagnostic
-cases above. Thus any trap wins over unavailable forms, and any unavailable
-form wins over assertion failures.
+- An unknown command or option, a repeated single option, and an extra
+  positional are invalid input.
+- A known command the tool does not yet support is **unavailable**, which is
+  a different outcome from an unknown spelling. The support inventory MUST
+  name every such command.
+- `help`, `--help`, and `-h` in the command position are equivalent and take
+  no arguments. Help shows this hierarchy with the supported inventory and
+  MUST NOT present an unavailable command as working. In JSON it returns the
+  usage text and the supported commands, profiles, and schemas.
+- There are no aliases such as `init`, `show`, or `find`.
+- Without `TARGET`, `check` and `lint` cover every local target. `run` and
+  `build` need the project's only binary target; with none or several and no
+  selector, the command is invalid input with no source diagnostic. A missing
+  target, or a library given to `run` or `build`, is invalid input.
+- `edit fix` needs exactly one applicable safe fix. `edit rename` needs one
+  resolved renameable identity, and checks collisions before planning. A
+  subject that matches nothing, or several things, is invalid input. No tool
+  guesses an edit.
 
-The `tests[].name` payload field is the exact canonical selector spelling.
-`tests[].result` is one of the five `@test.*` result atoms defined by the
-projects chapter. `tests[].failure` is non-null only for
-`@test.assertion-failed`; `tests[].trap` is non-null only for `@test.trap`;
-`tests[].auditTrace` is the array of `AuditEvent` objects the test completed in
-its fresh host world, standard output and error included, and is empty for a
-test that completes no host call, which includes every invalid and unavailable
-item.
-`tests[].diagnostics` contains suite-wide static diagnostics attributed through
-the test's module/import closure and item-owned diagnostics attributed by test
-identity and declaration-dependency closure. The same diagnostic documents also
-appear once in the envelope's `diagnostics` array. Each diagnostic appears at
-most once in the envelope array, in canonical diagnostic order, even if shared
-by multiple test items. `selected` is the
-number of selected test items, `passed` counts
-`@test.passed`, and `failed` is `selected - passed`. Options after the command
-are limited to the explicit `fmt --write` spelling and the `--` separator of
-`run`; unknown options, extra positionals before the separator, and alternate
-spellings are invalid input.
+### Program arguments, execution and evaluation
 
-`TARGET` is a canonical atom. It MUST equal the `name` of exactly one validated
-local target of the discovered project; names are unique, so the match is
-unique. Paths, roots, and non-atom spellings are not selectors. A token that
-names no target, and a library selected by `run`, are `@command.invalid-input`
-with process exit 2 and an empty diagnostic array. The `target` field of the
-`run` payload is that atom.
+**Arguments.** Only `run` accepts `--`, after its optional target. Every
+token after it is a program argument, in order, including another `--` or a
+token that begins with `-`. `--` with nothing after it supplies no
+arguments. The argument operation observes exactly these values. An argument
+that is not Unicode is that operation's typed error, not malformed command
+input. A test takes no program arguments; its world supplies them.
 
-`check TARGET` checks every source declaration in that target and in every
-local target unit reached through its imports, recursively. It checks all
-modules and declarations in those units, including declarations unreachable
-from the selected entry. Errors in an unrelated local target do not affect an
-explicitly selected target. Without `TARGET`, `check` covers every local
-target. `run TARGET` uses the same checking scope, then executes only the
-selected binary target. Workspace discovery, source-graph, ordinary dependency,
-and standard-library provenance diagnostics still apply to the whole captured
-workspace snapshot and block checking or execution.
+**Run and test** execute on the reference interpreter and MUST NOT need a
+linker.
 
-M2 Step 12 implements `check` and pure `run` over a captured project snapshot.
-Step 13 implements `test` over the same snapshot and test-unit contract.
-The default init destination is the workspace root. Otherwise `DEST` names a
-workspace-relative directory whose parent directories already exist. The
-package and binary target name comes from the destination directory name (or
-the workspace name when `DEST` is omitted): lowercase the Unicode text, keep
-ASCII letters and digits, replace each run of other characters with one
-hyphen, and trim edge hyphens. Use `hello` when no ASCII letter or digit
-remains, and prefix `project-` when the result starts with a digit.
+**Run** validates the target's binding recipes, acquires its grants in the
+order the [effects chapter](03-effects.md#target-admission) gives, and then
+invokes the entry. Startup work and its authority are reported separately
+from the entry's body. A tool permission flag never approves a program's
+resource policy.
 
-The initialized package is version `0.1.0` with no dependencies, one binary
-target rooted at `src/<name>` with entry `@<name>.main.main` and the empty
-target effect array `effects: (array)`, and source
-`src/<name>/main.vib` containing a pure `void` `main`. It also creates `src/`
-and `tests/`. The generated entry imports no standard-library module. Init rejects a
-nonempty destination and any path that escapes the canonical workspace. Its
-`workspace` result is the canonical initialized root; `created` lists every
-created file and directory relative to that root, in creation-plan order.
+**Eval** calls one checked pure module function, named by `SUBJECT`, with
+`--arg` values that are checked against its parameter types.
 
-For `fmt`, the successful payload path is the canonical slash-separated
-workspace-relative path. `changed` compares the input bytes with the planned
-canonical UTF-8 bytes. Preview returns the formatted text and leaves the file
-untouched. `--write` returns `written: true` only when a changed file was
-replaced successfully; a successful write response has `text: null`. If
-diagnostics prevent application, `written` is false and the planned text is
-returned. A recovered document is preserved byte-for-byte. The formatter may
-reorder labelled arguments only when an accepted checker result for that exact
-source in the captured workspace snapshot supplies their binding facts; absent
-facts never authorize an inferred reorder.
-The source is checked as the module it is of the captured workspace, with the
-candidate text in place of its captured bytes and every other module as
-captured, by the check `vibra check` runs. A source that is not a module of the
-workspace is not checked. If there is no check, or the check reports
-`@tool.unavailable`, `fmt` discards the check result and continues with
-syntax-only formatting. It uses no
-binding facts and must preserve labelled argument order; the unavailable
-semantic check does not make formatting unavailable. Parser and formatter
-diagnostics still apply to preview and write. The layouts that `fmt` writes for
-`do`, `let`, and `let-else` are the ones the source-language chapter's
-"Canonical format" section states; they need no binding facts, so they apply
-under syntax-only formatting too.
+- It MUST NOT run a procedure or a plan, make a grant, or use ambient
+  authority.
+- An argument that cannot have the required type is an input error.
+- A result that cannot be shown is an explicit tool outcome, not a trap.
+- Each call runs against a fresh snapshot. Eval is not a REPL and redefines
+  nothing.
+- An unproved static obligation is an error for eval as for check; eval
+  cannot postpone it to run time.
 
-JSON mode emits exactly one versioned envelope to stdout and sends diagnostics
-and operational logs to stderr. The envelope always has these fields:
+**Limits.** Every executing command runs under published, versioned limits
+on work, memory, and output. Its result names the engine, the limit profile,
+the limits reached, and whether the observation is complete. Reaching a tool
+limit is an **unknown** outcome. It MUST NOT be reported as a pass, as a
+false guard, or as an error value of the program. A scheduler quota only
+suspends and resumes; it is never a program result. The compiler's own
+constant evaluation uses the same interface: a required constant or
+obligation that is not established within the limits fails its check.
+
+### Initialization and project operations
+
+**Init.** `DEST` defaults to the workspace. It MUST be absent, or an empty
+confined directory whose parents exist. Init creates only `project.vibon`,
+`src/`, `tests/`, and one binary module, and refuses rather than overwrite.
+`created` lists the paths in the order made. The generated module is current
+source, takes no grants, and has an entry `proc` that returns a successful
+`ExitCode`. The project has version `0.1.0`, no dependency, one binary
+target, and an empty `grants` dict. The field names and the entry signature
+are those of the [programs chapter](04-programs-and-packages.md#targets),
+not of a template.
+
+The default name of the package and of its target is derived from the
+destination's name. Split it into runs of ASCII letters and digits and
+lower-case each run. The name is the first run followed by each later run
+with its first letter upper-cased, so `my-app` gives `myApp`. With no run
+the name is `hello`. If the name starts with a digit, `project` is put
+before it: `project2048`.
+
+**Inspect** returns the captured project, its targets, each dependency's
+source and state, the supported operations, and diagnostics. It fetches
+nothing.
+
+**Add and remove** take typed records, never a shell fragment or a text
+patch. Each previews a plan and applies it only with `--write`. An invalid
+or ambiguous identity is rejected. The edit keeps comments where it can and
+leaves the file in canonical VIBON format.
+
+**Sync** is the only command that acquires dependencies from the network.
+It accepts exact HTTPS Git revisions and confined local dependencies,
+verifies every input, runs no dependency code and no lifecycle script,
+exports no Git metadata, and publishes the vendor tree and lock only after
+everything validates. It rejects vendor content that conflicts. A dependency
+cycle is an error whatever the revisions.
+
+### Formatting
+
+`fmt PATH` formats source or VIBON according to the extension. It previews
+by default; `--write` applies.
+
+| Outcome | `changed` | `written` | `text` |
+| --- | --- | --- | --- |
+| preview | input bytes differ from canonical bytes | `false` | the canonical text |
+| written | `true` | `true` | `null` |
+| diagnostics prevent writing | as computed | `false` | the planned text |
+
+- The formatter MUST NOT rename an identifier or reorder operands, labelled
+  arguments, field initializers, or dict pairs. A name-case
+  convention is a diagnostic, never a reason to rename.
+- Source the parser recovered from ambiguously is kept byte for byte. The
+  formatter does not repair by guessing.
+- A captured module is formatted with a semantic check of the candidate text
+  in place of the captured bytes. A file that is not a module is formatted
+  by syntax alone. When checking is unavailable, formatting proceeds from
+  exact syntax facts; no incomplete fact authorizes a semantic edit.
+
+### Tests and selection
+
+A test selector is the test module's atom, `::`, and the test's name as one
+canonical string literal: `@tests.math::"adds one"`. It contains no other
+whitespace and its module begins `@tests.`. A malformed selector is invalid
+input (exit 2, no diagnostics).
+
+1. Tests are discovered in canonical module order, then declaration order. With no
+   selector, a missing or empty test root is an empty passing suite.
+2. Project, source-graph, and required parse errors are reported first, with
+   zero counts and no items. Without a selector every test module is parsed;
+   with one, its module is.
+3. A selector that then names no module or no test is invalid input.
+4. Every selected test is checked before any runs. An ordinary error in the
+   selection invalidates all of it: every item is `@test.invalid` and none
+   runs. Warnings do not block.
+5. A valid construct the tool does not support marks `@test.unavailable`
+   only the items whose declarations reach it. The others may run.
+6. Each test runs in a fresh fake world with its declared ceiling and no
+   real grant.
+
+| Item result | Meaning |
+| --- | --- |
+| `@test.passed` | the body completed with no failed assertion |
+| `@test.assertionFailed` | an assertion was false, or an operand could not be observed |
+| `@test.trap` | a toolchain defect trap |
+| `@test.invalid` | the selection had static errors |
+| `@test.unavailable` | the item needs an unsupported construct |
+
+`selected` counts selected items, `passed` only `@test.passed`, and `failed`
+is their difference. An item that ended unknown or exhausted is never
+counted as passed. When items differ, the suite result follows this
+precedence: trap, operational exhaustion, unavailable, test failed, ok. A
+diagnostic appears once in the envelope and is attributed to every item it
+affects. An item keeps the audit events it completed before a later failure.
+
+## Machine contracts
+
+### Versioned envelope and results
+
+The contracts of this chapter use JSON Schema major version 2, with
+identifiers `urn:vibra:schema:v2:<document-kind>`. A producer MUST validate
+every document it emits against its published schema, including rules that
+relate fields.
+
+Every structured response is a closed object with these fields:
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "toolVersion": "version",
   "command": "check",
+  "workspaceRevision": "sha256:...",
+  "status": "passed",
   "result": "@command.ok",
   "diagnostics": [],
+  "limits": {"profile": "id", "reached": [], "complete": true},
   "payload": {}
 }
 ```
 
-`result` is one of `@command.ok`, `@command.diagnostics`,
-`@command.test-failed`, `@command.invalid-input`,
-`@command.operational-failure`, `@command.trap`, `@command.unavailable`, or
-`@command.program-failed`.
-`diagnostics` is always an array of the versioned diagnostic documents. Payloads are closed by
-command: `help` has `{ "usage": string }`; `init` has
-`{ "workspace": string, "created": string[] }`; `fmt`
-has `{ "path": string, "changed": boolean, "written": boolean,
-"text": string|null }`; `check` has `{ "accepted": boolean }`; `run` has
-`{ "target": string, "programResult": string|null, "stdout": string,
-"stderr": string, "auditTrace": AuditEvent[], "trap":
-{ "trapCode": string, "origin": SpanDocument|null }|null }`; and `test` has
-`{ "selected": integer, "passed": integer, "failed": integer,
-"tests": [{ "name": string, "result": string, "failure":
-{ "assertion": string, "expected": string, "actual": string,
-"primarySpan": SpanDocument }|null, "trap": { "trapCode": string,
-"origin": SpanDocument|null }|null, "auditTrace": AuditEvent[],
-"diagnostics": DiagnosticDocument[] }] }`.
-An `AuditEvent` is `{ "kind": string, "op": string, "args": string[],
-"result": string }`: the event record of the runtime chapter's audit-trace
-section, every value as its VIBON text, in call order. A consumer preserves an
-event of a `kind` it does not know, with its fields as text.
-`programResult` is the pure value result in the runtime chapter's canonical
-value encoding; a runtime trap is represented by
-`@command.trap` and its structured diagnostic, never as a successful value.
-The trap payload has `trapCode: string` and `origin: SpanDocument|null` when
-the command owns a program result. In JSON mode
-`stdout` and `stderr` capture the program's output in the envelope, preserving
-one machine document on the process stdout; bytes that are not UTF-8 are
-decoded with each invalid sequence replaced by U+FFFD, and the exact bytes are
-the arguments of the audit events. Human `run` writes the program's stdout bytes
-directly and keeps command diagnostics on stderr.
+- `workspaceRevision` is `null` only when no snapshot was taken: help, a
+  command-line error, or failed discovery. It is never invented.
+- `status` is `passed`, `refuted`, `unknown`, or `unsupported`. It describes
+  the observation requested. Passing sampled tests is `passed` for that run,
+  not a universal claim about the program.
+- `limits.profile` names the published limit profile, with its units,
+  defaults, and engine version. `reached` lists the limits reached, in
+  order. `complete` is `false` after truncation or exhaustion.
+- When output would exceed its limit, the tool emits a bounded, valid
+  document with status `unknown`. It never emits truncated JSON and never
+  silently omits facts.
 
-An entry that returns `err` ends `run` with `@command.program-failed` and exit
-code 6, and the run is neither a trap nor a diagnostic: `err` is a value the
-program returned. The payload's `programResult` is the canonical encoding of the
-entry's `result`, `trap` is `null`, the envelope's `diagnostics` is empty, and
-human mode prints the encoding to standard error. An entry that returns `void` or
-`ok` is `@command.ok`. Every failure of a host operation reaches the entry only
-as the `err` of that operation, so no host failure is a command result of its
-own; memory exhaustion stays the host event, `@command.operational-failure`.
-Human `test` keeps diagnostics on stderr and reports on stdout. A fully passing
-suite prints `test suite passed: N test(s)`. Otherwise every non-passing item
-prints `FAIL <selector> <@test.* result>`, followed by an indented
-`assertion <member> expected=<value> actual=<value> at <source>:<line>:<column>`
-or `trap <trap code> at <source>:<line>:<column>` line when the item has one,
-and the report ends with `test suite <@command.* result>: P passed, F failed,
-N selected`.
-For M2 checked-program execution failures, `trapCode` is exactly the string
-`"@runtime.invalid-checked-program"`; their diagnostic uses that code with
-primary span `0..0` and no source ID, and the CLI trap `origin` is `null`.
-The other trap codes are `"@runtime.unobservable-function"`, whose origin in a
-test is the assertion call, and `"@runtime.invalid-host-value"`, which has no
-origin: it is raised when a host call, an accessor, or a builder receives a value
-it does not admit, and no checked program reaches it unless the toolchain has a
-defect. `"@runtime.division-by-zero"`, which has no origin either, is raised
-when an unchecked integer `div` or `rem` receives a zero divisor. The `test`
-item schema and the `run` payload admit all four. `run` reports any trap as
-`@command.trap`, with the code in its payload's `trap` and a `null` origin. Only a
-host event, such as `@runtime.memory-exhausted`, is
-`@command.operational-failure`.
+| Result | Exit | Meaning |
+| --- | --- | --- |
+| `@command.ok` | 0 | the requested operation completed and succeeded |
+| `@command.diagnostics` | 1 | static diagnostics prevent admission |
+| `@command.testFailed` | 1 | at least one selected test failed |
+| `@command.invalidInput` | 2 | invalid command, selector, or typed input |
+| `@command.operationalFailure` | 3 | tool, host, or startup failure or exhaustion |
+| `@command.unavailable` | 4 | a known operation outside the supported profile |
+| `@command.trap` | 5 | a registered toolchain or runtime defect |
+| `@command.programFailed` | 6 | the program returned a non-zero `ExitCode` |
 
-The process exit mapping is fixed: `0` for `@command.ok`, `1` for
-`@command.diagnostics` or `@command.test-failed`, `2` for
-`@command.invalid-input`, `3` for `@command.operational-failure`, `4` for
-`@command.unavailable`, `5` for `@command.trap`, and `6` for
-`@command.program-failed`. A valid deferred command
-or language form uses `@command.unavailable` and includes `@tool.unavailable`;
-an unknown command or option uses `@command.invalid-input` instead. A trap is
-never recast as an operational failure or an unavailable feature, and a program
-failure, an entry that returned `err`, is neither a trap nor an operational
-failure.
+- A bare guard that is disproved has status `refuted`; one that is not
+  established has status `unknown`. Both prevent admission.
+- **Exit code of a program.** `run` records the program's value in
+  `programResult` and `applicationCode`, and maps any non-zero code to
+  `@command.programFailed`, exit 6. A built executable returns the code
+  itself. A non-zero code is not a trap, a diagnostic, or a startup failure.
+  After a startup failure `programResult` is `null`.
+- **Streams.** In JSON format the tool writes exactly one envelope to
+  standard output and its logs to standard error. `run` captures the
+  program's output into the payload; bytes that are not UTF-8 show as U+FFFD
+  there, and the audit trace keeps the exact bytes. In human format the
+  program's bytes go straight through and diagnostics go to standard error.
+- **Invalid input.** Before a command's typed inputs are validated, the
+  response has the recognized command name, or an empty one, and an empty
+  payload. After validation it has that command's payload, with unavailable
+  facts `null`.
 
-Query subjects are a source position such as `src/main.vib:120`, an atom entity
-reference such as `@std.fs.read`, a built-in diagnostic code such as
-`@type.argument-mismatch`, or `@workspace`. Types, effects, context,
-diagnostics, references, and index records are metadata projections from that
-subject, not separate query kinds. Vibra has no `query effects`, `query index`,
-`vibra effects`, `vibra index`, or generic `vibra code` command.
+### Command payloads
 
-Commands that can change files preview by default. `--write` is required to
-apply formatter, lint-fix, project-edit, rename, fix, and organize-imports
-plans. `project init` and `project sync` are inherently mutating and must print
-their planned destinations before mutation when run interactively; they reject
-nonempty destinations or conflicting vendor content rather than overwriting.
+Each payload is a closed object. A field described as optional is a required
+field that may be `null`. `SpanDocument` and `DiagnosticDocument` are defined
+in the [diagnostics chapter](07-diagnostics-and-conformance.md#diagnostic-documents-and-spans).
 
-`vibra fmt` selects the source or VIBON formatter from the `.vib` or `.vibon`
-extension before parsing. It never guesses from contents and rejects a
-document whose grammar does not match its extension.
+| Command | Payload fields |
+| --- | --- |
+| `help` | `usage`: string; `capabilities`: `CommandCapability[]` |
+| `project init` | `workspace`: string; `created`: string[] |
+| `project inspect` | `project`: VIBON text or null; `targets`: `TargetSummary[]`; `dependencies`: `DependencySummary[]` |
+| `fmt` | `path`: string; `changed`: boolean; `written`: boolean; `text`: string or null |
+| `check` | `accepted`: boolean; `obligations`: `ObligationRecord[]` |
+| `lint` | `accepted`: boolean; `plan`: `EditPlan` or null |
+| `query` | `subject`: string; `resolvedKind`: string or null; `identity`: `Identity` or null; `metadata`: object; `expansions`: object |
+| `eval` | `subject`: `Identity` or null; `value`: canonical VIBON text or null; `observationError`: `ObservationError` or null |
+| `run` | `target`: atom string; `programResult`: canonical value text or null; `applicationCode`: integer 0–255 or null; `stdout`: string; `stderr`: string; `auditTrace`: `AuditEvent[]`; `startup`: `StartupRecord`; `trap`: `TrapRecord` or null |
+| `test` | `selected`, `passed`, `failed`: non-negative integers; `tests`: `TestItem[]` |
+| `build` | `target`: atom string; `triple`: string; `executable`: confined path or null; `manifest`: canonical build VIBON text or null; `semanticIdentity`: digest or null; `artifactIdentity`: digest or null |
+| `project add`, `project remove`, every `edit` | `plan`: `EditPlan` or null; `applied`: boolean; `resultingRevision`: digest or null |
+| `project sync` | `dependencies`: `DependencySummary[]`; `lock`: confined path or null; `written`: boolean |
 
-All commands accept `--format human|json` where their output is structured.
-JSON goes to stdout, diagnostics and operational logs go to stderr, and a
-nonzero exit is classified by a stable result atom. No command infers an output
-format from a filename extension.
+| Record | Fields |
+| --- | --- |
+| `CommandCapability` | `command`; `operations`: string[]; `profiles`: string[]; `supported`: boolean; `schemaIds`: exact published identifiers |
+| `TargetSummary` | `name`; `kind`; `root`; `entry` (nullable); `bindingStatus`: `exact`, `recovered`, or `unavailable` |
+| `DependencySummary` | `alias`; `kind`; `source`; `target` (nullable); `status`: `captured`, `verified`, `unavailable`, or `refuted`; `identity` (nullable) |
+| `TestItem` | `name`; `result`; `failure` (nullable); `trap` (nullable); `auditTrace`; `diagnostics`; `status` |
+| `TestItem.failure` | `kind`: `assertion` or `observation`; `assertion`, `expected`, `actual`: canonical text or null; `primarySpan`: `SpanDocument`; `observationError`: null for an assertion |
+| `TrapRecord` | `trapCode`; `origin` (nullable) |
+| `ObservationError` | `code`: `unsupportedValue`; `type` and `origin`: nullable |
+| `StartupRecord` | `status`: `notStarted`, `acquired`, or `failed`; `bindings`; `auditTrace`; `failure`: null or `{binding, code, origin}` |
+| `StartupRecord.bindings[]` | `name`; `recipeIdentity`; `providerIdentity`; `status`; `grantProjection` (nullable), in acquisition order |
 
-### Execution backend of `run` and `test`
+A summary never executes an acquisition. A grant projection is data that
+describes a grant; it cannot be turned back into one, and its schema and
+`AuditEvent` belong to the [runtime chapter](06-runtime.md#audit-trace). A
+function, a plan, or a grant is never encoded by inventing a string for it.
+A failed command keeps the startup events that completed.
 
-`run` and `test` execute the reference interpreter. They take no option that
-selects a backend, and an unknown option remains `@command.invalid-input`.
-`build` stays `@command.unavailable` with `@tool.unavailable`. The WebAssembly
-backend is reached only through the conformance harness, which runs every
-executable case in both backends and fails on a disagreement, as the
-conformance chapter states; whether a shipped command ever executes a module is
-decided with the build products. A command's observable result is therefore the
-interpreter's, and the module the harness runs produces the same one.
+A human test report keeps selectors and result atoms, prints each item that
+did not pass with its diagnostic, failure, or trap, and ends with the
+passed, failed, and selected counts. Its exact wording is not a contract.
 
-`run` gives the program the system provider of the runtime chapter, so its
-filesystem, environment, clocks, random bytes, and standard streams are the real
-ones, and the arguments after `--` are its `env.read.args`. `test` always gives
-each test a fresh deterministic in-memory host world, standard output and error
-included, which go to the test's audit trace and never to the process. The
-provider is not a language mode and not an option of either command.
+### Snapshot, claim and witness identity
 
-A host event ends `run` or `test` with an unlocated error diagnostic. The `run`
-payload then has a null `programResult` and a null `trap`; the `test` payload
-has zero `selected`, `passed`, and `failed` and an empty `tests` array.
+**Workspace revision.** `workspaceRevision` is `sha256:` and 64 lower-case
+hexadecimal digits. It hashes captured input bytes, never timestamps or
+absolute paths. The hashed bytes are, in order:
 
-## Project operations
+1. the ASCII text `vibraWorkspaceRevisionV2`;
+2. one zero byte;
+3. the number of records, as a big-endian 64-bit integer;
+4. the records, sorted by the UTF-8 bytes of `(kind, sourceId)`.
 
-Project tooling edits `project.vibon` through its typed project-data AST. `add`
-and `remove` produce the same transactional plan format as source edits. They
-preserve comments when possible and always finish with canonical formatting.
+A record is three byte strings, each preceded by its length as a big-endian
+64-bit integer: the kind, the project-relative source identifier, and the
+exact input bytes. The kinds are `project`, `lock`, `policy`, `approval`,
+`source`, `dependency`, and `toolchain`. The single `toolchain` record has
+the identifier `@toolchain` and holds canonical VIBON naming the exact
+grammar, checker, standard library, driver, and policy profile identities.
+Every admitted input contributes a record; an absent optional file
+contributes none. Identifiers are unique within a kind.
 
-`sync` is the only command that performs dependency network access. It
-accepts only declared HTTPS Git sources and exact revisions, exports no Git
-metadata, executes no dependency code, and atomically replaces the vendor tree
-and `project-lock.vibon` only after all hashes validate.
+A query answers from one captured revision. It never rereads the disk and
+never mixes revisions. Configuration that exists only at run time is
+recorded in startup evidence, not in the snapshot.
+
+Test vector (raw bytes, no trailing newline): `project/project.vibon` holds
+`project`; `source/src/main.vib` holds
+`fn f returns answer: Str do return "ok" endfn`; `toolchain/@toolchain`
+holds `toolchain`. The revision is
+`sha256:33d677dc829d6e953467ca5c9f3ffe396839cb1184fbeaba1e34703ee2fa4ff1`.
+The vector tests the framing only; its contents are not a valid project.
+Host tests MUST cover it and an edit of equal length.
+
+**Claim and witness.** Each declaration has two further hashes.
+
+| Identity | Covers |
+| --- | --- |
+| claim | public signatures, nominal anchors, representations and their visibility, guard predicates and consequences, approved binding and policy interfaces |
+| witness | checked bodies and their exact admitted dependencies |
+
+An approval separately protects the test bodies it selected, their helper
+code and data, the selection, and the runner, tool, driver, and policy
+versions. A manifest MUST distinguish the code under repair from the
+protected test code: pinning every body would make repair impossible.
+Changing a guard, a consequence, or a test is never a witness-only change. A
+report says which category changed and against which approved revision.
+
+A declared type's identity follows the logical anchor of the
+[type chapter](02-type-system.md#declared-types). Editing a body does not
+change it. A rename or move changes it, and the edit preview says so.
 
 ## Workspace queries
 
-Every query returns one normalized envelope containing the subject, resolved
-kind and canonical identity where applicable, exact/recovered/unavailable fact
-status, and workspace revision. With no projection flags it returns the compact
-core metadata appropriate to that subject. `--include` accepts a comma-separated
-selection from `syntax`, `context`, `source`, `signature`, `type`, `effects`,
-`visibility`, `diagnostics`, and `diagnostic`. `--expand` requests potentially
-large relations: `references`, `members`, `calls`, `applications`,
-`effect-witnesses`, or `declarations`. `calls` contains function-call edges;
-`applications` also includes constructors, projections, and lookups.
+`query SUBJECT` accepts `path:offset` (a UTF-8 byte offset into a confined
+source), a canonical entity atom, a registered diagnostic code, or
+`@workspace`. It returns compact metadata by default.
 
-A source-position query resolves the smallest containing syntax node. Its
-available metadata includes the information needed to produce a valid
-continuation:
+| Option | Values, comma-separated |
+| --- | --- |
+| `--include` | `syntax`, `context`, `source`, `signature`, `type`, `effects`, `visibility`, `diagnostics`, `diagnostic`, `index` |
+| `--expand` | `references`, `members`, `calls`, `applications`, `effectWitnesses`, `declarations` |
 
-- grammar category and permitted child forms or labels;
-- token role, including `@atom-value`, `@entity-reference`, or
-  `@code-reference`, and the grammar or VIBON schema slot that selected it;
-- expected and observed type;
-- for an application, its resolved kind, callee type or entity, operand
-  contract, selector when static, and exact result type;
-- allowed effect ceiling and currently computed performed row;
-- visible lexical names and imported module aliases;
-- resolved declaration candidates with canonical identities;
-- applicable constructors, record-field atoms, tuple indices, collection
-  key/index expectations, interface methods, and generic bounds;
-- diagnostics and safe fixes at the location; and
-- the exact workspace revision used.
+`calls` holds the edges that execute a function. `applications` also holds
+constructions, projections, collection lookups, and the building of plans.
 
-Milestone 1's structural library contract is the foundation under this query
-surface. `vibra-syntax::query_position` accepts a UTF-8 byte offset at a
-character boundary, including EOF, and selects the smallest non-empty
-lossless CST node containing it. A zero-width recovery node at the caret wins
-over a non-empty node; ties are resolved by deeper nesting and then source
-order. An offset beyond the document or inside a UTF-8 scalar is rejected
-without slicing or panicking. Trivia is reported as `trivia` with
-`unavailable` facts, while recovery markers are reported as `recovery` with
-`recovered` facts; a valid neighboring node remains `exact` even when another
-part of the file needs recovery.
+Query results are projections of the one checker's facts for one snapshot,
+never a second computation. They report the grammar slot, visible locals and
+imports, expected and observed types, whether the expected type was written,
+constructors and fields, generic bounds, applicable operands, static
+obligations, grant and driver summaries, diagnostics and fix capability, and
+the revision. For a callable of unknown body the operation row is still
+known exactly; which resource it holds may be unknown. Unknown never means
+"no authority".
 
-The published `source-position-query` schema carries `schemaVersion`, the
-queried `offset`, its nullable `sourceId`, a byte/display `span`, `mode`,
-`syntaxKind`, `category`,
-`status`, `permittedForms`, and `permittedLabels`. Categories are the closed
-vocabulary `module`, `declaration`, `type`, `pattern`, `expression`,
-`declaration-attribute`, `effect-row`, `data-field`, `trivia`, and `recovery`.
-An empty array means the slot is known and has no entries; JSON `null` means
-the fact is unavailable. This milestone publishes structural grammar facts
-only: it does not add resolution, type inference, effect inference, CLI, or
-MCP behavior.
+### Structural position and semantic envelope
+
+A position query selects the smallest non-empty syntax node that contains
+the offset. The offset MUST be on a character boundary and may be the end of
+the file. A zero-width recovery node at the offset wins; ties go to the
+deepest node, then source order. An offset outside the source or inside a
+character is rejected.
+
+**Structural record** (`sourcePositionQuery`, version 2):
+`schemaVersion`, `offset`, `sourceId`, `span`, `mode` (`source` or `data`),
+`syntaxKind`, `category`, `status`, `permittedForms`, `permittedLabels`. The
+categories are `module`, `declaration`, `type`, `pattern`, `expression`,
+`declarationAttribute`, `effectRow`, `dataField`, `trivia`, and
+`recovery`. `null` means unavailable; an empty array means known to be
+empty. Structural facts do not imply the source checked.
+
+**Semantic envelope** (`workspacePositionQuery`, version 2):
+`schemaVersion`, `toolVersion`, `workspaceRevision`, `sourceId`, `offset`,
+`nodeId`, `structural`, `role`, `context`, `identity`, `expectedType`,
+`observedType`, `visibleLocals`, `visibleImports`, `declarationCandidates`,
+`application`, `pattern`, `effects`, `obligations`.
+
+- `nodeId` is `<sourceId>#<start>-<end>`. A consumer joins facts by
+  `(workspaceRevision, sourceId, nodeId)`, never by spelling.
+- Each semantic field is `{status, value}`. The status is `exact`,
+  `recovered`, or `unavailable` (with a `null` value). A complete fact stays
+  `exact` beside an unrelated broken module. An incomplete fact is
+  `recovered`; it is not an exact lower bound.
+- **Roles:** `@atomValue`, `@entityReference`, `@codeReference`,
+  `@literal`, `@localBinding`, `@discard`, `@declaration`, `@application`,
+  `@unknown`. A role comes from the grammar or schema slot, not from how the
+  token looks: `@std.io` is an atom value in an expression and an entity
+  reference in an import. A `performs` entry resolves a name to an
+  interface. A project entry, driver, or policy reference resolves only
+  because its typed data slot says so.
+- **Contexts:** `module`, `initializer`, `function`, `proc`, `parameter`,
+  `anonymousFunction`, `letValue`, `letElseFallback`, `returnOperand`,
+  `branch`, `argument`, `result`, `contractPredicate`,
+  `contractConsequence`, `trivia`, `recovery`.
+- **Locals.** A `let` opens no nested scope. The visible locals at a
+  position are the earlier successful `let`s of the same sequence; a `let`'s
+  own names are not visible in its initializer or its `else`. `_` has the
+  discard role and no identity, definition, references, or rename.
+- **Identities** are `{kind, canonical}`. A declaration uses its canonical
+  logical identity. A local uses `binder:<sourceId>:<start>-<end>`, valid
+  within one revision only. Lists of locals are in lexical order, imports in
+  written order, and candidates in identity order. A private entity is not a
+  candidate where it is not visible.
+
+**Type document:** `{kind, name, parameters, result, labelled, effects}`.
+
+- `kind` is `primitive`, `function`, `proc`, `intent`, `declared`,
+  `interface`, `param`, `atom`, `tuple`, `list`, `dict`, or `record`.
+- `name` is the canonical primitive name or the declared identity. A
+  declared type is referenced, never expanded.
+- `parameters` holds inputs, components, or type arguments in order.
+  `labelled` holds `{name, type}` entries. `result` is present only for
+  `function`, `proc`, and `intent`.
+- `effects` is `{roots: [identity…]}`: empty for a pure type, complete for
+  `proc` and `intent`.
+
+**Application fact:** `{kind, callee, calleeType, positional, labelled,
+resultType, dispatch}`.
+
+- `kind` is `@function`, `@procPlan`, `@constructor`, `@contract`,
+  `@recordProjection`, or `@collectionLookup`.
+- Operands are in written order. `callee` is `null` without one resolved
+  declaration.
+- A constructor's `resultType` is `T` for a bare `where` and
+  `Result(T E)` for `where … else`, whatever the checker can fold.
+- `dispatch` is `null` or `{interface, member, receiver, selection,
+  destination}`. `selection` is `static`, `default`, `dynamic`, or
+  `closed`. `destination` is `true` for a member with no receiver that was
+  chosen by the written expected type.
+- Applying a `proc` member builds a plan and performs nothing. An `await` is
+  reported separately, with the plan's type, its complete row, and its
+  witness.
+
+**Pattern fact:** `{kind, scrutineeType, bindings, constructor}`, where
+`kind` is `@wildcard`, `@binding`, `@literal`, `@constant`, `@variant`,
+`@record`, `@tuple`, `@wrapper`, or `@list`, `bindings` is the ordered list
+of identities and types, and `constructor` is the resolved identity or
+`null`.
+
+**Obligation record:** `{kind, declaration, predicateIdentity, source,
+status, ruleIds, dependencies, counterexample}`. `kind` is `requires`,
+`ensures`, or `where`. `status` is `passed`, `refuted`, `unknown`, or
+`unsupported`. `dependencies` pins the checked inputs. `counterexample` is
+data or `null`. A guard with `else` is recorded in the declaration's
+metadata with its consequence; having a consequence never makes its
+predicate `passed`.
+
+### Effect and authority projections
+
+The `effects` value is `{enclosing, application, target, authority}`, plus
+`witnesses` under `--expand effect-witnesses`.
+
+| Field | Content |
+| --- | --- |
+| `enclosing` | `null` or `{identity, kind, ceiling, performed}`; `kind` is `function`, `proc`, `operation`, `anonymousFunction`, or `test`. An operation's ceiling includes its owner. |
+| `application` | `null` or `{immediate, latent, awaitSite}`. Building a plan performs none of its latent row. |
+| `target` | `null` or `{entry, bindings, possibleOperations, startupOperations}`: the reviewed recipes and drivers and the operations they allow, never a blanket permission. |
+| `authority` | the grant projections known at this position and, explicitly, what is unknown. It grants nothing. |
+| `witnesses` | `{root, hops}` per root, in identity order. A hop is `{span, callee}`; `callee` is `{kind, identity}` with kind `function`, `proc`, `operation`, `functionValue`, or `contractMember`. |
+
+A witness is the same chain, with the same tie-breaks, that
+`@effect.outsideCeiling` reports. For each `await` a report shows the
+operation, its delivery class, the driver bound for the target, and the
+policy in plain terms. A static summary names operation interfaces; it never
+invents which resource a run will touch.
 
 ### Index records
 
-The `@workspace` subject with `--expand declarations` and `--include index`
-projects one `@index.v1` document: the resolved symbol, implementation, and
-reference records of the checked snapshot. It exists so that an external
-retrieval consumer can read every declaration's identity, contract, relations,
-and normalized source without a second parser. The toolchain emits records
-only; embedding, ranking, and storage stay outside it.
+`query @workspace --include index --expand declarations` emits a canonical
+`@index.v2` VIBON document with `format`, `revision`, `declarations`,
+`implementations`, and `references`. Its JSON form is
+`urn:vibra:schema:v2:index`, with the same order and facts, and atoms keep
+their `@`. The index is for retrieval; embedding, ranking, and storage are
+not compiler services.
 
-```vibra
-(record
-  format: @index.v1
-  revision: "…"
-  declarations: (array declaration…)
-  implementations: (array implementation…)
-  references: (array reference…))
-```
-
-A **declaration** record describes one module-level or nested declaration:
-
-| Field | Value |
+| Record | Fields |
 | --- | --- |
-| `id` | The canonical atom identity, such as `@demo.config.parse.parse` |
-| `kind` | `@module`, `@value`, `@function`, `@method`, `@type`, `@interface`, `@effect-root`, or `@operation` |
-| `module` | The canonical atom of the owning module |
-| `owner` | The owning type, interface, or effect root for a nested member, else `void` |
-| `visibility` | `@public` or `@private` |
-| `source` | `(record source-id: "…" start: n end: n)`, the declaration's byte span |
-| `signature` | The canonical type encoding of a value, function, or method's checked type; a type's or interface's generic parameter list otherwise |
-| `ceiling` | The written or default-empty effect ceiling, as the row record `(record roots: (array @root...))` of the effects chapter. For an effect operation it is the complete row: the owner root together with the additive row |
-| `effects` | The checked performed effect row, as the same row record |
-| `external` | `void`, or `(record provider: @host symbol: "…")` or `(record provider: @compiler symbol: "…")` for a declaration bound by `external:`. A user package cannot write `external:`, so every record of a local package has `void`, and the record of an embedded standard-library declaration carries its provider and registry symbol |
-| `errors` | The error types its result can carry: `e` for a result type `(result t e)`, else `(array)` |
-| `applications` | The canonical identities of every declaration its body applies — calls, constructors, and interface members — sorted and without duplicates |
-| `text` | The formatter-normalized source of the declaration, byte for byte what `vibra fmt` writes |
+| declaration | `id`; `kind` (`module`, `value`, `function`, `proc`, `method`, `type`, `interface`, `operation`); `module`; `owner` (null at top level); `visibility`; `source`; `text` (the formatted source); `external` (null, or provider and symbol); `facts` |
+| `facts` | null when not established; otherwise `signature`, `ceiling`, `effects`, `errors`, `applications`, `contracts`, `claimIdentity`, `witnessIdentity` |
+| implementation | `receiver`; `interface`; `source`; `text`; `members`, each with `contract`, `source`, `signature`, `text` |
+| reference | `from`; `written`; `source`; `to` (null when it depends on failed checking) |
 
-An **implementation** record describes one `impl` block. It has no atom
-identity, since implementations are keyed by types: `receiver` and
-`interface` hold the canonical type encodings of the receiver type and the
-applied interface target, which together are the block's identity. `members`
-lists one record per implementation member with `contract` (the identity of
-the corresponding contract member), `source`, `signature`, and `text`, so a
-member's identity is the triple of `contract`, `interface`, and `receiver`.
-The block also carries its own `source` and `text`.
+- Rows are `{roots: […]}` records. `contracts` distinguishes bare guards
+  from guards with a consequence. `errors` lists ordinary result error
+  types.
+- An implementation is identified by the applied interface and the receiver
+  type together, and a member also by its contract member. Two
+  implementations for different applications of a generic interface never
+  collapse into one.
+- Declarations sort by the UTF-8 bytes of their identity; implementations by
+  receiver, then interface; references by source, start, and end.
+- A module has a null signature and its whole formatted text. The index
+  covers the local package; a dependency or standard-library entity appears
+  only as a reference target unless expanded.
+- A rejected body never shows exact rows or proofs.
 
-A **reference** record is one resolved written name. It has `from` (the
-identity of the enclosing declaration), `written` (the exact spelling),
-`source`, and `to` (the resolved canonical identity, or `void` for a name the
-resolver left to the checker, such as a variant of a role type).
-
-The document is canonical VIBON. Declarations are sorted by the UTF-8 bytes of
-`id`, implementations by `receiver` and then `interface`, and references by
-`source-id`, `start`, and `end`. An identical snapshot produces a byte-identical
-document on every host. An unavailable or recovered declaration keeps its
-record with `signature`, `ceiling`, `effects`, `errors`, and `applications`
-absent, and the envelope's fact status says why. `external` is a syntactic fact,
-so it is present on every record.
-
-A module record's `signature` is `void` and its `text` is the whole formatted
-module. A member written in an `impl` block has no atom identity, so it has no
-declaration record, and a reference in its body names the declaration that
-owns the block as `from`. A `test` form has no declaration record either, and
-a reference in its body names the test module as `from`. Every `text` is the
-formatted text of the record's own declaration, wherever the formatter's
-canonical member order places it. The records describe the modules of the
-local package; a standard-library declaration appears only as a target.
-
-`urn:vibra:schema:v1:index` is the JSON wire form of the same document for a
-tooling consumer: the same records in the same order, with identities as atom
-spellings without `@`, canonical type encodings as VIBON text, and absent facts
-as `null`. The checked facts form the object `facts`, which holds `signature`,
-`ceiling`, `effects`, `errors`, and `applications` and is `null` for an
-unavailable or recovered declaration, and `external` is a field of the record
-itself. A row is `{ "roots": [...] }` with its roots as atom spellings without
-`@` in the canonical order of the effects chapter, and `external` is `null` or
-`{ "provider": "host"|"compiler", "symbol": string }`. The `index` schema is major version 1
-and gains `ceiling` and `external` and the row form of `effects` in Milestone 4
-Step 20, which replaces the identity list of the earlier shape in place.
-
-Every effect root and every effect operation is an indexed entity. An effect root
-has the generic parameter list `(array)` as its `signature`, and the empty rows as
-its `ceiling` and `effects`, since only its operations carry rows. An operation has
-the checked function type as its `signature`, its complete row as its `ceiling`,
-and, for a body written in Vibra, the row its body performs as its `effects`; an
-operation bound by `external:` has no body, and its `effects` is its complete row,
-which the host performs. A type, an interface, a module, and a value have the empty
-`ceiling`, and a value's `effects` is the row its initializer performs. The rows
-are those of the one graph the checker reports its effect diagnostics from. A
-declaration whose body did not check, or whose performed row reaches a function
-that did not, has none of the checked facts, because a lower bound is not a row;
-`external` is read from the written `external:` and `symbol:` attributes whether
-or not the declaration checked, and a provider other than `@host` or `@compiler`
-is a rejected form that records `void`.
-
-### M2 workspace position envelope
-
-M2 keeps `urn:vibra:schema:v1:source-position-query` unchanged. Its
-`additionalProperties: false` contract is structural-only and remains the
-reader-facing result. Semantic facts use the separate
-`urn:vibra:schema:v1:workspace-position-query` contract. This is one envelope,
-not a compatibility bridge: a workspace query emits the latter and embeds one
-complete structural result under `structural`.
-
-The workspace envelope has these required fields: `schemaVersion`,
-`workspaceRevision`, `sourceId`, `offset`, `nodeId`, `structural`, `role`,
-`context`, `identity`, `expectedType`, `observedType`, `visibleLocals`,
-`visibleImports`, `declarationCandidates`, `application`, `pattern`, and
-`effects`. The envelope's `schemaVersion` is `1`. `sourceId` is the immutable project-relative
-source identity and `nodeId` is the canonical locator
-`<sourceId>#<start>-<end>`, using the selected structural span. A consumer joins
-semantic observations only by the triple `(workspaceRevision, sourceId,
-nodeId)`; it never joins by token spelling or by an unversioned span.
-
-Every semantic field is a `{ "status": ..., "value": ... }` wrapper. Status
-is one of `exact`, `recovered`, or `unavailable`, independently for each field.
-An exact known empty collection uses `status: "exact"` and `value: []`;
-`unavailable` uses `value: null`. A recovered field may carry a partial value,
-but a recovered syntax neighbor does not change an unrelated exact field. A
-discard (`-`, `@-`, or `-:`) has an exact `role` and `context`, with
-`identity`, `expectedType`, `observedType`, `declarationCandidates`, and
-`application` unavailable; it never receives a binder identity.
-
-The checked facts (`observedType`, an expected type the source does not write,
-`application`, and `pattern`) come from checking the whole workspace against
-the standard library: every unit and its import closure. When the workspace
-does not check, they come from checking the queried source alone, so a
-self-contained module beside a broken one keeps its facts.
-
-`role` is a closed M2 vocabulary: `@atom-value`, `@entity-reference`,
-`@code-reference`, `@literal`, `@local-binding`, `@discard`, `@declaration`,
-`@application`, and `@unknown`. `context` is one of `module`, `initializer`,
-`function`, `parameter`, `lambda`, `let-value`, `let-else-fallback`,
-`return-operand`, `branch`, `argument`, `result`, `trivia`, or `recovery`. The
-structural category remains authoritative for grammar facts; these fields
-describe semantic position.
-
-`let-value` is the context of every pattern and value of a `let` and of the
-pattern and value of a `let-else`. `let-else-fallback` is the context of the
-fallback of a `let-else`, and `return-operand` is the context of the operand of a
-`return`. An element of a body sequence, including one that follows a `let` or
-`let-else`, has the context it would have without the binding form: `function`
-or `result` in a `defn` or `test` body, `lambda` in a `lambda` body, and the
-context of the enclosing `do` in a `do`; a `let` form opens no context of its
-own, because it has no body. The vocabulary has no `let-body`: no form carries one.
-The `visibleLocals` of a position in a body sequence include the bindings of
-every earlier `let` and `let-else` element of that sequence and, inside a `let`,
-those of its earlier pairs. They exclude the bindings of the pair or form that
-contains the position.
-
-Identity values are `{ "kind": ..., "canonical": ... }`. Declaration
-identities use the resolver's canonical spelling. Lexical binders use the
-opaque, canonical spelling `binder:<sourceId>:<start>-<end>`, where the span is
-the binding pattern span; this spelling is scoped to the enclosing
-`workspaceRevision` and is never a cross-revision identity. Binder order is
-lexical introduction order, import order is source order, and declaration
-candidates are sorted by canonical identity. Private declarations are not
-candidates outside their visibility.
-
-Types are closed objects with `kind`, `name`, `parameters`, `result`, and
-`labelled`, and a function also has `effects`, its closed effect row as the
-record `{ "roots": [...] }` of the effects chapter, so two function types that
-differ only in their rows are different types in a query as in the checker. Only
-a function has a non-null `result`. The kinds are:
-
-| `kind` | `name` | `parameters` | `labelled` |
-|---|---|---|---|
-| `primitive` | the builtin's name, such as `str`, `i32`, or `never` | empty | empty |
-| `function` | `fn` | parameter types, in order | labelled slots |
-| `declared` | the declared type's path | type arguments, in order | empty |
-| `interface` | the interface's path, or `any` | interface arguments | empty |
-| `param` | the type parameter's name | empty | empty |
-| `atom` | the atom's name | empty | empty |
-| `tuple` | `tuple` | component types, in order | empty |
-| `array` | `array` | the element type | empty |
-| `dict` | `dict` | the key type, then the value type | empty |
-| `union` | `union` | member types, in declaration order | empty |
-| `record` | `record` | empty | fields, in declaration order |
-| `enum` | `enum` | empty | variants with their payload types |
-
-A declared type is named, never expanded: its definition is an index record.
-
-An application fact is `{ "kind": ..., "callee": ..., "calleeType": ...,
-"positional": [...], "labelled": [...], "resultType": ..., "dispatch": ... }`.
-`positional` and `labelled` are the operand types in written order, and
-`callee` is null when the application names no single resolved function. The
-kinds are:
-
-- `@function`: a function call. `calleeType` is the callee's function type.
-- `@constructor`: a declared type's constructor. `positional` and `labelled`
-  are the payload or the fields, and `resultType` is the declared type.
-- `@contract`: a call of an interface's contract member. `calleeType` is the
-  selected member's function type, or null for a closed conformance.
-
-`dispatch` is null except on a `@contract` application, where it is
-`{ "interface": ..., "member": ..., "receiver": ..., "selection": ...,
-"destination": ... }`: the interface's path, the contract member's name, the
-type that selected the implementation, and how it was selected.
-
-| `selection` | Meaning |
-|---|---|
-| `static` | a written implementation, selected from a known type |
-| `default` | the interface's default member |
-| `dynamic` | the implementation for the type the receiver holds at run time: an interface value or a type parameter |
-| `closed` | a conformance the toolchain supplies, such as an integer conversion |
-
-`destination` is `true` when the member takes no receiver operand and the
-implementing type is the expected type at the call, as in `from.convert`.
-
-A pattern fact describes the `match` arm pattern that contains the position. It
-is `{ "kind": ..., "scrutineeType": ..., "narrowed": ..., "unionMembers":
-[...] }`. `kind` is one of `@wildcard`, `@binding`, `@literal`, `@variant`,
-`@record`, `@tuple`, `@wrapper`, `@array`, or `@as`, and `scrutineeType` is the
-type of the matched value. On an `@as` pattern, `narrowed` is the member type
-it selects and `unionMembers` lists every member of the scrutinee's union in
-declaration order; on any other kind `narrowed` is null and `unionMembers` is
-empty. A subpattern has no fact of its own, and a position outside an arm
-pattern has an unavailable `pattern`.
-
-Projection, lookup, and lambda calls have no application fact. A call of an
-effect operation is a call of a function whose callee is that operation: it has an
-application fact of kind `@function`, with the operation's identity as `callee`
-and the operation's function type, whose row is its complete row, as
-`calleeType`. An expected type is reported where the source writes a primitive or
-function type or the checker binds an argument; elsewhere it is unavailable.
-
-The **effect fact** `effects` is `{ "status": ..., "value": ... }` like every
-semantic field, and its value is `null` when unavailable and otherwise the closed
-object `{ "enclosing": ..., "application": ..., "target": ... }`, with
-`"witnesses"` added by `--expand effect-witnesses` and absent without it:
-
-- `enclosing` is `null` outside every function, or `{ "identity": ..., "kind":
-  ..., "ceiling": ..., "performed": ... }` for the smallest enclosing `defn`,
-  nested method, effect operation, `lambda`, or `test`. `identity` is the
-  identity object of the function, operation, or test, and `null` for a
-  `lambda` and for a member written in an `impl` block, which have none (a member
-  is identified by the triple of the type-system chapter, never by a spelling of
-  this fact), `kind` is
-  `function`, `operation`, `lambda`, or `test`, and `ceiling` and `performed` are
-  rows `{ "roots": [...] }` of canonical identities. For an operation, `ceiling`
-  is its complete row;
-- `application` is `null` unless the position is in an application with an
-  application fact, and then the callee's complete row as the effects chapter
-  defines it: a row `{ "roots": [...] }`, empty for a constructor;
-- `target` is `null` unless the position is in a source module reached from a
-  binary target's entry, and then `{ "entry": ..., "effects": ... }`, the entry's
-  identity and the target's `effects` array as a row. The array is the consent
-  that admitted the entry, not the module's own ceiling; and
-- `witnesses` is an array with one record `{ "root": ..., "hops": [...] }` for
-  each root of the `enclosing` performed row, in canonical root order, each hop
-  `{ "span": SpanDocument, "callee": { "kind": "function"|"operation"|"function-value"|"contract-member", "identity": string|null } }`
-  in the order of the witness section of the effects chapter. It is the chain
-  the checker would report for that root if it were missing from the ceiling,
-  and it is empty when `enclosing` is `null`.
-
-All of it comes from the one function-call graph and performed-row result that
-the checker uses; a query never recomputes a row of its own.
-
-The members of the effect fact are read as follows. A **root** in a row is the
-canonical declaration identity of its `deffect`, spelled as the `canonical` of an
-identity object (`@demo@0.1.0/ops.log.audit`), so a consumer joins a root to the
-identity of the declaration it names; roots are in the canonical order of the
-effects chapter, which is the order of their atom paths and not of these
-spellings. A hop's `span` is the application's span in the source that holds it,
-with that source's own `sourceId`, and its `callee.identity` is the canonical
-identity of the function or operation, or of the contract member
-(`<interface identity>.<member>`), and `null` for a function value and for a
-member written in an `impl` block. A
-source is *reached from a binary target's entry* when it belongs to the import
-closure of the target's unit; a source that several targets reach belongs to the
-first of them in the order of the unit names, so the fact is a function of the
-snapshot. An application that applies no function, a constructor or a compiler
-conversion, has the empty row. The fact is `exact` when every row it reports is
-the checked row; it is `recovered`, with the rows it has, when the enclosing body
-did not check, or reaches a function that did not, or the application's call is in
-a body that did not check, because such a row is a lower bound; and it is
-`unavailable` when the structural position is recovered or unavailable, or the check produced no
-graph. A function that checked and reaches only functions that checked keeps an
-exact fact beside a module that did not check.
-
-`workspaceRevision` is a SHA-256 digest over a binary byte sequence with the
-exact spelling `sha256:<64 lowercase hexadecimal digits>`. The digest input is
-the ASCII bytes for `vibra-workspace-revision-v1` followed by exactly one
-`0x00` byte, then a big-endian `u64` length and exact bytes for `project.vibon`,
-followed by
-each captured source document in deterministic source-ID order: a big-endian
-`u64` source-ID length, the source-ID UTF-8 bytes, a big-endian `u64` byte
-length, and the exact source bytes. No absolute paths, timestamps, or ambient
-filesystem state participate. The revision is computed when the immutable
-snapshot is captured; queries never reread disk or combine facts from another
-revision.
-
-For the fixed vector `project.vibon = "project"`, one source with ID
-`src/main.vib` has the exact source bytes shown here, with no trailing newline
-and no backslash bytes:
-
-```text
-(defn f () str "ok")
-```
-
-The digest is
-`sha256:292c672b9ced8e6e02fbb3768f658fb52880ffd43b624c591b18e77fb083b996`.
-Implementations MUST cover this vector and an equal-length source edit in
-their host tests.
-
-The semantic envelope is deterministic for one snapshot. It does not add a
-public query CLI, MCP endpoint, relation index, edit plan, or execution
-behavior; those remain later milestone work. The `effects` fact and its
-witnesses are the contract of Milestone 4 Step 20, which added the field, its
-schema entry, and its producer in one change and replaced the M3 envelope in
-place. They are a library projection, as the envelope is: the library requests
-the `effect-witnesses` expansion with `PositionExpansion`, and the corpus
-`query` operation declares `expand = true` on an expected query.
-An application fact is available for a call of any module-level function or
-effect operation whose type the checker holds, including one with a nonempty
-effect row, and its `calleeType` is the checked function type with its ceiling as
-`effects`.
-
-Entity metadata and expanded references operate on resolved identities, not
-token spelling. They distinguish module, type, value, function, method,
-interface, effect root, effect operation, field, variant, and lexical binder
-identities. An interface implementation and its members have no single-atom
-identity and are reported by the type-keyed identities the type-system chapter
-defines: a block as its applied interface target and receiver type, and a member
-as its contract member, applied target, and receiver type. The applied target is
-required in both: one receiver may implement a generic interface at several
-targets, and omitting it would report two distinct entities under one identity.
-Discards have no identity, definition, references, or rename target; a query at
-`-`, `@-`, or `-:` reports its discard role and enclosing context only.
-
-Function and source-position metadata can include written-or-default ceilings
-and performed rows, as the `effects` fact and the `ceiling` and `effects` fields
-of an index record. `--expand effect-witnesses` adds the call paths that
-introduced those roots, with the structure of the effects chapter's witness
-section. `vibra query @workspace --expand declarations` emits
-one normalized record per declaration: canonical source, signature, effect
-row, visibility, call edges, referenced types, error types, and source
-fingerprint. The exact checker remains the admission test for a retrieved
-candidate; workspace metadata is not a substitute type system.
-
-Every resolved application reports one of `@function`, `@constructor`,
-`@tuple-projection`, `@record-projection`, or `@collection-lookup`. Projection
-metadata includes the compile-time component or field identity; lookup
-metadata includes the required key or index type. Only `@function` and
-`@contract` applications carry a callee effect row, the callee's complete row of
-the effects chapter, and contribute a function-call edge. Completion after a
-tuple callee proposes valid literal indices, completion after a record callee
-proposes visible atom field selectors, and collection lookup proposes the
-required operand type. Pattern completion uses the same resolved field,
-component, and constructor identities.
-
-Diagnostic codes are built-in query subjects. For example,
-`vibra query @type.argument-mismatch --include diagnostic` returns the code's
-fixed level, domain, summary, and fix capability from the compiler's diagnostic
-registry. It does not load or execute a Vibra declaration.
-
-Tooling MUST NOT infer reference role from atom shape. A query at `@std.io` in
-an ordinary expression reports `@atom-value`; the same token in the module
-locator of `(import io @std.io)` reports `@entity-reference` and the resolved
-module. `io.stdout` in a source effect row reports `@code-reference`, the
-lexical import alias, and the canonical nominal effect identity. An effect atom
-inside a `project.vibon` target reports `@entity-reference` because that typed
-schema slot requires one, as does its `entry` declaration reference. A slot
-decides whether a token is a reference and which entity kind it must denote; the
-code graph alone decides which entity its path denotes.
+A diagnostic code used as a query subject reads the compiler's registry. It
+never loads or runs a declaration.
 
 ## Transactional edit plans
 
-Supported semantic changes are format, safe diagnostic fix, semantic rename,
-and organize imports. Project add/remove and generated module scaffolding use
-the same plan envelope. Vibra does not expose arbitrary AST patterns, text search
-and replace, or a general patch language as a trusted compiler operation.
+The supported edits are canonical format, safe diagnostic fix, rename, and
+organize imports. Project add and remove and module scaffolding use the same
+plan. An edit names a typed operation, a target identity, and a new name or
+typed record. Arbitrary syntax patterns, free text replacement, and patch
+languages are not compiler operations.
 
-An edit plan is a JSON response and contains at least:
+**`EditPlan`, version 2:** `{schemaVersion, toolVersion, workspaceRevision,
+operation, target, documents, edits, resultingDiagnostics, postconditions}`.
+`target` is an identity or `null`. `documents` lists each affected input as
+`{path, revision}`. An edit has a confined path, a half-open UTF-8 byte
+span, replacement text, the expected syntax identity, and a source
+fingerprint. Edits are ordered by path and span and do not overlap. A rename
+records any change of nominal or claim identity in `postconditions`.
 
-```json
-{
-  "schemaVersion": 1,
-  "workspaceRevision": "sha256:...",
-  "operation": "rename",
-  "target": { "kind": "value", "id": "..." },
-  "documents": [
-    { "path": "src/main.vib", "revision": "sha256:..." }
-  ],
-  "edits": [],
-  "resultingDiagnostics": []
-}
-```
+A mutating command previews unless `--write` is given; over MCP, writing
+needs the write permission and a plan returned earlier. Applying a plan:
 
-Edits use half-open UTF-8 byte spans and include the expected syntax identity
-and source fingerprint. Before writing, the engine MUST verify the workspace
-and document revisions, apply every edit in memory, reparse and recheck every
-affected module, format changed forms, and validate the requested postcondition.
-It then replaces all files atomically. Stale, overlapping, ambiguous, or
-ill-typed plans fail without partial writes.
+1. verify the workspace revision and every document revision;
+2. stage every edit in memory;
+3. parse and check the affected modules again;
+4. format, without reordering operands;
+5. validate the postconditions;
+6. publish all files, or none.
 
-Rename rejects generated-only nodes, discards, keywords, visibility
-violations, name collisions, and shadowing. A record-selector atom in
-`(value @field)` is a rename reference only after application resolution binds
-it to that record's field identity; an ordinary equal atom value is untouched.
-A rename may touch imports and qualified references across packages in the
-current workspace but never edits vendored dependencies.
+A plan that is stale, ambiguous, overlapping, ill-typed, mismatched, or that
+changes a policy without approval fails with nothing written. A backend that
+cannot write several files atomically MUST refuse before writing. An
+interrupted application is never reported as applied.
+
+Rename rejects discards, generated nodes, keywords, private-access
+violations, collisions, and shadowing. A field is renamed only where
+resolution binds a token to that field; an equal atom or string is left
+alone. Edits reach local modules and never vendored dependencies. Organizing
+imports changes neither resolution nor operand order. No fix or format may
+alter a protected claim, test, or policy outside its approval workflow.
 
 ## MCP server
 
-`vibra mcp --workspace <root>` exposes the shared services over a versioned MCP
-stdio server. Tool names mirror CLI concepts, for example `vibra.query`,
-`vibra.edit.rename-plan`, and
-`vibra.edit.apply-plan`.
+`vibra mcp` serves the same engine over a versioned stdio MCP server rooted
+at the workspace. Its tools mirror the CLI: `vibra.query`, `vibra.eval`,
+`vibra.edit.renamePlan`, `vibra.edit.applyPlan`, `vibra.test`,
+`vibra.run`, `vibra.project.sync`. The server publishes its schemas and
+capability inventory, and no tool does anything the engine cannot.
 
-The default server is read-only and does not execute project code. Independent
-startup flags authorize narrow server actions:
+By default the server reads only and executes no project code.
 
-- `--allow-write` permits application of a validated edit plan;
-- `--allow-test` permits the test runner;
-- `--allow-run` permits execution of a statically valid project target; and
-- `--allow-sync` permits exact-revision dependency fetch and vendor writes.
+| Flag | Permits |
+| --- | --- |
+| `--allow-write` | applying a validated plan |
+| `--allow-eval` | bounded pure evaluation |
+| `--allow-test` | tests in isolated worlds |
+| `--allow-run` | running an admitted target |
+| `--allow-sync` | dependency acquisition and vendor writes |
 
-These flags govern MCP actions, not Vibra effects. `--allow-run` does not add
-effect roots: the selected binary target supplies its complete static ceiling
-and blanket execution consent. The server never accepts an executable path,
-shell fragment, arbitrary CLI subcommand, environment entry, or unvalidated
-tooling path from a client.
+- A permission makes no grant, widens no resource scope, and replaces no
+  target approval. A target gains no filesystem or network authority because
+  MCP may run it.
+- The server accepts no executable path, shell fragment, arbitrary
+  subcommand, or environment override.
+- Paths are confined to the workspace. Escapes through a parent, a symbolic
+  link, or a junction, absolute paths outside it, and writes to vendored
+  code are rejected.
+- Applying needs the exact plan and revision returned earlier.
+- A disconnect or cancellation is an explicit incomplete outcome. It does
+  not show that an action already dispatched did not happen.
 
-All tooling paths resolve beneath the canonical workspace. Symlink and
-junction escape, `..` escape, absolute paths outside the root, and writes to
-vendored dependencies are rejected. This confines compiler and edit operations;
-it does not narrow filesystem paths used by a running target that declares a
-filesystem effect. An apply call must present the exact plan and revision
-returned by a prior plan call.
+## Schemas, delivery and exclusions
 
-## Schemas and errors
+The toolchain MUST publish, and validate its own output against, version 2
+JSON Schemas for command results, diagnostic and span documents, structural
+and semantic queries and their expansions, the index, edit plans and
+results, test reports, registry inspection, and MCP envelopes. Persistent
+project, lock, build, policy, and approval documents are typed VIBON with
+decode and round-trip tests, and have no second JSON form. Unknown input
+fields and versions are rejected. A change of meaning or of fields is a new
+major version.
 
-The toolchain publishes JSON Schemas for CLI command results, MCP
-project inspection, diagnostics, normalized query results and expansions, edit
-plans/results, test reports, external-registry inspection, and MCP envelopes.
-Persistent project, lock, and build-data record schemas are
-defined as VIBON data contracts and tested through their typed decoders, not
-duplicated as normative JSON files.
+Read queries, bounded eval, and revision-checked edits belong to the
+language release. The MCP server and editor adapters follow in a named
+milestone of the [roadmap](../roadmap/README.md). `build` produces native
+executables for the qualified targets; the WebAssembly backend is removed
+when native execution is qualified; `run`, `test`, and `eval` stay on the
+interpreter. A tool reports what it supports at every stage.
 
-The published JSON Schema is the contract a consumer reads against. The
-implementation renders these documents and never decodes them, so a producer
-test validates each rendered document against its schema, and a rule that
-crosses fields, which a schema cannot express (for example a node identifier
-against its span), is asserted on the produced value.
+Excluded:
 
-Schema IDs and major versions are contracts. Unknown fields are rejected in
-inputs and ignored only where an output schema explicitly permits forward
-extension. Diagnostic and result atoms are serialized to JSON with their exact
-spelling, for example `"@type.argument-mismatch"`. Errors distinguish invalid input,
-diagnostics found, stale workspace, MCP action denied, dependency failure, host
-operation failure, runtime trap, and internal failure.
+- store stage, status, and publish workflows (`project sync` only acquires
+  dependencies);
+- a persistent REPL and live redefinition;
+- arbitrary patch languages and unrestricted source evaluation;
+- renames that keep a nominal identity automatically;
+- a second checker or index in an adapter;
+- making grants from tool permissions;
+- choosing a backend for `run` or `test`;
+- unversioned machine output and implicit shell or foreign-function
+  execution;
+- any claim that passing samples prove a guard for all inputs.
