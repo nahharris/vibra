@@ -8,7 +8,6 @@
 mod contract_members;
 mod effects;
 mod generics;
-mod namespace_facts;
 mod nominal_types;
 mod primitive_table;
 mod reserved_binders;

@@ -1,3 +1,0 @@
-(import assert @std.assert)
-(import parity @math.parity)
-(test "eight is even" (assert.true (parity.even 8u32)))
