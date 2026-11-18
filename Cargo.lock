@@ -1652,6 +1652,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vibra-syntax"
+version = "0.0.1"
+dependencies = [
+ "vibra-diagnostics",
+]
+
+[[package]]
 name = "vibra-syntax-v1"
 version = "0.0.1"
 dependencies = [

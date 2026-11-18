@@ -24,6 +24,8 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // The leaf of the new pipeline. Diagnostics are a language surface and
     // know nothing else.
     ("vibra-diagnostics", &[]),
+    // The new reader: the lexer, the lossless tree, and the data grammar.
+    ("vibra-syntax", &["vibra-diagnostics"]),
     // The new harness. It grows a dependency with each handler.
     ("vibra-conformance", &["vibra-diagnostics"]),
     // The leaf. Diagnostics are a language surface and know nothing else.
@@ -372,8 +374,9 @@ fn workspace_matches_the_declared_architecture() {
     );
 }
 
-/// The number of rows: the 24 crates of step 01 and the two of step 02.
-const ROWS: usize = 26;
+/// The number of rows: the 24 crates of step 01, the two of step 02, and the
+/// reader of step 03.
+const ROWS: usize = 27;
 
 #[test]
 fn every_crate_directory_has_exactly_one_row() {
@@ -505,6 +508,7 @@ fn the_workspace_excludes_the_archived_tree() {
 /// `vibra-workspace-v1`.
 const SEMANTIC_CRATES: &[&str] = &[
     "vibra-diagnostics",
+    "vibra-syntax",
     "vibra-diagnostics-v1",
     "vibra-syntax-v1",
     "vibra-resolve-v1",
