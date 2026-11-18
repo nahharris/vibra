@@ -1,0 +1,16 @@
+id = "V2-SRC-READER-vibon-application"
+rule = "V2-SRC-READER-vibon-application"
+profile = "readerV2"
+operation = "reader"
+description = "04-programs-and-packages.md#vibon-data-documents: an application is not a value and is reported once"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 4, end = 10 }

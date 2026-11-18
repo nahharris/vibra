@@ -12,6 +12,8 @@ publish.workspace = true
 serde.workspace = true
 toml.workspace = true
 vibra-diagnostics.workspace = true
+vibra-fmt.workspace = true
+vibra-syntax.workspace = true
 
 [[bin]]
 name = "vibra-conformance"

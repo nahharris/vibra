@@ -1,0 +1,19 @@
+id = "V2-SRC-READER-closer-crossed"
+rule = "V2-SRC-READER-closer-crossed"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#lexical-structure: a closer that crosses an open form closes it with a missing leaf"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+tree = "tree.vibon"
+formatted = "formatted.vibon"
+
+[[expect.diagnostics]]
+code = "@syntax.unmatchedDelimiter"
+level = "@error"
+span = { start = 12, end = 13 }
+related = [{ span = { start = 4, end = 5 } }]

@@ -1,0 +1,11 @@
+id = "V2-SRC-READER-separator-bracket"
+rule = "V2-SRC-READER-separator-bracket"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#lexical-structure: a bracket separates"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "accepted"

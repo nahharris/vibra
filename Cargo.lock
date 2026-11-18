@@ -1503,6 +1503,8 @@ dependencies = [
  "serde",
  "toml",
  "vibra-diagnostics",
+ "vibra-fmt",
+ "vibra-syntax",
 ]
 
 [[package]]
@@ -1547,6 +1549,14 @@ version = "0.0.1"
 dependencies = [
  "vibra-diagnostics-v1",
  "vibra-ir-v1",
+]
+
+[[package]]
+name = "vibra-fmt"
+version = "0.0.1"
+dependencies = [
+ "vibra-diagnostics",
+ "vibra-syntax",
 ]
 
 [[package]]
@@ -1668,6 +1678,13 @@ dependencies = [
  "vibra-diagnostics-v1",
  "vibra-syntax-v1",
  "vibra-workspace-v1",
+]
+
+[[package]]
+name = "vibra-syntax"
+version = "0.0.1"
+dependencies = [
+ "vibra-diagnostics",
 ]
 
 [[package]]

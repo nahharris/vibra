@@ -1,0 +1,17 @@
+id = "V2-SRC-READER-string-unterminated"
+rule = "V2-SRC-READER-string-unterminated"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#lexical-structure: a string open at the end of the document"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+formatted = "formatted.vibon"
+
+[[expect.diagnostics]]
+code = "@syntax.unmatchedDelimiter"
+level = "@error"
+span = { start = 0, end = 5 }

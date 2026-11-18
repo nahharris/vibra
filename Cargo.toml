@@ -21,6 +21,7 @@ vibra-conformance-v1 = { path = "crates/vibra-conformance-v1" }
 vibra-diagnostics = { path = "crates/vibra-diagnostics" }
 vibra-diagnostics-v1 = { path = "crates/vibra-diagnostics-v1" }
 vibra-exec = { path = "crates/vibra-exec" }
+vibra-fmt = { path = "crates/vibra-fmt" }
 vibra-fmt-v1 = { path = "crates/vibra-fmt-v1" }
 vibra-fs-scope = { path = "crates/vibra-fs-scope" }
 vibra-host-v1 = { path = "crates/vibra-host-v1" }
@@ -32,6 +33,7 @@ vibra-nexus = { path = "crates/vibra-nexus" }
 vibra-nexus-bridge = { path = "crates/vibra-nexus-bridge", features = ["library"] }
 vibra-nexus-eval = { path = "crates/vibra-nexus-eval" }
 vibra-schema-v1 = { path = "crates/vibra-schema-v1" }
+vibra-syntax = { path = "crates/vibra-syntax" }
 vibra-syntax-v1 = { path = "crates/vibra-syntax-v1" }
 vibra-resolve-v1 = { path = "crates/vibra-resolve-v1" }
 vibra-schema = { path = "crates/vibra-schema" }

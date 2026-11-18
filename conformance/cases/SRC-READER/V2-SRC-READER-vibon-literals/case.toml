@@ -1,0 +1,12 @@
+id = "V2-SRC-READER-vibon-literals"
+rule = "V2-SRC-READER-vibon-literals"
+profile = "readerV2"
+operation = "reader"
+description = "04-programs-and-packages.md#vibon-data-documents: every literal form of the data grammar is accepted and keeps its spelling"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vibon"

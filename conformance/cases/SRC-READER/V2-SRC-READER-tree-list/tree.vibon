@@ -1,0 +1,16 @@
+{
+  format: @tree.v2
+  root: {
+    kind: @data
+    children: [
+      {
+        kind: @list
+        children: [
+          {kind: @punctuation text: "["}
+          {kind: @integer text: "1u8"}
+          {kind: @punctuation text: "]"}
+        ]
+      }
+    ]
+  }
+}
