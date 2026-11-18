@@ -475,6 +475,11 @@ this specification. They are never regenerated from an engine's output.
 | `workspaceTest` | the same tree | one suite result with each test's trace, each test in a fresh world |
 
 - A case with several kinds of input states its operation.
+- A case names its inputs with the keys `source` (a source document),
+  `project` (a project document), `data` (a list of data documents), `tree`
+  (a confined tree, whose project document is `<tree>/project.vibon`), and
+  `hostWorld` (a host world document). The keys of a `query` case's subject,
+  offset, and options are not defined.
 - Paths are relative to the case, confined, and checked by extension. The
   loader captures the tree first; a handler reads only that capture.
 - `interpret`'s entry is a fixture for observing values. It is not an
@@ -485,9 +490,10 @@ this specification. They are never regenerated from an engine's output.
   gets a fresh copy. A malformed world fails only its case, once, and never
   becomes an empty permissive world. World data describes inputs; the fake
   broker issues the grants.
-- An expectation is `accepted`, `refuted`, `unknown`, or `unsupported`. Only
-  the first is a pass. A case for a static rule includes a passing example
-  and the nearest failing one.
+- An expected verdict is `accepted`, `refuted`, `unknown`, or `unsupported`.
+  A case passes when its observed verdict equals the expected one and every
+  other expectation is met. A case for a static rule includes a passing
+  example and the nearest failing one.
 - A handler that does not exist is unavailable and fails any gate that needs
   it.
 
@@ -963,9 +969,11 @@ specification, and not one per backend.
   those vectors is sampled evidence, not proof.
 
 The runner reports, per profile and executor, the counts of passed, failed,
-unknown, and unavailable cases. There is no "skipped" count that reads as
-success, and a missing executor is reported missing. Expected results are
-never regenerated from native or stepper output to make a failure pass.
+unknown, and unavailable cases. A case is unknown when its observed verdict
+is `unknown` and it expects another verdict. There is no "skipped" count
+that reads as success, and a missing executor is reported missing. Expected
+results are never regenerated from native or stepper output to make a
+failure pass.
 
 ## Required implementation suites
 

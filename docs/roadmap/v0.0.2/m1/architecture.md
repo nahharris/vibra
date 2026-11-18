@@ -419,11 +419,13 @@ in `conformance/rules.tsv`.
   chapter: `reader`, `projectDecode`, `sourceGraph`, `resolve`,
   `workspaceCheck`, `format`, `query`, `interpret`, `workspaceRun`,
   `workspaceTest`), `description` with the specification anchor,
-  `[inputs]`, `[expect]` with `verdict` (`accepted`, `refuted`, `unknown`,
-  or `unsupported`), `[[expect.diagnostics]]` rows (`code`, `level`,
-  `source`, `span`, `related`, `notes`), and snapshot paths `tree`,
-  `formatted`, `graph`, `resolved`, `types`, `result`, `testRun`. Only
-  the verdict `accepted` with every expectation met is a pass.
+  `[inputs]` (`source`, `project`, `data`, `tree`, `hostWorld`), `[expect]`
+  with `verdict` (`accepted`, `refuted`, `unknown`, or `unsupported`),
+  `[[expect.diagnostics]]` rows (`code`, `level`, `source`, `span`,
+  `related`, `notes`, `fixes`), and snapshot paths `tree`, `formatted`,
+  `graph`, `resolved`, `types`, `result`, `testRun`. A case passes when its
+  observed verdict equals the expected one and every other expectation is
+  met.
 - Snapshots are canonical VIBON of the formats the chapter lists:
   `@tree.v2`, `@sourceGraph.v1`, `@resolved.v2`, `@types.v2`, `@value.v2`,
   `@testRun.v2`. The runner compares them as decoded values.
