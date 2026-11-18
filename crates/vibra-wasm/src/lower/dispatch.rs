@@ -30,7 +30,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use vibra_ir::{CallTarget, Expr, SourceOrigin, Type, TypeId};
+use vibra_ir_v1::{CallTarget, Expr, SourceOrigin, Type, TypeId};
 use wasm_encoder::{BlockType, Instruction as I};
 
 use super::{
@@ -631,8 +631,8 @@ impl Builder<'_, '_> {
         // toolchain answers for the closed types, or the toolchain's defect.
         match closed {
             Some(
-                kind @ (vibra_ir::ClosedContract::KeyCompare
-                | vibra_ir::ClosedContract::KeyEqual),
+                kind @ (vibra_ir_v1::ClosedContract::KeyCompare
+                | vibra_ir_v1::ClosedContract::KeyEqual),
             ) => {
                 self.closed_key_call(
                     *kind,
@@ -644,7 +644,7 @@ impl Builder<'_, '_> {
                     dest,
                 )?;
             }
-            Some(vibra_ir::ClosedContract::IterNext) => {
+            Some(vibra_ir_v1::ClosedContract::IterNext) => {
                 self.closed_next(
                     &operands,
                     recv_desc,
@@ -657,7 +657,7 @@ impl Builder<'_, '_> {
             None => {
                 let stop = self.lowering.fns.stop_trap;
                 self.push(&[
-                    c32(vibra_ir::boundary::TrapCode::InvalidCheckedProgram.code()),
+                    c32(vibra_ir_v1::boundary::TrapCode::InvalidCheckedProgram.code()),
                     I::Call(stop),
                 ]);
             }

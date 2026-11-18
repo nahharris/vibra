@@ -2,8 +2,8 @@
 //! (feature `harness`). The grammar is the module documentation of
 //! `vibra_nexus_bridge::harness`.
 
-use vibra_host::{HostWorld, WorldProvider};
-use vibra_ir::arena::{STRIDE_CELLS, class, kind};
+use vibra_host_v1::{HostWorld, WorldProvider};
+use vibra_ir_v1::arena::{STRIDE_CELLS, class, kind};
 use vibra_nexus::{Cell, Context, Store};
 use vibra_nexus_bridge::harness::{
     MAX_DEPTH, MAX_NODES, MAX_PAYLOAD, dump_value, launch_harness,

@@ -12,7 +12,7 @@
 use std::fmt;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use vibra_ir::boundary::{
+use vibra_ir_v1::boundary::{
     ENTRY_EXPORT, LENGTH_EXPORT, LIVE_SIZE_EXPORT, READ_F32_EXPORT, READ_F64_EXPORT,
     READ_I32_EXPORT, READ_I64_EXPORT, READ_ID_EXPORT, RELEASE_EXPORT, TrapCode,
     VARIANT_EXPORT,
@@ -99,7 +99,7 @@ impl Instance {
     /// The events of the host calls that completed in this instance, in call
     /// order. A call that ended in a trap or a host event appended none.
     #[must_use]
-    pub fn audit_trace(&self) -> &[vibra_host::AuditEvent] {
+    pub fn audit_trace(&self) -> &[vibra_host_v1::AuditEvent] {
         &self.store.data().audit
     }
 
@@ -263,7 +263,7 @@ impl Instance {
         };
         let memory = self
             .instance
-            .get_memory(&mut self.store, vibra_ir::boundary::MEMORY_EXPORT)
+            .get_memory(&mut self.store, vibra_ir_v1::boundary::MEMORY_EXPORT)
             .ok_or_else(|| defect("the module exports no memory"))?;
         let mut bytes = vec![0_u8; length];
         memory

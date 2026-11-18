@@ -10,7 +10,7 @@ publish.workspace = true
 
 [dependencies]
 vibra-exec.workspace = true
-vibra-ir.workspace = true
+vibra-ir-v1.workspace = true
 
 [lints]
 workspace = true

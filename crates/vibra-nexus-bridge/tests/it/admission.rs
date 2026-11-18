@@ -1,7 +1,7 @@
 //! Admission: a descriptor that fails is refused before any code runs, any host
 //! operation is performed, or any audit event is recorded.
 
-use vibra_host::{SystemProvider, WorldProvider};
+use vibra_host_v1::{SystemProvider, WorldProvider};
 use vibra_nexus::{AdmitError, UNBOUNDED};
 use vibra_nexus_bridge::{
     CONSTANT_STR, EXIT_ADMISSION_REFUSED, Finished, Malformed, Refusal, VibraConstant,
@@ -18,7 +18,7 @@ fn demo() -> Fixture {
 /// Launches the fixture and checks everything every refusal shares.
 fn refused(fixture: &Fixture) -> Refusal {
     let descriptor = fixture.descriptor();
-    let mut host = WorldProvider::new(&vibra_host::HostWorld::default());
+    let mut host = WorldProvider::new(&vibra_host_v1::HostWorld::default());
     // SAFETY: the fixture owns every table the descriptor addresses.
     let execution = unsafe { execute(&descriptor, &mut host, LIMIT, UNBOUNDED) };
     assert_eq!(steps(), 0, "no step function was called");
@@ -149,7 +149,7 @@ fn a_null_or_empty_function_table_is_refused() {
 
 /// As [`refused`], for a descriptor edited after it was built.
 fn refused_descriptor(descriptor: &vibra_nexus_bridge::VibraProgram) -> Refusal {
-    let mut host = WorldProvider::new(&vibra_host::HostWorld::default());
+    let mut host = WorldProvider::new(&vibra_host_v1::HostWorld::default());
     // SAFETY: the descriptors this test passes address only tables whose
     // length is zero or whose address is null, which admission refuses
     // before it reads them; the others are the demo fixture's.

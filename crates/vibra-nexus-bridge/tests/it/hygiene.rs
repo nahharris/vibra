@@ -198,7 +198,7 @@ fn the_harness_writes_one_observation_document_in_a_host_world() {
 }
 
 /// The patterns of the workspace's ambient-read scan
-/// (`crates/vibra-conformance/tests/it/ambient_reads.rs`), restated.
+/// (`crates/vibra-conformance-v1/tests/it/ambient_reads.rs`), restated.
 const AMBIENT_PATTERNS: &[&str] = &[
     "std::fs",
     "fs::",

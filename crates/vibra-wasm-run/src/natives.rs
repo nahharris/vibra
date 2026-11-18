@@ -3,8 +3,8 @@
 //! `docs/spec/06-runtime.md`, "Native implementations": a module reaches
 //! toolchain-owned native code only through imports from the pure module
 //! `vibra_native_v1`, and the runner supplies them. The closed list of names and
-//! scalar signatures is the table `vibra_ir::external::NATIVE_ROWS`, which the
-//! emitter reads too, and the code behind each name is `vibra-native`, the one
+//! scalar signatures is the table `vibra_ir_v1::external::NATIVE_ROWS`, which the
+//! emitter reads too, and the code behind each name is `vibra-native-v1`, the one
 //! implementation that the reference interpreter calls directly. This is the one
 //! place the runner adds a native: it defines each in the linker, against the
 //! instance's own memory (`vibra_v1_memory`), and nothing else about running a
@@ -17,9 +17,9 @@
 //! which the runner reports as a defect of the toolchain and never as a read
 //! outside the arena.
 
-use vibra_ir::boundary::{MEMORY_EXPORT, NATIVE_IMPORT_MODULE};
-use vibra_ir::external::{NATIVE_ROWS, NativeRow, Scalar};
-use vibra_native::arena;
+use vibra_ir_v1::boundary::{MEMORY_EXPORT, NATIVE_IMPORT_MODULE};
+use vibra_ir_v1::external::{NATIVE_ROWS, NativeRow, Scalar};
+use vibra_native_v1::arena;
 use wasmtime::{Caller, Extern, FuncType, Linker, Val, ValType};
 
 use crate::Host;

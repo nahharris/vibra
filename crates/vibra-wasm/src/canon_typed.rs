@@ -26,7 +26,7 @@ use crate::lower::typetab::{ROW, kind as tk};
 use crate::runtime::{
     Ins, Routine, Routines, c32, c64, get, ld8, ld32, ld64, set, st8, st32, st64,
 };
-use vibra_ir::arena::class;
+use vibra_ir_v1::arena::class;
 
 const REF: i32 = class::REF as i32;
 /// The bytes of an entry of the walk's stack: the two values (the bits of a

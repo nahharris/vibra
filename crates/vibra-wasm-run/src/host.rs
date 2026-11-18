@@ -8,7 +8,7 @@
 //! that the host builds with the builders and seals, and that the module
 //! adopts.
 //!
-//! The operations themselves are written once, in `vibra-host`, against the
+//! The operations themselves are written once, in `vibra-host-v1`, against the
 //! value-access trait. This module is the runner's half of that trait: it reads
 //! an argument through the exported accessors (`vibra_v1_length`,
 //! `vibra_v1_read_i32`, `vibra_v1_read_id`) and builds a result through the
@@ -17,16 +17,16 @@
 //! completed appends its audit event, built by the same
 //! `AuditEvent::completed` the reference interpreter calls.
 
-use vibra_host::{
+use vibra_host_v1::{
     AuditEvent, HostCall, HostEnum, HostRecord, HostValues, ReadError, build_reply,
     perform,
 };
-use vibra_ir::boundary::{
+use vibra_ir_v1::boundary::{
     HOST_IMPORT_MODULE, LENGTH_EXPORT, NEW_EXPORT, READ_I32_EXPORT, READ_ID_EXPORT,
     RELEASE_EXPORT, SEAL_EXPORT, WRITE_F32_EXPORT, WRITE_F64_EXPORT, WRITE_I32_EXPORT,
     WRITE_I64_EXPORT, WRITE_ID_EXPORT,
 };
-use vibra_ir::external::host::{HOST_ROWS, HostType};
+use vibra_ir_v1::external::host::{HOST_ROWS, HostType};
 use wasmtime::{Caller, Extern, FuncType, Linker, TypedFunc, Val, ValType};
 
 use crate::Host;

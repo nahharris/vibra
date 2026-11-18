@@ -12,15 +12,15 @@
     missing_docs
 )]
 
-use vibra_diagnostics::ByteSpan;
+use vibra_diagnostics_v1::ByteSpan;
 use vibra_exec::{
     Block, BlockId, Callee, ConstId, Constant, FuncId, Function, GlobalId, Inst,
     ObjectKind, OriginId, Program, ScalarClass, ScalarOp, Slot, Terminator,
 };
-use vibra_host::{AuditEvent, HostWorld, WorldProvider};
-use vibra_ir::SourceOrigin;
-use vibra_ir::boundary::TrapCode;
-use vibra_ir::external::host::host_row;
+use vibra_host_v1::{AuditEvent, HostWorld, WorldProvider};
+use vibra_ir_v1::SourceOrigin;
+use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir_v1::external::host::host_row;
 use vibra_nexus::{
     ABI_VERSION, AdmitError, Cell, Context, Outcome, Requirements, Stats, Trap,
     UNBOUNDED, admit, run,

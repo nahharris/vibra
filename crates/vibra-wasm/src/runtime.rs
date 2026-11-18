@@ -16,7 +16,7 @@ use crate::layout::{
     self, CellClass, Kind, MAX_CLASS, MIN_CLASS, TABLE_ENTRY_SIZE,
     TABLE_FIRST_CAPACITY, header, state,
 };
-use vibra_ir::boundary::{
+use vibra_ir_v1::boundary::{
     FAILURE_ACTUAL_EXPORT, FAILURE_EXPECTED_EXPORT, FAILURE_EXPORT, LENGTH_EXPORT,
     LIVE_SIZE_EXPORT, ORIGIN_EXPORT, READ_F32_EXPORT, READ_F64_EXPORT, READ_I32_EXPORT,
     READ_I64_EXPORT, READ_ID_EXPORT, RELEASE_EXPORT, RESULT_EXPORT, STATUS_EXPORT,
@@ -1862,7 +1862,7 @@ pub(crate) fn test_export(
         ]);
     }
     code.extend([
-        c32(vibra_ir::boundary::TrapCode::InvalidCheckedProgram.code()),
+        c32(vibra_ir_v1::boundary::TrapCode::InvalidCheckedProgram.code()),
         I::Call(fns.stop_trap),
         I::End,
         I::End,
@@ -1990,7 +1990,7 @@ mod tests {
         let mut seen = std::collections::BTreeSet::new();
         for (name, _) in accessor_exports(&fns) {
             assert!(
-                vibra_ir::boundary::FUNCTION_EXPORTS.contains(&name),
+                vibra_ir_v1::boundary::FUNCTION_EXPORTS.contains(&name),
                 "{name}"
             );
             assert!(seen.insert(name), "{name} is exported twice");

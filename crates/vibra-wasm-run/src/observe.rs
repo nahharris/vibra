@@ -20,8 +20,8 @@
 
 use std::collections::BTreeMap;
 
-use vibra_host::{AuditEvent, HostProvider, HostWorld, WorldProvider};
-use vibra_ir::{ObservedValue, Type, TypeBody, TypeDefinition, TypeId, Value};
+use vibra_host_v1::{AuditEvent, HostProvider, HostWorld, WorldProvider};
+use vibra_ir_v1::{ObservedValue, Type, TypeBody, TypeDefinition, TypeId, Value};
 
 use crate::{Instance, Outcome, ResultSlot, Runner, RunnerError, Started, ValueId};
 
@@ -533,7 +533,7 @@ impl Instance {
         self.release(id)?;
         if matches!(template, Type::Function(_)) {
             return Err(Outcome::Trapped {
-                code: vibra_ir::boundary::TrapCode::UnobservableFunction,
+                code: vibra_ir_v1::boundary::TrapCode::UnobservableFunction,
                 origin: None,
             });
         }
@@ -582,10 +582,10 @@ impl Instance {
             Type::U32 => Value::U32(self.read_i32(id, index)?.cast_unsigned()),
             Type::I64 => Value::I64(self.read_i64(id, index)?),
             Type::U64 => Value::U64(self.read_i64(id, index)?.cast_unsigned()),
-            Type::F32 => Value::F32(vibra_ir::canonical_f32_bits(
+            Type::F32 => Value::F32(vibra_ir_v1::canonical_f32_bits(
                 self.read_f32(id, index)?.to_bits(),
             )),
-            Type::F64 => Value::F64(vibra_ir::canonical_f64_bits(
+            Type::F64 => Value::F64(vibra_ir_v1::canonical_f64_bits(
                 self.read_f64(id, index)?.to_bits(),
             )),
             _ => {
@@ -722,8 +722,8 @@ fn scalar(slot: ResultSlot, ty: &Type) -> Result<Option<Value>, Outcome> {
         Type::U32 => Value::U32(narrow()?),
         Type::I64 => Value::I64(bits.cast_signed()),
         Type::U64 => Value::U64(bits),
-        Type::F32 => Value::F32(vibra_ir::canonical_f32_bits(narrow()?)),
-        Type::F64 => Value::F64(vibra_ir::canonical_f64_bits(bits)),
+        Type::F32 => Value::F32(vibra_ir_v1::canonical_f32_bits(narrow()?)),
+        Type::F64 => Value::F64(vibra_ir_v1::canonical_f64_bits(bits)),
         _ => return Ok(None),
     }))
 }

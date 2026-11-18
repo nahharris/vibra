@@ -394,10 +394,10 @@ pub const MIN_CLASS: u32 = 5;
 pub const MAX_CLASS: u32 = 30;
 
 /// The object header, the strides, and the cells offset are written once in
-/// `vibra_ir::arena`, because the native code that reads and writes an object
-/// (`vibra-native`) needs them too, and depends on `vibra-ir` and not on this
+/// `vibra_ir_v1::arena`, because the native code that reads and writes an object
+/// (`vibra-native-v1`) needs them too, and depends on `vibra-ir-v1` and not on this
 /// crate.
-pub use vibra_ir::arena::{
+pub use vibra_ir_v1::arena::{
     STRIDE_BYTES, STRIDE_CELLS, STRIDE_CHARS, cells_offset, header,
 };
 
@@ -428,11 +428,11 @@ impl CellClass {
     #[must_use]
     pub const fn code(self) -> u8 {
         match self {
-            Self::I32 => vibra_ir::arena::class::I32,
-            Self::I64 => vibra_ir::arena::class::I64,
-            Self::F32 => vibra_ir::arena::class::F32,
-            Self::F64 => vibra_ir::arena::class::F64,
-            Self::Ref => vibra_ir::arena::class::REF,
+            Self::I32 => vibra_ir_v1::arena::class::I32,
+            Self::I64 => vibra_ir_v1::arena::class::I64,
+            Self::F32 => vibra_ir_v1::arena::class::F32,
+            Self::F64 => vibra_ir_v1::arena::class::F64,
+            Self::Ref => vibra_ir_v1::arena::class::REF,
         }
     }
 }
@@ -651,17 +651,17 @@ mod tests {
         }
         // The codes native code reads are the ones this table writes.
         for (kind, code) in [
-            (Kind::Atom, vibra_ir::arena::kind::ATOM),
-            (Kind::Str, vibra_ir::arena::kind::STR),
-            (Kind::Bytes, vibra_ir::arena::kind::BYTES),
-            (Kind::Tuple, vibra_ir::arena::kind::TUPLE),
-            (Kind::Array, vibra_ir::arena::kind::ARRAY),
-            (Kind::Dict, vibra_ir::arena::kind::DICT),
-            (Kind::Record, vibra_ir::arena::kind::RECORD),
-            (Kind::Enum, vibra_ir::arena::kind::ENUM),
-            (Kind::Wrapper, vibra_ir::arena::kind::WRAPPER),
-            (Kind::Union, vibra_ir::arena::kind::UNION),
-            (Kind::Function, vibra_ir::arena::kind::FUNCTION),
+            (Kind::Atom, vibra_ir_v1::arena::kind::ATOM),
+            (Kind::Str, vibra_ir_v1::arena::kind::STR),
+            (Kind::Bytes, vibra_ir_v1::arena::kind::BYTES),
+            (Kind::Tuple, vibra_ir_v1::arena::kind::TUPLE),
+            (Kind::Array, vibra_ir_v1::arena::kind::ARRAY),
+            (Kind::Dict, vibra_ir_v1::arena::kind::DICT),
+            (Kind::Record, vibra_ir_v1::arena::kind::RECORD),
+            (Kind::Enum, vibra_ir_v1::arena::kind::ENUM),
+            (Kind::Wrapper, vibra_ir_v1::arena::kind::WRAPPER),
+            (Kind::Union, vibra_ir_v1::arena::kind::UNION),
+            (Kind::Function, vibra_ir_v1::arena::kind::FUNCTION),
         ] {
             assert_eq!(kind.code(), u32::from(code), "{kind:?}");
         }

@@ -1450,12 +1450,12 @@ version = "0.0.1"
 dependencies = [
  "vibra-codegen",
  "vibra-exec",
- "vibra-ir",
+ "vibra-ir-v1",
  "vibra-lower",
 ]
 
 [[package]]
-name = "vibra-cli"
+name = "vibra-cli-v1"
 version = "0.0.1"
 dependencies = [
  "jsonschema",
@@ -1463,13 +1463,13 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "vibra-diagnostics",
- "vibra-fmt",
- "vibra-host",
- "vibra-schema",
- "vibra-syntax",
- "vibra-types",
- "vibra-workspace",
+ "vibra-diagnostics-v1",
+ "vibra-fmt-v1",
+ "vibra-host-v1",
+ "vibra-schema-v1",
+ "vibra-syntax-v1",
+ "vibra-types-v1",
+ "vibra-workspace-v1",
 ]
 
 [[package]]
@@ -1481,14 +1481,14 @@ dependencies = [
  "cranelift-module",
  "cranelift-object",
  "object",
- "vibra-diagnostics",
+ "vibra-diagnostics-v1",
  "vibra-exec",
- "vibra-ir",
+ "vibra-ir-v1",
  "vibra-nexus-bridge",
 ]
 
 [[package]]
-name = "vibra-conformance"
+name = "vibra-conformance-v1"
 version = "0.0.1"
 dependencies = [
  "object",
@@ -1496,43 +1496,43 @@ dependencies = [
  "serde_json",
  "toml",
  "vibra-build",
- "vibra-diagnostics",
+ "vibra-diagnostics-v1",
  "vibra-exec",
- "vibra-fmt",
- "vibra-host",
- "vibra-interp",
- "vibra-ir",
+ "vibra-fmt-v1",
+ "vibra-host-v1",
+ "vibra-interp-v1",
+ "vibra-ir-v1",
  "vibra-lower",
  "vibra-nexus",
  "vibra-nexus-eval",
- "vibra-resolve",
- "vibra-schema",
- "vibra-syntax",
- "vibra-types",
+ "vibra-resolve-v1",
+ "vibra-schema-v1",
+ "vibra-syntax-v1",
+ "vibra-types-v1",
  "vibra-wasm",
  "vibra-wasm-run",
- "vibra-workspace",
+ "vibra-workspace-v1",
  "wasmparser 0.261.0",
 ]
 
 [[package]]
-name = "vibra-diagnostics"
+name = "vibra-diagnostics-v1"
 version = "0.0.1"
 
 [[package]]
 name = "vibra-exec"
 version = "0.0.1"
 dependencies = [
- "vibra-diagnostics",
- "vibra-ir",
+ "vibra-diagnostics-v1",
+ "vibra-ir-v1",
 ]
 
 [[package]]
-name = "vibra-fmt"
+name = "vibra-fmt-v1"
 version = "0.0.1"
 dependencies = [
- "vibra-diagnostics",
- "vibra-syntax",
+ "vibra-diagnostics-v1",
+ "vibra-syntax-v1",
 ]
 
 [[package]]
@@ -1543,31 +1543,31 @@ dependencies = [
 ]
 
 [[package]]
-name = "vibra-host"
+name = "vibra-host-v1"
 version = "0.0.1"
 dependencies = [
  "getrandom",
  "serde_json",
- "vibra-diagnostics",
- "vibra-ir",
- "vibra-syntax",
+ "vibra-diagnostics-v1",
+ "vibra-ir-v1",
+ "vibra-syntax-v1",
 ]
 
 [[package]]
-name = "vibra-interp"
+name = "vibra-interp-v1"
 version = "0.0.1"
 dependencies = [
- "vibra-diagnostics",
- "vibra-host",
- "vibra-ir",
- "vibra-native",
+ "vibra-diagnostics-v1",
+ "vibra-host-v1",
+ "vibra-ir-v1",
+ "vibra-native-v1",
 ]
 
 [[package]]
-name = "vibra-ir"
+name = "vibra-ir-v1"
 version = "0.0.1"
 dependencies = [
- "vibra-diagnostics",
+ "vibra-diagnostics-v1",
 ]
 
 [[package]]
@@ -1575,33 +1575,33 @@ name = "vibra-lower"
 version = "0.0.1"
 dependencies = [
  "vibra-exec",
- "vibra-ir",
+ "vibra-ir-v1",
 ]
 
 [[package]]
-name = "vibra-native"
+name = "vibra-native-v1"
 version = "0.0.1"
 dependencies = [
- "vibra-ir",
+ "vibra-ir-v1",
 ]
 
 [[package]]
 name = "vibra-nexus"
 version = "0.0.1"
 dependencies = [
- "vibra-host",
- "vibra-ir",
- "vibra-native",
+ "vibra-host-v1",
+ "vibra-ir-v1",
+ "vibra-native-v1",
 ]
 
 [[package]]
 name = "vibra-nexus-bridge"
 version = "0.0.1"
 dependencies = [
- "vibra-diagnostics",
+ "vibra-diagnostics-v1",
  "vibra-exec",
- "vibra-host",
- "vibra-ir",
+ "vibra-host-v1",
+ "vibra-ir-v1",
  "vibra-nexus",
  "vibra-nexus-bridge",
  "vibra-nexus-eval",
@@ -1611,57 +1611,57 @@ dependencies = [
 name = "vibra-nexus-eval"
 version = "0.0.1"
 dependencies = [
- "vibra-diagnostics",
+ "vibra-diagnostics-v1",
  "vibra-exec",
- "vibra-host",
- "vibra-ir",
+ "vibra-host-v1",
+ "vibra-ir-v1",
  "vibra-nexus",
 ]
 
 [[package]]
-name = "vibra-resolve"
+name = "vibra-resolve-v1"
 version = "0.0.1"
 dependencies = [
- "vibra-diagnostics",
- "vibra-syntax",
+ "vibra-diagnostics-v1",
+ "vibra-syntax-v1",
 ]
 
 [[package]]
-name = "vibra-schema"
+name = "vibra-schema-v1"
 version = "0.0.1"
 dependencies = [
  "jsonschema",
  "serde",
  "serde_json",
- "vibra-diagnostics",
- "vibra-syntax",
- "vibra-workspace",
+ "vibra-diagnostics-v1",
+ "vibra-syntax-v1",
+ "vibra-workspace-v1",
 ]
 
 [[package]]
-name = "vibra-syntax"
+name = "vibra-syntax-v1"
 version = "0.0.1"
 dependencies = [
- "vibra-diagnostics",
+ "vibra-diagnostics-v1",
 ]
 
 [[package]]
-name = "vibra-types"
+name = "vibra-types-v1"
 version = "0.0.1"
 dependencies = [
  "sha2",
- "vibra-diagnostics",
- "vibra-ir",
- "vibra-resolve",
- "vibra-syntax",
+ "vibra-diagnostics-v1",
+ "vibra-ir-v1",
+ "vibra-resolve-v1",
+ "vibra-syntax-v1",
 ]
 
 [[package]]
 name = "vibra-wasm"
 version = "0.0.1"
 dependencies = [
- "vibra-diagnostics",
- "vibra-ir",
+ "vibra-diagnostics-v1",
+ "vibra-ir-v1",
  "wasm-encoder 0.261.0",
 ]
 
@@ -1669,28 +1669,28 @@ dependencies = [
 name = "vibra-wasm-run"
 version = "0.0.1"
 dependencies = [
- "vibra-host",
- "vibra-ir",
- "vibra-native",
+ "vibra-host-v1",
+ "vibra-ir-v1",
+ "vibra-native-v1",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
  "wasmtime",
 ]
 
 [[package]]
-name = "vibra-workspace"
+name = "vibra-workspace-v1"
 version = "0.0.1"
 dependencies = [
  "rustix",
  "sha2",
- "vibra-diagnostics",
- "vibra-fmt",
- "vibra-host",
- "vibra-interp",
- "vibra-ir",
- "vibra-resolve",
- "vibra-syntax",
- "vibra-types",
+ "vibra-diagnostics-v1",
+ "vibra-fmt-v1",
+ "vibra-host-v1",
+ "vibra-interp-v1",
+ "vibra-ir-v1",
+ "vibra-resolve-v1",
+ "vibra-syntax-v1",
+ "vibra-types-v1",
 ]
 
 [[package]]

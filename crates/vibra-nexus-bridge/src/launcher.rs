@@ -11,8 +11,8 @@
 use std::ffi::OsString;
 use std::io::Write;
 
-use vibra_host::{AuditEvent, HostProvider, SystemProvider};
-use vibra_ir::boundary::TrapCode;
+use vibra_host_v1::{AuditEvent, HostProvider, SystemProvider};
+use vibra_ir_v1::boundary::TrapCode;
 use vibra_nexus::{Context, Outcome, Trap, UNBOUNDED, run};
 
 use crate::abi::VibraProgram;
@@ -36,7 +36,7 @@ pub const EXIT_PROGRAM_FAILED: i32 = 6;
 pub const EXIT_ADMISSION_REFUSED: i32 = EXIT_HOST_EVENT;
 
 /// The memory a native program's context may hold: the budget `vibra run`
-/// gives the interpreter (`MEMORY_BUDGET` of `vibra-cli`). The limit belongs to
+/// gives the interpreter (`MEMORY_BUDGET` of `vibra-cli-v1`). The limit belongs to
 /// the embedding host.
 pub const SYSTEM_MEMORY_LIMIT: u64 = 256 * 1024 * 1024;
 

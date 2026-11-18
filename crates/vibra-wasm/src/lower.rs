@@ -122,12 +122,12 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
-use vibra_ir::external::host::{HOST_ROWS, HostRow};
-use vibra_ir::external::{
+use vibra_ir_v1::external::host::{HOST_ROWS, HostRow};
+use vibra_ir_v1::external::{
     Answer, CompilerIntrinsic, NATIVE_ROWS, NativeRow, ObjectKind, Operand as Wide,
     Totality,
 };
-use vibra_ir::{
+use vibra_ir_v1::{
     CallTarget, CheckedProgram, Constant, Expr, FunctionSignature, MatchArm,
     SourceOrigin, Type, Value, vocabulary,
 };
@@ -149,7 +149,7 @@ use crate::types::{
     Shape, TypeEnv, bind, class_of, function_params, head_key, signature_params,
     written_name,
 };
-use vibra_ir::boundary::TrapCode;
+use vibra_ir_v1::boundary::TrapCode;
 
 mod assertion;
 mod dispatch;
@@ -381,8 +381,8 @@ pub(crate) fn reachable(
                     keys |= matches!(
                         closed,
                         Some(
-                            vibra_ir::ClosedContract::KeyCompare
-                                | vibra_ir::ClosedContract::KeyEqual
+                            vibra_ir_v1::ClosedContract::KeyCompare
+                                | vibra_ir_v1::ClosedContract::KeyEqual
                         )
                     );
                 }
@@ -552,7 +552,7 @@ fn children(expr: &Expr) -> Vec<&Expr> {
 fn key_dispatched(
     env: &TypeEnv<'_>,
     key: &Type,
-    key_order: Option<&vibra_ir::TypeId>,
+    key_order: Option<&vibra_ir_v1::TypeId>,
 ) -> bool {
     key::order_of(env, key, key_order).is_none()
         && (key_order.is_some() || key::shape(key).is_none())
@@ -561,7 +561,7 @@ fn key_dispatched(
 /// Whether the program needs the key unit (`keys`): a closed `ordered.compare`
 /// or `equatable.equal`, or a dict ordered by dispatch.
 pub(crate) fn needs_key_unit(program: &CheckedProgram) -> bool {
-    use vibra_ir::ClosedContract;
+    use vibra_ir_v1::ClosedContract;
     let env = TypeEnv::new(program.types()).with_functions(program.functions());
     fn walk(env: &TypeEnv<'_>, expr: &Expr) -> bool {
         let here = match expr {
@@ -570,8 +570,8 @@ pub(crate) fn needs_key_unit(program: &CheckedProgram) -> bool {
                     CallTarget::Contract {
                         closed:
                             Some(
-                                vibra_ir::ClosedContract::KeyCompare
-                                | vibra_ir::ClosedContract::KeyEqual,
+                                vibra_ir_v1::ClosedContract::KeyCompare
+                                | vibra_ir_v1::ClosedContract::KeyEqual,
                             ),
                         ..
                     },
@@ -1055,7 +1055,7 @@ impl<'a> Lowering<'a> {
     /// The `ordered` interface of `@std.core`, when the program writes an
     /// implementation of it, which is how the program says where a declared
     /// key is ordered by its own `compare`.
-    fn ordered_interface(&self) -> Option<vibra_ir::TypeId> {
+    fn ordered_interface(&self) -> Option<vibra_ir_v1::TypeId> {
         self.program.functions().iter().find_map(|function| {
             function
                 .implements()
@@ -1336,7 +1336,7 @@ enum KeyAt {
 }
 
 /// The address of a checked pattern, which names it while one arm is lowered.
-fn pattern_key(pattern: &vibra_ir::Pattern) -> usize {
+fn pattern_key(pattern: &vibra_ir_v1::Pattern) -> usize {
     std::ptr::from_ref(pattern).addr()
 }
 
@@ -3528,7 +3528,7 @@ impl<'l, 'a> Builder<'l, 'a> {
     fn key_order(
         &mut self,
         key: &Type,
-        key_order: Option<&vibra_ir::TypeId>,
+        key_order: Option<&vibra_ir_v1::TypeId>,
         origin: &SourceOrigin,
     ) -> Result<KeyOrder, EmitError> {
         let unordered = || EmitError::malformed("user-key", Some(origin.clone()));
@@ -3718,7 +3718,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         &mut self,
         value_type: &Type,
         entries: &[(Expr, Expr)],
-        key_order: Option<&vibra_ir::TypeId>,
+        key_order: Option<&vibra_ir_v1::TypeId>,
         origin: &SourceOrigin,
         dest: u32,
     ) -> Result<(), EmitError> {
@@ -4042,7 +4042,7 @@ impl<'l, 'a> Builder<'l, 'a> {
         &mut self,
         collection: &Expr,
         key: &Expr,
-        key_order: Option<&vibra_ir::TypeId>,
+        key_order: Option<&vibra_ir_v1::TypeId>,
         value_type: &Type,
         origin: &SourceOrigin,
         dest: u32,

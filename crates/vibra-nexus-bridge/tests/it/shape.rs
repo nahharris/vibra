@@ -2,7 +2,7 @@
 //! harness reported a result: the dump and the counters are read inside the
 //! `harness` feature, and nothing about them is part of the shipped surface.
 
-use vibra_host::SystemProvider;
+use vibra_host_v1::SystemProvider;
 use vibra_nexus_bridge::{
     Execution, Finished, SYSTEM_MEMORY_LIMIT, execute, launch_system,
 };

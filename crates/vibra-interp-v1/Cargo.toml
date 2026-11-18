@@ -1,0 +1,18 @@
+[package]
+name = "vibra-interp-v1"
+description = "Deterministic reference execution for checked Vibra IR."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+vibra-diagnostics-v1.workspace = true
+vibra-host-v1.workspace = true
+vibra-ir-v1.workspace = true
+vibra-native-v1.workspace = true
+
+[lints]
+workspace = true

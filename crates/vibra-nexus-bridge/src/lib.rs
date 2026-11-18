@@ -1,6 +1,6 @@
 //! The bridge between generated machine code and Nexus: the C ABI, the
 //! launcher, and the static archive. **The only crate of the workspace that
-//! contains `unsafe`** (decision N10); `crates/vibra-conformance`'s
+//! contains `unsafe`** (decision N10); `crates/vibra-conformance-v1`'s
 //! `architecture_boundary` tests enforce that, and that this crate's lint
 //! tables are the workspace's with `unsafe_code` allowed and every `unsafe`
 //! block required to carry a `// SAFETY:` comment.

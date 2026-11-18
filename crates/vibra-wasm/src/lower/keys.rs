@@ -21,8 +21,8 @@
 //! the toolchain answers without a written implementation, are calls of the
 //! unit, and so is the order of a dict whose key type needs dispatch.
 
-use vibra_ir::external::CompilerIntrinsic;
-use vibra_ir::{ClosedContract, SourceOrigin, Type, vocabulary};
+use vibra_ir_v1::external::CompilerIntrinsic;
+use vibra_ir_v1::{ClosedContract, SourceOrigin, Type, vocabulary};
 use wasm_encoder::Instruction as I;
 
 use super::dispatch::{Dispatch, is_interface};

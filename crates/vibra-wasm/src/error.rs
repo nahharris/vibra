@@ -8,13 +8,13 @@
 //! a pattern over a type that has no shape, a contract call with no receiver,
 //! or a registry row the closed tables do not know. An error is a value, never
 //! a partial or approximate module. The `lowers_every_form` module of the
-//! `vibra-conformance` test target
-//! (`crates/vibra-conformance/tests/it/lowers_every_form.rs`) holds every
+//! `vibra-conformance-v1` test target
+//! (`crates/vibra-conformance-v1/tests/it/lowers_every_form.rs`) holds every
 //! checked corpus program to emitting without one.
 
 use std::fmt;
 
-use vibra_ir::{SourceOrigin, Type};
+use vibra_ir_v1::{SourceOrigin, Type};
 
 use crate::types::class_of;
 

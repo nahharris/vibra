@@ -15,26 +15,26 @@ publish = false
 vibra-actors = { path = "crates/vibra-actors" }
 vibra-build = { path = "crates/vibra-build" }
 vibra-codegen = { path = "crates/vibra-codegen" }
-vibra-conformance = { path = "crates/vibra-conformance" }
-vibra-diagnostics = { path = "crates/vibra-diagnostics" }
+vibra-conformance-v1 = { path = "crates/vibra-conformance-v1" }
+vibra-diagnostics-v1 = { path = "crates/vibra-diagnostics-v1" }
 vibra-exec = { path = "crates/vibra-exec" }
-vibra-fmt = { path = "crates/vibra-fmt" }
+vibra-fmt-v1 = { path = "crates/vibra-fmt-v1" }
 vibra-fs-scope = { path = "crates/vibra-fs-scope" }
-vibra-host = { path = "crates/vibra-host" }
-vibra-interp = { path = "crates/vibra-interp" }
+vibra-host-v1 = { path = "crates/vibra-host-v1" }
+vibra-interp-v1 = { path = "crates/vibra-interp-v1" }
 vibra-lower = { path = "crates/vibra-lower" }
-vibra-ir = { path = "crates/vibra-ir" }
-vibra-native = { path = "crates/vibra-native" }
+vibra-ir-v1 = { path = "crates/vibra-ir-v1" }
+vibra-native-v1 = { path = "crates/vibra-native-v1" }
 vibra-nexus = { path = "crates/vibra-nexus" }
 vibra-nexus-bridge = { path = "crates/vibra-nexus-bridge", features = ["library"] }
 vibra-nexus-eval = { path = "crates/vibra-nexus-eval" }
-vibra-schema = { path = "crates/vibra-schema" }
-vibra-syntax = { path = "crates/vibra-syntax" }
-vibra-resolve = { path = "crates/vibra-resolve" }
-vibra-types = { path = "crates/vibra-types" }
+vibra-schema-v1 = { path = "crates/vibra-schema-v1" }
+vibra-syntax-v1 = { path = "crates/vibra-syntax-v1" }
+vibra-resolve-v1 = { path = "crates/vibra-resolve-v1" }
+vibra-types-v1 = { path = "crates/vibra-types-v1" }
 vibra-wasm = { path = "crates/vibra-wasm" }
 vibra-wasm-run = { path = "crates/vibra-wasm-run" }
-vibra-workspace = { path = "crates/vibra-workspace" }
+vibra-workspace-v1 = { path = "crates/vibra-workspace-v1" }
 
 toml = "1"
 serde = { version = "1", features = ["derive"] }

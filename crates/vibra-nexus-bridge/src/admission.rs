@@ -7,7 +7,7 @@
 
 use std::fmt;
 
-use vibra_ir::external::host::{HostRow, host_row};
+use vibra_ir_v1::external::host::{HostRow, host_row};
 use vibra_nexus::{
     AdmitError, MAX_FRAME_SLOTS, Requirements, admit as admit_requirements,
 };

@@ -11,7 +11,7 @@
 
 use std::fmt;
 
-use vibra_ir::boundary::{
+use vibra_ir_v1::boundary::{
     BUILDER_EXPORTS, FUNCTION_EXPORTS, HOST_IMPORT_MODULE, MEMORY_EXPORT,
     NATIVE_IMPORT_MODULE,
 };

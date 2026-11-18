@@ -22,15 +22,15 @@ use vibra_exec::{
     BlockId, Callee, Constant, FuncId, Function, Inst, IntOp as ExecInt, ObjectKind,
     Program, ScalarClass, ScalarOp as ExecOp, Slot, Terminator, VerifyError, verify,
 };
-use vibra_ir::arena::{class, kind};
-use vibra_ir::boundary::TrapCode;
+use vibra_ir_v1::arena::{class, kind};
+use vibra_ir_v1::boundary::TrapCode;
 use vibra_nexus::{
     ABI_VERSION, Code, Context, Halt, IntOp, Requirements, ScalarOp, Step,
 };
 
 /// The runtime operation that executes an execution IR scalar operation: the
 /// stepper's one mapping, with no wildcard, so a new `vibra_exec::ScalarOp` does
-/// not compile until it is mapped. `vibra-conformance` holds it to the name
+/// not compile until it is mapped. `vibra-conformance-v1` holds it to the name
 /// the execution IR gives the operation, and the generator's tests hold the
 /// bridge's decoding of the generator's encoding to the same name.
 #[must_use]

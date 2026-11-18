@@ -11,7 +11,7 @@
 //! build, or an ID that is not valid.
 //!
 //! An unsealed value is an ordinary arena object with the header word
-//! `unsealed` set to `1` (`vibra_ir::arena::header::UNSEALED`), so every value
+//! `unsealed` set to `1` (`vibra_ir_v1::arena::header::UNSEALED`), so every value
 //! a module builds itself is sealed by construction. An unsealed value also
 //! carries a **written map** after its payload, one bit for each component,
 //! which the writers set and the seal checks; the map is part of the same
@@ -24,7 +24,7 @@ use crate::runtime::{
     EMPTY, I32, I64, Ins, Routine, Routines, c32, c64, get, invalid_host_value, ld8,
     ld32, make, push, set, st8, st32, st64,
 };
-use vibra_ir::boundary::{
+use vibra_ir_v1::boundary::{
     NEW_EXPORT, SEAL_EXPORT, WRITE_F32_EXPORT, WRITE_F64_EXPORT, WRITE_I32_EXPORT,
     WRITE_I64_EXPORT, WRITE_ID_EXPORT,
 };

@@ -12,11 +12,11 @@
 //! cell stack. Its `resume` field names the block that continues it, so a
 //! frame is all the state a suspended activation has.
 
-use vibra_host::{AuditEvent, HostCall, HostProvider, build_reply, perform};
-use vibra_ir::arena::{STRIDE_CELLS, kind};
-use vibra_ir::boundary::TrapCode;
-use vibra_ir::external::NumericType;
-use vibra_ir::external::host::HostRow;
+use vibra_host_v1::{AuditEvent, HostCall, HostProvider, build_reply, perform};
+use vibra_ir_v1::arena::{STRIDE_CELLS, kind};
+use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir_v1::external::NumericType;
+use vibra_ir_v1::external::host::HostRow;
 
 use crate::arith::{self, INTEGER_TYPES, IntOp};
 use crate::host::Values;

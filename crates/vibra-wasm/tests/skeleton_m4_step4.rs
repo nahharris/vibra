@@ -9,8 +9,8 @@
     clippy::unwrap_used
 )]
 
-use vibra_diagnostics::ByteSpan;
-use vibra_ir::{
+use vibra_diagnostics_v1::ByteSpan;
+use vibra_ir_v1::{
     CallTarget, CheckedFunction, CheckedGlobal, CheckedProgram, Expr,
     FunctionSignature, SourceOrigin, TestAssertion, Type, Value,
 };

@@ -9,9 +9,9 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-vibra-host.workspace = true
-vibra-ir.workspace = true
-vibra-native.workspace = true
+vibra-host-v1.workspace = true
+vibra-ir-v1.workspace = true
+vibra-native-v1.workspace = true
 wasmparser.workspace = true
 wasmtime.workspace = true
 

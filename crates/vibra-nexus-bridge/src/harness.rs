@@ -37,7 +37,7 @@
 //! ```text
 //! (record node: @scalar class: @i32|@i64|@f32|@f64 bits: "<u64 decimal>")
 //! (record node: @str value: "<text>")      ; the text is the canonical string
-//! (record node: @atom value: "<text>")     ; of `vibra_ir::canonical_string`
+//! (record node: @atom value: "<text>")     ; of `vibra_ir_v1::canonical_string`
 //! (record node: @bytes hex: "<lowercase hex>")
 //! (record node: @function)                 ; opaque: nothing of it is read
 //! (record node: @object kind: @tuple|@array|@dict|@record|@enum|@wrapper|@union
@@ -61,9 +61,9 @@
 use std::fmt::Write as _;
 use std::io::Write;
 
-use vibra_host::{HostWorld, WorldProvider, trace_to_vibon};
-use vibra_ir::arena::{class, kind};
-use vibra_ir::canonical_string;
+use vibra_host_v1::{HostWorld, WorldProvider, trace_to_vibon};
+use vibra_ir_v1::arena::{class, kind};
+use vibra_ir_v1::canonical_string;
 use vibra_nexus::{Cell, Context, Store};
 
 use crate::abi::VibraProgram;

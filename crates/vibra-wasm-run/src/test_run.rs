@@ -9,9 +9,9 @@
 //! type the origin table records and renders with the one canonical encoder the
 //! results use. A trap is status `1`, and the memory host event status `2`.
 
-use vibra_host::{AuditEvent, HostProvider, HostWorld, WorldProvider};
-use vibra_ir::boundary::{TEST_EXPORT, TrapCode};
-use vibra_ir::{TestAssertion, Type, TypeDefinition, Value};
+use vibra_host_v1::{AuditEvent, HostProvider, HostWorld, WorldProvider};
+use vibra_ir_v1::boundary::{TEST_EXPORT, TrapCode};
+use vibra_ir_v1::{TestAssertion, Type, TypeDefinition, Value};
 
 use crate::{
     Inspect, Instance, LiveSizes, Outcome, ResultSlot, Runner, RunnerError, Started,

@@ -12,8 +12,8 @@
 //! taken for each element it holds. Where the call expects the remainder as an
 //! interface value, it is widened with the descriptor of the iterator's type.
 
-use vibra_ir::external::CompilerIntrinsic;
-use vibra_ir::{SourceOrigin, Type, vocabulary};
+use vibra_ir_v1::external::CompilerIntrinsic;
+use vibra_ir_v1::{SourceOrigin, Type, vocabulary};
 use wasm_encoder::Instruction as I;
 
 use super::dispatch::is_interface;
@@ -131,7 +131,7 @@ impl Builder<'_, '_> {
         // Another type has no closed conformance, which the checker rejects.
         let stop = self.lowering.fns.stop_trap;
         self.push(&[
-            c32(vibra_ir::boundary::TrapCode::InvalidCheckedProgram.code()),
+            c32(vibra_ir_v1::boundary::TrapCode::InvalidCheckedProgram.code()),
             I::Call(stop),
         ]);
         self.goto(join, join);
@@ -215,7 +215,7 @@ impl Builder<'_, '_> {
         widen: bool,
         (some, none): (u32, u32),
         item_class: ValueClass,
-        option: &vibra_ir::TypeId,
+        option: &vibra_ir_v1::TypeId,
         origin: &SourceOrigin,
         dest: u32,
     ) -> Result<(), EmitError> {
@@ -285,7 +285,7 @@ impl Builder<'_, '_> {
         widen: bool,
         (some, none): (u32, u32),
         item_class: ValueClass,
-        option: &vibra_ir::TypeId,
+        option: &vibra_ir_v1::TypeId,
         result: &Type,
         origin: &SourceOrigin,
         dest: u32,
