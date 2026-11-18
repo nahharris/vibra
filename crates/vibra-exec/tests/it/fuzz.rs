@@ -12,13 +12,13 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use vibra_diagnostics::ByteSpan;
 use vibra_exec::{
-    Block, BlockId, Callee, ConstId, Constant, FuncId, Function, GlobalId, Inst,
+    Block, BlockId, Callee, ConstId, Constant, FuncId, Function, GlobalId, Inst, IntOp,
     ObjectKind, OriginId, Program, ScalarClass, ScalarOp, Slot, Terminator, verify,
 };
 use vibra_ir::SourceOrigin;
 use vibra_ir::boundary::TrapCode;
-use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::external::host::{HOST_ROWS, HostRow, host_row};
+use vibra_ir::external::{CompilerIntrinsic, NumericType};
 
 /// The seed every run starts from.
 const SEED: u64 = 0x5EED_0000_F0E1;
@@ -203,6 +203,21 @@ fn object_kind(rng: &mut Rng) -> ObjectKind {
     }
 }
 
+/// A scalar operation: any of `ScalarOp::all()`, and with `wild` also an
+/// integer operation at a floating-point type, which no program may name.
+fn scalar_op(rng: &mut Rng, wild: bool) -> ScalarOp {
+    if wild && rng.one_in(4) {
+        let numeric = if rng.one_in(2) {
+            NumericType::F32
+        } else {
+            NumericType::F64
+        };
+        return ScalarOp::Int(IntOp::ALL[rng.below(IntOp::ALL.len())], numeric);
+    }
+    let all = ScalarOp::all();
+    all[rng.below(all.len())]
+}
+
 fn intrinsic(rng: &mut Rng) -> CompilerIntrinsic {
     match rng.below(4) {
         0 => CompilerIntrinsic::StrLength,
@@ -268,7 +283,7 @@ fn instruction(body: &mut Body, context: &Context, rng: &mut Rng) {
             {
                 body.emit(Inst::Op {
                     dst,
-                    op: ScalarOp::I64Add,
+                    op: scalar_op(rng, false),
                     args: vec![a, b],
                 });
                 body.set(dst, true);
@@ -692,13 +707,11 @@ fn tweak_inst(inst: &mut Inst, rng: &mut Rng, b: Bounds) {
             }
         }
         Inst::Drop { slot } => replace_slot(slot, rng, b),
-        Inst::Op { dst, args, .. } => {
-            if field < 2 {
-                replace_slot(dst, rng, b);
-            } else {
-                tweak_slots(args, rng, b);
-            }
-        }
+        Inst::Op { dst, op, args } => match field {
+            0 => replace_slot(dst, rng, b),
+            1 => *op = scalar_op(rng, true),
+            _ => tweak_slots(args, rng, b),
+        },
         Inst::Intrinsic {
             dst,
             intrinsic: kind,

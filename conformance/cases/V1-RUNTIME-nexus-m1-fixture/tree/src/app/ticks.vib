@@ -1,0 +1,10 @@
+; The counting loop of the Nexus M1 fixture. The counter is a `u64` that counts
+; down by one each round, and the loop calls itself in tail position. When the
+; counter is zero the loop makes an indirect tail call of `finish`, a function
+; value that the other module defined.
+(defn count (finish (fn () str) remaining u64) str
+  visibility: @public
+  (if
+    (equatable.equal remaining 0u64)
+    (finish)
+    (count finish (u64.sub remaining 1u64))))

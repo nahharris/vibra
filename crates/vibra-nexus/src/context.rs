@@ -15,8 +15,10 @@
 use vibra_host::{AuditEvent, HostCall, HostProvider, build_reply, perform};
 use vibra_ir::arena::{STRIDE_CELLS, kind};
 use vibra_ir::boundary::TrapCode;
+use vibra_ir::external::NumericType;
 use vibra_ir::external::host::HostRow;
 
+use crate::arith::{self, INTEGER_TYPES, IntOp};
 use crate::host::Values;
 use crate::store::{Cell, Store, StoreError};
 
@@ -28,8 +30,16 @@ const SLOT_BYTES: u64 = 16;
 /// size, and its parameter count.
 const FUNCTION_HEADER: u32 = 3;
 
-/// A machine-level operation over scalar cells: none traps and none allocates.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// A machine-level operation over scalar cells: none traps on a verified
+/// program and none allocates.
+///
+/// The first four are bit-level operations on 64-bit cells. [`ScalarOp::Int`]
+/// is one operation of the unchecked integer family at one integer type,
+/// computed by [`crate::arith::apply`]: the type fixes the width, the
+/// signedness, and the bounds a result saturates at, so there is one operation
+/// to implement, one place that is wrong if it is wrong, and no separate
+/// normalization step that a program could leave out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ScalarOp {
     /// Wrapping 64-bit addition.
     I64Add,
@@ -39,6 +49,23 @@ pub enum ScalarOp {
     I64Eq,
     /// Signed 64-bit less-than, answering an `I32` `0` or `1`.
     I64LtS,
+    /// An operation of the unchecked integer family at an integer type.
+    Int(IntOp, NumericType),
+}
+
+impl ScalarOp {
+    /// Every operation, in a fixed order: the four 64-bit operations, then each
+    /// [`IntOp`] at each integer type.
+    #[must_use]
+    pub fn all() -> Vec<Self> {
+        let mut all = vec![Self::I64Add, Self::I64Sub, Self::I64Eq, Self::I64LtS];
+        for numeric in INTEGER_TYPES {
+            for op in IntOp::ALL {
+                all.push(Self::Int(op, numeric));
+            }
+        }
+        all
+    }
 }
 
 /// A recorded trap: its code and the ordinal of its origin, `0` for none.
@@ -704,7 +731,12 @@ impl<'h> Context<'h> {
     ///
     /// # Errors
     ///
-    /// A trap for a slot outside the frame.
+    /// A trap for a slot outside the frame, and
+    /// `@runtime.invalid-checked-program` for an integer operation the
+    /// lowering never emits: an operand that is not a canonical value of the
+    /// type, a floating-point type, and a zero divisor. The lowering tests a
+    /// divisor and traps with `@runtime.division-by-zero` before it divides, so
+    /// this operation does not trap on a divisor itself.
     pub fn scalar_op(
         &mut self,
         dst: u32,
@@ -712,14 +744,22 @@ impl<'h> Context<'h> {
         left: u32,
         right: u32,
     ) -> Done<()> {
-        let left = self.slot(left)?.bits;
-        let right = self.slot(right)?.bits;
+        let left = self.slot(left)?;
+        let right = self.slot(right)?;
         let signed = |bits: u64| i64::from_ne_bytes(bits.to_ne_bytes());
         let cell = match op {
-            ScalarOp::I64Add => Cell::i64(left.wrapping_add(right)),
-            ScalarOp::I64Sub => Cell::i64(left.wrapping_sub(right)),
-            ScalarOp::I64Eq => Cell::i32(u32::from(left == right)),
-            ScalarOp::I64LtS => Cell::i32(u32::from(signed(left) < signed(right))),
+            ScalarOp::I64Add => Cell::i64(left.bits.wrapping_add(right.bits)),
+            ScalarOp::I64Sub => Cell::i64(left.bits.wrapping_sub(right.bits)),
+            ScalarOp::I64Eq => Cell::i32(u32::from(left.bits == right.bits)),
+            ScalarOp::I64LtS => {
+                Cell::i32(u32::from(signed(left.bits) < signed(right.bits)))
+            }
+            ScalarOp::Int(int, numeric) => {
+                match arith::apply(int, numeric, left, right) {
+                    Some(cell) => cell,
+                    None => return Err(self.defect()),
+                }
+            }
         };
         self.set_slot(dst, cell)
     }

@@ -31,6 +31,8 @@ mod format;
 mod graph;
 mod manifest;
 mod native;
+mod native_exe;
+mod native_read;
 mod profile;
 mod project;
 mod reader;
@@ -56,10 +58,11 @@ pub use manifest::{
     ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError, NORMATIVE_SECTION_IDS,
 };
 pub use native::{
-    COLUMNS as NATIVE_PARITY_COLUMNS, INVENTORY_FILE as NATIVE_PARITY_FILE, Inventory,
-    InventoryCell, InventoryRow, NativeCounts, NativeObservation, NativeStatus,
-    StepperRun, owning_package,
+    COLUMNS as NATIVE_PARITY_COLUMNS, EntryJob, INVENTORY_FILE as NATIVE_PARITY_FILE,
+    Inventory, InventoryCell, InventoryRow, NativeCounts, NativeObservation,
+    NativeStatus, StepperRun, owning_package,
 };
+pub use native_exe::{WindowsExecutor, WindowsUnavailable};
 pub use profile::{ConformanceProfile, UnknownProfile};
 pub use project::StaticV1ProjectHandler;
 pub use reader::ReaderV1Handler;

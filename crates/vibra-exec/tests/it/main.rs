@@ -6,6 +6,7 @@
 #![allow(
     clippy::expect_used,
     clippy::indexing_slicing,
+    clippy::panic,
     clippy::unwrap_used,
     missing_docs
 )]
@@ -310,6 +311,45 @@ fn v4_operand_counts_and_environments_agree() {
             found: 1
         }
     );
+
+    // An integer operation passes exactly two operands at every integer type,
+    // and names an integer type.
+    for numeric in vibra_exec::INTEGER_TYPES {
+        for int in vibra_exec::IntOp::ALL {
+            let build = |args: Vec<Slot>| {
+                entry(
+                    3,
+                    vec![block(
+                        vec![
+                            scalar(0, 0),
+                            scalar(1, 0),
+                            Inst::Op {
+                                dst: Slot(2),
+                                op: ScalarOp::Int(int, numeric),
+                                args,
+                            },
+                        ],
+                        ret(2),
+                    )],
+                )
+            };
+            assert_eq!(verify(&build(vec![Slot(0), Slot(1)])), Ok(()));
+            assert_eq!(
+                rejected(&build(vec![Slot(0)])),
+                VerifyErrorKind::Arity {
+                    expected: 2,
+                    found: 1
+                }
+            );
+            assert_eq!(
+                rejected(&build(vec![Slot(0), Slot(1), Slot(0)])),
+                VerifyErrorKind::Arity {
+                    expected: 2,
+                    found: 3
+                }
+            );
+        }
+    }
 
     let host = entry(
         1,

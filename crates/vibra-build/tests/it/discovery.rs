@@ -184,6 +184,7 @@ fn the_missing_tool_error_says_what_was_looked_for_and_where() {
 }
 
 /// The marker that makes the test below run as its own child.
+#[cfg(windows)]
 const CHILD: &str = "VIBRA_BUILD_DISCOVERY_CHILD";
 
 #[cfg(windows)]

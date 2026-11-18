@@ -3,10 +3,11 @@
 use std::collections::BTreeSet;
 
 use vibra_exec::{
-    BlockId, Callee, ConstId, FuncId, GlobalId, Inst, OriginId, Program, Slot,
-    Terminator, VerifyErrorKind, verify,
+    BlockId, Callee, ConstId, FuncId, GlobalId, Inst, IntOp, OriginId, Program,
+    ScalarOp, Slot, Terminator, VerifyErrorKind, verify,
 };
 use vibra_ir::boundary::TrapCode;
+use vibra_ir::external::NumericType;
 
 use super::{block, entry, function, program, ret, scalar};
 
@@ -29,6 +30,7 @@ fn name(kind: &VerifyErrorKind) -> &'static str {
         VerifyErrorKind::UnknownGlobal(_) => "UnknownGlobal",
         VerifyErrorKind::UnknownOrigin(_) => "UnknownOrigin",
         VerifyErrorKind::Arity { .. } => "Arity",
+        VerifyErrorKind::NotAnIntegerType(_) => "NotAnIntegerType",
         VerifyErrorKind::DirectCallNeedsEnvironment(_) => "DirectCallNeedsEnvironment",
         VerifyErrorKind::FunctionValueWithoutEnvironment(_) => {
             "FunctionValueWithoutEnvironment"
@@ -40,7 +42,7 @@ fn name(kind: &VerifyErrorKind) -> &'static str {
 }
 
 /// Every name [`name`] can answer: one per variant.
-const NAMES: [&str; 19] = [
+const NAMES: [&str; 20] = [
     "NoFunctions",
     "MissingRoot",
     "RootTakesOperands",
@@ -55,6 +57,7 @@ const NAMES: [&str; 19] = [
     "UnknownGlobal",
     "UnknownOrigin",
     "Arity",
+    "NotAnIntegerType",
     "DirectCallNeedsEnvironment",
     "FunctionValueWithoutEnvironment",
     "ConsumedTwice",
@@ -142,6 +145,21 @@ fn rejected_programs() -> Vec<(Program, VerifyErrorKind)> {
         ),
         takes_one(),
     ]);
+    let not_an_integer_type = entry(
+        3,
+        vec![block(
+            vec![
+                scalar(0, 0),
+                scalar(1, 0),
+                Inst::Op {
+                    dst: Slot(2),
+                    op: ScalarOp::Int(IntOp::Add, NumericType::F64),
+                    args: vec![Slot(0), Slot(1)],
+                },
+            ],
+            ret(2),
+        )],
+    );
     let direct_call_needs_environment = program(vec![
         function(
             0,
@@ -217,6 +235,10 @@ fn rejected_programs() -> Vec<(Program, VerifyErrorKind)> {
                 expected: 1,
                 found: 2,
             },
+        ),
+        (
+            not_an_integer_type,
+            VerifyErrorKind::NotAnIntegerType(NumericType::F64),
         ),
         (
             direct_call_needs_environment,

@@ -39,25 +39,22 @@
 //! `vibra-conformance --write-native-parity <path>` and is never written by
 //! the test suite; the committed file is the source of truth.
 
-use std::collections::BTreeMap;
-
 use vibra_diagnostics::DiagnosticCode;
 use vibra_exec::verify;
 use vibra_host::{HostWorld, WorldProvider};
-use vibra_ir::{
-    CheckedProgram, ObservedValue, Type, TypeBody, TypeDefinition, TypeId, Value,
-};
+use vibra_ir::CheckedProgram;
 use vibra_lower::{LowerError, form, lower};
-use vibra_nexus::{Cell, Context, Halt, Outcome, Store, UNBOUNDED, admit, run};
+use vibra_nexus::{Context, Halt, Outcome, UNBOUNDED, admit, run};
 use vibra_nexus_eval::{EvalError, Evaluator};
 
+use crate::native_read::{Live, Stop, read};
 use crate::runner::{
     BackendObservation, ExecutionObservation, INSTANCE_MEMORY_LIMIT_BYTES,
     WasmObservation,
 };
 
 /// The package that owns the observation of values and the test table.
-const OBSERVATION: &str = "X3-18";
+pub(crate) const OBSERVATION: &str = "X3-18";
 
 /// The package that owns the form a lowering refuses by `name`, or that owns
 /// the stepper's refusal of an instruction by `name`; `None` for a name no
@@ -98,6 +95,39 @@ pub struct StepperRun {
     pub quota: u64,
     /// What the run observed, in the terms the Wasm backend uses.
     pub observation: BackendObservation<WasmObservation>,
+    /// The origin ordinal of the trap that ended the run, when one did.
+    pub trap_origin: Option<u32>,
+}
+
+/// What the `windows` column needs of an accepted executable case: the checked
+/// program to build, and the text of the host world the harness launcher reads
+/// from standard input.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EntryJob {
+    /// The checked program of the entry.
+    pub program: CheckedProgram,
+    /// The `@host-world.v1` document the executable is given.
+    pub world_text: String,
+}
+
+/// The world of a run that names none: the default world.
+pub(crate) const DEFAULT_WORLD_TEXT: &str = "(record format: @host-world.v1)\n";
+
+/// The job for `program`, in the case's own host world when `case_world`, and
+/// in the default world otherwise.
+pub(crate) fn entry_job(
+    case: &crate::corpus::Case,
+    program: &CheckedProgram,
+    case_world: bool,
+) -> Option<Box<EntryJob>> {
+    let world_text = match (case_world, case.manifest().inputs.host_world.as_deref()) {
+        (true, Some(path)) => case.read_file(path).ok()?,
+        _ => DEFAULT_WORLD_TEXT.to_owned(),
+    };
+    Some(Box::new(EntryJob {
+        program: program.clone(),
+        world_text,
+    }))
 }
 
 /// What the stepper did with an accepted executable case.
@@ -178,7 +208,11 @@ pub(crate) fn observe_entry(
     let mut runs = Vec::new();
     for quota in [UNBOUNDED, 1] {
         match step(&code, program, world, quota) {
-            Ok(observation) => runs.push(StepperRun { quota, observation }),
+            Ok((observation, trap_origin)) => runs.push(StepperRun {
+                quota,
+                observation,
+                trap_origin,
+            }),
             Err(name) => return NativeObservation::pending(OBSERVATION, name),
         }
     }
@@ -211,6 +245,7 @@ fn failed(reason: String) -> NativeObservation {
     NativeObservation::Ran(vec![StepperRun {
         quota: UNBOUNDED,
         observation: BackendObservation::new(WasmObservation::Failed { reason }),
+        trap_origin: None,
     }])
 }
 
@@ -221,6 +256,18 @@ fn step(
     program: &CheckedProgram,
     world: &HostWorld,
     quota: u64,
+) -> Result<(BackendObservation<WasmObservation>, Option<u32>), &'static str> {
+    let mut origin = None;
+    let observation = step_run(code, program, world, quota, &mut origin)?;
+    Ok((observation, origin))
+}
+
+fn step_run(
+    code: &Evaluator<'_>,
+    program: &CheckedProgram,
+    world: &HostWorld,
+    quota: u64,
+    origin: &mut Option<u32>,
 ) -> Result<BackendObservation<WasmObservation>, &'static str> {
     let limit = u64::try_from(INSTANCE_MEMORY_LIMIT_BYTES).unwrap_or(u64::MAX);
     let mut host = WorldProvider::new(world);
@@ -246,13 +293,13 @@ fn step(
             let result_type = program.entry().signature().result();
             let result = ctx.result();
             let value = read(
-                ctx.store(),
+                &Live(ctx.store()),
                 &program
                     .types()
                     .iter()
                     .map(|definition| (definition.id(), definition))
                     .collect(),
-                result,
+                &result,
                 &result_type,
                 0,
             );
@@ -280,6 +327,7 @@ fn step(
             if trap.code == vibra_ir::boundary::TrapCode::InvalidCheckedProgram {
                 return Ok(defect("the stepper trapped on a verified program"));
             }
+            *origin = Some(trap.origin);
             Ok(BackendObservation::new(WasmObservation::Trapped(
                 trap.code.diagnostic_code().as_atom().to_owned(),
             )))
@@ -302,202 +350,14 @@ fn defect(cause: &str) -> BackendObservation<WasmObservation> {
     })
 }
 
-// -- reading a result ---------------------------------------------------------------
-
-/// Why a result was not read.
-enum Stop {
-    /// The reader has no row for the value yet.
-    Unobservable(&'static str),
-    /// The store does not hold what the type says.
-    Fault(String),
-}
-
-/// The deepest value the reader follows. A value is read by explicit recursion
-/// over its type, and a deeper one waits for the observer of package X3-18.
-const MAX_DEPTH: usize = 64;
-
-type Definitions<'a> = BTreeMap<&'a TypeId, &'a TypeDefinition>;
-
-fn fault(what: &str) -> Stop {
-    Stop::Fault(what.to_owned())
-}
-
-/// The value `cell` holds, read by `ty`. The cell stays owned by the caller.
-fn read(
-    store: &Store,
-    definitions: &Definitions<'_>,
-    cell: Cell,
-    ty: &Type,
-    depth: usize,
-) -> Result<ObservedValue, Stop> {
-    if depth > MAX_DEPTH {
-        return Err(Stop::Unobservable("a value nested deeper than the reader"));
-    }
-    let word =
-        || u32::try_from(cell.bits & 0xFFFF_FFFF).map_err(|_| fault("a scalar cell"));
-    let reference = || {
-        cell.as_ref()
-            .ok_or_else(|| fault("a scalar where a value is stored"))
-    };
-    let store_fault = |_| fault("a handle the store does not admit");
-    let primitive = |value| Ok(ObservedValue::Primitive(value));
-    let narrow = |what: &str| fault(&format!("a cell that does not fit {what}"));
-    match ty {
-        Type::Void => primitive(Value::Void),
-        Type::Bool => {
-            let value = reference()?;
-            match store.variant(value).map_err(store_fault)? {
-                0 => primitive(Value::Bool(false)),
-                1 => primitive(Value::Bool(true)),
-                _ => Err(fault("a bool with another variant")),
-            }
-        }
-        Type::Char => primitive(Value::Char(
-            char::from_u32(word()?).ok_or_else(|| narrow("a char"))?,
-        )),
-        Type::I8 => primitive(Value::I8(
-            i8::try_from(word()?.cast_signed()).map_err(|_| narrow("i8"))?,
-        )),
-        Type::I16 => primitive(Value::I16(
-            i16::try_from(word()?.cast_signed()).map_err(|_| narrow("i16"))?,
-        )),
-        Type::I32 => primitive(Value::I32(word()?.cast_signed())),
-        Type::U8 => {
-            primitive(Value::U8(u8::try_from(word()?).map_err(|_| narrow("u8"))?))
-        }
-        Type::U16 => primitive(Value::U16(
-            u16::try_from(word()?).map_err(|_| narrow("u16"))?,
-        )),
-        Type::U32 => primitive(Value::U32(word()?)),
-        Type::I64 => primitive(Value::I64(cell.bits.cast_signed())),
-        Type::U64 => primitive(Value::U64(cell.bits)),
-        Type::F32 => primitive(Value::F32(vibra_ir::canonical_f32_bits(word()?))),
-        Type::F64 => primitive(Value::F64(vibra_ir::canonical_f64_bits(cell.bits))),
-        Type::Str => {
-            primitive(Value::Str(store.text(reference()?).map_err(store_fault)?))
-        }
-        Type::Atom | Type::AtomSingleton(_) => {
-            primitive(Value::Atom(store.text(reference()?).map_err(store_fault)?))
-        }
-        Type::Bytes => primitive(Value::Bytes(
-            store.byte_values(reference()?).map_err(store_fault)?,
-        )),
-        Type::Never
-        | Type::Function(_)
-        | Type::Param(_)
-        | Type::Dict(..)
-        | Type::Interface(..)
-        | Type::Any => Err(Stop::Unobservable("a result of a kind the reader lacks")),
-        Type::Array(element) => {
-            let value = reference()?;
-            let length = store.len(value).map_err(store_fault)?;
-            let mut elements = Vec::new();
-            for index in 0..length {
-                let item = store.cell(value, index).map_err(store_fault)?;
-                elements.push(read(store, definitions, item, element, depth + 1)?);
-            }
-            Ok(ObservedValue::Array(elements))
-        }
-        Type::Declared(_)
-        | Type::Applied(..)
-        | Type::Record(_)
-        | Type::Enum(_)
-        | Type::Tuple(_)
-        | Type::Union(_) => {
-            let body = match ty {
-                Type::Declared(id) => definitions
-                    .get(id)
-                    .and_then(|definition| definition.instantiate(&[])),
-                Type::Applied(id, arguments) => definitions
-                    .get(id)
-                    .and_then(|definition| definition.instantiate(arguments)),
-                Type::Record(fields) => Some(TypeBody::Record(fields.clone())),
-                Type::Enum(variants) => Some(TypeBody::Enum(variants.clone())),
-                Type::Tuple(components) => Some(TypeBody::Tuple(components.clone())),
-                _ => match ty {
-                    Type::Union(members) => Some(TypeBody::Union(members.clone())),
-                    _ => None,
-                },
-            }
-            .ok_or_else(|| fault("a type with no declaration"))?;
-            let type_id = match ty {
-                Type::Declared(id) | Type::Applied(id, _) => Some(id.clone()),
-                _ => None,
-            };
-            read_body(store, definitions, reference()?, body, type_id, depth)
-        }
-    }
-}
-
-fn read_body(
-    store: &Store,
-    definitions: &Definitions<'_>,
-    value: vibra_nexus::Ref,
-    body: TypeBody,
-    type_id: Option<TypeId>,
-    depth: usize,
-) -> Result<ObservedValue, Stop> {
-    let store_fault = |_| fault("a handle the store does not admit");
-    let component = |index: usize, ty: &Type| {
-        let index = u32::try_from(index).map_err(|_| fault("too many components"))?;
-        let item = store.cell(value, index).map_err(store_fault)?;
-        read(store, definitions, item, ty, depth + 1)
-    };
-    Ok(match body {
-        TypeBody::Record(fields) => {
-            let mut read_fields = Vec::new();
-            for (index, (name, ty)) in fields.iter().enumerate() {
-                read_fields.push((name.clone(), component(index, ty)?));
-            }
-            ObservedValue::Record {
-                type_id,
-                fields: read_fields,
-            }
-        }
-        TypeBody::Tuple(components) => {
-            let mut values = Vec::new();
-            for (index, ty) in components.iter().enumerate() {
-                values.push(component(index, ty)?);
-            }
-            ObservedValue::Tuple { type_id, values }
-        }
-        TypeBody::Wrapper(representation) => ObservedValue::Wrapper {
-            type_id: type_id.ok_or_else(|| fault("a wrapper with no declaration"))?,
-            value: Box::new(component(0, &representation)?),
-        },
-        TypeBody::Enum(variants) => {
-            let chosen = usize::try_from(store.variant(value).map_err(store_fault)?)
-                .map_err(|_| fault("a variant index"))?;
-            let (name, payload) = variants
-                .get(chosen)
-                .ok_or_else(|| fault("an enum with a variant it does not declare"))?;
-            let payload = if *payload == Type::Void {
-                None
-            } else {
-                Some(Box::new(component(0, payload)?))
-            };
-            ObservedValue::Enum {
-                type_id,
-                variant: name.clone(),
-                payload,
-            }
-        }
-        TypeBody::Union(members) => {
-            let chosen = usize::try_from(store.variant(value).map_err(store_fault)?)
-                .map_err(|_| fault("a member index"))?;
-            let member = members
-                .get(chosen)
-                .ok_or_else(|| fault("a union with a member it does not declare"))?;
-            ObservedValue::Union {
-                type_id,
-                member: Box::new(member.clone()),
-                value: Box::new(component(0, member)?),
-            }
-        }
-    })
-}
-
 // -- the inventory ------------------------------------------------------------------
+
+/// The package that moves a platform cell of a case the stepper matches: the Linux
+/// and macOS paths. A target without a runner stays pending here.
+pub(crate) const PLATFORM_PACKAGE: &str = "X3-08";
+/// The package that runs the windows column, named by a generated cell of a case
+/// the stepper matches when the column was not run.
+const WINDOWS_PACKAGE: &str = "X3-09";
 
 /// The columns of the inventory after `case`, in order.
 pub const COLUMNS: [&str; 4] = ["stepper", "windows", "linux", "macos"];
@@ -618,9 +478,21 @@ impl Inventory {
 
     /// The inventory the current executors produce: the stepper's cell is what
     /// it did, and each platform cell is pending at the package that will move
-    /// it: the stepper's package, or `X3-09` for a case the stepper matches.
+    /// it: the stepper's package, or `X3-08` (the Linux and macOS paths) for a
+    /// case the stepper matches.
     #[must_use]
     pub fn generated(statuses: &[(String, NativeStatus)]) -> Self {
+        Self::generated_with(statuses, None)
+    }
+
+    /// As [`Self::generated`], with the `windows` cell of each case taken from
+    /// what the linked executables did when they were run: `matched`, or pending
+    /// at the package that holds it.
+    #[must_use]
+    pub fn generated_with(
+        statuses: &[(String, NativeStatus)],
+        windows: Option<&[(String, NativeStatus)]>,
+    ) -> Self {
         let mut rows = statuses
             .iter()
             .map(|(case, status)| {
@@ -634,10 +506,26 @@ impl Inventory {
                 };
                 let platform = match &stepper {
                     InventoryCell::Pending(package) => package.clone(),
-                    InventoryCell::Matched => "X3-09".to_owned(),
+                    InventoryCell::Matched => PLATFORM_PACKAGE.to_owned(),
                 };
                 let cell = || InventoryCell::Pending(platform.clone());
-                (case.clone(), [stepper, cell(), cell(), cell()])
+                let windows_cell = match windows
+                    .and_then(|all| all.iter().find(|(name, _)| name == case))
+                {
+                    Some((_, NativeStatus::Matched)) => InventoryCell::Matched,
+                    Some((_, NativeStatus::Pending(package))) => {
+                        InventoryCell::Pending(package.clone())
+                    }
+                    // The column was not run (no archive, or not Windows): a case the
+                    // stepper matches waits for the package that runs it.
+                    _ => match &stepper {
+                        InventoryCell::Matched => {
+                            InventoryCell::Pending(WINDOWS_PACKAGE.to_owned())
+                        }
+                        InventoryCell::Pending(_) => cell(),
+                    },
+                };
+                (case.clone(), [stepper, windows_cell, cell(), cell()])
             })
             .collect::<Vec<_>>();
         rows.sort_by(|left, right| left.0.cmp(&right.0));
@@ -681,38 +569,66 @@ impl Inventory {
         &self,
         statuses: &[(String, NativeStatus)],
     ) -> Vec<String> {
+        self.column_disagreements(0, "the stepper", statuses)
+    }
+
+    /// As [`Self::stepper_disagreements`] for the `windows` column against what
+    /// the linked executables did, and one more rule: a row `matched` in
+    /// `windows` must be `matched` in `stepper`.
+    #[must_use]
+    pub fn windows_disagreements(
+        &self,
+        statuses: &[(String, NativeStatus)],
+    ) -> Vec<String> {
+        let mut found =
+            self.column_disagreements(1, "the windows executable", statuses);
+        for (case, cells) in &self.rows {
+            if cells[1] == InventoryCell::Matched && cells[0] != InventoryCell::Matched
+            {
+                found.push(format!("{case}: matched in windows but not in stepper"));
+            }
+        }
+        found
+    }
+
+    fn column_disagreements(
+        &self,
+        column: usize,
+        subject: &str,
+        statuses: &[(String, NativeStatus)],
+    ) -> Vec<String> {
         let mut found = Vec::new();
         for (case, status) in statuses {
             let Some((_, cells)) = self.rows.iter().find(|(row, _)| row == case) else {
                 continue;
             };
-            let [recorded, ..] = cells;
+            let Some(recorded) = cells.get(column) else {
+                continue;
+            };
             match (recorded, status) {
                 (InventoryCell::Matched, NativeStatus::Matched) => {}
                 (InventoryCell::Matched, NativeStatus::Pending(package)) => {
                     found.push(format!(
-                        "{case}: marked matched, but the stepper is pending {package}"
+                        "{case}: marked matched, but {subject} is pending {package}"
                     ))
                 }
                 (InventoryCell::Matched, NativeStatus::Failed { reason }) => found
                     .push(format!(
-                        "{case}: marked matched, but the stepper fails: {reason}"
+                        "{case}: marked matched, but {subject} fails: {reason}"
                     )),
-                (InventoryCell::Pending(package), NativeStatus::Matched) => {
-                    found.push(format!(
-                        "{case}: marked pending {package}, but the stepper matches"
-                    ))
-                }
+                (InventoryCell::Pending(package), NativeStatus::Matched) => found.push(
+                    format!("{case}: marked pending {package}, but {subject} matches"),
+                ),
                 (InventoryCell::Pending(recorded), NativeStatus::Pending(actual)) => {
                     if recorded != actual {
                         found.push(format!(
-                            "{case}: marked pending {recorded}, but the stepper is pending {actual}"
+                            "{case}: marked pending {recorded}, but {subject} is pending {actual}"
                         ));
                     }
                 }
                 (InventoryCell::Pending(package), NativeStatus::Failed { reason }) => {
                     found.push(format!(
-                        "{case}: marked pending {package}, but the stepper fails: {reason}"
+                        "{case}: marked pending {package}, but {subject} fails: {reason}"
                     ));
                 }
             }

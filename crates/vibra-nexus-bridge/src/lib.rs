@@ -113,6 +113,20 @@
 //!   because the canonical encoding of the `err` value needs the observation
 //!   of package X3-18, which does not exist yet.
 //!
+//! # The harness profile
+//!
+//! With the cargo feature `harness` the launcher takes a host world and a quota
+//! and writes one observation document instead of using the process: see the
+//! documentation of the `harness` module for the document and the grammar of the
+//! dump of the entry's result. The document carries the outcome, the audit
+//! trace, the context's counters (yields, peak frames, tail transfers, peak and
+//! final live size), and the result as a structural dump that names no type: the
+//! bridge reads the value store through the `vibra_nexus` read API and never
+//! learns the type system, and the conformance runner applies the entry's
+//! result type. The shipped `system` launcher does not contain any of it, and
+//! the context does not tell what its module values keep, so that counter is
+//! not reported.
+//!
 //! # Safety argument
 //!
 //! `unsafe` is used for four things only, each a single operation with a
@@ -144,11 +158,15 @@ pub mod harness;
 
 pub use abi::{
     ABI_VERSION, CLASS_F32, CLASS_F64, CLASS_I32, CLASS_I64, CONSTANT_ATOM,
-    CONSTANT_BYTES, CONSTANT_STR, KIND_ARRAY, KIND_ENUM, KIND_RECORD, KIND_TUPLE,
-    KIND_UNION, KIND_WRAPPER, NexusContext, OP_I64_ADD, OP_I64_EQ, OP_I64_LT_S,
-    OP_I64_SUB, PROGRAM_SYMBOL, STATUS_CONTINUE, STATUS_DONE, STATUS_EXHAUSTED,
-    STATUS_PROCEED, STATUS_TRAP, STATUS_WAIT, VibraConstant, VibraFunction,
-    VibraOrigin, VibraProgram, VibraStep, VibraTable,
+    CONSTANT_BYTES, CONSTANT_STR, INT_TYPE_I8, INT_TYPE_I16, INT_TYPE_I32,
+    INT_TYPE_I64, INT_TYPE_U8, INT_TYPE_U16, INT_TYPE_U32, INT_TYPE_U64, KIND_ARRAY,
+    KIND_ENUM, KIND_RECORD, KIND_TUPLE, KIND_UNION, KIND_WRAPPER, NexusContext,
+    OP_I64_ADD, OP_I64_EQ, OP_I64_LT_S, OP_I64_SUB, OP_INT_ADD, OP_INT_DIV,
+    OP_INT_EQUAL, OP_INT_LESS, OP_INT_MUL, OP_INT_REM, OP_INT_SHIFT_LEFT,
+    OP_INT_SHIFT_RIGHT, OP_INT_SUB, OP_INT_TYPE_SHIFT, PROGRAM_SYMBOL, STATUS_CONTINUE,
+    STATUS_DONE, STATUS_EXHAUSTED, STATUS_PROCEED, STATUS_TRAP, STATUS_WAIT,
+    VibraConstant, VibraFunction, VibraOrigin, VibraProgram, VibraStep, VibraTable,
+    decode_scalar_op, encode_scalar_op, int_op_code,
 };
 pub use admission::{
     Admitted, MAX_DATA_LEN, MAX_TABLE_LEN, Malformed, Origin, Refusal, admit,

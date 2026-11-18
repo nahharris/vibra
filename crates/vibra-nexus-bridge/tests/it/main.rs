@@ -15,9 +15,13 @@
 
 mod admission;
 mod demo;
+#[cfg(feature = "harness")]
+mod dump;
 mod exit_codes;
 mod fixture;
 mod hygiene;
 mod misuse;
+mod ops;
+mod shape;
 mod stepper;
 mod sys;

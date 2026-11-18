@@ -1,14 +1,16 @@
 //! The launcher's `main` (decision N13): the process entry point that lives in
 //! the static archive. It is the only place that reads the process.
 //!
-//! Kept to one function so that it sits alone in its own code-generation unit:
-//! a test binary that links this crate as a library then never pulls it in,
-//! and so never sees a second `main` or the undefined `vibra_program`.
+//! The feature `library` leaves it out: a Rust binary that links this crate as
+//! a library has its own `main` and defines no `vibra_program`.
 
+#[cfg(not(feature = "library"))]
 use std::ffi::{c_char, c_int};
 
+#[cfg(not(feature = "library"))]
 use crate::abi::VibraProgram;
 
+#[cfg(not(feature = "library"))]
 unsafe extern "C" {
     /// Defined by the generated object.
     static vibra_program: VibraProgram;
@@ -26,6 +28,7 @@ pub const PROFILE: &str = if cfg!(feature = "harness") {
 /// With the feature `harness`: the first argument is an optional quota, the
 /// host world is read from standard input, and one observation document is
 /// written to standard output.
+#[cfg(not(feature = "library"))]
 #[unsafe(no_mangle)]
 #[inline(never)]
 pub extern "C" fn main(_argc: c_int, _argv: *const *const c_char) -> c_int {

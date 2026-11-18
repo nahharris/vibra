@@ -1568,6 +1568,7 @@ dependencies = [
 name = "vibra-conformance"
 version = "0.0.1"
 dependencies = [
+ "object",
  "rusqlite",
  "serde",
  "serde_json",
@@ -1673,6 +1674,7 @@ dependencies = [
  "vibra-host",
  "vibra-ir",
  "vibra-nexus",
+ "vibra-nexus-bridge",
  "vibra-nexus-eval",
 ]
 

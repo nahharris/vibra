@@ -26,6 +26,7 @@
 //! This crate has no `unsafe` code and no dependency on the execution IR or on
 //! a code generator.
 
+pub mod arith;
 mod context;
 mod host;
 pub mod store;
@@ -33,6 +34,7 @@ pub mod store;
 use vibra_ir::boundary::TrapCode;
 use vibra_ir::external::host::{HOST_REGISTRY_MINOR, host_row};
 
+pub use arith::IntOp;
 pub use context::{Context, Halt, ScalarOp, Stats, Trap};
 pub use store::{Cell, Ref, Store, StoreError};
 

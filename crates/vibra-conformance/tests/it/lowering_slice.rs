@@ -27,13 +27,13 @@ use vibra_types::check_source;
 
 use crate::support::workspace_root;
 
-const MIB: u64 = 1024 * 1024;
+pub(crate) const MIB: u64 = 1024 * 1024;
 
 // -- what a program is expected to answer ---------------------------------------
 
 /// The expected answer of the entry, as the specification defines it.
 #[derive(Clone, Debug, PartialEq)]
-enum Want {
+pub(crate) enum Want {
     /// A primitive scalar.
     Prim(Value),
     /// A `bool`, an enum of the variants `false` and `true`.
@@ -42,6 +42,8 @@ enum Want {
     Str(&'static str),
     /// A `(result t e)` that is `ok`, the first variant.
     Ok,
+    /// An enum value with no payload: its variant index and its name.
+    Variant(u32, &'static str),
 }
 
 /// The cell a scalar is stored as: the `I32` class holds the value
@@ -102,6 +104,15 @@ fn interpreted(program: &CheckedProgram, want: &Want, audit: &[String], what: &s
                 "{what}"
             );
         }
+        Want::Variant(_, name) => {
+            assert!(
+                execution
+                    .canonical_result()
+                    .contains(&format!("variant: @{name}")),
+                "{what}: {}",
+                execution.canonical_result()
+            );
+        }
         Want::Ok => {
             assert!(!execution.program_failed(), "{what}");
             assert!(
@@ -119,28 +130,28 @@ fn interpreted(program: &CheckedProgram, want: &Want, audit: &[String], what: &s
 }
 
 /// What one stepper run left behind.
-struct Ran {
-    outcome: Outcome,
-    audit: Vec<String>,
-    stats: Stats,
-    peak: u64,
+pub(crate) struct Ran {
+    pub(crate) outcome: Outcome,
+    pub(crate) audit: Vec<String>,
+    pub(crate) stats: Stats,
+    pub(crate) peak: u64,
     /// The live size after the result was released.
-    live: u64,
-    result: Cell,
+    pub(crate) live: u64,
+    pub(crate) result: Cell,
     /// The result as the store holds it, read before it was released.
-    seen: Seen,
+    pub(crate) seen: Seen,
 }
 
 /// A result cell read through the store.
 #[derive(Debug, PartialEq, Eq)]
-enum Seen {
+pub(crate) enum Seen {
     Scalar(u64),
     Enum(u32),
     Str(String),
 }
 
 /// Runs the lowered `program` to its end, continuing after every yield.
-fn stepped(program: &Program, limit: u64, quota: u64) -> Ran {
+pub(crate) fn stepped(program: &Program, limit: u64, quota: u64) -> Ran {
     verify(program).expect("lower answers only programs that verify");
     let code = Evaluator::new(program).expect("the stepper admits the program");
     admit(&code.requirements()).expect("an admissible program");
@@ -191,6 +202,7 @@ fn expect_seen(ran: &Ran, want: &Want, what: &str) {
         Want::Bool(value) => Seen::Enum(u32::from(*value)),
         Want::Str(text) => Seen::Str((*text).to_owned()),
         Want::Ok => Seen::Enum(0),
+        Want::Variant(index, _) => Seen::Enum(*index),
     };
     assert_eq!(ran.seen, expected, "{what}: stepper result");
 }
@@ -201,7 +213,7 @@ const STR_GLOBAL_BYTES: u64 = 64;
 
 /// Checks `source` in both executors against `want` and `audit`, and returns
 /// the checked program. `kept` is what module values keep alive.
-fn differential(
+pub(crate) fn differential(
     name: &str,
     source: &str,
     want: &Want,
@@ -237,7 +249,7 @@ fn kept(name: &str, source: &str, want: &Want, kept: u64) {
     differential(name, source, want, &[], kept);
 }
 
-const fn prim(value: Value) -> Want {
+pub(crate) const fn prim(value: Value) -> Want {
     Want::Prim(value)
 }
 

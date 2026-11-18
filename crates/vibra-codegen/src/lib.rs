@@ -43,4 +43,5 @@ mod target;
 pub use descriptor::Inputs;
 pub use emit::{Listing, Object, emit, emit_with_listing};
 pub use error::EmitError;
+pub use function::op_code;
 pub use target::{SUPPORTED_TRIPLES, Target};

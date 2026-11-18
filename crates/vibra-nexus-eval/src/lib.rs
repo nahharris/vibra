@@ -19,12 +19,43 @@
 //! CLI reaches it.
 
 use vibra_exec::{
-    BlockId, Callee, Constant, FuncId, Function, Inst, ObjectKind, Program,
-    ScalarClass, ScalarOp as ExecOp, Slot, Terminator, VerifyError, verify,
+    BlockId, Callee, Constant, FuncId, Function, Inst, IntOp as ExecInt, ObjectKind,
+    Program, ScalarClass, ScalarOp as ExecOp, Slot, Terminator, VerifyError, verify,
 };
 use vibra_ir::arena::{class, kind};
 use vibra_ir::boundary::TrapCode;
-use vibra_nexus::{ABI_VERSION, Code, Context, Halt, Requirements, ScalarOp, Step};
+use vibra_nexus::{
+    ABI_VERSION, Code, Context, Halt, IntOp, Requirements, ScalarOp, Step,
+};
+
+/// The runtime operation that executes an execution IR scalar operation: the
+/// stepper's one mapping, with no wildcard, so a new `vibra_exec::ScalarOp` does
+/// not compile until it is mapped. `vibra-conformance` holds it to the name
+/// the execution IR gives the operation, and the generator's tests hold the
+/// bridge's decoding of the generator's encoding to the same name.
+#[must_use]
+pub const fn runtime_op(op: ExecOp) -> ScalarOp {
+    match op {
+        ExecOp::I64Add => ScalarOp::I64Add,
+        ExecOp::I64Sub => ScalarOp::I64Sub,
+        ExecOp::I64Eq => ScalarOp::I64Eq,
+        ExecOp::I64LtS => ScalarOp::I64LtS,
+        ExecOp::Int(op, numeric) => ScalarOp::Int(
+            match op {
+                ExecInt::Add => IntOp::Add,
+                ExecInt::Sub => IntOp::Sub,
+                ExecInt::Mul => IntOp::Mul,
+                ExecInt::Div => IntOp::Div,
+                ExecInt::Rem => IntOp::Rem,
+                ExecInt::ShiftLeft => IntOp::ShiftLeft,
+                ExecInt::ShiftRight => IntOp::ShiftRight,
+                ExecInt::Equal => IntOp::Equal,
+                ExecInt::Less => IntOp::Less,
+            },
+            numeric,
+        ),
+    }
+}
 
 /// Why a program cannot be executed by the stepper.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -157,12 +188,7 @@ impl<'p> Evaluator<'p> {
             Inst::Move { dst, src } => ctx.move_slot(dst.0, src.0),
             Inst::Drop { slot } => ctx.drop_slot(slot.0),
             Inst::Op { dst, op, args } => {
-                let op = match op {
-                    ExecOp::I64Add => ScalarOp::I64Add,
-                    ExecOp::I64Sub => ScalarOp::I64Sub,
-                    ExecOp::I64Eq => ScalarOp::I64Eq,
-                    ExecOp::I64LtS => ScalarOp::I64LtS,
-                };
+                let op = runtime_op(*op);
                 let (Some(left), Some(right)) = (args.first(), args.get(1)) else {
                     return Err(ctx.trap(TrapCode::InvalidCheckedProgram, 0));
                 };

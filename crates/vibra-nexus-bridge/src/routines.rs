@@ -27,13 +27,12 @@
 
 use vibra_ir::arena::kind;
 use vibra_ir::boundary::TrapCode;
-use vibra_nexus::{Context, Halt, ScalarOp};
+use vibra_nexus::{Context, Halt};
 
 use crate::abi::{
     CLASS_F32, CLASS_F64, CLASS_I32, CLASS_I64, KIND_ARRAY, KIND_ENUM, KIND_RECORD,
-    KIND_TUPLE, KIND_UNION, KIND_WRAPPER, NexusContext, OP_I64_ADD, OP_I64_EQ,
-    OP_I64_LT_S, OP_I64_SUB, STATUS_CONTINUE, STATUS_DONE, STATUS_EXHAUSTED,
-    STATUS_PROCEED, STATUS_TRAP,
+    KIND_TUPLE, KIND_UNION, KIND_WRAPPER, NexusContext, STATUS_CONTINUE, STATUS_DONE,
+    STATUS_EXHAUSTED, STATUS_PROCEED, STATUS_TRAP, decode_scalar_op,
 };
 use crate::admission::{Admitted, ConstantData, FunctionInfo};
 
@@ -181,16 +180,6 @@ fn scalar_class(class: u32) -> Option<u8> {
         CLASS_I64 => Some(class::I64),
         CLASS_F32 => Some(class::F32),
         CLASS_F64 => Some(class::F64),
-        _ => None,
-    }
-}
-
-const fn scalar_op(op: u32) -> Option<ScalarOp> {
-    match op {
-        OP_I64_ADD => Some(ScalarOp::I64Add),
-        OP_I64_SUB => Some(ScalarOp::I64Sub),
-        OP_I64_EQ => Some(ScalarOp::I64Eq),
-        OP_I64_LT_S => Some(ScalarOp::I64LtS),
         _ => None,
     }
 }
@@ -509,7 +498,7 @@ pub unsafe extern "C" fn nexus_op(
     right: u32,
 ) -> u32 {
     routine(ctx, |session| {
-        let Some(op) = scalar_op(op) else {
+        let Some(op) = decode_scalar_op(op) else {
             return Err(session.defect());
         };
         session.ctx.scalar_op(dst, op, left, right)?;

@@ -18,6 +18,7 @@
 //! | `Call` with a `Direct` or an `Indirect` target, `tail` or not | `Call` or `TailCall` with `Direct` or `Indirect` |
 //! | `Function`, `Closure` | `Function` over a body with an environment; a module function used as a value gets a wrapper body that is one tail call |
 //! | `Global` | `Global` |
+//! | `External` of an unchecked integer operation (`add`, `sub`, `mul`, `div`, `rem`, `neg`, `shift-left`, `shift-right`, `equal`, `compare`) | `Op` over the operand type; `neg` is `0 - x`; `div` and `rem` first test the divisor against zero and `Branch` to a block that ends in `Trap` `DivisionByZero` with no origin; `equal` and `compare` build their `bool` or `ordering` by branches (X3-10) |
 //! | `Host` | `Host`, which ends the block |
 //! | `Return` | `Return` |
 //!
@@ -25,8 +26,10 @@
 //! to a later package. `lower` answers [`LowerError::NotLowered`] with the
 //! name of the first such form it meets, never a partial program:
 //!
-//! - `External`, a call to a compiler intrinsic: `External numeric` (X3-10)
-//!   or `External collection` (X3-16);
+//! - `External`, a call to a compiler intrinsic other than an unchecked
+//!   integer operation: `External numeric` (the checked integer operations,
+//!   conversions, floats, `to-str`, `parse`, and `char` conversions) or
+//!   `External collection` (X3-16);
 //! - `Record`, `Tuple`, `Variant`, `Wrap`, `Array`, `Widen`, `Project`,
 //!   `TupleProject` (X3-11);
 //! - `Match` and `Try` (X3-12);
@@ -37,10 +40,9 @@
 //! - a test assertion function (X3-18);
 //! - an entry that takes a parameter.
 //!
-//! The table does not say what a `Call` of a function whose body is an
-//! `External` becomes before X3-10; it is outside the slice because the body
-//! is. Whether the `Call` row includes calls to such wrappers in tail position
-//! is therefore left to X3-10.
+//! A `Call` of a standard-library wrapper whose body is an `External` is an
+//! ordinary `Call`, in tail position too: the wrapper's body is lowered as any
+//! module function's is.
 //!
 //! # Whole program
 //!
@@ -90,10 +92,12 @@ use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 
 use vibra_exec::{
-    Block, BlockId, Callee, ConstId, Constant, FuncId, Function, GlobalId, Inst,
-    MAX_SLOTS, ObjectKind, OriginId, Program, ScalarClass, Slot, Terminator,
+    Block, BlockId, Callee, ConstId, Constant, FuncId, Function, GlobalId,
+    INTEGER_TYPES, Inst, IntOp, MAX_SLOTS, ObjectKind, OriginId, Program, ScalarClass,
+    ScalarOp, Slot, Terminator,
 };
-use vibra_ir::external::CompilerIntrinsic;
+use vibra_ir::boundary::TrapCode;
+use vibra_ir::external::{CompilerIntrinsic, IntegerOp, NumericType};
 use vibra_ir::{
     CallTarget, CheckedProgram, Expr, FunctionSignature, SourceOrigin, Value,
 };
@@ -462,6 +466,21 @@ impl<'p> Lowering<'p> {
     }
 }
 
+/// How an unchecked integer operation is lowered.
+#[derive(Clone, Copy)]
+enum Family {
+    /// One total `Op`.
+    Plain(IntOp),
+    /// A test for a zero divisor that traps, then one `Op`.
+    Divide(IntOp),
+    /// `0 - x`, saturated.
+    Negate,
+    /// `Op` `Equal`, then a `bool` built by a branch.
+    Equal,
+    /// `Op` `Less` and `Equal`, then an `ordering` built by branches.
+    Compare,
+}
+
 /// The frame a body is lowered for.
 struct Shape {
     params: u32,
@@ -727,13 +746,11 @@ impl<'a, 'p> Body<'a, 'p> {
                 *slot_count,
                 dest,
             ),
-            Expr::External { intrinsic, .. } => {
-                Err(LowerError::NotLowered(if is_numeric(*intrinsic) {
-                    form::EXTERNAL_NUMERIC
-                } else {
-                    form::EXTERNAL_COLLECTION
-                }))
-            }
+            Expr::External {
+                intrinsic,
+                arguments,
+                ..
+            } => self.external(*intrinsic, arguments, dest),
             Expr::Default { .. } => Err(LowerError::NotLowered(form::DEFAULT)),
             Expr::Match { .. } => Err(LowerError::NotLowered(form::MATCH)),
             Expr::Widen { .. } => Err(LowerError::NotLowered(form::WIDEN)),
@@ -950,6 +967,253 @@ impl<'a, 'p> Body<'a, 'p> {
         }
         self.release_to(mark);
         Ok(())
+    }
+
+    /// A compiler intrinsic. The unchecked integer family is lowered (X3-10);
+    /// every other intrinsic is outside the slice.
+    ///
+    /// The operands are temporaries that the instructions borrow, so each
+    /// path drops them once it no longer reads them.
+    fn external(
+        &mut self,
+        intrinsic: CompilerIntrinsic,
+        arguments: &[Expr],
+        dest: Slot,
+    ) -> Lowered<()> {
+        let refused = || {
+            LowerError::NotLowered(if is_numeric(intrinsic) {
+                form::EXTERNAL_NUMERIC
+            } else {
+                form::EXTERNAL_COLLECTION
+            })
+        };
+        let CompilerIntrinsic::Integer(numeric, op) = intrinsic else {
+            return Err(refused());
+        };
+        let family = match op {
+            IntegerOp::Add => Family::Plain(IntOp::Add),
+            IntegerOp::Sub => Family::Plain(IntOp::Sub),
+            IntegerOp::Mul => Family::Plain(IntOp::Mul),
+            IntegerOp::ShiftLeft => Family::Plain(IntOp::ShiftLeft),
+            IntegerOp::ShiftRight => Family::Plain(IntOp::ShiftRight),
+            IntegerOp::Div => Family::Divide(IntOp::Div),
+            IntegerOp::Rem => Family::Divide(IntOp::Rem),
+            IntegerOp::Neg => Family::Negate,
+            IntegerOp::Equal => Family::Equal,
+            IntegerOp::Compare => Family::Compare,
+            IntegerOp::AddChecked
+            | IntegerOp::SubChecked
+            | IntegerOp::MulChecked
+            | IntegerOp::DivChecked
+            | IntegerOp::RemChecked
+            | IntegerOp::NegChecked
+            | IntegerOp::ShiftLeftChecked
+            | IntegerOp::ShiftRightChecked
+            | IntegerOp::ToStr
+            | IntegerOp::Parse => return Err(refused()),
+        };
+        if !INTEGER_TYPES.contains(&numeric) {
+            return Err(LowerError::Malformed(
+                "an integer operation on a non-integer",
+            ));
+        }
+        let wanted = if matches!(family, Family::Negate) {
+            1
+        } else {
+            2
+        };
+        if arguments.len() != wanted {
+            return Err(LowerError::Malformed(
+                "an integer operation with the wrong operand count",
+            ));
+        }
+        let class = if matches!(numeric, NumericType::I64 | NumericType::U64) {
+            ScalarClass::I64
+        } else {
+            ScalarClass::I32
+        };
+        let mark = self.next_temp;
+        let args = self.operands(arguments)?;
+        if self.cur.is_none() {
+            self.release_to(mark);
+            return Ok(());
+        }
+        let int = |op| ScalarOp::Int(op, numeric);
+        match family {
+            Family::Plain(op) => {
+                self.emit(Inst::Op {
+                    dst: dest,
+                    op: int(op),
+                    args: args.clone(),
+                });
+                self.drop_all(&args);
+            }
+            Family::Negate => {
+                if !matches!(
+                    numeric,
+                    NumericType::I8
+                        | NumericType::I16
+                        | NumericType::I32
+                        | NumericType::I64
+                ) {
+                    return Err(LowerError::Malformed(
+                        "a negation of an unsigned integer",
+                    ));
+                }
+                // `0 - x`, saturated, is the negation, and the minimum of the
+                // type negates to its maximum.
+                let zero = self.temp();
+                self.emit(Inst::Scalar {
+                    dst: zero,
+                    class,
+                    bits: 0,
+                });
+                self.emit(Inst::Op {
+                    dst: dest,
+                    op: int(IntOp::Sub),
+                    args: vec![
+                        zero,
+                        *args.first().ok_or(LowerError::Malformed(
+                            "a negation without an operand",
+                        ))?,
+                    ],
+                });
+                self.drop_slot(zero);
+                self.drop_all(&args);
+            }
+            Family::Divide(op) => {
+                // A zero divisor is a trap with no origin, found by an
+                // explicit test; the operation itself has no such case.
+                let zero = self.temp();
+                let test = self.temp();
+                let divisor = *args
+                    .get(1)
+                    .ok_or(LowerError::Malformed("a division without a divisor"))?;
+                self.emit(Inst::Scalar {
+                    dst: zero,
+                    class,
+                    bits: 0,
+                });
+                self.emit(Inst::Op {
+                    dst: test,
+                    op: int(IntOp::Equal),
+                    args: vec![divisor, zero],
+                });
+                self.drop_slot(zero);
+                let (trap, go) = (self.new_block(), self.new_block());
+                self.end(Terminator::Branch {
+                    cond: test,
+                    then_block: trap,
+                    else_block: go,
+                });
+                self.start(trap);
+                self.end(Terminator::Trap {
+                    code: TrapCode::DivisionByZero,
+                    origin: OriginId::NONE,
+                });
+                self.start(go);
+                self.drop_slot(test);
+                self.emit(Inst::Op {
+                    dst: dest,
+                    op: int(op),
+                    args: args.clone(),
+                });
+                self.drop_all(&args);
+            }
+            Family::Equal => {
+                let test = self.temp();
+                self.emit(Inst::Op {
+                    dst: test,
+                    op: int(IntOp::Equal),
+                    args: args.clone(),
+                });
+                self.drop_all(&args);
+                self.choose(test, dest, [1, 0]);
+            }
+            Family::Compare => {
+                // `ordering`: less is 0, equal is 1, greater is 2.
+                let less = self.temp();
+                self.emit(Inst::Op {
+                    dst: less,
+                    op: int(IntOp::Less),
+                    args: args.clone(),
+                });
+                let (is_less, rest) = (self.new_block(), self.new_block());
+                self.end(Terminator::Branch {
+                    cond: less,
+                    then_block: is_less,
+                    else_block: rest,
+                });
+                let mut join = None;
+                self.start(is_less);
+                self.drop_slot(less);
+                self.drop_all(&args);
+                self.build_variant(dest, 0);
+                self.jump_to(&mut join);
+                self.start(rest);
+                self.drop_slot(less);
+                let equal = self.temp();
+                self.emit(Inst::Op {
+                    dst: equal,
+                    op: int(IntOp::Equal),
+                    args: args.clone(),
+                });
+                self.drop_all(&args);
+                let (is_equal, greater) = (self.new_block(), self.new_block());
+                self.end(Terminator::Branch {
+                    cond: equal,
+                    then_block: is_equal,
+                    else_block: greater,
+                });
+                for (block, variant) in [(is_equal, 1), (greater, 2)] {
+                    self.start(block);
+                    self.drop_slot(equal);
+                    self.build_variant(dest, variant);
+                    self.jump_to(&mut join);
+                }
+                if let Some(join) = join {
+                    self.start(join);
+                }
+            }
+        }
+        self.release_to(mark);
+        Ok(())
+    }
+
+    fn drop_all(&mut self, slots: &[Slot]) {
+        for slot in slots {
+            self.drop_slot(*slot);
+        }
+    }
+
+    fn build_variant(&mut self, dest: Slot, variant: u32) {
+        self.emit(Inst::Build {
+            dst: dest,
+            kind: ObjectKind::Enum,
+            variant,
+            cells: Vec::new(),
+        });
+    }
+
+    /// Builds the `bool` `test` holds into `dest` and drops `test`:
+    /// `variants[0]` when it is nonzero and `variants[1]` when it is zero.
+    fn choose(&mut self, test: Slot, dest: Slot, variants: [u32; 2]) {
+        let (then_block, else_block) = (self.new_block(), self.new_block());
+        self.end(Terminator::Branch {
+            cond: test,
+            then_block,
+            else_block,
+        });
+        let mut join = None;
+        for (block, variant) in [(then_block, variants[0]), (else_block, variants[1])] {
+            self.start(block);
+            self.drop_slot(test);
+            self.build_variant(dest, variant);
+            self.jump_to(&mut join);
+        }
+        if let Some(join) = join {
+            self.start(join);
+        }
     }
 
     /// A host operation. Its operands are borrowed, so they are dropped when
