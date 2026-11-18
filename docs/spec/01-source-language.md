@@ -318,13 +318,16 @@ Notes on the grammar:
   `@syntax.unmatchedDelimiter`.
 
 The productions above write the sections of a declaration in their canonical
-order, to be readable. The parser accepts them in any order, under three
+order, to be readable. The parser accepts them in any order, under four
 constraints: the keyword, the name, and the type parameters come first; `do`
-and its body come last; and the `case` alternatives of a variant type keep
-their written order among themselves, which is the order of the variants.
-So `fn f returns r: I32 takes {x: I32} do return x endfn` is accepted, and
+and its body come last; the `case` alternatives of a variant type keep
+their written order among themselves, which is the order of the variants;
+and, in a file, every `use` precedes every other top-level form. So
+`fn f returns r: I32 takes {x: I32} do return x endfn` is accepted, and
 the formatter moves `takes` before `returns`. Nested members and `impl`
-blocks may be written between sections.
+blocks may be written between sections. A `use` written after another
+top-level form is `@syntax.invalidForm` at the `use`; the formatter moves no
+top-level form, so it does not repair one.
 
 Every section occurs at most once, `requires` and `ensures` included; a
 repeat is `@syntax.duplicateSection`. A required section that is missing,
@@ -477,6 +480,10 @@ A `fn` is a pure function. A `proc` is a procedure that may perform
 operations; its `performs` section is its closed effect ceiling, and an
 omitted `performs` is the empty row. The ceiling is never inferred. The
 effects chapter defines rows, plans, and `await`.
+
+A `fn` or `proc` has a body unless it is an abstract member of an
+`interface` or an [external definition](#external-definitions). Any other
+`fn` or `proc` written without `do` is `@syntax.invalidForm` at its closer.
 
 `takes` lists the required positional parameters as `Pattern: Type` entries;
 a bare name is the simplest pattern. Every parameter pattern MUST be
@@ -785,7 +792,8 @@ run-time type. The type chapter defines irrefutability and coverage.
 
 - UTF-8, LF line endings, one trailing newline, no trailing whitespace;
 - two-space indentation and a limit of 88 columns;
-- one blank line between top-level forms; imports first, in written order;
+- one blank line between top-level forms, which keep their written order;
+  the imports are already first, as the [grammar](#grammar) requires;
 - one space between tokens on a line; none inside `(`, `)`, `{`, `}`, `[`,
   `]`, before `(`, or before `:`; one after `:`;
 - numeric suffixes, string contents, and name spellings exactly as written;
@@ -841,3 +849,9 @@ roadmap.
   bases;
 - rest, alternative, and guarded patterns;
 - macros, reader extensions, and any user-defined syntax.
+
+An excluded spelling has no diagnostic of its own; it is whatever the
+grammar makes of it. In particular, a `(` where a top-level form or a
+statement is expected is `@syntax.invalidForm`, reported once over the
+balanced parenthesized form, and `as` anywhere outside a `use` is
+`@syntax.invalidForm` at the `as`.

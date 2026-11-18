@@ -443,6 +443,10 @@ Negative zero is normalized only where an operation says so.
 | `Str.length` | `Fn({Str} U64)` | the count of Unicode scalars, not of bytes or graphemes |
 | `Str.concat` | `Fn({Str Str} Str)` | concatenation |
 | `Str.slice` | `Fn({Str U64 U64} Option(Str))` | a half-open range of scalars, start then end; none if the start exceeds the end or the end exceeds the length |
+| `Char.isAsciiDigit` | `Fn({Char} Bool)` | `Ordered.inRange(value '0' '9')` |
+| `Char.isAsciiAlphabetic` | `Fn({Char} Bool)` | `Ordered.inRange(value 'A' 'Z')` or `Ordered.inRange(value 'a' 'z')` |
+| `Char.isAsciiWhitespace` | `Fn({Char} Bool)` | the value is U+0020 space, U+0009 tab, U+000A LF, or U+000D CR |
+| `Str.trim` | `Fn({Str} Str)` | the string without the longest prefix and the longest suffix of scalars for which `Char.isAsciiWhitespace` holds; an all-whitespace string gives the empty string |
 | `Str.toUtf8` | `Fn({Str} Bytes)` | the UTF-8 encoding |
 | `Str.fromUtf8` | `Fn({Bytes} Result(Str ConversionError))` | `invalidFormat` for ill-formed UTF-8 |
 | `Str(…)` and its pattern | `List(Char)` to and from `Str` | the characters in order |
@@ -472,9 +476,11 @@ There is no `List.of`, `Dict.of`, or `Dict.fromEntries`.
   implementations stay explicit and small.
 - **`Bool`.** `Bool.not`, `and`, `or`, and `xor` are ordinary members and
   evaluate both operands. Short-circuiting is written with `if`.
-- **`Char`.** The ASCII classifiers are ordinary library definitions. The
-  shared range test is `Ordered.inRange`; there is no `Char.inRange`.
-- **`Str.trim`** trims ASCII whitespace. It is not a Unicode or grapheme
+- **`Char`.** The three ASCII classifiers of the table are ordinary library
+  definitions, each written with `Ordered.inRange` and `Equatable.equal`.
+  The shared range test is `Ordered.inRange`; there is no `Char.inRange`.
+- **`Str.trim`** trims the four ASCII whitespace scalars of
+  `Char.isAsciiWhitespace` at both ends. It is not a Unicode or grapheme
   algorithm.
 
 **Iteration.** `Iter.next` is pure. It returns an item together with an

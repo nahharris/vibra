@@ -78,7 +78,12 @@ This is the grammar of a process command line, not Vibra source.
   MUST NOT present an unavailable command as working. In JSON it returns the
   usage text and the supported commands, profiles, and schemas.
 - There are no aliases such as `init`, `show`, or `find`.
-- Without `TARGET`, `check` and `lint` cover every local target. `run` and
+- Without `TARGET`, `check` and `lint` cover every local target and the
+  `@tests` unit, and the `check` payload's obligations include those of the
+  test modules. `check @app` covers that target only, not `@tests`. A target
+  whose kind the tool's profile does not support still decodes with the
+  project: it is reported `@tool.unavailable` at its target record, with the
+  status `unsupported`, and the other targets are checked. `run` and
   `build` need the project's only binary target; with none or several and no
   selector, the command is invalid input with no source diagnostic. A missing
   target, or a library given to `run` or `build`, is invalid input.

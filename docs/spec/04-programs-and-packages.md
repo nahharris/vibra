@@ -32,7 +32,12 @@ entry  = data, ":", data ;
 Every terminal is spelled as in the
 [source language](01-source-language.md#lexical-structure): literals keep
 their numeric suffixes, `true` and `false` are the booleans, and `//` starts
-a comment. There are no commas. `{}` is the empty tuple, `[]` the empty
+a comment. `true` and `false` are the `boolean` production, and outside a
+field name they are the only identifiers the data grammar admits: any other
+identifier, a doc string, and an application such as
+`Option.some(value: 1i32)` are `@syntax.invalidForm` at the token. A typed
+decoder rejects a wrong shape afterwards, with `@data.invalidShape`. There
+are no commas. `{}` is the empty tuple, `[]` the empty
 list, and `[:]` the empty dict. A field name is an identifier, so no field
 of any schema is a reserved word or contains a hyphen. A record's fields are
 unique. A later duplicate dict key is an error in VIBON, `@data.duplicateKey`,
@@ -610,7 +615,7 @@ fallback.
 | `format` | `@stdlibManifest.v2` | required |
 | `package` | record `name: Str`, `version: Str` | the embedded package |
 | `modules` | list of module entries sorted by `path` | every embedded module |
-| `symbols` | record `compiler`, `host`, `native`: each a list of `Str` sorted by UTF-8 bytes | the wire symbols the modules may bind |
+| `symbols` | record `compiler`, `host`, `native`: each a list of `Str` sorted by UTF-8 bytes, possibly empty | the wire symbols the modules may bind. An empty `native` list is valid: acceleration is an optimization the manifest declares, and without it the interpreter runs every Vibra body |
 
 A module entry has `path` (the module atom), `digest` (`Str`, `sha256:` and
 the SHA-256 of the module's exact bytes), and `languageRoles` (list of role

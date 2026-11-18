@@ -225,9 +225,9 @@ command-line context.
 | use of a hidden constructor, pattern, or field read | `@name.inaccessibleRepresentation`, the use, related to the type |
 | a name that resolves to nothing: a path part, a `given` key, an `impl` member or choice that is no member of the interface, an entity reference slot | `@name.unknownSymbol`, the name |
 | an entity of the wrong kind: an import of a member, an `impl` target of the wrong kind, a bound that is not an interface, a typed data slot | `@name.wrongEntityKind`, the reference |
-| a repeated module, import, local, test, or `given` key name | `@name.redeclaration`, the later name, related to the earlier |
-| two members of one owner with one name; a member or choice supplied twice in one `impl` | `@name.memberCollision`, the later name, related to the first |
-| a repeated type parameter | `@name.genericRedeclaration`, the later parameter |
+| a repeated module, import, local, test, or `given` key name; an associated type chosen twice in one `impl` | `@name.redeclaration`, the later name, related to the earlier |
+| two members of one owner with one name, an associated type and another member of its interface included; a callable member supplied twice in one `impl` | `@name.memberCollision`, the later name, related to the first |
+| a repeated type parameter; an associated type with the name of a visible type parameter | `@name.genericRedeclaration`, the later parameter, the associated type, or the `impl` head |
 | a reserved word in a label position | `@name.reservedLabel`, the word |
 | a test module without an import that resolves to `@std.assert` | `@module.missingRequiredImport`, at its first test's name |
 | a test outside `@tests`; an assertion used outside `@tests` | `@module.testOutsideTests`; `@module.assertionOutsideTests` |
@@ -245,6 +245,11 @@ Resolution reads only the captured source graph.
 | an unknown numeric suffix, an integer suffix on a float body, or trailing token text | `@syntax.invalidNumericLiteral`, the token |
 | a malformed identifier | `@syntax.invalidName`, the token |
 | a form the grammar does not admit; a doc string outside `doc`; a tag outside a section's closed set; a VIBON form outside the data grammar | `@syntax.invalidForm`, the smallest enclosing construct |
+| a `(` where a top-level form or a statement is expected | `@syntax.invalidForm`, once, the balanced parenthesized form |
+| `as` outside a `use` | `@syntax.invalidForm`, the `as` |
+| a `use` after another top-level form | `@syntax.invalidForm`, the `use` |
+| a `fn` or `proc` without `do` that is neither an abstract interface member nor an external definition | `@syntax.invalidForm`, its closer |
+| an identifier other than `true` and `false`, a doc string, or an application in a VIBON document | `@syntax.invalidForm`, the token |
 | a reserved word in a declaration or binder position; a prelude name declared as a type, interface, type parameter, or binder; a reserved type head declared | `@name.reservedDeclaration`, the name |
 | a repeated record field in VIBON | `@data.duplicateField`, the later field |
 | a repeated dict key in VIBON, after decoding | `@data.duplicateKey`, the later key |
@@ -358,7 +363,12 @@ The sixth discharge rule of [Guards](02-type-system.md#guards) uses exactly
 the facts below and no other arithmetic reasoning. `x`, `y`, and `z` are
 values of one sized integer type. The relations are the results of that
 type's `Ordered.compare` and `Equatable.equal`, written here in mathematical
-notation, which is not source syntax.
+notation, which is not source syntax. For the sized integer types, and for
+them only, the checker reads each of these default members of `Ordered` as
+its defining relation, so the facts apply to a predicate written with one:
+`less(x y)` is x < y, `lessOrEqual(x y)` is x ≤ y, `greater(x y)` is x > y,
+`greaterOrEqual(x y)` is x ≥ y, and `inRange(x low high)` is low ≤ x and
+x ≤ high. `min` and `max` are not relations and are not covered.
 
 | ID | From | The checker may conclude |
 | --- | --- | --- |
@@ -387,7 +397,7 @@ change to this table, with a positive case and a nearest negative case.
 | a valid command or construct outside the tool's profile; a driver the platform does not support, at admission | `@tool.unavailable`, the whole form, or the command-line context |
 | a plan whose workspace or document revision no longer matches | `@tool.stalePlan`, no location |
 | an MCP or tool action the server's permissions deny | `@tool.actionDenied`, no location |
-| a tool limit reached, with an unknown, incomplete status | `@tool.limitExceeded`, no location |
+| a tool limit reached, with an unknown, incomplete status | `@tool.limitExceeded`; the predicate when the limit stopped an obligation, whose status is then `unknown` and which gets no `@contract.unproved`; otherwise no location |
 | a value that cannot be shown: a function, a plan, or a grant, including one an interface value holds | `@tool.unsupportedValue`, the observed expression when one exists |
 | a build for a platform the toolchain does not emit | `@tool.unsupportedTarget`, no location |
 | a missing platform linker | `@tool.missingLinkTool`, no location |
@@ -419,6 +429,14 @@ so that diagnostics and queries stay useful in an unfinished file.
 - Later phases use the valid subtrees and suppress errors that only repeat
   an earlier one. They never fill an unknown proof or effect with a
   successful value.
+- A closer that does not match the innermost open construct is resolved by
+  kind. If a construct of the closer's kind is open, every construct inside
+  it closes as missing and the closer closes that construct, with one
+  `@syntax.unmatchedDelimiter` at the closer, related to the innermost
+  opener. So an `endfn` met while a `match` is open inside a `fn` closes
+  the `match` as missing and then the `fn`. If no construct of the closer's
+  kind is open, the closer is an error leaf, nothing closes, and the same
+  code is reported at it.
 - Missing operands, crossed or missing closers, repeated or unknown labels,
   items with no whitespace between them, invalid tokens, and ambiguous
   applications are errors. A `:` in the wrong place is not reinterpreted.
@@ -483,10 +501,52 @@ are omitted, lists are in the order stated, and a **span record** is
 
 | Format | Defined in |
 | --- | --- |
-| `@sourceGraph.v1`, `@resolved.v2`, `@types.v2`, `@testRun.v2` | below |
+| `@tree.v2`, `@sourceGraph.v1`, `@resolved.v2`, `@types.v2`, `@testRun.v2` | below |
 | `@index.v2` | the [index](05-tooling.md#index-records) |
 | `@type.v2`, `@value.v2` | the [canonical value encoding](06-runtime.md#canonical-value-encoding) |
 | `@auditTrace.v2` | the [audit trace](06-runtime.md#audit-trace) |
+
+**`@tree.v2`** holds the lossless syntax tree that a `reader` case compares.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `@tree.v2` | required |
+| `kind` | atom | `@source` for a `.vib` document, `@data` for a `.vibon` document |
+| `root` | node | the whole document |
+
+A node is one of two closed records. An interior node is
+`{kind: K children: C}`, with `C` a list of nodes in source order that may
+be empty. A leaf is `{kind: K text: Str}`, holding the exact text of one
+token. The texts of the leaves, concatenated in order, equal the input, so
+whitespace and comments are leaves.
+
+- An interior `kind` is the name of the production of the
+  [source grammar](01-source-language.md#grammar) or the
+  [data grammar](04-programs-and-packages.md#vibon-data-documents) the node
+  matched, in camelCase, or `@error`.
+- A leaf `kind` is `@identifier`, `@reservedWord`, `@integer`, `@float`,
+  `@atom`, `@string`, `@docString`, `@character`, `@punctuation`,
+  `@whitespace`, `@comment`, or `@missing`.
+- Recovery is recorded with kinds, never with flags. An `@error` node holds
+  the tokens a recovery step consumed without building a form. A `@missing`
+  leaf has empty text and stands where a required element was not written.
+- A document that is not valid UTF-8 has no tree; its observation is its
+  diagnostic.
+
+```vibon
+{
+  format: @tree.v2
+  kind: @data
+  root: {
+    kind: @list
+    children: [
+      {kind: @punctuation text: "["}
+      {kind: @integer text: "1u8"}
+      {kind: @punctuation text: "]"}
+    ]
+  }
+}
+```
 
 **`@sourceGraph.v1`** holds exact source bytes and no parsed declaration.
 Every graph has the `@tests` unit, even when empty.

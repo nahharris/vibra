@@ -118,9 +118,10 @@ Vibra body.
 
 ### The prelude
 
-The compiler-owned types, the types and interfaces that play a role, `Any`,
-`Self`, `Ordering`, and the values `true` and `false` are the only
-declarations a program names without an import. This closed set is the
+The compiler-owned types, the types and interfaces that play a role, the
+conversion interfaces `From` and `TryFrom`, `Any`, `Self`, `Ordering`, and
+the values `true` and `false` are the only declarations a program names
+without an import. This closed set is the
 **prelude**. It is not extensible. A prelude name resolves to its real
 declaration in every module, and a path that starts with one reaches its
 members: `Str.concat(a b)`, `Ordered.compare(a b)`. No module outside the
@@ -215,8 +216,31 @@ field is `@name.inaccessibleRepresentation`.
 A `where` section on a wrapper, declared tuple, or declared record states an
 invariant. Its operand is a predicate: a pure function value of type
 `Fn({R} Bool)`, where `R` is the representation type. A `where` on a variant
-type is `@type.invalidInvariant`. The [Guards](#guards) section defines what
-a bare `where` and a `where … else` mean. In both forms:
+type is `@type.invalidInvariant`. The operand is an expression like any
+other function value: an anonymous `fn`, or the name of a `fn`, which
+resolves in the flat module scope and so may be declared after the type.
+
+```vibra
+type Percent of U8
+  where fn takes {value: U8} returns valid: Bool do
+    return Ordered.lessOrEqual(value 100u8)
+  endfn
+endtype
+
+type Port of U16
+  where isUserPort
+endtype
+
+fn isUserPort
+  takes {value: U16}
+  returns valid: Bool
+  do
+    return Ordered.greaterOrEqual(value 1024u16)
+endfn
+```
+
+The [Guards](#guards) section defines what a bare `where` and a
+`where … else` mean. In both forms:
 
 - constructor arguments are evaluated once in written order, the raw
   representation is assembled, and the predicate is applied to it before any
@@ -612,7 +636,8 @@ names and default values, guards, and effect row are those of the contract.
 | --- | --- |
 | an abstract callable member or an associated type the implementation does not supply | `@type.missingAbstractMember`, the `impl` head, related to the contract member |
 | a member or choice whose name is no member of the interface | `@name.unknownSymbol`, the name |
-| a member or choice supplied twice in one `impl` | `@name.memberCollision`, the later name, related to the first |
+| a callable member supplied twice in one `impl` | `@name.memberCollision`, the later name, related to the first |
+| an associated type chosen twice in one `impl` | `@name.redeclaration`, the later choice, related to the first |
 | a default member supplied again | `@type.defaultOverride`, the member's name, related to the default |
 | a member whose signature differs from the contract under the substitution | `@type.mismatch`, the differing type, related to the contract member |
 
@@ -701,13 +726,23 @@ projection path through a type or a parameter:
    there. A choice is resolved before the associated names of its own
    `impl` are in scope, so a choice cannot mention an associated type of
    the same `impl`; such a name is `@name.unknownSymbol`. An associated
-   name in scope in an `impl` MUST NOT equal a type parameter visible there,
-   or the `impl` is `@name.redeclaration` at its head, related to the
-   parameter.
+   type MUST NOT have the name of a type parameter visible where it comes
+   into scope: declared in an interface with a parameter of that name, it
+   is `@name.genericRedeclaration` at the associated type, and brought into
+   an `impl` where a parameter of that name is visible, it is
+   `@name.genericRedeclaration` at the `impl` head, each related to the
+   parameter. An associated type with the name of another member of its
+   interface is `@name.memberCollision`, as for any two members.
 2. **A label in a type application**, after the positional arguments, which
    fixes the choice: `Iter(Item: U8)`, `TryFrom(Str Error: ParseError)`. A
    label that names no associated type, a label repeated, or a label in an
    `impl` target is `@type.typeArgumentMismatch` at the label.
+
+So `I.Item` and `Once.Item` are not type paths. A type parameter has the
+callable members of its bound and a type has its own members, and neither
+owns an associated type name. In `fn f(I) takes {x: I.Item}` the part
+`Item` resolves to nothing and is `@name.unknownSymbol` at `Item`, related
+to the type parameter, whatever the bound of `I` is.
 
 ### Dispatch
 
@@ -1029,8 +1064,10 @@ A guard's predicate and its `else` consequence MUST be **certified**
 expressions: built only from parameters and constants, constructions, field
 reads, `if` and `match` with full coverage, the primitive comparison and
 `Bool` operations, and calls of certified functions. A certified function is
-a `fn` whose body is certified and whose recursion, if any, the checker can
-show terminates. A certified expression cannot fault. A predicate that is
+a `fn` whose body is certified and that is not recursive, directly or
+through other functions. A recursive `fn` is outside the fragment, and a
+predicate that calls one is `@contract.unsupportedPredicate` at the call. A
+certified expression cannot fault. A predicate that is
 not of type `Bool`, or a `where` operand that is not a `Fn({R} Bool)`, is
 `@contract.invalidPredicate`; a consequence of the wrong type, or a
 `where … else` consequence that is not constant, is
@@ -1077,6 +1114,12 @@ the diagnostic names the predicate and the repairs: branch on the same
 predicate, pass a value of a type whose invariant states it, or give the
 guard an `else`. An obligation is never moved to run time, and a sampled test
 never discharges one.
+
+`@contract.unproved` is kept for an obligation the rules examined and could
+not establish. When a tool limit stops the evaluation of a predicate before
+the rules reach a verdict, the report is `@tool.limitExceeded` alone, at the
+predicate; the obligation's status is `unknown`, and no
+`@contract.unproved` is added.
 
 A bare `where` leaves the constructor's result type unchanged.
 
