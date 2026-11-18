@@ -1,0 +1,40 @@
+[package]
+name = "vibra-fs-scope"
+description = "The Windows file-scope adapter: files opened relative to a held directory handle, without following reparse points, with the real entry name checked. Its Windows module is the second place in the workspace with unsafe code."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true, features = [
+    "Wdk_Foundation",
+    "Wdk_Storage_FileSystem",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+] }
+
+# Every workspace lint is restated here, because `[lints] workspace = true`
+# cannot be combined with an override. The architecture test
+# `the_unsafe_crates_restate_the_workspace_lints` fails when this copy drifts
+# from `[workspace.lints]`: only `unsafe_code` differs, and the two `unsafe`
+# lints are added.
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "deny"
+missing_docs = "warn"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"
+indexing_slicing = "warn"
+panic = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+todo = "warn"
+unimplemented = "warn"

@@ -35,9 +35,9 @@ vibra-nexus-eval.workspace = true
 
 # Every workspace lint is restated here, because `[lints] workspace = true`
 # cannot be combined with an override. The architecture test
-# `the_bridge_lints_are_the_workspace_lints_except_for_unsafe` fails when this
-# copy drifts from `[workspace.lints]`: only `unsafe_code` differs, and the two
-# `unsafe` lints are added.
+# `the_unsafe_crates_restate_the_workspace_lints` fails when this copy drifts
+# from `[workspace.lints]`: only `unsafe_code` differs, and the two `unsafe`
+# lints are added.
 [lints.rust]
 unsafe_code = "allow"
 unsafe_op_in_unsafe_fn = "deny"
