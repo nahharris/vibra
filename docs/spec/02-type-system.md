@@ -655,10 +655,13 @@ second member.
 ### Substitution
 
 Every rule that relates a contract member to a use goes through one closed
-**substitution**, formed from a selected implementation. Selecting an
-implementation unifies its key with a closed receiver and closed positional
-arguments, which fixes every parameter the key is open in. Under that
-instantiation:
+**substitution**, formed from a selected implementation. In an activation
+every type is closed, and selecting an implementation unifies its key with a
+closed receiver and closed positional arguments, which fixes every parameter
+the key is open in. Where a generic body is checked, a receiver may still be
+a type parameter; [Dispatch](#dispatch) then checks the call against the
+parameter's bound, and the key closes when the body is activated. Under the
+instantiation of a selected implementation:
 
 - `Self` maps to the key's receiver;
 - each parameter of the interface maps to the corresponding positional
@@ -761,9 +764,12 @@ selected.
    receiver slot is dispatched on the written expected type at the call
    (destination dispatch): the checker matches that type against the
    member's written result type, structurally and only through the
-   positions of the `Self` map, and takes the receiver from the position
-   where `Self` is written. With no written expected type the call is
-   `@type.ambiguousDestination`.
+   positions of the `Self` map, and collects the type found at every
+   position where `Self` is written. All of them MUST be one type, which is
+   the receiver. An expected type whose shape has no such position, or
+   positions that give different types, as when `{Self Self}` meets
+   `{U8 U16}`, is `@type.mismatch` at the application. With no written
+   expected type the call is `@type.ambiguousDestination`.
 2. **Positional constraints.** Wherever a parameter of the interface is
    written in the member's parameter types or result type, the matching
    operand type or part of the expected type constrains it, by the ordinary
@@ -771,14 +777,30 @@ selected.
    associated type is written, nothing is constrained: the position is
    recorded as a **deferred equality** between the choice and the type
    found there.
-3. **Selection.** The receiver and the positional constraints select the
-   implementations of this interface whose key unifies with them. None is
+3. **Bound evidence.** When the receiver is a type parameter in scope, no
+   implementation is selected where the body is checked. The parameter has
+   exactly the members of its [bound](#bounds), so the interface and the
+   positional constraints MUST be those of the bound, or the call is
+   `@type.unsatisfiedBound` at the receiver operand or the expected type.
+   The call is checked in step 5 against the **evidence view**: the
+   signature with `Self` replaced by the parameter, each parameter of the
+   interface by the bound's positional argument, and each associated type
+   by the type the bound's label fixes. An associated type the bound leaves
+   unfixed stays abstract: it equals itself and no other type, so a
+   deferred equality with anything else is `@type.mismatch`. The key closes
+   at activation, when the parameter has its actual type and the
+   implementation selected for it is the activation's evidence. Step 4 is
+   skipped.
+4. **Selection.** Otherwise the receiver and the positional constraints
+   select the implementations of this interface whose key unifies with them
+   without fixing a type parameter in scope. None is
    `@type.unsatisfiedBound` at the receiver operand or the expected type,
    related to the interface. More than one, which happens only when a
    positional argument is still undetermined, is
    `@type.ambiguousImplementation` at the application.
-4. **Checking.** The selected implementation's closed substitution is
-   applied to the complete signature. Then, and only then, every operand is
+5. **Checking.** The selected implementation's substitution, or the
+   evidence view of step 3, is applied to the complete signature. Then, and
+   only then, every operand is
    checked against its parameter type, every deferred equality is compared,
    and the complete result type is compared with the expected type, like
    any other call. A parameter outside the receiver slot whose written type
@@ -786,15 +808,27 @@ selected.
    argument of another type is `@type.argumentMismatch` at that argument. A
    deferred equality or a result that disagrees is `@type.mismatch`.
 
-So in `let port: U16 be try TryFrom.convert(text) endlet`, `convert` has no
-receiver slot, and its written result type is `Result(Self Error)`. The
-expected type `Result(U16 ConversionError)` of the `try` operand gives the
-receiver `U16` from the position of `Self`, and defers the equality of
-`Error` with `ConversionError`. The operand `text` constrains `Source` to
-`Str`. The key `TryFrom`, `U16`, `Str` selects one implementation. Its
-substitution turns the result type into `Result(U16 ConversionError)`, its
-choice of `Error` satisfies the deferred equality, and the result is
-compared whole with the expected type.
+**Member-local parameters.** A member's own type parameters, such as `Acc`
+in `Iter.fold(Acc)`, are no part of any key and play no part in steps 1 to
+4. They are inferred in step 5 by the ordinary joint
+[inference](#inference-and-checking) of type arguments, from the operands
+and the written expected type, against the signature as step 5 instantiated
+it: under the selected substitution, under the evidence view, or, for a call
+through an interface value, under the
+[public view](#interface-values). A member-local parameter the call does
+not determine is `@type.ambiguousInference`, whichever implementation was
+selected.
+
+The four cases below are worked through the steps. `once` has the type
+`Once` of [Associated types](#associated-types), and `box` has the type
+`Iter(Item: U8)`.
+
+| Call | Constraints | Selection | Checking and result |
+| --- | --- | --- | --- |
+| `Iter.next(once)` | The receiver slot is parameter 0, so the receiver is `Once`. `Iter` has no positional argument. The written `Item` defers nothing here, since no expected type is written. | The key `Iter`, `Once`, no arguments selects the `impl Iter` in `Once`. | `Self` is `Once` and `Item` is `U8`. The operand is checked against `Once`, and the result is `Option({U8 Once})`. |
+| `TryFrom.convert("12")` with the written expected type `Result(U8 ConversionError)` | No receiver slot. The written result `Result(Self Error)` is matched with the expected type: the one `Self` position gives the receiver `U8`, and the `Error` position defers `Error` equal to `ConversionError`. The operand constrains `Source` to `Str`. | The key `TryFrom`, `U8`, `Str` selects one implementation. | `Self` is `U8`, `Source` is `Str`, `Error` is the implementation's choice `ConversionError`. The operand is checked against `Str`, the deferred equality holds, and the complete result `Result(U8 ConversionError)` equals the expected type. |
+| `Iter.next(box)` | The receiver is an interface value, so the call is checked against the public view: `Self` is `Iter(Item: U8)` and `Item` is `U8`. | None at the call site. At run time the call unboxes `box` and runs `next` under the substitution stored when the held value was widened. | The operand is checked against `Iter(Item: U8)`. The activation returns the held type's `Option({U8 Self})`; the `Self` position is reboxed with the same implementation, and the result is `Option({U8 Iter(Item: U8)})`. |
+| `Iter.fold(once initial step)` | The receiver slot is parameter 0, so the receiver is `Once`. `Acc` is member-local and constrains nothing. | The key `Iter`, `Once`, no arguments, exactly as for `next`. With `box` in place of `once`, the public view and no selection. With a receiver of a parameter type `I` under `given {I: Iter(Item: T)}`, the evidence view, where `Item` is `T`. | The signature becomes `Fn({Once Acc Fn({Acc U8} Acc)} Acc)`. `Acc` is then inferred jointly from `initial`, from `step`, and from a written expected result when there is one, so `step` must be a `Fn({Acc U8} Acc)` for that `Acc`. In a generic caller `Acc` may be one of the caller's own parameters, fixed by its written operand types. |
 
 A member with no receiver slot whose written result type does not contain
 `Self` can be selected by neither constraint and is

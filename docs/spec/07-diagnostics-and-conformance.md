@@ -280,8 +280,8 @@ Resolution reads only the captured source graph.
 | a contract member whose written result type places `Self` outside the [`Self` map](02-type-system.md#interfaces), found when the interface declaration is checked, whether or not the interface is used as a value | `@type.unsupportedSelfPosition`, the result type |
 | a destination-dispatched call with no written expected type | `@type.ambiguousDestination`, the application |
 | `From` and `TryFrom` sources of one receiver that unify | `@type.redundantConversion`, the later `impl` head, related to the earlier |
-| a receiver or destination with no implementation for the selected key; a label-bound parameter that fails its own bound | `@type.unsatisfiedBound`, the operand or the expected type, related to the interface or bound |
-| an implementation member whose signature differs from the contract; a widening whose label differs from the implementation's choice; a label-bound parameter fixed to two types; a deferred associated equality or a complete result that disagrees after selection | `@type.mismatch`, the differing type or expression |
+| a receiver or destination with no implementation for the selected key; a call on a type parameter of a member its bound does not give; a label-bound parameter that fails its own bound | `@type.unsatisfiedBound`, the operand or the expected type, related to the interface or bound |
+| an implementation member whose signature differs from the contract; a widening whose label differs from the implementation's choice; a label-bound parameter fixed to two types; a deferred associated equality or a complete result that disagrees after selection; a destination-dispatched call whose expected type has no position for `Self` or gives `Self` two types, at the application | `@type.mismatch`, the differing type or expression |
 
 ### Binding, return and pattern diagnostics
 
@@ -435,8 +435,9 @@ so that diagnostics and queries stay useful in an unfinished file.
   `@syntax.unmatchedDelimiter` at the closer, related to the innermost
   opener. So an `endfn` met while a `match` is open inside a `fn` closes
   the `match` as missing and then the `fn`. If no construct of the closer's
-  kind is open, the closer is an error leaf, nothing closes, and the same
-  code is reported at it.
+  kind is open, nothing closes: the closer is kept as its ordinary token
+  leaf inside an `@error` node of the
+  [tree](#persistent-observations), and the same code is reported at it.
 - Missing operands, crossed or missing closers, repeated or unknown labels,
   items with no whitespace between them, invalid tokens, and ambiguous
   applications are errors. A `:` in the wrong place is not reinterpreted.
@@ -511,8 +512,7 @@ are omitted, lists are in the order stated, and a **span record** is
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `format` | `@tree.v2` | required |
-| `kind` | atom | `@source` for a `.vib` document, `@data` for a `.vibon` document |
-| `root` | node | the whole document |
+| `root` | node | the one document node |
 
 A node is one of two closed records. An interior node is
 `{kind: K children: C}`, with `C` a list of nodes in source order that may
@@ -520,29 +520,76 @@ be empty. A leaf is `{kind: K text: Str}`, holding the exact text of one
 token. The texts of the leaves, concatenated in order, equal the input, so
 whitespace and comments are leaves.
 
-- An interior `kind` is the name of the production of the
-  [source grammar](01-source-language.md#grammar) or the
-  [data grammar](04-programs-and-packages.md#vibon-data-documents) the node
-  matched, in camelCase, or `@error`.
-- A leaf `kind` is `@identifier`, `@reservedWord`, `@integer`, `@float`,
-  `@atom`, `@string`, `@docString`, `@character`, `@punctuation`,
-  `@whitespace`, `@comment`, or `@missing`.
-- Recovery is recorded with kinds, never with flags. An `@error` node holds
-  the tokens a recovery step consumed without building a form. A `@missing`
-  leaf has empty text and stands where a required element was not written.
+One rule decides which productions of the
+[source grammar](01-source-language.md#grammar) and the
+[data grammar](04-programs-and-packages.md#vibon-data-documents) are nodes:
+
+- The root is the one **document node**, of kind `@source` for a `.vib`
+  document and `@data` for a `.vibon` document. It stands for the whole
+  document, and no node stands for `module`.
+- A **choice production**, one whose body is only alternatives, is never a
+  node: `top`, `statement`, `expr`, `unary`, `primary`, `literal`,
+  `argument`, `pattern`, `type-expr`, and `data` among them. What a choice
+  production matches takes its place: a node, when the chosen alternative
+  is a node production, and otherwise the tokens of an alternative written
+  inline, which become children of the nearest enclosing node.
+- Every other production is an interior node whose `kind` is the
+  production's name in camelCase: `@fnDecl`, `@postfix`, `@list`, `@entry`.
+- A lexical production is a leaf. A leaf `kind` is `@identifier`,
+  `@reservedWord`, `@integer`, `@float`, `@atom`, `@string`, `@docString`,
+  `@character`, `@punctuation`, `@whitespace`, `@comment`, or `@missing`.
+- Recovery is recorded with two kinds, never with flags. An `@error` node is
+  interior and holds, as their ordinary token leaves, the tokens a recovery
+  step consumed without building a form; an unmatched closer is its
+  `@punctuation` or `@reservedWord` leaf inside an `@error` node. A
+  `@missing` leaf has empty text and stands where a required element was
+  not written.
 - A document that is not valid UTF-8 has no tree; its observation is its
   diagnostic.
+
+The valid document `[1u8]`, five bytes with no newline, has this tree. The
+element is matched by the choice production `data`, so the integer leaf is
+a child of the list node:
 
 ```vibon
 {
   format: @tree.v2
-  kind: @data
   root: {
-    kind: @list
+    kind: @data
     children: [
-      {kind: @punctuation text: "["}
-      {kind: @integer text: "1u8"}
-      {kind: @punctuation text: "]"}
+      {
+        kind: @list
+        children: [
+          {kind: @punctuation text: "["}
+          {kind: @integer text: "1u8"}
+          {kind: @punctuation text: "]"}
+        ]
+      }
+    ]
+  }
+}
+```
+
+The malformed document `[1u8}` recovers as follows. No brace form is open,
+so the `}` closes nothing and is kept in an `@error` node; the list then
+ends without its closer, which a `@missing` leaf marks. Both faults are
+`@syntax.unmatchedDelimiter`, at the `}` and at the `[`:
+
+```vibon
+{
+  format: @tree.v2
+  root: {
+    kind: @data
+    children: [
+      {
+        kind: @list
+        children: [
+          {kind: @punctuation text: "["}
+          {kind: @integer text: "1u8"}
+          {kind: @error children: [{kind: @punctuation text: "}"}]}
+          {kind: @missing text: ""}
+        ]
+      }
     ]
   }
 }

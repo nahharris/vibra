@@ -733,8 +733,12 @@ empty. A key has no `kind` and no `choices`, so it is never mistaken for an
 interface value type, which must fix every choice.
 
 An **open type encoding** is the type encoding of [Types](#types) with
-three more records. They are valid only inside a signature record or an
-implementation record:
+three more records. They are valid in exactly three contexts: a signature
+record; an implementation record; and a type-bearing fact of the index or
+of a query, whose binder references index the binders of the signature
+record that encloses the fact, as the
+[tooling chapter](05-tooling.md#index-records) states. Anywhere else they
+are `@data.invalidShape`:
 
 | Reference | Fields | Valid in |
 | --- | --- | --- |
@@ -1444,7 +1448,10 @@ The example is shape only; its identities are placeholders:
   approved broker effects before the entry are not hidden.
 - Future kinds, for attempts, refusals, or actors, need their own specified
   fields and ordering.
-- A consumer MUST keep an unknown kind as an opaque record. Adding a field
+- A consumer MUST keep an unknown kind as an opaque record, serialized as
+  [opaque data](04-programs-and-packages.md#decoded-values-and-canonical-bytes):
+  fields in name order, and the entries of a nested dict in the byte order
+  of their keys. Adding a field
   to an existing kind, or changing its meaning, requires a new major
   format.
 - A JSON envelope carries the same facts: each field of an event is its own

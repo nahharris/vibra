@@ -123,6 +123,15 @@ keys are compared as typed values, never as text or encoded bytes, so `2u8`
 precedes `10u8`. Canonical serialization and every tool that renders or
 traverses a decoded dict use this order.
 
+**Opaque data** is data no schema describes: the record of an audit event
+of an unknown kind, and everything nested in it. A dict inside opaque data
+has no typed key slot, so it has its own rule: each key is serialized to its
+canonical bytes, with a number keeping its suffix exactly as written, and
+the entries ascend by the unsigned byte order of those key bytes, a shorter
+key before a longer one it prefixes. Two such keys are duplicates exactly
+when their canonical bytes are equal. A typed slot always keeps the key
+type's order; the byte order applies only where no schema types the key.
+
 **Canonical serialization** is defined for a document validated against a
 schema. Its output, the document's **canonical bytes**, is fully determined
 by the decoded value and the schema, has no comment, and has no layout:
@@ -143,10 +152,11 @@ by the decoded value and the schema, has no comment, and has no layout:
 - a record's fields in schema order. An absent optional field is omitted,
   and so is a field whose value equals its schema default, whatever the
   input spelled;
-- a record no schema describes, such as an audit event of an unknown kind
-  that a consumer keeps opaque, with its fields in the order of the UTF-8
-  bytes of their names and nothing omitted;
-- a dict's entries in dict order; a list's elements in their order;
+- a record in opaque data with its fields in the order of the UTF-8 bytes
+  of their names and nothing omitted, and a number in opaque data with its
+  minimal digits and the suffix it was written with, or none;
+- a dict's entries in dict order, or in the byte order of opaque data where
+  no schema types the key; a list's elements in their order;
 - an empty compound as `{}`, `[]`, or `[:]`.
 
 Every identity hash defined over a record covers its canonical bytes. The
@@ -160,7 +170,10 @@ A file the toolchain writes for a document with no human author (a lock
 file, a build record, a snapshot) is the document's canonical text laid out
 by the formatter's layout rules and ended with one LF. Laying out changes
 whitespace only, so reading the file and serializing it gives the canonical
-bytes again. No hash covers the laid-out file.
+bytes again. No hash defined over a canonical record covers the laid-out
+file. A hash of exact input bytes does when the file is one of its inputs:
+the workspace revision covers the lock file's bytes exactly as they are on
+disk, layout included.
 
 The **source-preserving formatter** is a different operation. `vibra fmt`
 and the project edits of the [tooling chapter](05-tooling.md#formatting)
