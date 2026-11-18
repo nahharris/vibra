@@ -853,7 +853,7 @@ Each of the five also has these four cases:
 
 | Case | Meaning |
 | --- | --- |
-| `denied` | the grant's policy rejected the request; nothing was dispatched |
+| `denied` | the request was refused, by the policy before dispatch or by the driver after it opened an entry; no file content was read, created, or changed |
 | `limitExceeded` | the broker could not reserve the limits; nothing was dispatched |
 | `unsupported` | this adapter or action cannot be attempted under this profile; nothing was attempted |
 | `outcomeUnknown` | the action may have run and its completion is unknown. It MUST NOT be reported as rejected before submission |
@@ -909,8 +909,14 @@ access by itself.
 - It MUST refuse to traverse a symbolic link or reparse point, and to cross
   a forbidden mount. A refusal MUST NOT fabricate the result of a followed
   target.
-- A valid request outside the grant's scope is `denied`, with no external
-  action.
+- A valid request outside the grant's scope is `denied`, with no file
+  content read, created, or changed. A refusal the driver makes after it
+  has opened an entry (a link, a reparse point, a name that fails the
+  real-name check, a replace the hard-link rule forbids) is `denied` as
+  well, returned as a completed call and traced.
+- The driver reports a regular file where a directory is required as
+  `notADirectory`, and a directory or other non-regular entry where a file
+  is required as `notAFile`; both are typed `FsError` cases.
 - [Scope policies](03-effects.md#scope-policies) specifies `RelativePath`
   parsing, file-name tests, rooted traversal, and the limits on hard links.
 - A grant narrowed by `sub` keeps the same acquired anchor and adds a path
@@ -951,6 +957,12 @@ link, and so gains no wider traversal authority.
   checks kind and name. Authorization to create a new file requires
   exclusive creation; it MUST NOT fall back to truncating an existing file
   that collides by case or alias.
+- Replacing is truncate-and-write in place on the checked handle: the
+  file's identity and its other names are kept. A driver MUST NOT write a
+  new file and rename it over the old one.
+- Replacing a file whose link count the platform reports above one is
+  `denied`, as the [effects chapter](03-effects.md#filesystem-policies)
+  requires; reading it is allowed.
 - A write is not transactional. An ordinary failure may leave a prefix
   written, and a `Result` implies no rollback.
 

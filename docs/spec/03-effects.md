@@ -432,11 +432,18 @@ selects directories: `self` is `prefix` itself, `children` one name further,
 - **Paths.** A `RelativePath` (`@std.fs`) is a list of names, built by the
   fallible constructor `RelativePath(names)`. A name is non-empty and is
   rejected if it is `.` or `..`, contains `/`, `\`, `:`, NUL, or a control
-  character, ends in a dot or a space, or is a reserved Windows device name
-  with or without an extension. Absolute, drive-relative, UNC, and device
-  paths cannot be represented. Nothing is expanded, decoded, or stripped.
-  Prefixes are compared name by name, never as strings, so `reports` does
-  not cover `reportsOld`.
+  character, ends in a dot or a space, or is a reserved device name.
+  Absolute, drive-relative, UNC, and device paths cannot be represented.
+  Nothing is expanded, decoded, or stripped. Prefixes are compared name by
+  name, never as strings, so `reports` does not cover `reportsOld`.
+- **Reserved device names.** Names are portable: the same closed set is
+  rejected on every platform. A name's **stem** is the part before its
+  first dot, with trailing spaces removed. A name is rejected when its
+  stem, compared without case, is one of `CON`, `PRN`, `AUX`, `NUL`,
+  `CONIN$`, `CONOUT$`, `COM0` through `COM9`, `LPT0` through `LPT9`, or
+  the superscript-digit forms `COM¹`, `COM²`, `COM³`, `LPT¹`, `LPT²`,
+  `LPT³`. So `nul`, `NUL.txt`, and `con .log` are rejected and `nul2` is
+  not.
 - **Names.** A name test compares exact Unicode scalars, with no case
   folding and no normalization. `suffix(".txt")` accepts `notes.txt` and
   `.txt` and rejects `notes.TXT` and `notes.txt.exe`. An empty suffix is
@@ -466,9 +473,11 @@ user is shown when approving a target:
   is renamed, the grant still refers to it; if another directory takes its
   old path, the grant does not refer to that one.
 - **Hard links.** A permitted file name can be a hard link to a file that
-  also has a name elsewhere. A policy does not establish where data came
-  from or that a write is seen only under the permitted name. A read-only
-  grant still cannot write.
+  also has a name elsewhere. Reading such a file is allowed: its content is
+  an entry of the scoped directory, and a policy does not establish where
+  data came from. Replacing it MUST be refused with `denied` when the
+  platform reports a link count above one, because the change would be
+  visible outside the scope. A read-only grant still cannot write.
 
 ### HTTP policies
 
@@ -532,13 +541,13 @@ least these cases, in addition to the operation's own:
 
 | Case | Meaning |
 | --- | --- |
-| `denied` | The grant's policy does not permit the request; nothing was attempted |
+| `denied` | The request was refused: no file content was read, created, or changed. The policy may refuse before the adapter runs, or the driver may refuse after opening an entry (a link, a reparse point, a name that fails the real-name check, a replace the hard-link rule forbids); the latter is a completed, traced call |
 | `limitExceeded` | A limit would be exceeded; nothing was attempted |
 | `unsupported` | The platform cannot enforce the grant for this action; nothing was attempted |
 | `outcomeUnknown` | The action was submitted and its result is not known |
 
-"Nothing was attempted", "failed", and "may have happened" stay distinct.
-There is no implicit conversion between error types.
+"Refused", "failed", and "may have happened" stay distinct. There is no
+implicit conversion between error types.
 
 ## Standard operation inventory
 
