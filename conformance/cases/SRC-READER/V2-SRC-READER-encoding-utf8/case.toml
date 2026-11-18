@@ -1,0 +1,16 @@
+id = "V2-SRC-READER-encoding-utf8"
+rule = "V2-SRC-READER-encoding-utf8"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#lexical-structure: a document must be valid UTF-8"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidEncoding"
+level = "@error"
+span = { start = 1, end = 2 }

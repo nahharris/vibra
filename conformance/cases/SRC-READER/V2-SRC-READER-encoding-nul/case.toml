@@ -1,0 +1,16 @@
+id = "V2-SRC-READER-encoding-nul"
+rule = "V2-SRC-READER-encoding-nul"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#lexical-structure: a NUL byte is not admitted"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidEncoding"
+level = "@error"
+span = { start = 1, end = 2 }

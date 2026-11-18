@@ -1,0 +1,12 @@
+id = "V2-SRC-READER-tree-list"
+rule = "V2-SRC-READER-tree-list"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#lexical-structure: the first @tree.v2 example of the diagnostics chapter"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

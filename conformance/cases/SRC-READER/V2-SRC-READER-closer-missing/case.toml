@@ -1,0 +1,16 @@
+id = "V2-SRC-READER-closer-missing"
+rule = "V2-SRC-READER-closer-missing"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#lexical-structure: a form open at the end of the document"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.unmatchedDelimiter"
+level = "@error"
+span = { start = 0, end = 1 }

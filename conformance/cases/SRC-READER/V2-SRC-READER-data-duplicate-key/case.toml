@@ -1,0 +1,16 @@
+id = "V2-SRC-READER-data-duplicate-key"
+rule = "V2-SRC-READER-data-duplicate-key"
+profile = "readerV2"
+operation = "reader"
+description = "04-programs-and-packages.md#vibon-data-documents: dict keys are unique as decoded values"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@data.duplicateKey"
+level = "@error"
+span = { start = 10, end = 18 }

@@ -1,0 +1,26 @@
+id = "V2-SRC-READER-character"
+rule = "V2-SRC-READER-character"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#lexical-structure: an empty character, two characters, and an unknown escape"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidCharacterLiteral"
+level = "@error"
+span = { start = 4, end = 6 }
+
+[[expect.diagnostics]]
+code = "@syntax.invalidCharacterLiteral"
+level = "@error"
+span = { start = 10, end = 14 }
+
+[[expect.diagnostics]]
+code = "@syntax.invalidCharacterLiteral"
+level = "@error"
+span = { start = 18, end = 22 }

@@ -1,0 +1,26 @@
+id = "V2-SRC-READER-numeric-suffix"
+rule = "V2-SRC-READER-numeric-suffix"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#lexical-structure: an unknown suffix, an integer suffix on a float, and a suffix run on"
+
+[inputs]
+data = ["input.vibon"]
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidNumericLiteral"
+level = "@error"
+span = { start = 4, end = 9 }
+
+[[expect.diagnostics]]
+code = "@syntax.invalidNumericLiteral"
+level = "@error"
+span = { start = 13, end = 19 }
+
+[[expect.diagnostics]]
+code = "@syntax.invalidNumericLiteral"
+level = "@error"
+span = { start = 23, end = 27 }
