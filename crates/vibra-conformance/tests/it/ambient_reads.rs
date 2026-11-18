@@ -38,6 +38,10 @@ const TOOLING_EXCEPTIONS: &[(&str, &str)] = &[
         "reads the environment, the registry through `reg.exe`, and the filesystem to find the linker, and starts it, all in its module `system` (`the_build_driver_reads_the_machine_in_one_module`)",
     ),
     (
+        "vibra-fs-scope",
+        "is the filesystem adapter itself: it opens entries relative to a held directory handle and does nothing else",
+    ),
+    (
         "vibra-nexus-bridge",
         "its launcher `main` reads the process arguments and standard streams of the executable, and its harness profile reads standard input, then hands them to the host provider",
     ),
