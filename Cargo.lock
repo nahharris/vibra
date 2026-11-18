@@ -1614,6 +1614,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vibra-fs-scope"
+version = "0.0.1"
+dependencies = [
+ "windows-sys",
+]
+
+[[package]]
 name = "vibra-host"
 version = "0.0.1"
 dependencies = [

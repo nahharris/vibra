@@ -189,6 +189,10 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         "vibra-build",
         &["vibra-codegen", "vibra-exec", "vibra-ir", "vibra-lower"],
     ),
+    // The Windows file-scope adapter of the v0.0.2 M0 feasibility check. It
+    // knows no language: it opens files below a held directory handle. No
+    // crate depends on it yet.
+    ("vibra-fs-scope", &[]),
     // The harness. Legitimately sits above every node.
     (
         "vibra-conformance",
@@ -779,9 +783,18 @@ fn shipped_crates_do_not_depend_on_their_build_checkout() {
     );
 }
 
-/// The one crate that contains `unsafe` code and `extern "C"` items (decision
+/// The crate that contains `unsafe` code and `extern "C"` items (decision
 /// N10). Its lint tables restate the workspace's.
 const BRIDGE_CRATE: &str = "vibra-nexus-bridge";
+
+/// The Windows file-scope adapter, whose NT calls need `unsafe`. Only the one
+/// source file below may contain it, and its lint tables restate the
+/// workspace's as the bridge's do.
+const FS_SCOPE_CRATE: &str = "vibra-fs-scope";
+const FS_SCOPE_UNSAFE_SOURCE: &str = "src/windows.rs";
+
+/// Every crate with its own lint tables.
+const UNSAFE_CRATES: &[&str] = &[BRIDGE_CRATE, FS_SCOPE_CRATE];
 
 /// `source` with comments, string literals, and character literals blanked
 /// out, so a scan sees code only.
@@ -883,7 +896,7 @@ fn package_name(manifest: &toml::Table) -> &str {
 }
 
 #[test]
-fn only_the_bridge_contains_unsafe() {
+fn only_the_bridge_and_the_file_scope_adapter_contain_unsafe() {
     let root = workspace_root();
     let mut checked = 0;
     let mut found = Vec::new();
@@ -893,20 +906,29 @@ fn only_the_bridge_contains_unsafe() {
             continue;
         }
         checked += 1;
-        let lints = manifest.get("lints").and_then(toml::Value::as_table);
-        let inherits = lints.is_some_and(|lints| {
-            lints.len() == 1
-                && lints.get("workspace").and_then(toml::Value::as_bool) == Some(true)
-        });
-        if !inherits {
-            found.push(format!(
-                "{} does not inherit the workspace lints (`[lints] workspace = true`)",
-                path.display()
-            ));
+        let crate_dir = path.parent().expect("a crate directory");
+        let allowed_source =
+            (name == FS_SCOPE_CRATE).then(|| crate_dir.join(FS_SCOPE_UNSAFE_SOURCE));
+        if name != FS_SCOPE_CRATE {
+            let lints = manifest.get("lints").and_then(toml::Value::as_table);
+            let inherits = lints.is_some_and(|lints| {
+                lints.len() == 1
+                    && lints.get("workspace").and_then(toml::Value::as_bool)
+                        == Some(true)
+            });
+            if !inherits {
+                found.push(format!(
+                    "{} does not inherit the workspace lints (`[lints] workspace = true`)",
+                    path.display()
+                ));
+            }
         }
         let mut sources = Vec::new();
-        rust_sources(path.parent().expect("a crate directory"), &mut sources);
+        rust_sources(crate_dir, &mut sources);
         for source_path in sources {
+            if allowed_source.as_ref() == Some(&source_path) {
+                continue;
+            }
             let source =
                 std::fs::read_to_string(&source_path).expect("readable source");
             if names_token(&code_only(&source), "unsafe") {
@@ -920,7 +942,9 @@ fn only_the_bridge_contains_unsafe() {
     );
     assert!(
         found.is_empty(),
-        "only `{BRIDGE_CRATE}` may contain `unsafe` or its own lint table:\n{}",
+        "only `{BRIDGE_CRATE}` and `{FS_SCOPE_CRATE}/{FS_SCOPE_UNSAFE_SOURCE}` may \
+         contain `unsafe`, and only those two crates may have their own lint \
+         tables:\n{}",
         found.join("\n")
     );
 }
@@ -949,11 +973,17 @@ fn the_unsafe_scan_reads_code_only() {
 }
 
 #[test]
-fn the_bridge_lints_are_the_workspace_lints_except_for_unsafe() {
+fn the_unsafe_crates_restate_the_workspace_lints() {
+    for crate_name in UNSAFE_CRATES {
+        lints_are_the_workspace_lints_except_for_unsafe(crate_name);
+    }
+}
+
+fn lints_are_the_workspace_lints_except_for_unsafe(crate_name: &str) {
     let root = workspace_root();
     let workspace = read_manifest(&root.join("Cargo.toml"));
-    let bridge =
-        read_manifest(&root.join("crates").join(BRIDGE_CRATE).join("Cargo.toml"));
+    let manifest =
+        read_manifest(&root.join("crates").join(crate_name).join("Cargo.toml"));
     let table = |manifest: &toml::Table, outer: &str, tool: &str| -> toml::Table {
         manifest
             .get(outer)
@@ -992,9 +1022,9 @@ fn the_bridge_lints_are_the_workspace_lints_except_for_unsafe() {
         }
         expected.insert(added.0.to_owned(), string(added.1));
         assert_eq!(
-            table(&bridge, "lints", tool),
+            table(&manifest, "lints", tool),
             expected,
-            "the bridge's `[lints.{tool}]` must be the workspace's, except for `unsafe`"
+            "{crate_name}: `[lints.{tool}]` must be the workspace's, except for `unsafe`"
         );
     }
     let workspace_rust = table(&workspace, "workspace", "lints");
@@ -1007,11 +1037,11 @@ fn the_bridge_lints_are_the_workspace_lints_except_for_unsafe() {
         "the workspace keeps `unsafe_code = \"forbid\"`"
     );
     assert!(
-        bridge
+        manifest
             .get("lints")
             .and_then(|lints| lints.get("workspace"))
             .is_none(),
-        "the bridge states its own lints"
+        "{crate_name} states its own lints"
     );
 }
 

@@ -19,6 +19,7 @@ vibra-conformance = { path = "crates/vibra-conformance" }
 vibra-diagnostics = { path = "crates/vibra-diagnostics" }
 vibra-exec = { path = "crates/vibra-exec" }
 vibra-fmt = { path = "crates/vibra-fmt" }
+vibra-fs-scope = { path = "crates/vibra-fs-scope" }
 vibra-host = { path = "crates/vibra-host" }
 vibra-interp = { path = "crates/vibra-interp" }
 vibra-lower = { path = "crates/vibra-lower" }
@@ -52,6 +53,9 @@ rusqlite = { version = "0.42.0", default-features = false, features = ["libsqlit
 # Stable Rust's rename may replace an existing directory on Windows. This
 # safe wrapper provides exclusive publication without a non-atomic fallback.
 renamore = "0.3.2"
+# The Windows file-scope adapter's NT calls (`vibra-fs-scope`). It is already
+# in the lock file through other dependencies.
+windows-sys = "0.61.2"
 
 # The WebAssembly backend (milestone 4, Step 4). The engine is Wasmtime with
 # Cranelift only, and only `vibra-wasm-run` may depend on it. `wasm-encoder`
