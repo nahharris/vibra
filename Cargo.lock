@@ -1488,6 +1488,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "vibra-conformance"
+version = "0.0.1"
+dependencies = [
+ "serde",
+ "toml",
+ "vibra-diagnostics",
+]
+
+[[package]]
 name = "vibra-conformance-v1"
 version = "0.0.1"
 dependencies = [

@@ -1,0 +1,47 @@
+//! The conformance corpus runner.
+//!
+//! `docs/spec/07-diagnostics-and-conformance.md` requires a corpus of Vibra
+//! cases that is independent of any backend and organized by the rule each
+//! case tests. This crate loads that corpus from `conformance/cases`, checks
+//! every case against the rule index `conformance/rules.tsv`, dispatches each
+//! case to a handler of its profile, and compares the handler's observations
+//! with the expectations written from the specification. It has no mode that
+//! writes an expectation.
+//!
+//! # Position in the architecture
+//!
+//! This crate sits above every other node and may depend on all of them. That
+//! also makes it the home of workspace-wide structural invariants, such as
+//! the architecture test in `tests/`, which no single crate can check from
+//! the inside.
+//!
+//! # Handlers
+//!
+//! No handler is registered yet, so every case is unavailable. Handlers
+//! arrive with the steps that make their observations exist.
+
+mod corpus;
+mod manifest;
+mod profile;
+mod rules;
+mod runner;
+mod standard;
+
+pub use corpus::{
+    Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError, corpus_root,
+    workspace_root,
+};
+pub use manifest::{
+    CaseExpectations, CaseInputs, CaseManifest, ExpectedDiagnostic,
+    ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError, Verdict,
+};
+pub use profile::{
+    CaseObservation, ConformanceOperation, ConformanceProfile, HandlerError,
+    ProfileHandler, UnknownOperation, UnknownProfile,
+};
+pub use rules::{
+    IdentityParts, InvalidIdentity, RULE_PREFIXES, RULES_FILE_NAME, RULES_HEADER,
+    RuleIndex, RuleRow, RuleStatus, RulesError, parse_identity,
+};
+pub use runner::{CaseReport, CaseStatus, ConformanceRunner, ProfileCounts, RunReport};
+pub use standard::{DispatchResult, ProfileDispatcher, standard_dispatcher};

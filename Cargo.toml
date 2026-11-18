@@ -15,6 +15,7 @@ publish = false
 vibra-actors = { path = "crates/vibra-actors" }
 vibra-build = { path = "crates/vibra-build" }
 vibra-codegen = { path = "crates/vibra-codegen" }
+vibra-conformance = { path = "crates/vibra-conformance" }
 vibra-conformance-v1 = { path = "crates/vibra-conformance-v1" }
 vibra-diagnostics = { path = "crates/vibra-diagnostics" }
 vibra-diagnostics-v1 = { path = "crates/vibra-diagnostics-v1" }
