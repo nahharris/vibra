@@ -309,6 +309,11 @@ fn violations(
             continue;
         };
         for edge in edges.difference(permitted) {
+            // A crate's tests may name the crate itself to turn on one of its
+            // own features; that is not an edge between crates.
+            if edge == crate_name {
+                continue;
+            }
             found.push(format!(
                 "crate `{crate_name}` depends on `{edge}`, which the architecture \
                  boundary does not permit"
@@ -1039,6 +1044,8 @@ fn the_bridge_carries_no_compiler_ir() {
     assert!(section("build-dependencies").is_empty());
     assert!(
         section("dev-dependencies").is_subset(&BTreeSet::from([
+            // Itself, for the library feature its tests link under.
+            BRIDGE_CRATE.to_owned(),
             "vibra-diagnostics".to_owned(),
             "vibra-exec".to_owned(),
             "vibra-nexus-eval".to_owned()
