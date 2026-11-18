@@ -32,7 +32,7 @@ pub use corpus::{
     workspace_root,
 };
 pub use manifest::{
-    CaseExpectations, CaseInputs, CaseManifest, ExpectedDiagnostic,
+    CaseExpectations, CaseInputs, CaseManifest, ExpectedDiagnostic, ExpectedFix,
     ExpectedRelatedSpan, MANIFEST_FILE_NAME, ManifestError, Verdict,
 };
 pub use profile::{

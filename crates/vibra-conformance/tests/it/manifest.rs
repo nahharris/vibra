@@ -211,7 +211,7 @@ fn the_expectation_keys_decode() {
         "{}\n[[expect.diagnostics]]\ncode = \"@syntax.unmatchedDelimiter\"\n\
          level = \"@error\"\nsource = \"input.vibon\"\nspan = {{ start = 4, end = 5 }}\n\
          related = [{{ source = \"input.vibon\", span = {{ start = 0, end = 1 }} }}]\n\
-         notes = [\"a note\"]\n",
+         notes = [\"a note\"]\nfixes = []\n",
         manifest(
             "V2-SRC-READER-x",
             "readerV2",
@@ -247,6 +247,24 @@ fn the_expectation_keys_decode() {
     assert_eq!(diagnostic.source_id.as_deref(), Some("input.vibon"));
     assert_eq!(diagnostic.related.len(), 1);
     assert_eq!(diagnostic.notes, ["a note"]);
+    assert_eq!(diagnostic.fixes, Some(Vec::new()));
+}
+
+#[test]
+fn a_fix_on_a_code_without_fix_capability_is_rejected() {
+    let text = format!(
+        "{}\n[[expect.diagnostics]]\ncode = \"@style.casing\"\nlevel = \"@warning\"\n\
+         span = {{ start = 0, end = 1 }}\nfixes = [{{ safe = true }}]\n",
+        manifest("V2-SRC-READER-x", "readerV2", "reader", "")
+    );
+    let error = CaseManifest::from_str(&text).expect_err("@none offers no fix");
+    assert!(
+        error.to_string().contains("fix capability @none"),
+        "{error}"
+    );
+    let text = text.replace("{ safe = true }", "{ safe = true, kind = 1 }");
+    let error = CaseManifest::from_str(&text).expect_err("an unknown fix key");
+    assert!(error.to_string().contains("kind"), "{error}");
 }
 
 #[test]

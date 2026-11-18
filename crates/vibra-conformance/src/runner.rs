@@ -344,6 +344,32 @@ fn matches(
         if !expected.notes.is_empty() && expected.notes != actual.notes() {
             return Err(format!("diagnostic {index} notes mismatch"));
         }
+        if let Some(fixes) = &expected.fixes {
+            if fixes.len() != actual.fixes().len() {
+                return Err(format!(
+                    "diagnostic {index} fix count mismatch: expected {}, got {}",
+                    fixes.len(),
+                    actual.fixes().len()
+                ));
+            }
+            for (fix_index, (expected_fix, actual_fix)) in
+                fixes.iter().zip(actual.fixes()).enumerate()
+            {
+                let fix_matches = expected_fix.safe == actual_fix.is_safe()
+                    && expected_fix
+                        .description
+                        .as_deref()
+                        .is_none_or(|description| {
+                            description == actual_fix.description()
+                        })
+                    && expected_fix.expected_revision.as_deref().is_none_or(
+                        |revision| revision == actual_fix.expected_revision().as_str(),
+                    );
+                if !fix_matches {
+                    return Err(format!("diagnostic {index} fix {fix_index} mismatch"));
+                }
+            }
+        }
     }
     let observed = [
         ("tree", observation.tree.as_deref()),

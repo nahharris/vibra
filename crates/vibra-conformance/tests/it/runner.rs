@@ -10,7 +10,7 @@ use vibra_conformance::{
     Case, CaseObservation, CaseStatus, ConformanceProfile, ConformanceRunner, Corpus,
     HandlerError, ProfileDispatcher, ProfileHandler, Verdict, standard_dispatcher,
 };
-use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
+use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, DocumentRevision, Fix};
 
 fn conformance(arguments: &[&std::ffi::OsStr]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_vibra-conformance"))
@@ -200,6 +200,34 @@ fn a_diagnostic_span_mismatch_fails_and_reports_both_spans() {
         reason.contains("3..5") && reason.contains("3..4"),
         "{reason}"
     );
+}
+
+#[test]
+fn a_stated_empty_fix_list_fails_when_a_fix_is_offered() {
+    let root = one_reader_case(
+        "\n[[expect.diagnostics]]\ncode = \"@syntax.invalidForm\"\nlevel = \"@error\"\n\
+         span = { start = 3, end = 5 }\nfixes = []\n",
+    );
+    let diagnostic = Diagnostic::new(
+        DiagnosticCode::SyntaxInvalidForm,
+        ByteSpan::new(3, 5),
+        "not admitted",
+    );
+    let mut observation = CaseObservation::new(Verdict::Accepted);
+    observation.diagnostics.push(diagnostic.clone());
+    assert_eq!(
+        status_under(&root, ConformanceProfile::ReaderV2, observation),
+        CaseStatus::Passed
+    );
+    let mut observation = CaseObservation::new(Verdict::Accepted);
+    observation.diagnostics.push(
+        diagnostic.with_fix(Fix::safe("rewrite the form", DocumentRevision::new("r1"))),
+    );
+    let status = status_under(&root, ConformanceProfile::ReaderV2, observation);
+    let CaseStatus::Failed { reason } = status else {
+        panic!("{status:?}");
+    };
+    assert!(reason.contains("fix count mismatch"), "{reason}");
 }
 
 #[test]

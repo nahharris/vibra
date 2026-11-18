@@ -12,7 +12,7 @@ use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 
 use serde::Deserialize;
-use vibra_diagnostics::{ByteSpan, DiagnosticCode, Level};
+use vibra_diagnostics::{ByteSpan, DiagnosticCode, FixCapability, Level};
 
 use crate::profile::{ConformanceOperation, ConformanceProfile};
 use crate::rules::{is_suffix, parse_identity};
@@ -147,6 +147,21 @@ pub struct ExpectedDiagnostic {
     pub related: Vec<ExpectedRelatedSpan>,
     /// Notes, asserted when the case states any.
     pub notes: Vec<String>,
+    /// Fixes, in order, asserted when the case states the key. A code whose
+    /// fix capability is `@none` offers no fix, so its list is empty.
+    pub fixes: Option<Vec<ExpectedFix>>,
+}
+
+/// One expected fix of a diagnostic.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ExpectedFix {
+    /// Whether the fix may be applied automatically.
+    pub safe: bool,
+    /// The description, asserted when stated.
+    pub description: Option<String>,
+    /// The document revision the fix was computed against, asserted when
+    /// stated.
+    pub expected_revision: Option<String>,
 }
 
 /// The expected observations of a case. Every snapshot is a case-relative
@@ -537,6 +552,25 @@ fn decode_diagnostic(
             code.level()
         )));
     }
+    if code.fix_capability() == FixCapability::None
+        && raw.fixes.as_ref().is_some_and(|fixes| !fixes.is_empty())
+    {
+        return Err(ManifestError::Invalid(format!(
+            "expected diagnostic {code} declares a fix, but the registry gives it fix \
+             capability {}",
+            code.fix_capability()
+        )));
+    }
+    let fixes = raw.fixes.map(|fixes| {
+        fixes
+            .into_iter()
+            .map(|fix| ExpectedFix {
+                safe: fix.safe,
+                description: fix.description,
+                expected_revision: fix.expected_revision,
+            })
+            .collect()
+    });
     let primary_span = decode_span(&raw.span, code)?;
     let related = raw
         .related
@@ -555,6 +589,7 @@ fn decode_diagnostic(
         primary_span,
         related,
         notes: raw.notes,
+        fixes,
     })
 }
 
@@ -631,6 +666,18 @@ struct RawExpectedDiagnostic {
     related: Vec<RawRelatedSpan>,
     #[serde(default)]
     notes: Vec<String>,
+    #[serde(default)]
+    fixes: Option<Vec<RawFix>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct RawFix {
+    safe: bool,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    expected_revision: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
