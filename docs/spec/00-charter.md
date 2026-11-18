@@ -98,20 +98,24 @@ conformance case or an explicit review-only invariant.
   or rejects. It leaves no run-time check.
 - **Effects and authority are separate and both explicit.** A procedure's
   written ceiling states which operations it may perform. Performing one
-  also needs a grant: a sealed value, passed as an ordinary argument, that
-  the program received at entry from a binding the project target declares.
-  No ambient authority exists.
+  also needs a grant: a sealed value, passed as an ordinary argument. Every
+  grant descends from one of two roots: a binding the project target
+  declares, received at entry, or the root grant the test runner issues for
+  a test's isolated world. Derivation from a root is restricted to the
+  narrowing operations of the effects chapter and the test-world operations
+  of the programs chapter. No ambient authority exists.
 - **No dependency cycles.** Imports, package dependencies, module-value
   initializers, startup grant bindings, and build inputs are acyclic.
   Recursion among the declarations of one module, in functions and in types,
   is not a dependency cycle.
 - **Tail calls.** A call in tail position reuses the current activation.
   Recursion has no depth limit of its own.
-- **Library-first core.** The compiler owns the scalar types, `List`, the
-  callable types, and the structural type forms. Every other type is
-  standard-library Vibra, known to the compiler only by a closed language
-  role. Toolchain-owned external declarations use only the closed
-  `@compiler` and `@host` providers.
+- **Library-first core.** The compiler owns the representation of the
+  scalar types and `List`, which the embedded `@std.builtin` module declares
+  with `Intrinsic` bodies, and the callable and structural type forms. Every
+  other type is standard-library Vibra, known to the compiler only by a
+  closed language role. Toolchain-owned external declarations use only the
+  closed `@compiler` and `@host` providers.
 - **Two executions, one meaning.** The interpreter is permanent: it is the
   reference for semantics and the evaluator the compiler uses at compile
   time. The native compiler and runtime produce standalone executables. The

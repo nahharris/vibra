@@ -57,8 +57,9 @@ Evaluation is strict and, apart from explicit host inputs, deterministic.
   directly enclosing sequence. When a refutable `let … else` fails, only the
   fallback runs, and every path of it MUST leave the sequence.
 - **`return`** evaluates its operand and leaves the nearest callable
-  activation, subject to [callable contract execution](#callable-contract-execution).
-  The remaining statements are skipped.
+  activation, subject to
+  [callable contract execution](#callable-contract-execution). The
+  remaining statements are skipped.
 - **`try`** evaluates its operand once and propagates only as the type
   chapter specifies. It converts no error.
 - **`if`** runs only the selected branch. **`match`** evaluates its subject
@@ -203,13 +204,23 @@ A generic activation MUST behave as if its body had been written at its
 actual type arguments.
 
 - A `List(T)` built where `T` is `I32` is a `List(I32)` wherever it goes.
-- Member selection uses the instantiated receiver and interface arguments.
-- A default member runs with the receiver and interface arguments of its
-  own call.
+- Member selection uses the closed
+  [substitution](02-type-system.md#substitution) of the type chapter: the
+  instantiated receiver, the interface's positional arguments, and the
+  selected implementation's choices. That substitution is the dispatch
+  evidence of the activation.
+- A default member runs under the substitution of the implementation
+  selected for its own call, so an associated name in its body denotes that
+  implementation's choice.
 - A destination-dispatched conversion uses the instantiated, written
   destination type.
-- A closure keeps the type arguments of the activation that created it. A
-  generic anonymous callable adds its own when it is called.
+- A type parameter bound to a choice by label, as in
+  `given {T: Ordered I: Iter(Item: T)}`, is instantiated at the choice of
+  the selected implementation, and its own bound's evidence comes from that
+  type.
+- A closure and a plan keep the type arguments and the dispatch evidence of
+  the activation that created them. A generic anonymous callable adds its
+  own when it is called.
 
 The first native profile passes type descriptors at run time. A later
 optimization MAY specialize instead, only if no observation changes.
@@ -298,10 +309,10 @@ defines. A row alone MUST NOT create a grant or permit a real effect.
 - A false assertion records `@test.assertionFailed` and stops only its own
   test. It is an outcome of the runner. It is not a `Result` and not a trap,
   and source cannot catch it.
-- A type known to contain a function, a plan, or a grant is rejected
-  statically wherever a value must be observed. A value that hides one
-  behind an interface value gives an explicit observation error,
-  `@tool.unsupportedValue`, and never a trap.
+- A type known to contain a function, a plan, a grant, or an interface
+  value is rejected statically wherever a value must be observed. A value
+  that holds one where the static type did not show it gives an explicit
+  observation error, `@tool.unsupportedValue`, and never a trap.
 - Defect traps and host events keep their own categories.
 
 ## Compiler intrinsic registry
@@ -393,14 +404,17 @@ first replace any NaN by the single positive quiet NaN with a zero payload
 of its width. Arithmetic MAY produce any NaN, or canonicalize eagerly.
 Negative zero is normalized only where an operation says so.
 
-**Canonical text.** A float is written `nan`, `inf`, `-inf`, or the
-shortest decimal digits that round-trip.
+**Canonical text.** `From` to `Str` writes a float as `nan`, `inf`,
+`-inf`, or the shortest decimal digits that round-trip.
 
 - Zero, and a magnitude in [1e-4, 1e16), use decimal notation with at least
   one fractional digit: `100.0`, `-0.0`, `0.0025`.
 - Any other magnitude uses scientific notation, with one integral digit and
   no plus sign in the exponent: `1e20`, `1.5e-7`.
-- A value encoding adds the width suffix. `From` to `Str` does not.
+- A [value encoding](#values) writes a finite float as this text with the
+  width suffix, so signed zero is preserved as `-0.0f64`, and writes a
+  non-finite float as a closed record, because `nan` and `inf` are not
+  literals of the VIBON grammar.
 
 ### Character, sequence and dictionary operations
 
@@ -433,8 +447,11 @@ shortest decimal digits that round-trip.
 There is no `List.of`, `Dict.of`, or `Dict.fromEntries`.
 
 - **One walk.** `Str` and `Bytes` delegate their lexicographic comparison to
-  one generic helper over two `Iter` values with `Ordered` items. Their
-  `Equatable` implementations stay explicit and small.
+  one generic helper, `fn compareLexicographic(T I)` with
+  `takes {left: I right: I}`, `returns order: Ordering`, and
+  `given {T: Ordered I: Iter(Item: T)}`, which walks both iterators with
+  `Iter.next` and compares items with `Ordered.compare`. Their `Equatable`
+  implementations stay explicit and small.
 - **`Bool`.** `Bool.not`, `and`, `or`, and `xor` are ordinary members and
   evaluate both operands. Short-circuiting is written with `if`.
 - **`Char`.** The ASCII classifiers are ordinary library definitions. The
@@ -568,31 +585,44 @@ linked list, no copy-on-write, and no constant-time operation.
 ## Canonical value encoding
 
 A persistent observation is VIBON data. It is written with the data forms of
-source and is never evaluated as source.
+source and is never evaluated as source. Its field names, like every
+schema's, are identifiers and never reserved words.
 
 - A complete observation is a closed record with the fields
-  `format: @value.v2`, `type: T`, and `value: v`, in that order.
+  `format: @value.v2`, `typeInfo: T`, and `value: v`, in that order.
 - A type description alone is a closed record with `format: @type.v2` and
-  `type: T`.
+  `typeInfo: T`.
 - The format version is part of every stored observation. An incompatible
   shape MUST NOT reuse a version.
 
-### Types
-
-`T` is the canonical type encoding. The compiler-owned scalar types use the
-fixed wire atoms `@i8` through `@u64`, `@f32`, `@f64`, `@char`, `@atom`,
-`@void`, and `@never`. These are protocol tags, not source spellings.
-`@never` appears only inside a type, since `Never` has no value.
-
-A declared type is described by its canonical path, its identity, and its
-type arguments. Its body is not expanded:
-
 ```vibon
-{type: @example.count.Positive seed: "<identity>" arguments: []}
+{format: @value.v2 typeInfo: @u8 value: 200u8}
 ```
 
-Here `<identity>` stands for the identity string that
-[declared types](02-type-system.md#declared-types) defines.
+### Types
+
+`T` is the canonical type encoding. The compiler-owned scalar types are
+written as the bare fixed wire atoms `@i8` through `@u64`, `@f32`, `@f64`,
+`@char`, `@atom`, `@void`, and `@never`. These are protocol tags, not source
+spellings. `@never` appears only inside a type, since `Never` has no value.
+
+Every other type is a closed record whose first field `kind` names its
+form. A declared type is described by its canonical path, its identity, and
+its type arguments; its body is not expanded:
+
+```vibon
+{
+  kind: @declared
+  path: @example.count.Positive
+  seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+  arguments: []
+}
+```
+
+`seed` is the identity string that
+[declared types](02-type-system.md#declared-types) defines. The pair
+`{path: P seed: S}` alone is an **entity reference record**, which rows,
+the index, and build records use to name a declaration.
 
 Every type record has exactly these fields, in this order. `P` is a
 canonical atom path, `S` an identity string, `T` a nested type encoding,
@@ -600,52 +630,95 @@ and `R` a row.
 
 | Type | Fields |
 | --- | --- |
-| declared type | `type: P`; `seed: S`; `arguments`: list of `T` in parameter order, written even when empty |
-| `List` | `type: @list`; `arguments`: list holding the element `T` |
-| structural tuple | `type: @tuple`; `arguments`: list of component `T` |
-| structural record | `type: @record`; `fields`: record of `name: T` in canonical name order |
-| atom singleton | `type: @atomSingleton`; `atom`: the atom |
-| `Fn` | `type: @fn`; `parameters`: list of positional `T`; `labelled`: record of `label: T` in canonical label order; `result: T` |
-| `Proc` | `type: @proc`; `parameters`; `labelled`; `result: T`; `effects: R` |
-| `Intent` | `type: @intent`; `result: T`; `effects: R` |
+| declared type | `kind: @declared`; `path: P`; `seed: S`; `arguments`: list of `T` in parameter order, written even when empty |
+| `List` | `kind: @list`; `arguments`: list holding the element `T` |
+| structural tuple | `kind: @tuple`; `arguments`: list of component `T` |
+| structural record | `kind: @record`; `fields`: record of `name: T` in canonical name order |
+| atom singleton | `kind: @atomSingleton`; `atom`: the atom |
+| interface value | `kind: @interface`; `path: P`; `seed: S`; `arguments`: list of positional `T`, written even when empty; `choices`: dict from `Str` associated type name to `T`, one entry per associated type, written even when empty |
+| `Fn` | `kind: @fn`; `parameters`: list of positional `T`; `labels`: dict from `Str` label to `T`; `result: T` |
+| `Proc` | `kind: @proc`; `parameters`; `labels`; `result: T`; `effects: R` |
+| `Intent` | `kind: @intent`; `result: T`; `effects: R` |
 
 - `List` has the wire tag `@list`. `Bool`, `Str`, `Bytes`, `Dict`,
   `Option`, and `Result` are ordinary declared library types and are encoded
   with their declared identities.
-- A row `R` is a closed record with one field, `roots`: a list of
-  resolved canonical identity atoms, sorted by identity bytes as the
-  effects chapter defines. It is written even when empty. `Fn` has no row.
+- An interface value type names the interface and fixes every associated
+  type, exactly as source must. `Iter(Item: U8)` and `Iter(Item: Str)` are
+  two descriptors. An associated type never appears unfixed, because a
+  checked signature names one only through a label or a type parameter
+  bound to it, and a type parameter does not survive checking.
+- A row `R` is a closed record with one field, `roots`: a list of entity
+  reference records of operation interfaces, sorted by the UTF-8 bytes of
+  `path`. It is written even when empty. `Fn` has no row.
+- `labels` is a dict because it may be empty, and `{}` is a tuple.
 - Default values belong to callable values, not to this description. No
   variadic or union descriptor exists.
+
+```vibon
+{
+  format: @type.v2
+  typeInfo: {
+    kind: @fn
+    parameters: [
+      {
+        kind: @interface
+        path: @std.iter.Iter
+        seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+        arguments: []
+        choices: ["Item": @u8]
+      }
+    ]
+    labels: [:]
+    result: {kind: @list arguments: [@u8]}
+  }
+}
+```
 
 ### Values
 
 A scalar is written as its canonical literal, with its exact width suffix
 where it has one. A `Str` value is written as its canonical string literal,
 and a `Bytes` value as the bytes record below, although both source types
-are library declarations. Every other compound value is one of these closed
-records:
+are library declarations. A non-finite float is written as the `@nonFinite`
+record. Every other compound value is one of these closed records:
 
 | Value | Fields |
 | --- | --- |
+| non-finite float | `kind: @nonFinite`; `value`: `@nan`, `@positiveInfinity`, or `@negativeInfinity` |
 | bytes | `kind: @bytes`; `values`: list of `U8` literals |
-| tuple | `kind: @tuple`; `type: T` if declared; `values`: list of encoded components |
+| tuple | `kind: @tuple`; `typeInfo: T`, present only for a declared tuple; `values`: list of encoded components |
 | list | `kind: @list`; `values`: list of encoded elements in order |
 | dict | `kind: @dict`; `entries`: list of encoded key and value tuples in `Ordered` key order |
-| record | `kind: @record`; `type: T` if declared; `fields`: record of encoded fields |
-| variant | `kind: @enum`; `type: T`; `variant`: the case name as an atom; `payload`: the encoded fields, only for a case that has fields |
-| wrapper | `kind: @wrapper`; `type: T`; `value`: the encoded representation |
+| record | `kind: @record`; `typeInfo: T`, present only for a declared record; `fields`: record of encoded fields |
+| variant | `kind: @enum`; `typeInfo: T`; `variant`: the case name as an atom; `payload`: the encoded fields, only for a case that has fields |
+| wrapper | `kind: @wrapper`; `typeInfo: T`; `value`: the encoded representation |
 
-- A declared type's `type` field is its complete description, with its
-  identity and arguments. An anonymous tuple or record has no `type` field,
-  because the observation's own type already gives its shape.
+- A `@nonFinite` record is valid only where the enclosing type is `@f32` or
+  `@f64`. There is one canonical NaN, written `@nan`, whatever the sign or
+  payload of the value observed. A finite float is its literal with its
+  suffix, and `0.0f32` and `-0.0f32` are two different values.
+- A declared type's `typeInfo` field is its complete description, with its
+  identity and arguments. An anonymous tuple or record has no `typeInfo`
+  field, because the observation's own type already gives its shape.
 - Declared fields and cases keep declaration order. Anonymous record fields
   use canonical name order.
-- A case name is the resolved source name. That is no reason to rename an
-  unrelated historical wire tag.
+- A case name is the resolved source name.
 - A decoder MUST check the expected type, every width and scalar invariant,
   the completeness of fields and cases, the nominal identity, and any
   `where`, before it exposes a typed value.
+
+```vibon
+{format: @value.v2 typeInfo: @f64 value: {kind: @nonFinite value: @negativeInfinity}}
+```
+
+```vibon
+{
+  format: @value.v2
+  typeInfo: {kind: @record fields: {ratio: @f32 scale: @f64}}
+  value: {kind: @record fields: {ratio: -0.0f32 scale: 1e20f64}}
+}
+```
 
 ### What has no encoding
 
@@ -654,8 +727,10 @@ encoding, and nothing decodes into one.
 
 - A type statically known to contain one is rejected wherever an encoding
   is required.
-- A value that hides one behind an interface value gives an explicit
-  encoding error. It never gives a trap, a fake null, or a truncated value.
+- An interface value has no value encoding either: the type that chose its
+  implementation is hidden, and an observation never recovers it. A value
+  that holds one gives an explicit encoding error. It never gives a trap, a
+  fake null, or a truncated value.
 - A diagnostic tool MAY emit a separately versioned summary that cannot be
   decoded. It MUST be labelled as a summary, and a value decoder MUST NOT
   accept it.
@@ -690,9 +765,9 @@ declarations of the embedded standard library may bind them.
 
 ## Host registry
 
-Registry major version 2 adapts the 17 host rows of v0.0.1 to capability
-receivers, one nominal owner per operation, and typed delivery outcomes. It
-keeps their wire symbols. It does not reinterpret a major-1 binary.
+Registry major version 2 has 17 host rows, each with a capability receiver,
+one nominal owner per operation, and typed delivery outcomes. A binary built
+against another major is not reinterpreted.
 
 A row is a symbol, an owner, an exact signature, a `since` minor version,
 and a delivery class. Every row below has `since` 0 and delivery `@once`.
@@ -827,8 +902,7 @@ access by itself.
 
 **`DirStat.stat`** needs its own grant and selector. It returns the byte
 length of a regular file, and zero for any other kind. It does not follow a
-link, and so gains no wider traversal authority. This is a deliberate
-change from the unconstrained major-1 row.
+link, and so gains no wider traversal authority.
 
 **File writes** create or replace the whole contents.
 
@@ -957,19 +1031,33 @@ worlds, with fake sealed grants.
   and the versions of source, driver, policy, and world.
 
 The closed data format is `@hostWorld.v2`, with these fields in this
-order. A missing field takes its default. An unknown field or an invalid
-value is rejected.
+order. Every field but `format` is optional and takes its default when
+absent, under the [schema rules](04-programs-and-packages.md#schemas). An
+unknown field or an invalid value is rejected.
 
 | Field | Data | Default |
 | --- | --- | --- |
 | `format` | `@hostWorld.v2` | required |
-| `stdin` | a `Str` literal or a canonical bytes record | empty text |
-| `directories` | list of canonical rooted virtual directory paths | empty |
-| `files` | dict from canonical rooted virtual path to `Str` or bytes content | empty |
+| `stdin` | a `Str` literal or a [bytes record](#values) | empty text |
+| `directories` | list of canonical rooted virtual directory paths, each a `Str` | empty |
+| `files` | dict from `Str` canonical rooted virtual path to `Str` or bytes record content | empty |
 | `env` | dict from `Str` name to `Str` value | empty |
 | `args` | list of `Str` | empty |
-| `clock` | record `wall: I64`, `monotonic: U64`, `step: U64` | `0i64`, `0u64`, `1u64` |
+| `clock` | record `wall: I64`, `monotonic: U64`, `step: U64`, each optional | `0i64`, `0u64`, `1u64` |
 | `random` | record `seed: U64` | `0u64` |
+
+```vibon
+{
+  format: @hostWorld.v2
+  stdin: "x\ny"
+  directories: ["/notes"]
+  files: ["/notes/a.txt": "hello" "/notes/raw.bin": {kind: @bytes values: [0u8 255u8]}]
+  env: ["HOME": "/home/vibra"]
+  args: ["/notes"]
+  clock: {wall: 1700000000000000000i64 monotonic: 0u64 step: 1000u64}
+  random: {seed: 42u64}
+}
+```
 
 **Paths.** The default world has a root directory and nothing else.
 
@@ -1010,33 +1098,123 @@ is separate, and its observation schema and version are checked.
 
 ## Audit trace
 
-The trace is the ordered list of completed host calls, plus event kinds
-specified separately. Its persistent format is `@auditTrace.v2`, a record
-of `format` and then `events`, a list. A completed host event is a closed
-record with these fields in this order:
+The trace is the ordered list of completed host calls and of the startup
+steps that came before them. Its persistent format is `@auditTrace.v2`:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `@auditTrace.v2` | required |
+| `revision` | `Str` | the workspace revision of the source that ran |
+| `target` | optional atom | the binary target; absent for a test or an evaluation |
+| `drivers` | list of `{provider: Atom version: Str}` sorted by `provider` | every driver bound in the run; `provider` is `@hostWorld.v2` for a fake world's driver |
+| `policies` | dict from `Str` policy hash to the normalized `@scopePolicy.v1` document | every policy a grant projection refers to |
+| `redaction` | atom | `@none`, or the redaction profile applied |
+| `events` | list of event records | in completion order |
+
+A **startup event** records one leaf of the
+[startup order](04-programs-and-packages.md#startup-order), and a **host
+event** one completed host call. Both are closed records whose first field
+is `kind`:
+
+| Field | Meaning |
+| --- | --- |
+| `kind` | `@startup` |
+| `binding` | the leaf's atom |
+| `provider` | the issuer's atom |
+| `status` | `@acquired`, `@absent` (refused, bound to `Option.none()`), or `@failed` |
+| `grant` | optional, present when acquired: the grant projection |
+| `failure` | optional, present when failed: `{code: Atom message: Str}` |
 
 | Field | Meaning |
 | --- | --- |
 | `kind` | `@host` |
 | `invocation` | the invocation's ordinal within the run, `U64` |
-| `parent` | the parent invocation's ordinal as `Option` data; none for a root |
+| `parent` | optional: the parent invocation's ordinal, `U64`; absent for a root invocation and for a startup read |
+| `phase` | `@startup` for a read a recipe performs, `@entry` otherwise |
 | `op` | the exact registered wire symbol, `Str` |
-| `driver` | the identity and version of the bound driver, as data |
+| `driver` | `{provider: Atom version: Str}`, the bound driver |
 | `origin` | the source-origin ordinal, `U64`; zero means no source origin |
-| `grant` | a safe projection of the grant: its policy, rights, and root accounting, with references stable within the run |
+| `grant` | the grant projection |
 | `args` | list of the canonical argument values after the grant, in parameter order |
 | `result` | the canonical data of the operation's complete `Result` value |
 
+A **grant projection** is a closed record of `binding` (atom, the leaf the
+grant descends from); `policy` (`Str`, the hash of its normalized policy and
+a key of `policies`, or the empty string for a provider without a policy);
+`rights` (a one-entry list of entity reference records, the operation
+interface it permits); `limits` (optional, absent when no bound is set,
+otherwise a record of the bounds that are set among `invocations`,
+`inputBytes`, and `outputBytes`, each `U64`); and `root` (`U64`, a
+run-local ordinal of the root grant whose accounting it shares).
+
+```vibon
+{
+  format: @auditTrace.v2
+  revision: "sha256:33d677dc829d6e953467ca5c9f3ffe396839cb1184fbeaba1e34703ee2fa4ff1"
+  target: @hello
+  drivers: [{provider: @host.io.stdout version: "0.0.2"}]
+  policies: [:]
+  redaction: @none
+  events: [
+    {
+      kind: @startup
+      binding: @out
+      provider: @host.io.stdout
+      status: @acquired
+      grant: {
+        binding: @out
+        policy: ""
+        rights: [{path: @std.io.StdoutText seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"}]
+        root: 1u64
+      }
+    }
+    {
+      kind: @host
+      invocation: 2u64
+      parent: 1u64
+      phase: @entry
+      op: "io.stdoutText"
+      driver: {provider: @host.io.stdout version: "0.0.2"}
+      origin: 1u64
+      grant: {
+        binding: @out
+        policy: ""
+        rights: [{path: @std.io.StdoutText seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"}]
+        root: 1u64
+      }
+      args: ["hello\n"]
+      result: {
+        kind: @enum
+        typeInfo: {
+          kind: @declared
+          path: @std.result.Result
+          seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+          arguments: [
+            @void
+            {
+              kind: @declared
+              path: @std.io.IoError
+              seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+              arguments: []
+            }
+          ]
+        }
+        variant: @ok
+        payload: {value: void}
+      }
+    }
+  ]
+}
+```
+
 **Projections.**
 
-- The identities of source, target, driver, and policy, and any redaction
-  profile, are pinned alongside the trace.
 - A grant projection links to the approved policy and to the run-time
   resource identity. It never encodes a usable broker handle, a credential,
   or a callable, and decoding one grants nothing.
-- Sensitive path or credential detail may be redacted only under the stated
-  profile, and authorized tooling must keep enough stable references to
-  inspect the run.
+- Sensitive path or credential detail may be redacted only under the
+  `redaction` profile named in the trace, and authorized tooling must keep
+  enough stable references to inspect the run.
 
 **When an event is appended.**
 
@@ -1056,8 +1234,9 @@ record with these fields in this order:
 
 **Other kinds.**
 
-- Startup acquisition has its own phase and correlations, so configuration
-  reads and approved broker effects before the entry are not hidden.
+- Startup is recorded by the `@startup` events and the `@host` events of
+  phase `@startup`, in acquisition order, so configuration reads and
+  approved broker effects before the entry are not hidden.
 - Future kinds, for attempts, refusals, or actors, need their own specified
   fields and ordering.
 - A consumer MUST keep an unknown kind as an opaque record. Adding a field
@@ -1076,16 +1255,19 @@ signature and its binding recipes.
 **Startup.**
 
 - Recipes are checked for type, version, and authority at build time. A
-  missing required binding fails the build.
-- Grants are acquired in dependency order, with ties in the order written
-  in the project file.
-- A required grant that cannot be acquired fails startup before the entry
-  runs, with `@grant.requiredUnavailable`.
-- An optional grant refused in the way its provider specifies is bound to
-  `Option.none()`. A malformed recipe or an incompatible provider is an
-  error; it never becomes an absence.
-- Grants already acquired are released in reverse order. Release MUST NOT
-  be presented as rollback of an external effect already dispatched.
+  missing or invalid recipe fails the build, for a required and an optional
+  leaf alike.
+- Grants are acquired in the
+  [startup order](04-programs-and-packages.md#startup-order) of the
+  programs chapter, which also lists each issuer's refusals.
+- A required grant that is refused fails startup before the entry runs,
+  with `@grant.requiredUnavailable`.
+- An optional grant that is refused is bound to `Option.none()`. A
+  malformed recipe or an incompatible provider is an error; it never becomes
+  an absence.
+- Grants already acquired are released in reverse acquisition order.
+  Release MUST NOT be presented as rollback of an external effect already
+  dispatched.
 
 **The run.** After startup the launcher builds the entry's plan and runs it
 under the same contract and authority rules as any procedure.

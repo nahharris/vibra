@@ -183,9 +183,10 @@ effectful walk over a collection is a recursive `proc` over `Iter.next`.
 ## Capability values
 
 A **grant** is a sealed run-time value issued by the runtime under a target's
-binding recipe or, in a test, by the test's world. It records the operation
-it permits, the resource and policy it is limited to, the world that issued
-it, and the limits it shares with its relatives.
+binding recipe or, in a test, derived from the root grant the runner issues
+for the test's world. It records the operation it permits, the resource and
+policy it is limited to, the world that issued it, and the limits it shares
+with its relatives.
 
 No source expression makes a grant. A path, a policy value, a wrapper type,
 an `impl`, and decoded data are not grants and cannot become one. A grant has
@@ -286,23 +287,25 @@ build MUST reject an entry whose row, or a startup step whose row, is not
 contained in it. An interface in the list that nothing performs is a
 warning. The list authorizes nothing.
 
-Every entry parameter MUST have a binding recipe, defined in the
+Every grant leaf of the entry MUST have a binding recipe, defined in the
 [programs chapter](04-programs-and-packages.md#targets). The toolchain MUST
-reject a missing recipe, a recipe whose provider cannot issue the
-parameter's type, a cyclic `after` relation, and a recipe that reads an
-argument or variable without naming the grant for that read.
+reject a missing recipe, a recipe whose provider cannot issue the leaf's
+type, a cyclic `after` relation, and a recipe that reads an argument or
+variable without naming the grant leaf for that read.
 
 What a target is allowed to do MUST be presentable in plain terms from the
 project file alone: for each grant, the actual resource, the operation, the
 policy, and the limits, and not only an interface name. A recipe that reads
-configuration to choose a resource shows that read.
+configuration to choose a resource shows that read, and that read is a
+startup step whose row counts against the admission ceiling.
 
-At startup the runtime acquires grants in the order `after` requires, with
-ties in the order of their names. A required grant that cannot be acquired prevents the
-entry from running. An optional grant refused in the way its provider
-specifies becomes `Option.none()`; a malformed recipe or an incompatible
-driver is an error, never an absence. After a failed startup, grants already
-acquired are released in reverse order. Release is not rollback: an external
+At startup the runtime acquires grants in the
+[startup order](04-programs-and-packages.md#startup-order) the programs
+chapter defines. A required grant that cannot be acquired prevents the entry
+from running. An optional grant refused in the way its provider specifies
+becomes `Option.none()`; a malformed recipe or an incompatible driver is an
+error, never an absence. After a failed startup, grants already acquired are
+released in reverse acquisition order. Release is not rollback: an external
 effect that already happened is reported, not undone.
 
 No operation returns `Never`, and none terminates the process. The
@@ -383,9 +386,9 @@ Unknown fields, kinds, and versions are rejected.
 | `@fileRule` | `root`, `prefix` (list of names), `depth` (`@children`, `@tree`), `actions` (set of `@read`, `@replace`, `@create`, `@stat`), `names` |
 | `@directoryRule` | `root`, `prefix`, `depth` (`@self`, `@children`, `@tree`), `actions` (set of `@list`, `@stat`) |
 
-`root` names the entry parameter whose recipe holds the directory. `names`
-is a record whose `kind` is `@anyName`; `@exact` with `names`; `@suffix`
-with `value`; or `@allOf` or `@anyOf` with `items`.
+`root` names the grant leaf whose recipe holds the directory. `names` is a
+record whose `kind` is `@anyName`; `@exact` with `names`; `@suffix` with
+`value`; or `@allOf` or `@anyOf` with `items`.
 
 A policy is normalized before it is hashed or shown: nested `allOf` or
 `anyOf` of the same kind are flattened, duplicate items removed, items
@@ -519,10 +522,9 @@ There is no implicit conversion between error types.
 ## Standard operation inventory
 
 Each row of the host registry, major version 2, is one operation interface
-in an embedded module. The wire symbols are those of v0.0.1; the source
-names, the grant receiver, and the error cases are new. The first parameter
-of every member is the grant. The [runtime chapter](06-runtime.md#host-registry)
-gives each signature and its exact behavior.
+in an embedded module. The first parameter of every member is the grant. The
+[runtime chapter](06-runtime.md#host-registry) gives each signature and its
+exact behavior.
 
 | Module | Interface and member | Wire symbol | Resource |
 | --- | --- | --- | --- |

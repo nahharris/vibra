@@ -32,11 +32,47 @@ value, truthiness, implicit numeric widening, or implicit string conversion.
 Vibra is library-first. The compiler owns only what the language cannot build
 for itself:
 
-- the scalar types `Void`, `Atom`, `Char`, `I8` through `I64`, `U8` through
-  `U64`, `F32`, `F64`, and the uninhabited type `Never`;
-- the one generic immutable sequence `List(T)`;
+- the representation of the scalar types `Void`, `Atom`, `Char`, `I8`
+  through `I64`, `U8` through `U64`, `F32`, `F64`, and the uninhabited type
+  `Never`;
+- the representation of the one generic immutable sequence `List(T)`;
 - the `Fn`, `Proc`, and `Intent` types and the structural tuple and record
   types.
+
+The **builtin types** of the first two groups are nevertheless declared in
+Vibra, in the embedded module `@std.builtin`, each as a `type` whose body is
+`Intrinsic(@tag)` with the type's wire tag, with its static members bound to
+`@compiler` intrinsics and its implementations in nested `impl` blocks like
+any other type:
+
+```vibra
+type List(T) of Intrinsic(@list)
+  visibility @public
+  fn length
+    takes {items: Self}
+    returns count: U64
+    visibility @public
+    external @compiler
+    symbol "list.length"
+  endfn
+  impl Iter
+    type Item of T endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({T Self})
+      visibility @public
+      external @compiler
+      symbol "list.next"
+    endfn
+  endimpl
+endtype
+```
+
+`Intrinsic` gives the compiler the representation and nothing else: the
+declaration's members, implementations, visibility, and identity are those
+of its source like any other type's. `@std.builtin` is in every checked
+graph and is never imported; its public declarations are reached through the
+prelude. Only it may write `Intrinsic`.
 
 Every other type, including `Bool`, `Str`, `Bytes`, `Dict`, `Option`,
 `Result`, `Ordering`, and the standard error types, is an ordinary `type` in
@@ -56,8 +92,19 @@ role** such a type plays. A role is a closed, compiler-known position:
 | `@ordered` | `Ordered` | dict keys |
 
 The standard library declares each role exactly once with the `role`
-section. A missing or repeated role is a toolchain defect. Adding a role is a
-change to this table.
+section, on a declaration of the shape the role requires: `@bool` on a
+variant type with exactly the cases `false` and `true`; `@str`, `@bytes`,
+`@dict`, `@option`, and `@result` on the types with the constructors and
+cases this chapter names; `@iter` on an interface whose members are exactly
+the associated type `Item`, the abstract `next` of
+[Iteration](#iteration), and default members; `@equatable` and `@ordered` on
+the two interfaces of
+[Dict keys, equality, and order](#dict-keys-equality-and-order). A `role`
+section outside the embedded library is `@syntax.invalidSection`.
+A missing, repeated, or wrong-shaped role in the embedded library is a
+toolchain defect, reported as `@runtime.invalidCheckedProgram` when the
+library is loaded, never as a fallback. Adding a role is a change to this
+table.
 
 The standard library declares `Bool` as a variant type with the cases
 `false` and `true`, `Str` as a wrapper over `List(Char)`, and `Bytes` as a
@@ -100,7 +147,9 @@ IEEE 754 binary32 and binary64 formats. A suffixed literal MUST fit its type.
 An unsuffixed literal takes its type from its expected type and is
 `@type.ambiguousInference` when none follows. A decimal float literal is
 rounded to nearest, ties to even; a finite literal that would round to
-infinity is out of range. There is no source spelling for infinity or NaN.
+infinity is out of range. There is no source spelling for infinity or NaN;
+arithmetic produces them, and the
+[canonical value encoding](06-runtime.md#values) represents them as data.
 
 Plain integer arithmetic saturates. Division and remainder exist only in
 their checked forms, which return a `Result`, as do the other checked
@@ -113,11 +162,27 @@ Every `type` declaration introduces a new identity. Two declared types with
 the same structure are different types. There are no transparent aliases and
 no implicit conversion between a declared type and its representation.
 
-A declaration's identity is the hash of its logical anchor: the package and
-unit, the module path, the owner path, the declaration kind, the name, and
-the identity scheme version. The anchor does not include the declaration's
-body, so a type's identity does not depend on its fields, members, or guards.
-Renaming or moving a declaration changes its identity.
+A declaration's identity is the hash of its logical anchor: the package name
+and version, the module path (which begins with the unit), the owner path,
+the declaration kind, and the name. The anchor does not include the
+declaration's body, so a type's identity does not depend on its fields,
+members, or guards. Renaming or moving a declaration changes its identity.
+The identity is the string `sha256:` followed by 64 lower-case hexadecimal
+digits of the SHA-256 of these bytes, in order:
+
+1. the ASCII text `vibraDeclarationIdentityV2`;
+2. one zero byte;
+3. six byte strings, each preceded by its length as a big-endian 64-bit
+   integer: the package name, the package version, the module path atom with
+   its `@`, the owner path (the dotted member path within the module, empty
+   for a top-level declaration), the declaration kind atom, and the name.
+
+The declaration kinds are `@module`, `@type`, `@interface`, `@case`, `@fn`,
+`@proc`, `@value`, `@test`, and `@associatedType`. A module's anchor has an
+empty owner path and its own path's last part as the name. Test vector:
+package `hello` version `0.1.0`, module `@hello.main`, no owner, kind
+`@proc`, name `main` gives
+`sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad`.
 
 | Body | Declares | Constructor | Pattern |
 | --- | --- | --- | --- |
@@ -135,10 +200,10 @@ does not delegate application, field reads, or interface conformance to it.
 A declared type keeps its declaration order for fields and cases; that order
 fixes discriminants, rendering, and comparison order.
 
-The record fields, cases, and nested `fn` members of one type share one flat
-member namespace, and so do the members of one interface. Two members of one
-owner with the same name are `@name.memberCollision`. Implementations add no
-name to it.
+The record fields, cases, and nested `fn` and `proc` members of one type
+share one flat member namespace, and so do the members of one interface,
+its associated types included. Two members of one owner with the same name
+are `@name.memberCollision`. Implementations add no name to it.
 
 ### Representation visibility
 
@@ -178,9 +243,10 @@ names with equal types, in any written order; a record's canonical field
 order sorts names by their UTF-8 bytes. `{}` is the empty tuple. Both forms
 are accepted in every type position.
 
-An anonymous type has no owner: it declares no members, receives no `impl`,
-and conforms to no interface other than `Any` and the structural key rule
-below. It cannot refer to itself.
+An anonymous type has no owner: it declares no members and receives no
+`impl`. It conforms to `Any` and, under the structural rule of
+[Dict keys, equality, and order](#dict-keys-equality-and-order), to
+`Equatable` and `Ordered`; to no other interface. It cannot refer to itself.
 
 ### Recursive types
 
@@ -253,12 +319,15 @@ is then not defined. There is no hashed collection and no hashing interface.
 Dict keys MUST implement `Ordered`. The standard library writes the
 implementations of `Bool`, `Char`, `Str`, `Bytes`, and the integer types
 where each type is declared. `Atom`, every atom singleton type, and an
-anonymous tuple or record whose every component is an admissible key conform
-structurally, with no declaration. `Void`, `Never`, `F32`, `F64`, callable
-types, `List`, `Dict`, and `Option` are not admissible keys. A declared type
-is admissible only through its own `Ordered` implementation. An inadmissible
-key type is `@type.invalidDictKey`; a callable key is
-`@type.functionNotEquatable`.
+anonymous tuple or record whose every component implements `Ordered` conform
+to `Equatable` and `Ordered` **structurally**, with no declaration. This
+structural conformance is ordinary evidence: it satisfies a bound, it admits
+the type as a dict key, and it is the implementation `Ordered.compare` and
+`Equatable.equal` dispatch to for such a type. `Void`, `Never`, `F32`,
+`F64`, callable types, `List`, `Dict`, and `Option` are not admissible keys.
+A declared type is admissible only through its own `Ordered`
+implementation. An inadmissible key type is `@type.invalidDictKey`; a
+callable key is `@type.functionNotEquatable`.
 
 Canonical key order is the only order in which a dict is traversed, rendered,
 or iterated: `false` before `true`; numeric order for integers; scalar value
@@ -286,8 +355,8 @@ index yield `Option.none()`; they never trap. String indices count Unicode
 scalars. Construction and lookup are pure and add no call edge.
 
 No other value is applicable: not a tuple, record, variant value, wrapper,
-atom, number, or a value of an unconstrained generic type. There is no
-callable interface.
+atom, number, interface value, or a value of a type parameter. Applying one
+is `@type.notApplicable` at the callee. There is no callable interface.
 
 An argument that does not fit its slot, a wrong arity, and an unknown,
 duplicate, or missing label are `@type.argumentMismatch`. Any other
@@ -360,6 +429,16 @@ the places where a written type would supply it.
 There are no call-site type arguments. A call whose type arguments its
 operands and written expected type do not determine is rejected.
 
+The type arguments of one call are solved together: the checker unifies the
+callee's parameter types with the types of all written operands and, when
+one is written, the callee's result type with the expected type. An operand
+whose own type arguments are open, such as the construction
+`Result.ok(value: 2u64)` whose error type nothing inside it fixes, takes them
+from that unification, so `assert.equal(Result.ok(value: 2u64) actual)`
+is well-typed when `actual` has a complete `Result` type. A variable that
+is still open after every operand and the expected type have been used is
+`@type.ambiguousInference`.
+
 Every public `fn`, `proc`, module value, type parameter, and interface member
 has a complete written type. The checker validates a body against that
 contract and never rewrites the contract from the body.
@@ -368,9 +447,11 @@ contract and never rewrites the contract from the body.
 
 Type parameters are declared in a declaration's header: `type Pair(A B)`,
 `fn first(T)`, `interface From(Source)`. `given {T: Printable}` gives a
-parameter one nominal interface bound; a parameter without an entry has the
-bound `Any`. A `given` entry for a name the header does not declare is
-`@name.unknownSymbol`.
+parameter one interface bound; a parameter without an entry has the bound
+`Any`. A `given` key MUST be a type parameter of the same header: an entry
+for any other name, an inherited parameter included, is
+`@name.unknownSymbol` at the key, and a repeated key is
+`@name.redeclaration` at the later entry, related to the earlier.
 
 ```vibra
 fn first(T)
@@ -383,12 +464,61 @@ endfn
 ```
 
 Generic arguments are invariant. An applied type supplies exactly its head's
-parameter list; any other count is `@type.typeArgumentMismatch`. A bound is
-one name and cannot apply a generic interface. Every type argument MUST
-implement its parameter's bound, or the application is
-`@type.unsatisfiedBound`. Partial application, named or defaulted type
-arguments, multiple bounds on one parameter, and run-time type tests do not
-exist.
+parameter list; any other count is `@type.typeArgumentMismatch` at the
+application. Every type argument MUST implement its parameter's bound, or
+the application is `@type.unsatisfiedBound` at the argument, related to the
+bound. When an application's shape is itself invalid, only
+`@type.typeArgumentMismatch` is reported for it. Partial application,
+named or defaulted type arguments, multiple bounds on one parameter, and
+run-time type tests do not exist.
+
+### Bounds
+
+A bound is an interface, written exactly as the interface is written in any
+type position: bare, applied to positional arguments, or applied with the
+labels of [Associated types](#associated-types).
+
+```vibra
+fn largest(T)
+  takes {items: List(T)}
+  returns largest: Option(T)
+  given {T: Ordered}
+  visibility @public
+  do
+    return Iter.fold(items Option.none() fn
+      takes {best: Option(T) item: T}
+      returns next: Option(T)
+      do
+        match best
+          case Option.none()
+            return Option.some(value: item)
+          case Option.some(value: current)
+            return Option.some(value: Ordered.max(current item))
+        endmatch
+    endfn)
+endfn
+```
+
+- A bound that does not resolve to an interface, bare or applied, is
+  `@name.wrongEntityKind` at the bound. Structural, callable, and interface
+  value types are not bounds; the bound `Any` is written by omitting the
+  entry.
+- `given {T: From(I16)}` admits every type that implements `From(I16)`.
+- `given {I: Iter(Item: U8)}` admits every type whose `Iter`
+  implementation chooses `U8` for `Item`.
+- A label may name another parameter of the same header:
+  `given {T: Ordered I: Iter(Item: T)}`. This is how a generic names an
+  associated type: it binds the choice to a parameter and uses the
+  parameter. At each use of the generic the checker selects the `Iter`
+  implementation of the actual `I` and takes `T` from that implementation's
+  choice. If another operand or the expected type also fixes `T`, the two
+  MUST agree, or the operand is `@type.mismatch`; and `T` MUST then satisfy
+  its own bound, or the application is `@type.unsatisfiedBound`.
+- Inside the generic, a parameter has exactly the members of its bound, and
+  a call on it dispatches to the actual type's implementation. The evidence
+  for that dispatch, including every choice taken from it, is part of the
+  activation, as the [runtime chapter](06-runtime.md#generic-instantiation)
+  requires.
 
 A nested member sees the type parameters of its owner and declares only
 additional ones; redeclaring an inherited name is
@@ -407,7 +537,10 @@ An `interface` declares a nominal set of member signatures over `Self`.
 Conformance is always explicit: matching names and shapes are not enough.
 
 `Any` is the predeclared empty interface. Every type satisfies it without an
-implementation, and it is the only interface satisfied implicitly. `Never`
+implementation. The only other conformance without an `impl` is the
+structural `Equatable` and `Ordered` conformance of atoms and of anonymous
+tuples and records of
+[Dict keys, equality, and order](#dict-keys-equality-and-order). `Never`
 satisfies `Any` and no other interface.
 
 ### Implementations
@@ -423,45 +556,70 @@ type, never an anonymous structural type or an interface. The other kind is
 type of the same module is `@type.redundantImplementation`.
 
 A generic interface is keyed by its applied type, so one receiver may
-implement `From(I16)` and `From(I8)`. The applied targets of one receiver
-MUST be pairwise non-unifiable (see [Overlap](#overlap)), or the declaration
-is `@type.overlappingImplementation`.
+implement `From(I16)` and `From(I8)`. The **key** of an implementation is
+its receiver together with the positional arguments of its target; the
+target admits no label (`@type.typeArgumentMismatch` at the label), so a key
+is always visibly positional. The applied targets of one receiver MUST be
+pairwise non-unifiable (see [Overlap](#overlap)), or the later
+implementation is `@type.overlappingImplementation`, related to the earlier.
 
 For each implementation the checker MUST find every abstract contract member
-exactly once and verify, after replacing `Self` with the receiver, that the
-parameter and result types, labelled names and default values, guards, and
-effect row are those of the contract. An implementation MUST NOT redeclare a
-default member (`@type.defaultOverride`), omit an abstract one
-(`@type.missingAbstractMember`), or add a member the contract lacks. An
-implementation member cannot add or strengthen a `requires`, and its
+exactly once and verify that, under the implementation's
+[substitution](#substitution), the parameter and result types, labelled
+names and default values, guards, and effect row are those of the contract.
+
+| Condition | Diagnostic |
+| --- | --- |
+| an abstract callable member or an associated type the implementation does not supply | `@type.missingAbstractMember`, the `impl` head, related to the contract member |
+| a member or choice whose name is no member of the interface | `@name.unknownSymbol`, the name |
+| a member or choice supplied twice in one `impl` | `@name.memberCollision`, the later name, related to the first |
+| a default member supplied again | `@type.defaultOverride`, the member's name, related to the default |
+| a member whose signature differs from the contract under the substitution | `@type.mismatch`, the differing type, related to the contract member |
+
+An implementation member cannot add or strengthen a `requires`, and its
 `ensures` is the contract's.
 
-Default members are checked against the contract and are available to every
-conforming type. A toolchain may specialize a default body; that is not a
+Default members are checked once, against the abstract contract with the
+interface's parameters and associated types open and bounded only as the
+interface declares. At each use their signatures, bodies, and labelled
+constant defaults are instantiated under the substitution of the selected
+implementation. A toolchain may specialize a default body; that is not a
 second member.
+
+### Substitution
+
+Every rule that relates a contract member to a use goes through one closed
+**substitution**, formed from a selected implementation:
+
+- `Self` maps to the receiver type;
+- each parameter of the interface maps to the corresponding positional
+  argument of the implementation's target;
+- each associated type maps to the implementation's choice.
+
+Nothing else is substituted, and the result contains no open name of the
+interface. The substitution is used, and only it, for signature conformance
+of implementation members, for instantiating default members, for
+[dispatch](#dispatch), for [widening](#widening) to an interface value, and
+as the run-time evidence the
+[runtime chapter](06-runtime.md#generic-instantiation) carries in
+activations, closures, and plans.
 
 ### Associated types
 
 An interface parameter is chosen by whoever uses the interface, so one
 receiver may implement `From(I16)` and `From(I8)`. An **associated type** is
 chosen by the implementation, once: a receiver that is an iterator has one
-item type, and a conversion from one source has one error type.
+item type, and a conversion from one source has one error type. The prelude
+interface `Iter` of [Iteration](#iteration) declares the associated type
+`Item`; `Once` below implements it:
 
 ```vibra
-interface Iter
-  type Item endtype
-  fn next
-    takes {value: Self}
-    returns step: Option({Item Self})
-  endfn
-endinterface
-
 type Once of Option(U8)
   impl Iter
     type Item of U8 endtype
     fn next
       takes {value: Self}
-      returns step: Option({U8 Self})
+      returns step: Option({Item Self})
       do
         match value
           case Once(Option.some(value: item))
@@ -474,37 +632,72 @@ type Once of Option(U8)
 endtype
 ```
 
-- In an interface, `type Name endtype` declares an associated type. A
-  `given` entry may bound it. Inside the interface the name denotes the
-  choice of `Self`.
+- In an interface, `type Name endtype` declares an associated type. It is a
+  member of the interface, in the interface's member namespace, and it is
+  not bounded where it is declared: a `given` entry names only a header
+  parameter. A use that needs the choice to satisfy an interface binds it to
+  a bounded parameter, as [Bounds](#bounds) shows.
 - In an `impl`, `type Name of T endtype` makes the choice. It names the
   existing type `T`; it declares no new type. An implementation MUST choose
-  every associated type of its interface exactly once. A missing choice is
-  `@type.missingAbstractMember`.
+  every associated type of its interface exactly once, under the
+  diagnostics of [Implementations](#implementations).
 - Associated types are not part of an implementation's key. One receiver
   implements `Iter` at most once, and `TryFrom(Str)` at most once.
-- Through a type, an associated type is a path: `Once.Item` is `U8`,
-  and for a parameter with `given {I: Iter}`, `I.Item` is the item type of
-  whatever `I` is.
-- A type expression may fix an associated type by label, after the
-  positional arguments: `Iter(Item: U8)`, `TryFrom(Str Error: ParseError)`.
-  In a bound, `given {I: Iter(Item: U8)}` admits only iterators of `U8`. A
-  label that names no associated type is `@type.typeArgumentMismatch`.
+
+An associated type has exactly two ways to be named, and there is no
+projection path through a type or a parameter:
+
+1. **Its bare name.** Inside the interface that declares it, the name
+   denotes the choice of `Self`. Inside an `impl` of that interface, in the
+   member signatures and bodies, the name denotes the chosen type, so
+   `Once.next` above returns `Option({Item Self})` and `Item` is `U8`
+   there. A choice is resolved before the associated names of its own
+   `impl` are in scope, so a choice cannot mention an associated type of
+   the same `impl`; such a name is `@name.unknownSymbol`. An associated
+   name in scope in an `impl` MUST NOT equal a type parameter visible there,
+   or the `impl` is `@name.redeclaration` at its head, related to the
+   parameter.
+2. **A label in a type application**, after the positional arguments, which
+   fixes the choice: `Iter(Item: U8)`, `TryFrom(Str Error: ParseError)`. A
+   label that names no associated type, a label repeated, or a label in an
+   `impl` target is `@type.typeArgumentMismatch` at the label.
 
 ### Dispatch
 
 `Self` is the receiver type inside an interface, a `type`, and an `impl`. It
 is not visible in a module-level callable.
 
-A contract member that takes `Self` as the type of a required positional
-parameter is dispatched on that argument. A member with no such parameter
-whose result type contains `Self` is **destination-dispatched**: the checker
-unifies the written expected type at the call with the member's result type
-and takes `Self` from it. With no written expected type the call is
-`@type.ambiguousDestination`. A member selectable by neither rule is
-`@type.undispatchableContractMember` at its declaration. When two
-implementations remain candidates at a call, it is
-`@type.ambiguousImplementation`.
+Dispatch selects one implementation by its key and then checks the call
+under that implementation's [substitution](#substitution):
+
+1. **Receiver dispatch.** A contract member that takes `Self` as the type of
+   a required positional parameter is dispatched on that argument: the
+   argument's type is the receiver.
+2. **Destination dispatch.** A member with no such parameter whose result
+   type contains `Self` is dispatched on the written expected type at the
+   call: the checker unifies that type with the member's result type and
+   takes `Self` from it. With no written expected type the call is
+   `@type.ambiguousDestination`.
+3. The interface's positional arguments are taken from the operands and the
+   expected type by the ordinary [inference](#inference-and-checking) of
+   type arguments.
+4. The receiver and positional arguments select the implementation by key.
+   A receiver with no implementation for that key is
+   `@type.unsatisfiedBound` at the receiver operand or the expected type,
+   related to the interface. When two implementations remain candidates, the
+   call is `@type.ambiguousImplementation`.
+5. The complete signature is instantiated under the selected
+   implementation's substitution, choices included, and the operands and the
+   expected type are checked against it like any other call. So in
+   `let port: U16 be try TryFrom.convert(text) endlet`, the expected type
+   `Result(U16 ConversionError)` of the `try` operand fixes `Self` as
+   `U16`, `text` fixes `Source` as `Str`, the implementation `TryFrom(Str)`
+   on `U16` is selected, and its choice of `Error` makes the result
+   `Result(U16 ConversionError)`, which is compared whole with the expected
+   type.
+
+A member selectable by neither rule is
+`@type.undispatchableContractMember` at its declaration.
 
 A member is called through its path: `User.nameLength(value)`,
 `Printable.render(value)`. There is no inheritance between concrete types
@@ -517,20 +710,25 @@ hides which conforming type it holds. A value reaches it only by widening at
 a written expected type. A generic interface is written applied, and every
 associated type MUST be fixed by label, since the value hides the type that
 chose it: `Iter(Item: U8)`. An interface value type that leaves one open is
-`@type.typeArgumentMismatch`.
+`@type.typeArgumentMismatch` at the type.
 
 - A contract member is called through an interface value by its receiver;
-  the implementation is that of the held type.
-- `Self` in a member's result type is replaced by the same interface value
-  type, wherever it occurs in a supported position: as the result itself,
-  as a component of a tuple or record, as an argument of `Option`, `Result`,
-  or `List`, and inside the `Intent` a `proc` member builds. So `Iter.next`
-  called through an `Iter(Item: U8)` returns
-  `Option({U8 Iter(Item: U8)})`, and the remainder never shows the hidden
-  type.
-- A member that takes `Self` in another parameter, or whose result is a
-  callable taking `Self`, cannot be called through an interface value; the
-  call is `@type.mismatch`.
+  the implementation is that of the held type, and the call is checked under
+  the interface value's own substitution: `Self` maps to the interface value
+  type, the positional arguments to the written ones, and each associated
+  type to its fixed label.
+- `Self` in a member's result type is replaced through the **`Self` map**:
+  at the result itself, and recursively in the components of a tuple or
+  record, in the arguments of `Option`, `Result`, and `List`, and in the
+  result of the `Intent` a `proc` member builds. So `Iter.next` called
+  through an `Iter(Item: U8)` returns `Option({U8 Iter(Item: U8)})`, and the
+  remainder never shows the hidden type. A contract member whose result
+  type contains `Self` anywhere else, such as `Dict(Str Self)`, an argument
+  of a user generic type, or a callable type, is
+  `@type.unsupportedSelfPosition` at its result type.
+- A member that takes `Self` in a parameter other than the receiver cannot
+  be called through an interface value; the call is `@type.mismatch` at that
+  argument.
 - An interface value type implements no interface, itself included. It
   satisfies only the bound `Any`, and it never widens again.
 - No pattern, test, or conversion recovers the held type. A value of type
@@ -541,8 +739,9 @@ A signature that needs the concrete type uses a type parameter instead.
 ### Overlap
 
 Two type expressions are **unifiable** when some substitution of the type
-parameters in scope makes them the same type. Unification ignores bounds, so
-an overlap decision never depends on implementations written elsewhere. Two
+parameters in scope makes them the same type. Unification ignores bounds, and
+a type expression contains no associated type unless a label fixes it, so an
+overlap decision never depends on implementations written elsewhere. Two
 rules require a set to be pairwise non-unifiable: the applied interface
 targets of one receiver, and the source types of one receiver's `From` and
 `TryFrom` implementations taken together.
@@ -578,11 +777,44 @@ The declaration adds these default members:
 | `fold(Acc)` | `{value: Self initial: Acc step: Fn({Acc Item} Acc)}` | `Acc` |
 
 `map`, `filter`, `skip`, and `take` return the public standard-library
-adapter types `MappedIter(Item Out)`, `FilteredIter(Item)`,
-`SkippedIter(Item)`, and `TakenIter(Item)`, widened to the interface value at
-the member's result. Each adapter is an ordinary `type` with a nested `impl`
-supplying `next`. `collect` and `fold` drain the receiver; `fold` applies
-`step` to the accumulator and each item in order, starting from `initial`.
+adapter types `MappedIter(In Out)`, `FilteredIter(T)`, `SkippedIter(T)`, and
+`TakenIter(T)`, widened to the interface value at the member's result. Each
+adapter is an ordinary declared record that stores its source as the
+interface value `Iter(Item: T)` (`Iter(Item: In)` for `MappedIter`) beside
+its callback or count, with a nested `impl Iter` that chooses `Item` and
+supplies `next` by calling `Iter.next` on the stored source:
+
+```vibra
+type FilteredIter(T) of {source: Iter(Item: T) keep: Fn({T} Bool)}
+  visibility @public
+  representation @private
+  impl Iter
+    type Item of T endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        let FilteredIter(source: inner keep: keep) be value endlet
+        let Option.some(value: {item rest}) be Iter.next(inner) else
+          return Option.none()
+        endlet
+        let remainder be FilteredIter(source: rest keep: keep) endlet
+        if keep(item) then
+          return Option.some(value: {item remainder})
+        else
+          return Iter.next(remainder)
+        endif
+    endfn
+  endimpl
+endtype
+```
+
+The default `filter` constructs `FilteredIter(source: value keep: keep)`:
+the field type `Iter(Item: T)` is a written expected type, so the receiver
+widens there, and the adapter's public type arguments never name the
+source's concrete type. `collect` and `fold` drain the receiver; `fold`
+applies `step` to the accumulator and each item in order, starting from
+`initial`.
 
 Laws, over a finite iterator `xs` unless stated:
 
@@ -607,10 +839,11 @@ where the type is declared:
 | `Option(T)` | `T` | zero or one item |
 
 `Result` does not implement `Iter`. A user type implements `Iter` with a
-nested `impl` that chooses `Item` and supplies `next`. A shared algorithm over a collection is
-written once, as a member of an interface or as a generic function, and never
-once per collection type; `length`, `concat`, and `slice`, whose cost depends
-on the representation, are static members of each type.
+nested `impl` that chooses `Item` and supplies `next`. A shared algorithm
+over a collection is written once, as a member of an interface or as a
+generic function, and never once per collection type; `length`, `concat`,
+and `slice`, whose cost depends on the representation, are static members of
+each type.
 
 ## Control flow and failure
 
@@ -757,8 +990,9 @@ The checker discharges an obligation with these rules and no others:
 5. **Boolean structure.** Introduction and projection of `Bool.and`, and the
    branch rules of the fixed `Bool` operations.
 6. **Listed integer facts.** The exact-width comparison facts the
-   [conformance chapter](07-diagnostics-and-conformance.md#integer-facts) lists, such as
-   `Ordered.greater(x y)` implying that `x` and `y` are not equal.
+   [conformance chapter](07-diagnostics-and-conformance.md#integer-facts)
+   lists, such as `Ordered.greater(x y)` implying that `x` and `y` are not
+   equal.
 7. **Certified results.** After a call returns, the callee's proven `ensures`
    holds for the result, provided its `requires` was discharged.
 
@@ -825,8 +1059,12 @@ checked under the contract's `requires` and MUST establish the contract's
 Vibra has exactly two widening relations: a concrete type widens to an
 interface it conforms to, and the singleton type of an atom widens to `Atom`.
 Neither is subtyping. Each applies once, at a **written expected type**,
-never through a container and never to an interface value. The written
-expected types are:
+never through a container and never from an interface value. A concrete
+type widens to an applied interface value type only when it implements the
+interface at those positional arguments and every label of the expected type
+equals the choice of that implementation, under the implementation's
+[substitution](#substitution); a differing label is `@type.mismatch` at the
+widened expression. The written expected types are:
 
 - a parameter type, required or labelled;
 - a written result type, for the operand of each `return`;
@@ -901,6 +1139,8 @@ effects chapter defines them.
 - tuple index projection and application of tuples or records;
 - blanket implementations, generic `impl` targets inside an interface,
   inheritance, and overloading;
+- projection paths from a type or a type parameter to an associated type,
+  and bounds on an associated type at its declaration;
 - narrowing an interface value, run-time type tests;
 - guards on variant types, quantified predicates, user-supplied proofs, and
   any guard checked by sampling;

@@ -4,7 +4,8 @@ Status: normative target
 Implementation status: this chapter describes the tool contract of the
 rewritten language. The shipped v0.0.1 tool implements an earlier contract.
 A tool MUST report which commands, profiles, and schema versions it actually
-supports, as [Conformance profiles](07-diagnostics-and-conformance.md#conformance-profiles)
+supports, as
+[Conformance profiles](07-diagnostics-and-conformance.md#conformance-profiles)
 requires.
 
 ## One workspace engine
@@ -100,10 +101,10 @@ input. A test takes no program arguments; its world supplies them.
 linker.
 
 **Run** validates the target's binding recipes, acquires its grants in the
-order the [effects chapter](03-effects.md#target-admission) gives, and then
-invokes the entry. Startup work and its authority are reported separately
-from the entry's body. A tool permission flag never approves a program's
-resource policy.
+[startup order](04-programs-and-packages.md#startup-order) the programs
+chapter defines, and then invokes the entry. Startup work and its authority
+are reported separately from the entry's body. A tool permission flag never
+approves a program's resource policy.
 
 **Eval** calls one checked pure module function, named by `SUBJECT`, with
 `--arg` values that are checked against its parameter types.
@@ -152,7 +153,9 @@ nothing.
 **Add and remove** take typed records, never a shell fragment or a text
 patch. Each previews a plan and applies it only with `--write`. An invalid
 or ambiguous identity is rejected. The edit keeps comments where it can and
-leaves the file in canonical VIBON format.
+lays the file out with the
+[source-preserving formatter](04-programs-and-packages.md#decoded-values-and-canonical-bytes)
+of the programs chapter.
 
 **Sync** is the only command that acquires dependencies from the network.
 It accepts exact HTTPS Git revisions and confined local dependencies,
@@ -163,8 +166,9 @@ cycle is an error whatever the revisions.
 
 ### Formatting
 
-`fmt PATH` formats source or VIBON according to the extension. It previews
-by default; `--write` applies.
+`fmt PATH` formats source or VIBON according to the extension. For VIBON it
+is the source-preserving formatter: it keeps comments, spellings, and the
+written order of entries. It previews by default; `--write` applies.
 
 | Outcome | `changed` | `written` | `text` |
 | --- | --- | --- | --- |
@@ -172,9 +176,9 @@ by default; `--write` applies.
 | written | `true` | `true` | `null` |
 | diagnostics prevent writing | as computed | `false` | the planned text |
 
-- The formatter MUST NOT rename an identifier or reorder operands, labelled
-  arguments, field initializers, or dict pairs. A name-case
-  convention is a diagnostic, never a reason to rename.
+- The formatter MUST NOT rename an identifier, drop or add an `as`, or
+  reorder operands, labelled arguments, field initializers, or dict pairs. A
+  name-case convention is a diagnostic, never a reason to rename.
 - Source the parser recovered from ambiguously is kept byte for byte. The
   formatter does not repair by guessing.
 - A captured module is formatted with a semantic check of the candidate text
@@ -189,8 +193,8 @@ canonical string literal: `@tests.math::"adds one"`. It contains no other
 whitespace and its module begins `@tests.`. A malformed selector is invalid
 input (exit 2, no diagnostics).
 
-1. Tests are discovered in canonical module order, then declaration order. With no
-   selector, a missing or empty test root is an empty passing suite.
+1. Tests are discovered in canonical module order, then declaration order.
+   With no selector, a missing or empty test root is an empty passing suite.
 2. Project, source-graph, and required parse errors are reported first, with
    zero counts and no items. Without a selector every test module is parsed;
    with one, its module is.
@@ -227,6 +231,9 @@ identifiers `urn:vibra:schema:v2:<document-kind>`. A producer MUST validate
 every document it emits against its published schema, including rules that
 relate fields.
 
+JSON is the only place `null` appears: it is the **JSON projection** of an
+absent optional field of a VIBON document, and of an unavailable fact.
+Every VIBON document a response carries is embedded as its canonical text.
 Every structured response is a closed object with these fields:
 
 ```json
@@ -287,7 +294,8 @@ Every structured response is a closed object with these fields:
 
 Each payload is a closed object. A field described as optional is a required
 field that may be `null`. `SpanDocument` and `DiagnosticDocument` are defined
-in the [diagnostics chapter](07-diagnostics-and-conformance.md#diagnostic-documents-and-spans).
+in the
+[diagnostics chapter](07-diagnostics-and-conformance.md#diagnostic-documents-and-spans).
 
 | Command | Payload fields |
 | --- | --- |
@@ -359,19 +367,105 @@ holds `toolchain`. The revision is
 The vector tests the framing only; its contents are not a valid project.
 Host tests MUST cover it and an edit of equal length.
 
-**Claim and witness.** Each declaration has two further hashes.
+The `toolchain` record is a `@toolchain.v2` document:
 
-| Identity | Covers |
-| --- | --- |
-| claim | public signatures, nominal anchors, representations and their visibility, guard predicates and consequences, approved binding and policy interfaces |
-| witness | checked bodies and their exact admitted dependencies |
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `@toolchain.v2` | required |
+| `version` | `Str` | the toolchain release |
+| `grammar` | `Str` | the source and VIBON grammar identity |
+| `checker` | `Str` | the checker identity |
+| `stdlib` | `Str` | `sha256:` and the SHA-256 of the canonical bytes of the embedded [`@stdlibManifest.v2`](04-programs-and-packages.md#the-standard-library) |
+| `drivers` | `Str` | the driver set identity |
+| `policy` | `Str` | the policy profile identity |
+| `registry` | record `major: U32`, `minor: U32` | the host registry the toolchain implements |
+
+```vibon
+{
+  format: @toolchain.v2
+  version: "0.0.2"
+  grammar: "sourceV2"
+  checker: "staticV2"
+  stdlib: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"
+  drivers: "systemV2"
+  policy: "scopePolicyV1"
+  registry: {major: 2u32 minor: 0u32}
+}
+```
+
+**Claim and witness.** Each declaration has two further hashes, each
+`sha256:` and 64 lower-case hexadecimal digits of the SHA-256 of a framing
+text, one zero byte, and the canonical bytes of a record.
+
+| Identity | Framing text | Record | Covers |
+| --- | --- | --- | --- |
+| claim | `vibraClaimIdentityV2` | `@claim.v2` | public signatures, nominal anchors, representations and their visibility, guard predicates and consequences, implementations with their choices, and approved binding and policy interfaces |
+| witness | `vibraWitnessIdentityV2` | `@witness.v2` | the checked body and its exact admitted dependencies |
+
+A `@claim.v2` record has `format`; `declaration` (`Str`, the declaration's
+identity); `kind` (a declaration kind atom of the
+[type chapter](02-type-system.md#declared-types)); `access` (`@public` or
+`@private`); `representation` (optional, `@public` or `@private`, for a
+type); `signature` (optional, the [type encoding](06-runtime.md#types) of a
+callable's type, of a type's representation, or of a module value's type);
+`guards` (list of `{kind: Atom predicate: Str consequence: Str}` with
+`consequence` optional, `kind` one of `@requires`, `@ensures`, `@where`,
+and each text the canonical source of the expression); and
+`implementations` (list of `{contract: T choices: Dict(Str T)}` sorted by
+the canonical bytes of `contract`, where `T` is an interface descriptor and
+`choices` maps each associated type name to the chosen type encoding).
+
+A `@witness.v2` record has `format`; `declaration`; `body` (`Str`, the
+canonical source text of the whole declaration); and `dependencies` (list of
+`{declaration: Str claim: Str}` sorted by `declaration`, one per declaration
+the body resolves to).
+
+Test vectors. The claim record below, as the exact bytes shown with LF
+endings and one trailing newline, hashes to
+`sha256:d17e48d85c7888cf4ed1143b085c84c2819310c7db3970e9ebaef4cd795ae03c`:
+
+```vibon
+{
+  format: @claim.v2
+  declaration: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+  kind: @proc
+  access: @public
+  signature: {
+    kind: @proc
+    parameters: []
+    labels: [:]
+    result: {
+      kind: @declared
+      path: @std.process.ExitCode
+      seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+      arguments: []
+    }
+    effects: {roots: []}
+  }
+  guards: []
+  implementations: []
+}
+```
+
+The witness record below hashes to
+`sha256:fd75a164dc3910dbdc95a357f4f04f20faa970bb1d57f6eecfccc184e8827544`:
+
+```vibon
+{
+  format: @witness.v2
+  declaration: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+  body: "proc main returns code: ExitCode do return ExitCode(0u8) endproc"
+  dependencies: []
+}
+```
 
 An approval separately protects the test bodies it selected, their helper
 code and data, the selection, and the runner, tool, driver, and policy
 versions. A manifest MUST distinguish the code under repair from the
 protected test code: pinning every body would make repair impossible.
-Changing a guard, a consequence, or a test is never a witness-only change. A
-report says which category changed and against which approved revision.
+Changing a guard, a consequence, a test, or an implementation's choice is
+never a witness-only change. A report says which category changed and
+against which approved revision.
 
 A declared type's identity follows the logical anchor of the
 [type chapter](02-type-system.md#declared-types). Editing a body does not
@@ -449,19 +543,14 @@ empty. Structural facts do not imply the source checked.
   written order, and candidates in identity order. A private entity is not a
   candidate where it is not visible.
 
-**Type document:** `{kind, name, parameters, result, labelled, effects}`.
+**Type document:** the JSON projection of the
+[canonical type encoding](06-runtime.md#types), with one addition: a type
+parameter in scope is `{"kind": "param", "name": "T"}`. A declared type is
+referenced by its path and identity, never expanded; an interface value
+carries its fixed `choices`; a callable carries its `labels` and, for a
+`proc` or `intent`, its complete `effects`.
 
-- `kind` is `primitive`, `function`, `proc`, `intent`, `declared`,
-  `interface`, `param`, `atom`, `tuple`, `list`, `dict`, or `record`.
-- `name` is the canonical primitive name or the declared identity. A
-  declared type is referenced, never expanded.
-- `parameters` holds inputs, components, or type arguments in order.
-  `labelled` holds `{name, type}` entries. `result` is present only for
-  `function`, `proc`, and `intent`.
-- `effects` is `{roots: [identity…]}`: empty for a pure type, complete for
-  `proc` and `intent`.
-
-**Application fact:** `{kind, callee, calleeType, positional, labelled,
+**Application fact:** `{kind, callee, calleeType, positional, labels,
 resultType, dispatch}`.
 
 - `kind` is `@function`, `@procPlan`, `@constructor`, `@contract`,
@@ -514,31 +603,55 @@ invents which resource a run will touch.
 ### Index records
 
 `query @workspace --include index --expand declarations` emits a canonical
-`@index.v2` VIBON document with `format`, `revision`, `declarations`,
-`implementations`, and `references`. Its JSON form is
-`urn:vibra:schema:v2:index`, with the same order and facts, and atoms keep
-their `@`. The index is for retrieval; embedding, ranking, and storage are
-not compiler services.
+`@index.v2` VIBON document. Its JSON form is `urn:vibra:schema:v2:index`,
+with the same order and facts, atoms keeping their `@`, and absent optional
+fields projected as `null`. The index is for retrieval; embedding, ranking,
+and storage are not compiler services.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `format` | `@index.v2` | required |
+| `revision` | `Str` | the workspace revision |
+| `declarations` | list of declaration records sorted by the UTF-8 bytes of `id` | every declaration of the local package |
+| `implementations` | list of implementation records sorted by `receiver`, then `contract` | every implementation of the local package |
+| `references` | list of reference records sorted by `source`, then `start`, then `end` | every resolved reference |
 
 | Record | Fields |
 | --- | --- |
-| declaration | `id`; `kind` (`module`, `value`, `function`, `proc`, `method`, `type`, `interface`, `operation`); `module`; `owner` (null at top level); `visibility`; `source`; `text` (the formatted source); `external` (null, or provider and symbol); `facts` |
-| `facts` | null when not established; otherwise `signature`, `ceiling`, `effects`, `errors`, `applications`, `contracts`, `claimIdentity`, `witnessIdentity` |
-| implementation | `receiver`; `interface`; `source`; `text`; `members`, each with `contract`, `source`, `signature`, `text` |
-| reference | `from`; `written`; `source`; `to` (null when it depends on failed checking) |
+| declaration | `id` (`Str`, the identity); `kind` (a declaration kind atom of the [type chapter](02-type-system.md#declared-types)); `module` (atom); `owner` (optional `Str`, the owner's identity; absent at top level); `access` (`@public` or `@private`); `source` (a span record); `text` (`Str`, the formatted source); `binding` (optional record `provider: Atom`, `wireSymbol: Str`, present for an external declaration); `facts` (optional, absent when not established) |
+| `facts` | `signature` (a type encoding); `ceiling` and `effects` (rows, `{roots: […]}` of [entity reference records](06-runtime.md#types)); `errors` (list of type encodings, the ordinary result error types); `applications` (list of application facts); `contracts` (list of `{kind: Atom predicate: Str consequence: Str}` with `consequence` optional, distinguishing bare guards from guards with a consequence); `claimIdentity` and `witnessIdentity` (`Str`) |
+| implementation | `receiver` (a type encoding); `contract` (an interface descriptor with its positional arguments and no choices); `choices` (dict from `Str` associated type name to type encoding, in name order); `source`; `text`; `members`, a list of `{member: Str source: span signature: T text: Str}` where `member` is the contract member's identity |
+| reference | `from` (`Str`, the identity of the enclosing declaration); `written` (`Str`); `source` (a span record); `to` (optional `Str`, absent when it depends on failed checking) |
 
-- Rows are `{roots: […]}` records. `contracts` distinguishes bare guards
-  from guards with a consequence. `errors` lists ordinary result error
-  types.
+A span record is `{sourceId: Str start: U64 end: U64}`.
+
+```vibon
+{
+  format: @index.v2
+  revision: "sha256:33d677dc829d6e953467ca5c9f3ffe396839cb1184fbeaba1e34703ee2fa4ff1"
+  declarations: [
+    {
+      id: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+      kind: @proc
+      module: @hello.main
+      access: @private
+      source: {sourceId: "src/hello/main.vib" start: 0u64 end: 68u64}
+      text: "proc main returns code: ExitCode do return ExitCode(0u8) endproc"
+    }
+  ]
+  implementations: []
+  references: []
+}
+```
+
 - An implementation is identified by the applied interface and the receiver
   type together, and a member also by its contract member. Two
   implementations for different applications of a generic interface never
-  collapse into one.
-- Declarations sort by the UTF-8 bytes of their identity; implementations by
-  receiver, then interface; references by source, start, and end.
-- A module has a null signature and its whole formatted text. The index
-  covers the local package; a dependency or standard-library entity appears
-  only as a reference target unless expanded.
+  collapse into one, and a changed choice changes the implementation's
+  observation and the receiver's claim.
+- A module declaration has no `facts.signature` and its whole formatted
+  text. The index covers the local package; a dependency or standard-library
+  entity appears only as a reference target unless expanded.
 - A rejected body never shows exact rows or proofs.
 
 A diagnostic code used as a query subject reads the compiler's registry. It
