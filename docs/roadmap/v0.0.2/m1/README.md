@@ -88,7 +88,7 @@ the vertical-slice rule.
 | 09 | [project-and-source-graph](steps/09-project-and-source-graph.md) | vertical | 03 | 04, 05, 06, 07, 08, 12, 13, 14, 24, 27 | `vibra-workspace` (new), `vibra-conformance`, `conformance/cases` | planned |
 | 10 | [resolve-declarations](steps/10-resolve-declarations.md) | vertical | 07, 09 | 08, 12, 13, 14, 24, 27 | `vibra-resolve` (new), `vibra-workspace`, `vibra-conformance`, `conformance/cases` | planned |
 | 11 | [resolve-bodies](steps/11-resolve-bodies.md) | vertical | 10 | 08, 12, 13, 14, 24, 27 | `vibra-resolve`, `conformance/cases` | planned |
-| 12 | [checked-ir](steps/12-checked-ir.md) | infrastructure | 02 | 03 to 11, 24 | `vibra-ir` (new) | planned |
+| 12 | [checked-ir](steps/12-checked-ir.md) | infrastructure | 02 | 03 to 11, 24 | `vibra-ir` (new) | landed |
 | 13 | [interpreter](steps/13-interpreter.md) | infrastructure | 12 | 03 to 11, 14, 24 | `vibra-interp` (new) | planned |
 | 14 | [stdlib-bootstrap](steps/14-stdlib-bootstrap.md) | infrastructure | 07, 12 | 08, 09, 10, 11, 13, 24, 27 | `stdlib/` (new), `vibra-types` (new) | planned |
 | 15 | [check-core](steps/15-check-core.md) | vertical | 11, 13, 14 | 08, 24, 27 | `vibra-types`, `vibra-interp`, `vibra-workspace`, `vibra-conformance`, `stdlib/`, `conformance/cases` | planned |
