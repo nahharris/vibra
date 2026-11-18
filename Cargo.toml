@@ -25,6 +25,7 @@ vibra-fs-scope = { path = "crates/vibra-fs-scope" }
 vibra-host-v1 = { path = "crates/vibra-host-v1" }
 vibra-interp-v1 = { path = "crates/vibra-interp-v1" }
 vibra-lower = { path = "crates/vibra-lower" }
+vibra-ir = { path = "crates/vibra-ir" }
 vibra-ir-v1 = { path = "crates/vibra-ir-v1" }
 vibra-native-v1 = { path = "crates/vibra-native-v1" }
 vibra-nexus = { path = "crates/vibra-nexus" }

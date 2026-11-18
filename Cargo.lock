@@ -1577,6 +1577,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vibra-ir"
+version = "0.0.1"
+dependencies = [
+ "vibra-diagnostics",
+]
+
+[[package]]
 name = "vibra-ir-v1"
 version = "0.0.1"
 dependencies = [
