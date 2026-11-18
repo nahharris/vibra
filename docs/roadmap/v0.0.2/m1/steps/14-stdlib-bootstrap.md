@@ -16,9 +16,6 @@ checker checks every prelude module in every graph.
   [runtime chapter](../../../../spec/06-runtime.md) "Compiler intrinsic
   registry", "Native implementations", "External providers"; [source
   chapter](../../../../spec/01-source-language.md) "External definitions".
-- Open questions: Q12 (`From`, `TryFrom` in the prelude) decides whether
-  `@std.core` is imported or ambient in the examples of later steps; Q15
-  (the `native` list may be empty). Q12 must be answered before step 19.
 
 ## Entry points
 
@@ -41,7 +38,8 @@ arrives in 15).
    `lessOrEqual`, `greater`, `greaterOrEqual`, `min`, `max`, `inRange`
    written with one `compare` call each and left-biased ties, `From(Source)`,
    `TryFrom(Source)` with `type Error endtype`. Every declaration
-   `visibility @public`.
+   `visibility @public`. `Equatable`, `Ordered`, `Ordering`, `From`, and
+   `TryFrom` are prelude names, with `Any`, `Self`, `true`, and `false`.
 2. `@std.bool`: `type Bool case false case true role @bool visibility @public …`
    with `not`, `and`, `or`, `xor` members (eager, by `match`), the module
    values `true` and `false`, and `impl Equatable`, `impl Ordered` (`false`
@@ -51,27 +49,39 @@ arrives in 15).
    `case err {error: E}`, role `@result`.
 4. `@std.iter`: `Iter` with role `@iter`, `type Item endtype`, abstract
    `next`, default `map(Out)`, `filter`, `skip`, `take`, `collect`,
-   `fold(Acc)`, and the four adapter types `MappedIter(Item Out)`,
-   `FilteredIter(Item)`, `SkippedIter(Item)`, `TakenIter(Item)` with nested
+   `fold(Acc)`, and the four adapter types `MappedIter(In Out)`,
+   `FilteredIter(T)`, `SkippedIter(T)`, `TakenIter(T)`, each a record that
+   stores its source as an `Iter(Item: …)` interface value, with nested
    `impl Iter`. (Checked in step 20; parsed and loaded now.)
 5. `@std.builtin`: the `external @compiler` declarations of the intrinsic
    registry as static members of the compiler-owned types declared `of
    Intrinsic(@…)`: `I8` … `U64` (`add`, `sub`, `mul`, `neg` where signed,
    `shiftLeft`, `shiftRight`, the checked forms), `F32`, `F64` (`add`,
    `sub`, `mul`, `div`, `neg`, `equal`, `compareTotal`), `Char` (`toU32`,
-   `fromU32`), `List(T)` (`length`, `append`, `concat`, `slice`). `Dict`
-   arrives in 16, `Str` and `Bytes` in 20. Never imported.
-6. `manifest.vibon`: `@stdlibManifest.v2` with package name and version,
-   every module's path, digest, and role (`@source`, `@testRegistry` for
-   `@std.assert` later), `compiler` symbols, `host: []`, `native: []`,
-   `assertions: []`. Canonical VIBON.
-7. Loader: decode the manifest through its closed record, hash each
+   `fromU32`), `List(T)` (`length`, `append`, `concat`, `slice`, and the
+   nested `impl Iter` whose `next` is bound to `list.next`). Each wire
+   symbol is the dotted camelCase string of the registry of step 12, such
+   as `symbol "i32.addChecked"`. `Dict` arrives in 16, `Str` and `Bytes`
+   in 20. Never imported.
+6. `manifest.vibon`: the closed `@stdlibManifest.v2` record: `format`;
+   `package` with `name` and `version`; `modules`, sorted by `path`, each
+   with `path`, `digest` (`sha256:` and the SHA-256 of the module's exact
+   bytes), and `languageRoles`; `symbols` with the three lists `compiler`,
+   `host`, and `native`, each sorted by UTF-8 bytes. `host` and `native`
+   are empty in M1, which the chapter permits. The file is the document's
+   canonical text laid out by the formatter.
+7. Loader: decode the manifest through its schema (step 09), hash each
    embedded module, parse each with the reader in standard-library mode,
-   check every `external @compiler` symbol against the registry's signature
-   (`@external.unknownSymbol`, `@external.signatureMismatch` as operational
-   diagnostics that fail the load), check each role is claimed exactly once,
-   build the resolver overlay (`@std` unit). Invariant: no I/O; a mismatch
-   is a toolchain defect, never a fallback.
+   check every `external @compiler` declaration against the registry's
+   signature and owner, and check that each of the nine language roles is
+   claimed exactly once, on a declaration of the shape the type chapter
+   requires. The external check is one function over a parsed module that
+   returns `@external.unknownSymbol`, `@external.signatureMismatch`, or
+   `@external.ownerMismatch`; the checker reports them as diagnostics when
+   it checks a module, and the loader turns any fault of the embedded
+   library into the defect `@runtime.invalidCheckedProgram`, with the
+   fault in its notes. Build the resolver overlay (the unit `@std`).
+   Invariant: no I/O; a mismatch is a toolchain defect, never a fallback.
 8. Architecture row:
    `vibra-types: [vibra-diagnostics, vibra-ir, vibra-resolve, vibra-syntax]`
    (step 15 adds `vibra-interp`).
@@ -88,9 +98,11 @@ Host tests.
 | digests | each module | the manifest digest equals the embedded bytes' SHA-256 |
 | roles once | the loaded modules | nine roles, each claimed by exactly one declaration (`@dict`, `@str`, `@bytes` claimed by placeholders until 16 and 20, see the note) |
 | external symbols | every `external @compiler` declaration | its symbol is a registry row and the written signature equals the row's |
-| unknown symbol | a fixture manifest naming `i32.add-rounded` | the load fails with `@external.unknownSymbol` |
-| signature mismatch | a fixture declaring `addChecked` returning `I32` | `@external.signatureMismatch` |
-| role missing | a fixture without `role @bool` | the load fails naming the role |
+| unknown symbol | a fixture module binding `symbol "i32.addRounded"` | the external check gives `@external.unknownSymbol` at the symbol; the load fails with `@runtime.invalidCheckedProgram` |
+| signature mismatch | a fixture declaring `addChecked` returning `I32` | `@external.signatureMismatch` at the declaration; the load fails with `@runtime.invalidCheckedProgram` |
+| owner mismatch | a fixture binding `i32.addChecked` on `I64` | `@external.ownerMismatch`; the load fails the same way |
+| role missing, repeated, or misshapen | fixtures without `role @bool`, with it twice, and with it on a type whose cases are `no` and `yes` | each load fails with `@runtime.invalidCheckedProgram` naming the role |
+| manifest order | a fixture manifest whose `modules` are not sorted by `path` | the load fails |
 | prelude table | the loaded overlay | the prelude names of the type chapter all resolve to a declaration of `@std` |
 
 Note on roles: `Str`, `Bytes`, and `Dict` are declared in this step as
@@ -100,8 +112,9 @@ claimed once and the checker can type string literals and dict literals in
 
 ## Diagnostics and schema changes
 
-Codes: `@external.unknownSymbol`, `@external.signatureMismatch` (operational,
-on the toolchain's own library). Schema: `@stdlibManifest.v2` (closed
+Codes: `@external.unknownSymbol`, `@external.signatureMismatch`,
+`@external.ownerMismatch`, and the defect `@runtime.invalidCheckedProgram`
+for a fault of the embedded library. Schema: `@stdlibManifest.v2` (closed
 record, as the programs chapter lists).
 
 ## Validation
@@ -124,8 +137,8 @@ Checking the stdlib (15 onward); `Str`, `Bytes`, `Dict` members (16, 20);
 
 ## Completion evidence
 
-- [ ] `stdlib/manifest.vibon` lists six modules, an empty `host`, an empty
-      `native`, an empty `assertions`.
+- [ ] `stdlib/manifest.vibon` lists six modules sorted by `path`, an empty
+      `host` list, and an empty `native` list.
 - [ ] Every `external @compiler` declaration in `stdlib/` has a registry row
       (the loader test).
 - [ ] `stdlib-v1/` is untouched (`git diff --stat c6521c76 -- stdlib-v1` is

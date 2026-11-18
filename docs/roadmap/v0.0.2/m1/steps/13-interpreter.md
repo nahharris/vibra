@@ -7,6 +7,11 @@ the v1 interpreter was before its checker existed. The design of v1 is kept
 (heap activations, tail transfer, memory budget, instrumentation); the code
 is new because every value kind changed.
 
+This step is the interpreter part of the packages N1, N2, N3, N5, and N6 of
+the [native contract](../../m0/native-contract.md#7-suggested-package-cut),
+as the [architecture](../architecture.md#native-contract-packages) maps
+them. It edits no `-v1` crate.
+
 ## Prerequisites
 
 - Step 12 landed.
@@ -15,8 +20,8 @@ is new because every value kind changed.
   contract execution", "Generic instantiation", "Tail calls", "Activations
   and memory", "Test assertions", "Compiler intrinsic registry",
   "Representation latitude", "Canonical value encoding", "Traps";
-  [tooling chapter](../../../../spec/05-tooling.md) "Limits".
-- Open questions: none.
+  [tooling chapter](../../../../spec/05-tooling.md) "Limits";
+  [native contract](../../m0/native-contract.md) section 2.
 
 ## Entry points
 
@@ -65,9 +70,12 @@ evaluate}`.
    data.
 8. Memory budget: frames and values counted; `RuntimeError::MemoryExhausted`
    as a host event; peak and live measurements exposed.
-9. Traps: `InvalidCheckedProgram` for an IR invariant violation; nothing
-   else traps. `UnobservableValue` for a function behind an interface
-   value at an observation is an observation error, not a trap.
+9. Traps: the `Trap` type of step 12 with its two defect traps. The pure
+   language raises only `InvalidCheckedProgram`, for an IR invariant
+   violation; `InvalidHostValue` has no source in M1. There is no division
+   trap and no unobservable-value trap: a zero divisor is a typed
+   `Result`, and a function behind an interface value at an observation
+   is the observation error `@tool.unsupportedValue`.
 10. `evaluate(&CheckedModuleSet, &Expr, &[Value], Limits) -> Evaluation`
     for the checker: `Value`, `LimitReached(limit)`, or `Defect(trap)`; the
     reduction count is the limit.
@@ -96,6 +104,8 @@ Host tests over hand-built IR.
 | saturating arithmetic | `I8.add(127i8 1i8)`, `U8.sub(0u8 1u8)`, `I8.neg(-128i8)`, `I32.shiftLeft(1i32 40u32)` | `127i8`, `0u8`, `127i8`, `2147483647i32` |
 | checked arithmetic | `divChecked(1i32 0i32)`, `divChecked(-2147483648i32 -1i32)`, `remChecked(-2147483648i32 -1i32)`, `shiftLeftChecked(1u8 8u32)` | `divisionByZero`, `overflow`, `ok 0i32`, `invalidShift` |
 | float text | `1e20`, `0.0025`, `-0.0`, NaN, a value that rounds to infinity when parsed | `1e20`, `0.0025`, `-0.0`, `nan`; parse gives `outOfRange` |
+| non-finite observation | an `F64` negative infinity and an `F32` NaN as results | `{kind: @nonFinite value: @negativeInfinity}` and `{kind: @nonFinite value: @nan}` |
+| interface observation | `Any` holding `200u8` | `{kind: @interface held: {format: @value.v2 typeInfo: @u8 value: 200u8}}` |
 | NaN canonical | two NaNs with different payloads | `equal` is false for each with itself; `compareTotal` and the encoding agree and show one NaN |
 | lookups | `List`, `Dict`, `Str`, `Bytes` with an index out of range or a missing key | `Option.none()`; never a trap |
 | dict order | a dict built from keys `"b"`, `"a"`, `"a"` | two entries, `"a"` first with the later value |
@@ -124,8 +134,9 @@ small stack and still pass.
 
 ## Excluded
 
-Host operations and grants (M2); native implementations (v0.0.3); any
-front-end dependency.
+Host operations and grants (M2, packages N7 to N12); plan values,
+`Proc` and `Intent` invocation, and `await` (M2, package N4); native
+implementations (v0.0.3); any front-end dependency.
 
 ## Completion evidence
 

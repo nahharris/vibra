@@ -18,10 +18,8 @@ paths are step 11.
   chapter](../../../../spec/01-source-language.md) "Declarations", "`use`",
   "Names and paths"; [diagnostics
   chapter](../../../../spec/07-diagnostics-and-conformance.md) "Availability,
-  discovery and resolution", the `@resolved.v2` row, the `@style.casing` rule.
-- Open questions: Q13 (the identity encoding) must be answered before the
-  `@resolved.v2` snapshots are committed; Q14 (`I.Item` on an unbounded
-  parameter) is step 19's.
+  discovery and resolution", `@resolved.v2` under "Persistent
+  observations", the `@style.casing` rule.
 
 ## Entry points
 
@@ -41,23 +39,34 @@ chapter lists); step 14 binds them to real declarations.
 
 1. Collect declarations per module: the seven kinds, nested members, cases,
    fields, associated types, `impl` blocks (identified by target and
-   receiver). Compute each anchor (package, unit, module path, owner path,
-   kind, name, scheme version) and its identity per Q13. Invariant: the
-   identity does not change when a body changes.
+   receiver). Compute each declaration's identity as the type chapter
+   defines it: `sha256:` and the SHA-256 of the text
+   `vibraDeclarationIdentityV2`, one zero byte, and six strings, each
+   prefixed by its byte length as a big-endian `U64`: the package name,
+   the package version, the module path atom with its `@`, the owner
+   path, the kind atom, and the name. The kind is one of `@module`,
+   `@type`, `@interface`, `@case`, `@fn`, `@proc`, `@value`, `@test`,
+   `@associatedType`. Invariant: the identity does not change when a body
+   changes.
 2. Module scope: one flat scope; a repeated top-level name or import name
    is `@name.redeclaration` at the later with the earlier related; the
    later still binds. One owner's fields, cases, nested members, and
    associated types share one namespace (`@name.memberCollision`). A
    nested member or `impl` redeclaring an inherited type parameter is
-   `@name.genericRedeclaration`; a `given` entry for a name the header does
-   not declare is `@name.unknownSymbol`.
-3. Prelude: a declaration or binder spelled as a prelude type or interface
-   name is `@name.reservedDeclaration`; a module value, function, or import
-   spelled as a prelude name is `@name.reservedValueSpelling`; both still
-   bind.
+   `@name.genericRedeclaration`, and so is an associated type whose name
+   equals a visible type parameter; a `given` key that is not a parameter
+   of the header is `@name.unknownSymbol`, and a repeated key is
+   `@name.redeclaration`.
+3. Prelude: a type, interface, type parameter, or pattern binder spelled
+   as a prelude name is `@name.reservedDeclaration` at the name; a module
+   value, `fn`, `proc`, or import spelled as one is
+   `@name.reservedValueSpelling` at the name; either still binds.
 4. Imports: locator resolution by walking parts from the unit's root
    (`@module.unknownPath`), module import versus declaration import, the
-   local name from the last part or `as`; a private declaration imported is
+   local name from the last part or `as`; an import names a module or one
+   top-level declaration, so a path that resolves to a member, a case, or
+   a field is `@name.wrongEntityKind` at the import; a private declaration
+   imported is
    `@name.privateAccess`; `@module.importCycle` at the later edge with the
    cycle related; an import name equal to a declaration or another import is
    `@name.redeclaration`. A target module importing `@tests` is
@@ -65,13 +74,19 @@ chapter lists); step 14 binds them to real declarations.
    by the referring position.
 5. Paths in type positions and in section operands: `given` bounds, `impl`
    targets, type arguments, `use` locators; `@name.unknownSymbol`;
-   `@name.wrongEntityKind` names what was found; a type position resolves
-   across the type and interface namespaces.
+   `@name.wrongEntityKind` names what was found (a bound that is not an
+   interface is one); a type position resolves across the type and
+   interface namespaces. An associated type is named only by its bare name
+   inside its interface or `impl`, or as a label in a type application.
+   There is no projection path: in `I.Item` and `Once.Item` the part
+   `Item` is `@name.unknownSymbol`, related to the parameter or type.
 6. Casing: `@style.casing` (warning) for a declaration name that departs
    from the convention; meaning unchanged.
-7. `@resolved.v2` snapshot: `format`, `package`, `modules`, `declarations`
-   (anchor, identity, kind, visibility, source, span), `imports`,
-   `references` (type-position references in this step). The `resolve`
+7. `@resolved.v2` snapshot, the closed schema of the diagnostics chapter:
+   `format`, `package`, `modules`, `declarations` (each with `identity`,
+   `anchor`, `access`, `span`), `imports` (each with `span`, `path`,
+   `name`, `to`), and `references` (type-position references in this
+   step). A span is the record `{sourceId start end}`. The `resolve`
    handler.
 8. Cases, as confined trees with `project.vibon`.
 
@@ -87,7 +102,13 @@ chapter lists); step 14 binds them to real declarations.
 | `V2-TYPE-GENERIC-given-unknown` | negative | `type Box(T) of {item: T} given {U: Any} endtype` | `@name.unknownSymbol` at `U` |
 | `V2-TYPE-NAMES-reserved-declaration` | negative | `type Option of U8 endtype` | `@name.reservedDeclaration` at `Option` |
 | `V2-TYPE-NAMES-reserved-value` | negative | `let true: U8 be 1u8 endlet` | `@name.reservedValueSpelling` at `true` |
-| `V2-TYPE-NAMES-reserved-import` | negative | `use @app.util.Option enduse` with `util.vib` declaring nothing named so | `@module.unknownPath` first; with a real `Option` declared in `util` the case is `@name.reservedDeclaration` there and `@name.reservedValueSpelling` at the import |
+| `V2-TYPE-NAMES-reserved-import` | negative | `use @app.util as true enduse` | `@name.reservedValueSpelling` at `true` |
+| `V2-TYPE-NAMES-reserved-type-parameter` | negative | `type Box(Option) of {item: U8} endtype` | `@name.reservedDeclaration` at the parameter `Option` |
+| `V2-TYPE-GENERIC-given-repeated` | negative | `type Box(T) of {item: T} given {T: Any T: Ordered} endtype` | `@name.redeclaration` at the second `T` |
+| `V2-TYPE-NAMES-assoc-shadows-parameter` | negative | `interface Source(Item) type Item endtype endinterface` | `@name.genericRedeclaration` at the associated `Item` |
+| `V2-TYPE-NAMES-no-projection-path` | negative | `fn first(I) takes {it: I} returns r: Option(I.Item) given {I: Iter} do return Option.none() endfn` | `@name.unknownSymbol` at `Item`, related to the parameter `I` |
+| `V2-PROJECT-import-member` | negative | `use @app.model.User.nameLength enduse` | `@name.wrongEntityKind` at the import |
+| `V2-PROJECT-import-std-unit` | positive | `use @std.core enduse` in a project that declares no dependency | resolves to the unit `@std` (with the placeholder table until step 14) |
 | `V2-PROJECT-import-module` | positive | `use @app.model enduse` with `model.vib` declaring public `User`; `main.vib` uses `model.User` in a type | accepted; one module import |
 | `V2-PROJECT-import-declaration` | positive | `use @app.model.User enduse`; `User` used bare | accepted |
 | `V2-PROJECT-import-alias` | positive | `use @app.model as m enduse`; `m.User` | accepted |
@@ -100,7 +121,8 @@ chapter lists); step 14 binds them to real declarations.
 | `V2-TYPE-NAMES-unknown-type` | negative | `type A of Nothere endtype` | `@name.unknownSymbol` at `Nothere` |
 | `V2-TYPE-NAMES-impl-target-kind` | negative | `type A of U8 impl U16 endimpl endtype` | `@name.wrongEntityKind` at `U16` |
 | `V2-DIAG-style-casing` | warning | `type user of U8 endtype` | `@style.casing` at `user`; accepted |
-| `V2-TYPE-NAMES-resolved-snapshot` | positive | the module-import case | the `@resolved.v2` snapshot (hand-written from the chapter and Q13) |
+| `V2-TYPE-NAMES-resolved-snapshot` | positive | the module-import case | the `@resolved.v2` snapshot, hand-written from the chapter, with identities computed from the framing by hand |
+| host: identity vector | positive | package `hello`, version `0.1.0`, module `@hello.main`, empty owner path, kind `@proc`, name `main` | `sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad` |
 
 ## Diagnostics and schema changes
 
@@ -131,7 +153,6 @@ library overlay (14); every type rule.
 
 ## Completion evidence
 
-- [ ] `conformance/rules.tsv` has `V2-TYPE-NAMES` and `V2-DIAG` active.
-- [ ] The identity scheme is implemented as Q13 answers, with a host test
-      vector.
+- [ ] `conformance/rules.tsv` has one `active` row per case id above.
+- [ ] The identity test vector of the type chapter passes as a host test.
 - [ ] All cases pass; validation commands exit 0.

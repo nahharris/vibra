@@ -19,8 +19,6 @@ type. No operation traps.
   and dictionary operations", "Native implementations";
   [diagnostics chapter](../../../../spec/07-diagnostics-and-conformance.md)
   "Required coverage" item 8.
-- Open questions: Q15 (empty `native` list) answered; Q17 (`Str.trim` and
-  the `Char` classifier member names are not listed by the chapter).
 
 ## Entry points
 
@@ -37,8 +35,10 @@ Proposed: `stdlib/src/std/{str,bytes}.vib`; `@std.iter` completed;
 
 1. `Str`: `type Str of List(Char) role @str representation @private …` with
    `length`, `concat`, `slice`, `toUtf8`, `fromUtf8`, `trim`, `Equatable`,
-   `Ordered` (through the shared lexicographic helper over two `Iter`
-   values with `Ordered` items), `Iter` (`Item` is `Char`), `From(N)` for
+   `Ordered` (through the one generic helper
+   `fn compareLexicographic(T I)` with `takes {left: I right: I}`,
+   `returns order: Ordering`, and `given {T: Ordered I: Iter(Item: T)}`),
+   `Iter` (`Item` is `Char`), `From(N)` for
    every number type, and the constructor and pattern `Str(scalars)`
    accessible inside the module only.
 2. `Bytes`: `of List(U8)`, `length`, `concat`, `slice`, `Equatable`,
@@ -48,13 +48,16 @@ Proposed: `stdlib/src/std/{str,bytes}.vib`; `@std.iter` completed;
    `Str`; the float static members `add`, `sub`, `mul`, `div`, `neg`,
    `equal`, `compareTotal`; floats implement neither `Equatable` nor
    `Ordered`.
-4. `Char`: `toU32`, `fromU32`, the ASCII classifiers (Q17 names), using
-   `Ordered.inRange`.
+4. `Char`: `toU32`, `fromU32`, and the three classifiers
+   `Char.isAsciiDigit`, `Char.isAsciiAlphabetic`, and
+   `Char.isAsciiWhitespace`, ordinary library definitions written with
+   `Ordered.inRange` and `Equatable.equal`. `Str.trim` removes the longest
+   prefix and suffix of the four scalars of `Char.isAsciiWhitespace`.
 5. `Bool`: `not`, `and`, `or`, `xor` eager (already in 14; cases here).
 6. `Iter`: `fold(Acc)` strict left; `map`, `filter`, `skip`, `take` lazy
    through the adapter types; `collect`; implementations for `List`,
-   `Dict` (items `{K V}` in key order through the dict iteration
-   primitive), `Str`, `Bytes`, `Option`; `Result` has none.
+   `Dict` (items `{K V}` in key order through the primitive `dict.next`),
+   `Str`, `Bytes`, `Option`; `Result` has none.
 7. `Dict`: `entries`, `From(List({K V}))`.
 8. Loader: the manifest lists eight modules; `native: []` stays empty.
 9. Cases: each law of the iteration section as an `interpret` case with a
@@ -66,7 +69,8 @@ Proposed: `stdlib/src/std/{str,bytes}.vib`; `@std.iter` completed;
 | --- | --- | --- | --- |
 | `V2-TYPE-INTERFACE-str-members` | positive, interpret | `{Str.length("héllo") Str.concat("a" "b") Str.slice("hello" 1u64 3u64) Str.slice("hello" 3u64 1u64)}` | `{5u64 "ab" Option.some(value: "el") Option.none()}` |
 | `V2-TYPE-INTERFACE-str-utf8` | positive, interpret | `Str.fromUtf8(Str.toUtf8("é"))` and `Str.fromUtf8(Bytes([255u8]))` | `Result.ok(value: "é")`, `Result.err(error: ConversionError.invalidFormat())` |
-| `V2-TYPE-INTERFACE-str-trim` | positive, interpret | `Str.trim("  a b\t")` | `"a b"` |
+| `V2-TYPE-INTERFACE-str-trim` | positive, interpret | `{Str.trim("  a b\t") Str.trim(" \n\r\t") Str.trim("\u{A0}a")}` | `{"a b" "" "\u{A0}a"}`: only the four ASCII whitespace scalars are trimmed |
+| `V2-TYPE-INTERFACE-char-classifiers` | positive, interpret | `{Char.isAsciiDigit('7') Char.isAsciiDigit('a') Char.isAsciiAlphabetic('Z') Char.isAsciiAlphabetic('é') Char.isAsciiWhitespace('\n') Char.isAsciiWhitespace('x')}` | `{true false true false true false}` |
 | `V2-TYPE-INTERFACE-str-order` | positive, interpret | `Ordered.compare("ab" "b")`, `Equatable.equal("a" "a")` | `Ordering.less()`, `true` |
 | `V2-TYPE-INTERFACE-str-representation-private` | negative | `Str(['a'])` outside `@std.str` | `@name.inaccessibleRepresentation` |
 | `V2-TYPE-INTERFACE-str-lookup` | positive, interpret | `"héllo"(1u64)` | `Option.some(value: 'é')` |
@@ -76,8 +80,9 @@ Proposed: `stdlib/src/std/{str,bytes}.vib`; `@std.iter` completed;
 | `V2-TYPE-CONVERT-render-integer` | positive, interpret | `let s: Str be From.convert(-7i32) endlet` | `"-7"` |
 | `V2-TYPE-CONVERT-float-text` | positive, interpret | `From.convert(100.0f64)`, `From.convert(0.0025f64)`, `From.convert(1e20f64)` at `Str` | `"100.0"`, `"0.0025"`, `"1e20"` |
 | `V2-TYPE-CONVERT-float-parse` | positive, interpret | `TryFrom.convert("1.5")`, `"1e400"`, `"nan"` at `F64` | `ok 1.5f64`, `outOfRange`, `invalidFormat` |
-| `V2-TYPE-INTERFACE-float-not-ordered` | negative | `Ordered.less(1.0f64 2.0f64)` | `@type.mismatch` (no implementation) |
-| `V2-RUNTIME-float-ops` | positive, interpret | `F64.div(1.0f64 0.0f64)`, `F64.equal(F64.div(0.0f64 0.0f64) F64.div(0.0f64 0.0f64))` | `inf`, `false` |
+| `V2-TYPE-INTERFACE-float-not-ordered` | negative | `Ordered.less(1.0f64 2.0f64)` | `@type.unsatisfiedBound` at `1.0f64`, related to `Ordered` |
+| `V2-RUNTIME-float-ops` | positive, interpret | `F64.div(1.0f64 0.0f64)`, `F64.equal(F64.div(0.0f64 0.0f64) F64.div(0.0f64 0.0f64))` | `{kind: @nonFinite value: @positiveInfinity}`, `false` |
+| `V2-RUNTIME-float-nan-observed` | positive, interpret | `F32.div(0.0f32 0.0f32)` | `{format: @value.v2 typeInfo: @f32 value: {kind: @nonFinite value: @nan}}` |
 | `V2-RUNTIME-saturating` | positive, interpret | `{I8.add(127i8 1i8) U8.sub(0u8 1u8) I32.shiftLeft(1i32 40u32) I8.shiftRight(-1i8 9u32)}` | `{127i8 0u8 2147483647i32 -1i8}` |
 | `V2-RUNTIME-checked` | positive, interpret | `{I32.divChecked(1i32 0i32) I32.divChecked(-2147483648i32 -1i32) U8.shiftLeftChecked(1u8 8u32)}` | `{err divisionByZero err overflow err invalidShift}` |
 | `V2-TYPE-INTERFACE-char` | positive, interpret | `{Char.toU32('A') Char.fromU32(55296u32)}` | `{65u32 Option.none()}` |
@@ -92,15 +97,17 @@ Proposed: `stdlib/src/std/{str,bytes}.vib`; `@std.iter` completed;
 | `V2-TYPE-INTERFACE-iter-next-pure` | positive, interpret | `Iter.next(xs)` twice on one value | equal results |
 | `V2-TYPE-INTERFACE-iter-dict` | positive, interpret | `Iter.collect(["b": 1i32 "a": 2i32])` | `[{"a" 2i32} {"b" 1i32}]` |
 | `V2-TYPE-INTERFACE-iter-str-option` | positive, interpret | `Iter.collect("ab")`, `Iter.collect(Option.some(value: 1i32))`, `Iter.collect(Option.none())` typed | `['a' 'b']`, `[1i32]`, `[]` |
-| `V2-TYPE-INTERFACE-iter-result-none` | negative | `Iter.collect(Result.ok(value: 1i32))` | `@type.mismatch` (no implementation) |
+| `V2-TYPE-INTERFACE-iter-result-none` | negative | `Iter.collect(Result.ok(value: 1i32))` | `@type.unsatisfiedBound` at the operand, related to `Iter` |
 | `V2-TYPE-INTERFACE-iter-remainder-type` | positive | `let step: Option({U8 Once}) be Iter.next(once) endlet` | accepted: the remainder has the receiver's own type |
 | `V2-TYPE-INTERFACE-dict-entries` | positive, interpret | `Dict.entries(["b": 1i32 "a": 2i32])` | `[{"a" 2i32} {"b" 1i32}]` |
 | `V2-TYPE-CONVERT-dict-from-list` | positive, interpret | `let d: Dict(Str I32) be From.convert([{"a" 1i32} {"a" 2i32}]) endlet` | one entry `"a": 2i32` |
 
 ## Diagnostics and schema changes
 
-Codes: `@type.mismatch`, `@name.inaccessibleRepresentation`. No schema
-change. The manifest gains `@std.str` and `@std.bytes`.
+Codes: `@type.unsatisfiedBound`, `@name.inaccessibleRepresentation`. No
+schema change. The manifest gains `@std.str` and `@std.bytes`, and its
+`compiler` list gains the symbols those modules bind, `dict.next` among
+them.
 
 ## Validation
 
@@ -125,4 +132,5 @@ Native acceleration (v0.0.3); `@std.assert` (23); host modules (M2).
       or a host test named after it.
 - [ ] Every law of "Iteration" has a case.
 - [ ] `stdlib/manifest.vibon` lists eight modules with `native: []`.
+- [ ] `conformance/rules.tsv` has one `active` row per case id above.
 - [ ] Validation commands exit 0.

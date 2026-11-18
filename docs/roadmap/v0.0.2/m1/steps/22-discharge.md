@@ -12,12 +12,15 @@ rule identifiers.
 - Read: [type chapter](../../../../spec/02-type-system.md) "Bare guards" (the
   seven rules), "Guards and callable types"; [diagnostics
   chapter](../../../../spec/07-diagnostics-and-conformance.md) "Integer facts",
-  "Contract, effect and authority diagnostics", "Required coverage" item 9;
-  [tooling chapter](../../../../spec/05-tooling.md) "Obligation record";
+  "Contract, effect and authority diagnostics", the obligation record of
+  `@types.v2`, "Required coverage" item 9;
   [runtime chapter](../../../../spec/06-runtime.md) "Callable contract
   execution" ("Bare guards leave no code").
-- Open questions: Q21 (how the integer facts apply to the `Ordered` default
-  members) must be answered before this step starts.
+- Open question: the strings the `rules` field holds for the seven
+  discharge rules ([specification questions](../spec-questions.md)). The
+  facts have the identifiers `INT-1` to `INT-8`; this guide writes
+  `GUARD-1` to `GUARD-7` for the rules as placeholders, and no snapshot
+  that lists `rules` is committed before the answer.
 
 ## Entry points
 
@@ -35,11 +38,14 @@ procedure with rule identifiers `GUARD-1` … `GUARD-7`, `INT-1` … `INT-8`.
 
 1. Obligations: `requires C` at every call (substituting actual arguments),
    `ensures C` at every `return` of the body (and the `try` exits), `where P`
-   at every construction. Each gets a status `passed`, `refuted`,
-   `unknown`, or `unsupported`, its rule identifiers, dependencies, and a
-   counterexample when refuted.
+   at every construction. Each gets a status `@passed`, `@refuted`,
+   `@unknown`, or `@unsupported`, its `rules` in the order used, its
+   sorted `dependencies`, and a `counterexample` (the canonical VIBON
+   text of the refuting values) when refuted.
 2. Rule 1, constants: evaluate the predicate over constant operands through
-   `ctfe`; `true` discharges, `false` refutes, a limit leaves `unknown`.
+   `ctfe`; `true` discharges, `false` refutes; a limit leaves the status
+   `@unknown` and is reported as `@tool.limitExceeded` alone, at the
+   predicate.
 3. Rule 2, type invariant: a value of a type with an invariant supplies the
    type's predicate over its representation.
 4. Rule 3, dominating branch: facts from the condition of the enclosing
@@ -50,8 +56,13 @@ procedure with rule identifiers `GUARD-1` … `GUARD-7`, `INT-1` … `INT-8`.
    arguments, and operands are the same resolved entities.
 6. Rule 5, Boolean structure: introduction and projection of `Bool.and`,
    and the branch rules of `Bool.not`, `or`, `xor`.
-7. Rule 6, the listed integer facts, over the Bool-returning members per
-   Q21; nothing about arithmetic results.
+7. Rule 6, the listed integer facts. For the sized integer types, and for
+   them only, the checker reads the default members `Ordered.less`,
+   `lessOrEqual`, `greater`, `greaterOrEqual`, and `inRange` as their
+   defining relations (`inRange(x low high)` is low ≤ x and x ≤ high);
+   `min` and `max` are not relations and carry no fact. Nothing relates
+   an arithmetic result to its operands, and no fact covers a float or a
+   user implementation of `Ordered`.
 8. Rule 7, certified results: a callee's proven `ensures` holds for its
    result when its `requires` was discharged.
 9. `@contract.refuted` at the predicate, related to the refuting argument
@@ -63,8 +74,8 @@ procedure with rule identifiers `GUARD-1` … `GUARD-7`, `INT-1` … `INT-8`.
     related to the guard. A callable whose `requires` has an `else`
     converts freely and keeps its checks.
 11. Contract members: an implementation is checked under the contract's
-    `requires` and must establish the contract's `ensures`; it cannot add
-    or strengthen a `requires`.
+    `requires` and must establish the contract's `ensures`. It declares
+    no guard of its own (step 07 rejects the section).
 12. A discharged guard leaves no code: the lowered program of a function
     with a discharged bare guard equals the program without it (host
     test).
@@ -105,9 +116,11 @@ procedure with rule identifiers `GUARD-1` … `GUARD-7`, `INT-1` … `INT-8`.
 | `V2-CONTRACT-int6` | positive | `if lt(x y) then if le(y z) then return ltReq(x z) …` | `INT-6` |
 | `V2-CONTRACT-int7` | positive | `if le(x y) then if le(y z) then return leReq(x z) …` | `INT-7` |
 | `V2-CONTRACT-int7-nearest-failing` | negative | `if le(x y) then if le(z y) then return leReq(x z) …` | `@contract.unproved` |
-| `V2-CONTRACT-int8` | positive | `return pos(I32.add(2i32 3i32))`? No: arithmetic results have no facts, so the case is `requires gt(5i32 3i32)` on a constant pair | `INT-8` (evaluation) |
+| `V2-CONTRACT-int8` | positive | `return gtReq(5i32 3i32)` where the callee requires `gt(a b)` | `INT-8`: the comparison of two integer constants, by evaluation |
+| `V2-CONTRACT-in-range-relation` | positive | `if Ordered.inRange(x 1i32 9i32) then return geReq(x 1i32) …` | accepted: `inRange` is read as `1 ≤ x` and `x ≤ 9` |
+| `V2-CONTRACT-min-no-fact` | negative | `if eq(Ordered.min(x y) x) then return leReq(x y) …` | `@contract.unproved`: `min` is not a relation |
 | `V2-CONTRACT-no-arithmetic-fact` | negative | `if gt(x 0i32) then return pos(I32.add(x 1i32)) …` | `@contract.unproved` (saturation) |
-| `V2-CONTRACT-no-float-fact` | negative | the same shapes over `F64` with `F64.compareTotal` | `@contract.unsupportedPredicate` or `unproved` as the fragment decides: `F64` has no `Ordered`, so the predicate is a static member call, certified, and the fact set is empty: `@contract.unproved` |
+| `V2-CONTRACT-no-float-fact` | negative | `if F64.equal(a b) then return sameReq(b a) …` where the callee requires `F64.equal(a b)` of its own parameters | `@contract.unproved`: the predicate is certified and no fact covers a float |
 | `V2-CONTRACT-no-user-ordered-fact` | negative | a user type with `impl Ordered`; `if Ordered.less(a b) then return ltUserReq(a b)` where the callee requires `Bool.not(Equatable.equal(a b))` | `@contract.unproved` |
 | `V2-CONTRACT-rule7-certified-result` | positive | `fn mk returns r: I32 ensures gt(r 0i32) do return 1i32 endfn`; `return pos(mk())` | accepted by `GUARD-7` |
 | `V2-CONTRACT-rule7-requires-not-discharged` | negative | the callee's `ensures` depends on a `requires` the caller did not establish | `@contract.unproved` at the caller |
@@ -121,7 +134,7 @@ procedure with rule identifiers `GUARD-1` … `GUARD-7`, `INT-1` … `INT-8`.
 | `V2-CONTRACT-obligation-kept-by-type` | positive | `fn posP takes {p: Positive} returns r: I32 requires isPositiveP(p) …`; `let f: Fn({Positive} I32) be posP endlet` | accepted (parameter type establishes it) |
 | `V2-CONTRACT-else-converts-freely` | positive, interpret | `let f: Fn({I32} I32) be posElse endlet return f(0i32)` where `posElse` has `requires … else -1i32` | `-1i32` |
 | `V2-CONTRACT-member-guard-contract` | positive | an interface member with `requires`; an implementation checked under it | accepted |
-| `V2-CONTRACT-member-adds-requires` | negative | an implementation member with its own `requires` | `@type.mismatch` at the member (the contract's guards are the member's) |
+| `V2-CONTRACT-member-else-copied` | positive, interpret | an interface member with `requires … else`; two implementations, one called directly and one through an interface value, each with a failing argument | the consequence both times: the contract's guard runs in every implementation |
 | `V2-CONTRACT-member-ensures-established` | negative | an implementation that does not establish the contract's `ensures` | `@contract.unproved` at the member's `return` |
 | `V2-CONTRACT-no-runtime-check` | positive | the lowered program of `pos(5i32)` | host test: identical to the program without the `requires` |
 | `V2-CONTRACT-unproved-notes` | negative | `pos(y)` | the `@contract.unproved` diagnostic carries three notes naming the repairs |
@@ -130,7 +143,7 @@ procedure with rule identifiers `GUARD-1` … `GUARD-7`, `INT-1` … `INT-8`.
 
 Codes: `@contract.unproved`, `@contract.refuted`,
 `@contract.obligationLost`, `@contract.unsupportedPredicate`,
-`@type.mismatch`. Schema: `@types.v2` obligations carry `ruleIds` and
+`@tool.limitExceeded`. Schema: `@types.v2` obligations carry `rules` and
 `counterexample`.
 
 ## Validation
@@ -157,4 +170,5 @@ proofs by sampling (never).
       and per fact `INT-1` to `INT-8`.
 - [ ] The `@types.v2` snapshot of a discharged obligation lists its rule
       identifiers.
+- [ ] `conformance/rules.tsv` has one `active` row per case id above.
 - [ ] Validation commands exit 0.

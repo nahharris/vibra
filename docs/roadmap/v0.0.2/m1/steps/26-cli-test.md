@@ -16,7 +16,6 @@ human report. It completes the tool surface of slice 8.
   chapter](../../../../spec/06-runtime.md) "Test assertions", "Traps";
   [diagnostics chapter](../../../../spec/07-diagnostics-and-conformance.md)
   "Runtime and tool failures".
-- Open questions: none blocks this step.
 
 ## Entry points
 
@@ -43,8 +42,10 @@ Proposed modules: `vibra-cli::{test,selector}`; the `test` payload,
    names no module or no test is `@command.invalidInput`.
 3. Run through `run_tests`; map `TestRun` to the payload: `selected`,
    `passed`, `failed`, and `tests` with `name` (the selector text),
-   `result`, `failure`, `trap`, `auditTrace` (empty in M1), `diagnostics`
-   (the codes attributed to the item), `status`. Invariant: a diagnostic
+   `result`, `failure`, `trap`, `auditTrace` (no events in M1),
+   `diagnostics` (the codes attributed to the item), `status`. The JSON
+   fields are the projection of the `@testRun.v2` record of step 23, with
+   `null` for an absent optional field. Invariant: a diagnostic
    appears once in the envelope and is attributed to every item it affects.
 4. Suite result by precedence: trap (`@command.trap`, exit 5), operational
    exhaustion (`@command.operationalFailure`, exit 3), unavailable

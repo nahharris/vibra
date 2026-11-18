@@ -16,8 +16,8 @@ labels.
   [source chapter](../../../../spec/01-source-language.md) "Application",
   "Anonymous products and collections", "Names and paths" (field reads);
   [runtime chapter](../../../../spec/06-runtime.md) "Evaluation"
-  (construction, reads, dicts).
-- Open questions: none.
+  (construction, reads, dicts) and "Values" (the encodings the `interpret`
+  cases expect).
 
 ## Entry points
 
@@ -39,7 +39,7 @@ Proposed: `vibra-types::{nominal, generics}`.
    duplicate, unknown label, wrong arity `@type.argumentMismatch`; result
    type is the declared type (the `Result` of `where … else` is 21).
    Applying a tuple, record, wrapper value, atom, or number is
-   `@type.notApplicable`.
+   `@type.notApplicable` at the callee.
 3. Field reads: on a record or declared record; `@type.unknownRecordField`;
    no tuple index.
 4. Structural types: tuple arity and component types; record field sets in
@@ -71,18 +71,18 @@ Proposed: `vibra-types::{nominal, generics}`.
 
 | Case id | Kind | Input | Expected |
 | --- | --- | --- | --- |
-| `V2-TYPE-NOMINAL-record-construct` | positive, interpret | `type User of {name: Str id: U64} endtype\nfn main returns r: User do return User(id: 1u64 name: "Ada") endfn` | `{kind: @record type: {type: @app.main.User …} fields: {name: "Ada" id: 1u64}}` in declaration order |
+| `V2-TYPE-NOMINAL-record-construct` | positive, interpret | `type User of {name: Str id: U64} endtype\nfn main returns r: User do return User(id: 1u64 name: "Ada") endfn` | `{kind: @record typeInfo: {kind: @declared path: @app.main.User seed: … arguments: []} fields: {name: "Ada" id: 1u64}}`, fields in declaration order |
 | `V2-TYPE-NOMINAL-record-missing-field` | negative | `User(name: "Ada")` | `@type.argumentMismatch` at the application |
 | `V2-TYPE-NOMINAL-record-unknown-field` | negative | `User(name: "Ada" id: 1u64 age: 3u8)` | `@type.argumentMismatch` |
 | `V2-TYPE-NOMINAL-record-duplicate-field` | negative | `User(name: "Ada" name: "Bob" id: 1u64)` | `@type.argumentMismatch` |
 | `V2-TYPE-NOMINAL-record-positional` | negative | `User("Ada" 1u64)` | `@type.argumentMismatch` |
-| `V2-TYPE-NOMINAL-wrapper` | positive, interpret | `type Celsius of F64 endtype … return Celsius(21.5f64)` | `{kind: @wrapper type: … value: 21.5f64}` |
+| `V2-TYPE-NOMINAL-wrapper` | positive, interpret | `type Celsius of F64 endtype … return Celsius(21.5f64)` | `{kind: @wrapper typeInfo: … value: 21.5f64}` |
 | `V2-TYPE-NOMINAL-wrapper-no-delegation` | negative | `type Celsius of F64 endtype`; `F64.add(Celsius(1.0f64) 2.0f64)` | `@type.mismatch` at the `Celsius` value |
-| `V2-TYPE-NOMINAL-declared-tuple` | positive, interpret | `type Pair of {I32 Str} endtype … Pair(1i32 "x")` | tuple with `type` |
-| `V2-TYPE-NOMINAL-variant-fields` | positive, interpret | `type Shape case circle {radius: F64} case empty endtype … Shape.circle(radius: 1.0f64)` | `{kind: @enum type: … variant: @circle payload: {radius: 1.0f64}}` |
+| `V2-TYPE-NOMINAL-declared-tuple` | positive, interpret | `type Pair of {I32 Str} endtype … Pair(1i32 "x")` | `{kind: @tuple typeInfo: … values: [1i32 "x"]}` |
+| `V2-TYPE-NOMINAL-variant-fields` | positive, interpret | `type Shape case circle {radius: F64} case empty endtype … Shape.circle(radius: 1.0f64)` | `{kind: @enum typeInfo: … variant: @circle payload: {radius: 1.0f64}}`; `Shape.empty()` has no `payload` field |
 | `V2-TYPE-NOMINAL-variant-fieldless-args` | negative | `Shape.empty(1i32)` | `@type.argumentMismatch` |
 | `V2-TYPE-NOMINAL-same-shape-different-type` | negative | `type A of {x: I32} endtype\ntype B of {x: I32} endtype`; a `B` where an `A` is expected | `@type.mismatch` |
-| `V2-TYPE-NOMINAL-not-applicable` | negative | `let t be {1i32 2i32} endlet t(0u64)` | `@type.notApplicable` at the application |
+| `V2-TYPE-NOMINAL-not-applicable` | negative | `let t be {1i32 2i32} endlet t(0u64)` | `@type.notApplicable` at the callee `t` |
 | `V2-TYPE-NOMINAL-field-read` | positive, interpret | `return user.name` with `user: User` | `"Ada"` |
 | `V2-TYPE-NOMINAL-unknown-record-field` | negative | `user.age` | `@type.unknownRecordField` at `age` |
 | `V2-TYPE-NOMINAL-structural-record-order` | positive, interpret | `fn f takes {r: {a: I32 b: Str}} returns s: Str do return r.b endfn` called with `{b: "x" a: 1i32}` | `"x"` |
@@ -95,7 +95,8 @@ Proposed: `vibra-types::{nominal, generics}`.
 | `V2-TYPE-NOMINAL-dict-order-and-duplicate` | positive, interpret | `["b": 1i32 "a": 2i32 "a": 3i32]` | two entries, `"a": 3i32` first |
 | `V2-TYPE-NOMINAL-dict-key-float` | negative | `[1.0f64: "x"]` | `@type.invalidDictKey` at the key type |
 | `V2-TYPE-NOMINAL-dict-key-function` | negative | `[inc: "x"]` | `@type.functionNotEquatable` |
-| `V2-TYPE-NOMINAL-dict-key-tuple` | positive, interpret | `[{1i32 "a"}: true]` | one entry |
+| `V2-TYPE-NOMINAL-dict-key-tuple` | positive, interpret | `[{1i32 "a"}: true]` | one entry: an anonymous tuple of `Ordered` components is `Ordered` structurally |
+| `V2-TYPE-NOMINAL-dict-key-atom` | positive, interpret | `[@b: 1i32 @a: 2i32]` | two entries, `@a` first: atoms are `Ordered` structurally |
 | `V2-SRC-CALLS-lookup-list` | positive, interpret | `return [7i32](0u64)` and `return [7i32](1u64)` | `Option.some(value: 7i32)` and `Option.none()` |
 | `V2-SRC-CALLS-lookup-dict` | positive, interpret | `["a": 1i32]("a")` | `Option.some(value: 1i32)` |
 | `V2-SRC-CALLS-lookup-arity` | negative | `[7i32](0u64 1u64)` | `@type.argumentMismatch` |
@@ -133,7 +134,7 @@ cargo test --locked --offline --workspace --all-targets --all-features
 ```
 
 Read: all cases pass; the `@value.v2` snapshots of the declared types carry
-the identity of Q13.
+the declaration identity of the type chapter in `seed`.
 
 ## Excluded
 
@@ -142,6 +143,6 @@ beyond `Any` (19); `Str` and `Bytes` members (20).
 
 ## Completion evidence
 
-- [ ] `conformance/rules.tsv` has `V2-TYPE-NOMINAL`, `V2-TYPE-GENERIC` active.
+- [ ] `conformance/rules.tsv` has one `active` row per case id above.
 - [ ] `@std.builtin`'s `Dict` and `List` members check clean (host test).
 - [ ] Validation commands exit 0.

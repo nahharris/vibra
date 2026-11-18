@@ -16,7 +16,6 @@ only on the diagnostics crate, so it runs beside the reader from the start.
   exclusions"; [diagnostics
   chapter](../../../../spec/07-diagnostics-and-conformance.md) "Diagnostic
   documents and spans", "Conformance profiles".
-- Open questions: none blocks this step.
 
 ## Entry points
 
@@ -28,17 +27,37 @@ only on the diagnostics crate, so it runs beside the reader from the start.
 | `crates/vibra-schema-v1/tests/it/command_result.rs` | the producer-validates test pattern |
 | `crates/vibra-cli-v1/tests/it/support.rs` | the in-process harness for host tests |
 
-Proposed crates and modules:
+## Files
 
-- `crates/vibra-schema` (new): `schemas/v2/command-result.json`,
-  `schemas/v2/diagnostic.json`; `src/envelope.rs` (`Envelope`, `Status`,
-  `CommandOutcome`, `Limits`), `src/diagnostic.rs` (`DiagnosticDocument`,
-  `SpanDocument` rendering from `vibra-diagnostics`), `src/capability.rs`
-  (`CommandCapability`), `src/validate.rs`. Depends on `vibra-diagnostics`
-  only.
-- `crates/vibra-cli` (new, binary `vibra`): `src/args.rs` (the grammar),
-  `src/inventory.rs` (one row per command), `src/help.rs`, `src/render.rs`
-  (human and JSON), `src/lib.rs` (`run`), `src/main.rs`.
+Created:
+
+| Path | Contents |
+| --- | --- |
+| `crates/vibra-schema/Cargo.toml` | package `vibra-schema`; dependencies `vibra-diagnostics`, `serde`, `serde_json`, `jsonschema` |
+| `crates/vibra-schema/schemas/v2/command-result.json` | `urn:vibra:schema:v2:command-result` |
+| `crates/vibra-schema/schemas/v2/diagnostic.json` | `urn:vibra:schema:v2:diagnostic`, with `SpanDocument` |
+| `crates/vibra-schema/src/lib.rs` | module list; the two schemas embedded with `include_str!` |
+| `crates/vibra-schema/src/envelope.rs` | `Envelope`, `Status`, `CommandOutcome`, `Limits` |
+| `crates/vibra-schema/src/diagnostic.rs` | `DiagnosticDocument` and `SpanDocument` rendered from `vibra-diagnostics` |
+| `crates/vibra-schema/src/capability.rs` | `CommandCapability` |
+| `crates/vibra-schema/src/validate.rs` | validation of a document against its embedded schema |
+| `crates/vibra-schema/tests/it/main.rs`, `command_result.rs`, `diagnostic.rs` | the producer-validates tests |
+| `crates/vibra-cli/Cargo.toml` | package `vibra-cli`, binary `vibra` at `src/main.rs`; dependencies `vibra-diagnostics`, `vibra-schema`, `serde_json` |
+| `crates/vibra-cli/src/main.rs` | the thin `main` |
+| `crates/vibra-cli/src/lib.rs` | `run(args, cwd, stdout, stderr)` and the result-to-exit function |
+| `crates/vibra-cli/src/args.rs` | the command-line grammar |
+| `crates/vibra-cli/src/inventory.rs` | one row per command line |
+| `crates/vibra-cli/src/help.rs`, `render.rs` | the usage text; human and JSON rendering |
+| `crates/vibra-cli/tests/it/main.rs`, `support.rs`, `help.rs`, `invalid_input.rs`, `unavailable.rs` | the host tests of the matrix |
+
+Edited: the root `Cargo.toml` and `Cargo.lock` (two packages);
+`crates/vibra-conformance/tests/it/architecture_boundary.rs` (rows
+`vibra-schema: [vibra-diagnostics]` and
+`vibra-cli: [vibra-diagnostics, vibra-schema]`).
+
+The toolchain version the envelope reports is the workspace package
+version, read with `env!("CARGO_PKG_VERSION")`. The limit profile
+identifier is `m1Default`.
 
 ## Ordered tasks
 
@@ -69,7 +88,7 @@ Proposed crates and modules:
    `passed`, result `@command.ok`.
 5. Every other well-formed command: status `unsupported`, result
    `@command.unavailable`, exit 4, one `@tool.unavailable` diagnostic with
-   no span naming the command, `workspaceRevision` `null`, the empty
+   no span and a note naming the command, `workspaceRevision` `null`, the empty
    payload.
 6. Streams: in JSON format exactly one envelope on standard output and
    nothing else; logs on standard error. In human format the usage text or
@@ -111,13 +130,13 @@ Codes: `@tool.unavailable`. Schemas published:
 
 ```powershell
 $env:RUSTFLAGS='-D warnings'
+cargo fmt --all --check
 cargo clippy --locked --offline --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --offline -p vibra-schema -p vibra-cli
 cargo run --locked --offline -p vibra-cli --bin vibra -- --format json help
 cargo test --locked --offline --workspace --all-targets --all-features
 ```
 
-`vibra-schema` and `vibra-cli` are proposed packages this step creates.
 Read: the `help` run prints one JSON object whose `capabilities` has 18
 entries, one with `supported: true`; the workspace test run is green with
 the `-v1` binary `vibra-v1` untouched.

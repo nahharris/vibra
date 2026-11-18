@@ -15,8 +15,8 @@ atoms, `try` with its expected type, fallible values, `Never` through
   "Patterns"; [diagnostics
   chapter](../../../../spec/07-diagnostics-and-conformance.md) "Binding, return
   and pattern diagnostics"; [runtime chapter](../../../../spec/06-runtime.md)
-  "Evaluation" (`let`, `try`).
-- Open questions: none.
+  "Evaluation" (`let`, `try`); the grammar note of the source chapter on
+  constructor patterns.
 
 ## Entry points
 
@@ -34,7 +34,11 @@ Proposed: `vibra-types::pattern` (coverage, irrefutability, binding types).
    (expanded value), case with named fields (omitted fields ignored),
    declared record by field, wrapper and declared tuple positionally with
    exact arity, tuple, record (omitted fields ignored), list of exact
-   length. A pattern that does not fit its type is `@type.mismatch`.
+   length. A constructor pattern whose shape does not fit the constructor
+   it names (labels for a wrapper or declared tuple, positional components
+   for a declared record or a case with fields, a wrong arity, or an
+   unknown or repeated field) is `@type.argumentMismatch` at the pattern.
+   Any other pattern that does not fit its type is `@type.mismatch`.
 2. Coverage: variants by inhabited cases; `Bool` by `true` and `false`;
    products by components; a fixed-length list never covers; literals
    never cover `Str`, `Bytes`, `Char`, numbers; atoms never cover `Atom`;
@@ -89,6 +93,11 @@ Proposed: `vibra-types::pattern` (coverage, irrefutability, binding types).
 | `V2-TYPE-CONTROL-match-constant-pattern` | positive, interpret | module `let zero: I32 be 0i32 endlet`; `case zero return "z" case _ return "n"` | `"z"` for `0i32` |
 | `V2-TYPE-CONTROL-match-where-no-coverage` | negative | a wrapper with a bare `where` and a `match` on its representation covering only the invariant's range | `@pattern.nonExhaustive` (recorded now with the `where` parsed; the invariant rule lands in 21 and the expectation does not change) |
 | `V2-TYPE-CONTROL-pattern-type-mismatch` | negative | `match n case "x" …` with `n: I32` | `@type.mismatch` at the pattern |
+| `V2-TYPE-CONTROL-pattern-shape-labels` | negative | `match c case Celsius(value: v) …` with the wrapper `Celsius` | `@type.argumentMismatch` at the pattern |
+| `V2-TYPE-CONTROL-pattern-shape-positional` | negative | `match user case User(n i) …` with the declared record `User` | `@type.argumentMismatch` at the pattern |
+| `V2-TYPE-CONTROL-pattern-shape-unknown-field` | negative | `match user case User(age: a) …` | `@type.argumentMismatch` at the pattern |
+| `V2-TYPE-CONTROL-pattern-shape-arity` | negative | `match p case Pair(a) …` with `Pair of {I32 Str}` | `@type.argumentMismatch` at the pattern |
+| `V2-TYPE-CONTROL-empty-body` | negative | `fn f returns r: I32 do endfn` | `@type.missingReturn` at the body |
 | `V2-TYPE-CONTROL-try-option` | positive, interpret | `fn f takes {o: Option(I32)} returns r: Option(I32) do let v be try o endlet return Option.some(value: I32.add(v 1i32)) endfn` | `some 2` for `some 1`; `none` for `none` |
 | `V2-TYPE-CONTROL-try-result` | positive, interpret | the same with `Result(I32 Str)` | `ok`/`err` propagated |
 | `V2-TYPE-CONTROL-try-wrong-carrier` | negative | `try o` with `o: Option(I32)` in a `fn` returning `Result(I32 Str)` | `@type.invalidTry` at the `try` |
@@ -106,7 +115,8 @@ Proposed: `vibra-types::pattern` (coverage, irrefutability, binding types).
 
 Codes: `@pattern.refutableBinding`, `@pattern.irrefutableLetElse`,
 `@pattern.nonExhaustive`, `@pattern.unreachableArm`,
-`@pattern.unsupportedCoverage`, `@type.mismatch`, `@type.invalidTry`,
+`@pattern.unsupportedCoverage`, `@type.mismatch`,
+`@type.argumentMismatch`, `@type.missingReturn`, `@type.invalidTry`,
 `@type.unhandledFallible`, `@effect.invalidAwait`. No schema change.
 
 ## Validation
@@ -133,4 +143,5 @@ irrefutability through `where … else` (21); tests (23).
       chapter that M1 owns has a case (the owner table lists them).
 - [ ] A host test asserts the first uncovered shape is reported in declaration
       order for a three-case variant.
+- [ ] `conformance/rules.tsv` has one `active` row per case id above.
 - [ ] Validation commands exit 0.

@@ -19,9 +19,8 @@ implementation except to close a defect the audit exposes.
   "Guards"; [runtime chapter](../../../../spec/06-runtime.md) "Tail calls",
   "Callable contract execution"; the registered pilot draft that M0 keeps
   current.
-- Open questions: every question of [spec-questions.md](../spec-questions.md)
-  is answered and applied to the specification, or moved to a later
-  milestone by name.
+- Every item of the [specification questions](../spec-questions.md) is
+  answered in the specification, and the file is deleted with its links.
 
 ## Entry points
 
@@ -29,7 +28,7 @@ implementation except to close a defect the audit exposes.
 | --- | --- |
 | `conformance/rules.tsv` (step 02) | the active rule identities |
 | `docs/roadmap/v0.0.2/m0/owners.md` | the form-to-case table the audit checks |
-| `conformance/spec-examples.tsv` (step 08) | every example classified and exercised |
+| `crates/vibra-conformance/tests/it/spec_examples.rs` (step 08) | every fenced block of the specification read |
 | `crates/vibra-conformance/tests/it/` | where the audit test lives |
 | `examples/hello/` (step 28) | the directory the gate program's pure part joins |
 
@@ -129,5 +128,6 @@ running the pilot (M2); native execution (M4); the `fullV2` claim.
 - [ ] `docs/roadmap/v0.0.2/m1/gate-rejections.md` exists; an empty list is
       stated as empty with the gate modules it covers.
 - [ ] `owner_coverage` passes with no exemption list.
-- [ ] Every open question is closed or reassigned by name.
+- [ ] `docs/roadmap/v0.0.2/m1/spec-questions.md` no longer exists and no
+      document links to it.
 - [ ] Validation commands exit 0.

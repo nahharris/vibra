@@ -48,7 +48,8 @@ gate.
 Out of this release: dependency acquisition and locking beyond local inputs,
 MCP and editor adapters, concurrency, network operations, a content-addressed
 store as an authority, persistent sessions with live redefinition, and native
-execution beyond the M4 slice.
+execution beyond the M4 slice. Local dependencies, the `path` entries of
+`@project.v2`, belong to M2; an M1 project has none.
 
 ## Release gate
 

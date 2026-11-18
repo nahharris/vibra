@@ -15,7 +15,6 @@ callables, and the tail-call rule through every callee kind.
   anonymous), "Application" (labelled arguments in any position); [runtime
   chapter](../../../../spec/06-runtime.md) "Generic instantiation", "Tail
   calls".
-- Open questions: none.
 
 ## Entry points
 
@@ -44,8 +43,10 @@ Proposed: `vibra-types::callables`.
    expression position; constructors, field reads, and lookups are not
    values (`@type.mismatch` where a function is expected; an anonymous `fn`
    wraps them).
-4. Generic functions: parameters inferred from operands and expected
-   result; `given` bounds other than `Any` are checked in 19.
+4. Generic functions: type arguments are inferred jointly from every
+   operand and the expected result, never operand by operand; a parameter
+   no constraint fixes is `@type.ambiguousInference`; `given` bounds other
+   than `Any` are checked in 19.
 5. Tail calls through values, closures, and record fields in the
    interpreter; `Never`-typed calls.
 6. Cases.
@@ -71,6 +72,8 @@ Proposed: `vibra-types::callables`.
 | `V2-TYPE-INFER-constructor-wrapped` | positive, interpret | `let f: Fn({F64} Celsius) be fn takes {v: F64} returns c: Celsius do return Celsius(v) endfn endlet return f(1.0f64)` | a `Celsius` |
 | `V2-TYPE-INFER-member-value` | positive, interpret | `type U of {n: Str} fn len takes {u: Self} returns r: U64 do return Str.length(u.n) endfn endtype`; `let f be U.len endlet return f(U(n: "ab"))` | `2u64` |
 | `V2-TYPE-GENERIC-fn-inferred-result` | positive, interpret | `fn none(T) returns r: Option(T) do return Option.none() endfn`; `let o: Option(I32) be none() endlet` | `Option.none()` typed `Option(I32)` in the snapshot |
+| `V2-TYPE-GENERIC-joint-inference` | positive, interpret | `fn pick(T) takes {a: T b: T} returns r: T do return a endfn`; `let n: I64 be pick(1 2i64) endlet` | `1i64`: the unsuffixed operand is typed by the other operand |
+| `V2-TYPE-GENERIC-joint-conflict` | negative | `pick(1i32 "x")` | `@type.mismatch` at `"x"` |
 | `V2-RUNTIME-tail-through-value` | positive, interpret | mutual recursion through a function value held in a record, 100,000 transfers | the result; depth 1 (host assertion) |
 | `V2-RUNTIME-tail-through-closure` | positive, interpret | a closure calling itself through a parameter, 100,000 transfers | depth 1 |
 | `V2-RUNTIME-closure-captures-value` | positive, interpret | a closure built in one scope and called after the scope ended | the captured value |
@@ -101,4 +104,5 @@ callables and `@contract.obligationLost` (21, 22); `proc` (M2).
 
 - [ ] Every row of "Applications and values" in the diagnostics chapter's
       required coverage that concerns functions has a case.
+- [ ] `conformance/rules.tsv` has one `active` row per case id above.
 - [ ] Validation commands exit 0.

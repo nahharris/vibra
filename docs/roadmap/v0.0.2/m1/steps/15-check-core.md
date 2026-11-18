@@ -18,11 +18,11 @@ and the `workspaceCheck` and `interpret` handlers are created here.
   chapter](../../../../spec/01-source-language.md) "`fn` and `proc`", "`return`,
   `try`, `await`", "`if`, `match`, `do`"; [diagnostics
   chapter](../../../../spec/07-diagnostics-and-conformance.md) "Binding, return
-  and pattern diagnostics", the `@types.v2` row, the `interpret` and
-  `workspaceCheck` rows; [tooling chapter](../../../../spec/05-tooling.md) "One
-  source alone".
-- Open questions: Q16 (`@types.v2` exact shape) must be answered before the
-  `types` snapshots are committed.
+  and pattern diagnostics", `@types.v2` under "Persistent observations",
+  the `interpret` and `workspaceCheck` rows; [runtime
+  chapter](../../../../spec/06-runtime.md) "Open signatures"; [tooling
+  chapter](../../../../spec/05-tooling.md) "One source alone" and the
+  `check` rule of "Command surface".
 
 ## Entry points
 
@@ -51,8 +51,9 @@ Proposed: `vibra-types::{declare, infer, expr, lower, check}`;
 3. Application of a `Fn` value: positional arguments to parameters in
    order; wrong arity or a label on a positional-only callee is
    `@type.argumentMismatch`; any other disagreement `@type.mismatch`. The
-   callee is any expression. Constructor application for fieldless cases
-   (`Bool.true()`, `Ordering.less()`).
+   callee is any expression; one whose type cannot be applied is
+   `@type.notApplicable` at the callee. Constructor application for
+   fieldless cases (`Bool.true()`, `Ordering.less()`).
 4. Bodies: statements in order; `return` checked at the written result
    type and typed `Never`; a body that can run off its end is
    `@type.missingReturn`; a statement after a `Never` statement, or
@@ -71,9 +72,19 @@ Proposed: `vibra-types::{declare, infer, expr, lower, check}`;
 6. Lowering to IR and `CheckedModuleSet`; `check_source` entering the
    first function with no parameters for `interpret`.
 7. Workspace check: resolve the graph with the stdlib overlay; check a
-   target's units and import closure plus the prelude modules; `CheckStatus`
-   `Accepted | Diagnostics | Unavailable`; the `@types.v2` document per Q16
-   with `moduleValues`, `callables`, and an empty `obligations`.
+   target's units and import closure plus the prelude modules. With no
+   target named, every local target and the `@tests` unit are covered; a
+   named target covers that target only. A target whose kind the profile
+   does not support (`@bin` until M2) still decodes: it is reported
+   `@tool.unavailable` at its target record with the status
+   `unsupported`, and the other targets are checked. The `@types.v2`
+   document is the closed schema of the diagnostics chapter:
+   `moduleValues` of `{declaration typeInfo}`, `callables` of
+   `{declaration signature}` with the signature record of step 12,
+   `implementations`, and `obligations`, the last two empty in this step.
+   A host test in `vibra-conformance` reads every encoding example of
+   step 12's host tests back through `vibra-syntax` and compares decoded
+   values, which proves the two writers and the reader agree.
 8. The `@std.bool` module checks clean under this step's rules (its members
    use `match` on fieldless cases); `@std.core`, `@std.option`,
    `@std.result`, `@std.iter`, `@std.builtin` are loaded and only the
@@ -124,8 +135,9 @@ spelling.
 | `V2-RUNTIME-tail-loop` | positive, interpret | `fn count takes {n: I32 acc: I32} returns r: I32 do if Equatable.equal(n 0i32) then return acc else return count(I32.sub(n 1i32) I32.add(acc 1i32)) endif endfn\nfn main returns r: I32 do return count(100000i32 0i32) endfn` | `100000i32`; the host test asserts `max_activation_depth` 1 |
 | `V2-RUNTIME-non-tail-depth` | positive, interpret | `fn sum takes {n: I32} returns r: I32 do if Equatable.equal(n 0i32) then return 0i32 else return I32.add(1i32 sum(I32.sub(n 1i32))) endif endfn` with `main` calling `sum(100000i32)` | `100000i32` under the runner's budget |
 | `V2-RUNTIME-memory-exhausted` | host event | `fn loop takes {n: I32} returns r: I32 do return I32.add(1i32 loop(n)) endfn` | the host event `@runtime.memoryExhausted`; no result |
-| `V2-PROJECT-workspace-check-library` | positive, workspaceCheck | a two-module library where `main.vib` imports `@app.util` and calls a public function | accepted; `types` snapshot per Q16 |
-| `V2-PROJECT-workspace-check-bin-unavailable` | boundary, workspaceCheck | the chapter's binary project | `@tool.unavailable` at the target (M2) |
+| `V2-PROJECT-workspace-check-library` | positive, workspaceCheck | a two-module library where `main.vib` imports `@app.util` and calls a public function | accepted; the `types` snapshot is a `@types.v2` document with two `callables`, each `{declaration signature}` |
+| `V2-PROJECT-workspace-check-bin-unavailable` | boundary, workspaceCheck | a project with one `@lib` target and the chapter's `@bin` target | `@tool.unavailable` at the `@bin` target's record; the library target is checked and accepted |
+| `V2-SRC-CALLS-not-applicable-scalar` | negative | `fn f returns r: I32 do let n be 1i32 endlet return n(2i32) endfn` | `@type.notApplicable` at the callee `n` |
 | `V2-TOOL-unavailable-proc` | boundary | a module with a `proc` | `@tool.unavailable` over the `proc`; other declarations exact |
 
 The `Equatable.equal` and `I32.add` calls use the `@std.builtin`
@@ -139,7 +151,7 @@ Codes: `@type.numericOutOfRange`, `@type.ambiguousInference`,
 `@type.mismatch`, `@type.argumentMismatch`, `@type.missingReturn`,
 `@type.invalidReturn`, `@type.unreachableCode`, `@pattern.nonExhaustive`,
 `@pattern.unreachableArm`, `@type.initializerCycle`, `@tool.unavailable`,
-`@runtime.memoryExhausted`. Schema: `@types.v2` (Q16).
+`@type.notApplicable`, `@runtime.memoryExhausted`. Schema: `@types.v2`.
 
 ## Validation
 
@@ -163,8 +175,7 @@ parameters, anonymous callables (18); interfaces (19); guards (21, 22).
 
 ## Completion evidence
 
-- [ ] `conformance/rules.tsv` has `V2-TYPE-INFER`, `V2-TYPE-CONTROL`,
-      `V2-SRC-CALLS`, `V2-RUNTIME`, `V2-TOOL` active.
+- [ ] `conformance/rules.tsv` has one `active` row per case id above.
 - [ ] `@std.bool` is checked in every `interpret` case (a host test asserts the
       module set contains its functions).
 - [ ] The architecture test lists `vibra-types` with `vibra-interp` added.

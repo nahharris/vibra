@@ -5,17 +5,19 @@ implementation relies on them.
 
 ## Scope
 
-- **Specification review.** Review the eight chapters under `docs/spec/`
-  against each other and against the carry-over inventory of current Vibra (741 construct ids, in
-  the scratchpad debate record). Every construct of v0.0.1 is kept, changed,
-  deferred, or dropped by an explicit rule or exclusion.
+- **Specification review.** Review the eight chapters under `docs/spec/` against
+  each other and against the carry-over inventory of current Vibra (741
+  construct ids, in the scratchpad debate record). Every construct of v0.0.1 is
+  kept, changed, deferred, or dropped by an explicit rule or exclusion.
 - **Specification tests.** Two host tests tie the specification to the
   code: the diagnostic registry table, and the inventory of source examples.
   Both fail against the redesigned specification, because the code still
-  implements v0.0.1. They are marked ignored, with this milestone named as
-  the reason, when the specification merges. This milestone restores the
-  registry test against the new table; M1 restores the example inventory
-  when the new reader exists.
+  implements v0.0.1, and both are marked ignored. Neither is restored in
+  this milestone, which changes no code they read. The registry test is
+  restored in [M1 step 02](../m1/steps/02-diagnostics-and-harness.md),
+  with the new diagnostics crate. The example inventory test is deleted in
+  [M1 step 08](../m1/steps/08-reader-exit.md) and replaced by a test that
+  runs every fenced block of the specification through the new reader.
 - **The code store.** The workspace has a content-addressed codebase store:
   the `vibra codebase` commands, the `codebase` module of
   `vibra-workspace`, its SQLite dependency, its conformance cases, and

@@ -17,7 +17,6 @@ snapshot lists for expressions.
   chapter](../../../../spec/07-diagnostics-and-conformance.md) "Binding, return
   and pattern diagnostics" rows for `@name.redeclaration` and
   `@name.reservedDeclaration`.
-- Open questions: none.
 
 ## Entry points
 
@@ -47,8 +46,9 @@ name; never a call).
    function or a non-constant module value in pattern position is
    `@name.redeclaration` at the name, related to the declaration. A pattern
    binding one name twice, or a binder that shadows any visible name, is
-   `@name.redeclaration`; a binder spelled as a reserved word or prelude
-   name is `@name.reservedDeclaration`. The later binder still binds.
+   `@name.redeclaration`; a binder spelled as a prelude name is
+   `@name.reservedDeclaration` (the reader already reports a reserved
+   word, step 06). The later binder still binds.
 3. Dotted names in expressions: if the first identifier is a local or a
    module value, each later part is a field read; otherwise the longest
    prefix naming an entity is the path and the rest are field reads; the
@@ -60,9 +60,7 @@ name; never a call).
    is `@name.unknownSymbol`.
 5. `Self`: visible inside a `type`, `interface`, and `impl`; in a
    module-level callable it is `@name.unknownSymbol`.
-6. `_` binds nothing and may repeat; `_` in an expression is
-   `@name.unknownSymbol`? No: the source chapter makes it `@syntax.invalidForm`
-   at the reader (step 06 covers it). Nothing to do here but a case.
+6. `_` binds nothing and may repeat.
 7. `@resolved.v2` `references` for expression and pattern positions.
 8. Cases.
 

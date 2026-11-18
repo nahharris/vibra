@@ -17,9 +17,6 @@ then a member is `@tool.unavailable` over the member.
   "Canonical format"; [type chapter](../../../../spec/02-type-system.md)
   "Declared types" and "Associated types" for the shapes the views must expose
   (checking is steps 15 to 19).
-- Open questions: Q9 (which code a wrong tag in `visibility`,
-  `representation`, `role`, `external` gets). Must be answered before this
-  step starts.
 
 ## Entry points
 
@@ -35,7 +32,7 @@ Cases(Vec<Case>), items }`,
 `Case { name, fields: Option<Vec<(Ident, TypeExpr)>> }`,
 `InterfaceDecl { name, params, items }`, `AssocType { name }`,
 `Impl { target: TypeExpr, items }`, `AssocChoice { name, chosen: TypeExpr }`,
-`Given(Vec<(Ident, Path)>)`, `Where { predicate_tokens, else_tokens }`
+`Given(Vec<(Ident, TypeExpr)>)`, `Where { predicate_tokens, else_tokens }`
 (expressions typed in step 06), `Visibility(Atom)`, `Representation(Atom)`,
 `Role(Atom)`, `Doc(DocString)`.
 
@@ -47,14 +44,21 @@ Cases(Vec<Case>), items }`,
    T)`, `Proc(inputs T [row])`, `Intent(T [row])`, where `inputs` is
    `{ {type-expr} {ident ":" type-expr} }` and `row` is `{ {path} }`. A
    labelled type argument after a positional one only; a positional after a
-   labelled one is `@syntax.invalidForm`. Invariant: `(` is never the start
-   of a type.
+   labelled one is `@syntax.invalidForm`. `Fn`, `Proc`, `Intent`, and
+   `Intrinsic` are reserved type heads: a type expression or type body
+   that begins with one is parsed by that head's own production and never
+   as an applied path. A reserved word written as a label is recovered as
+   the label with `@name.reservedLabel` at the word. Invariant: `(` is
+   never the start of a type.
 2. `type … endtype`: name, optional `type-params` (`(` identifiers `)`),
    then `of type-body` or one or more `case`, then items. `type-body` is a
    type expression or `Intrinsic(atom)`. A `case` has a name and an
    optional `record-type`. Missing name, missing body and cases, both `of`
-   and `case`, a case list that is empty, are `@syntax.invalidForm`.
-   Invariant: cases keep written order.
+   and `case`, a case list that is empty, are `@syntax.invalidForm`. A
+   reserved word as the declaration name or as a type parameter is
+   recovered with `@name.reservedDeclaration` at the word; as a record or
+   case field name, with `@name.reservedLabel`. Invariant: cases keep
+   written order.
 3. Sections admitted by `type`: `given`, `where`, `role`, `visibility`,
    `representation`, `doc`; by `interface`: `given`, `role`, `visibility`,
    `doc`; by `impl`: none. Any other section is `@syntax.invalidSection`
@@ -62,23 +66,27 @@ Cases(Vec<Case>), items }`,
    library are `@syntax.invalidSection` (the reader is told whether it
    parses a standard-library module through `parse_source`'s options; the
    default is "not standard library"). A tag outside the closed set of a
-   tag section gets the Q9 code. Invariant: admissibility is one table per
-   declaration kind.
+   `visibility`, `representation`, or `role` section is
+   `@syntax.invalidForm` over the section. Invariant: admissibility is one
+   table per declaration kind.
 4. `interface … endinterface`: name, params, items: `given`, `role`,
    `visibility`, `doc`, `type Name endtype` (associated type: a `type`
    with no body and no items; a body here is `@syntax.invalidForm`),
-   `impl`, members (unavailable until 07).
+   `impl`, members (unavailable until 07). An associated type is a member
+   of the interface.
 5. `impl type-expr … endimpl`: valid only as a direct child of a `type` or
    `interface`; at top level or inside anything else it is
-   `@syntax.invalidForm`. Items: `type Name of T endtype` (associated
-   choice), members (unavailable until 07).
+   `@syntax.invalidForm`. Its operand is one type expression. Items:
+   `type Name of T endtype` (associated choice), members (unavailable
+   until 07).
 6. `where`: `where expr [else expr]`; the operand tokens are captured and
    typed as expressions in step 06; here the section boundary is fixed.
 7. Formatter: type expressions on one line when they fit, otherwise one
-   entry per line; `case` lines one step in; associated types and choices
-   as one-line declarations; `impl` blocks after members; the canonical
-   section order. Invariant: no reordering of cases, fields, or type
-   arguments.
+   entry per line; `case` lines one step in; the canonical member order:
+   the sections, then the associated type declarations of an interface or
+   the choices of an `impl`, then nested `fn` and `proc` members, then
+   `impl` blocks, each group in written order. Invariant: no reordering
+   of cases, fields, or type arguments.
 8. Cases.
 
 ## Test matrix
@@ -90,6 +98,10 @@ Cases(Vec<Case>), items }`,
 | `V2-SRC-DECL-type-tuple` | positive | `type Pair of {I32 Str} endtype` | accepted; body is a tuple type with two components |
 | `V2-SRC-DECL-type-variant` | positive, formatter | `type Lookup(T)\n  case found {value: T}\n  case missing\n  visibility @public\nendtype` | accepted; cases in order; formatted equals input |
 | `V2-SRC-DECL-type-generic-given` | positive | `type Box(T)\n  of {item: T}\n  given {T: Printable}\nendtype` | accepted; `given` entry `T: Printable` |
+| `V2-SRC-DECL-given-bound-forms` | positive | `type Sorted(T I)\n  of {items: I}\n  given {T: Ordered I: Iter(Item: T)}\nendtype` | accepted; the second bound is a type expression with one labelled argument |
+| `V2-SRC-DECL-type-reserved-name` | negative | `type where of U8 endtype` | `@name.reservedDeclaration` at `5..10`; the declaration is still built |
+| `V2-SRC-DECL-type-reserved-field` | negative | `type A of {role: U8} endtype` | `@name.reservedLabel` at `11..15` |
+| `V2-SRC-DECL-type-head-application` | positive | `type H of Fn({I32} Bool) endtype` | accepted as a callable type, never as the path `Fn` applied to two arguments |
 | `V2-SRC-DECL-type-section-order` | formatter | `type A given {T: Any} of {x: T} visibility @public endtype` written with `given` before `of` | formatted puts `of` first, then `given`, then `visibility`, each on its line |
 | `V2-SRC-DECL-type-callable-types` | positive | `type Handler of Fn({I32 verbose: Bool} Bool) endtype` and `type Job of Proc({Str} Void {DirWrite}) endtype` and `type Plan of Intent(Void {DirWrite}) endtype` | accepted; the row `{DirWrite}` is the last operand |
 | `V2-SRC-DECL-type-assoc-label` | positive | `type Items of Iter(Item: U8) endtype` | accepted; one labelled type argument |
@@ -100,7 +112,7 @@ Cases(Vec<Case>), items }`,
 | `V2-SRC-DECL-type-invalid-section` | negative | `type A of U8 performs {X} endtype` | `@syntax.invalidSection` at `performs {X}` |
 | `V2-SRC-DECL-type-role-outside-stdlib` | negative | `type A of U8 role @bool endtype` | `@syntax.invalidSection` at `role @bool` |
 | `V2-SRC-DECL-type-intrinsic-outside-stdlib` | negative | `type A of Intrinsic(@i32) endtype` | `@syntax.invalidSection` at the body |
-| `V2-SRC-DECL-type-bad-tag` | negative | `type A of U8 visibility @friends endtype` | the Q9 code at `@friends` |
+| `V2-SRC-DECL-type-bad-tag` | negative | `type A of U8 visibility @friends endtype` | `@syntax.invalidForm` at `13..32`, the section `visibility @friends` |
 | `V2-SRC-DECL-interface-basic` | positive, formatter | `interface Printable\n  visibility @public\n  fn render\n    takes {value: Self}\n    returns text: Str\n  endfn\nendinterface` | accepted with `@tool.unavailable` over the `fn` member until 07; re-recorded as accepted in 07 |
 | `V2-SRC-DECL-interface-assoc` | positive | `interface Iter\n  type Item endtype\nendinterface` | accepted; one associated type `Item` |
 | `V2-SRC-DECL-interface-assoc-with-body` | negative | `interface I type Item of U8 endtype endinterface` | `@syntax.invalidForm` over the nested `type` |
@@ -113,7 +125,13 @@ Cases(Vec<Case>), items }`,
 
 Codes: `@syntax.invalidForm`, `@syntax.invalidSection`,
 `@syntax.duplicateSection`, `@syntax.unmatchedDelimiter`,
-`@tool.unavailable`, and the Q9 code. No schema change.
+`@name.reservedDeclaration`, `@name.reservedLabel`, `@tool.unavailable`.
+Schema: `@tree.v2` gains the node kinds of this step's productions
+(`@typeDecl`, `@case`, `@interfaceDecl`, `@assocType`, `@impl`,
+`@assocChoice`, `@typeParams`, `@given`, `@where`, `@visibility`,
+`@representation`, `@role`, `@doc`, `@recordType`, `@inputs`, `@row`,
+`@path`); the choice productions `type-body`, `type-item`, and
+`type-expr` are never nodes.
 
 ## Validation
 
@@ -125,8 +143,8 @@ cargo run --locked --offline -p vibra-conformance --bin vibra-conformance -- --r
 cargo test --locked --offline --workspace --all-targets --all-features
 ```
 
-Read: every case above passes; the step 04 case `V2-SRC-DECL-use-first` is
-re-recorded as fully accepted.
+Read: every case above passes; the step 04 case `V2-SRC-DECL-use-late` is
+re-recorded with its one `@syntax.invalidForm` and no `@tool.unavailable`.
 
 ## Excluded
 
@@ -142,4 +160,5 @@ semantic rule of the type chapter.
       table names it.
 - [ ] The section admissibility table in code has one row per declaration kind
       and a host test checks it against the chapter's grammar.
+- [ ] `conformance/rules.tsv` has one `active` row per case id above.
 - [ ] All cases pass; validation commands exit 0.

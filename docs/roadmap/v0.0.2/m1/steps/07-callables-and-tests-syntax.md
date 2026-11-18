@@ -13,8 +13,9 @@ step the reader accepts the whole grammar of the source chapter.
   `requires`, `ensures`, `performs`, `external`, `symbol`, `native`, `anon-fn`,
   `anon-proc`), "Declarations" (`fn` and `proc`, `test`, "External
   definitions"), "Canonical format"; [type
-  chapter](../../../../spec/02-type-system.md) "Guards" (the shapes only).
-- Open questions: Q10 (a top-level `fn` with neither body nor `external`).
+  chapter](../../../../spec/02-type-system.md) "Guards" (the shapes only)
+  and "Implementations" (the sentence that implementation members declare
+  no guards).
 
 ## Entry points
 
@@ -38,7 +39,10 @@ Option<(Pattern, TypeExpr)>, performs: Option<Row>, body }`.
    `params = { {pattern ":" type-expr} }`;
    `labelled = { {ident ":" type-expr "be" expr} }`. A missing `returns` is
    `@syntax.invalidForm`; an empty `takes {}` or `labelled {}` is accepted and
-   removed by the formatter. Invariant: the result name is kept.
+   removed by the formatter. A reserved word as a labelled parameter's
+   name is recovered with `@name.reservedLabel`; as the declaration name,
+   a type parameter, or a parameter binder, with
+   `@name.reservedDeclaration`. Invariant: the result name is kept.
 2. `fn … endfn` and `proc … endproc`: name, params, signature, sections in
    any order (`given`, `requires`, `ensures`, `visibility`, `external`,
    `symbol`, `native`, `doc`; `performs` for `proc` only), `do body` last.
@@ -46,15 +50,19 @@ Option<(Pattern, TypeExpr)>, performs: Option<Row>, body }`.
    are `@syntax.invalidSection`. `external`, `symbol`, `native` outside the
    standard library are `@syntax.invalidSection`. A declaration with
    `external` must have `symbol` and no body, and `symbol` needs
-   `external`; otherwise `@syntax.invalidForm`. Per Q10 a `fn` with no body
-   and no `external` outside an interface is `@syntax.invalidForm`.
-   Invariant: the admissibility table of step 05 gains the `fn`, `proc`,
-   `test`, and `let` rows.
+   `external`; otherwise `@syntax.invalidForm`. An `external` tag outside
+   its closed set is `@syntax.invalidForm` over the section. A `fn` or
+   `proc` without `do` that is neither an abstract interface member nor an
+   external definition is `@syntax.invalidForm` at its closer. Invariant:
+   the admissibility table of step 05 gains the `fn`, `proc`, `test`, and
+   `let` rows.
 3. Nested members: `fn`/`proc` as items of `type`, `interface`, and `impl`;
-   an abstract interface member has no `do`; a default member's body has at
-   least one statement (`@syntax.invalidForm` for `do endfn`). A named
-   `fn`, `proc`, `type`, `interface`, or `test` inside a body is
-   `@syntax.invalidForm`.
+   an abstract interface member has no `do`. A `do` with an empty body is
+   grammatical; the checker reports it as `@type.missingReturn` (steps 17
+   and 19). A member of an `impl` declares no guard: `requires`,
+   `ensures`, or `where` on one is `@syntax.invalidSection` at the
+   section. A named `fn`, `proc`, `type`, `interface`, or `test` inside a
+   body is `@syntax.invalidForm`.
 4. Anonymous `fn`/`proc` expressions: no name, visibility, or doc; `given`,
    `requires`, `ensures` (and `performs` for `proc`) admitted; a name after
    the keyword in expression position is `@syntax.invalidForm`.
@@ -84,7 +92,10 @@ Option<(Pattern, TypeExpr)>, performs: Option<Row>, body }`.
 | `V2-SRC-DECL-fn-missing-returns` | negative | `fn f takes {x: I32} do return x endfn` | `@syntax.invalidForm` over the form |
 | `V2-SRC-DECL-fn-performs` | negative | `fn f returns r: I32 performs {X} do return 1i32 endfn` | `@syntax.invalidSection` at `performs {X}` |
 | `V2-SRC-DECL-fn-duplicate-requires` | negative | `fn f takes {x: I32} returns r: I32 requires a requires b do return x endfn` | `@syntax.duplicateSection` at the second `requires` |
-| `V2-SRC-DECL-fn-no-body` | negative | `fn f returns r: I32 endfn` | `@syntax.invalidForm` (Q10) |
+| `V2-SRC-DECL-fn-no-body` | negative | `fn f returns r: I32 endfn` | `@syntax.invalidForm` at `20..25`, the closer |
+| `V2-SRC-DECL-fn-reserved-label` | negative | `fn f labelled {role: Bool be false} returns r: Bool do return role endfn` | `@name.reservedLabel` at `15..19`; nothing else |
+| `V2-SRC-DECL-fn-external` | positive, stdlib mode | `fn addChecked takes {left: I32 right: I32} returns sum: Result(I32 ArithmeticError) external @compiler symbol "i32.addChecked" endfn` | accepted |
+| `V2-SRC-DECL-fn-external-bad-tag` | negative, stdlib mode | the same with `external @vendor` | `@syntax.invalidForm` over the section `external @vendor` |
 | `V2-SRC-DECL-fn-external-outside-stdlib` | negative | `fn f returns r: I32 external @compiler symbol "x" endfn` | `@syntax.invalidSection` at `external @compiler` |
 | `V2-SRC-DECL-fn-external-with-body` | negative, stdlib mode | the same with `do return 1i32` | `@syntax.invalidForm` |
 | `V2-SRC-DECL-fn-local-declaration` | negative | `fn f returns r: I32 do fn g returns s: I32 do return 1i32 endfn return 1i32 endfn` | `@syntax.invalidForm` over the inner `fn` |
@@ -94,17 +105,22 @@ Option<(Pattern, TypeExpr)>, performs: Option<Row>, body }`.
 | `V2-SRC-DECL-anon-fn-named` | negative | `let g: Fn({} I32) be fn h returns r: I32 do return 1i32 endfn endlet` | `@syntax.invalidForm` |
 | `V2-SRC-DECL-anon-proc` | positive | `let p: Proc({Str} Void {Out}) be proc takes {s: Str} returns r: Void performs {Out} do return void endproc endlet` | accepted by the reader |
 | `V2-SRC-DECL-member-and-impl` | positive, formatter | the `User` example with the nested `nameLength` and `impl Printable … endimpl` | accepted; members before `impl`, formatted equals the chapter |
-| `V2-SRC-DECL-interface-default-empty` | negative | `interface I fn f takes {v: Self} returns r: Str do endfn endinterface` | `@syntax.invalidForm` over the member |
+| `V2-SRC-DECL-interface-default-empty` | positive | `interface I fn f takes {v: Self} returns r: Str do endfn endinterface` | accepted by the reader: an empty body is grammatical (step 19 owns its `@type.missingReturn`) |
+| `V2-SRC-DECL-impl-member-guard` | negative | `type A of U8\n  impl P\n    fn f takes {v: Self} returns r: U8 requires true do return 1u8 endfn\n  endimpl\nendtype` | `@syntax.invalidSection` at `requires true` |
 | `V2-SRC-DECL-test-basic` | positive, formatter | `test "adds one"\n  do\n    assert.equal(2u64 add(1u64 1u64))\nendtest` | accepted |
 | `V2-SRC-DECL-test-world` | positive | `test "reads" takes {world: TestWorld} performs {TestWorld} do assert.true(true) endtest` | accepted by the reader |
 | `V2-SRC-DECL-test-two-params` | negative | `test "x" takes {a: A b: B} do assert.true(true) endtest` | `@syntax.invalidForm` |
-| `V2-SRC-READER-fn-recovery` | recovery | `fn f takes {x: I32 returns r: I32 do return x endfn\nfn g returns r: I32 do return 1i32 endfn` | `@syntax.unmatchedDelimiter` at `returns` or the closer per Q8; `g` exact |
+| `V2-SRC-READER-fn-recovery` | recovery | `fn f takes {x: I32 returns r: I32 do return x endfn\nfn g returns r: I32 do return 1i32 endfn` | one `@syntax.unmatchedDelimiter` at `46..51`, the `endfn`, related `11..12`, the `{` it closed as missing; `g` exact |
 
 ## Diagnostics and schema changes
 
 Codes: `@syntax.invalidForm`, `@syntax.invalidSection`,
-`@syntax.duplicateSection`, `@syntax.unmatchedDelimiter`. The reader emits
-`@tool.unavailable` nowhere after this step. No schema change.
+`@syntax.duplicateSection`, `@syntax.unmatchedDelimiter`,
+`@name.reservedLabel`, `@name.reservedDeclaration`. The reader emits
+`@tool.unavailable` nowhere after this step. Schema: `@tree.v2` gains the
+node kinds `@fnDecl`, `@procDecl`, `@signature`, `@params`, `@labelled`,
+`@test`, `@requires`, `@ensures`, `@performs`, `@external`, `@symbol`,
+`@native`, `@anonFn`, and `@anonProc`.
 
 ## Validation
 
@@ -130,5 +146,6 @@ Every semantic rule; the standard-library modules themselves (14).
       `external`, `symbol`, `native`, `anon-fn`, `anon-proc`, named in the owner
       table.
 - [ ] Every example fenced `vibra` in the source chapter parses with no
-      diagnostic (host test, superseded by step 08's inventory).
+      diagnostic (host test; step 08 extends it to every chapter).
+- [ ] `conformance/rules.tsv` has one `active` row per case id above.
 - [ ] All cases pass; validation commands exit 0.
