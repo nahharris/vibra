@@ -446,7 +446,7 @@ pub(crate) struct Checker<'a> {
     /// The bounds of the binders in scope, and the interface `Self` belongs
     /// to in a default body.
     pub(crate) evidence: Evidence<'a>,
-    pub(crate) slots: Vec<Option<Type>>,
+    pub(crate) slots: Slots,
     pub(crate) captures: Vec<Type>,
     /// The enclosing callable's result, `None` in a module-value
     /// initializer.
@@ -454,6 +454,50 @@ pub(crate) struct Checker<'a> {
     /// Whether the expression is a guard's predicate or consequence, where
     /// nothing leaves the activation.
     pub(crate) in_guard: bool,
+}
+
+/// The slots of an activation being checked: the declared count bounds the
+/// slot numbers, and only the slots bound hold storage, so a count taken
+/// from the IR allocates nothing in proportion to itself.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct Slots {
+    count: usize,
+    held: BTreeMap<usize, Type>,
+}
+
+impl Slots {
+    pub(crate) const fn new(count: usize) -> Self {
+        Self {
+            count,
+            held: BTreeMap::new(),
+        }
+    }
+
+    const fn check(&self, slot: usize) -> Result<(), IrError> {
+        if slot < self.count {
+            Ok(())
+        } else {
+            Err(IrError::SlotOutOfRange {
+                slot,
+                count: self.count,
+            })
+        }
+    }
+
+    /// The type `slot` holds, `None` when it is unset.
+    fn get(&self, slot: usize) -> Result<Option<&Type>, IrError> {
+        self.check(slot)?;
+        Ok(self.held.get(&slot))
+    }
+
+    /// Sets `slot` to `ty`, or unsets it, and returns what it held.
+    fn set(&mut self, slot: usize, ty: Option<Type>) -> Result<Option<Type>, IrError> {
+        self.check(slot)?;
+        Ok(match ty {
+            Some(ty) => self.held.insert(slot, ty),
+            None => self.held.remove(&slot),
+        })
+    }
 }
 
 /// `actual` is a value of `expected`: they are equal, or `actual` is `Never`.
@@ -517,7 +561,7 @@ impl<'a> Checker<'a> {
             tables,
             scope,
             evidence: Evidence::default(),
-            slots: vec![None; slot_count],
+            slots: Slots::new(slot_count),
             captures: Vec::new(),
             result: None,
             in_guard: false,
@@ -613,20 +657,14 @@ impl<'a> Checker<'a> {
         slot: usize,
         ty: Type,
     ) -> Result<Option<Type>, IrError> {
-        let count = self.slots.len();
-        let held = self
-            .slots
-            .get_mut(slot)
-            .ok_or(IrError::SlotOutOfRange { slot, count })?;
-        Ok(held.replace(ty))
+        self.slots.set(slot, Some(ty))
     }
 
     /// Restores slots bound by [`Self::bind`], last first.
     pub(crate) fn restore(&mut self, bound: Vec<(usize, Option<Type>)>) {
         for (slot, held) in bound.into_iter().rev() {
-            if let Some(place) = self.slots.get_mut(slot) {
-                *place = held;
-            }
+            // Every slot here was bound, so it is in range.
+            let _ = self.slots.set(slot, held);
         }
     }
 
@@ -692,13 +730,7 @@ impl<'a> Checker<'a> {
             }
             Expr::Variable { slot, value_type } => {
                 self.check_type(value_type)?;
-                let count = self.slots.len();
-                let held = self
-                    .slots
-                    .get(*slot)
-                    .ok_or(IrError::SlotOutOfRange { slot: *slot, count })?
-                    .as_ref()
-                    .ok_or(IrError::UnsetSlot(*slot))?;
+                let held = self.slots.get(*slot)?.ok_or(IrError::UnsetSlot(*slot))?;
                 if held != value_type {
                     return Err(IrError::SlotTypeMismatch {
                         slot: *slot,
@@ -1025,7 +1057,7 @@ impl<'a> Checker<'a> {
             tables: self.tables,
             scope: self.scope,
             evidence: self.evidence,
-            slots: vec![None; closure.slot_count],
+            slots: Slots::new(closure.slot_count),
             captures: closure.captures.clone(),
             result: Some(result.clone()),
             in_guard: self.in_guard,

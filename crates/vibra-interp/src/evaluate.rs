@@ -10,7 +10,6 @@ use vibra_ir::{
 };
 
 use crate::encode::{ObserveError, observe, to_neutral};
-use crate::frame::Frame;
 use crate::machine::{Halt, Machine, Mode, Resolved, Target};
 use crate::types::type_of;
 use crate::value::Val;
@@ -98,7 +97,7 @@ pub fn run(
     let mut machine = Machine::new(set, Mode::Run, budget.bytes, u64::MAX);
     let value = call_entry(&mut machine, program.entry(), budget)?
         .map_err(|halt| runtime_error(halt, machine.origin(), budget))?;
-    machine.stats.live_memory_bytes = machine.measure(Some(&value));
+    machine.stats.live_memory_bytes = machine.measure(std::slice::from_ref(&value));
     let (neutral, canonical) = match observe(set, &value, &result_type) {
         Ok(observed) => observed,
         Err(ObserveError::Unsupported) => {
@@ -139,7 +138,8 @@ pub fn run_test(
     let mut machine = Machine::new(set, Mode::Test, budget.bytes, u64::MAX);
     let failure = match call_entry(&mut machine, program.entry(), budget)? {
         Ok(value) => {
-            machine.stats.live_memory_bytes = machine.measure(Some(&value));
+            machine.stats.live_memory_bytes =
+                machine.measure(std::slice::from_ref(&value));
             None
         }
         Err(Halt::Failed(failure)) => Some(*failure),
@@ -171,10 +171,13 @@ pub fn evaluate(
     };
     let mut machine =
         Machine::new(set, Mode::Evaluate, limits.memory.bytes, limits.reductions);
-    let mut frame = Frame::new(inputs.len(), Rc::clone(&machine.empty_env));
-    frame.inputs = inputs;
+    let env = Rc::clone(&machine.empty_env);
     let outcome = machine
-        .enter_root(frame)
+        .new_frame(inputs.len(), env, &[])
+        .and_then(|mut frame| {
+            frame.inputs = inputs;
+            machine.enter_root(frame)
+        })
         .and_then(|()| machine.execute(crate::machine::Step::Eval(&root)))
         .and_then(|value| to_neutral(set, &value, &value_type));
     match outcome {

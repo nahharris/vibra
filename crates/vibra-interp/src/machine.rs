@@ -15,14 +15,14 @@ use vibra_ir::external::CompilerIntrinsic;
 use vibra_ir::{
     Arguments, CallTarget, CheckedFunction, CheckedModuleSet, ClosureBody, Constant,
     Construction, Expr, FunctionBody, Guard, Library, MatchArm, NamedTypes, Node,
-    Pattern, SourceOrigin, Type, TypeBody, TypeId,
+    Pattern, SourceOrigin, Type, TypeBody, TypeId, Value,
 };
 
 use crate::compare::{DictBuild, DictFind, Structural};
 use crate::encode::{ObserveError, encoding, from_neutral};
 use crate::frame::{Frame, TypeEnv};
 use crate::types::{match_type, mentions_self, type_of};
-use crate::value::{ClosureVal, FunctionVal, Held, Repr, Val, same};
+use crate::value::{ClosureVal, FunctionVal, Held, Repr, Val, neutral_storage, same};
 use crate::{FailureKind, Instrumentation, TestAssertionFailure, intrinsics};
 
 /// Why the machine stopped before its work was done.
@@ -360,20 +360,88 @@ impl<'a> Machine<'a> {
 
     /// A constant as a runtime value.
     fn constant(&mut self, constant: &'a Constant) -> Result<Val<'a>, Halt> {
-        let value = from_neutral(self.set, constant.value(), constant.value_type())?;
-        self.allocated(&value)?;
-        Ok(value)
+        self.ingress(constant.value(), constant.value_type())
+    }
+
+    /// A neutral value as a runtime value of `ty`: its storage is reserved
+    /// against the budget before any of it is built.
+    pub(crate) fn ingress(
+        &mut self,
+        value: &'a Value,
+        ty: &Type,
+    ) -> Result<Val<'a>, Halt> {
+        let cost = as_u64(neutral_storage(value));
+        self.reserve(cost, &[])?;
+        let converted = from_neutral(self.set, value, ty)?;
+        self.allocated_bytes = self.allocated_bytes.saturating_add(cost);
+        Ok(converted)
     }
 
     // ----- memory -----
 
-    /// Accounts a newly built value against the budget.
-    pub(crate) fn allocated(&mut self, value: &Val<'_>) -> Result<(), Halt> {
+    /// Accounts a newly built value, which no root holds yet, against the
+    /// budget.
+    pub(crate) fn allocated(&mut self, value: &Val<'a>) -> Result<(), Halt> {
         if let Some((_, bytes)) = value.storage() {
             self.allocated_bytes = self.allocated_bytes.saturating_add(as_u64(bytes));
-            self.check_memory()?;
+            self.reserve(0, std::slice::from_ref(value))?;
         }
         Ok(())
+    }
+
+    /// Checks that `pending` more bytes fit the budget beside what is
+    /// accounted. When they do not at first, the live bytes are measured
+    /// again from the roots and from `in_flight`, the values built that no
+    /// root holds yet.
+    fn reserve(&mut self, pending: u64, in_flight: &[Val<'a>]) -> Result<(), Halt> {
+        let accounted = self.accounted().saturating_add(pending);
+        if accounted <= self.budget {
+            self.stats.peak_memory_bytes = self.stats.peak_memory_bytes.max(accounted);
+            return Ok(());
+        }
+        self.live_bytes = self.measure(in_flight);
+        self.allocated_bytes = 0;
+        let accounted = self.accounted().saturating_add(pending);
+        self.stats.peak_memory_bytes = self.stats.peak_memory_bytes.max(accounted);
+        if accounted > self.budget {
+            return Err(Halt::Memory);
+        }
+        Ok(())
+    }
+
+    /// A frame of `slot_count` slots, its bytes reserved before it is built;
+    /// `in_flight` are the values that will fill it.
+    pub(crate) fn new_frame(
+        &mut self,
+        slot_count: usize,
+        env: Rc<TypeEnv>,
+        in_flight: &[Val<'a>],
+    ) -> Result<Frame<'a>, Halt> {
+        let cost = FRAME_BYTES
+            .saturating_add(as_u64(slot_count).saturating_mul(SLOT_BYTES))
+            .saturating_add(KONT_BYTES);
+        self.reserve(cost, in_flight)?;
+        Frame::try_new(slot_count, env).ok_or(Halt::Memory)
+    }
+
+    /// Sets `slot` of the current activation. An evaluation's root
+    /// activation grows to hold it, its new slots reserved first.
+    fn bind_slot(&mut self, slot: usize, value: Val<'a>) -> Result<(), Halt> {
+        let count = self.frame()?.slots.len();
+        if slot >= count {
+            let wanted = slot.checked_add(1).ok_or(Halt::Memory)?;
+            let extra = wanted.saturating_sub(count);
+            let bytes = as_u64(extra).saturating_mul(SLOT_BYTES);
+            self.reserve(bytes, std::slice::from_ref(&value))?;
+            let frame = self.frame_mut()?;
+            frame
+                .slots
+                .try_reserve_exact(extra)
+                .map_err(|_| Halt::Memory)?;
+            frame.slots.resize(wanted, None);
+            self.frame_bytes = self.frame_bytes.saturating_add(bytes);
+        }
+        self.frame_mut()?.set(slot, value)
     }
 
     fn accounted(&self) -> u64 {
@@ -384,22 +452,12 @@ impl<'a> Machine<'a> {
     }
 
     fn check_memory(&mut self) -> Result<(), Halt> {
-        let accounted = self.accounted();
-        self.stats.peak_memory_bytes = self.stats.peak_memory_bytes.max(accounted);
-        if accounted <= self.budget {
-            return Ok(());
-        }
-        self.live_bytes = self.measure(None);
-        self.allocated_bytes = 0;
-        if self.accounted() > self.budget {
-            return Err(Halt::Memory);
-        }
-        Ok(())
+        self.reserve(0, &[])
     }
 
     /// The bytes of every value reachable from the machine's roots and from
     /// `extra`, each shared part counted once.
-    pub(crate) fn measure(&self, extra: Option<&Val<'a>>) -> u64 {
+    pub(crate) fn measure(&self, extra: &[Val<'a>]) -> u64 {
         let mut seen = HashSet::new();
         let mut pending: Vec<Val<'a>> = Vec::new();
         let mut total: u64 = 0;
@@ -425,7 +483,7 @@ impl<'a> Machine<'a> {
                 root(value, true, &mut total);
             }
         }
-        if let Some(value) = extra {
+        for value in extra {
             root(value, true, &mut total);
         }
         while let Some(value) = pending.pop() {
@@ -477,16 +535,17 @@ impl<'a> Machine<'a> {
     // ----- evaluation -----
 
     fn read_slot(&mut self, slot: usize, value_type: &Type) -> Result<Val<'a>, Halt> {
-        let set = self.set;
-        let frame = self.frame_mut()?;
+        let frame = self.frame()?;
         if let Some(Some(value)) = frame.slots.get(slot) {
             return Ok(value.clone());
         }
-        let input = frame.inputs.get(slot).ok_or_else(|| {
+        let inputs = frame.inputs;
+        let input = inputs.get(slot).ok_or_else(|| {
             Halt::Invalid(format!("slot {slot} is read before it is set"))
         })?;
-        let value = from_neutral(set, input, &frame.env.apply(value_type))?;
-        frame.bind(slot, value.clone());
+        let ty = frame.env.apply(value_type);
+        let value = self.ingress(input, &ty)?;
+        self.bind_slot(slot, value.clone())?;
         Ok(value)
     }
 
@@ -651,7 +710,8 @@ impl<'a> Machine<'a> {
             GlobalState::Unread => {
                 *state = GlobalState::Evaluating;
                 self.konts.push(Kont::Global(index));
-                let frame = Frame::new(global.slot_count, Rc::clone(&self.empty_env));
+                let env = Rc::clone(&self.empty_env);
+                let frame = self.new_frame(global.slot_count, env, &[])?;
                 self.frame_bytes = self.frame_bytes.saturating_add(frame_cost(&frame));
                 self.frames.push(frame);
                 self.check_memory()?;
@@ -1032,9 +1092,9 @@ impl<'a> Machine<'a> {
                 if matches!(body.value_type, Type::Proc(_)) {
                     return Err(unavailable_plan());
                 }
-                let mut frame = Frame::new(body.slot_count, env);
+                let mut frame = self.new_frame(body.slot_count, env, &args)?;
                 for (slot, value) in args.into_iter().enumerate() {
-                    frame.bind(slot, value);
+                    frame.set(slot, value)?;
                 }
                 frame.closure = Some(closure);
                 self.push_frame(frame, tail)?;
@@ -1056,9 +1116,9 @@ impl<'a> Machine<'a> {
                     let origin = origin.unwrap_or(&function.origin);
                     return self.intrinsic(*intrinsic, &type_arguments, args, origin);
                 }
-                let mut frame = Frame::new(function.slot_count, env);
+                let mut frame = self.new_frame(function.slot_count, env, &args)?;
                 for (slot, value) in args.into_iter().enumerate() {
-                    frame.bind(slot, value);
+                    frame.set(slot, value)?;
                 }
                 self.push_frame(frame, tail)?;
                 if let Some(guard) = &function.entry_guard {
@@ -1544,7 +1604,7 @@ impl<'a> Machine<'a> {
             Kont::Leave => {
                 let frame = self.frame_mut()?;
                 if let Some(exit) = frame.exit.take() {
-                    frame.bind(exit.candidate, value.clone());
+                    frame.set(exit.candidate, value.clone())?;
                     self.konts.push(Kont::Leave);
                     self.konts.push(Kont::Ensures {
                         candidate: value,
@@ -1570,7 +1630,7 @@ impl<'a> Machine<'a> {
             }
             Kont::Let { slot, body } => {
                 if let Some(slot) = slot {
-                    self.frame_mut()?.bind(slot, value);
+                    self.bind_slot(slot, value)?;
                 }
                 Step::Eval(body)
             }
@@ -1703,7 +1763,7 @@ impl<'a> Machine<'a> {
             let fits = match pattern {
                 Pattern::Discard => true,
                 Pattern::Bind(slot) => {
-                    self.frame_mut()?.bind(*slot, value);
+                    self.bind_slot(*slot, value)?;
                     true
                 }
                 Pattern::Literal(constant) => same(&self.constant(constant)?, &value),

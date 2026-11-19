@@ -726,6 +726,28 @@ fn v6_recursion_through_an_indirection_is_accepted() {
     assert!(with_types(vec![holder, boxed]).is_ok());
 }
 
+// -- V10: a slot count allocates nothing in validation --------------------------
+
+/// The largest slot count validates, and its slots are still bounded by it.
+#[test]
+fn v10_the_largest_slot_count_validates_without_allocating() {
+    let set = |body: Node| {
+        let mut parts = library_parts();
+        parts.functions = vec![function(
+            "wide",
+            signature(Vec::new(), Type::I32),
+            body,
+            usize::MAX,
+        )];
+        CheckedModuleSet::try_new(parts)
+    };
+    assert!(set(int(1)).is_ok());
+    assert!(matches!(
+        set(variable(usize::MAX - 1, Type::I32)),
+        Err(IrError::UnsetSlot(_))
+    ));
+}
+
 // -- V9: defaults travel with the callable value ------------------------------
 
 /// `Fn({I32 step: I32} I32)`.
