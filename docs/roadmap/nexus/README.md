@@ -23,10 +23,10 @@ behavior.
 
 ## The plan in three sentences
 
-The interpreter stays permanently, a native compiler and runtime are built,
-and the Wasm backend is removed at the native cutover (N39). The native
-track follows the release order: one slice in v0.0.2 M4, the whole language
-and three platforms in v0.0.3 (N40). Concurrency in v0.0.4 is built on an
+The interpreter is permanent and a native compiler and runtime are built
+beside it; they are the two executors (N39, N55). The native track follows
+the release order: one slice in v0.0.2 M4, the whole language and three
+platforms in v0.0.3 (N40). Concurrency in v0.0.4 is built on an
 actor kernel, with scoped children and a bounded parallel map as the first
 things a program author meets (N50).
 

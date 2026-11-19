@@ -22,12 +22,6 @@
 //! and `sourceGraph` under `staticV2`. Every
 //! other case is unavailable until the step that makes its observations
 //! exist registers a handler.
-//!
-//! # Executors
-//!
-//! [WasmExecutor] runs the checked IR of an executable case on the
-//! WebAssembly transition backend beside the reference interpreter, and the
-//! runner reports its column per profile.
 
 mod corpus;
 mod manifest;
@@ -37,7 +31,6 @@ mod reader;
 mod rules;
 mod runner;
 mod standard;
-mod wasm;
 
 pub use corpus::{
     Case, CaseInputDocument, CaseTreeFile, Corpus, CorpusError, corpus_root,
@@ -59,4 +52,3 @@ pub use rules::{
 };
 pub use runner::{CaseReport, CaseStatus, ConformanceRunner, ProfileCounts, RunReport};
 pub use standard::{DispatchResult, ProfileDispatcher, standard_dispatcher};
-pub use wasm::{Executable, WASM_SUPPORT_HEADER, WasmExecutor, unsupported_node};

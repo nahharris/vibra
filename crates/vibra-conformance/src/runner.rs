@@ -4,21 +4,14 @@
 //! and unavailable cases (`docs/spec/07-diagnostics-and-conformance.md`,
 //! "Differential execution"). There is no "skipped" count: a case no handler
 //! runs is unavailable, and only a passed case is a success.
-//!
-//! A run with an executor beside the interpreter reports a second column:
-//! each `interpret` or `workspaceTest` case the interpreter accepted is also
-//! run on the executor, and counted per profile for that executor. A case the
-//! executor does not run is unavailable there and does not fail the run; a
-//! failed or unknown case does.
 
 use std::collections::BTreeMap;
 use std::fmt;
 
 use crate::corpus::{Case, Corpus};
 use crate::manifest::{CaseExpectations, Verdict};
-use crate::profile::{CaseObservation, ConformanceOperation, ConformanceProfile};
+use crate::profile::{CaseObservation, ConformanceProfile};
 use crate::standard::{DispatchResult, ProfileDispatcher};
-use crate::wasm::WasmExecutor;
 
 /// The status of one case.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,9 +47,6 @@ pub struct CaseReport {
     pub provided_profile: Option<ConformanceProfile>,
     /// The status.
     pub status: CaseStatus,
-    /// The status on the executor beside the interpreter, for an executable
-    /// case the interpreter accepted; `None` otherwise.
-    pub executor: Option<CaseStatus>,
 }
 
 /// The counts of one profile.
@@ -132,50 +122,12 @@ impl RunReport {
         total
     }
 
-    /// The executor column's counts of every profile with a case the
-    /// executor saw, in specification order.
-    #[must_use]
-    pub fn executor_counts(&self) -> Vec<(ConformanceProfile, ProfileCounts)> {
-        let mut counts = BTreeMap::<ConformanceProfile, ProfileCounts>::new();
-        for report in &self.reports {
-            if let Some(status) = &report.executor {
-                counts
-                    .entry(report.required_profile)
-                    .or_default()
-                    .add(status);
-            }
-        }
-        ConformanceProfile::ALL
-            .iter()
-            .filter_map(|profile| counts.get(profile).map(|count| (*profile, *count)))
-            .collect()
-    }
-
-    /// The executor column's counts over every case.
-    #[must_use]
-    pub fn executor_total(&self) -> ProfileCounts {
-        let mut total = ProfileCounts::default();
-        for status in self
-            .reports
-            .iter()
-            .filter_map(|report| report.executor.as_ref())
-        {
-            total.add(status);
-        }
-        total
-    }
-
-    /// Whether every case passed, and no case failed or was unknown on the
-    /// executor.
+    /// Whether every case passed.
     #[must_use]
     pub fn is_success(&self) -> bool {
-        self.reports.iter().all(|report| {
-            report.status == CaseStatus::Passed
-                && !matches!(
-                    report.executor,
-                    Some(CaseStatus::Failed { .. } | CaseStatus::Unknown { .. })
-                )
-        })
+        self.reports
+            .iter()
+            .all(|report| report.status == CaseStatus::Passed)
     }
 }
 
@@ -183,26 +135,13 @@ impl RunReport {
 #[derive(Debug)]
 pub struct ConformanceRunner {
     dispatcher: ProfileDispatcher,
-    executor: Option<WasmExecutor>,
 }
 
 impl ConformanceRunner {
     /// A runner over `dispatcher`.
     #[must_use]
     pub const fn new(dispatcher: ProfileDispatcher) -> Self {
-        Self {
-            dispatcher,
-            executor: None,
-        }
-    }
-
-    /// The same runner with `executor` beside the interpreter.
-    #[must_use]
-    pub fn with_executor(self, executor: WasmExecutor) -> Self {
-        Self {
-            dispatcher: self.dispatcher,
-            executor: Some(executor),
-        }
+        Self { dispatcher }
     }
 
     /// Runs every case, on as many threads as the machine has, and reports
@@ -272,14 +211,12 @@ impl ConformanceRunner {
                 required_profile: required,
                 provided_profile: Some(provided),
                 status: compare(case, &case.manifest().expectations, &observation),
-                executor: self.on_executor(case, &observation),
             },
             DispatchResult::Unavailable { required, reason } => CaseReport {
                 case_id,
                 required_profile: required,
                 provided_profile: None,
                 status: CaseStatus::Unavailable { reason },
-                executor: None,
             },
             DispatchResult::Failed {
                 required,
@@ -292,35 +229,8 @@ impl ConformanceRunner {
                 status: CaseStatus::Failed {
                     reason: format!("handler failed: {error}"),
                 },
-                executor: None,
             },
         }
-    }
-
-    /// The executor column of one case: an `interpret` or `workspaceTest`
-    /// case the interpreter accepted, run on the executor.
-    fn on_executor(
-        &self,
-        case: &Case,
-        observation: &CaseObservation,
-    ) -> Option<CaseStatus> {
-        let executor = self.executor.as_ref()?;
-        let executable = matches!(
-            case.manifest().operation,
-            ConformanceOperation::Interpret | ConformanceOperation::WorkspaceTest
-        );
-        if !executable || observation.verdict != Verdict::Accepted {
-            return None;
-        }
-        Some(observation.executable.as_ref().map_or_else(
-            || CaseStatus::Unavailable {
-                reason: format!(
-                    "{} executor: the handler built no checked program",
-                    WasmExecutor::NAME
-                ),
-            },
-            |executable| executor.check(executable),
-        ))
     }
 
     /// The dispatcher of this runner.

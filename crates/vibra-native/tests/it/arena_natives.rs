@@ -1,8 +1,8 @@
-//! The natives over linear memory, without an engine.
+//! The natives over arena memory.
 //!
 //! These tests lay arena objects out by hand, in the layout of
-//! `vibra_ir::arena`, and call each native as the runner does. They hold the
-//! protocol the import table states: a row measures with no destination and
+//! `vibra_ir::arena`, and call each native as a runtime does. They hold the
+//! protocol the table of native rows states: a row measures with no destination and
 //! fills the one it is given, takes one `dup` for each reference it copies,
 //! and refuses an operand that is not an object of the row, instead of reading
 //! outside the memory.

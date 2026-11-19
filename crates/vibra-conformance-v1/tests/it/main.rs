@@ -1,7 +1,7 @@
 //! The `vibra-conformance-v1` integration tests, one test target.
 //!
 //! Every file in `tests/` would be its own binary, and each links the
-//! WebAssembly engine, so the tests live here as modules of one binary that
+//! native track, so the tests live here as modules of one binary that
 //! share `support` instead of each carrying a copy of the helpers they need.
 
 #![allow(

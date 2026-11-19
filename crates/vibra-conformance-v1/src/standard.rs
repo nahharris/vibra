@@ -17,10 +17,7 @@ use crate::workspace_semantic::{
 
 /// Every real handler the workspace has, registered where its profile puts it.
 ///
-/// The `interpreter-v1` handlers also run the WebAssembly backend on each
-/// accepted executable case, because both backends receive the one checked
-/// program (`docs/spec/07-diagnostics-and-conformance.md`, "Differential
-/// execution"). The `vibra-conformance-v1` binary and the host tests that run the
+/// The `vibra-conformance-v1` binary and the host tests that run the
 /// corpus build the same dispatcher, so the two cannot disagree about which
 /// handlers exist.
 #[must_use]

@@ -152,7 +152,7 @@ pub struct HostParameter {
 /// One row of the host registry: `(symbol, owner, signature, since)`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HostRow {
-    /// The registry symbol, the entry's identity and its Wasm import field.
+    /// The registry symbol, the entry's identity.
     pub symbol: &'static str,
     /// The operation's source name, such as `io.stdin.text`.
     pub operation: &'static str,

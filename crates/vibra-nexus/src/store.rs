@@ -643,10 +643,8 @@ mod tests {
         assert_eq!(store.live_size(), 0);
     }
 
-    // The tests below are the arena host tests of milestone 4
-    // (`crates/vibra-conformance-v1/tests/it/arena_runtime.rs` and the unit tests
-    // of `vibra-wasm`'s layout), driven on the store directly. A constant
-    // that differs from the M4 one says so, and why.
+    // The tests below are the arena host tests of milestone 4, driven on the
+    // store directly. A constant that differs from the M4 one says so, and why.
 
     /// A block of `len` bytes that is allocated and released at once.
     fn bytes_round_trip(store: &mut Store, len: u32) -> Done<()> {
@@ -767,12 +765,9 @@ mod tests {
 
     #[test]
     fn a_value_nested_deep_releases_with_bounded_stack() {
-        // M4 `a_value_nested_deep_releases_with_bounded_engine_stack`: 5,000
-        // and 100,000 levels on a 64 KiB stack. A node is a 64-byte block. The
-        // M4 live size while held was `(depth + 1) * 64 + 256`
-        // (320,320 and 6,400,320): the 256 bytes were the Wasm handle table,
-        // which a native context does not have (N7), so the Nexus live size is
-        // 320,064 and 6,400,064.
+        // 5,000 and 100,000 levels on a 64 KiB stack. A node is a 64-byte
+        // block, and a native context has no handle table (N7), so the live
+        // size while held is `(depth + 1) * 64`: 320,064 and 6,400,064.
         on_a_small_stack(|| {
             for (depth, held) in [(5_000_u32, 320_064_u64), (100_000, 6_400_064)] {
                 let mut store = Store::new(64 * MIB);

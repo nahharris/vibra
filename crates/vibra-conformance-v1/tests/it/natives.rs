@@ -3,13 +3,12 @@
 //! `docs/spec/06-runtime.md`, "Native implementations": every native
 //! implementation, and every primitive row whose algorithm needs a loop, is
 //! toolchain-owned Rust written once. The reference interpreter calls it
-//! directly, a module reaches it through an import of `vibra_native_v1`, and a
-//! native whose meaning applies a function value has no import and a module
-//! runs its body.
+//! directly, and a native whose meaning applies a function value has no row
+//! in the table and runs its body.
 //!
 //! This file proves the rule as a whole. The audit shows that no second
-//! implementation of a native exists in the interpreter, the emitter, or the
-//! runner; the manifest and the registry name the same natives; the import
+//! implementation of a native exists in the interpreter; the manifest and
+//! the registry name the same natives; the import
 //! table names exactly the imports; a symbol the toolchain does not implement
 //! is a provenance defect; and a fault in a native is the toolchain defect
 //! `@runtime.invalid-checked-program`, never a program result.
@@ -72,10 +71,9 @@ const ALGORITHMS: &[&str] = &[
 ];
 
 #[test]
-fn no_native_has_a_second_implementation_in_the_interpreter_the_emitter_or_the_runner()
-{
+fn no_native_has_a_second_implementation_in_the_interpreter() {
     let mut found = Vec::new();
-    for krate in ["vibra-interp-v1", "vibra-wasm", "vibra-wasm-run"] {
+    for krate in ["vibra-interp-v1"] {
         for (path, code) in crate_sources(krate) {
             // The interpreter's own `native.rs` is the adapter that reads its
             // values as sequences for the native code.

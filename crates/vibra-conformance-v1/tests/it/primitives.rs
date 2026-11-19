@@ -1,20 +1,13 @@
-//! The integer and `char` primitive rows (milestone 4 Step 8a), in
-//! WebAssembly.
+//! The integer and `char` primitive rows (milestone 4 Step 8a).
 //!
 //! One table of sample vectors (`CompilerIntrinsic::vectors`, in `vibra-ir-v1`)
 //! holds the operands and the specified outcome of every sample of every row
-//! that the emitter lowers inline. Each row is run as one program, a tuple of
-//! its samples, by the reference interpreter and by the WebAssembly module, and
-//! both are held to the table. The expected outcomes come from the language's
-//! own integer types, not from either backend, so the two backends cannot
-//! drift apart on a boundary: overflow, division by zero, the signed minimum
-//! divided by `-1`, the sign of a remainder, a shift at or past the width, a
-//! conversion at the edge of its target, and the surrogate range of `char`.
-//!
-//! The tests also hold the lowering to what the runtime chapter asks of it:
-//! every path through a row, the error results included, leaves the arena
-//! balanced; a primitive application creates no activation; and emission is
-//! deterministic.
+//! that a backend lowers inline. The expected outcomes come from the language's
+//! own integer types, not from a backend, so two backends cannot drift apart
+//! on a boundary: overflow, division by zero, the signed minimum divided by
+//! `-1`, the sign of a remainder, a shift at or past the width, a conversion
+//! at the edge of its target, and the surrogate range of `char`. The tests
+//! here hold the table of native rows and the manifest to the registry.
 
 use std::collections::{BTreeMap, BTreeSet};
 

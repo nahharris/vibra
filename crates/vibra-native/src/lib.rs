@@ -3,11 +3,9 @@
 //!
 //! `docs/spec/06-runtime.md`, "Native implementations": every native
 //! implementation, and every primitive row whose algorithm needs a loop, is
-//! native code that the toolchain owns. A WebAssembly transition module
-//! reaches these functions through an import from `vibra_native_v1`, which
-//! the runner supplies over the instance's linear memory. The Vibra body of a
-//! native stays its meaning, and the shared sample vectors hold this code to
-//! it.
+//! native code that the toolchain owns. A runtime calls these functions over
+//! the value arena it owns. The Vibra body of a native stays its meaning, and
+//! the shared sample vectors hold this code to it.
 //!
 //! # The value-access interface
 //!
@@ -15,8 +13,8 @@
 //! through [`Source`] and build one through [`Sink`], and a backend implements
 //! the two for its own values:
 //!
-//! - [`arena`] implements them over the arena objects of a module's linear
-//!   memory, which is what the runner calls. A `Str` is read as its Unicode
+//! - [`arena`] implements them over the arena objects of a runtime's value
+//!   arena, which is what a runtime calls. A `Str` is read as its Unicode
 //!   scalars, a `Bytes` as its bytes, and a `List` or `Dict` as its cells, so
 //!   a function never branches on a value kind;
 //! - the host tests implement them over slices.
@@ -29,12 +27,11 @@
 //!
 //! A [`Sink`] can also only count, so a row that builds an object of a size it
 //! does not know in advance runs once to measure and once to fill, which is how
-//! a module's own allocator stays the one allocator. The code never allocates
-//! in a module, never drops, and calls back into nothing.
+//! the arena's own allocator stays the one allocator. The code never allocates
+//! in an arena, never drops, and calls back into nothing.
 //!
-//! This crate depends on `vibra-ir` for the closed table of native imports and
-//! the shape of an arena object. It has no engine dependency, and the emitter
-//! does not depend on it.
+//! This crate depends on `vibra-ir` for the closed table of native rows and
+//! the shape of an arena object, and on nothing else.
 
 pub mod arena;
 pub mod number;
@@ -203,7 +200,7 @@ where
             .all(|(left, right)| left == right)
 }
 
-/// `-1`, `0`, or `1`: how an `Ordering` crosses the native import boundary.
+/// `-1`, `0`, or `1`: how a native row answers an `Ordering`.
 #[must_use]
 pub const fn order_code(order: Ordering) -> i32 {
     match order {

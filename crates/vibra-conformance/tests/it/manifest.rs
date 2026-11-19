@@ -31,7 +31,6 @@ fn every_profile_spelling_is_accepted() {
         "interpreterV2",
         "toolingV2",
         "nativeV1",
-        "wasmTransitionV2",
         "fullV2",
     ] {
         let case = CaseManifest::from_str(&manifest(
@@ -43,7 +42,7 @@ fn every_profile_spelling_is_accepted() {
         .unwrap_or_else(|error| panic!("{spelling}: {error}"));
         assert_eq!(case.profile.as_str(), spelling);
     }
-    assert_eq!(ConformanceProfile::ALL.len(), 7);
+    assert_eq!(ConformanceProfile::ALL.len(), 6);
 }
 
 #[test]
@@ -168,9 +167,9 @@ fn an_unknown_key_in_expect_is_an_error_naming_the_key() {
         "V2-SRC-READER-x",
         "readerV2",
         "reader",
-        "wasm = true\n",
+        "extra = true\n",
     ));
-    assert!(error.contains("unknown field `wasm`"), "{error}");
+    assert!(error.contains("unknown field `extra`"), "{error}");
 }
 
 #[test]

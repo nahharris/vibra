@@ -233,8 +233,6 @@ fn the_emitter_the_checker_and_the_interpreter_are_scanned() {
         "vibra-ir-v1",
         "vibra-interp-v1",
         "vibra-native-v1",
-        "vibra-wasm",
-        "vibra-wasm-run",
         "vibra-fmt-v1",
         "vibra-schema-v1",
     ] {

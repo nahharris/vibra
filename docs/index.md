@@ -13,7 +13,7 @@ Read the chapters in order:
 4. [Effects](spec/03-effects.md)
 5. [Programs and packages](spec/04-programs-and-packages.md)
 6. [CLI, MCP, and code tooling](spec/05-tooling.md)
-7. [Runtime and WebAssembly](spec/06-runtime.md)
+7. [Runtime and native execution](spec/06-runtime.md)
 8. [Diagnostics and conformance](spec/07-diagnostics-and-conformance.md)
 
 `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` carry their RFC 2119

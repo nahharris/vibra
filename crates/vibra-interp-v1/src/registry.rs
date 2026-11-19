@@ -411,8 +411,8 @@ mod tests {
     }
 
     /// The reference implementation answers every sample vector of every row
-    /// as the table specifies, which the WebAssembly lowering is held to as
-    /// well, so the two backends agree on each of them.
+    /// as the table specifies, which Nexus is held to as well, so the two
+    /// backends agree on each of them.
     #[test]
     fn every_sample_vector_of_every_row_is_answered_as_specified() {
         let mut checked = 0_usize;

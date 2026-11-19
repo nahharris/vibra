@@ -147,14 +147,14 @@ Vibra is developed specification-first. The [charter](docs/spec/00-charter.md)
 and [language specifications](docs/index.md) define the language contracts.
 
 [v0.0.1](docs/roadmap/v0.0.1/README.md) shipped a checked language with an
-interpreter, static effects, and a WebAssembly backend, in an S-expression
-syntax. That syntax is not kept.
+interpreter and static effects, in an S-expression syntax. That syntax is
+not kept.
 
 - [v0.0.2](docs/roadmap/v0.0.2/README.md) plans the redesigned language on
   the interpreter, grants for host operations, an agent repair loop, and a
   first native slice.
 - [v0.0.3](docs/roadmap/v0.0.3/README.md) plans native executables on
-  Windows, Linux, and macOS, and removes WebAssembly.
+  Windows, Linux, and macOS.
 - [v0.0.4](docs/roadmap/v0.0.4/README.md) plans dependencies, tool adapters,
   and bounded local concurrency.
 - [v0.0.5](docs/roadmap/v0.0.5/README.md) plans service behavior and

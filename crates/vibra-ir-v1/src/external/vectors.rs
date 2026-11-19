@@ -2,7 +2,7 @@
 //!
 //! One table holds the operands and the specified outcome of every sample of
 //! every row that a backend lowers inline. The reference interpreter's registry
-//! and the WebAssembly lowering are each held to the table, so the two cannot
+//! and the native lowering are each held to the table, so the two cannot
 //! drift apart on a boundary: overflow, division by zero, the signed minimum
 //! divided by `-1`, the sign of a remainder, a shift at or past the bit width,
 //! a conversion at the edge of its target, or a scalar at the edge of the

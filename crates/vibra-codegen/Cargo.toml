@@ -13,9 +13,7 @@ vibra-exec.workspace = true
 vibra-ir-v1.workspace = true
 vibra-nexus-bridge.workspace = true
 # The one crate of the workspace that names Cranelift (decision N12). All four
-# are pinned to the version of `cranelift-codegen` that Wasmtime already locks,
-# so the lock file holds one Cranelift. No ISA feature is enabled here: the
-# ISAs available are the ones the existing graph provides.
+# are pinned to one version, so the lock file holds one Cranelift.
 # The `x86` backend is named explicitly: without it Cranelift builds only the
 # host's backend, and an ARM host could not emit the Windows x86-64 object.
 cranelift-codegen = { version = "=0.136.2", features = ["x86"] }

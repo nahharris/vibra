@@ -242,7 +242,6 @@ intrinsic registry".
 | Activations and memory | 13 / 15 | `V2-RUNTIME-non-tail-depth`, `V2-RUNTIME-memory-exhausted`, `V2-PROJECT-test-exhaustion-isolated` | `@runtime.memoryExhausted` | `@testRun.v2` |
 | Compiler intrinsic registry; integer, float, character, sequence, and dictionary operations | 12, 13 / 20 | `V2-RUNTIME-saturating`, `V2-RUNTIME-checked`, `V2-RUNTIME-float-ops`, `V2-TYPE-INTERFACE-str-members`, `V2-TYPE-INTERFACE-dict-entries` | `@runtime.invalidCheckedProgram` | `@value.v2` |
 | Canonical value encoding | 12 / 13 | every `interpret` case; `V2-PROJECT-test-unobservable` | `@tool.unsupportedValue` | `@value.v2`, `@type.v2` |
-| Wasm transition | 27 | host tests of step 27; `conformance/wasm-support.tsv` | `@tool.unavailable`, `@runtime.invalidCheckedProgram` | none |
 | Diagnostic documents, ordering, and the registry | 02 | host tests of step 02 | every row of the registry | `urn:vibra:schema:v2:diagnostic` |
 | Conformance manifest, rules, and profiles | 02 | host tests of step 02 | none | `case.toml`, `conformance/rules.tsv` |
 | Command line: grammar, envelope, `help` | 24 | host tests of step 24 | `@tool.unavailable` | `urn:vibra:schema:v2:command-result` |

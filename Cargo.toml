@@ -42,8 +42,7 @@ vibra-syntax-v1 = { path = "crates/vibra-syntax-v1" }
 vibra-resolve-v1 = { path = "crates/vibra-resolve-v1" }
 vibra-schema = { path = "crates/vibra-schema" }
 vibra-types-v1 = { path = "crates/vibra-types-v1" }
-vibra-wasm = { path = "crates/vibra-wasm" }
-vibra-wasm-run = { path = "crates/vibra-wasm-run" }
+
 vibra-workspace = { path = "crates/vibra-workspace" }
 vibra-workspace-v1 = { path = "crates/vibra-workspace-v1" }
 
@@ -54,20 +53,13 @@ jsonschema = { version = "0.35", default-features = false }
 sha2 = "0.10"
 rustix = { version = "1.1.4", features = ["fs"] }
 # The operating system's random source, read only by the system provider of
-# `vibra-host` (milestone 4, Step 16a). It is already in the lock file through
-# the engine's dependencies.
+# `vibra-host`.
 getrandom = "0.3"
 
 # The Windows file-scope adapter's NT calls (`vibra-fs-scope`). It is already
 # in the lock file through other dependencies.
 windows-sys = "0.61.2"
 
-# The WebAssembly backend (milestone 4, Step 4). The engine is Wasmtime with
-# Cranelift only, and only `vibra-wasm-run` may depend on it. `wasm-encoder`
-# emits modules, and `wasmparser` validates them under the v1 feature baseline.
-wasm-encoder = { version = "0.261", default-features = false, features = ["std"] }
-wasmparser = { version = "0.261", default-features = false, features = ["std", "validate", "features", "simd"] }
-wasmtime = { version = "49.0.2", default-features = false, features = ["std", "runtime", "cranelift"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
@@ -85,7 +77,7 @@ expect_used = "warn"
 todo = "warn"
 unimplemented = "warn"
 
-# Every test that runs a module compiles it with Cranelift, and an unoptimized
+# Every test that generates native code runs Cranelift, and an unoptimized
 # Cranelift is an order of magnitude slower than an optimized one. Dependencies
 # are built once and cached, so they are optimized in the test profile, while the
 # workspace's own crates stay unoptimized and debuggable.

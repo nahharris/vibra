@@ -1,7 +1,7 @@
 //! The sample vectors of the number-text rows and the float rows.
 //!
 //! Every outcome here comes from a source that is neither the reference
-//! interpreter nor the WebAssembly lowering nor the toolchain's native code:
+//! interpreter nor the native lowering nor the toolchain's native code:
 //!
 //! - the float arithmetic rows are Rust's own `f32` and `f64` operators, whose
 //!   results are IEEE 754 round-to-nearest, ties-to-even, and a NaN result is the

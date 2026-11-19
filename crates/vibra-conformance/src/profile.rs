@@ -1,6 +1,6 @@
 //! Profiles, operations, and the handler interface of the corpus runner.
 //!
-//! `docs/spec/07-diagnostics-and-conformance.md` names seven conformance
+//! `docs/spec/07-diagnostics-and-conformance.md` names six conformance
 //! profiles ("Conformance profiles") and ten case operations ("Case operations
 //! and inputs"). Both are closed sets spelled as camelCase atoms without the
 //! `@`. A handler registers under a profile and returns backend-neutral
@@ -13,7 +13,6 @@ use vibra_diagnostics::Diagnostic;
 
 use crate::corpus::Case;
 use crate::manifest::Verdict;
-use crate::wasm::Executable;
 
 /// A versioned statement of what a tool supports.
 ///
@@ -36,8 +35,6 @@ pub enum ConformanceProfile {
     /// `staticV2` plus verified execution IR, the native runtime, code
     /// generation, linking, launch, and native observations.
     NativeV1,
-    /// The transitional WebAssembly path.
-    WasmTransitionV2,
     /// Everything a release requires.
     FullV2,
 }
@@ -50,7 +47,6 @@ impl ConformanceProfile {
         Self::InterpreterV2,
         Self::ToolingV2,
         Self::NativeV1,
-        Self::WasmTransitionV2,
         Self::FullV2,
     ];
 
@@ -63,7 +59,6 @@ impl ConformanceProfile {
             Self::InterpreterV2 => "interpreterV2",
             Self::ToolingV2 => "toolingV2",
             Self::NativeV1 => "nativeV1",
-            Self::WasmTransitionV2 => "wasmTransitionV2",
             Self::FullV2 => "fullV2",
         }
     }
@@ -73,9 +68,7 @@ impl ConformanceProfile {
     /// The relation is the "Covers" column of the specification table:
     /// `staticV2` includes `readerV2`; `interpreterV2`, `toolingV2`, and
     /// `nativeV1` each include `staticV2` and nothing beside it; `nativeV1`
-    /// does not include `interpreterV2`; `fullV2` includes every profile. The
-    /// table states no inclusion for `wasmTransitionV2`, so it includes only
-    /// itself.
+    /// does not include `interpreterV2`; `fullV2` includes every profile.
     #[must_use]
     pub const fn supports(self, required: Self) -> bool {
         match self {
@@ -91,7 +84,6 @@ impl ConformanceProfile {
             Self::NativeV1 => {
                 matches!(required, Self::ReaderV2 | Self::StaticV2 | Self::NativeV1)
             }
-            Self::WasmTransitionV2 => matches!(required, Self::WasmTransitionV2),
             Self::FullV2 => true,
         }
     }
@@ -103,10 +95,7 @@ impl ConformanceProfile {
         match self {
             Self::ReaderV2 => 0,
             Self::StaticV2 => 1,
-            Self::InterpreterV2
-            | Self::ToolingV2
-            | Self::NativeV1
-            | Self::WasmTransitionV2 => 2,
+            Self::InterpreterV2 | Self::ToolingV2 | Self::NativeV1 => 2,
             Self::FullV2 => 3,
         }
     }
@@ -292,9 +281,6 @@ pub struct CaseObservation {
     pub result: Option<String>,
     /// The `@testRun.v2` observation.
     pub test_run: Option<String>,
-    /// The checked IR of an executable case, which a second executor runs
-    /// beside the interpreter ("Differential execution").
-    pub executable: Option<Executable>,
 }
 
 impl CaseObservation {
@@ -311,7 +297,6 @@ impl CaseObservation {
             types: None,
             result: None,
             test_run: None,
-            executable: None,
         }
     }
 }

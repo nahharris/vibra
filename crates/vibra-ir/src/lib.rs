@@ -1,7 +1,7 @@
 //! The checked IR of Vibra: the types, values, and expressions a checked
 //! module set is made of, the canonical encodings of types and values, the
-//! closed `@compiler` intrinsic registry, and the boundary of a WebAssembly
-//! transition module: the arena layout and the export table.
+//! closed `@compiler` intrinsic registry, the host registry, and the arena
+//! layout that toolchain-owned native code reads.
 //!
 //! The authority is `docs/spec`: the type chapter for [`Type`] and the
 //! declarations, the runtime chapter for evaluation, the encodings, the
@@ -12,7 +12,6 @@
 use std::fmt;
 
 pub mod arena;
-pub mod boundary;
 mod check;
 mod conformance;
 mod constant;

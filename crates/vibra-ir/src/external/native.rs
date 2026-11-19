@@ -1,54 +1,52 @@
-//! The closed list of native imports: the registry rows that a transition
-//! module reaches through the `vibra_native_v1` import module.
+//! The closed table of native rows: the registry rows that toolchain-owned
+//! native code implements over the bytes of a value arena.
 //!
 //! `docs/spec/06-runtime.md`, "Native implementations": every native
 //! implementation, and every primitive row whose algorithm needs a loop, is
-//! toolchain-owned native code written once. A module imports it, by the
-//! names and scalar signatures this table fixes, and the runner supplies it
-//! over the module's linear memory. The emitter depends on this table and
-//! never on the native code; the native code (`vibra-native`) and the runner
-//! depend on it too, so a signature is written once and cannot drift.
+//! toolchain-owned native code written once. A runtime calls it by the names
+//! and scalar signatures this table fixes, over the arena it owns. A code
+//! generator depends on this table and never on the native code; the native
+//! code (`vibra-native`) depends on it too, so a signature is written once
+//! and cannot drift.
 //!
 //! # The protocol
 //!
-//! An import is pure: it takes scalars and offsets of arena objects, reads and
-//! writes only the module's memory, never allocates, and never calls back into
-//! the module. A row that **builds** an object cannot know the object's size
-//! before it runs, and the arena's allocator is the module's own, so it takes
-//! the destination as its last operand and is called twice by the code the
-//! emitter writes:
+//! A native call is pure: it takes scalars and offsets of arena objects, reads
+//! and writes only the arena's bytes, never allocates, and never calls back
+//! into its caller. A row that **builds** an object cannot know the object's
+//! size before it runs, and the arena's allocator is its owner's, so it takes
+//! the destination as its last operand and is called twice:
 //!
 //! 1. with a destination of `0`, it measures: it returns the component count of
 //!    the object it would build, or `-1` when the row's result is the absence of
 //!    one (`none`, or the `invalidFormat` error), and writes nothing; and
-//! 2. with the destination the module allocated to that size, it fills it and
+//! 2. with the destination the caller allocated to that size, it fills it and
 //!    returns the same count. The cells of an object that hold references take
 //!    one `dup` each, so the counts stay exact, and nothing is dropped.
 //!
 //! A row that answers a scalar returns it directly: an `Ordering` as `-1`,
 //! `0`, or `1`. A row that reads a number from text (`parse`) builds no object
-//! and needs no allocation either: it takes the address of an 8-byte cell of
-//! the module's own frame as its last operand, writes the number there in the
-//! cell format of its type when the text spells one, and returns a status (`0`
-//! for a number, `1` for `invalidFormat`, `2` for `outOfRange`). A row that
-//! takes a number (`toStr`) receives the 64 bits of its cell as one `i64`,
-//! which its type, fixed by the row, decodes; an `F32` or `F64` is its IEEE
-//! bit pattern, so a NaN crosses the boundary exactly as the module holds it
-//! and the native code decides what it observes.
+//! and needs no allocation either: it takes the address of an 8-byte cell the
+//! caller owns as its last operand, writes the number there in the cell format
+//! of its type when the text spells one, and returns a status (`0` for a
+//! number, `1` for `invalidFormat`, `2` for `outOfRange`). A row that takes a
+//! number (`toStr`) receives the 64 bits of its cell as one `i64`, which its
+//! type, fixed by the row, decodes; an `F32` or `F64` is its IEEE bit pattern,
+//! so a NaN reaches the native code exactly as the caller holds it and the
+//! native code decides what it observes.
 //!
 //! A row whose meaning applies a function value, such as `list.fold`, is not
-//! in this table, because a pure import cannot call back into the module.
+//! in this table, because a native call cannot call back into its caller.
 //!
 //! # What the table holds
 //!
 //! The looping primitive rows: the collection rows that copy, and the 20 rows
 //! that print and read numbers, `toStr` and `parse` of the eight integer types
 //! and of `F32` and `F64`. A primitive row that does not loop is a few
-//! instructions the emitter writes inline, and none of those is here.
-
+//! instructions a code generator writes inline, and none of those is here.
 use super::{CompilerIntrinsic, FloatOp, FloatType, IntegerOp, IntegerType};
 
-/// A WebAssembly scalar of an import's signature.
+/// A scalar of a native row's signature.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scalar {
     /// `i32`: an offset of an arena object, a class byte, or an ordering.
@@ -78,7 +76,7 @@ impl Numeric {
     }
 }
 
-/// What an operand of a native import is.
+/// What an operand of a native row is.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Operand {
     /// A `Str` object, as its offset (`i32`).
@@ -134,7 +132,7 @@ pub enum Totality {
     Conversion,
 }
 
-/// What a native import answers.
+/// What a native row answers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Answer {
     /// An `Ordering` of the two operands, as `-1`, `0`, or `1` (`i32`).
@@ -145,8 +143,8 @@ pub enum Answer {
     /// (`i32`).
     Same,
     /// A number the row reads from text, written into the 8-byte cell at the
-    /// destination the last operand (`i32`) names, which is a cell of the
-    /// module's own frame, and its status (`i32`): `0` when the text spells a
+    /// destination the last operand (`i32`) names, which is a cell the
+    /// caller owns, and its status (`i32`): `0` when the text spells a
     /// number, which is then in the cell; `1` for `invalidFormat`; `2` for
     /// `outOfRange`. The cell is written only when the status is `0`.
     Parsed,
@@ -159,26 +157,26 @@ pub enum Answer {
     },
 }
 
-/// One row of the table: a registry row and the native import that implements
-/// it.
+/// One row of the table: a registry row and the signature of the native
+/// routine that implements it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NativeRow {
-    /// The registry row. The import's name is its symbol.
+    /// The registry row. The routine's name is its symbol.
     pub intrinsic: CompilerIntrinsic,
     /// The operands, in the order of the row's signature.
     pub operands: &'static [Operand],
-    /// What the import answers.
+    /// What the routine answers.
     pub answer: Answer,
 }
 
 impl NativeRow {
-    /// The name of the import, which is the registry symbol.
+    /// The name of the routine, which is the registry symbol.
     #[must_use]
     pub fn name(&self) -> String {
         self.intrinsic.symbol()
     }
 
-    /// The parameters of the import: each operand's scalars, then the
+    /// The parameters of the routine: each operand's scalars, then the
     /// destination (`i32`) of a building row.
     #[must_use]
     pub fn params(&self) -> Vec<Scalar> {
@@ -193,7 +191,7 @@ impl NativeRow {
         params
     }
 
-    /// The scalar the import returns.
+    /// The scalar the routine returns.
     #[must_use]
     pub const fn result(&self) -> Scalar {
         match self.answer {
@@ -249,8 +247,8 @@ macro_rules! table {
     };
 }
 
-/// Every native import. The row's own place in this list is nothing a module
-/// can see: a module imports the rows it uses, in this order.
+/// Every native row. A row's place in this list is nothing a program can
+/// observe.
 pub const NATIVE_ROWS: [NativeRow; 40] = table![
     (Integer, IntegerOp, I8, IntegerType),
     (Integer, IntegerOp, I16, IntegerType),
@@ -325,7 +323,7 @@ pub const NATIVE_ROWS: [NativeRow; 40] = table![
 ];
 
 impl CompilerIntrinsic {
-    /// The native import that implements this row, or `None` for a row that is
+    /// The native row that implements this row, or `None` for a row that is
     /// lowered inline or whose meaning applies a function value.
     #[must_use]
     pub fn native_import(self) -> Option<NativeRow> {

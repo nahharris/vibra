@@ -1,17 +1,15 @@
 //! The value-access trait and the typed host operations.
 //!
-//! `docs/spec/06-runtime.md`, "WebAssembly boundary" and "The audit trace": each
+//! `docs/spec/06-runtime.md`, "Host calls" and "The audit trace": each
 //! host operation is written once in Rust, behind a value-access trait. The
-//! reference interpreter implements [`HostValues`] over its own values, and the
-//! Wasm runner implements it through the exported accessors and builders of the
-//! module, never through the instance's linear memory. A [`HostCall`] is the
+//! reference interpreter implements [`HostValues`] over its own values, and
+//! Nexus implements it over its value store. A [`HostCall`] is the
 //! operation read from the arguments of one call, [`perform`] runs it on a
 //! provider, and a [`HostReply`] is built back into the backend's value, so the
 //! two backends cannot differ in what an operation does.
 //!
 //! Builders are bottom-up: a child is built, and so sealed, before the value
-//! that holds it, which is the discipline of the seven builders of the Wasm
-//! boundary.
+//! that holds it.
 
 use std::fmt;
 

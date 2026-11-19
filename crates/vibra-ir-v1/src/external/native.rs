@@ -1,5 +1,5 @@
-//! The closed list of native imports: the registry rows that a WebAssembly
-//! module reaches through the `vibra_native_v1` import module.
+//! The closed table of native rows: the registry rows that toolchain-owned
+//! native code implements over the bytes of a value arena.
 //!
 //! `docs/spec/06-runtime.md`, "Native implementations": every native
 //! implementation, and every primitive row whose algorithm needs a loop, is
@@ -60,7 +60,7 @@
 
 use super::{CompilerIntrinsic, FloatOp, IntegerOp, NumericType};
 
-/// A WebAssembly scalar of an import's signature.
+/// A scalar of a native row's signature.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scalar {
     /// `i32`: an offset of an arena object, a class byte, or an ordering.

@@ -3,13 +3,9 @@
 //! `docs/spec/06-runtime.md`, "Host calls and the builders": each host operation
 //! is written once, in `vibra-host-v1`, against an interface that reads arguments
 //! and builds results. The reference interpreter supplies the interface over its
-//! own values, the runner supplies it through the exported accessors and builders
-//! and never through `vibra_v1_memory`, and both build the audit event with the
-//! same code. This audit holds the interpreter, the emitter, and the runner to
-//! that: none implements an operation, none calls a provider method itself,
-//! none builds an event except by `AuditEvent::completed`, and the runner's host
-//! path does not read the instance's memory. That the emitter does not know the
-//! provider is the dependency rule of `architecture_boundary`.
+//! own values and builds the audit event with the shared code. This audit holds
+//! the interpreter to that: it implements no operation, calls no provider
+//! method itself, and builds no event except by `AuditEvent::completed`.
 
 use crate::support::crate_sources;
 
@@ -36,7 +32,7 @@ const PROVIDER_METHODS: &[&str] = &[
 
 #[test]
 fn no_backend_calls_a_provider_method_or_implements_an_operation() {
-    for krate in ["vibra-interp-v1", "vibra-wasm", "vibra-wasm-run"] {
+    for krate in ["vibra-interp-v1"] {
         for (path, code) in crate_sources(krate) {
             for method in PROVIDER_METHODS {
                 // `read_text` is also a method of the value-access trait, which

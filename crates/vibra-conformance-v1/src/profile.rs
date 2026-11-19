@@ -26,9 +26,7 @@ pub enum ConformanceProfile {
     /// Static profile plus schemas, queries, plans, CLI, and MCP.
     #[serde(rename = "tooling-v1")]
     ToolingV1,
-    /// Static profile plus deterministic Wasm and runtime.
-    #[serde(rename = "wasm-v1")]
-    WasmV1,
+
     /// All profiles, the standard library, projects, and release gates.
     #[serde(rename = "full-v1")]
     FullV1,
@@ -41,7 +39,6 @@ impl ConformanceProfile {
         Self::StaticV1,
         Self::InterpreterV1,
         Self::ToolingV1,
-        Self::WasmV1,
         Self::FullV1,
     ];
 
@@ -53,7 +50,6 @@ impl ConformanceProfile {
             Self::StaticV1 => "static-v1",
             Self::InterpreterV1 => "interpreter-v1",
             Self::ToolingV1 => "tooling-v1",
-            Self::WasmV1 => "wasm-v1",
             Self::FullV1 => "full-v1",
         }
     }
@@ -73,9 +69,7 @@ impl ConformanceProfile {
             Self::ToolingV1 => {
                 matches!(required, Self::ReaderV1 | Self::StaticV1 | Self::ToolingV1)
             }
-            Self::WasmV1 => {
-                matches!(required, Self::ReaderV1 | Self::StaticV1 | Self::WasmV1)
-            }
+
             Self::FullV1 => true,
         }
     }
@@ -87,7 +81,7 @@ impl ConformanceProfile {
         match self {
             Self::ReaderV1 => 0,
             Self::StaticV1 => 1,
-            Self::InterpreterV1 | Self::ToolingV1 | Self::WasmV1 => 2,
+            Self::InterpreterV1 | Self::ToolingV1 => 2,
             Self::FullV1 => 3,
         }
     }
@@ -130,7 +124,6 @@ impl FromStr for ConformanceProfile {
             "static-v1" => Self::StaticV1,
             "interpreter-v1" => Self::InterpreterV1,
             "tooling-v1" => Self::ToolingV1,
-            "wasm-v1" => Self::WasmV1,
             "full-v1" => Self::FullV1,
             _ => {
                 return Err(UnknownProfile {

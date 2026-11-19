@@ -2,9 +2,9 @@
 
 | Release | Phase | Outcome | Exit evidence |
 | --- | --- | --- | --- |
-| [v0.0.1](v0.0.1/README.md) | Pre-alpha, shipped | Checked language in the earlier S-expression surface, interpreter, effects, and Wasm conformance | [M4 exit evidence](v0.0.1/m4/exit-evidence.md) |
+| [v0.0.1](v0.0.1/README.md) | Pre-alpha, shipped | Checked language in the earlier S-expression surface, interpreter, effects, and conformance | [M4 exit evidence](v0.0.1/m4/exit-evidence.md) |
 | [v0.0.2](v0.0.2/README.md) | Pre-alpha, planned | The language of the active specification on the interpreter, grants, an agent repair loop, and a first native slice | [Repair a seeded defect and run one native fixture](v0.0.2/README.md#release-gate) |
-| [v0.0.3](v0.0.3/README.md) | Pre-alpha, planned | Native executables on Windows, Linux, and macOS; `vibra build`; Wasm removed | [Interpreter parity and reproducible artifacts on all three targets](v0.0.3/README.md#release-gate) |
+| [v0.0.3](v0.0.3/README.md) | Pre-alpha, planned | Native executables on Windows, Linux, and macOS; `vibra build` | [Interpreter parity and reproducible artifacts on all three targets](v0.0.3/README.md#release-gate) |
 | [v0.0.4](v0.0.4/README.md) | Pre-alpha, planned | Dependencies, tool adapters, and bounded local concurrency | [Use and upgrade a real dependency; exercise two workers](v0.0.4/README.md#release-gate) |
 | [v0.0.5](v0.0.5/README.md) | Pre-alpha, planned | Service behavior and selected recovery profiles | [The pending-save service case under failure injection](v0.0.5/README.md#release-gate) |
 | Later v0.0.x | Pre-alpha | Scope assigned as proposals mature | |

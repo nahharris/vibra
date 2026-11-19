@@ -914,8 +914,7 @@ except `revision`, which is the workspace revision test vector of the
 }
 ```
 
-The runtime chapter defines native execution and what the WebAssembly
-transition backend supports.
+The runtime chapter defines native execution.
 
 ## Exclusions
 

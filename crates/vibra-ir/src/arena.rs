@@ -1,17 +1,13 @@
-//! What toolchain-owned native code knows of an arena object of a transition
-//! module.
+//! What toolchain-owned native code knows of an arena object.
 //!
-//! `docs/spec/06-runtime.md`, "Native implementations" and "Wasm transition":
-//! a native routine reads and writes the module's linear memory directly,
-//! through the toolchain-reserved export, so it must know the header of an
-//! arena object, the layouts of its payload, and the codes of its kinds and
-//! cell classes. They are written once here, beside the closed tables of the
-//! registry, because the emitter that lays objects out (`vibra-wasm`, whose
-//! layout chapter explains the representation) and the native code that
-//! reads them (`vibra-native`) depend on `vibra-ir` and on neither each
-//! other. The codes are constants of this boundary alone; the native value
-//! arena has its own private kinds. No offset of this module reaches typed
-//! IR, a canonical encoding, an audit event, or a snapshot.
+//! `docs/spec/06-runtime.md`, "Native implementations" and "Value arena": a
+//! native routine reads and writes the bytes of a value arena directly, so
+//! it must know the header of an arena object, the layouts of its payload,
+//! and the codes of its kinds and cell classes. They are written once here,
+//! beside the closed tables of the registry, because the runtime that lays
+//! objects out and the native code that reads them (`vibra-native`) depend
+//! on `vibra-ir` and on neither each other. No offset of this module reaches
+//! typed IR, a canonical encoding, an audit event, or a snapshot.
 
 /// The object header: 24 bytes at the start of every arena block.
 pub mod header {
@@ -29,8 +25,7 @@ pub mod header {
     pub const LEN: u32 = 12;
     /// `variant` (u32): the case index of a variant value.
     pub const VARIANT: u32 = 16;
-    /// `reserved` (u32): always `0`. No host value enters a transition
-    /// module, so no value is ever unsealed.
+    /// `reserved` (u32): always `0`.
     pub const RESERVED: u32 = 20;
 }
 

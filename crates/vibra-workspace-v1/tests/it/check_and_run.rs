@@ -949,7 +949,7 @@ fn host_provider_outside_a_deffect_and_unknown_provider_are_rejected() {
         ),
         (
             "unknown-provider",
-            "wasm",
+            "foreign",
             DiagnosticCode::ExternalUnknownSymbol,
         ),
         (

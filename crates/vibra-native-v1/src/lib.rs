@@ -3,11 +3,10 @@
 //! `docs/spec/06-runtime.md`, "Native implementations": every native
 //! implementation, and every primitive row whose algorithm needs a loop, is
 //! native code that the toolchain owns. The reference interpreter calls it
-//! directly, over its own values. A WebAssembly module reaches the same
-//! functions through an import from `vibra_native_v1`, which the runner
-//! supplies over the instance's linear memory, so the two backends cannot drift
-//! apart. The Vibra body of a native stays its meaning, and the conformance
-//! suite holds this code to it.
+//! directly, over its own values. Nexus calls the same functions over the
+//! value arena it owns, so the two backends cannot drift apart. The Vibra
+//! body of a native stays its meaning, and the conformance suite holds this
+//! code to it.
 //!
 //! # The value-access interface
 //!
@@ -17,8 +16,8 @@
 //!
 //! - the reference interpreter implements them over its strings, byte vectors,
 //!   and arrays of runtime values;
-//! - [`arena`] implements them over the arena objects of a module's linear
-//!   memory, which is what the runner calls. A `str` is read as its Unicode
+//! - [`arena`] implements them over the arena objects of a runtime's value
+//!   arena, which is what Nexus calls. A `str` is read as its Unicode
 //!   scalars, `bytes` as its bytes, and an `array` or `dict` as its cells, so a
 //!   function never branches on a value kind.
 //!
@@ -26,16 +25,15 @@
 //! reads the scalars of a `str` through a [`Source`] and writes them through a
 //! [`Sink`], and takes and answers a number as a value (an integer as an `i128`,
 //! a float as its IEEE bits), so it is the one implementation of integer and
-//! float `to-str` and `parse` that the interpreter and a module share.
+//! float `to-str` and `parse` that the two backends share.
 //!
 //! A [`Sink`] can also only count, so a row that builds an object of a size it
 //! does not know in advance runs once to measure and once to fill, which is how
-//! a module's own allocator stays the one allocator. The code never allocates
-//! in a module, never drops, and calls back into nothing.
+//! the arena's own allocator stays the one allocator. The code never allocates
+//! in an arena, never drops, and calls back into nothing.
 //!
-//! This crate depends on `vibra-ir-v1` for the closed table of native imports and
-//! the shape of an arena object. It has no engine dependency, and the emitter
-//! does not depend on it.
+//! This crate depends on `vibra-ir-v1` for the closed table of native rows and
+//! the shape of an arena object, and on nothing else.
 
 pub mod arena;
 pub mod number;

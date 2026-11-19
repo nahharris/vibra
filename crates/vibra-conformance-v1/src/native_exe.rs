@@ -9,8 +9,7 @@
 //! document on standard input, and writes one observation document
 //! (`vibra_nexus_bridge::harness::observation`). Each run is turned into a
 //! [`ExecutorObservation`] and held to the case's one expectation by
-//! `runner::executor_status`, the function the Wasm backend and the stepper are
-//! held to.
+//! `runner::executor_status`, the function the stepper is held to.
 //!
 //! This is the one module of the runner that starts a process.
 //!
@@ -51,7 +50,7 @@ const TIMEOUT: Duration = Duration::from_secs(120);
 pub(crate) struct WindowsRun {
     /// The quota of the run: [`u64::MAX`] for unbounded.
     pub(crate) quota: u64,
-    /// What the executable did, in the terms the Wasm backend uses.
+    /// What the executable did, in the terms every executor reports.
     pub(crate) observation: BackendObservation<ExecutorObservation>,
     /// The origin ordinal the launcher reported for a trap.
     pub(crate) trap_origin: Option<u32>,

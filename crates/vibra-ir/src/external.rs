@@ -1,6 +1,5 @@
 //! The external registries the checked IR names: the closed `@compiler`
-//! registry, the major-1 host registry, and the native imports of a
-//! transition module.
+//! registry, the major-1 host registry, and the table of native rows.
 
 pub mod compiler;
 pub mod host;

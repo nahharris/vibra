@@ -60,10 +60,10 @@ workspace dependency key and path, and every `vibra_<name>::` path):
 | `vibra-cli` | `vibra-cli-v1` |
 | `vibra-conformance` | `vibra-conformance-v1` |
 
-Eleven crates keep their names and their directories: `vibra-actors`,
-`vibra-fs-scope`, `vibra-wasm`, `vibra-wasm-run`, `vibra-exec`,
-`vibra-lower`, `vibra-nexus`, `vibra-nexus-eval`, `vibra-nexus-bridge`,
-`vibra-codegen`, `vibra-build`. Those of them that depend on a renamed
+Nine crates keep their names and their directories: `vibra-actors`,
+`vibra-fs-scope`, `vibra-exec`, `vibra-lower`, `vibra-nexus`,
+`vibra-nexus-eval`, `vibra-nexus-bridge`, `vibra-codegen`,
+`vibra-build`. Those of them that depend on a renamed
 crate now depend on its `-v1` name. `vibra-fs-scope` and `vibra-actors`
 depend on no workspace crate and are not edited.
 
@@ -87,15 +87,12 @@ No file is created and no file is deleted.
 2. In the root `Cargo.toml`, rename the thirteen keys of
    `[workspace.dependencies]` and their paths. In every crate manifest,
    rename each `<name>.workspace = true` and each `<name> = { … }` entry of
-   a renamed crate. Invariant: `cargo metadata` lists 24 packages.
+   a renamed crate. Invariant: `cargo metadata` lists 22 packages.
 3. Rewrite every Rust path of a renamed crate with one search-and-replace
    over `crates/`: `vibra_<name>::` to `vibra_<name>_v1::`, and
    `extern crate`, `use vibra_<name>;`, and `vibra_<name> as` forms the
    same way. Match whole identifiers, so that `vibra_native` does not
-   match inside `vibra_native_v1`, the Wasm import module string of
-   `crates/vibra-ir-v1/src/boundary.rs:23`, which is data and stays.
-   Invariant: the quoted strings `vibra_native_v1` and `vibra_v1` are
-   unchanged.
+   match inside `vibra_native_v1`.
 4. Rename the binary `vibra` to `vibra-v1` and the binary
    `vibra-conformance` to `vibra-conformance-v1`, and update the seven
    `env!("CARGO_BIN_EXE_…")` sites of the table. Invariant: no two
@@ -134,7 +131,7 @@ No language behavior. The matrix is the existing suites, run unchanged:
 | `cargo test --workspace` | the pass count of the commit before the step; the three tests above still ignored |
 | v1 corpus runner on `conformance/v1/cases` | 597 cases, none failed, the same counts per profile as before |
 | `vibra-v1 help` | exit 0; the usage text is unchanged |
-| `cargo metadata --no-deps` | 24 packages; thirteen names end in `-v1` |
+| `cargo metadata --no-deps` | 22 packages; thirteen names end in `-v1` |
 | leftover paths | the search of the validation block prints nothing |
 
 ## Diagnostics and schema changes
@@ -172,7 +169,7 @@ matches.
 ## Excluded
 
 Deleting anything; changing behavior; touching `archive/`; renaming a
-logical source identity or a Wasm boundary string.
+logical source identity.
 
 ## Completion evidence
 

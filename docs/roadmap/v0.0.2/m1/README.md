@@ -49,15 +49,13 @@ In one line each:
   renames with a `-v1` suffix and step 28 deletes.
 - The checked IR is closed in step 12 for the whole of M1, with a migration
   table for the native track; package X2-01 moves the native track to it.
-- The packages N1 to N13 of the native contract are each assigned once:
-  N1, N2, N3, N5, N6, and N13 are absorbed by steps 02, 12, 13, 15, 19,
+- The packages N1 to N12 of the native contract are each assigned once:
+  N1, N2, N3, N5, and N6 are absorbed by steps 02, 12, 13, 15, 19,
   21, and 27; N4 and N7 to N12 are M2 packages on the new crates. The
   [architecture](architecture.md#native-contract-packages) has the table.
 - The checker calls the interpreter for compile-time evaluation; that arrow
   is part of language semantics.
-- The Wasm backend is ported fail-closed to the new IR in step 27 and runs
-  the new corpus's pure executable cases it supports; its column is not an
-  M1 gate.
+
 - The three host tests ignored when the specification merged are settled
   by steps 02 (the registry test, restored), 08 (the example inventory,
   deleted and replaced by a test that reads every fenced block of the
@@ -103,7 +101,7 @@ the vertical-slice rule.
 | 24 | [cli-skeleton](steps/24-cli-skeleton.md) | vertical | 02 | 03 to 23, 27 | `vibra-schema`, `vibra-cli` (new) | landed |
 | 25 | [cli-fmt-check](steps/25-cli-fmt-check.md) | vertical | 08, 15, 24 | 16 to 23, 27 | `vibra-cli`, `vibra-schema`, `vibra-workspace`, `vibra-conformance`, `conformance/cases` | planned |
 | 26 | [cli-test](steps/26-cli-test.md) | vertical | 23, 25 | 18 to 22, 27 | `vibra-cli`, `vibra-schema` | planned |
-| 27 | [runtime-crate-port](steps/27-runtime-crate-port.md) | infrastructure | 03, 13 | 04 to 11, 14 to 26 | `vibra-host`, `vibra-native` (new), `vibra-wasm`, `vibra-wasm-run`, `vibra-ir`, `vibra-conformance`, `vibra-conformance-v1` (its Wasm column removed) | landed |
+| 27 | [runtime-crate-port](steps/27-runtime-crate-port.md) | infrastructure | 03, 13 | 04 to 11, 14 to 26 | `vibra-host`, `vibra-native` (new), `vibra-ir` | landed |
 | 28 | [cutover](steps/28-cutover.md) | infrastructure | 08, 20, 22, 23, 26, 27; X2-01 (Nexus plan) | — | every `-v1` crate (deleted), `Cargo.toml`, CI, `README.md`, `examples/`, `docs/roadmap` | planned |
 | 29 | [m1-exit](steps/29-m1-exit.md) | evidence | 28 | — | `examples/`, `conformance/cases`, this directory | planned |
 

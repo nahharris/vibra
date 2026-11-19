@@ -1,8 +1,8 @@
 //! `native_vectors`: the shared sample vectors of `vibra-ir`, run through the
-//! natives over linear memory.
+//! natives over arena memory.
 //!
 //! Every native row that has vectors is called on each sample's operands, laid
-//! out by hand in the arena layout, as the runner calls it: a building row
+//! out by hand in the arena layout, as a runtime calls it: a building row
 //! measures with no destination and then fills one of that length, and a
 //! `parse` row writes its cell. The answer is read back as a value and
 //! compared with the outcome the vectors specify, which no executor wrote.
@@ -147,7 +147,7 @@ fn err(error: &str) -> Value {
     case("err", vec![("error".to_owned(), case(error, Vec::new()))])
 }
 
-/// Calls `row` on `operands` as the runner does, and reads the answer back.
+/// Calls `row` on `operands` as a runtime does, and reads the answer back.
 fn answer(row: &NativeRow, operands: &[Value]) -> Result<Value, String> {
     let mut heap = Arena::new();
     let mut scalars = Vec::new();
