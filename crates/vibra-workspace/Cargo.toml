@@ -1,0 +1,17 @@
+[package]
+name = "vibra-workspace"
+description = "Vibra project discovery, the typed project file, the confined source snapshot, and the source graph."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+sha2.workspace = true
+vibra-diagnostics.workspace = true
+vibra-syntax.workspace = true
+
+[lints]
+workspace = true

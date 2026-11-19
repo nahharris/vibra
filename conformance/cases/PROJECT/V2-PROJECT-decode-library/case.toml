@@ -1,0 +1,11 @@
+id = "V2-PROJECT-decode-library"
+rule = "V2-PROJECT-decode-library"
+profile = "staticV2"
+operation = "projectDecode"
+description = "04-programs-and-packages.md#project-file: a library project with one target decodes"
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+verdict = "accepted"

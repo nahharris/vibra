@@ -14,6 +14,7 @@ toml.workspace = true
 vibra-diagnostics.workspace = true
 vibra-fmt.workspace = true
 vibra-syntax.workspace = true
+vibra-workspace.workspace = true
 
 [[bin]]
 name = "vibra-conformance"

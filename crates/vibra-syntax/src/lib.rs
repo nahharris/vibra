@@ -14,6 +14,10 @@
 //! and `use` in full. The bodies of the other six forms are reported
 //! `@tool.unavailable`, once per form.
 //!
+//! [`decode`] reads a data document under a closed record [`Schema`], in the
+//! validation order of the programs chapter's "Schemas", and
+//! [`TypedDocument::canonical_bytes`] writes its canonical bytes.
+//!
 //! # Position in the architecture
 //!
 //! This crate depends only on `vibra-diagnostics`. It reads no file: callers
@@ -25,6 +29,7 @@ mod data;
 mod document;
 mod lexer;
 mod literal;
+mod schema;
 pub mod source;
 mod tree;
 
@@ -39,6 +44,11 @@ pub use lexer::{
 pub use literal::{
     FloatSuffix, IntegerSuffix, canonical_character, canonical_string,
     decode_character, decode_string,
+};
+pub use schema::{
+    Decoded, DefaultValue, FieldSchema, Presence, RecordSchema, Schema, Slot,
+    SpellingRule, TypedDocument, TypedEntry, TypedField, TypedNode, TypedValue,
+    VariantSchema, compare, decode,
 };
 pub use source::{Declaration, Module, Use, module};
 pub use tree::{TREE_FORMAT, tree_document, tree_text};

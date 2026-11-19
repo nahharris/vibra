@@ -1,0 +1,17 @@
+id = "V2-PROJECT-decode-git-rev"
+rule = "V2-PROJECT-decode-git-rev"
+profile = "staticV2"
+operation = "projectDecode"
+description = "04-programs-and-packages.md#project-file: a revision is 40 lower-case hexadecimal digits"
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@data.invalidValue"
+level = "@error"
+source = "project.vibon"
+span = { start = 192, end = 197 }

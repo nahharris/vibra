@@ -1,0 +1,11 @@
+id = "V2-PROJECT-decode-binary-shape"
+rule = "V2-PROJECT-decode-binary-shape"
+profile = "staticV2"
+operation = "projectDecode"
+description = "04-programs-and-packages.md#project-file: the chapter's binary project decodes by shape"
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+verdict = "accepted"
