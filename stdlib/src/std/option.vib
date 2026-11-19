@@ -1,0 +1,9 @@
+// The optional value, which plays the `@option` role: lookups and `try`
+// answer with it.
+
+type Option(T)
+  case none
+  case some {value: T}
+  role @option
+  visibility @public
+endtype

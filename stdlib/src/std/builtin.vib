@@ -1,0 +1,961 @@
+// The builtin types: the compiler owns their representation, written
+// `Intrinsic(@tag)` with the type's wire tag, and their static members are
+// bound to `@compiler` intrinsics. The module is in every checked graph and is
+// never imported; its public declarations are reached through the prelude.
+// `Str`, `Bytes`, and `Dict` are declared here with their roles.
+
+use @std.core.ArithmeticError enduse
+
+type Void of Intrinsic(@void)
+  visibility @public
+endtype
+
+type Never of Intrinsic(@never)
+  visibility @public
+endtype
+
+type Atom of Intrinsic(@atom)
+  visibility @public
+endtype
+
+type Char of Intrinsic(@char)
+  visibility @public
+  fn toU32
+    takes {value: Self}
+    returns scalar: U32
+    visibility @public
+    external @compiler
+    symbol "char.toU32"
+  endfn
+  fn fromU32
+    takes {scalar: U32}
+    returns value: Option(Self)
+    visibility @public
+    external @compiler
+    symbol "char.fromU32"
+  endfn
+endtype
+
+type I8 of Intrinsic(@i8)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "i8.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "i8.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "i8.mul"
+  endfn
+  fn neg
+    takes {value: Self}
+    returns negated: Self
+    visibility @public
+    external @compiler
+    symbol "i8.neg"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i8.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i8.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.remChecked"
+  endfn
+  fn negChecked
+    takes {value: Self}
+    returns negated: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.negChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i8.shiftRightChecked"
+  endfn
+endtype
+
+type I16 of Intrinsic(@i16)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "i16.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "i16.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "i16.mul"
+  endfn
+  fn neg
+    takes {value: Self}
+    returns negated: Self
+    visibility @public
+    external @compiler
+    symbol "i16.neg"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i16.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i16.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.remChecked"
+  endfn
+  fn negChecked
+    takes {value: Self}
+    returns negated: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.negChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i16.shiftRightChecked"
+  endfn
+endtype
+
+type I32 of Intrinsic(@i32)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "i32.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "i32.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "i32.mul"
+  endfn
+  fn neg
+    takes {value: Self}
+    returns negated: Self
+    visibility @public
+    external @compiler
+    symbol "i32.neg"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i32.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i32.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.remChecked"
+  endfn
+  fn negChecked
+    takes {value: Self}
+    returns negated: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.negChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i32.shiftRightChecked"
+  endfn
+endtype
+
+type I64 of Intrinsic(@i64)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "i64.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "i64.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "i64.mul"
+  endfn
+  fn neg
+    takes {value: Self}
+    returns negated: Self
+    visibility @public
+    external @compiler
+    symbol "i64.neg"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i64.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "i64.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.remChecked"
+  endfn
+  fn negChecked
+    takes {value: Self}
+    returns negated: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.negChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "i64.shiftRightChecked"
+  endfn
+endtype
+
+type U8 of Intrinsic(@u8)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "u8.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "u8.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "u8.mul"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u8.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u8.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u8.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u8.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u8.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u8.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u8.remChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u8.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u8.shiftRightChecked"
+  endfn
+endtype
+
+type U16 of Intrinsic(@u16)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "u16.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "u16.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "u16.mul"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u16.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u16.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u16.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u16.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u16.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u16.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u16.remChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u16.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u16.shiftRightChecked"
+  endfn
+endtype
+
+type U32 of Intrinsic(@u32)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "u32.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "u32.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "u32.mul"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u32.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u32.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u32.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u32.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u32.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u32.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u32.remChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u32.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u32.shiftRightChecked"
+  endfn
+endtype
+
+type U64 of Intrinsic(@u64)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "u64.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "u64.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "u64.mul"
+  endfn
+  fn shiftLeft
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u64.shiftLeft"
+  endfn
+  fn shiftRight
+    takes {value: Self amount: U32}
+    returns shifted: Self
+    visibility @public
+    external @compiler
+    symbol "u64.shiftRight"
+  endfn
+  fn addChecked
+    takes {left: Self right: Self}
+    returns sum: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u64.addChecked"
+  endfn
+  fn subChecked
+    takes {left: Self right: Self}
+    returns difference: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u64.subChecked"
+  endfn
+  fn mulChecked
+    takes {left: Self right: Self}
+    returns product: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u64.mulChecked"
+  endfn
+  fn divChecked
+    takes {left: Self right: Self}
+    returns quotient: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u64.divChecked"
+  endfn
+  fn remChecked
+    takes {left: Self right: Self}
+    returns remainder: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u64.remChecked"
+  endfn
+  fn shiftLeftChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u64.shiftLeftChecked"
+  endfn
+  fn shiftRightChecked
+    takes {value: Self amount: U32}
+    returns shifted: Result(Self ArithmeticError)
+    visibility @public
+    external @compiler
+    symbol "u64.shiftRightChecked"
+  endfn
+endtype
+
+type F32 of Intrinsic(@f32)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "f32.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "f32.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "f32.mul"
+  endfn
+  fn div
+    takes {left: Self right: Self}
+    returns quotient: Self
+    visibility @public
+    external @compiler
+    symbol "f32.div"
+  endfn
+  fn neg
+    takes {value: Self}
+    returns negated: Self
+    visibility @public
+    external @compiler
+    symbol "f32.neg"
+  endfn
+  fn equal
+    takes {left: Self right: Self}
+    returns same: Bool
+    visibility @public
+    external @compiler
+    symbol "f32.equal"
+  endfn
+  fn compareTotal
+    takes {left: Self right: Self}
+    returns order: Ordering
+    visibility @public
+    external @compiler
+    symbol "f32.compareTotal"
+  endfn
+endtype
+
+type F64 of Intrinsic(@f64)
+  visibility @public
+  fn add
+    takes {left: Self right: Self}
+    returns sum: Self
+    visibility @public
+    external @compiler
+    symbol "f64.add"
+  endfn
+  fn sub
+    takes {left: Self right: Self}
+    returns difference: Self
+    visibility @public
+    external @compiler
+    symbol "f64.sub"
+  endfn
+  fn mul
+    takes {left: Self right: Self}
+    returns product: Self
+    visibility @public
+    external @compiler
+    symbol "f64.mul"
+  endfn
+  fn div
+    takes {left: Self right: Self}
+    returns quotient: Self
+    visibility @public
+    external @compiler
+    symbol "f64.div"
+  endfn
+  fn neg
+    takes {value: Self}
+    returns negated: Self
+    visibility @public
+    external @compiler
+    symbol "f64.neg"
+  endfn
+  fn equal
+    takes {left: Self right: Self}
+    returns same: Bool
+    visibility @public
+    external @compiler
+    symbol "f64.equal"
+  endfn
+  fn compareTotal
+    takes {left: Self right: Self}
+    returns order: Ordering
+    visibility @public
+    external @compiler
+    symbol "f64.compareTotal"
+  endfn
+endtype
+
+type List(T) of Intrinsic(@list)
+  visibility @public
+  fn length
+    takes {items: Self}
+    returns count: U64
+    visibility @public
+    external @compiler
+    symbol "list.length"
+  endfn
+  fn append
+    takes {items: Self item: T}
+    returns appended: Self
+    visibility @public
+    external @compiler
+    symbol "list.append"
+  endfn
+  fn concat
+    takes {left: Self right: Self}
+    returns joined: Self
+    visibility @public
+    external @compiler
+    symbol "list.concat"
+  endfn
+  fn slice
+    takes {items: Self start: U64 end: U64}
+    returns part: Option(Self)
+    visibility @public
+    external @compiler
+    symbol "list.slice"
+  endfn
+  impl Iter
+    type Item of T endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({T Self})
+      visibility @public
+      external @compiler
+      symbol "list.next"
+    endfn
+  endimpl
+endtype
+
+type Str of List(Char)
+  role @str
+  visibility @public
+endtype
+
+type Bytes of List(U8)
+  role @bytes
+  visibility @public
+endtype
+
+type Dict(K V) of List({K V})
+  role @dict
+  visibility @public
+  representation @private
+endtype

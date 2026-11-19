@@ -1,0 +1,9 @@
+// The fallible value, which plays the `@result` role: `try`, fallible
+// construction, and unhandled-failure checking recognize it.
+
+type Result(T E)
+  case ok {value: T}
+  case err {error: E}
+  role @result
+  visibility @public
+endtype
