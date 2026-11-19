@@ -660,7 +660,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         let head = if program.supported_fn(function) {
                             Head::Function(function)
                         } else {
-                            Head::Error
+                            self.skipped(
+                                data.module,
+                                ByteSpan::new(span.start(), suffix_span.end()),
+                            )
                         };
                         return (head, consumed + 1);
                     }
@@ -707,9 +710,32 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 Head::Value(Box::new(Out { ty, node }))
             }
             Entity::Type(_) | Entity::Interface(_) | Entity::Module(_) => Head::Static,
-            Entity::Fn(_) | Entity::Value(_) | Entity::Other(..) => Head::Error,
+            Entity::Fn(index) => {
+                let module = program.functions.get(index).map(|data| data.module);
+                module.map_or(Head::Error, |module| self.skipped(module, whole))
+            }
+            Entity::Value(index) => {
+                let module = program.values.get(index).map(|data| data.module);
+                module.map_or(Head::Error, |module| self.skipped(module, whole))
+            }
+            Entity::Other(..) => Head::Error,
         };
         (head, consumed)
+    }
+
+    /// A reference to a declaration this checker does not lower: one of the
+    /// standard library it skipped is reported here, since nothing else
+    /// reports it; a local one was reported at its declaration.
+    fn skipped(&mut self, module: usize, span: ByteSpan) -> Head {
+        let embedded = self
+            .program
+            .modules
+            .get(module)
+            .is_some_and(|data| data.embedded);
+        if embedded {
+            self.unavailable(span, "this standard-library declaration");
+        }
+        Head::Error
     }
 
     fn step_postfix(

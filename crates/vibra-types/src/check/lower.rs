@@ -251,6 +251,9 @@ pub(crate) fn check_program(
         functions: Vec::new(),
     };
     if result.has_errors() {
+        if result.only_unavailable() {
+            result.types = types_document(&program);
+        }
         return result;
     }
     match assemble(&program, &layout, pass) {

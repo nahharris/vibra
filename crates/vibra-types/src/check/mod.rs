@@ -106,7 +106,7 @@ impl CheckResult {
     }
 
     /// The `@types.v2` document of the local declarations checked, when no
-    /// error was found.
+    /// error other than `@tool.unavailable` was found.
     #[must_use]
     pub fn types_document(&self) -> Option<&str> {
         self.types.as_deref()
@@ -167,7 +167,9 @@ pub fn check_workspace(input: &ResolveInput, units: &[String]) -> CheckResult {
     result.diagnostics = diagnostics;
     if result.has_errors() {
         result.module_set = None;
-        result.types = None;
+        if !result.only_unavailable() {
+            result.types = None;
+        }
         result.entry = None;
         result.functions.clear();
     }
