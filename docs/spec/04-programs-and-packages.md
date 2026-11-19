@@ -14,7 +14,8 @@ and no declarations, so it is parsed and validated and never executed.
 
 The file extension selects the grammar before parsing; contents are never
 used to guess. A document presented to the wrong loader is
-`@data.invalidExtension` before its contents are read.
+`@data.invalidExtension` before its contents are read, at offset 0 of that
+document, whose source identity the diagnostic carries.
 
 A VIBON document is exactly one value:
 
@@ -35,13 +36,21 @@ their numeric suffixes, `true` and `false` are the booleans, and `//` starts
 a comment. `true` and `false` are the `boolean` production, and outside a
 field name they are the only identifiers the data grammar admits: any other
 identifier, a doc string, and an application such as
-`Option.some(value: 1i32)` are `@syntax.invalidForm` at the token. A typed
-decoder rejects a wrong shape afterwards, with `@data.invalidShape`. There
-are no commas. `{}` is the empty tuple, `[]` the empty
-list, and `[:]` the empty dict. A field name is an identifier, so no field
-of any schema is a reserved word or contains a hyphen. A record's fields are
-unique. A later duplicate dict key is an error in VIBON, `@data.duplicateKey`,
-where source would let it replace the earlier one.
+`Option.some(value: 1i32)` are `@syntax.invalidForm` at the token. An
+application is reported once, at its first token: no grammar fault inside
+its parentheses is reported, and a lexical fault there still is. A malformed
+identifier is `@syntax.invalidName` only. A typed decoder rejects a wrong
+shape afterwards, with `@data.invalidShape`. There are no commas. `{}` is
+the empty tuple, `[]` the empty list, and `[:]` the empty dict. A field
+name is an identifier, so no field of any schema is a reserved word or
+contains a hyphen; a reserved word written as a field name is
+`@syntax.invalidForm` at the word. A field or an entry with no value after
+its `:` is `@syntax.invalidForm` over the name or key and the `:`. A
+character that starts no token is `@syntax.invalidForm` at that character.
+A document that holds no value, only whitespace and comments or nothing, is
+`@syntax.invalidForm` over the whole document. A record's fields are
+unique. A later duplicate dict key is an error in VIBON,
+`@data.duplicateKey`, where source would let it replace the earlier one.
 
 This is the only VIBON grammar. Every compiler-owned document is written in
 it: project and lock files, host worlds, audit traces, build manifests,
@@ -91,6 +100,11 @@ A reader validates a document in this order, and reports one fault once:
 6. a repeated dict key, `@data.duplicateKey` at the later key. Keys are
    compared as decoded values of the key slot's type, so the comparison
    happens only after steps 3 to 5 have typed and accepted them.
+
+A boolean is the literal of a schema slot of boolean type. It is not the
+encoding of a `Bool` value: `Bool` is an ordinary declared type, and a
+[`@value.v2`](06-runtime.md#values) document writes a `Bool` as its variant
+record.
 
 An unsuffixed number is accepted by the grammar and typed by the schema slot
 it lands in. A slot with no number type rejects it. In canonical output every
@@ -147,8 +161,8 @@ by the decoded value and the schema, has no comment, and has no layout:
   written directly; a character likewise, with `\'` for the quote;
 - an integer as its minimal decimal digits and its exact suffix; a float as
   the [canonical text](06-runtime.md#floating-point-operations) of the
-  runtime chapter and its exact suffix; `true` and `false`; an atom as its
-  parts;
+  runtime chapter and its exact suffix; a boolean slot as `true` or `false`;
+  an atom as its parts;
 - a record's fields in schema order. An absent optional field is omitted,
   and so is a field whose value equals its schema default, whatever the
   input spelled;
@@ -243,7 +257,7 @@ output.
 | Record | Fields, in canonical order | Constraint |
 | --- | --- | --- |
 | project | `format`, `package`, `targets`, `dependencies` | all required; `targets` a list with at least one target; `dependencies` a dict from `Str` name to dependency, possibly empty |
-| package | `name`, `version` | strings; `name` satisfies the source identifier grammar, is not a reserved word, and is camelCase; `version` is one semantic version, never a range |
+| package | `name`, `version` | strings; `name` satisfies the source identifier grammar, is not a reserved word, and is camelCase, which here means that its first letter is lower case; `version` is one semantic version, never a range |
 | target | `name`, `kind`, `root`, `entry`, `effects`, `grants` | `name` is a one-part atom whose part is not a reserved word; `kind` is `@bin` or `@lib`; `root` a `Str`; a binary requires `entry` (an entity reference), `effects` (a list of entity references), and `grants` (a dict from leaf atom to grant binding); a library omits all three |
 | grant binding | `provider`, `resource`, `policy`, `limits`, `after` | `provider`, `resource`, `after` required; `policy` and `limits` optional; a present `limits` holds at least one bound; see [Targets](#targets) |
 | limits | `invocations`, `inputBytes`, `outputBytes` | each an optional `U64`; at least one present |
@@ -271,22 +285,27 @@ Every target `root` MUST be a non-empty relative path without `.` or `..`
 parts. Its canonical directory MUST exist inside the canonical project root,
 compared by path components; otherwise it is `@project.invalidTargetRoot`.
 Canonical target roots MUST be pairwise disjoint, neither equal nor nested,
-or the later one is `@project.overlappingTargetRoots`. These checks finish
-before any source directory is listed.
+or the later one is `@project.overlappingTargetRoots` at its `root` value,
+with no related span. These checks finish before any source directory is
+listed.
 
 Below a root, a symbolic link or junction MUST resolve inside both the
 project root and its own source root. An escaping link or a directory cycle
 is `@module.pathEscape`; a dangling or unreadable link is
 `@module.ioError`. A canonical directory is walked once, and a linked file
 is admitted once, at its first path in sorted order. A source root MUST NOT
-itself be a link. No source byte is read before these checks pass.
+itself be a link. No source byte is read before these checks pass. Either
+diagnostic on a directory entry names that entry's project-relative path as
+its source, at offset 0.
 
 A regular file is a module only when its extension is exactly `.vib`. Every
 file and directory name on a module's path MUST satisfy the source identifier
 grammar and MUST NOT be a reserved word, or the path is
 `@module.invalidSegment`. Names are compared with
 exact case. Two paths under one root that differ only by case are
-`@module.caseCollision` on every host, and on a case-insensitive filesystem
+`@module.caseCollision` on every host, at offset 0 of the later path in
+source-identity order with no related span, and on a case-insensitive
+filesystem
 a reference whose case differs from the file's actual name is
 `@module.unknownPath`. A file `text.vib` beside a directory `text/` is
 `@module.fileDirectoryCollision`. Entries are sorted by project-relative
@@ -297,8 +316,11 @@ filesystem access.
 
 The optional top-level `tests/` directory is the source root of the reserved
 test unit `@tests`, walked under the same rules and required to be disjoint
-from every target root. A target or dependency named `tests` or `std` is
-`@project.reservedUnitName`.
+from every target root: a target root that overlaps it is
+`@project.overlappingTargetRoots` at that target's `root` value. A `tests`
+at the project root that is a link or not a directory is
+`@project.invalidTargetRoot` with the source `tests`, at offset 0. A target
+or dependency named `tests` or `std` is `@project.reservedUnitName`.
 
 ## Packages, units, and targets
 
@@ -309,7 +331,10 @@ Dependency selection is exact; there is no version solving.
 A **unit** is one local target, the reserved unit `@tests`, the embedded
 standard library `@std`, or one dependency name. The first part of every
 code-reference atom names a unit. Target and dependency names share one
-namespace with the two reserved units. Because roots are disjoint, every
+namespace with the two reserved units. Two targets with one name, or a
+target and a dependency with one name, are `@project.duplicateName` at the
+later name in the project file, a target's `name` value or a dependency's
+key, related to the earlier one. Because roots are disjoint, every
 module belongs to exactly one unit and has exactly one canonical path.
 
 The units a module can name are closed: its own unit, `@std`, and the
@@ -675,7 +700,8 @@ The package enters resolution as unit `@std`. Its modules are:
 
 Adding a module or symbol is a change to this specification and to the
 runtime registry. A project module whose source identity collides with an
-embedded one is `@module.sourceIdCollision`.
+embedded one is `@module.sourceIdCollision` at offset 0 of the project
+module.
 
 ## Tests
 

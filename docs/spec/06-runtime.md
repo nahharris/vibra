@@ -399,6 +399,10 @@ through an extra static member:
 | `TryFrom(Str)` on `T` | an optional minus (signed `T` only), then one or more ASCII decimal digits, and nothing else. Anything else is `invalidFormat`. A well-formed value outside `T` is `outOfRange` |
 | `From(S)` or `TryFrom(S)` on `T`, for another integer type `S` | the same integer. `From` exists exactly when every value of `S` fits `T`; otherwise `TryFrom` returns `outOfRange` for a value that does not fit |
 
+The registry rows `<t>.equal`, `<t>.compare`, `<t>.toStr`, `<t>.parse`, and
+`<s>.to<T>`, such as `i16.equal` and `i16.toI32`, are the bodies these
+implementations bind. None of them is a member a source path can name.
+
 The destination of a conversion is its written expected type. The default
 members of `Ordered` call `compare` once. `min` and `max` return the left
 operand on a tie. `inRange` compares the lower bound first, and the upper
@@ -828,7 +832,7 @@ record. Every other compound value is one of these closed records:
 | bytes | `kind: @bytes`; `values`: list of `U8` literals |
 | tuple | `kind: @tuple`; `typeInfo: T`, present only for a declared tuple; `values`: list of encoded components |
 | list | `kind: @list`; `values`: list of encoded elements in order |
-| dict | `kind: @dict`; `entries`: list of encoded key and value tuples in `Ordered` key order |
+| dict | `kind: @dict`; `entries`: list of entries in `Ordered` key order, each the encoding of the anonymous tuple of its key and value, `{kind: @tuple values: [k v]}` |
 | record | `kind: @record`; `typeInfo: T`, present only for a declared record; `fields`: record of encoded fields |
 | variant | `kind: @enum`; `typeInfo: T`; `variant`: the case name as an atom; `payload`: a record of the case's encoded fields in declaration order, only for a case that has fields |
 | wrapper | `kind: @wrapper`; `typeInfo: T`; `value`: the encoded representation |
@@ -845,6 +849,10 @@ record. Every other compound value is one of these closed records:
   use canonical name order. A variant's `payload` has no `kind` and no
   `typeInfo` of its own: `payload: {radius: 1.5f64}`.
 - A case name is the resolved source name.
+- `Bool` has no form of its own. A `Bool` value is the variant record of
+  its declaration, `{kind: @enum typeInfo: T variant: @true}` or
+  `variant: @false`; the `true` and `false` literals of the data grammar
+  never encode one.
 - An interface value is encoded as the complete observation of the value it
   holds, format included, because an observation is for tools, which may
   see it. Source still cannot: no pattern or conversion reads `held` back,

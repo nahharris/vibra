@@ -204,8 +204,8 @@ pub static LINES: [Line; 18] = [
         ..UNSUPPORTED
     },
     Line {
-        words: &["edit", "organize-imports"],
-        synopsis: "edit organize-imports PATH [--write]",
+        words: &["edit", "imports"],
+        synopsis: "edit imports PATH [--write]",
         required: 1,
         options: &[WRITE],
         ..UNSUPPORTED

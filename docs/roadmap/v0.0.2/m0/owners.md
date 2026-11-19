@@ -348,6 +348,7 @@ with no M1 step belongs to the milestone named.
 | `@project.invalidEntrySignature` | M2 |
 | `@project.ambiguousDependencyTarget` | M2 |
 | `@project.reservedUnitName` | steps 09 |
+| `@project.duplicateName` | steps 08 |
 | `@project.overlappingTargetRoots` | steps 09 |
 | `@project.notFound` | steps 09, 25 |
 | `@project.invalidTargetRoot` | steps 09 |

@@ -13,9 +13,4 @@ verdict = "refuted"
 [[expect.diagnostics]]
 code = "@syntax.missingSeparator"
 level = "@error"
-span = { start = 7, end = 7 }
-
-[[expect.diagnostics]]
-code = "@syntax.invalidForm"
-level = "@error"
-span = { start = 7, end = 10 }
+span = { start = 4, end = 4 }

@@ -50,12 +50,18 @@ vibra [GLOBAL...] build [TARGET] [--target TRIPLE]
 vibra [GLOBAL...] query SUBJECT [--include METADATA] [--expand RELATIONS]
 vibra [GLOBAL...] edit fix SUBJECT [--write]
 vibra [GLOBAL...] edit rename SUBJECT NEWNAME [--write]
-vibra [GLOBAL...] edit organize-imports PATH [--write]
+vibra [GLOBAL...] edit imports PATH [--write]
 vibra [GLOBAL...] mcp [SERVER-PERMISSION...]
 vibra [GLOBAL...] help
 ```
 
 This is the grammar of a process command line, not Vibra source.
+
+**Names.** A code entity is written in camelCase or PascalCase everywhere,
+the command line included: an argument that names one, such as an atom, a
+profile, or a result, keeps the entity's spelling. Every other word of the
+command line, a command or an option, may be kebab-case. A command name is
+short, preferably one word: `edit imports` organizes imports.
 
 | Operand | Meaning |
 | --- | --- |
@@ -69,10 +75,21 @@ This is the grammar of a process command line, not Vibra source.
 | `TEST` | a [test selector](#tests-and-selection) |
 
 - An unknown command or option, a repeated single option, and an extra
-  positional are invalid input.
+  positional are invalid input. So are a command line with no command and a
+  command group, `project` or `edit`, with no subcommand of the group
+  after it; the response then carries the empty command name.
+- Invalid input is answered in the format recognized before the fault:
+  `--format json --format human help` is refused in JSON, and
+  `--format xml help` in the human format. It carries no diagnostic. In the
+  human format it is one line on standard error, whose wording is not a
+  contract.
+- Every token after `mcp` is a server permission operand, whatever it
+  begins with; none is read as an option.
 - A known command the tool does not yet support is **unavailable**, which is
   a different outcome from an unknown spelling. The support inventory MUST
-  name every such command.
+  name every such command. A well-formed line of such a command is
+  unavailable whatever its operands hold: its typed operands are not
+  validated.
 - `help`, `--help`, and `-h` in the command position are equivalent and take
   no arguments. Help shows this hierarchy with the supported inventory and
   MUST NOT present an unavailable command as working. In JSON it returns the
@@ -258,7 +275,12 @@ Every structured response is a closed object with these fields:
   command-line error, or failed discovery. It is never invented.
 - `status` is `passed`, `refuted`, `unknown`, or `unsupported`. It describes
   the observation requested. Passing sampled tests is `passed` for that run,
-  not a universal claim about the program.
+  not a universal claim about the program. The result fixes it, as the table
+  below states, with two exceptions: a reached limit and a bare guard that
+  is not established make it `unknown`.
+- `command` is the words that select the command, joined by one space:
+  `check`, `project init`, `edit imports`. An operand is never part of it,
+  so `project add target` has the name `project add`.
 - `limits.profile` names the published limit profile, with its units,
   defaults, and engine version. `reached` lists the limits reached, in
   order. `complete` is `false` after truncation or exhaustion.
@@ -266,16 +288,16 @@ Every structured response is a closed object with these fields:
   document with status `unknown`. It never emits truncated JSON and never
   silently omits facts.
 
-| Result | Exit | Meaning |
-| --- | --- | --- |
-| `@command.ok` | 0 | the requested operation completed and succeeded |
-| `@command.diagnostics` | 1 | static diagnostics prevent admission |
-| `@command.testFailed` | 1 | at least one selected test failed |
-| `@command.invalidInput` | 2 | invalid command, selector, or typed input |
-| `@command.operationalFailure` | 3 | tool, host, or startup failure or exhaustion |
-| `@command.unavailable` | 4 | a known operation outside the supported profile |
-| `@command.trap` | 5 | a registered toolchain or runtime defect |
-| `@command.programFailed` | 6 | the program returned a non-zero `ExitCode` |
+| Result | Exit | Status | Meaning |
+| --- | --- | --- | --- |
+| `@command.ok` | 0 | `passed` | the requested operation completed and succeeded |
+| `@command.diagnostics` | 1 | `refuted` | static diagnostics prevent admission |
+| `@command.testFailed` | 1 | `refuted` | at least one selected test failed |
+| `@command.invalidInput` | 2 | `unknown` | invalid command, selector, or typed input |
+| `@command.operationalFailure` | 3 | `unknown` | tool, host, or startup failure or exhaustion |
+| `@command.unavailable` | 4 | `unsupported` | a known operation outside the supported profile |
+| `@command.trap` | 5 | `unknown` | a registered toolchain or runtime defect |
+| `@command.programFailed` | 6 | `unknown` | the program returned a non-zero `ExitCode` |
 
 - A bare guard that is disproved has status `refuted`; one that is not
   established has status `unknown`. Both prevent admission.
@@ -319,7 +341,7 @@ in the
 
 | Record | Fields |
 | --- | --- |
-| `CommandCapability` | `command`; `operations`: string[]; `profiles`: string[]; `supported`: boolean; `schemaIds`: exact published identifiers |
+| `CommandCapability` | one per line of the command surface, in its order: `command`, the command name; `operations`: string[], the operations a supported command offers, its own name for `help`; `profiles`: string[], the conformance profiles that cover it; `supported`: boolean; `schemaIds`: exact published identifiers of the documents it emits. The three lists are empty for an unsupported command |
 | `TargetSummary` | `name`; `kind`; `root`; `entry` (nullable); `bindingStatus`: `exact`, `recovered`, or `unavailable` |
 | `DependencySummary` | `alias`; `kind`; `source`; `target` (nullable); `status`: `captured`, `verified`, `unavailable`, or `refuted`; `identity` (nullable) |
 | `TestItem` | `name`; `result`; `failure` (nullable); `trap` (nullable); `auditTrace`; `diagnostics`; `status` |
