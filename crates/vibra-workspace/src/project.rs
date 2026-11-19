@@ -97,6 +97,7 @@ impl Package {
 /// One local target.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Target {
+    span: ByteSpan,
     name: String,
     name_span: ByteSpan,
     kind: TargetKind,
@@ -106,6 +107,12 @@ pub struct Target {
 }
 
 impl Target {
+    /// Where the target's record is written in the project file.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+
     /// The unit name, an atom with its `@`.
     #[must_use]
     pub fn name(&self) -> &str {
@@ -472,6 +479,7 @@ pub fn decode_project(
             let name = target.get("name");
             let root = target.get("root");
             Target {
+                span: target.span(),
                 name: text_of(name),
                 name_span: name.map_or(target.span(), TypedNode::span),
                 kind,

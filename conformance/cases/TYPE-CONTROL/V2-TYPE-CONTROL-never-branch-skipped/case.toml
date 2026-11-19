@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-never-branch-skipped"
+rule = "V2-TYPE-CONTROL-never-branch-skipped"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#joins: a branch of type Never is skipped when branches are compared"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

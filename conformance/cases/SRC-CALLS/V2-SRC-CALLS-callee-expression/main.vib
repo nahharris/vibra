@@ -1,0 +1,4 @@
+fn main returns r: I32 do return pick(true)(1i32) endfn
+fn inc takes {x: I32} returns r: I32 do return I32.add(x 1i32) endfn
+fn dec takes {x: I32} returns r: I32 do return I32.sub(x 1i32) endfn
+fn pick takes {b: Bool} returns f: Fn({I32} I32) do if b then return inc else return dec endif endfn

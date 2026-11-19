@@ -1,0 +1,1 @@
+fn f takes {o: Ordering} returns r: I32 do return match o case Ordering.less() 1i32 case Ordering.equal() 2i32 endmatch endfn

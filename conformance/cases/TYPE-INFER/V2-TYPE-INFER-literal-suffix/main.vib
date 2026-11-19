@@ -1,0 +1,1 @@
+fn main returns r: U8 do return 7u8 endfn

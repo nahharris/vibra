@@ -186,6 +186,9 @@ pub struct CaseExpectations {
     pub result: Option<String>,
     /// The `@testRun.v2` snapshot.
     pub test_run: Option<String>,
+    /// The atom of the host event the execution ends with, such as
+    /// `@runtime.memoryExhausted`.
+    pub host_event: Option<DiagnosticCode>,
 }
 
 impl CaseExpectations {
@@ -515,6 +518,16 @@ fn decode_expectations(
         .into_iter()
         .map(decode_diagnostic)
         .collect::<Result<Vec<_>, _>>()?;
+    let host_event = raw
+        .host_event
+        .map(|atom| {
+            atom.parse::<DiagnosticCode>().map_err(|_| {
+                ManifestError::Invalid(format!(
+                    "expected host event `{atom}` is not in the registry"
+                ))
+            })
+        })
+        .transpose()?;
     Ok(CaseExpectations {
         verdict,
         diagnostics,
@@ -525,6 +538,7 @@ fn decode_expectations(
         types: raw.types,
         result: raw.result,
         test_run: raw.test_run,
+        host_event,
     })
 }
 
@@ -652,6 +666,9 @@ struct RawExpectations {
     result: Option<String>,
     #[serde(default)]
     test_run: Option<String>,
+    /// Spelled as `docs/spec/07-diagnostics-and-conformance.md` writes it.
+    #[serde(default, rename = "host_event")]
+    host_event: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

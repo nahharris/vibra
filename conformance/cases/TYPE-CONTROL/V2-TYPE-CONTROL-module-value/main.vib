@@ -1,0 +1,2 @@
+let defaultRetries: U8 be 3u8 endlet
+fn main returns r: U8 do return defaultRetries endfn

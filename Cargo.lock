@@ -1212,8 +1212,11 @@ dependencies = [
  "toml",
  "vibra-diagnostics",
  "vibra-fmt",
+ "vibra-interp",
+ "vibra-ir",
  "vibra-resolve",
  "vibra-syntax",
+ "vibra-types",
  "vibra-workspace",
 ]
 
@@ -1450,6 +1453,7 @@ dependencies = [
  "sha2",
  "vibra-diagnostics",
  "vibra-fmt",
+ "vibra-interp",
  "vibra-ir",
  "vibra-resolve",
  "vibra-syntax",

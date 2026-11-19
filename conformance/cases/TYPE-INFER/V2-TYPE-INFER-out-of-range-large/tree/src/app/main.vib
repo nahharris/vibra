@@ -1,0 +1,1 @@
+fn main returns r: U8 do return 300u8 endfn

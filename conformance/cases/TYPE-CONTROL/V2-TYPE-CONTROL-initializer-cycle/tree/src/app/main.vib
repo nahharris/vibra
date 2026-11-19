@@ -1,0 +1,2 @@
+let a: U8 be helper() endlet
+fn helper returns r: U8 do return a endfn

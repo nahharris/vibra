@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-if-statement-void"
+rule = "V2-TYPE-CONTROL-if-statement-void"
+profile = "interpreterV2"
+operation = "interpret"
+description = "01-source-language.md#if-match-do: an if statement may omit else when its branch is Void or Never"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

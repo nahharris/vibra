@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-let-written-type"
+rule = "V2-TYPE-CONTROL-let-written-type"
+profile = "interpreterV2"
+operation = "interpret"
+description = "01-source-language.md#let: a written type is the expected type of the initializer"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

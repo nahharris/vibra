@@ -8,6 +8,8 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use vibra_diagnostics::DiagnosticCode;
+
 use crate::corpus::{Case, Corpus};
 use crate::manifest::{CaseExpectations, Verdict};
 use crate::profile::{CaseObservation, ConformanceProfile};
@@ -269,6 +271,13 @@ fn matches(
         return Err(format!(
             "verdict mismatch: expected {}, got {}",
             expected.verdict, observation.verdict
+        ));
+    }
+    if expected.host_event != observation.host_event {
+        return Err(format!(
+            "host event mismatch: expected {:?}, got {:?}",
+            expected.host_event.map(DiagnosticCode::as_atom),
+            observation.host_event.map(DiagnosticCode::as_atom)
         ));
     }
     if expected.diagnostics.len() != observation.diagnostics.len() {

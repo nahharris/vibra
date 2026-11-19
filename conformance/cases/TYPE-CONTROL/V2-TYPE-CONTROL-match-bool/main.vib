@@ -1,0 +1,2 @@
+fn main returns r: I32 do return f(false) endfn
+fn f takes {b: Bool} returns r: I32 do return match b case true 1i32 case false 2i32 endmatch endfn

@@ -9,7 +9,7 @@
     }
     {
       path: @std.builtin
-      digest: "sha256:6085e9a7f9040325b96a3a58f95d6461a634080214c2bdcac4e83981676241e1"
+      digest: "sha256:ef5cc78bd1e087349a15df2f6cab6c77e49c20fa5e6827da1280c34a91d948e2"
       languageRoles: [@bytes @dict @str]
     }
     {
@@ -54,6 +54,7 @@
       "i16.add"
       "i16.addChecked"
       "i16.divChecked"
+      "i16.equal"
       "i16.mul"
       "i16.mulChecked"
       "i16.neg"
@@ -68,6 +69,7 @@
       "i32.add"
       "i32.addChecked"
       "i32.divChecked"
+      "i32.equal"
       "i32.mul"
       "i32.mulChecked"
       "i32.neg"
@@ -82,6 +84,7 @@
       "i64.add"
       "i64.addChecked"
       "i64.divChecked"
+      "i64.equal"
       "i64.mul"
       "i64.mulChecked"
       "i64.neg"
@@ -96,6 +99,7 @@
       "i8.add"
       "i8.addChecked"
       "i8.divChecked"
+      "i8.equal"
       "i8.mul"
       "i8.mulChecked"
       "i8.neg"
@@ -115,6 +119,7 @@
       "u16.add"
       "u16.addChecked"
       "u16.divChecked"
+      "u16.equal"
       "u16.mul"
       "u16.mulChecked"
       "u16.remChecked"
@@ -127,6 +132,7 @@
       "u32.add"
       "u32.addChecked"
       "u32.divChecked"
+      "u32.equal"
       "u32.mul"
       "u32.mulChecked"
       "u32.remChecked"
@@ -139,6 +145,7 @@
       "u64.add"
       "u64.addChecked"
       "u64.divChecked"
+      "u64.equal"
       "u64.mul"
       "u64.mulChecked"
       "u64.remChecked"
@@ -151,6 +158,7 @@
       "u8.add"
       "u8.addChecked"
       "u8.divChecked"
+      "u8.equal"
       "u8.mul"
       "u8.mulChecked"
       "u8.remChecked"

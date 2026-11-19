@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONTROL-unreachable-after-return"
+rule = "V2-TYPE-CONTROL-unreachable-after-return"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#return-and-never: a statement after a statement of type Never is unreachable"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.unreachableCode"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 35, end = 46 }
+related = [{ span = { start = 23, end = 34 } }]

@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-module-value"
+rule = "V2-TYPE-CONTROL-module-value"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#module-value-initialization: a module value is read from a function"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

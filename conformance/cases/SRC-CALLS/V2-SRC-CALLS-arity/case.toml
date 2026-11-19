@@ -1,0 +1,18 @@
+id = "V2-SRC-CALLS-arity"
+rule = "V2-SRC-CALLS-arity"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#application: a wrong number of arguments is an argument mismatch at the application"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 102, end = 116 }

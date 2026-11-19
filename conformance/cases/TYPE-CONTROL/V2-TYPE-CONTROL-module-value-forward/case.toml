@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-module-value-forward"
+rule = "V2-TYPE-CONTROL-module-value-forward"
+profile = "interpreterV2"
+operation = "interpret"
+description = "06-runtime.md#module-value-initialization: an initializer may read a module value declared after it"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

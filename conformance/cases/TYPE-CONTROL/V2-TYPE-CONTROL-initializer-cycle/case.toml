@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONTROL-initializer-cycle"
+rule = "V2-TYPE-CONTROL-initializer-cycle"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "06-runtime.md#module-value-initialization: an initializer that reaches itself through a call"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.initializerCycle"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 0, end = 28 }
+related = [{ span = { start = 13, end = 19 } }, { span = { start = 63, end = 64 } }]

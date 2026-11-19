@@ -14,6 +14,8 @@ mod ambient_reads;
 mod architecture_boundary;
 mod deep_nesting;
 mod diagnostic_registry;
+mod encoding_readback;
+mod interpret;
 mod manifest;
 mod runner;
 mod spec_examples;
