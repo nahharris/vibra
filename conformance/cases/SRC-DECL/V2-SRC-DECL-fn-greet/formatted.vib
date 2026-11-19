@@ -1,0 +1,7 @@
+fn greet
+  takes {name: Str}
+  returns greeting: Str
+  visibility @public
+  do
+    return Str.concat("hello, " name)
+endfn

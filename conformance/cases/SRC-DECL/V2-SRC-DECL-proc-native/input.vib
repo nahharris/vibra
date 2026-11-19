@@ -1,0 +1,1 @@
+proc p returns r: Void native "x" do return void endproc

@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-fn-no-body"
+rule = "V2-SRC-DECL-fn-no-body"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#fn-and-proc: a fn that is not an abstract member or an external definition needs do; reported at its closer"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 20, end = 25 }

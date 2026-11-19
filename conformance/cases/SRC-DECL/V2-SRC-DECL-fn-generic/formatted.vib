@@ -1,0 +1,7 @@
+fn first(T)
+  takes {items: List(T)}
+  returns head: Option(T)
+  visibility @public
+  do
+    return items(0u64)
+endfn

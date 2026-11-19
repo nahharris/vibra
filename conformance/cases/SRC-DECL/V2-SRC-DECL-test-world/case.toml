@@ -1,0 +1,12 @@
+id = "V2-SRC-DECL-test-world"
+rule = "V2-SRC-DECL-test-world"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#test: a test that takes its world and declares its row"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

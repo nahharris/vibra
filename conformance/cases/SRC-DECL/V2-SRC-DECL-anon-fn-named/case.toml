@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-anon-fn-named"
+rule = "V2-SRC-DECL-anon-fn-named"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#fn-and-proc: an anonymous fn has no name; a name after the keyword is an invalid form over the fn"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 21, end = 61 }

@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-fn-external-outside-stdlib"
+rule = "V2-SRC-DECL-fn-external-outside-stdlib"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#external-definitions: an external definition outside the standard library is reported once, at external"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidSection"
+level = "@error"
+span = { start = 20, end = 38 }

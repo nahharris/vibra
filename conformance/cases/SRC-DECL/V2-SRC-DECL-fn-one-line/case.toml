@@ -1,0 +1,12 @@
+id = "V2-SRC-DECL-fn-one-line"
+rule = "V2-SRC-DECL-fn-one-line"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#canonical-format: a fn with a section other than of is always on several lines, however short"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

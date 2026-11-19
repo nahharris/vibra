@@ -1,0 +1,12 @@
+id = "V2-SRC-DECL-fn-empty-takes"
+rule = "V2-SRC-DECL-fn-empty-takes"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#grammar: an empty takes {} means the same as omitting it, and the formatter removes it"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

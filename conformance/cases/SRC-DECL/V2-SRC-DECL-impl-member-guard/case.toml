@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-impl-member-guard"
+rule = "V2-SRC-DECL-impl-member-guard"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#impl: a member of an impl declares no guard; requires on one is a section it does not admit"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidSection"
+level = "@error"
+span = { start = 61, end = 74 }

@@ -1,0 +1,8 @@
+let inc: Fn({I32} I32) be
+  fn
+    takes {value: I32}
+    returns next: I32
+    do
+      return I32.add(value 1i32)
+  endfn
+endlet
