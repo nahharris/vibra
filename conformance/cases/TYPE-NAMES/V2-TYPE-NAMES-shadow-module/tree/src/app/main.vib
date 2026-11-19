@@ -1,0 +1,14 @@
+fn seed
+  returns s: I32
+  do
+    return 1i32
+endfn
+
+let limit: I32 be seed() endlet
+
+fn f
+  returns r: I32
+  do
+    let limit be 2i32 endlet
+    return limit
+endfn

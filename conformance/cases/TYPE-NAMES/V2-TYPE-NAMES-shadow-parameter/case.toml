@@ -1,0 +1,19 @@
+id = "V2-TYPE-NAMES-shadow-parameter"
+rule = "V2-TYPE-NAMES-shadow-parameter"
+profile = "staticV2"
+operation = "resolve"
+description = "01-source-language.md#patterns: a binder may not shadow a parameter; @name.redeclaration at the later binder, related to the parameter"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.redeclaration"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 52, end = 53 }
+related = [{ source = "src/app/main.vib", span = { start = 14, end = 15 } }]

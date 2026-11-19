@@ -1,0 +1,13 @@
+id = "V2-TYPE-NAMES-prelude-member-path"
+rule = "V2-TYPE-NAMES-prelude-member-path"
+profile = "staticV2"
+operation = "resolve"
+description = "02-type-system.md#the-prelude: a path that starts with a prelude name reaches its members, with the member's identity"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+resolved = "resolved.vibon"

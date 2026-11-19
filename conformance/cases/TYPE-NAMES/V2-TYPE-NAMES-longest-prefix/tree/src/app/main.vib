@@ -1,0 +1,8 @@
+use @app.model enduse
+
+fn f
+  takes {u: model.User}
+  returns r: I32
+  do
+    return model.User.nameLength(u).x
+endfn

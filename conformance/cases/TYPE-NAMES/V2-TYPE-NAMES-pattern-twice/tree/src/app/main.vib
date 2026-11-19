@@ -1,0 +1,7 @@
+fn f
+  takes {t: {I32 I32}}
+  returns r: I32
+  do
+    let {a a} be t endlet
+    return a
+endfn

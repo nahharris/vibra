@@ -1,0 +1,19 @@
+id = "V2-TYPE-NAMES-prelude-unknown-member"
+rule = "V2-TYPE-NAMES-prelude-unknown-member"
+profile = "staticV2"
+operation = "resolve"
+description = "02-type-system.md#the-prelude: a part after a prelude type that names none of its members is @name.unknownSymbol, related to the declaration"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.unknownSymbol"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 53, end = 60 }
+related = [{ source = "stdlib/src/std/option.vib", span = { start = 98, end = 104 } }]

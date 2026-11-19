@@ -1,0 +1,12 @@
+fn f
+  takes {c: Bool}
+  returns r: I32
+  do
+    if c then
+      let a be 1i32 endlet
+      return a
+    else
+      let a be 2i32 endlet
+      return a
+    endif
+endfn

@@ -1,0 +1,9 @@
+fn f
+  takes {x: Option(I32)}
+  returns r: I32
+  do
+    let Option.some(value: a) be x else
+      return a
+    endlet
+    return a
+endfn

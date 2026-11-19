@@ -1,0 +1,18 @@
+id = "V2-TYPE-NAMES-let-not-in-else"
+rule = "V2-TYPE-NAMES-let-not-in-else"
+profile = "staticV2"
+operation = "resolve"
+description = "01-source-language.md#bodies-and-statements: a let's names are not visible in its fallback; the use is @name.unknownSymbol"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.unknownSymbol"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 105, end = 106 }

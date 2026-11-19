@@ -1,0 +1,10 @@
+type User of {x: I32}
+  visibility @public
+  fn nameLength
+    takes {u: Self}
+    returns n: User
+    visibility @public
+    do
+      return u
+  endfn
+endtype
