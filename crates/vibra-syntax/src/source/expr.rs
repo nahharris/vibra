@@ -8,10 +8,10 @@
 //! order. The views read what shaping built; a part that shaping kept in an
 //! `@error` node is absent from them.
 
+use super::callable::Callable;
 use super::construct::is_trivia;
 use super::declaration::{Ident, name_of};
 use super::pattern::{Pattern, read_pattern};
-use super::section::Construct;
 use super::statement::{Body, Let};
 use crate::cst::{CstNode, SyntaxKind};
 
@@ -282,8 +282,8 @@ pub enum Primary<'a> {
     Match(Match<'a>),
     /// `do … enddo`.
     Do(DoBlock<'a>),
-    /// An anonymous `fn` or `proc`, whose grammar is not read yet.
-    Callable(Construct<'a>),
+    /// An anonymous `fn` or `proc`.
+    Callable(Callable<'a>),
 }
 
 impl<'a> Primary<'a> {
@@ -301,7 +301,7 @@ impl<'a> Primary<'a> {
             SyntaxKind::If => Self::If(If { node, text }),
             SyntaxKind::Match => Self::Match(Match { node, text }),
             SyntaxKind::DoBlock => Self::Do(DoBlock { node, text }),
-            _ => Self::Callable(Construct::new(node, text)?),
+            _ => Self::Callable(Callable::new(node, text)?),
         })
     }
 }

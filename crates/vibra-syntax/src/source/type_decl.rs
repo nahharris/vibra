@@ -35,19 +35,21 @@
 //!   `if`); it is read as a predicate expression and an optional `else`
 //!   expression, and anything else in it is `@syntax.invalidForm` over the
 //!   section;
-//! - a named `fn` or `proc` member is `@tool.unavailable` over the member
-//!   until the callable grammar exists; an `impl` is shaped in place; any
-//!   other nested construct is `@syntax.invalidForm` over it.
+//! - a named `fn` or `proc` member is shaped in the callable grammar, as a
+//!   member of its declaration kind (an abstract `interface` member, an
+//!   `impl` member with no guard); an `impl` is shaped in place; any other
+//!   nested construct is `@syntax.invalidForm` over it.
 //!
 //! Cases keep their written order, which is the order of the variants.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 
+use super::callable::{Callable, CallableKind};
 use super::construct::is_trivia;
 use super::declaration::{Atom, Ident, name_of};
 use super::keyword::{STANDARD_LIBRARY_SECTIONS, admissible_sections, tag_set};
 use super::section::{Construct, Doc, Given, TagSection, Where};
-use super::shape::shape_where_operand;
+use super::shape::{CallableRole, Place, shape_callable, shape_where_operand};
 use super::types::{
     Head, Role, TypeExpr, entry_count, shape_group, shape_type_list, type_entries,
 };
@@ -169,7 +171,11 @@ fn significant(items: &[CstNode]) -> Vec<&CstNode> {
 
 /// Reports a reserved word or a reserved type head written as a declared
 /// name.
-fn report_declared_name(node: &CstNode, text: &str, sink: &mut Vec<Diagnostic>) {
+pub(crate) fn report_declared_name(
+    node: &CstNode,
+    text: &str,
+    sink: &mut Vec<Diagnostic>,
+) {
     let reserved = node.kind() == SyntaxKind::ReservedWord;
     let head =
         node.kind() == SyntaxKind::Identifier && Head::of(node.text(text)).is_some();
@@ -183,6 +189,50 @@ fn report_declared_name(node: &CstNode, text: &str, sink: &mut Vec<Diagnostic>) 
                 "a reserved type head cannot be declared"
             },
         ));
+    }
+}
+
+/// Shapes `(…)` after a declared name as the type parameters: one or more
+/// names. Any other content is `@syntax.invalidForm` over the group, kept in
+/// an `@error` node; a group closed as missing is kept as written.
+pub(crate) fn shape_type_params(
+    mut paren: CstNode,
+    text: &str,
+    sink: &mut Vec<Diagnostic>,
+) -> CstNode {
+    let span = paren.span();
+    if paren
+        .children()
+        .last()
+        .is_some_and(|last| last.kind() == SyntaxKind::Missing)
+    {
+        return paren;
+    }
+    let children = paren.take_children();
+    let contents = children
+        .get(1..children.len().saturating_sub(1))
+        .unwrap_or_default();
+    let names = significant(contents);
+    let ok = !names.is_empty()
+        && contents.iter().all(|node| node.kind() != SyntaxKind::Error)
+        && names.iter().all(|node| {
+            matches!(
+                node.kind(),
+                SyntaxKind::Identifier | SyntaxKind::ReservedWord
+            )
+        });
+    if ok {
+        for name in names {
+            report_declared_name(name, text, sink);
+        }
+        CstNode::interior(SyntaxKind::TypeParams, children, span.start())
+    } else {
+        sink.push(Diagnostic::new(
+            DiagnosticCode::SyntaxInvalidForm,
+            span,
+            "type parameters are one or more names in `(…)`",
+        ));
+        CstNode::interior(SyntaxKind::Error, children, span.start())
     }
 }
 
@@ -357,7 +407,7 @@ impl Shaper<'_, '_> {
                 if let Some(item) = items.next_if(|item| {
                     !item.section_keyword && item.node.kind() == SyntaxKind::Paren
                 }) {
-                    let params = self.params(item.node);
+                    let params = shape_type_params(item.node, self.text, self.sink);
                     self.out.push(params);
                 }
             } else {
@@ -389,44 +439,6 @@ impl Shaper<'_, '_> {
             }
         }
         self.finish(&part, current);
-    }
-
-    /// Shapes `(…)` after the name as the type parameters.
-    fn params(&mut self, mut paren: CstNode) -> CstNode {
-        let span = paren.span();
-        if paren
-            .children()
-            .last()
-            .is_some_and(|last| last.kind() == SyntaxKind::Missing)
-        {
-            return paren;
-        }
-        let children = paren.take_children();
-        let contents = children
-            .get(1..children.len().saturating_sub(1))
-            .unwrap_or_default();
-        let names = significant(contents);
-        let ok = !names.is_empty()
-            && contents.iter().all(|node| node.kind() != SyntaxKind::Error)
-            && names.iter().all(|node| {
-                matches!(
-                    node.kind(),
-                    SyntaxKind::Identifier | SyntaxKind::ReservedWord
-                )
-            });
-        if ok {
-            for name in names {
-                report_declared_name(name, self.text, self.sink);
-            }
-            CstNode::interior(SyntaxKind::TypeParams, children, span.start())
-        } else {
-            self.sink.push(Diagnostic::new(
-                DiagnosticCode::SyntaxInvalidForm,
-                span,
-                "type parameters are one or more names in `(…)`",
-            ));
-            CstNode::interior(SyntaxKind::Error, children, span.start())
-        }
     }
 
     /// Ends the part being read with its items; its trailing trivia stays in
@@ -655,12 +667,22 @@ impl Shaper<'_, '_> {
             });
         let kind = match (self.kind, keyword) {
             (_, "fn" | "proc") if named => {
-                self.sink.push(Diagnostic::new(
-                    DiagnosticCode::ToolUnavailable,
-                    node.span(),
-                    "the grammar of `fn` and `proc` members is not available in this reader",
-                ));
-                self.out.push(node);
+                let place = match self.kind {
+                    DeclKind::Interface => Place::InterfaceMember,
+                    DeclKind::Impl => Place::ImplMember,
+                    _ => Place::TypeMember,
+                };
+                let role = CallableRole {
+                    kind: if keyword == "fn" {
+                        CallableKind::Fn
+                    } else {
+                        CallableKind::Proc
+                    },
+                    place,
+                    standard_library: self.options.standard_library,
+                };
+                let shaped = shape_callable(node, role, self.text, self.sink);
+                self.out.push(shaped);
                 return;
             }
             (DeclKind::Type | DeclKind::Interface, "impl") => DeclKind::Impl,
@@ -739,15 +761,11 @@ pub(crate) fn children_of_kind(node: &CstNode, kind: SyntaxKind) -> Vec<&CstNode
         .collect()
 }
 
-/// The named `fn` and `proc` members, as generic constructs until the
-/// callable grammar exists.
-pub(crate) fn members<'a>(node: &'a CstNode, text: &'a str) -> Vec<Construct<'a>> {
+/// The named `fn` and `proc` members, in written order.
+pub(crate) fn members<'a>(node: &'a CstNode, text: &'a str) -> Vec<Callable<'a>> {
     contents(node)
         .iter()
-        .filter_map(|child| Construct::new(child, text))
-        .filter(|construct| {
-            matches!(construct.keyword(), "fn" | "proc") && is_named(*construct)
-        })
+        .filter_map(|child| Callable::new(child, text))
         .collect()
 }
 
@@ -909,7 +927,7 @@ impl<'a> TypeDecl<'a> {
 
     /// The named `fn` and `proc` members, in written order.
     #[must_use]
-    pub fn members(&self) -> Vec<Construct<'a>> {
+    pub fn members(&self) -> Vec<Callable<'a>> {
         members(self.node, self.text)
     }
 

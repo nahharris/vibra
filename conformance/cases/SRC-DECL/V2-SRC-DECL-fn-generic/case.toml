@@ -1,0 +1,12 @@
+id = "V2-SRC-DECL-fn-generic"
+rule = "V2-SRC-DECL-fn-generic"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#fn-and-proc: a fn with one type parameter"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

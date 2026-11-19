@@ -1,0 +1,1 @@
+test "reads" takes {world: TestWorld} performs {TestWorld} do assert.true(true) endtest

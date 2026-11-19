@@ -1,0 +1,1 @@
+test "x" takes {a: A b: B} do assert.true(true) endtest

@@ -15,6 +15,7 @@
 //! the interface: it has a name and nothing else, and a body or an item in
 //! it is `@syntax.invalidForm` over the nested `type`.
 
+use super::callable::Callable;
 use super::declaration::Ident;
 use super::impl_block::Impl;
 use super::section::{Construct, Doc, Given, TagSection};
@@ -103,7 +104,7 @@ impl<'a> InterfaceDecl<'a> {
 
     /// The named `fn` and `proc` members, in written order.
     #[must_use]
-    pub fn members(&self) -> Vec<Construct<'a>> {
+    pub fn members(&self) -> Vec<Callable<'a>> {
         members(self.node, self.text)
     }
 

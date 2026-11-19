@@ -371,9 +371,15 @@ fn build(
     items: Vec<CstNode>,
     entries: &[Entry],
     rules: &ListRules<'_>,
+    text: &str,
     sink: &mut Vec<Diagnostic>,
 ) -> (Vec<Slot>, Option<ByteSpan>) {
     let kinds: Vec<SyntaxKind> = items.iter().map(CstNode::kind).collect();
+    // `as` outside a `use` is reported by the generic section rules.
+    let is_as: Vec<bool> = items
+        .iter()
+        .map(|node| node.kind() == SyntaxKind::ReservedWord && node.text(text) == "as")
+        .collect();
     let mut builder = Builder::new(items);
     let mut intrinsic = None;
     for (position, entry) in entries.iter().enumerate() {
@@ -456,6 +462,9 @@ fn build(
                 }
                 Some(SyntaxKind::Paren) => {
                     builder.invalid(index, index, "`(` never starts a type", sink);
+                }
+                _ if is_as.get(index) == Some(&true) => {
+                    builder.wrap(index, index, SyntaxKind::Error);
                 }
                 _ => builder.invalid(index, index, "this is not a type", sink),
             },
@@ -598,7 +607,7 @@ fn visit(
                 labels,
                 body: false,
             };
-            let (slots, _) = build(contents, &entries, &rules, sink);
+            let (slots, _) = build(contents, &entries, &rules, text, sink);
             let mut all = Vec::with_capacity(slots.len() + 2);
             all.push(Slot::Ready(opener));
             all.extend(slots);
@@ -684,7 +693,7 @@ pub(crate) fn shape_type_list(
         labels: LabelKind::Label,
         body,
     };
-    let (slots, intrinsic) = build(items, &entries, &rules, sink);
+    let (slots, intrinsic) = build(items, &entries, &rules, text, sink);
     TypeList {
         nodes: run(slots, text, sink),
         entries: entries.len(),
@@ -928,6 +937,38 @@ pub(crate) fn type_entries<'a>(
     entries
 }
 
+/// The type expression at `items[*at]`, a shaped type: its head and the
+/// `(…)` applied to it; moves past it.
+pub(crate) fn read_type<'a>(
+    items: &[&'a CstNode],
+    at: &mut usize,
+    text: &'a str,
+) -> Option<TypeExpr<'a>> {
+    let head = *items.get(*at)?;
+    let fits = match head.kind() {
+        SyntaxKind::Path
+        | SyntaxKind::Atom
+        | SyntaxKind::Brace
+        | SyntaxKind::RecordType => true,
+        SyntaxKind::Identifier => Head::of(head.text(text)).is_some(),
+        _ => false,
+    };
+    if !fits {
+        return None;
+    }
+    let appliable = matches!(head.kind(), SyntaxKind::Path | SyntaxKind::Identifier);
+    let applied = items
+        .get(*at + 1)
+        .copied()
+        .filter(|next| appliable && next.kind() == SyntaxKind::Paren);
+    *at += 1 + usize::from(applied.is_some());
+    Some(TypeExpr {
+        head,
+        applied,
+        text,
+    })
+}
+
 /// A dotted name: `identifier { "." identifier }`.
 #[derive(Clone, Copy, Debug)]
 pub struct Path<'a> {
@@ -1004,6 +1045,11 @@ pub struct Row<'a> {
 }
 
 impl<'a> Row<'a> {
+    /// The view of a `@row` node of the document `text`.
+    pub(crate) fn of(node: &'a CstNode, text: &'a str) -> Option<Self> {
+        (node.kind() == SyntaxKind::Row).then_some(Self { node, text })
+    }
+
     /// The `@row` node.
     #[must_use]
     pub const fn node(&self) -> &'a CstNode {

@@ -22,7 +22,8 @@
 //!   an interface or the choices of an `impl`, then named `fn` and `proc`
 //!   members, then `impl` blocks, then `do`; within each group the written
 //!   order is kept, so cases, fields, and type arguments are never
-//!   reordered, and an empty `given {}` is removed;
+//!   reordered, and an empty `takes {}`, `labelled {}`, `given {}`, or
+//!   `performs {}` is removed;
 //! - a type expression on one line when it fits, otherwise its brace or
 //!   parenthesized forms one entry per line, one step in, with the closing
 //!   token on its own line;
@@ -30,16 +31,18 @@
 //!   `visibility` or `doc` section, as a declaration whose last section is
 //!   `be` and its value.
 //!
-//! The grammar of `fn`, `proc`, and `test` arrives in later steps, and their
-//! bodies are written flat here, one space between tokens. A form whose
-//! comments cannot be placed by these rules (a comment between the tokens of
-//! one operand) leaves the whole document unchanged.
+//! A `fn`, `proc`, or `test`, named or anonymous, is laid out with the
+//! expressions ([`crate::expr`]): its signature split into its sections, a
+//! guard's `else` on the next line one step in when both do not fit, and the
+//! body statements one step in from `do`. A form whose comments cannot be
+//! placed by these rules (a comment between the tokens of one operand) leaves
+//! the whole document unchanged.
 
+use vibra_syntax::source::Construct;
 use vibra_syntax::source::keyword::{SECTIONS, section_rank};
-use vibra_syntax::source::{Construct, is_construct};
 use vibra_syntax::{CstNode, SyntaxKind};
 
-use crate::expr::{expr_items, let_items};
+use crate::expr::{body_items, expr_items, guard_items, labelled_items, let_items};
 use crate::layout::{Item, render};
 
 /// The rank of the groups after the sections.
@@ -131,24 +134,6 @@ struct Parts<'a> {
     closing: Vec<String>,
 }
 
-/// Whether a construct nested directly in a generic declaration is a
-/// member: a named `type`, `fn`, or `proc`, or an `impl`. An anonymous `fn`
-/// or `proc` and every other construct belong to the operand written before
-/// them.
-fn member_rank(node: &CstNode, text: &str) -> Option<usize> {
-    let construct = Construct::new(node, text)?;
-    let named = construct
-        .head()
-        .first()
-        .is_some_and(|first| first.kind() == SyntaxKind::Identifier);
-    match construct.keyword() {
-        "type" if named => Some(TYPE_MEMBERS),
-        "fn" | "proc" if named => Some(CALLABLE_MEMBERS),
-        "impl" => Some(IMPL_BLOCKS),
-        _ => None,
-    }
-}
-
 /// The rank of a child of a typed declaration that starts a unit, and
 /// whether more nodes may follow it in the same unit (`of` and its type).
 fn typed_rank(node: &CstNode, text: &str) -> Option<(usize, bool)> {
@@ -169,7 +154,7 @@ fn typed_rank(node: &CstNode, text: &str) -> Option<(usize, bool)> {
         | SyntaxKind::Role
         | SyntaxKind::Doc => Some((section_rank(keyword())?, false)),
         SyntaxKind::AssocType | SyntaxKind::AssocChoice => Some((TYPE_MEMBERS, false)),
-        SyntaxKind::Construct => Some((CALLABLE_MEMBERS, false)),
+        SyntaxKind::FnDecl | SyntaxKind::ProcDecl => Some((CALLABLE_MEMBERS, false)),
         SyntaxKind::Impl => Some((IMPL_BLOCKS, false)),
         _ => None,
     }
@@ -192,7 +177,7 @@ fn has_nested_let(node: &CstNode, text: &str) -> bool {
 /// `start` says whether a child starts a unit, with its rank and whether
 /// the nodes after it, up to the next unit, belong to it.
 fn split<'a>(
-    contents: &'a [CstNode],
+    contents: impl IntoIterator<Item = &'a CstNode>,
     text: &str,
     start: impl Fn(&CstNode) -> Option<(usize, bool)>,
 ) -> Option<Parts<'a>> {
@@ -257,6 +242,9 @@ fn declaration(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
         | SyntaxKind::AssocType
         | SyntaxKind::AssocChoice => typed(node, text, out),
         SyntaxKind::ModuleLet => module_let(node, text, out),
+        SyntaxKind::FnDecl | SyntaxKind::ProcDecl | SyntaxKind::Test => {
+            callable(node, text, out)
+        }
         _ => generic(node, text, out),
     }
 }
@@ -365,32 +353,20 @@ fn module_let(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
     Some(())
 }
 
-/// A declaration whose grammar is not typed yet: sections and members by
-/// keyword, each operand written flat. A `fn`, `proc`, or `test` with any
-/// section or member is always on several lines.
-pub(crate) fn generic(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
+/// A `use`: its sections by keyword, each operand written flat.
+fn generic(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
     let construct = Construct::new(node, text)?;
     let closer = construct.closer()?;
-    let parts = split(construct.contents(), text, |child| match child.kind() {
-        SyntaxKind::Section => {
-            let keyword = child
-                .children()
-                .first()
-                .map_or("", |keyword| keyword.text(text));
-            let rank = if keyword == "do" {
-                BODY
-            } else {
-                section_rank(keyword)?
-            };
-            Some((rank, true))
+    let parts = split(construct.contents(), text, |child| {
+        if child.kind() != SyntaxKind::Section {
+            return None;
         }
-        kind if is_construct(kind) => {
-            member_rank(child, text).map(|rank| (rank, false))
-        }
-        _ => None,
+        let keyword = child
+            .children()
+            .first()
+            .map_or("", |keyword| keyword.text(text));
+        Some((section_rank(keyword)?, true))
     })?;
-    // In a generic declaration, an anonymous construct written after a
-    // section's operand stays with it.
     let mut opener = construct.keyword().to_owned();
     if !parts.head.is_empty() {
         opener.push(' ');
@@ -398,70 +374,169 @@ pub(crate) fn generic(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option
     }
     let mut units = Vec::with_capacity(parts.units.len());
     for unit in &parts.units {
-        let mut items = Vec::new();
-        generic_unit(unit, text, &mut items)?;
-        units.push((unit, items));
+        units.push((unit, vec![Item::Text(flat(&unit.nodes, text)?)]));
     }
-    let always_broken = matches!(construct.keyword(), "fn" | "proc" | "test")
-        && !parts.units.is_empty();
     lay_out(
         vec![Item::Text(opener)],
         &parts,
         units,
         closer.text(text),
-        always_broken || has_nested_let(node, text),
+        has_nested_let(node, text),
         false,
         out,
     );
     Some(())
 }
 
-/// A generic unit's items; the body of `do` goes on the next line, one step
-/// further in, when the declaration does not fit on one line.
-fn generic_unit(unit: &Unit<'_>, text: &str, out: &mut Vec<Item>) -> Option<()> {
-    if let [member] = unit.nodes.as_slice()
-        && is_construct(member.kind())
-    {
-        return declaration(member, text, out);
+/// The rank of a child of a callable that starts a unit, and whether the
+/// nodes after it belong to it: a signature keyword takes its operand and
+/// `do` its body; every other section is one node.
+fn callable_rank(node: &CstNode, text: &str) -> Option<(usize, bool)> {
+    match node.kind() {
+        SyntaxKind::ReservedWord => match node.text(text) {
+            "do" => Some((BODY, true)),
+            word @ ("takes" | "labelled" | "returns") => {
+                Some((section_rank(word)?, true))
+            }
+            _ => None,
+        },
+        SyntaxKind::Given
+        | SyntaxKind::Requires
+        | SyntaxKind::Ensures
+        | SyntaxKind::Performs
+        | SyntaxKind::Visibility
+        | SyntaxKind::External
+        | SyntaxKind::Symbol
+        | SyntaxKind::Native
+        | SyntaxKind::Doc => {
+            let keyword = node.children().first()?.text(text);
+            Some((section_rank(keyword)?, false))
+        }
+        _ => None,
     }
-    if unit.rank != BODY {
-        out.push(Item::Text(flat(&unit.nodes, text)?));
-        return Some(());
+}
+
+/// A `fn`, `proc`, or `test`, named or anonymous: its signature split into
+/// its sections, every section in the canonical order and on its own line,
+/// and the body statements one step in from `do`. With no section it is one
+/// line.
+pub(crate) fn callable(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
+    let children = node.children();
+    let opener = children.first()?;
+    let closer = children
+        .last()
+        .filter(|last| last.kind() != SyntaxKind::Missing)?;
+    let contents = children.get(1..children.len().saturating_sub(1))?;
+    let flattened = contents.iter().flat_map(|child| {
+        if child.kind() == SyntaxKind::Signature {
+            child.children()
+        } else {
+            std::slice::from_ref(child)
+        }
+    });
+    let mut parts = split(flattened, text, |child| callable_rank(child, text))?;
+    drop_empty(&mut parts, text);
+    let mut head = opener.text(text).to_owned();
+    if !parts.head.is_empty() {
+        head.push(' ');
+        head.push_str(&flat(&parts.head, text)?);
     }
-    out.push(Item::Text("do".to_owned()));
-    let body: Vec<&CstNode> = unit
-        .nodes
-        .iter()
-        .flat_map(|node| node.children().iter().skip(1))
-        .collect();
-    let body = flat(&body, text)?;
-    if !body.is_empty() {
-        out.extend([Item::Indent, Item::Space, Item::Text(body), Item::Dedent]);
+    let mut units = Vec::with_capacity(parts.units.len());
+    for unit in &parts.units {
+        units.push((unit, callable_unit(unit, text)?));
     }
+    let broken = !parts.units.is_empty();
+    lay_out(
+        vec![Item::Text(head)],
+        &parts,
+        units,
+        closer.text(text),
+        broken,
+        false,
+        out,
+    );
     Some(())
 }
 
-/// Whether a `given` section is empty, which the formatter removes.
-fn is_empty_given(node: &CstNode) -> bool {
-    node.kind() == SyntaxKind::Given
-        && node
+/// A callable unit's items.
+fn callable_unit(unit: &Unit<'_>, text: &str) -> Option<Vec<Item>> {
+    let first = *unit.nodes.first()?;
+    let rest = unit.nodes.get(1..)?;
+    let mut out = Vec::new();
+    match first.kind() {
+        SyntaxKind::ReservedWord => match (first.text(text), rest) {
+            ("do", []) => out.push(Item::Text("do".to_owned())),
+            ("do", [body]) => {
+                out.push(Item::Text("do".to_owned()));
+                let statements = body_items(body, text)?;
+                if !statements.is_empty() {
+                    out.push(Item::Indent);
+                    out.extend(statements);
+                    out.push(Item::Dedent);
+                }
+            }
+            ("takes", [params]) => {
+                out.push(Item::Text("takes ".to_owned()));
+                out.extend(type_items(&[params], text)?);
+            }
+            ("labelled", [labelled]) => {
+                out.push(Item::Text("labelled ".to_owned()));
+                out.extend(labelled_items(labelled, text)?);
+            }
+            ("returns", [name, colon, written @ ..]) if is_colon(colon, text) => {
+                out.push(Item::Text(format!("returns {}: ", flat(&[name], text)?)));
+                out.extend(type_items(written, text)?);
+            }
+            _ => return None,
+        },
+        SyntaxKind::Requires | SyntaxKind::Ensures => {
+            out.extend(guard_items(first, text)?)
+        }
+        SyntaxKind::Given | SyntaxKind::Performs => {
+            let keyword = first.children().first()?.text(text);
+            let operand: Vec<&CstNode> = first.children().iter().skip(1).collect();
+            out.push(Item::Text(format!("{keyword} ")));
+            out.extend(type_items(&operand, text)?);
+        }
+        _ => out.push(Item::Text(flat(&unit.nodes, text)?)),
+    }
+    Some(out)
+}
+/// Whether a unit is an empty `takes {}`, `labelled {}`, `given {}`, or
+/// `performs {}`, which the formatter removes.
+fn is_empty_section(unit: &Unit<'_>, text: &str) -> bool {
+    let Some(first) = unit.nodes.first() else {
+        return false;
+    };
+    let keyword = if first.kind() == SyntaxKind::ReservedWord {
+        first.text(text)
+    } else {
+        first
             .children()
+            .first()
+            .map_or("", |keyword| keyword.text(text))
+    };
+    matches!(keyword, "takes" | "labelled" | "given" | "performs")
+        && unit
+            .nodes
             .iter()
-            .find(|child| child.kind() == SyntaxKind::Brace)
-            .is_some_and(|brace| {
-                brace.children().iter().all(|child| {
-                    child.kind() != SyntaxKind::Brace && is_bracket_or_trivia(child)
-                })
-            })
+            .copied()
+            .chain(first.children())
+            .any(is_empty_bracket)
 }
 
-fn is_bracket_or_trivia(node: &CstNode) -> bool {
+/// Whether a node is a brace form with nothing between its brackets.
+fn is_empty_bracket(node: &CstNode) -> bool {
     matches!(
         node.kind(),
-        SyntaxKind::Whitespace | SyntaxKind::Punctuation
-    )
+        SyntaxKind::Brace | SyntaxKind::Row | SyntaxKind::Params | SyntaxKind::Labelled
+    ) && node.children().iter().all(|child| {
+        matches!(
+            child.kind(),
+            SyntaxKind::Whitespace | SyntaxKind::Punctuation
+        )
+    })
 }
-
 /// A typed declaration: `type`, `interface`, `impl`, an associated type,
 /// or an associated choice.
 fn typed(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
@@ -472,7 +547,7 @@ fn typed(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
         .filter(|last| last.kind() != SyntaxKind::Missing)?;
     let contents = children.get(1..children.len().saturating_sub(1))?;
     let mut parts = split(contents, text, |child| typed_rank(child, text))?;
-    drop_empty_givens(&mut parts);
+    drop_empty(&mut parts, text);
     let mut opener_items = vec![Item::Text(opener.text(text).to_owned())];
     if !parts.head.is_empty() {
         opener_items.push(Item::Text(" ".to_owned()));
@@ -488,10 +563,12 @@ fn typed(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
         typed_unit(unit, text, &mut items)?;
         units.push((unit, items));
     }
-    // Every unit but `of` and the cases, which take the place of `of`, is a
-    // section other than `of` or a member.
-    let of_rank = section_rank("of");
-    let always_broken = parts.units.iter().any(|unit| Some(unit.rank) != of_rank);
+    // Every unit but `of` is a case, a section other than `of`, or a member.
+    let always_broken = parts.units.iter().any(|unit| {
+        unit.nodes
+            .first()
+            .is_none_or(|node| node.kind() != SyntaxKind::ReservedWord)
+    });
     let of_first = parts.units.first().is_some_and(|unit| {
         unit.leading.is_empty()
             && unit
@@ -511,13 +588,13 @@ fn typed(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
     Some(())
 }
 
-/// Removes every empty `given {}`; its comments move to the unit after it,
-/// or before the closer.
-fn drop_empty_givens(parts: &mut Parts<'_>) {
+/// Removes every empty section; its comments move to the unit after it, or
+/// before the closer.
+fn drop_empty(parts: &mut Parts<'_>, text: &str) {
     let mut carried: Vec<String> = Vec::new();
     let mut kept = Vec::with_capacity(parts.units.len());
     for mut unit in std::mem::take(&mut parts.units) {
-        if unit.nodes.first().is_some_and(|node| is_empty_given(node)) {
+        if is_empty_section(&unit, text) {
             carried.append(&mut unit.leading);
             carried.extend(unit.trailing.take());
             continue;
@@ -596,7 +673,8 @@ fn typed_unit(unit: &Unit<'_>, text: &str, out: &mut Vec<Item>) -> Option<()> {
         SyntaxKind::AssocType
         | SyntaxKind::AssocChoice
         | SyntaxKind::Impl
-        | SyntaxKind::Construct => declaration(first, text, out)?,
+        | SyntaxKind::FnDecl
+        | SyntaxKind::ProcDecl => declaration(first, text, out)?,
         _ => out.push(Item::Text(flat(&unit.nodes, text)?)),
     }
     Some(())
@@ -661,6 +739,7 @@ const fn is_type_group(kind: SyntaxKind) -> bool {
             | SyntaxKind::RecordType
             | SyntaxKind::Inputs
             | SyntaxKind::Row
+            | SyntaxKind::Params
     )
 }
 
@@ -806,9 +885,8 @@ mod tests {
 
     use super::format;
 
-    /// The layout of a document, whatever its diagnostics: `fn`, `proc`,
-    /// and `test`, named or anonymous, are `@tool.unavailable` in this step,
-    /// so their layout is reachable only here.
+    /// The layout of a document, whatever its diagnostics, so the layout of a
+    /// form the reader rejects is reachable here.
     fn layout(source: &str) -> String {
         let document = parse_source(None, source.as_bytes());
         format(document.root().unwrap(), document.text().unwrap()).unwrap()
@@ -859,7 +937,7 @@ mod tests {
     fn a_nested_let_breaks_the_declaration() {
         assert_eq!(
             layout("fn f returns r: I32 do let x: I32 be 1i32 endlet return x endfn"),
-            "fn f\n  returns r: I32\n  do\n    let x: I32 be 1i32 endlet return x\nendfn\n"
+            "fn f\n  returns r: I32\n  do\n    let x: I32 be 1i32 endlet\n    return x\nendfn\n"
         );
     }
 
@@ -872,8 +950,10 @@ mod tests {
             "interface A\n  visibility @public\n  type C endtype\n  fn g\n    returns r: I32\n  endfn\n  impl B endimpl\nendinterface\n"
         );
         assert_eq!(
-            layout("fn f fn g returns r: I32 endfn returns r: I32 do return x endfn"),
-            "fn f\n  returns r: I32\n  fn g\n    returns r: I32\n  endfn\n  do\n    return x\nendfn\n"
+            layout(
+                "type A of U8 fn g takes {a: Self} returns r: I32 do return 1i32 endfn visibility @public endtype"
+            ),
+            "type A of U8\n  visibility @public\n  fn g\n    takes {a: Self}\n    returns r: I32\n    do\n      return 1i32\n  endfn\nendtype\n"
         );
     }
 
@@ -893,14 +973,55 @@ mod tests {
             layout("type Celsius of F64 endtype"),
             "type Celsius of F64 endtype\n"
         );
-        assert_eq!(
-            layout("type Color case red case green endtype"),
-            "type Color case red case green endtype\n"
-        );
         assert_eq!(layout("fn f endfn"), "fn f endfn\n");
         assert_eq!(
             layout("type A of U8 impl B endimpl endtype"),
             "type A of U8\n  impl B endimpl\nendtype\n"
+        );
+    }
+
+    #[test]
+    fn a_case_list_always_breaks() {
+        assert_eq!(
+            layout("type Color case red case green endtype"),
+            "type Color\n  case red\n  case green\nendtype\n"
+        );
+    }
+
+    #[test]
+    fn a_callable_body_is_two_steps_in_and_empty_sections_are_removed() {
+        assert_eq!(
+            layout(
+                "proc p takes {} labelled {} performs {} returns r: Void do let x: I32 be 1i32 endlet return void endproc"
+            ),
+            "proc p\n  returns r: Void\n  do\n    let x: I32 be 1i32 endlet\n    return void\nendproc\n"
+        );
+        assert_eq!(
+            layout("test \"t\" takes {w: World} do return void endtest"),
+            "test \"t\"\n  takes {w: World}\n  do\n    return void\nendtest\n"
+        );
+    }
+
+    #[test]
+    fn a_guard_else_breaks_one_step_in_only_when_the_guard_does_not_fit() {
+        assert_eq!(
+            layout("fn f returns r: I32 requires ready else 0i32 do return 1i32 endfn"),
+            "fn f\n  returns r: I32\n  requires ready else 0i32\n  do\n    return 1i32\nendfn\n"
+        );
+        let long = "x".repeat(60);
+        assert_eq!(
+            layout(&format!(
+                "fn f returns r: I32 requires {long} else Result.err(error: E.bad()) do return 1i32 endfn"
+            )),
+            format!(
+                "fn f\n  returns r: I32\n  requires {long}\n    else Result.err(error: E.bad())\n  do\n    return 1i32\nendfn\n"
+            )
+        );
+        assert_eq!(
+            layout(
+                "fn f labelled {up: Bool be false} returns r: I32 do return 1i32 endfn"
+            ),
+            "fn f\n  labelled {up: Bool be false}\n  returns r: I32\n  do\n    return 1i32\nendfn\n"
         );
     }
 

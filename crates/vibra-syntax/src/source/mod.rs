@@ -3,15 +3,15 @@
 //! `docs/spec/01-source-language.md`, "Grammar" and "Declarations": a module
 //! is a sequence of the seven top-level forms. The construct matcher builds
 //! the generic structure every form shares, keyword-led constructs with
-//! typed closers and sections; `use`, `type`, `interface`, and the module
-//! value `let` are then read in their own grammar, with type expressions,
-//! cases, associated types, `impl` blocks, expressions, statements, and
-//! patterns. The forms whose grammar does not exist yet are reported
-//! `@tool.unavailable`. Views ([`Module`], [`Declaration`], [`TypeDecl`],
-//! [`InterfaceDecl`], [`Impl`], [`ModuleLet`], [`TypeExpr`], [`Expr`],
-//! [`Body`], [`Pattern`], [`Construct`], [`Section`], [`Use`], …) are
-//! projections of the lossless tree.
+//! typed closers and sections; each form is then read in its own grammar,
+//! with type expressions, cases, associated types, `impl` blocks, callables,
+//! signatures, guards, expressions, statements, and patterns. Views
+//! ([`Module`], [`Declaration`], [`TypeDecl`], [`InterfaceDecl`], [`Impl`],
+//! [`Callable`], [`Test`], [`ModuleLet`], [`TypeExpr`], [`Expr`], [`Body`],
+//! [`Pattern`], [`Construct`], [`Section`], [`Use`], …) are projections of
+//! the lossless tree.
 
+mod callable;
 mod construct;
 mod declaration;
 mod expr;
@@ -23,9 +23,11 @@ mod pattern;
 mod section;
 mod shape;
 mod statement;
+mod test_decl;
 mod type_decl;
 mod types;
 
+pub use callable::{Callable, CallableKind, Guard, Signature};
 pub use declaration::{Atom, Declaration, Ident, Use};
 pub use expr::{
     Argument, DoBlock, Expr, ExprForm, If, Match, MatchArm, Postfix, Primary, Suffix,
@@ -34,8 +36,11 @@ pub use impl_block::{AssocChoice, Impl};
 pub use interface_decl::{AssocType, InterfaceDecl};
 pub use module::{Module, module};
 pub use pattern::{Pattern, PatternForm};
-pub use section::{Construct, Doc, Given, Section, TagSection, Where, is_construct};
+pub use section::{
+    Construct, Doc, Given, Section, StringSection, TagSection, Where, is_construct,
+};
 pub use statement::{Body, Let, ModuleLet, Statement};
+pub use test_decl::Test;
 pub use type_decl::{Case, SourceOptions, TypeBody, TypeDecl};
 pub use types::{Inputs, Path, Row, TypeExpr, TypeForm};
 

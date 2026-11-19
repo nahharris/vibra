@@ -195,17 +195,15 @@ fn parse_data_with(
 /// Reports the encoding, literal, name, and separator faults, unmatched
 /// delimiters and closers, top-level tokens that open no form, a late `use`,
 /// malformed imports, repeated sections, `as` outside a `use`, and the
-/// faults of the `type` and `interface` grammar. Each `fn`, `proc`, `let`,
-/// and `test` form, and each named `fn` or `proc` member, is
-/// `@tool.unavailable` over the whole form until its grammar exists.
+/// faults of the grammar of every form.
 #[must_use]
 pub fn parse_source(source_id: Option<&str>, bytes: &[u8]) -> Document {
     parse_source_with(source_id, bytes, SourceOptions::default())
 }
 
 /// Parses a `.vib` document with the reader `options`: whether it is an
-/// embedded standard-library module, where `role` and `Intrinsic` are
-/// admitted.
+/// embedded standard-library module, where `role`, `Intrinsic`, external
+/// declarations, and `native` are admitted.
 #[must_use]
 pub fn parse_source_with(
     source_id: Option<&str>,

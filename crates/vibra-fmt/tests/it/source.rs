@@ -63,7 +63,7 @@ fn the_formatter_moves_no_top_level_form() {
 }
 
 #[test]
-fn a_recovered_or_unavailable_document_is_returned_byte_for_byte() {
+fn a_recovered_document_is_returned_byte_for_byte() {
     for input in [
         "use @a enduse\n???\nuse @b enduse",
         "use @std.io endfn",
@@ -80,4 +80,33 @@ fn a_recovered_or_unavailable_document_is_returned_byte_for_byte() {
 fn an_empty_module_formats_to_nothing() {
     assert_eq!(format(""), "");
     assert_eq!(format(" \n\n"), "");
+}
+
+#[test]
+fn a_callable_is_laid_out_section_by_section() {
+    let valid = |text: &str| {
+        assert!(
+            parse_source(None, text.as_bytes()).diagnostics().is_empty(),
+            "{text}"
+        );
+        format(text)
+    };
+    let canonical = "fn splitCents\n  takes {total: Cents parts: I32}\n  labelled {roundUp: Bool be false}\n  returns shares: Result(List(Cents) SplitError)\n  requires Ordered.greaterOrEqual(parts 1i32)\n    else Result.err(error: SplitError.noParts())\n  do\n    return Result.ok(value: divide(total parts roundUp: roundUp))\nendfn\n";
+    assert_eq!(valid(canonical), canonical);
+    assert_eq!(
+        valid(
+            "fn next takes {value: I32} returns r: I32 do return I32.add(value 1i32) endfn"
+        ),
+        "fn next\n  takes {value: I32}\n  returns r: I32\n  do\n    return I32.add(value 1i32)\nendfn\n"
+    );
+    assert_eq!(
+        valid(
+            "let f: Fn({I32} I32) be fn takes {x: I32} returns r: I32 do return x endfn endlet"
+        ),
+        "let f: Fn({I32} I32) be\n  fn\n    takes {x: I32}\n    returns r: I32\n    do\n      return x\n  endfn\nendlet\n"
+    );
+    assert_eq!(
+        valid("test \"adds\" takes {world: World} do return void endtest"),
+        "test \"adds\"\n  takes {world: World}\n  do\n    return void\nendtest\n"
+    );
 }

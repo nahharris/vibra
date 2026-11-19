@@ -1,0 +1,12 @@
+id = "V2-SRC-DECL-fn-labelled"
+rule = "V2-SRC-DECL-fn-labelled"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#fn-and-proc: labelled parameters and a guard with else; the else goes on the next line one step in because the guard does not fit"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

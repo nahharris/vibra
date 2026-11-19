@@ -1,0 +1,1 @@
+fn f returns r: I32 external @compiler symbol "x" endfn

@@ -44,9 +44,10 @@
 //! - A reserved word written as a label is the label, with
 //!   `@name.reservedLabel` at it; as a pattern binder or a module value's
 //!   name it is the name, with `@name.reservedDeclaration` at it.
-//! - An anonymous `fn` or `proc` is `@tool.unavailable` over the form until
-//!   the callable grammar exists; a named declaration in expression
-//!   position is `@syntax.invalidForm` over it.
+//! - An anonymous `fn` or `proc` is read in the callable grammar
+//!   ([`callable`]), and so are the named `fn`, `proc`, and `test`
+//!   declarations; a named declaration in expression position is
+//!   `@syntax.invalidForm` over it.
 //! - Any other token a construct does not admit (a missing `then`, `be`, or
 //!   expression, a stray separator, a doc string, a float pattern) makes the
 //!   smallest enclosing construct `@syntax.invalidForm`, once, over the
@@ -58,20 +59,29 @@
 //! time and its nested forms are scheduled on a work stack, so nesting depth
 //! is bounded by memory, not by the stack.
 
+mod callable;
+
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 
+pub(crate) use callable::{CallableRole, Place, shape_callable, shape_test};
+
+use super::callable::CallableKind;
 use super::construct::is_trivia;
-use super::keyword::tag_set;
+use super::keyword::{admissible_sections, tag_set};
 use super::types::shape_type_list;
 use crate::cst::{CstNode, SyntaxKind};
-
-/// The sections a module value admits besides `be`, from the `module-let`
-/// production.
-pub(crate) const MODULE_LET_SECTIONS: &[&str] = &["visibility", "doc"];
 
 /// The grammar a construct or a bracket group is read in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Role {
+    /// A `fn` or `proc`, named or anonymous.
+    Callable(CallableRole),
+    /// `test … endtest`.
+    Test,
+    /// `{…}` after `takes`: the parameter patterns and their types.
+    Params,
+    /// `{…}` after `labelled`: the labelled parameters and their defaults.
+    Labelled,
     /// A top-level `let`.
     ModuleLet,
     /// A local `let`.
@@ -504,14 +514,18 @@ impl<'t> Level<'t> {
                     );
                     Start::Alone(Slot::Visit(node, Role::Let))
                 }
-                Some("fn" | "proc") if !is_named_callable(&node) => {
-                    self.push_diagnostic(
-                        DiagnosticCode::ToolUnavailable,
-                        node.span(),
-                        "the grammar of anonymous `fn` and `proc` is not available in this reader",
-                    );
-                    Start::Primary(Slot::Ready(node))
+                Some(word @ ("fn" | "proc")) if !is_named_callable(&node) => {
+                    let kind = if word == "fn" {
+                        CallableKind::Fn
+                    } else {
+                        CallableKind::Proc
+                    };
+                    let role = CallableRole::anonymous(kind);
+                    Start::Primary(Slot::Visit(node, Role::Callable(role)))
                 }
+                // An `impl` outside a `type` or an `interface` is reported by
+                // the generic section rules.
+                Some("impl") => Start::Alone(Slot::Ready(as_error(node))),
                 _ => {
                     self.push_diagnostic(
                         DiagnosticCode::SyntaxInvalidForm,
@@ -884,7 +898,7 @@ impl<'t> Level<'t> {
             self.rest(out);
             return;
         }
-        self.sections(out, MODULE_LET_SECTIONS);
+        self.sections(out, admissible_sections("let").unwrap_or_default());
     }
 
     /// Reads the sections of a `let` after its head: `be` and its
@@ -935,7 +949,10 @@ impl<'t> Level<'t> {
         }
     }
 
-    /// Shapes a `visibility` or `doc` section of a module value.
+    /// Shapes a section whose operand is one token: `doc` and its doc
+    /// string, `symbol` or `native` and a string, or a tag section
+    /// (`visibility`, `external`) and one atom of its closed set. Any other
+    /// operand is `@syntax.invalidForm` over the section.
     fn tag_section(&mut self, keyword: &str, region: Vec<CstNode>) -> CstNode {
         let span = region_span(&region);
         let text = self.text;
@@ -944,20 +961,35 @@ impl<'t> Level<'t> {
             .skip(1)
             .filter(|node| !is_trivia(node))
             .collect();
-        let (kind, fits, message) = if keyword == "doc" {
-            (
+        let one = |kind: SyntaxKind| matches!(operand.as_slice(), [token] if token.kind() == kind);
+        let (kind, fits, message) = match keyword {
+            "doc" => (
                 SyntaxKind::Doc,
-                matches!(operand.as_slice(), [doc] if doc.kind() == SyntaxKind::DocString),
+                one(SyntaxKind::DocString),
                 "a `doc` section is one doc string",
-            )
-        } else {
-            let tags = tag_set(keyword).unwrap_or_default();
-            (
-                SyntaxKind::Visibility,
-                matches!(operand.as_slice(),
-                    [tag] if tag.kind() == SyntaxKind::Atom && tags.contains(&tag.text(text))),
-                "the operand is one atom of this section's closed tag set",
-            )
+            ),
+            "symbol" | "native" => (
+                if keyword == "symbol" {
+                    SyntaxKind::Symbol
+                } else {
+                    SyntaxKind::Native
+                },
+                one(SyntaxKind::String),
+                "this section is one string",
+            ),
+            _ => {
+                let tags = tag_set(keyword).unwrap_or_default();
+                (
+                    if keyword == "external" {
+                        SyntaxKind::External
+                    } else {
+                        SyntaxKind::Visibility
+                    },
+                    matches!(operand.as_slice(),
+                        [tag] if tag.kind() == SyntaxKind::Atom && tags.contains(&tag.text(text))),
+                    "the operand is one atom of this section's closed tag set",
+                )
+            }
         };
         if !fits {
             self.push_diagnostic(DiagnosticCode::SyntaxInvalidForm, span, message);
@@ -1094,6 +1126,8 @@ const fn group_message(role: Role) -> &'static str {
             "a brace pattern is all positional (a tuple) or all labelled (a record)"
         }
         Role::PatternList => "a list pattern holds patterns only",
+        Role::Params => "parameters are `pattern: Type` entries",
+        Role::Labelled => "labelled parameters are `name: Type be default` entries",
         _ => "arguments are expressions, each with an optional `label:`",
     }
 }
@@ -1112,6 +1146,23 @@ fn visit(
     let recovered = children
         .last()
         .is_none_or(|last| last.kind() == SyntaxKind::Missing);
+    match role {
+        Role::Callable(callable) => {
+            let form = callable::Form::Callable(callable);
+            return callable::visit_form(children, span, form, recovered, text, sink);
+        }
+        Role::Test => {
+            return callable::visit_form(
+                children,
+                span,
+                callable::Form::Test,
+                recovered,
+                text,
+                sink,
+            );
+        }
+        _ => {}
+    }
     if let Some((construct, message)) = construct_role(role) {
         let closer = children.pop();
         let mut rest = children.into_iter();
@@ -1165,12 +1216,19 @@ fn visit(
         Role::Product => level.product_entries(&mut slots),
         Role::Collection => level.collection_entries(&mut slots),
         Role::PatternList => level.pattern_entries(&mut slots, false),
+        Role::Params => level.param_entries(&mut slots),
+        Role::Labelled => level.labelled_entries(&mut slots),
         _ => level.pattern_entries(&mut slots, true),
     }
     level.trivia(&mut slots);
     if !level.malformed && level.next_sig().is_none() {
         sink.append(&mut level.diagnostics);
         slots.extend(closer.map(Slot::Ready));
+        let kind = match role {
+            Role::Params => SyntaxKind::Params,
+            Role::Labelled => SyntaxKind::Labelled,
+            _ => kind,
+        };
         return (kind, slots, span.start());
     }
     sink.push(Diagnostic::new(

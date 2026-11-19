@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-fn-local-declaration"
+rule = "V2-SRC-DECL-fn-local-declaration"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#fn-and-proc: a named fn inside a body is an invalid form over the inner fn"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 23, end = 63 }

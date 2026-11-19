@@ -1,0 +1,1 @@
+fn f returns r: I32 do fn g returns s: I32 do return 1i32 endfn return 1i32 endfn
