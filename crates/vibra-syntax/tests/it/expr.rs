@@ -629,6 +629,9 @@ fn a_reserved_opener_or_closer_as_a_label_is_one_reserved_label() {
             (NameReservedDeclaration, 29, 31)
         ]
     );
+    // The word after `returns` is the result name, a closer included.
+    let text = "fn f returns enddo: I32 do return 1i32 endfn";
+    assert_eq!(diagnostics(text), [(NameReservedDeclaration, 13, 18)]);
     // A closer before `:` still closes its construct: a dict key may be an
     // `if`.
     accepted("let d: Dict(U8 U8) be [if c then 1u8 else 2u8 endif: 0u8] endlet");

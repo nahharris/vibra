@@ -15,10 +15,10 @@
 //!   (the operand of `requires`, `ensures`, `where`, or `be`, a guard's
 //!   `else` consequence, or the operand of a prefix word) or a `do` inside
 //!   the body opens a block closed by `enddo`;
-//! - the word after `as`, the first word of a `type`, an `interface`, or a
-//!   `let`, and the word after `case` in a `match` are name positions: a
-//!   reserved word there other than the construct's own closer is taken as
-//!   the name or binder;
+//! - the word after `as` or `returns`, the first word of a `type`, an
+//!   `interface`, or a `let`, and the word after `case` in a `match` are name
+//!   positions: a reserved word there other than the construct's own closer
+//!   is taken as the name or binder;
 //! - a reserved word followed by `:` directly in a bracket group, and an
 //!   opener or a section keyword followed by `:` anywhere, is a label, a
 //!   binder, or a result name, which the shaper recovers and reports: no
@@ -260,7 +260,7 @@ impl Matcher<'_> {
         }
         if is_section(word) && in_construct.is_some() {
             self.start_section(token, false);
-            if word == "as"
+            if matches!(word, "as" | "returns")
                 && let Some(frame) = self.stack.last_mut()
             {
                 frame.expect_name = true;
