@@ -250,3 +250,19 @@ fn bare_where_types_are_read() {
         [(DiagnosticCode::ToolUnavailable, at(&source, "Small", 2))]
     );
 }
+
+/// Patterns nest without bound: one nested far deeper than any type is
+/// typed without recursion on the host stack, and the outermost level that
+/// does not fit is the one fault.
+#[test]
+fn deeply_nested_patterns_are_checked_iteratively() {
+    let depth = 20_000;
+    let pattern = format!("{}x{}", "[".repeat(depth), "]".repeat(depth));
+    let source = format!(
+        "fn f returns r: I32 do let {pattern} be 1i32 endlet return 0i32 endfn\n"
+    );
+    assert_eq!(
+        faults(&source),
+        [(DiagnosticCode::TypeMismatch, at(&source, &pattern, 0))]
+    );
+}

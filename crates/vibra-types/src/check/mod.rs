@@ -9,7 +9,8 @@
 //! The checker resolves the graph first; a graph with resolution errors is
 //! reported as resolution reports it and is not type-checked. It then reads
 //! every declaration's header ([`declare`]), checks and lowers the bodies of
-//! the modules in scope ([`expr`]), runs the initializer-cycle analysis
+//! the modules in scope ([`expr`]), deciding the coverage of their patterns
+//! ([`pattern`]), runs the initializer-cycle analysis
 //! ([`cycle`]), and builds the [`CheckedModuleSet`] ([`lower`]).
 
 mod cycle;
