@@ -19,6 +19,10 @@
 //!   `let`, and the word after `case` in a `match` are name positions: a
 //!   reserved word there other than the construct's own closer is taken as
 //!   the name or binder;
+//! - a reserved word followed by `:` directly in a bracket group, and an
+//!   opener or a section keyword followed by `:` anywhere, is a label, a
+//!   binder, or a result name, which the shaper recovers and reports: no
+//!   opener or section keyword is ever followed by `:`;
 //! - a closer is resolved by kind (`docs/spec/07-diagnostics-and-conformance.md`,
 //!   "Recovery"), over constructs and brackets alike.
 //!
@@ -187,7 +191,9 @@ impl Matcher<'_> {
         });
     }
 
-    fn token(&mut self, token: Token) {
+    /// Reads one token; `colon` says whether the next significant token is a
+    /// `:`.
+    fn token(&mut self, token: Token, colon: bool) {
         if token.kind.is_trivia() {
             self.leaf(token);
             return;
@@ -201,6 +207,13 @@ impl Matcher<'_> {
             && std::mem::take(&mut frame.expect_name)
             && token.kind == TokenKind::ReservedWord
             && frame.opener_word().and_then(closer_of) != Some(word)
+        {
+            self.leaf(token);
+            return;
+        }
+        if token.kind == TokenKind::ReservedWord
+            && colon
+            && self.names_before_colon(word)
         {
             self.leaf(token);
             return;
@@ -263,6 +276,20 @@ impl Matcher<'_> {
         {
             frame.expect_name = true;
         }
+    }
+
+    /// Whether the reserved word `word`, followed by `:`, is a name: a label,
+    /// a binder, or a result name, recovered by the shaper. Directly in a
+    /// bracket group every word before `:` is a label or a binder. Elsewhere
+    /// an opener or a section keyword is, since none is ever followed by
+    /// `:`; a closer there still closes its construct, as an `if` may be a
+    /// dict key.
+    fn names_before_colon(&self, word: &str) -> bool {
+        let in_group = self
+            .stack
+            .last()
+            .is_some_and(|frame| matches!(frame.kind, FrameKind::Group(_)));
+        in_group || opener_keyword(word).is_some() || is_section(word)
     }
 
     /// Whether the innermost frame expects an expression next: its last
@@ -389,8 +416,17 @@ pub(crate) fn match_constructs(
         stack: Vec::new(),
         diagnostics,
     };
-    for token in tokens {
-        matcher.token(*token);
+    // Whether each token is followed, after trivia, by a `:`.
+    let mut colon_after = vec![false; tokens.len()];
+    let mut next_is_colon = false;
+    for (index, token) in tokens.iter().enumerate().rev() {
+        colon_after[index] = next_is_colon;
+        if !token.kind.is_trivia() {
+            next_is_colon = token.kind == TokenKind::Colon;
+        }
+    }
+    for (token, colon) in tokens.iter().zip(colon_after) {
+        matcher.token(*token, colon);
     }
     matcher.finish()
 }
