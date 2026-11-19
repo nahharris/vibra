@@ -28,7 +28,9 @@ insignificant: line breaks and indentation never change meaning.
 ## Lexical structure
 
 A `.vib` file is UTF-8. A byte-order mark, an invalid UTF-8 sequence, or a NUL
-is `@syntax.invalidEncoding`. Whitespace is space, tab, CR, and LF.
+is `@syntax.invalidEncoding`. A byte-order mark is U+FEFF at offset 0;
+anywhere else U+FEFF is an ordinary scalar, which outside a literal or a
+comment starts no token. Whitespace is space, tab, CR, and LF.
 `//` starts a comment that runs to the end of the line. There is no block
 comment.
 
@@ -62,7 +64,8 @@ escape      = "\\" | '\"' | "\n" | "\r" | "\t"
 An identifier starts with an ASCII letter and continues with ASCII letters and
 digits. Hyphens, underscores, `?`, and `!` are not identifier characters. An
 identifier that fails this production is `@syntax.invalidName` over the whole
-token.
+token, and that is its only diagnostic: the token is not also reported as
+`@syntax.invalidForm` where the grammar admits no identifier.
 
 Two adjacent tokens of the classes identifier, reserved word, number, atom,
 string, character, and doc string MUST be separated by whitespace, a bracket,
@@ -97,7 +100,10 @@ import name) the report is `@name.reservedDeclaration` at the word. In a
 label position (a labelled parameter, a record or case field, a labelled
 argument, a record literal or pattern field, a type-application label) it is
 `@name.reservedLabel` at the word. The recovered name still binds or labels
-for the rest of its scope so that the error does not cascade.
+for the rest of its scope so that the error does not cascade. The closer of
+the construct being read is never taken as the identifier: in
+`use @a as enduse` the name is missing, while `use @a as endfn enduse`
+recovers the name `endfn`.
 
 The names of the prelude (the [type chapter](02-type-system.md#the-prelude)
 lists them, for example `Bool`, `Option`, `true`, `false`) are ordinary
@@ -112,7 +118,10 @@ still binds for the rest of its scope so that the error does not cascade.
 An atom is `@` followed by one or more dot-separated parts. A part starts with
 an ASCII letter and continues with ASCII letters and digits. Atoms are
 written in camelCase like every other value name, the registered tags of the
-toolchain included: `@runtime.invalidHostValue`, `@auditTrace.v1`.
+toolchain included: `@runtime.invalidHostValue`, `@auditTrace.v1`. An `@`
+directly followed by a letter, a digit, or `_` starts an atom token; one that
+fails the production, such as `@a.` or `@1`, is `@syntax.invalidName` over
+the whole token. Any other `@` starts no token.
 
 An atom is an ordinary value. What an atom means depends on the grammar
 position it is written in:
@@ -157,12 +166,15 @@ the opening delimiter starts with a line break, that break is removed; the
 line break and indentation before the closing delimiter are removed; and the
 longest whitespace prefix common to all non-blank lines is removed from each
 line. A doc string is valid only as the operand of a `doc` section; elsewhere
-it is `@syntax.invalidForm`.
+it is `@syntax.invalidForm`. A doc string that reaches the end of the file
+unterminated is `@syntax.unmatchedDelimiter` and nothing else.
 
 A character literal is single quoted and denotes exactly one Unicode scalar:
 one scalar written directly, or one string escape, or `\'`. An empty literal,
 one holding more than one scalar, or a surrogate is
-`@syntax.invalidCharacterLiteral`.
+`@syntax.invalidCharacterLiteral`. A character literal never spans lines:
+one with no closing quote before the line break or the end of the file is
+`@syntax.invalidCharacterLiteral` over its text up to that point.
 
 `void` is the single value of the type `Void`. `_` is the discard: in a binder
 or pattern position it matches anything and binds nothing, it may repeat, and
@@ -325,14 +337,16 @@ their written order among themselves, which is the order of the variants;
 and, in a file, every `use` precedes every other top-level form. So
 `fn f returns r: I32 takes {x: I32} do return x endfn` is accepted, and
 the formatter moves `takes` before `returns`. Nested members and `impl`
-blocks may be written between sections. A `use` written after another
-top-level form is `@syntax.invalidForm` at the `use`; the formatter moves no
-top-level form, so it does not repair one.
+blocks may be written between sections. A section written before the name,
+or after `do`, is `@syntax.invalidForm` at that section. A `use` written
+after another top-level form is `@syntax.invalidForm` at the `use`; the
+formatter moves no top-level form, so it does not repair one.
 
 Every section occurs at most once, `requires` and `ensures` included; a
-repeat is `@syntax.duplicateSection`. A required section that is missing,
-such as `returns`, is `@syntax.invalidForm`. Several conditions are joined
-with `Bool.and`. A section a declaration kind does not admit, such as
+repeat is `@syntax.duplicateSection` at the keyword of the later section,
+with no related span. A required section that is missing, such as
+`returns`, is `@syntax.invalidForm`. Several conditions are joined with
+`Bool.and`. A section a declaration kind does not admit, such as
 `performs` on a `fn`, is `@syntax.invalidSection`. The formatter writes
 sections in the canonical order given under
 [Canonical format](#canonical-format).
@@ -354,9 +368,7 @@ Every declaration is private to its module unless it contains
 ```vibra
 use @std.io enduse
 
-type UserId of U64
-  visibility @public
-endtype
+type UserId of U64 visibility @public endtype
 
 let defaultRetries: U8 be 3u8 endlet
 
@@ -394,15 +406,9 @@ gives it named fields.
 ```vibra
 type Celsius of F64 endtype
 
-type User of {name: Str id: UserId}
-  visibility @public
-endtype
+type User of {name: Str id: UserId} visibility @public endtype
 
-type Lookup(T)
-  case found {value: T}
-  case missing
-  visibility @public
-endtype
+type Lookup(T) case found {value: T} case missing visibility @public endtype
 ```
 
 Type parameters are declared in the header. `given` gives a parameter its
@@ -433,10 +439,7 @@ written result type of each member may place `Self` only where the
 ```vibra
 interface Printable
   visibility @public
-  fn render
-    takes {value: Self}
-    returns text: Str
-  endfn
+  fn render takes {value: Self} returns text: Str endfn
 endinterface
 ```
 
@@ -456,12 +459,7 @@ type User of {name: Str id: UserId}
       return Str.length(user.name)
   endfn
   impl Printable
-    fn render
-      takes {value: Self}
-      returns text: Str
-      do
-        return value.name
-    endfn
+    fn render takes {value: Self} returns text: Str do return value.name endfn
   endimpl
 endtype
 ```
@@ -795,7 +793,7 @@ run-time type. The type chapter defines irrefutability and coverage.
 - one blank line between top-level forms, which keep their written order;
   the imports are already first, as the [grammar](#grammar) requires;
 - one space between tokens on a line; none inside `(`, `)`, `{`, `}`, `[`,
-  `]`, before `(`, or before `:`; one after `:`;
+  `]`, before `(`, before `:`, or around `.`; one after `:`;
 - numeric suffixes, string contents, and name spellings exactly as written;
 - a construct on one line when it holds no comment, no nested `let`, and
   fits within the limit; otherwise its opener line, its contents indented one
@@ -804,9 +802,10 @@ run-time type. The type chapter defines irrefutability and coverage.
   this order: `of` or the `case` list, `takes`, `labelled`, `returns`,
   `given`, `where`, `requires`, `ensures`, `performs`, `role`,
   `visibility`, `representation`, `external`, `symbol`, `native`, `doc`,
-  then the associated type declarations of an interface or the choices of
-  an `impl`, then nested `fn` and `proc` members, then `impl` blocks, then
-  `do`; within each of these three groups the written order is kept;
+  `as`, `be`, then the associated type declarations of an interface or the
+  choices of an `impl`, then nested `fn` and `proc` members, then `impl`
+  blocks, then `do`; within each of these three groups the written order is
+  kept;
 - the statements of a callable body two steps in from the declaration, one
   step in from `do`; a guard's `else` on the next line one step in from its
   guard when both do not fit on one line;
@@ -820,10 +819,14 @@ run-time type. The type chapter defines irrefutability and coverage.
   ends with `endlet` on the same line;
 - a brace or bracket form on one line when it fits, otherwise one entry per
   line, one step in, with the closing token on its own line;
-- arguments in written order, always; and
+- arguments in written order, always;
 - comments preserved: a comment on a construct's line stays at the end of
   that line, and any other comment stays on its own line before the form
-  that follows it.
+  that follows it. Between top-level forms, an own-line comment that follows
+  a form is separated from it by one blank line, and a blank line written
+  after an own-line comment is kept as one blank line; and
+- a document with no form and no comment as the empty text, with no
+  newline.
 
 Formatting MUST be idempotent and MUST preserve meaning. It never reorders
 anything that is evaluated. If the parser recovered from a syntax error

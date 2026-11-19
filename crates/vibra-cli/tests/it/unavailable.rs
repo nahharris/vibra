@@ -92,7 +92,7 @@ fn well_formed_lines_with_operands_and_options_are_unavailable() {
         &["query", "@app.main.f", "--include", "m", "--expand", "r"],
         &["edit", "fix", "@app.main.f", "--write"],
         &["edit", "rename", "@app.main.f", "g", "--write"],
-        &["edit", "organize-imports", "src/a.vib", "--write"],
+        &["edit", "imports", "src/a.vib", "--write"],
         &["mcp"],
         &["mcp", "--read-only", "x"],
         &["check", "--write-nothing"],

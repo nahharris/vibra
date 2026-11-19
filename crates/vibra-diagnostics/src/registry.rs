@@ -406,6 +406,8 @@ diagnostic_registry! {
         "a dependency without `target` names a package with several library targets";
     ProjectReservedUnitName => "@project.reservedUnitName", Project, Error, None,
         "a target or dependency is named `tests`";
+    ProjectDuplicateName => "@project.duplicateName", Project, Error, None,
+        "two targets, or a target and a dependency, share a name";
     ProjectOverlappingTargetRoots => "@project.overlappingTargetRoots", Project, Error, None,
         "target roots overlap each other or `tests`";
     ProjectNotFound => "@project.notFound", Project, Error, None,
@@ -480,7 +482,7 @@ mod tests {
     use std::collections::BTreeSet;
 
     /// The count of the specification table.
-    const REGISTERED_CODES: usize = 115;
+    const REGISTERED_CODES: usize = 116;
 
     #[test]
     fn the_registry_has_every_code_in_the_specification_table() {

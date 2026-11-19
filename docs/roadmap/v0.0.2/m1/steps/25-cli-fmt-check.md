@@ -132,7 +132,7 @@ Read: the conformance run lists the `V2-TOOL-format-*` cases as passed under
 
 ## Excluded
 
-`lint` and `edit organize-imports` (M3); `--write` plans with revision
+`lint` and `edit imports` (M3); `--write` plans with revision
 checks (M3); `test` (26); formatting a directory (not in the surface).
 
 ## Completion evidence

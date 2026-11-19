@@ -100,6 +100,7 @@ its level MUST agree with it.
 | `@project.invalidEntrySignature` | `@error` |
 | `@project.ambiguousDependencyTarget` | `@error` |
 | `@project.reservedUnitName` | `@error` |
+| `@project.duplicateName` | `@error` |
 | `@project.overlappingTargetRoots` | `@error` |
 | `@project.notFound` | `@error` |
 | `@project.invalidTargetRoot` | `@error` |
@@ -178,8 +179,7 @@ use offsets.
   position 1:1. A tool MUST NOT invent a location or blame an unrelated
   declaration.
 - Diagnostics sort by source, then primary start and end, then registry
-  order. Within one source, lexer diagnostics precede parser diagnostics at
-  equal spans.
+  order.
 - One fault is reported once. A later phase does not report the same
   introduction again.
 - Tests assert codes, levels, spans, related identities, defined notes, and
@@ -202,16 +202,17 @@ command-line context.
 | --- | --- |
 | no `project.vibon` at or above the workspace | `@project.notFound` |
 | the nearest `project.vibon` is malformed (no search continues above it) | its data or syntax code |
-| a file with the wrong extension | `@data.invalidExtension` |
-| a target or test root that is missing, not a directory, absolute, or escapes | `@project.invalidTargetRoot` |
-| target roots that overlap each other or `tests` | `@project.overlappingTargetRoots` |
-| a target or dependency named `tests` | `@project.reservedUnitName` |
+| a file with the wrong extension | `@data.invalidExtension`, at offset 0 of that document |
+| a target or test root that is missing, not a directory, absolute, or escapes | `@project.invalidTargetRoot`, the target's `root` value; for the test root, offset 0 of the source `tests` |
+| target roots that overlap each other or `tests` | `@project.overlappingTargetRoots`, the later target's `root` value, or the `root` value of the target that overlaps `tests`; no related span |
+| a target or dependency named `tests` or `std` | `@project.reservedUnitName`, the target's `name` value or the dependency's key |
+| two targets with one name, or a target and a dependency with one name | `@project.duplicateName`, the later name, a target's `name` value or a dependency's key, related to the earlier one |
 | other project input or output failure | `@project.ioError` |
-| module enumeration or read failure, unreadable or dangling entry | `@module.ioError` |
+| module enumeration or read failure, unreadable or dangling entry | `@module.ioError`, at offset 0 of the entry's project-relative path |
 | an invalid source path segment | `@module.invalidSegment`, at offset 0 of that source |
-| two source paths that differ only by case | `@module.caseCollision` |
-| a link that leaves the source root | `@module.pathEscape` |
-| one source identity for two modules, including dependency inputs | `@module.sourceIdCollision` |
+| two source paths that differ only by case | `@module.caseCollision`, at offset 0 of the later path in source-identity order; no related span |
+| a link that leaves the source root | `@module.pathEscape`, at offset 0 of the entry's project-relative path |
+| one source identity for two modules, including dependency inputs | `@module.sourceIdCollision`, at offset 0 of the project module |
 | an import cycle | `@module.importCycle`: primary span on the later edge, related spans along the cycle |
 | a dependency cycle | `@project.dependencyCycle`, the later dependency entry in the project file, related along the cycle |
 | a `.vib` file beside a directory of the same name | `@module.fileDirectoryCollision`, at offset 0 of that source |
@@ -240,16 +241,21 @@ Resolution reads only the captured source graph.
 | --- | --- |
 | a byte-order mark, invalid UTF-8, or NUL | `@syntax.invalidEncoding`, the offending bytes |
 | two adjacent tokens, each of the classes identifier, reserved word, number, atom, string, character, or doc string, with nothing between them; a bracket or `:` beside a token never triggers it | `@syntax.missingSeparator`, a zero-width span at the second token |
-| an empty, multi-scalar, or surrogate character literal | `@syntax.invalidCharacterLiteral`, the token |
+| an empty, multi-scalar, or surrogate character literal; one with no closing quote on its line | `@syntax.invalidCharacterLiteral`, the token, which ends before the line break |
 | a terminated string with a malformed or unsupported escape | `@syntax.invalidStringLiteral`, the token |
 | an unknown numeric suffix, an integer suffix on a float body, or trailing token text | `@syntax.invalidNumericLiteral`, the token |
-| a malformed identifier | `@syntax.invalidName`, the token |
+| a malformed identifier or atom | `@syntax.invalidName`, the token; the token gets no `@syntax.invalidForm` |
 | a form the grammar does not admit; a doc string outside `doc`; a tag outside a section's closed set; a VIBON form outside the data grammar | `@syntax.invalidForm`, the smallest enclosing construct |
 | a `(` where a top-level form or a statement is expected | `@syntax.invalidForm`, once, the balanced parenthesized form |
 | `as` outside a `use` | `@syntax.invalidForm`, the `as` |
 | a `use` after another top-level form | `@syntax.invalidForm`, the `use` |
 | a `fn` or `proc` without `do` that is neither an abstract interface member nor an external definition | `@syntax.invalidForm`, its closer |
-| an identifier other than `true` and `false`, a doc string, or an application in a VIBON document | `@syntax.invalidForm`, the token |
+| an identifier other than `true` and `false`, a doc string, or a character that starts no token in a VIBON document | `@syntax.invalidForm`, the token |
+| an application in a VIBON document | `@syntax.invalidForm`, once, its first token |
+| a reserved word as a VIBON field name | `@syntax.invalidForm`, the word |
+| a VIBON field or entry with no value | `@syntax.invalidForm`, the name or key and its `:` |
+| a VIBON document that holds no value | `@syntax.invalidForm`, the whole document |
+| a section before the declaration's name, or after `do` | `@syntax.invalidForm`, that section |
 | a reserved word in a declaration or binder position; a prelude name declared as a type, interface, type parameter, or binder; a reserved type head declared | `@name.reservedDeclaration`, the name |
 | a repeated record field in VIBON | `@data.duplicateField`, the later field |
 | a repeated dict key in VIBON, after decoding | `@data.duplicateKey`, the later key |
@@ -291,7 +297,7 @@ Every row is an error with no automatic fix.
 | --- | --- |
 | a `let` where a statement is not allowed | `@syntax.misplacedBinding`, the `let` |
 | a missing `be`, expression, or `endlet`; crossed or missing closers | `@syntax.invalidForm` or `@syntax.unmatchedDelimiter`, the form or token |
-| a repeated section; a section the declaration does not admit | `@syntax.duplicateSection`; `@syntax.invalidSection` |
+| a repeated section; a section the declaration does not admit | `@syntax.duplicateSection`, the keyword of the later section; `@syntax.invalidSection`, the section |
 | a `let` or parameter pattern that can fail, with no `else` | `@pattern.refutableBinding`, the pattern |
 | a `let … else` whose pattern cannot fail | `@pattern.irrefutableLetElse`, the pattern |
 | an `else` of a `let` that can complete normally | `@type.mismatch`, the `else` body |
