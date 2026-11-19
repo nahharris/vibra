@@ -12,9 +12,10 @@
 //!   `do` directly inside a `fn`, `proc`, or `test` is the body section, which
 //!   runs to the next section keyword or the closer and holds the constructs
 //!   nested in it; a `do` inside the body opens a block closed by `enddo`;
-//! - the word after `as`, and the first word of a `type` or an `interface`,
-//!   is a name position: a reserved word there other than the construct's own
-//!   closer is taken as the name;
+//! - the word after `as`, the first word of a `type`, an `interface`, or a
+//!   `let`, and the word after `case` in a `match` are name positions: a
+//!   reserved word there other than the construct's own closer is taken as
+//!   the name or binder;
 //! - a closer is resolved by kind (`docs/spec/07-diagnostics-and-conformance.md`,
 //!   "Recovery"), over constructs and brackets alike.
 //!
@@ -29,9 +30,10 @@ use super::keyword::{
 };
 
 /// The constructs whose first word is always a name position: a `type` or an
-/// `interface` is never anonymous, so a reserved word written there is its
-/// recovered name, not a section.
-const NAMED_CONSTRUCTS: &[&str] = &["type", "interface"];
+/// `interface` is never anonymous, and a `let` starts with its name or
+/// pattern, so a reserved word written there is its recovered name or
+/// binder, not a section or an opener.
+const NAMED_CONSTRUCTS: &[&str] = &["type", "interface", "let"];
 use crate::cst::{CstNode, SyntaxKind};
 use crate::lexer::{Token, TokenKind};
 
@@ -242,6 +244,14 @@ impl Matcher<'_> {
             return;
         }
         self.leaf(token);
+        // The pattern of a `match` arm starts after `case`: a reserved word
+        // there is a recovered binder.
+        if word == "case"
+            && let Some(frame) = self.stack.last_mut()
+            && frame.opener_word() == Some("match")
+        {
+            frame.expect_name = true;
+        }
     }
 
     fn start_section(&mut self, token: Token, body: bool) {

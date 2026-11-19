@@ -29,7 +29,8 @@ use crate::lexer::{Token, TokenKind};
 /// kinds, [`SyntaxKind::Construct`], and [`SyntaxKind::Section`] are generic
 /// groups, which the tree observation writes as their children in their
 /// place: a bracket form that is no production of its own (a tuple type, the
-/// arguments of a type application, the braces of `given`), and the
+/// arguments of a type application or a call, the braces of `given`, a
+/// tuple, record, list, or dict value, a bracket pattern), and the
 /// constructs and sections of a grammar this crate does not parse yet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SyntaxKind {
@@ -91,6 +92,21 @@ pub enum SyntaxKind {
     ProcDecl,
     /// The `module-let` production.
     ModuleLet,
+    /// The `body` production: a sequence of statements.
+    Body,
+    /// The `let` production: a local binding statement.
+    Let,
+    /// The `postfix` production: a primary and its applications and field
+    /// reads.
+    Postfix,
+    /// The `if` production.
+    If,
+    /// The `match` production.
+    Match,
+    /// The `arm` production: one `case` of a `match`.
+    Arm,
+    /// The `do-block` production.
+    DoBlock,
     /// The `test` production.
     Test,
     /// Tokens a recovery step consumed without building a form.
@@ -167,6 +183,13 @@ impl SyntaxKind {
             Self::FnDecl => "@fnDecl",
             Self::ProcDecl => "@procDecl",
             Self::ModuleLet => "@moduleLet",
+            Self::Body => "@body",
+            Self::Let => "@let",
+            Self::Postfix => "@postfix",
+            Self::If => "@if",
+            Self::Match => "@match",
+            Self::Arm => "@arm",
+            Self::DoBlock => "@doBlock",
             Self::Test => "@test",
             Self::Error => "@error",
             Self::Brace

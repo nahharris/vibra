@@ -936,6 +936,11 @@ pub struct Path<'a> {
 }
 
 impl<'a> Path<'a> {
+    /// The view of a `@path` node of the document `text`.
+    pub(crate) const fn of(node: &'a CstNode, text: &'a str) -> Self {
+        Self { node, text }
+    }
+
     /// The `@path` node.
     #[must_use]
     pub const fn node(&self) -> &'a CstNode {

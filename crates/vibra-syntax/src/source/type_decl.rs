@@ -32,7 +32,9 @@
 //!   completeness, because its end was never written;
 //! - the operand of `where` runs to the next section, case, or member, and
 //!   holds the expression constructs written in it (an anonymous `fn`, an
-//!   `if`); its expressions are typed by the expression grammar;
+//!   `if`); it is read as a predicate expression and an optional `else`
+//!   expression, and anything else in it is `@syntax.invalidForm` over the
+//!   section;
 //! - a named `fn` or `proc` member is `@tool.unavailable` over the member
 //!   until the callable grammar exists; an `impl` is shaped in place; any
 //!   other nested construct is `@syntax.invalidForm` over it.
@@ -45,6 +47,7 @@ use super::construct::is_trivia;
 use super::declaration::{Atom, Ident, name_of};
 use super::keyword::{STANDARD_LIBRARY_SECTIONS, admissible_sections, tag_set};
 use super::section::{Construct, Doc, Given, TagSection, Where};
+use super::shape::shape_where_operand;
 use super::types::{
     Head, Role, TypeExpr, entry_count, shape_group, shape_type_list, type_entries,
 };
@@ -534,6 +537,16 @@ impl Shaper<'_, '_> {
             "where" => {
                 if operand.is_empty() {
                     self.sink.push(invalid("a `where` section has a predicate"));
+                } else {
+                    let rest = items.split_off(1);
+                    let (shaped, malformed) =
+                        shape_where_operand(rest, text, self.sink);
+                    items.extend(shaped);
+                    if malformed {
+                        self.sink.push(invalid(
+                            "a `where` section is one predicate expression and an optional `else` expression",
+                        ));
+                    }
                 }
                 SyntaxKind::Where
             }

@@ -11,6 +11,7 @@
 mod support;
 
 mod data;
+mod expr;
 mod lexer;
 mod schema;
 mod source;

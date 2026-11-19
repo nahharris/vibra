@@ -308,10 +308,10 @@ fn do_comes_last_and_the_name_comes_first() {
 fn every_form_without_its_grammar_is_unavailable_once() {
     assert!(diagnostics("type A of U8 endtype").is_empty());
     assert!(diagnostics("interface I endinterface").is_empty());
+    assert!(diagnostics("let x: I32 be 1i32 endlet").is_empty());
     for (text, end) in [
         ("fn f returns r: I32 endfn", 25),
         ("proc p returns r: I32 endproc", 29),
-        ("let x: I32 be 1i32 endlet", 25),
         ("test \"t\" do endtest", 19),
     ] {
         assert_eq!(diagnostics(text), [(ToolUnavailable, 0, end)], "{text}");
@@ -356,6 +356,10 @@ fn check_invariants(text: &str) {
     if let Some(module) = module(&document) {
         for declaration in module.declarations() {
             let _ = declaration.construct().sections();
+            if let Declaration::Let(value) = declaration {
+                let _ = (value.name(), value.written_type(), value.visibility());
+                crate::expr::walk(value.value());
+            }
         }
     }
 }
