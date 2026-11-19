@@ -1,0 +1,14 @@
+id = "V2-TOOL-format-vibon"
+rule = "V2-TOOL-format-vibon"
+profile = "toolingV2"
+operation = "format"
+description = "04-programs-and-packages.md#decoded-values-and-canonical-bytes: the source-preserving formatter lays out a VIBON document and keeps its comment, the written order of its fields, and the spelling of an escape"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+source = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vibon"
