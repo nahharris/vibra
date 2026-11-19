@@ -151,7 +151,7 @@ impl<'a> Machine<'a> {
 
     /// Compares two keys of `key_type`; the `Ordering` goes to the top
     /// continuation.
-    fn compare_keys(
+    pub(crate) fn compare_keys(
         &mut self,
         key_type: &Type,
         left: Val<'a>,

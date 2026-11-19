@@ -771,6 +771,62 @@ impl CheckedModuleSet {
         Ok(Arc::new(Self { flow, ..set }))
     }
 
+    /// Whether a value of `held`, a closed type, may stand behind an
+    /// interface value of `interface_type`: `held` is valid, is no interface
+    /// value type, and widens to `interface_type` as a checked
+    /// `WidenToInterface` would.
+    ///
+    /// # Errors
+    ///
+    /// `held` is malformed or names nothing, or the evidence that it
+    /// implements the interface needs more goals than validation allows.
+    pub fn widens(&self, held: &Type, interface_type: &Type) -> Result<bool, IrError> {
+        let tables = self.tables();
+        tables.check_type(held, OpenScope::Closed)?;
+        if held.is_interface_value() {
+            return Ok(false);
+        }
+        match interface_type {
+            Type::Any => Ok(true),
+            Type::Interface(interface, arguments, choices) => tables.conforms_with(
+                Evidence::default(),
+                held,
+                interface,
+                arguments,
+                choices,
+            ),
+            _ => Ok(false),
+        }
+    }
+
+    /// The type of the function at `index` as a value at `type_arguments`,
+    /// which are closed and satisfy its bounds.
+    ///
+    /// # Errors
+    ///
+    /// No function `index`, a type argument that is malformed, open, or of
+    /// the wrong count, or a bound that does not hold.
+    pub fn function_value_type(
+        &self,
+        index: usize,
+        type_arguments: &[Type],
+    ) -> Result<Type, IrError> {
+        let tables = self.tables();
+        for argument in type_arguments {
+            tables.check_type(argument, OpenScope::Closed)?;
+        }
+        let ty = tables.function_type(index, type_arguments)?;
+        tables.check_bounds(
+            Evidence::default(),
+            tables.function(index)?.signature.binders(),
+            &Substitution {
+                binders: type_arguments,
+                ..Substitution::default()
+            },
+        )?;
+        Ok(ty)
+    }
+
     fn tables(&self) -> Tables<'_> {
         Tables {
             library: self.table.library(),

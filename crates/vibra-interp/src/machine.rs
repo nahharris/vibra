@@ -21,6 +21,7 @@ use vibra_ir::{
 use crate::compare::{DictBuild, DictFind, Structural};
 use crate::encode::{ObserveError, encoding, from_neutral};
 use crate::frame::{Frame, TypeEnv};
+use crate::ingress::{Check, Ingress, Then, checks_of, needs_checks, refused};
 use crate::types::{match_type, mentions_self, type_of};
 use crate::value::{ClosureVal, FunctionVal, Held, Repr, Val, neutral_storage, same};
 use crate::{FailureKind, Instrumentation, TestAssertionFailure, intrinsics};
@@ -31,6 +32,9 @@ pub(crate) enum Halt {
     /// The checked program is not one the checker accepts:
     /// `@runtime.invalidCheckedProgram`.
     Invalid(String),
+    /// A value the host handed in is not a value of its type:
+    /// `@runtime.invalidHostValue`.
+    HostValue(String),
     /// The memory budget is exhausted.
     Memory,
     /// The reduction limit of an evaluation is reached.
@@ -201,6 +205,9 @@ pub(crate) enum Kont<'a> {
     DictBuild(Box<DictBuild<'a>>),
     DictFind(Box<DictFind<'a>>),
     Structural(Box<Structural<'a>>),
+    /// The checks of a value coming in, the answer of the current one
+    /// awaited.
+    Ingress(Box<Ingress<'a>>),
     /// Widens each `Self` position of a result dispatched through an
     /// interface value back to that interface value.
     Rebox {
@@ -224,6 +231,7 @@ impl<'a> Kont<'a> {
             Self::DictBuild(build) => build.for_each_value(visit),
             Self::DictFind(find) => find.for_each_value(visit),
             Self::Structural(structural) => structural.for_each_value(visit),
+            Self::Ingress(ingress) => ingress.for_each_value(visit),
             _ => {}
         }
     }
@@ -267,6 +275,8 @@ pub(crate) struct Machine<'a> {
     frame_bytes: u64,
     live_bytes: u64,
     allocated_bytes: u64,
+    /// The constants already admitted, by address: each is checked once.
+    admitted: HashSet<usize>,
     pub(crate) stats: Instrumentation,
 }
 
@@ -304,6 +314,7 @@ impl<'a> Machine<'a> {
             frame_bytes: 0,
             live_bytes: 0,
             allocated_bytes: 0,
+            admitted: HashSet::new(),
             stats: Instrumentation::default(),
         }
     }
@@ -360,21 +371,77 @@ impl<'a> Machine<'a> {
 
     /// A constant as a runtime value.
     fn constant(&mut self, constant: &'a Constant) -> Result<Val<'a>, Halt> {
-        self.ingress(constant.value(), constant.value_type())
+        self.ingress(constant.value(), constant.value_type(), false)
     }
 
     /// A neutral value as a runtime value of `ty`: its storage is reserved
-    /// against the budget before any of it is built.
+    /// against the budget before any of it is built. A value that does not
+    /// fit `ty` halts as an invalid host value when `host` holds.
     pub(crate) fn ingress(
         &mut self,
         value: &'a Value,
         ty: &Type,
+        host: bool,
     ) -> Result<Val<'a>, Halt> {
         let cost = as_u64(neutral_storage(value));
         self.reserve(cost, &[])?;
-        let converted = from_neutral(self.set, value, ty)?;
+        let converted =
+            from_neutral(self.set, value, ty).map_err(|halt| match halt {
+                Halt::Invalid(message) => refused(host, message),
+                other => other,
+            })?;
         self.allocated_bytes = self.allocated_bytes.saturating_add(cost);
         Ok(converted)
+    }
+
+    /// The checks `constant` must pass the first time the run meets it.
+    fn constant_checks(
+        &mut self,
+        constant: &'a Constant,
+        checks: &mut Vec<Check<'a>>,
+    ) -> Result<(), Halt> {
+        if !self.admitted.insert(std::ptr::from_ref(constant).addr())
+            || !needs_checks(self.set, constant.value_type())
+        {
+            return Ok(());
+        }
+        let value = self.constant(constant)?;
+        checks.extend(checks_of(self.set, &value, constant.value_type(), false)?);
+        Ok(())
+    }
+
+    /// A literal: its constant, admitted the first time.
+    fn literal(&mut self, constant: &'a Constant) -> Result<Step<'a>, Halt> {
+        let value = self.constant(constant)?;
+        if !self.admitted.insert(std::ptr::from_ref(constant).addr())
+            || !needs_checks(self.set, constant.value_type())
+        {
+            return Ok(Step::Ret(value));
+        }
+        let checks = checks_of(self.set, &value, constant.value_type(), false)?;
+        self.admit(checks, false, Then::Ret(value))
+    }
+
+    /// Runs `step` once the constants a call can reach without evaluating a
+    /// node are admitted: the defaults of every function and the
+    /// consequence of every invariant.
+    pub(crate) fn prelude(&mut self, step: Step<'a>) -> Result<Step<'a>, Halt> {
+        let set = self.set;
+        let mut checks = Vec::new();
+        for function in set.functions() {
+            for (_, default) in &function.defaults {
+                self.constant_checks(default, &mut checks)?;
+            }
+        }
+        for definition in set.types().types().values() {
+            if let Some(consequence) = definition
+                .invariant()
+                .and_then(|invariant| invariant.consequence.as_ref())
+            {
+                self.constant_checks(consequence, &mut checks)?;
+            }
+        }
+        self.admit(checks, false, Then::Continue(step))
     }
 
     // ----- memory -----
@@ -426,7 +493,11 @@ impl<'a> Machine<'a> {
 
     /// Sets `slot` of the current activation. An evaluation's root
     /// activation grows to hold it, its new slots reserved first.
-    fn bind_slot(&mut self, slot: usize, value: Val<'a>) -> Result<(), Halt> {
+    pub(crate) fn bind_slot(
+        &mut self,
+        slot: usize,
+        value: Val<'a>,
+    ) -> Result<(), Halt> {
         let count = self.frame()?.slots.len();
         if slot >= count {
             let wanted = slot.checked_add(1).ok_or(Halt::Memory)?;
@@ -534,25 +605,27 @@ impl<'a> Machine<'a> {
 
     // ----- evaluation -----
 
-    fn read_slot(&mut self, slot: usize, value_type: &Type) -> Result<Val<'a>, Halt> {
+    /// Reads `slot`; an evaluation's input is converted and admitted on its
+    /// first read, at the type the read names.
+    fn read_slot(&mut self, slot: usize, value_type: &Type) -> Result<Step<'a>, Halt> {
         let frame = self.frame()?;
         if let Some(Some(value)) = frame.slots.get(slot) {
-            return Ok(value.clone());
+            return Ok(Step::Ret(value.clone()));
         }
         let inputs = frame.inputs;
         let input = inputs.get(slot).ok_or_else(|| {
             Halt::Invalid(format!("slot {slot} is read before it is set"))
         })?;
         let ty = frame.env.apply(value_type);
-        let value = self.ingress(input, &ty)?;
-        self.bind_slot(slot, value.clone())?;
-        Ok(value)
+        let value = self.ingress(input, &ty, true)?;
+        let checks = checks_of(self.set, &value, &ty, true)?;
+        self.admit(checks, true, Then::Bind(slot, value))
     }
 
     #[allow(clippy::too_many_lines)]
     fn eval(&mut self, node: &'a Node) -> Result<Step<'a>, Halt> {
         Ok(match &node.expr {
-            Expr::Literal(constant) => Step::Ret(self.constant(constant)?),
+            Expr::Literal(constant) => self.literal(constant)?,
             Expr::Intrinsic {
                 intrinsic,
                 type_arguments,
@@ -567,9 +640,7 @@ impl<'a> Machine<'a> {
                 Vec::new(),
             )?,
             Expr::Sequence(statements) => self.sequence(statements)?,
-            Expr::Variable { slot, value_type } => {
-                Step::Ret(self.read_slot(*slot, value_type)?)
-            }
+            Expr::Variable { slot, value_type } => self.read_slot(*slot, value_type)?,
             Expr::Global(index) => self.global(*index)?,
             Expr::Function {
                 function,
@@ -757,7 +828,11 @@ impl<'a> Machine<'a> {
                     env,
                 })));
                 self.allocated(&value)?;
-                Ok(Step::Ret(value))
+                let mut checks = Vec::new();
+                for (_, default) in &body.defaults {
+                    self.constant_checks(default, &mut checks)?;
+                }
+                self.admit(checks, false, Then::Ret(value))
             }
             Work::Lookup { collection, .. } => {
                 let mut done = done.into_iter();
@@ -1727,6 +1802,7 @@ impl<'a> Machine<'a> {
             Kont::Structural(structural) => {
                 self.resume_structural(*structural, &value)?
             }
+            Kont::Ingress(ingress) => self.resume_ingress(*ingress, &value)?,
             Kont::Rebox { result, held_type } => {
                 let value = self.rebox(value, &result, &held_type)?;
                 self.allocated(&value)?;

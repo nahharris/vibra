@@ -18,6 +18,7 @@ mod compare;
 mod encode;
 mod evaluate;
 mod frame;
+mod ingress;
 mod intrinsics;
 mod machine;
 mod types;

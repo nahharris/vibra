@@ -29,6 +29,11 @@ fn runtime_error(
     };
     match halt {
         Halt::Invalid(message) => trap(message),
+        Halt::HostValue(message) => RuntimeError::Trap {
+            trap: Trap::InvalidHostValue,
+            origin: origin.cloned(),
+            message,
+        },
         Halt::Memory => RuntimeError::MemoryExhausted { budget },
         Halt::Unavailable(message) => RuntimeError::Unavailable { message },
         Halt::Reductions => trap("a reduction limit outside an evaluation".to_owned()),
@@ -74,7 +79,10 @@ fn call_entry<'a>(
         target: Target::Function(entry),
         env: Rc::clone(&machine.empty_env),
     };
-    let step = match machine.invoke(resolved, Vec::new(), false, None) {
+    let started = machine
+        .invoke(resolved, Vec::new(), false, None)
+        .and_then(|step| machine.prelude(step));
+    let step = match started {
         Ok(step) => step,
         Err(halt) => return Err(runtime_error(halt, machine.origin(), budget)),
     };
@@ -178,12 +186,14 @@ pub fn evaluate(
             frame.inputs = inputs;
             machine.enter_root(frame)
         })
-        .and_then(|()| machine.execute(crate::machine::Step::Eval(&root)))
+        .and_then(|()| machine.prelude(crate::machine::Step::Eval(&root)))
+        .and_then(|step| machine.execute(step))
         .and_then(|value| to_neutral(set, &value, &value_type));
     match outcome {
         Ok(value) => Evaluation::Value(value),
         Err(Halt::Reductions) => Evaluation::LimitReached(Limit::Reductions),
         Err(Halt::Memory) => Evaluation::LimitReached(Limit::Memory),
+        Err(Halt::HostValue(_)) => Evaluation::Defect(Trap::InvalidHostValue),
         Err(_) => defect,
     }
 }
