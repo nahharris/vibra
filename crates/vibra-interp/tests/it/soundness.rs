@@ -312,6 +312,42 @@ fn v8_a_constant_dict_out_of_key_order_is_rejected() {
     );
 }
 
+// -- V7: coverage is the checker's -------------------------------------------
+
+/// `pick(b: Bool) U8`: `match b case true 1u8 endmatch`, with no arm for
+/// `false`.
+fn pick() -> CheckedFunction {
+    let body = node(Expr::Match {
+        subject: Box::new(var(0, bool_type())),
+        arms: vec![MatchArm {
+            pattern: Pattern::Case {
+                case: "true".to_owned(),
+                fields: Vec::new(),
+            },
+            body: lit(Type::U8, Value::U8(1)),
+        }],
+        value_type: Type::U8,
+    });
+    function("pick", signature(vec![bool_type()], Type::U8), body, 1)
+}
+
+/// The checked IR trusts the checker for coverage: it admits a `match` with
+/// no arm for a value of its subject, and that value reaching the `match` is
+/// the defect `@runtime.invalidCheckedProgram`, never a program outcome.
+#[test]
+fn v7_a_value_no_arm_matches_is_a_defect() {
+    let set = set_with(vec![pick()], Vec::new(), Vec::new());
+    let pick_of = |value: bool| crate::call(BASE, vec![boolean(value)]);
+    assert_eq!(
+        evaluate(&set, &pick_of(true).expr, &[], SMALL),
+        Evaluation::Value(Value::U8(1))
+    );
+    assert_eq!(
+        evaluate(&set, &pick_of(false).expr, &[], SMALL),
+        Evaluation::Defect(Trap::InvalidCheckedProgram)
+    );
+}
+
 // -- V10: slots are reserved before they exist ---------------------------------
 
 /// A function with `slot_count` slots and a `Void` body.

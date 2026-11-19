@@ -343,6 +343,28 @@ Bool, Str, Bytes, Dict, Option, Result, Ordering, and the error types are
 `Declared` types whose identities the checker binds through their roles; the
 IR has no scalar case for them. The interpreter may represent them directly.
 
+### What the checked IR validates and what it trusts the checker for
+
+The checked IR is a trust boundary: `CheckedModuleSet::try_new` rejects every
+module set an execution could go wrong on, except where the table says the IR
+trusts the checker. A trusted property that fails reaches execution as the
+defect `@runtime.invalidCheckedProgram`, never as a program outcome. The step
+that owns a trusted property tests it at the checker.
+
+| Property | Checked IR | Owner |
+| --- | --- | --- |
+| Every type is well formed, names a declared type or an interface at its arity, and nests at most `Type::MAX_DEPTH` (64) levels; a type the check of a body works out is held to the same bound | validates | step 12 |
+| Every node's slots, arity, and types agree; a `return`, a `try`, and a tail call stand only where they may | validates | step 12 |
+| A widening, a call through an interface value, a generic instantiation, a contract call on an open receiver, and a dict key have conformance evidence: a bound, `Self` in a default body, a matching implementation with its bounds, or the structural rule for atoms, tuples, and records | validates | step 12 |
+| An implementation supplies every abstract member, supplies no default member, and overlaps no other implementation | validates | step 12 |
+| A declared type holds itself only through `List`, `Dict`, a callable, or an interface value | validates | step 12 |
+| Every labelled parameter of a function or a closure has one constant default of its type, and a closure value carries its defaults | validates | step 12 |
+| A constant fits its type | validates | step 12 |
+| A constant or an evaluation's input satisfies every invariant its type carries, and every dict in it holds its keys ascending and distinct | the interpreter checks it where the value comes in: `@runtime.invalidCheckedProgram` for a constant, `@runtime.invalidHostValue` for an input | step 13 |
+| Every value of a `match` subject matches an arm, and every arm is reachable | trusts the checker; a value no arm matches is `@runtime.invalidCheckedProgram` | steps 15 and 17 |
+| An implementation member's labelled default values and guards are the contract member's under the implementation's substitution | trusts the checker; the IR holds neither for an abstract member | step 19 |
+| A bare guard the checker discharges holds | trusts the checker; the guard leaves no node | step 22 |
+
 **`vibra-interp` to `vibra-types`, `vibra-workspace`:**
 
 ```rust

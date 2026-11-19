@@ -64,8 +64,12 @@ Proposed: `vibra-types::{declare, infer, expr, lower, check}`;
    (`@type.mismatch` at the form without it). `match` over a variant with
    fieldless case patterns and `_`; coverage for variants and `Bool`
    (`@pattern.nonExhaustive`, `@pattern.unreachableArm`); richer patterns
-   in 16 and 17. `do` blocks. Local `let` with a bare name and optional
-   written type (patterns in 17).
+   in 16 and 17. The checked IR trusts the checker for coverage (the
+   [architecture's table of what it
+   trusts](../architecture.md#what-the-checked-ir-validates-and-what-it-trusts-the-checker-for)),
+   so a `match` this step lowers MUST cover its subject. `do` blocks.
+   Local `let` with a bare name and optional written type (patterns
+   in 17).
 5. Module values: type mandatory, initializer checked at it, lazy; the
    initializer-cycle analysis through functions, closures, and function
    values (`@type.initializerCycle` naming one `let`, edges related).
