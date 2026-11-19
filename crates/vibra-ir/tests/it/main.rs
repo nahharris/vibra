@@ -15,6 +15,7 @@ mod encode;
 mod migration;
 mod registry;
 mod shape;
+mod soundness;
 
 use vibra_diagnostics::ByteSpan;
 use vibra_ir::{

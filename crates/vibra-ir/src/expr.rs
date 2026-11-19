@@ -17,6 +17,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use crate::conformance::Evidence;
 use crate::encode::{TypeTable, encode_value};
 use crate::external::CompilerIntrinsic;
 use crate::{
@@ -439,6 +440,9 @@ impl<'a> Tables<'a> {
 pub(crate) struct Checker<'a> {
     pub(crate) tables: Tables<'a>,
     pub(crate) scope: OpenScope<'a>,
+    /// The bounds of the binders in scope, and the interface `Self` belongs
+    /// to in a default body.
+    pub(crate) evidence: Evidence<'a>,
     pub(crate) slots: Vec<Option<Type>>,
     pub(crate) captures: Vec<Type>,
     /// The enclosing callable's result, `None` in a module-value
@@ -509,6 +513,7 @@ impl<'a> Checker<'a> {
         Self {
             tables,
             scope,
+            evidence: Evidence::default(),
             slots: vec![None; slot_count],
             captures: Vec::new(),
             result: None,
@@ -530,6 +535,39 @@ impl<'a> Checker<'a> {
 
     fn bool_type(&self) -> Result<Type, IrError> {
         self.tables.library_type(Library::Bool, Vec::new())
+    }
+
+    /// Checks that `key` implements `Ordered`, as every dict key must.
+    fn check_dict_key(&self, key: &Type) -> Result<(), IrError> {
+        if self.tables.is_dict_key(self.evidence, key)? {
+            Ok(())
+        } else {
+            Err(IrError::InvalidType(format!(
+                "{key} does not implement `Ordered` and keys no dict"
+            )))
+        }
+    }
+
+    /// The type of the function at `index` as a value at `type_arguments`,
+    /// whose bounds hold.
+    fn instantiated_function(
+        &self,
+        index: usize,
+        type_arguments: &[Type],
+    ) -> Result<Type, IrError> {
+        for argument in type_arguments {
+            self.check_type(argument)?;
+        }
+        let ty = self.tables.function_type(index, type_arguments)?;
+        self.tables.check_bounds(
+            self.evidence,
+            self.tables.function(index)?.signature.binders(),
+            &Substitution {
+                binders: type_arguments,
+                ..Substitution::default()
+            },
+        )?;
+        Ok(ty)
     }
 
     /// Sets `slot` to `ty` and returns what it held.
@@ -642,12 +680,7 @@ impl<'a> Checker<'a> {
             Expr::Function {
                 function,
                 type_arguments,
-            } => {
-                for argument in type_arguments {
-                    self.check_type(argument)?;
-                }
-                self.tables.function_type(*function, type_arguments)
-            }
+            } => self.instantiated_function(*function, type_arguments),
             Expr::Closure { closure, captures } => {
                 self.check_closure(closure, captures)
             }
@@ -773,6 +806,7 @@ impl<'a> Checker<'a> {
                 } else if let Some([key_type, value]) =
                     library.arguments_of(Library::Dict, &collection)
                 {
+                    self.check_dict_key(key_type)?;
                     (key_type.clone(), value.clone())
                 } else {
                     return Err(IrError::InvalidExpression(format!(
@@ -825,7 +859,22 @@ impl<'a> Checker<'a> {
             Expr::WidenToInterface { value, value_type } => {
                 self.check_type(value_type)?;
                 let value = self.check(value)?;
-                if !value_type.is_interface_value() || value.is_interface_value() {
+                let widens = match value_type {
+                    _ if value.is_interface_value() => false,
+                    Type::Any => true,
+                    _ if value == Type::Never => true,
+                    Type::Interface(interface, arguments, choices) => {
+                        self.tables.conforms_with(
+                            self.evidence,
+                            &value,
+                            interface,
+                            arguments,
+                            choices,
+                        )?
+                    }
+                    _ => false,
+                };
+                if !widens {
                     return Err(IrError::InvalidExpression(format!(
                         "{value} does not widen to {value_type}"
                     )));
@@ -937,6 +986,7 @@ impl<'a> Checker<'a> {
         let mut inner = Checker {
             tables: self.tables,
             scope: self.scope,
+            evidence: self.evidence,
             slots: vec![None; closure.slot_count],
             captures: closure.captures.clone(),
             result: Some(result.clone()),
@@ -962,6 +1012,7 @@ impl<'a> Checker<'a> {
                     "a {value_type} is built from a dict literal"
                 )));
             };
+            self.check_dict_key(key)?;
             for (entry_key, entry_value) in entries {
                 expect(key, &self.check(entry_key)?)?;
                 expect(value, &self.check(entry_value)?)?;
@@ -1065,15 +1116,10 @@ impl<'a> Checker<'a> {
             CallTarget::Direct {
                 function,
                 type_arguments,
-            } => {
-                for argument in type_arguments {
-                    self.check_type(argument)?;
-                }
-                Ok((
-                    self.tables.function_type(*function, type_arguments)?,
-                    Some(*function),
-                ))
-            }
+            } => Ok((
+                self.instantiated_function(*function, type_arguments)?,
+                Some(*function),
+            )),
             CallTarget::Value(callee) => Ok((self.check(callee)?, None)),
             CallTarget::Contract(call) => {
                 let ContractCall {
@@ -1131,77 +1177,109 @@ impl<'a> Checker<'a> {
                         interface.path()
                     )));
                 }
-                self.check_implementation(interface, receiver, arguments, choices)?;
+                self.check_receiver(interface, member, declared, call)?;
                 let binders = arguments
                     .iter()
                     .chain(member_arguments)
                     .cloned()
                     .collect::<Vec<_>>();
+                let substitution = Substitution {
+                    binders: &binders,
+                    self_type: Some(receiver),
+                    associated: Some(choices),
+                };
+                self.tables.check_bounds(
+                    self.evidence,
+                    declared.signature.binders(),
+                    &substitution,
+                )?;
                 Ok((
-                    declared.signature.type_info().substitute(&Substitution {
-                        binders: &binders,
-                        self_type: Some(receiver),
-                        associated: Some(choices),
-                    }),
+                    declared.signature.type_info().substitute(&substitution),
                     None,
                 ))
             }
         }
     }
 
-    /// For a closed key, the implementation that is selected exists and its
-    /// choices are the ones the call names.
-    fn check_implementation(
+    /// Checks the receiver of a contract call. Through an interface value,
+    /// the value's interface, positional arguments, and choices are the
+    /// call's, the member has a receiver slot, and no other parameter
+    /// mentions `Self`. Otherwise evidence that the receiver implements the
+    /// interface gives exactly the call's choices.
+    fn check_receiver(
         &self,
         interface: &TypeId,
-        receiver: &Type,
-        arguments: &[Type],
-        choices: &NamedTypes,
+        member: &str,
+        declared: &crate::InterfaceMember,
+        call: &ContractCall,
     ) -> Result<(), IrError> {
-        if !receiver.is_closed()
-            || receiver.is_interface_value()
-            || !arguments.iter().all(Type::is_closed)
-        {
+        let path = interface.path();
+        if call.receiver.is_interface_value() {
+            let same = matches!(
+                &call.receiver,
+                Type::Interface(held, arguments, choices)
+                    if held == interface
+                        && *arguments == call.arguments
+                        && *choices == call.choices
+            );
+            if !same {
+                return Err(IrError::InvalidExpression(format!(
+                    "a call of `{path}.{member}` through a value of {}",
+                    call.receiver
+                )));
+            }
+            let parameters = match declared.signature.type_info() {
+                Type::Fn(signature) => signature.parameters.as_slice(),
+                Type::Proc(signature) => signature.parameters.as_slice(),
+                _ => &[],
+            };
+            let slot = declared
+                .signature
+                .receiver()
+                .and_then(|slot| usize::try_from(slot).ok())
+                .ok_or_else(|| {
+                    IrError::InvalidExpression(format!(
+                        "`{path}.{member}` has no receiver slot and is not called through an interface value"
+                    ))
+                })?;
+            let mentions_self = |ty: &Type| {
+                let mut found = false;
+                ty.visit(&mut |inner| found |= *inner == Type::SelfType);
+                found
+            };
+            let labels = match declared.signature.type_info() {
+                Type::Fn(signature) => signature.labels.entries(),
+                Type::Proc(signature) => signature.labels.entries(),
+                _ => &[],
+            };
+            let other_self = parameters
+                .iter()
+                .enumerate()
+                .any(|(index, ty)| index != slot && mentions_self(ty))
+                || labels.iter().any(|(_, ty)| mentions_self(ty));
+            if other_self {
+                return Err(IrError::InvalidExpression(format!(
+                    "`{path}.{member}` takes `Self` outside its receiver slot and is not called through an interface value"
+                )));
+            }
             return Ok(());
         }
-        for implementation in self.tables.implementations {
-            if implementation.contract().interface != *interface {
-                continue;
-            }
-            let mut assignment = vec![None; implementation.binders().len()];
-            let matched = crate::module_set::unify(
-                implementation.receiver(),
-                receiver,
-                &mut assignment,
-            ) && implementation
-                .contract()
-                .arguments
-                .iter()
-                .zip(arguments)
-                .all(|(left, right)| {
-                    crate::module_set::unify(left, right, &mut assignment)
-                });
-            if matched {
-                let binders = crate::module_set::resolved(&assignment);
-                let selected = implementation
-                    .choices()
-                    .entries()
-                    .iter()
-                    .map(|(name, value)| (name.clone(), value.instantiate(&binders)));
-                return if NamedTypes::new(selected)? == *choices {
-                    Ok(())
-                } else {
-                    Err(IrError::InvalidExpression(format!(
-                        "the choices of the call of `{}` are not the selected implementation's",
-                        interface.path()
-                    )))
-                };
-            }
+        let provided = self
+            .tables
+            .conformance(self.evidence, &call.receiver, interface, &call.arguments)?
+            .ok_or_else(|| {
+                IrError::InvalidExpression(format!(
+                    "no implementation of `{path}` for {}",
+                    call.receiver
+                ))
+            })?;
+        if provided == call.choices {
+            Ok(())
+        } else {
+            Err(IrError::InvalidExpression(format!(
+                "the choices of the call of `{path}` are not the selected implementation's"
+            )))
         }
-        Err(IrError::InvalidExpression(format!(
-            "no implementation of `{}` for {receiver}",
-            interface.path()
-        )))
     }
 
     fn check_call(

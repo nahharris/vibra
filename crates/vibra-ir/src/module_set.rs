@@ -11,6 +11,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+use crate::conformance::Evidence;
 use crate::encode::{TypeTable, encode_value};
 use crate::expr::{Checker, ClosureBody, Expr, Tables, expect};
 use crate::external::{CompilerIntrinsic, RowType};
@@ -221,7 +222,7 @@ fn is_open_form(ty: &Type) -> bool {
 
 /// Whether two types have the same outermost form: the same case, and the
 /// same identity, names, atom, or row where the case has one.
-fn same_head(left: &Type, right: &Type) -> bool {
+pub(crate) fn same_head(left: &Type, right: &Type) -> bool {
     match (left, right) {
         (Type::AtomSingleton(left), Type::AtomSingleton(right))
         | (Type::Associated(left), Type::Associated(right)) => left == right,
@@ -595,6 +596,7 @@ fn closure_checker<'a>(
         }
     };
     let mut inner = Checker::new(outer.tables, outer.scope, closure.slot_count);
+    inner.evidence = outer.evidence;
     inner.captures.clone_from(&closure.captures);
     inner.result = Some(result);
     inner.in_guard = outer.in_guard;
@@ -830,12 +832,24 @@ impl CheckedModuleSet {
                 }
             }
         }
+        let mut defaults = BTreeMap::new();
         for interface in self.interfaces.values() {
             for member in interface.members() {
                 tables.check_type(
                     member.signature.type_info(),
                     member.signature.scope(),
                 )?;
+                if !self_map_result(member.signature.type_info(), self.table.library())
+                {
+                    return Err(IrError::InvalidType(format!(
+                        "the result of `{}.{}` holds `Self` outside the positions an interface value reboxes",
+                        interface.id().path(),
+                        member.name
+                    )));
+                }
+                if let Some(default) = member.default {
+                    defaults.insert(default, interface.id());
+                }
                 if let Some(default) = member.default
                     && tables.function(default)?.signature != member.signature
                 {
@@ -858,8 +872,12 @@ impl CheckedModuleSet {
             gather(&mut checker, &global.initializer, &mut gathered)?;
             flow.absorb_owner(gathered, |flow, facts| flow.globals.push(facts));
         }
-        for function in &self.functions {
-            let gathered = self.validate_function(&tables, function)?;
+        for (index, function) in self.functions.iter().enumerate() {
+            let gathered = self.validate_function(
+                &tables,
+                function,
+                defaults.get(&index).copied(),
+            )?;
             flow.absorb_owner(gathered, |flow, facts| flow.functions.push(facts));
         }
         Ok(flow)
@@ -948,6 +966,7 @@ impl CheckedModuleSet {
         &self,
         tables: &Tables<'_>,
         function: &CheckedFunction,
+        self_interface: Option<&TypeId>,
     ) -> Result<Gathered, IrError> {
         let signature = &function.signature;
         let scope = signature.scope();
@@ -996,6 +1015,10 @@ impl CheckedModuleSet {
             expect(expected, default.value_type())?;
         }
         let mut checker = Checker::new(*tables, scope, function.slot_count);
+        checker.evidence = Evidence {
+            binders: signature.binders(),
+            self_interface,
+        };
         checker.result = Some(result.clone());
         for (slot, ty) in slot_types.into_iter().enumerate() {
             checker.bind(slot, ty)?;
@@ -1140,6 +1163,43 @@ impl Flow {
 
 fn table_bool(table: &TypeTable) -> Result<Type, IrError> {
     table.library().declared(Library::Bool, Vec::new())
+}
+
+/// Whether every `Self` in the result of the callable type `member` stands
+/// in a position of the type chapter's `Self` map: the result itself, and
+/// recursively a component of a tuple or record, or an argument of
+/// `Option`, `Result`, or `List`.
+fn self_map_result(member: &Type, library: &LibraryTypes) -> bool {
+    let result = match member {
+        Type::Fn(signature) => &signature.result,
+        Type::Proc(signature) => &signature.result,
+        _ => return true,
+    };
+    let mut pending = vec![result];
+    while let Some(ty) = pending.pop() {
+        match ty {
+            Type::SelfType => {}
+            Type::Tuple(_) | Type::Record(_) | Type::List(_) => {
+                pending.extend(ty.components());
+            }
+            Type::Declared(id, arguments)
+                if matches!(
+                    library.library_of(id),
+                    Some(Library::Option | Library::Result)
+                ) =>
+            {
+                pending.extend(arguments);
+            }
+            other => {
+                let mut found = false;
+                other.visit(&mut |inner| found |= *inner == Type::SelfType);
+                if found {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 /// Whether two implementations of one interface have keys some types
