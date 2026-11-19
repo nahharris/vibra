@@ -458,6 +458,50 @@ fn members_and_implementation_members() {
 }
 
 #[test]
+fn only_a_type_member_among_members_declares_visibility() {
+    // A static member of a type declares its own access.
+    assert!(
+        diagnostics(
+            "type A of U8\n  fn f\n    returns r: U8\n    visibility @public\n    do\n      return 1u8\n  endfn\nendtype"
+        )
+        .is_empty()
+    );
+    // A member of an interface has the interface's access, a default
+    // member included.
+    for member in [
+        "fn f takes {v: Self} returns r: U8 visibility @public endfn",
+        "fn f takes {v: Self} returns r: U8 visibility @private do return 1u8 endfn",
+        "proc p takes {v: Self} returns r: U8 visibility @public endproc",
+    ] {
+        let text = format!("interface I\n  {member}\nendinterface");
+        let section = if member.contains("@private") {
+            "visibility @private"
+        } else {
+            "visibility @public"
+        };
+        let (start, end) = at(&text, section);
+        assert_eq!(
+            diagnostics(&text),
+            [(SyntaxInvalidSection, start, end)],
+            "{text}"
+        );
+    }
+    // A member of an `impl` has the access of the member it implements, in
+    // a type and in an interface.
+    for text in [
+        "type A of U8\n  impl P\n    fn f takes {v: Self} returns r: U8 visibility @public do return 1u8 endfn\n  endimpl\nendtype",
+        "interface P\n  impl A\n    fn f takes {v: Self} returns r: U8 visibility @public do return 1u8 endfn\n  endimpl\nendinterface",
+    ] {
+        let (start, end) = at(text, "visibility @public");
+        assert_eq!(
+            diagnostics(text),
+            [(SyntaxInvalidSection, start, end)],
+            "{text}"
+        );
+    }
+}
+
+#[test]
 fn anonymous_callables() {
     let text = "let inc: Fn({I32} I32) be fn takes {value: I32} returns next: I32 do return I32.add(value 1i32) endfn endlet";
     let document = source(text);

@@ -27,8 +27,9 @@
 //! - a section the form does not admit
 //!   ([`super::super::keyword::ADMISSIBLE_SECTIONS`]) is
 //!   `@syntax.invalidSection` at the section, and so are an external
-//!   declaration and `native` outside the embedded standard library, and a
-//!   guard on a member of an `impl`;
+//!   declaration and `native` outside the embedded standard library, a
+//!   guard on a member of an `impl`, and `visibility` on a member of an
+//!   `interface` or an `impl`;
 //! - the operand of `requires` and `ensures` runs to the next section and
 //!   holds the expression constructs written in it; a guard that is not one
 //!   expression and an optional `else` expression is `@syntax.invalidForm`
@@ -60,8 +61,8 @@ use crate::cst::{CstNode, SyntaxKind};
 use crate::source::callable::CallableKind;
 use crate::source::construct::is_trivia;
 use crate::source::keyword::{
-    IMPLEMENTATION_MEMBER_EXCLUDED, SIGNATURE_SECTIONS, STANDARD_LIBRARY_SECTIONS,
-    admissible_sections,
+    IMPLEMENTATION_MEMBER_EXCLUDED, INTERFACE_MEMBER_EXCLUDED, SIGNATURE_SECTIONS,
+    STANDARD_LIBRARY_SECTIONS, admissible_sections,
 };
 use crate::source::type_decl::{report_declared_name, shape_type_params};
 use crate::source::types::{Role as TypeRole, shape_group};
@@ -73,9 +74,11 @@ pub(crate) enum Place {
     TopLevel,
     /// A member of a `type`.
     TypeMember,
-    /// A member of an `interface`, abstract when it has no `do`.
+    /// A member of an `interface`, abstract when it has no `do`, which
+    /// declares no `visibility`.
     InterfaceMember,
-    /// A member of an `impl`, which declares no guard.
+    /// A member of an `impl`, which declares neither a guard nor
+    /// `visibility`.
     ImplMember,
     /// An anonymous `fn` or `proc` in expression position.
     Anonymous,
@@ -487,12 +490,24 @@ impl<'t> Level<'t> {
             }
             return;
         }
-        if guard
-            && form.place() == Place::ImplMember
-            && IMPLEMENTATION_MEMBER_EXCLUDED.contains(&word)
-        {
-            let region = self.guard_region();
-            self.reject(out, region, "a member of an `impl` declares no guard");
+        let excluded = match form.place() {
+            Place::ImplMember => IMPLEMENTATION_MEMBER_EXCLUDED,
+            Place::InterfaceMember => INTERFACE_MEMBER_EXCLUDED,
+            _ => &[],
+        };
+        if excluded.contains(&word) {
+            let (region, message) = if guard {
+                (
+                    self.guard_region(),
+                    "a member of an `impl` declares no guard",
+                )
+            } else {
+                (
+                    self.region(),
+                    "a member of an `interface` or an `impl` has the interface's access and declares no `visibility`",
+                )
+            };
+            self.reject(out, region, message);
             return;
         }
         match word {

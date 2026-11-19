@@ -325,7 +325,10 @@ impl<'a> Graph<'a> {
                 Declaration::Type(view) => self.collect_type(module, view),
                 Declaration::Interface(view) => self.collect_interface(module, view),
                 Declaration::Fn(view) | Declaration::Proc(view) => {
-                    if let Some(index) = self.collect_callable(module, None, view) {
+                    let access = Access::of(view.visibility());
+                    if let Some(index) =
+                        self.collect_callable(module, None, view, access)
+                    {
                         self.top(module, index);
                     }
                 }
@@ -434,7 +437,8 @@ impl<'a> Graph<'a> {
                     kind: MemberKind::Callable,
                 });
             }
-            self.collect_callable(module, Some(owner), member);
+            let member_access = Access::of(member.visibility());
+            self.collect_callable(module, Some(owner), member, member_access);
         }
         for block in view.impls() {
             if let Some(data) = self.modules.get_mut(module) {
@@ -490,7 +494,8 @@ impl<'a> Graph<'a> {
                     kind: MemberKind::Callable,
                 });
             }
-            self.collect_callable(module, Some(owner), member);
+            // A member is part of the interface and has its access.
+            self.collect_callable(module, Some(owner), member, access);
         }
         for block in view.impls() {
             if let Some(data) = self.modules.get_mut(module) {
@@ -503,11 +508,14 @@ impl<'a> Graph<'a> {
         }
     }
 
+    /// Collects a named callable with `access`: its own `visibility` at the
+    /// top level and in a type, its interface's in an interface.
     fn collect_callable(
         &mut self,
         module: usize,
         owner: Option<usize>,
         view: Callable<'a>,
+        access: Access,
     ) -> Option<usize> {
         let name = view.name()?;
         let kind = match view.kind() {
@@ -521,7 +529,7 @@ impl<'a> Graph<'a> {
             kind,
             name,
             view.node().span(),
-            Access::of(view.visibility()),
+            access,
         ))
     }
 

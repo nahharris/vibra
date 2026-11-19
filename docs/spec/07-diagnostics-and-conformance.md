@@ -224,7 +224,7 @@ command-line context.
 | an `entry` on a library target | `@project.entryOnLibrary`, the `entry` field |
 | an `entry` that is not a module-level `proc` with an entry signature, or that has a bare `requires` | `@project.invalidEntrySignature`, the `entry` field, related to the declaration |
 | a dependency without `target` on a package with several library targets | `@project.ambiguousDependencyTarget`, the dependency entry |
-| access to a private declaration | `@name.privateAccess`, the reference, related to the declaration |
+| access to a private declaration, a static member reached through its type included | `@name.privateAccess`, the reference, or the member's name in the path, related to the declaration |
 | use of a hidden constructor, pattern, or field read | `@name.inaccessibleRepresentation`, the use, related to the type |
 | a name that resolves to nothing: a path part, a `given` key, an `impl` member or choice that is no member of the interface, an entity reference slot | `@name.unknownSymbol`, the name |
 | an entity of the wrong kind: an import of a member, an `impl` target of the wrong kind, a bound that is not an interface, a typed data slot | `@name.wrongEntityKind`, the reference |

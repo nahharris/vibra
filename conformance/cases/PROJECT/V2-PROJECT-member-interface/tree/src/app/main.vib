@@ -1,0 +1,9 @@
+use @app.model.Shown enduse
+
+fn render(T)
+  takes {value: T}
+  returns code: U8
+  given {T: Shown}
+  do
+    return Shown.show(value)
+endfn

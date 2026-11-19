@@ -1,0 +1,12 @@
+id = "V2-PROJECT-member-private-same-module"
+rule = "V2-PROJECT-member-private-same-module"
+profile = "staticV2"
+operation = "resolve"
+description = "04-programs-and-packages.md#modules-and-imports: a private static member is visible inside the module that declares its type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

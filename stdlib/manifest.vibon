@@ -9,7 +9,7 @@
     }
     {
       path: @std.builtin
-      digest: "sha256:14f065b5eba8a4fe91248b6fcf4b34366c3ba982a50ca3922eddff37f01fb224"
+      digest: "sha256:b37e9db451fce7b1eec7123f1c4cddf34226cba86989f391cf59b84514a3192d"
       languageRoles: [@bytes @dict @str]
     }
     {

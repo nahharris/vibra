@@ -1,0 +1,14 @@
+type Counter of U8
+  visibility @public
+  fn hidden
+    returns r: U8
+    do
+      return 1u8
+  endfn
+  fn shown
+    returns r: U8
+    visibility @public
+    do
+      return Counter.hidden()
+  endfn
+endtype

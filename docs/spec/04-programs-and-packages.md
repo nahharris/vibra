@@ -536,6 +536,13 @@ Resolution is total and access is not. A path resolves to a private
 declaration as it does to a public one, and the referring position applies
 its own rule: an import of a private declaration is `@name.privateAccess`,
 relating the declaration, while a target's `entry` may name a private one.
+Access applies to members as to top-level declarations: a path from another
+module that reaches a private static member through its type is
+`@name.privateAccess` at the member's name, relating the member. A member of
+an interface or an `impl` has the interface's access, and a case or a record
+field the type's, as the
+[source chapter](01-source-language.md#declarations) states. Within its own
+module every declaration is visible.
 
 **Imports MUST NOT form a cycle.** An import whose target module imports,
 directly or through any chain of imports, the importing module is

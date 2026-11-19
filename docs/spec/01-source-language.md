@@ -364,6 +364,10 @@ name.
 
 Every declaration is private to its module unless it contains
 `visibility @public`. `@public` and `@private` are the only visibility values.
+The members of an [`interface`](#interface) and an [`impl`](#impl) take their
+access from the interface. The
+[programs chapter](04-programs-and-packages.md#modules-and-imports) defines
+where access is applied.
 
 ```vibra
 use @std.io enduse
@@ -425,7 +429,9 @@ entry has the bound `Any`. `where` states a type invariant and
 `representation` controls who may construct and take apart the type; the
 [type chapter](02-type-system.md#declared-types) defines all three. A `type`
 may nest `fn` and `proc` declarations, which are its static members, and
-`impl` blocks.
+`impl` blocks. A static member is private to the module that declares the
+type unless it has `visibility @public`. A `case` and a record field have the
+type's access; `representation` governs constructing and taking apart.
 
 `of Intrinsic(@name)` and the `role` section are admissible only in the
 embedded standard library.
@@ -437,9 +443,11 @@ member with `do` is a default, and its body is checked like any other
 callable body, so an empty one is `@type.missingReturn`. A nested
 `type Name endtype`, with no body, declares an associated type, which each
 implementation chooses; it is a member of the interface, and the
-[type chapter](02-type-system.md#associated-types) defines it. An interface
-whose members include a `proc` is an operation interface, which the
-[effects chapter](03-effects.md) defines. When an interface is checked, the
+[type chapter](02-type-system.md#associated-types) defines it. A member is
+part of the interface and has its access; a `visibility` section on a member
+is `@syntax.invalidSection`. An interface whose members include a `proc` is
+an operation interface, which the [effects chapter](03-effects.md) defines.
+When an interface is checked, the
 written result type of each member may place `Self` only where the
 [type chapter](02-type-system.md#interfaces) allows; any other position is
 `@type.unsupportedSelfPosition`.
@@ -480,8 +488,10 @@ type User of {name: Str id: UserId}
 endtype
 ```
 
-A callable member of an `impl` MUST have a body, or be an external
-declaration, and MUST match its contract under the
+A member of an `impl` has the access of the interface member it implements;
+a `visibility` section on one is `@syntax.invalidSection`. A callable member
+of an `impl` MUST have a body, or be an external declaration, and MUST match
+its contract under the
 [substitution](02-type-system.md#substitution) the type chapter defines. A
 `type Name of T endtype` inside an `impl` chooses the associated type `Name`
 and has no body. The operand of `impl` is positional: a label in it, as in
@@ -802,7 +812,8 @@ run-time type. The type chapter defines irrefutability and coverage.
 
 ## Canonical format
 
-`vibra fmt` defines the only canonical representation:
+`vibra fmt` defines the only canonical representation, unique up to the
+spaces and tabs before a comment that ends a line:
 
 - UTF-8, LF line endings, one trailing newline, no trailing whitespace;
 - two-space indentation and a limit of 88 columns;
@@ -842,9 +853,11 @@ run-time type. The type chapter defines irrefutability and coverage.
   line, one step in, with the closing token on its own line;
 - arguments in written order, always;
 - comments preserved: a comment on a construct's line stays at the end of
-  that line, and any other comment stays on its own line before the form
-  that follows it. Between top-level forms, an own-line comment that follows
-  a form is separated from it by one blank line, and a blank line written
+  that line after the spaces and tabs written before it, or one space when
+  none was written, so comments may be aligned in a column; any other
+  comment stays on its own line before the form that follows it. Between
+  top-level forms, an own-line comment that follows a form is separated
+  from it by one blank line, and a blank line written
   after an own-line comment is kept as one blank line; and
 - a document with no form and no comment as the empty text, with no
   newline.

@@ -27,6 +27,13 @@
 //! through a type parameter, an associated type, or the `Self` of an
 //! interface, which dispatch selects.
 //!
+//! `docs/spec/04-programs-and-packages.md`, "Modules and imports": access
+//! applies to members as to top-level declarations. A path from another
+//! module through a module to a private declaration, or through a type to a
+//! private static member, is `@name.privateAccess`, the first at the path,
+//! the second at the member's name, related to the declaration. A member of
+//! an interface has the interface's access, and a case the type's.
+//!
 //! Every path that resolves to a declaration with an identity is a
 //! reference of the `@resolved.v2` observation, at the bytes of the path.
 
@@ -680,6 +687,7 @@ impl<'a> Walker<'_, 'a, '_> {
                 && member.kind() != DeclarationKind::AssociatedType
         });
         if let Some(index) = found {
+            self.member_access(owner, index, part);
             return Some(Step::Into(Entity::Decl(index)));
         }
         let field = decl.members.iter().any(|member| {
@@ -707,6 +715,37 @@ impl<'a> Walker<'_, 'a, '_> {
         );
         self.report(diagnostic);
         None
+    }
+
+    /// Reports `part`, a path part that names the member `member` of
+    /// `owner`, when the member is private to another module. A member of a
+    /// private owner is not reported again: the owner is, where the path
+    /// reaches it. A case and an interface member have their owner's access,
+    /// so only a static member of a type can be private where its type is
+    /// not.
+    fn member_access(&mut self, owner: usize, member: usize, part: Ident<'a>) {
+        let (Some(owner), Some(decl)) =
+            (self.graph.decls.get(owner), self.graph.decls.get(member))
+        else {
+            return;
+        };
+        if decl.access == Access::Private
+            && owner.access == Access::Public
+            && decl.module != self.module
+        {
+            let diagnostic = at(
+                DiagnosticCode::NamePrivateAccess,
+                self.source_id(),
+                part.span(),
+                format!("`{}.{}` is private to its module", owner.name, part.text()),
+            )
+            .with_related_source(
+                self.graph.source_id(decl.module),
+                decl.name_span,
+                "the private member",
+            );
+            self.report(diagnostic);
+        }
     }
 
     /// The entity `part` names inside `entity`, the prefix of a path.
