@@ -1,0 +1,7 @@
+interface Shown
+  visibility @public
+  fn show
+    takes {value: Self}
+    returns code: U8
+  endfn
+endinterface

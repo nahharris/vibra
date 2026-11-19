@@ -27,6 +27,7 @@ V2-SRC-DECL-impl-with-section	active	01-source-language.md#grammar
 V2-SRC-DECL-interface-assoc	active	01-source-language.md#interface
 V2-SRC-DECL-interface-assoc-with-body	active	01-source-language.md#interface
 V2-SRC-DECL-interface-basic	active	01-source-language.md#interface
+V2-SRC-DECL-interface-member-visibility	active	01-source-language.md#interface
 V2-SRC-DECL-interface-default-empty	active	01-source-language.md#fn-and-proc
 V2-SRC-DECL-member-and-impl	active	01-source-language.md#impl
 V2-SRC-DECL-module-let	active	01-source-language.md#module-values
@@ -209,6 +210,10 @@ V2-PROJECT-import-module	active	04-programs-and-packages.md#modules-and-imports
 V2-PROJECT-import-declaration	active	04-programs-and-packages.md#modules-and-imports
 V2-PROJECT-import-alias	active	04-programs-and-packages.md#modules-and-imports
 V2-PROJECT-import-private	active	04-programs-and-packages.md#modules-and-imports
+V2-PROJECT-member-private	active	04-programs-and-packages.md#modules-and-imports
+V2-PROJECT-member-private-same-module	active	04-programs-and-packages.md#modules-and-imports
+V2-PROJECT-member-public	active	04-programs-and-packages.md#modules-and-imports
+V2-PROJECT-member-interface	active	04-programs-and-packages.md#modules-and-imports
 V2-PROJECT-import-unknown	active	04-programs-and-packages.md#modules-and-imports
 V2-PROJECT-import-cycle	active	04-programs-and-packages.md#modules-and-imports
 V2-PROJECT-import-case-exact	active	04-programs-and-packages.md#modules-and-imports

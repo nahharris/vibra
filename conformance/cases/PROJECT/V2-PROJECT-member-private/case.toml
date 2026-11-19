@@ -1,0 +1,19 @@
+id = "V2-PROJECT-member-private"
+rule = "V2-PROJECT-member-private"
+profile = "staticV2"
+operation = "resolve"
+description = "04-programs-and-packages.md#modules-and-imports: a private static member used from another module is @name.privateAccess at the member's name, related to the member"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.privateAccess"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 72, end = 78 }
+related = [{ source = "src/app/model.vib", span = { start = 45, end = 51 } }]
