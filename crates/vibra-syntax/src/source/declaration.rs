@@ -2,18 +2,23 @@
 //!
 //! `docs/spec/01-source-language.md`, "Declarations": Vibra has exactly seven
 //! top-level forms. `use` is complete here (`use atom [as identifier]
-//! enduse`); the other six are generic constructs whose bodies are reported
-//! `@tool.unavailable` until their own grammar exists. The generic section
-//! rules of "Grammar" apply to every construct: a repeated section is
+//! enduse`); `type` and `interface` have their own modules; the other four
+//! are generic constructs whose bodies are reported `@tool.unavailable`
+//! until their own grammar exists. The generic section rules of "Grammar"
+//! apply to every construct: a repeated section is
 //! `@syntax.duplicateSection` at the repeated keyword; in a `fn`, `proc`, or
 //! `test`, `do` comes last; a declaration's name comes before its sections;
-//! and `as` outside a `use` is `@syntax.invalidForm` at the `as`.
+//! `as` outside a `use` is `@syntax.invalidForm` at the `as`; and an `impl`
+//! that is not a direct child of a `type` or an `interface` is
+//! `@syntax.invalidForm` over the `impl`.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 
 use super::construct::is_trivia;
+use super::interface_decl::InterfaceDecl;
 use super::keyword::BODY_CONSTRUCTS;
 use super::section::{Construct, Section};
+use super::type_decl::TypeDecl;
 use crate::cst::{CstNode, SyntaxKind};
 
 /// One top-level form of a module.
@@ -22,9 +27,9 @@ pub enum Declaration<'a> {
     /// `use … enduse`.
     Use(Use<'a>),
     /// `type … endtype`.
-    Type(Construct<'a>),
+    Type(TypeDecl<'a>),
     /// `interface … endinterface`.
-    Interface(Construct<'a>),
+    Interface(InterfaceDecl<'a>),
     /// `fn … endfn`.
     Fn(Construct<'a>),
     /// `proc … endproc`.
@@ -43,8 +48,10 @@ impl<'a> Declaration<'a> {
         let construct = Construct::new(node, text)?;
         Some(match node.kind() {
             SyntaxKind::Use => Self::Use(Use::new(construct, text)),
-            SyntaxKind::TypeDecl => Self::Type(construct),
-            SyntaxKind::InterfaceDecl => Self::Interface(construct),
+            SyntaxKind::TypeDecl => Self::Type(TypeDecl::new(node, text)?),
+            SyntaxKind::InterfaceDecl => {
+                Self::Interface(InterfaceDecl::new(node, text)?)
+            }
             SyntaxKind::FnDecl => Self::Fn(construct),
             SyntaxKind::ProcDecl => Self::Proc(construct),
             SyntaxKind::ModuleLet => Self::Let(construct),
@@ -55,12 +62,12 @@ impl<'a> Declaration<'a> {
 
     /// The generic view of the form.
     #[must_use]
-    pub const fn construct(&self) -> Construct<'a> {
+    pub fn construct(&self) -> Construct<'a> {
         match self {
             Self::Use(view) => view.construct,
-            Self::Type(construct)
-            | Self::Interface(construct)
-            | Self::Fn(construct)
+            Self::Type(view) => view.construct(),
+            Self::Interface(view) => view.construct(),
+            Self::Fn(construct)
             | Self::Proc(construct)
             | Self::Let(construct)
             | Self::Test(construct) => *construct,
@@ -76,6 +83,14 @@ pub struct Atom<'a> {
 }
 
 impl<'a> Atom<'a> {
+    /// The view of an atom leaf of the document `text`.
+    pub(crate) fn of(node: &CstNode, text: &'a str) -> Option<Self> {
+        (node.kind() == SyntaxKind::Atom).then(|| Self {
+            text: node.text(text),
+            span: node.span(),
+        })
+    }
+
     /// The atom's text, `@` included.
     #[must_use]
     pub const fn text(&self) -> &'a str {
@@ -187,7 +202,9 @@ impl<'a> Use<'a> {
     }
 }
 
-fn name_of<'a>(node: &CstNode, text: &'a str) -> Option<Ident<'a>> {
+/// The name a leaf spells: an identifier, or a reserved word recovered as a
+/// name.
+pub(crate) fn name_of<'a>(node: &CstNode, text: &'a str) -> Option<Ident<'a>> {
     let reserved = match node.kind() {
         SyntaxKind::Identifier => false,
         SyntaxKind::ReservedWord => true,
@@ -263,8 +280,9 @@ pub(crate) fn check_use(node: &CstNode, text: &str, diagnostics: &mut Vec<Diagno
 }
 
 /// Applies the generic section rules to every construct in `node`, a
-/// top-level form: repeated sections, `do` last, the name first, and `as`
-/// outside a `use`. The walk is iterative.
+/// top-level form: repeated sections, `do` last, the name first, `as`
+/// outside a `use`, and an `impl` outside a `type` or `interface`. The walk
+/// is iterative.
 pub(crate) fn check_sections(
     node: &CstNode,
     text: &str,
@@ -284,35 +302,42 @@ pub(crate) fn check_sections(
             "a declaration's name comes before its sections",
         ));
     }
-    // Each entry: a node, and whether it is directly in a `use` construct.
-    let mut stack: Vec<(&CstNode, bool)> = vec![(node, false)];
-    while let Some((current, in_use)) = stack.pop() {
+    // Each entry: a node, and the keyword of the construct it is directly in.
+    let mut stack: Vec<(&CstNode, &str)> = vec![(node, "")];
+    while let Some((current, parent)) = stack.pop() {
         if current.kind() == SyntaxKind::Section {
             let mut children = current.children().iter();
             if let Some(keyword) = children.next()
-                && !in_use
+                && parent != "use"
             {
                 report_as(keyword, text, diagnostics);
             }
-            stack.extend(children.map(|child| (child, false)));
+            stack.extend(children.map(|child| (child, "")));
             continue;
         }
         if let Some(construct) = Construct::new(current, text) {
             check_construct(construct, diagnostics);
-            let is_use = construct.keyword() == "use";
+            let keyword = construct.keyword();
+            if keyword == "impl" && !matches!(parent, "type" | "interface") {
+                diagnostics.push(Diagnostic::new(
+                    DiagnosticCode::SyntaxInvalidForm,
+                    construct.span(),
+                    "an `impl` is written only directly in a `type` or an `interface`",
+                ));
+            }
             stack.extend(
                 current
                     .children()
                     .iter()
                     .skip(1)
-                    .map(|child| (child, is_use)),
+                    .map(|child| (child, keyword)),
             );
             continue;
         }
         if current.kind().is_leaf() {
             report_as(current, text, diagnostics);
         } else {
-            stack.extend(current.children().iter().map(|child| (child, false)));
+            stack.extend(current.children().iter().map(|child| (child, "")));
         }
     }
 }

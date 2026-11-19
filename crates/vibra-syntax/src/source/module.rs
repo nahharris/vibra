@@ -8,13 +8,16 @@
 //! where a top-level form is expected is reported once over the balanced
 //! parenthesized form, and an `as` alone is reported at the `as`. Every
 //! `use` precedes every other top-level form; a later `use` is
-//! `@syntax.invalidForm` at its keyword.
+//! `@syntax.invalidForm` at its keyword. A `type` and an `interface` are
+//! shaped in their own grammar; each `fn`, `proc`, `let`, and `test` is
+//! `@tool.unavailable` over the whole form until its grammar exists.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 
 use super::construct::is_trivia;
 use super::declaration::{Declaration, check_construct, check_sections, check_use};
 use super::section::Construct;
+use super::type_decl::{DeclKind, SourceOptions, shape_declaration};
 use crate::cst::{CstNode, SyntaxKind};
 use crate::document::{Document, DocumentMode};
 
@@ -37,6 +40,7 @@ const fn is_top_form(kind: SyntaxKind) -> bool {
 pub(crate) fn shape_module(
     items: Vec<CstNode>,
     text: &str,
+    options: SourceOptions,
     diagnostics: &mut Vec<Diagnostic>,
 ) -> CstNode {
     let mut out: Vec<CstNode> = Vec::with_capacity(items.len());
@@ -47,6 +51,19 @@ pub(crate) fn shape_module(
             flush_run(&mut run, &mut out, diagnostics);
             check_form(&item, text, after_other_form, diagnostics);
             after_other_form |= item.kind() != SyntaxKind::Use;
+            let item = match item.kind() {
+                SyntaxKind::TypeDecl => {
+                    shape_declaration(item, DeclKind::Type, options, text, diagnostics)
+                }
+                SyntaxKind::InterfaceDecl => shape_declaration(
+                    item,
+                    DeclKind::Interface,
+                    options,
+                    text,
+                    diagnostics,
+                ),
+                _ => item,
+            };
             out.push(item);
         } else if run.is_empty()
             && (is_trivia(&item) || item.kind() == SyntaxKind::Error)
@@ -81,6 +98,12 @@ fn check_form(
         return;
     }
     check_sections(item, text, diagnostics);
+    if matches!(
+        item.kind(),
+        SyntaxKind::TypeDecl | SyntaxKind::InterfaceDecl
+    ) {
+        return;
+    }
     diagnostics.push(Diagnostic::new(
         DiagnosticCode::ToolUnavailable,
         item.span(),

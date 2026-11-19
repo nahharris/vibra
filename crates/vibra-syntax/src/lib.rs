@@ -9,10 +9,11 @@
 //!
 //! A document is parsed by the grammar its extension selects
 //! ([`DocumentMode::from_path`]). [`parse_data`] is complete. [`parse_source`]
-//! parses the source grammar's skeleton ([`source`]): the module, the seven
-//! top-level forms recognized by keyword and typed closer, generic sections,
-//! and `use` in full. The bodies of the other six forms are reported
-//! `@tool.unavailable`, once per form.
+//! parses the source grammar ([`source`]): the module, the seven top-level
+//! forms recognized by keyword and typed closer, generic sections, `use`,
+//! and the type grammar (`type`, `interface`, `impl`, type expressions) in
+//! full. The bodies of `fn`, `proc`, `let`, and `test` forms and of named
+//! `fn` and `proc` members are reported `@tool.unavailable`, once per form.
 //!
 //! # Position in the architecture
 //!
@@ -32,7 +33,9 @@ pub use cst::{CstNode, SyntaxKind};
 pub use data::{
     DataEntry, DataField, DataNode, DataValue, FloatLiteral, IntegerLiteral,
 };
-pub use document::{Document, DocumentMode, load, parse, parse_data, parse_source};
+pub use document::{
+    Document, DocumentMode, load, parse, parse_data, parse_source, parse_source_with,
+};
 pub use lexer::{
     Lexed, RESERVED_WORDS, Token, TokenKind, check_encoding, is_reserved_word, lex,
 };
@@ -40,5 +43,7 @@ pub use literal::{
     FloatSuffix, IntegerSuffix, canonical_character, canonical_string,
     decode_character, decode_string,
 };
-pub use source::{Declaration, Module, Use, module};
+pub use source::{
+    Declaration, InterfaceDecl, Module, SourceOptions, TypeDecl, TypeExpr, Use, module,
+};
 pub use tree::{TREE_FORMAT, tree_document, tree_text};

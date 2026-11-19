@@ -1,14 +1,17 @@
 //! Typed views of constructs and sections.
 //!
 //! A view is a projection of the lossless tree: it borrows the tree and the
-//! document text and owns no bytes. Constructs and sections are generic in
-//! this step: a construct knows its opener keyword, its head, its sections,
-//! its nested constructs, and its closer; a section knows its keyword and its
-//! operand.
+//! document text and owns no bytes. A generic construct knows its opener
+//! keyword, its head, its sections, its nested constructs, and its closer; a
+//! generic section knows its keyword and its operand. The typed sections of
+//! the declarations ([`Given`], [`Where`], [`TagSection`], [`Doc`]) read the
+//! nodes of their productions.
 
 use vibra_diagnostics::ByteSpan;
 
 use super::construct::is_trivia;
+use super::declaration::{Atom, Ident};
+use super::types::{TypeExpr, type_entries};
 use crate::cst::{CstNode, SyntaxKind};
 
 /// Whether `kind` is a keyword-led construct: a top-level form or a generic
@@ -24,6 +27,9 @@ pub const fn is_construct(kind: SyntaxKind) -> bool {
             | SyntaxKind::ProcDecl
             | SyntaxKind::ModuleLet
             | SyntaxKind::Test
+            | SyntaxKind::Impl
+            | SyntaxKind::AssocType
+            | SyntaxKind::AssocChoice
             | SyntaxKind::Construct
     )
 }
@@ -40,6 +46,11 @@ impl<'a> Construct<'a> {
     #[must_use]
     pub fn new(node: &'a CstNode, text: &'a str) -> Option<Self> {
         is_construct(node.kind()).then_some(Self { node, text })
+    }
+
+    /// The view of a declaration node a typed view already checked.
+    pub(crate) const fn of_declaration(node: &'a CstNode, text: &'a str) -> Self {
+        Self { node, text }
     }
 
     /// The node.
@@ -179,5 +190,181 @@ impl<'a> Section<'a> {
             .skip(1)
             .filter(|child| !is_trivia(child))
             .collect()
+    }
+}
+
+/// The keyword and the operand of a typed section node: the keyword leaf
+/// first, then the operand without trivia.
+fn operand_of(node: &CstNode) -> Vec<&CstNode> {
+    node.children()
+        .iter()
+        .skip(1)
+        .filter(|child| !is_trivia(child))
+        .collect()
+}
+
+/// `given { Parameter: Bound … }`.
+#[derive(Clone, Copy, Debug)]
+pub struct Given<'a> {
+    node: &'a CstNode,
+    text: &'a str,
+}
+
+impl<'a> Given<'a> {
+    /// The view of a `@given` node of the document `text`.
+    #[must_use]
+    pub fn new(node: &'a CstNode, text: &'a str) -> Option<Self> {
+        (node.kind() == SyntaxKind::Given).then_some(Self { node, text })
+    }
+
+    /// The node.
+    #[must_use]
+    pub const fn node(&self) -> &'a CstNode {
+        self.node
+    }
+
+    /// The entries, each a type parameter and its bound, in written order.
+    #[must_use]
+    pub fn entries(&self) -> Vec<(Ident<'a>, TypeExpr<'a>)> {
+        let Some(brace) = self
+            .node
+            .children()
+            .iter()
+            .find(|child| child.kind() == SyntaxKind::Brace)
+        else {
+            return Vec::new();
+        };
+        let children = brace.children();
+        let inner = children
+            .get(1..children.len().saturating_sub(1))
+            .unwrap_or_default();
+        type_entries(inner, self.text)
+            .into_iter()
+            .filter_map(|(label, bound)| Some((label?, bound)))
+            .collect()
+    }
+}
+
+/// `where predicate [else consequence]`. The operands are captured as
+/// tokens here and typed by the expression grammar.
+#[derive(Clone, Copy, Debug)]
+pub struct Where<'a> {
+    node: &'a CstNode,
+    text: &'a str,
+}
+
+impl<'a> Where<'a> {
+    /// The view of a `@where` node of the document `text`.
+    #[must_use]
+    pub fn new(node: &'a CstNode, text: &'a str) -> Option<Self> {
+        (node.kind() == SyntaxKind::Where).then_some(Self { node, text })
+    }
+
+    /// The node.
+    #[must_use]
+    pub const fn node(&self) -> &'a CstNode {
+        self.node
+    }
+
+    fn split(&self) -> (Vec<&'a CstNode>, Option<Vec<&'a CstNode>>) {
+        let operand = operand_of(self.node);
+        let at = operand.iter().position(|node| {
+            node.kind() == SyntaxKind::ReservedWord && node.text(self.text) == "else"
+        });
+        match at {
+            Some(at) => {
+                let mut predicate = operand;
+                let consequence = predicate.split_off(at).into_iter().skip(1).collect();
+                (predicate, Some(consequence))
+            }
+            None => (operand, None),
+        }
+    }
+
+    /// The predicate's tokens, groups, and constructs, without trivia.
+    #[must_use]
+    pub fn predicate_tokens(&self) -> Vec<&'a CstNode> {
+        self.split().0
+    }
+
+    /// The consequence's tokens after `else`, when an `else` is written.
+    #[must_use]
+    pub fn else_tokens(&self) -> Option<Vec<&'a CstNode>> {
+        self.split().1
+    }
+}
+
+/// A section whose operand is one tag: `visibility`, `representation`, or
+/// `role`.
+#[derive(Clone, Copy, Debug)]
+pub struct TagSection<'a> {
+    node: &'a CstNode,
+    text: &'a str,
+}
+
+impl<'a> TagSection<'a> {
+    /// The view of a `@visibility`, `@representation`, or `@role` node of the
+    /// document `text`.
+    #[must_use]
+    pub fn new(node: &'a CstNode, text: &'a str) -> Option<Self> {
+        matches!(
+            node.kind(),
+            SyntaxKind::Visibility | SyntaxKind::Representation | SyntaxKind::Role
+        )
+        .then_some(Self { node, text })
+    }
+
+    /// The node.
+    #[must_use]
+    pub const fn node(&self) -> &'a CstNode {
+        self.node
+    }
+
+    /// The section keyword.
+    #[must_use]
+    pub fn keyword(&self) -> &'a str {
+        self.node
+            .children()
+            .first()
+            .map_or("", |keyword| keyword.text(self.text))
+    }
+
+    /// The tag, when the operand is one atom.
+    #[must_use]
+    pub fn tag(&self) -> Option<Atom<'a>> {
+        match operand_of(self.node).as_slice() {
+            [tag] => Atom::of(tag, self.text),
+            _ => None,
+        }
+    }
+}
+
+/// `doc """…"""`.
+#[derive(Clone, Copy, Debug)]
+pub struct Doc<'a> {
+    node: &'a CstNode,
+    text: &'a str,
+}
+
+impl<'a> Doc<'a> {
+    /// The view of a `@doc` node of the document `text`.
+    #[must_use]
+    pub fn new(node: &'a CstNode, text: &'a str) -> Option<Self> {
+        (node.kind() == SyntaxKind::Doc).then_some(Self { node, text })
+    }
+
+    /// The node.
+    #[must_use]
+    pub const fn node(&self) -> &'a CstNode {
+        self.node
+    }
+
+    /// The doc string token as written, delimiters included.
+    #[must_use]
+    pub fn doc_string(&self) -> Option<&'a str> {
+        match operand_of(self.node).as_slice() {
+            [doc] if doc.kind() == SyntaxKind::DocString => Some(doc.text(self.text)),
+            _ => None,
+        }
     }
 }

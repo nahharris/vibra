@@ -132,10 +132,7 @@ fn use_alias_reserved() {
 #[test]
 fn use_late() {
     let text = "type A of U8 endtype\n\nuse @std.io enduse";
-    assert_eq!(
-        diagnostics(text),
-        [(ToolUnavailable, 0, 20), (SyntaxInvalidForm, 22, 25)]
-    );
+    assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 22, 25)]);
     let document = source(text);
     let declarations = module(&document).unwrap().declarations();
     assert!(matches!(declarations[0], Declaration::Type(_)));
@@ -308,10 +305,10 @@ fn do_comes_last_and_the_name_comes_first() {
 }
 
 #[test]
-fn every_form_but_use_is_unavailable_once() {
+fn every_form_without_its_grammar_is_unavailable_once() {
+    assert!(diagnostics("type A of U8 endtype").is_empty());
+    assert!(diagnostics("interface I endinterface").is_empty());
     for (text, end) in [
-        ("type A of U8 endtype", 20),
-        ("interface I endinterface", 24),
         ("fn f returns r: I32 endfn", 25),
         ("proc p returns r: I32 endproc", 29),
         ("let x: I32 be 1i32 endlet", 25),

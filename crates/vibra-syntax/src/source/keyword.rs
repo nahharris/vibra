@@ -69,6 +69,78 @@ pub const SEPARATORS: &[&str] = &["then", "else", "case"];
 /// The reserved words that are ordinary tokens of an expression.
 pub const EXPRESSION_WORDS: &[&str] = &["return", "try", "await", "void"];
 
+/// The reserved type heads of "Grammar": a type expression or type body that
+/// begins with one is parsed by that head's own production, never as an
+/// applied path. They are identifiers to the lexer and name no declaration.
+pub const TYPE_HEADS: &[&str] = &["Fn", "Proc", "Intent", "Intrinsic"];
+
+/// The sections each declaration kind admits, one row per kind, from the
+/// grammar's `type-item`, `interface-decl`, and `impl` productions. The body
+/// of a `type` (`of` or its `case` list) is part of the declaration's
+/// structure, not a row entry. A section that is not in its kind's row is
+/// `@syntax.invalidSection`.
+pub const ADMISSIBLE_SECTIONS: &[(&str, &[&str])] = &[
+    (
+        "type",
+        &[
+            "given",
+            "where",
+            "role",
+            "visibility",
+            "representation",
+            "doc",
+        ],
+    ),
+    ("interface", &["given", "role", "visibility", "doc"]),
+    ("impl", &[]),
+];
+
+/// The sections admissible only in the embedded standard library; elsewhere
+/// each is `@syntax.invalidSection`.
+pub const STANDARD_LIBRARY_SECTIONS: &[&str] = &["role"];
+
+/// The closed tag set of each section whose operand is a tag, from the
+/// source chapter ("Declarations") and the type chapter ("Language core and
+/// standard library"). Any other operand is `@syntax.invalidForm` over the
+/// section.
+pub const TAG_SETS: &[(&str, &[&str])] = &[
+    ("visibility", &["@public", "@private"]),
+    ("representation", &["@public", "@private"]),
+    (
+        "role",
+        &[
+            "@bool",
+            "@str",
+            "@bytes",
+            "@option",
+            "@result",
+            "@dict",
+            "@iter",
+            "@equatable",
+            "@ordered",
+        ],
+    ),
+];
+
+/// The sections declaration kind `kind` admits, or `None` for a kind with no
+/// row.
+#[must_use]
+pub fn admissible_sections(kind: &str) -> Option<&'static [&'static str]> {
+    ADMISSIBLE_SECTIONS
+        .iter()
+        .find(|(row, _)| *row == kind)
+        .map(|(_, sections)| *sections)
+}
+
+/// The closed tag set of the section `keyword`, when its operand is a tag.
+#[must_use]
+pub fn tag_set(keyword: &str) -> Option<&'static [&'static str]> {
+    TAG_SETS
+        .iter()
+        .find(|(row, _)| *row == keyword)
+        .map(|(_, tags)| *tags)
+}
+
 /// The closer of the construct `opener` opens.
 #[must_use]
 pub fn closer_of(opener: &str) -> Option<&'static str> {
