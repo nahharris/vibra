@@ -271,6 +271,9 @@ fn sections_a_form_does_not_admit() {
     assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 26, 29)]);
     let text = "proc p returns r: Void performs X do return void endproc";
     assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 23, 33)]);
+    // A construct between the sections is invalid over the construct.
+    let text = "fn f returns r: I32 fn g returns r: I32 do return 1i32 endfn do return 1i32 endfn";
+    assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 20, 60)]);
 }
 
 #[test]

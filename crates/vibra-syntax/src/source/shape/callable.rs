@@ -37,6 +37,9 @@
 //!   `external` without `symbol` or with a body, a `symbol` without
 //!   `external`, and a `test` whose `takes` has other than one parameter are
 //!   `@syntax.invalidForm` over the form, once;
+//! - a construct written between the sections is `@syntax.invalidForm` over
+//!   that construct, as in a `type`; an `impl` there is already reported by
+//!   the generic section rules;
 //! - a `fn` or `proc` without `do` that is neither an abstract member of an
 //!   `interface` nor an external definition is `@syntax.invalidForm` at its
 //!   closer.
@@ -384,9 +387,23 @@ impl<'t> Level<'t> {
                     }
                     continue;
                 }
-                self.strays(out, &|level, item| {
-                    item.keyword
-                        || construct_keyword(&item.node, level.text) == Some("impl")
+                if item.node.kind() == SyntaxKind::Construct {
+                    // A construct between the sections is a form the
+                    // declaration does not admit, reported over itself as in
+                    // a `type`.
+                    self.trivia(out);
+                    if let Some(node) = self.bump() {
+                        self.push_diagnostic(
+                            DiagnosticCode::SyntaxInvalidForm,
+                            node.span(),
+                            "this form does not admit this construct",
+                        );
+                        out.push(Slot::Ready(as_error(node)));
+                    }
+                    continue;
+                }
+                self.strays(out, &|_, item| {
+                    item.keyword || item.node.kind() == SyntaxKind::Construct
                 });
                 continue;
             }
