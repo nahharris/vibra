@@ -68,6 +68,8 @@ its level MUST agree with it.
 | `@type.mismatch` | `@error` |
 | `@type.ambiguousInference` | `@error` |
 | `@type.infiniteSize` | `@error` |
+| `@type.depthExceeded` | `@error` |
+| `@type.expandingInstantiation` | `@error` |
 | `@type.invalidDictKey` | `@error` |
 | `@type.invalidTry` | `@error` |
 | `@type.unhandledFallible` | `@error` |
@@ -273,6 +275,8 @@ Resolution reads only the captured source graph.
 | a literal that does not fit its type | `@type.numericOutOfRange`, the literal |
 | a module value whose initializer reaches itself | `@type.initializerCycle`, the `let`, related along the cycle |
 | a declared type whose expansion repeats | `@type.infiniteSize`, the declaration whose expansion first repeats |
+| a type nested more than 64 levels | `@type.depthExceeded`, the written type, or the expression whose type it is |
+| a generic callable that reaches itself at a type built around one of its own type parameters | `@type.expandingInstantiation`, the call or callable reference with the expanding type argument, related along the cycle |
 | an inadmissible dict key type | `@type.invalidDictKey`, the key type |
 | a callable as a dict key, or an `assert.equal` operand whose type contains a callable, plan, or grant | `@type.functionNotEquatable`, the type or the operand |
 | `try` on a wrong carrier, in a callable with another carrier, or directly in a test | `@type.invalidTry`, the `try` |

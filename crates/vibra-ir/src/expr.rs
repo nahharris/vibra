@@ -197,6 +197,73 @@ impl Expr {
         Ok(())
     }
 
+    /// The nodes directly under this expression: its operands, the callee
+    /// of a call of a value, and the body of a closure.
+    pub(crate) fn operands(&self) -> Vec<&Node> {
+        let mut nodes: Vec<&Node> = Vec::new();
+        match self {
+            Self::Intrinsic { arguments, .. } => nodes.extend(arguments),
+            Self::Sequence(statements) => nodes.extend(statements),
+            Self::Closure { closure, captures } => {
+                nodes.extend(captures);
+                nodes.push(&closure.body);
+            }
+            Self::Let { value, body, .. } => nodes.extend([&**value, &**body]),
+            Self::LetElse {
+                value,
+                fallback,
+                body,
+                ..
+            } => nodes.extend([&**value, &**fallback, &**body]),
+            Self::Match { subject, arms, .. } => {
+                nodes.push(subject);
+                nodes.extend(arms.iter().map(|arm| &arm.body));
+            }
+            Self::If {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                nodes.extend([&**condition, &**then_branch]);
+                nodes.extend(else_branch.as_deref());
+            }
+            Self::Construct { construction, .. } => match construction {
+                Construction::Tuple(operands) | Construction::List(operands) => {
+                    nodes.extend(operands);
+                }
+                Construction::Record(fields) | Construction::Case { fields, .. } => {
+                    nodes.extend(fields.iter().map(|(_, node)| node));
+                }
+                Construction::Wrapper(operand) => nodes.push(operand),
+                Construction::Dict(entries) => {
+                    for (key, value) in entries {
+                        nodes.extend([key, value]);
+                    }
+                }
+            },
+            Self::Lookup { collection, key } => nodes.extend([&**collection, &**key]),
+            Self::Call { target, arguments } | Self::TailCall { target, arguments } => {
+                if let CallTarget::Value(callee) = target {
+                    nodes.push(callee);
+                }
+                nodes.extend(&arguments.positional);
+                nodes.extend(arguments.labelled.iter().map(|(_, node)| node));
+            }
+            Self::Field { record: value, .. }
+            | Self::Return(value)
+            | Self::Try(value)
+            | Self::WidenToInterface { value, .. }
+            | Self::WidenAtom(value) => nodes.push(value),
+            Self::Literal(_)
+            | Self::Variable { .. }
+            | Self::Global(_)
+            | Self::Function { .. }
+            | Self::Captured { .. }
+            | Self::Default(_) => {}
+        }
+        nodes
+    }
+
     /// Moves the expression of each operand of this one to `pending`,
     /// leaving a placeholder that owns nothing.
     fn take_operands(&mut self, pending: &mut Vec<Self>) {

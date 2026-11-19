@@ -125,7 +125,7 @@ Type chapter, by section.
 | Declared types | 16 | `V2-TYPE-NOMINAL-record-*`, `V2-TYPE-NOMINAL-wrapper`, `V2-TYPE-NOMINAL-wrapper-no-delegation`, `V2-TYPE-NOMINAL-declared-tuple`, `V2-TYPE-NOMINAL-variant-*`, `V2-TYPE-NOMINAL-same-shape-different-type` | `@type.argumentMismatch`, `@type.unknownRecordField`, `@type.mismatch`, `@name.memberCollision` | `@types.v2`, `@value.v2` |
 | Representation visibility | 16 | `V2-TYPE-NOMINAL-representation-*` | `@name.inaccessibleRepresentation` | `@types.v2` |
 | Type invariants | 21, 22 | `V2-CONTRACT-where-*`, `V2-CONTRACT-ingress-*` | `@type.invalidInvariant`, `@contract.invalidPredicate`, `@contract.unproved`, `@contract.refuted` | `@types.v2` |
-| Structural types | 16 | `V2-TYPE-NOMINAL-structural-record-order`, `V2-TYPE-NOMINAL-tuple-arity`, `V2-TYPE-NOMINAL-empty-tuple`, `V2-TYPE-NOMINAL-list`, `V2-TYPE-NOMINAL-list-mixed` | `@type.mismatch` | `@types.v2`, `@value.v2` |
+| Structural types | 16 | `V2-TYPE-NOMINAL-structural-record-order`, `V2-TYPE-NOMINAL-tuple-arity`, `V2-TYPE-NOMINAL-empty-tuple`, `V2-TYPE-NOMINAL-list`, `V2-TYPE-NOMINAL-list-mixed`, `V2-TYPE-NOMINAL-depth-*` | `@type.mismatch`, `@type.depthExceeded` | `@types.v2`, `@value.v2` |
 | Recursive types | 16 | `V2-TYPE-NOMINAL-recursive-list`, `V2-TYPE-NOMINAL-infinite-size`, `V2-TYPE-NOMINAL-infinite-size-mutual` | `@type.infiniteSize` | `@types.v2` |
 | Callable types (`Fn`) | 18 | `V2-TYPE-NOMINAL-fn-type-with-labelled`, `V2-TYPE-NOMINAL-fn-type-labelled-mismatch`, `V2-SRC-CALLS-function-value` | `@type.mismatch` | `@types.v2` |
 | Callable types (`Proc`, `Intent`) | M2 | M2 | M2 | M2 |
@@ -134,7 +134,7 @@ Type chapter, by section.
 | Namespaces and resolution | 10 / 11 | `V2-TYPE-NAMES-*` | `@name.unknownSymbol`, `@name.wrongEntityKind`, `@name.privateAccess`, `@name.redeclaration`, `@name.memberCollision`, `@name.genericRedeclaration`, `@name.reservedDeclaration`, `@name.reservedValueSpelling`, `@style.casing` | `@resolved.v2` |
 | Functions as values | 18 | `V2-TYPE-INFER-constructor-not-value`, `V2-TYPE-INFER-constructor-wrapped`, `V2-TYPE-INFER-member-value`, `V2-TYPE-INTERFACE-member-as-value`, `V2-TYPE-INTERFACE-member-as-value-ambiguous` | `@type.mismatch`, `@type.ambiguousInference` | `@types.v2` |
 | Inference and checking | 15 / 16, 18 | `V2-TYPE-INFER-*`, `V2-TYPE-CONTROL-let-written-type`, `V2-TYPE-CONTROL-let-written-type-mismatch` | `@type.ambiguousInference`, `@type.mismatch` | `@types.v2` |
-| Generics | 16 / 18, 19 | `V2-TYPE-GENERIC-*`, `V2-SRC-EXPR-anon-fn-generic-*` | `@type.typeArgumentMismatch`, `@type.ambiguousInference`, `@type.unsatisfiedBound`, `@name.genericRedeclaration` | `@types.v2` |
+| Generics | 16 / 18, 19 | `V2-TYPE-GENERIC-*`, `V2-SRC-EXPR-anon-fn-generic-*` | `@type.typeArgumentMismatch`, `@type.ambiguousInference`, `@type.unsatisfiedBound`, `@type.expandingInstantiation`, `@name.genericRedeclaration` | `@types.v2` |
 | Interfaces; the `Self` map; implementations | 19 | `V2-TYPE-INTERFACE-impl-*`, `V2-TYPE-INTERFACE-missing-member`, `V2-TYPE-INTERFACE-unknown-member`, `V2-TYPE-INTERFACE-member-twice`, `V2-TYPE-INTERFACE-default-override`, `V2-TYPE-INTERFACE-signature-mismatch`, `V2-TYPE-INTERFACE-default-member`, `V2-TYPE-INTERFACE-default-empty-body`, `V2-TYPE-INTERFACE-self-position`, `V2-TYPE-INTERFACE-self-map` | `@type.redundantImplementation`, `@type.missingAbstractMember`, `@type.defaultOverride`, `@type.mismatch`, `@type.missingReturn`, `@type.unsupportedSelfPosition`, `@type.typeArgumentMismatch`, `@name.unknownSymbol`, `@name.memberCollision` | `@types.v2` |
 | Associated types | 10 / 19 | `V2-TYPE-INTERFACE-assoc-*`, `V2-TYPE-NAMES-no-projection-path`, `V2-TYPE-NAMES-assoc-shadows-parameter`, `V2-TYPE-INTERFACE-iter-remainder-type` | `@name.redeclaration`, `@name.unknownSymbol`, `@name.genericRedeclaration`, `@type.missingAbstractMember`, `@type.typeArgumentMismatch`, `@type.mismatch` | `@types.v2` |
 | Bounds | 10 / 19 | `V2-TYPE-GENERIC-bound-*`, `V2-TYPE-GENERIC-given-unknown`, `V2-TYPE-GENERIC-given-repeated`, `V2-TYPE-INTERFACE-assoc-label` | `@name.wrongEntityKind`, `@name.unknownSymbol`, `@name.redeclaration`, `@type.unsatisfiedBound`, `@type.ambiguousInference`, `@type.mismatch` | `@types.v2` |
@@ -315,6 +315,8 @@ with no M1 step belongs to the milestone named.
 | `@type.mismatch` | steps 15, 16, 17, 18, 19, 21, 25, 26 |
 | `@type.ambiguousInference` | steps 15, 16, 18, 19 |
 | `@type.infiniteSize` | steps 16 |
+| `@type.depthExceeded` | steps 16 |
+| `@type.expandingInstantiation` | steps 16, 19 |
 | `@type.invalidDictKey` | steps 16, 19 |
 | `@type.invalidTry` | steps 17, 23 |
 | `@type.unhandledFallible` | steps 17 |

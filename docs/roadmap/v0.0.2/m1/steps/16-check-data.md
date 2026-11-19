@@ -44,7 +44,13 @@ Proposed: `vibra-types::{nominal, generics}`.
    no tuple index.
 4. Structural types: tuple arity and component types; record field sets in
    any written order with canonical order by UTF-8 bytes; `{}` the empty
-   tuple; mixing `@type.mismatch`.
+   tuple; mixing `@type.mismatch`. Type depth: a written type, and the
+   type of every expression, nests at most 64 levels
+   (`vibra_ir::Type::MAX_DEPTH`); a deeper one is `@type.depthExceeded` at
+   the type or the expression. The depth is measured without recursion,
+   and before any walk that recurses over the type. Invariant: no type
+   that reaches `CheckedModuleSet::try_new` is deeper, so the checked IR's
+   own depth check never fires on checker output.
 5. Collections: list literal elements of one type; `[]` and `[:]` need an
    expected type (`@type.ambiguousInference`); dict keys `Ordered`
    (`@type.invalidDictKey` for `F64`, `Void`, `List`, `Option`, a declared
@@ -59,7 +65,17 @@ Proposed: `vibra-types::{nominal, generics}`.
    `@type.unsatisfiedBound` (bounds are nominal interfaces; `Any` always
    holds; other bounds are checked when 19 adds implementations, so this
    step's bound cases use `Any`), inference of arguments from operands and
-   expected types, no call-site type arguments.
+   expected types, no call-site type arguments. Expanding instantiations:
+   build the graph whose nodes are the type parameters of every generic
+   callable and whose edges are the type arguments of each call of, and
+   reference to, a generic callable inside a generic callable's body and
+   guards, closures included; an edge is expanding when the argument
+   mentions the parameter and is not the parameter alone. An expanding
+   edge on a cycle is `@type.expandingInstantiation` at the call or
+   reference, the first in source order, related to the other
+   instantiations of the cycle. Step 19 adds the edges of contract calls
+   and of the implementations that satisfy a bound. Invariant: the checked
+   IR's `IrError::ExpandingInstantiation` never fires on checker output.
 8. Recursive types: symbolic references; `@type.infiniteSize` at the first
    repeating declaration; recursion through `List`, `Dict`, or a callable
    is finite.
@@ -109,6 +125,12 @@ Proposed: `vibra-types::{nominal, generics}`.
 | `V2-TYPE-GENERIC-invariant` | negative | `fn f takes {b: Box(Any)} …` called with a `Box(I32)` | `@type.mismatch` |
 | `V2-TYPE-GENERIC-inferred-argument` | positive, interpret | `fn first(T) takes {items: List(T)} returns head: Option(T) do return items(0u64) endfn` called with `[1i32]` | `Option.some(value: 1i32)` |
 | `V2-TYPE-GENERIC-uninferable` | negative | `fn make(T) returns r: Option(T) do return Option.none() endfn` called as `make()` with no expected type | `@type.ambiguousInference` at the application |
+| `V2-TYPE-GENERIC-expanding-direct` | negative | `fn f(T) takes {items: List(T)} returns r: U64 do return f([items]) endfn` | `@type.expandingInstantiation` at `f([items])` |
+| `V2-TYPE-GENERIC-expanding-mutual` | negative | `f(T)` calling `g([items])` and `g(U) takes {items: U}` calling `f(items)` | `@type.expandingInstantiation` at `g([items])`, related to the call of `f` |
+| `V2-TYPE-GENERIC-recursion-same-parameter` | positive | `fn f(T) takes {items: List(T)} returns r: U64 do return f(items) endfn` | accepted |
+| `V2-TYPE-GENERIC-recursion-closed` | positive | `f(T)` calling `f([1u8])` | accepted |
+| `V2-TYPE-NOMINAL-depth-limit` | boundary | a `List` nested 64 levels, written as a parameter type | accepted |
+| `V2-TYPE-NOMINAL-depth-exceeded` | negative | a `List` nested 65 levels, written as a parameter type | `@type.depthExceeded` at the type |
 | `V2-TYPE-NOMINAL-recursive-list` | positive, interpret | `type Tree case leaf case node {kids: List(Tree)} endtype` | accepted; a value built and returned |
 | `V2-TYPE-NOMINAL-infinite-size` | negative | `type A of {next: A} endtype` | `@type.infiniteSize` at `A` |
 | `V2-TYPE-NOMINAL-infinite-size-mutual` | negative | `type A of {b: B} endtype\ntype B of {a: A} endtype` | `@type.infiniteSize` at the first in declaration order whose expansion repeats |
@@ -120,7 +142,8 @@ Codes: `@type.argumentMismatch`, `@type.mismatch`, `@type.notApplicable`,
 `@type.unknownRecordField`, `@type.ambiguousInference`,
 `@type.invalidDictKey`, `@type.functionNotEquatable`,
 `@name.inaccessibleRepresentation`, `@name.privateAccess`,
-`@type.typeArgumentMismatch`, `@type.infiniteSize`. No schema change
+`@type.typeArgumentMismatch`, `@type.infiniteSize`,
+`@type.depthExceeded`, `@type.expandingInstantiation`. No schema change
 (`@types.v2` gains declared types inside its existing fields).
 
 ## Validation

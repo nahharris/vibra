@@ -111,8 +111,8 @@ rather than a rename of everything that survives.
    of `vibra-conformance-v1`; in the same PR the v1 runner loses the
    executor columns of the crates that moved. If X2-01 has not landed
    when every other prerequisite of step 28 has, step 28 does the
-   mechanical re-pointing itself and records the tests it had to drop as X2-01's remaining list; it never deletes
-   the native crates.
+   mechanical re-pointing itself and records the tests it had to drop as
+   X2-01's remaining list; it never deletes the native crates.
 6. **`vibra-native` and `vibra-host` exist twice until the cutover.** The
    `-v1` crates serve the v1 pipeline and, until X2-01, the native track.
    Step 27 creates the crates of the final names on the new `vibra-ir`
@@ -337,6 +337,7 @@ that owns a trusted property tests it at the checker.
 | A widening, a call through an interface value, a generic instantiation, a contract call on an open receiver, and a dict key have conformance evidence: a bound, `Self` in a default body, a matching implementation with its bounds, or the structural rule for atoms, tuples, and records | validates | step 12 |
 | An implementation supplies every abstract member, supplies no default member, and overlaps no other implementation | validates | step 12 |
 | A declared type holds itself only through `List`, `Dict`, a callable, or an interface value | validates | step 12 |
+| No generic function reaches itself at a type built around one of its own type parameters: no cycle of the instantiation graph holds an expanding type argument. The instantiations are direct calls, function values, the member a contract call's receiver selects, and the members of each implementation that satisfies a bound. A contract call on a type parameter, a default body's call on `Self`, and the evidence of a widening or a dict key add no edge | validates the edges named; trusts the checker for the rest | steps 16 and 19 |
 | Every labelled parameter of a function or a closure has one constant default of its type, and a closure value carries its defaults | validates | step 12 |
 | A constant fits its type | validates | step 12 |
 | A constant or an evaluation's input satisfies every invariant its type carries, and every dict in it holds its keys ascending and distinct | the interpreter checks it where the value comes in: `@runtime.invalidCheckedProgram` for a constant, `@runtime.invalidHostValue` for an input | step 13 |

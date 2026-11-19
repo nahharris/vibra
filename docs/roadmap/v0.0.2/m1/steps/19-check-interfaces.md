@@ -112,7 +112,12 @@ Proposed: `vibra-types::{interfaces, dispatch, widen}`.
    resolvable is `@type.ambiguousInference` at the application; a
    resolvable bound with no implementation is `@type.unsatisfiedBound`;
    two sources of one parameter that disagree are `@type.mismatch` at the
-   operand.
+   operand. The instantiation graph of step 16 gains two kinds of edge:
+   the member that a contract call's receiver selects, at the types the
+   selection gives the implementation's parameters, and every member of
+   each implementation that satisfies a bound of an instantiated
+   callable; an expanding edge on a cycle is
+   `@type.expandingInstantiation`.
 8. Conversion: `From(Source)` and `TryFrom(Source)` destination dispatched;
    `@type.redundantConversion` when one receiver's `From` and `TryFrom`
    sources unify.
@@ -196,7 +201,8 @@ Codes: `@type.redundantImplementation`, `@name.wrongEntityKind`,
 `@type.ambiguousInference`, `@type.overlappingImplementation`,
 `@type.ambiguousImplementation`, `@type.typeArgumentMismatch`,
 `@type.unsatisfiedBound`, `@type.redundantConversion`,
-`@type.invalidDictKey`, `@type.unsupportedSelfPosition`,
+`@type.expandingInstantiation`, `@type.invalidDictKey`,
+`@type.unsupportedSelfPosition`,
 `@type.argumentMismatch`, `@type.missingReturn`, `@name.unknownSymbol`,
 `@name.memberCollision`, `@name.redeclaration`,
 `@name.genericRedeclaration`. Schema: `@types.v2` `implementations` is

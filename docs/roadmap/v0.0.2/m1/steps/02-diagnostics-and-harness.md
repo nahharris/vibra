@@ -34,7 +34,7 @@ Created:
 | `crates/vibra-diagnostics/Cargo.toml` | package `vibra-diagnostics`, no dependency, workspace lints |
 | `crates/vibra-diagnostics/src/lib.rs` | re-exports of the four modules |
 | `crates/vibra-diagnostics/src/span.rs`, `line_index.rs`, `diagnostic.rs` | copies of the v1 files |
-| `crates/vibra-diagnostics/src/registry.rs` | the 116 codes of the specification table |
+| `crates/vibra-diagnostics/src/registry.rs` | the 118 codes of the specification table |
 | `crates/vibra-conformance/Cargo.toml` | package `vibra-conformance`, binary `vibra-conformance` at `src/bin/conformance.rs`; dependencies `vibra-diagnostics`, `toml`, `serde` |
 | `crates/vibra-conformance/src/lib.rs` | module list |
 | `crates/vibra-conformance/src/corpus.rs` | discovery under `conformance/cases` |
@@ -126,7 +126,7 @@ Host tests only; there is no case yet.
 | Test | Input | Expected |
 | --- | --- | --- |
 | registry membership | the chapter table | the implemented set equals the specified set; the test is not ignored |
-| registry count | the registry | 116 codes |
+| registry count | the registry | 118 codes |
 | registry levels | each code | `@type.suspiciousRow`, `@style.casing`, `@contract.unusedEffect` are `@warning`; every other code `@error` |
 | registry domain | each code | the domain's spelling is the code's first component; the counts are syntax 11, name 10, module 11, type 29, pattern 5, effect 4, external 3, data 5, project 11, runtime 3, style 1, contract 7, grant 6, tool 9 |
 | manifest: profile spellings | `profile = "readerV2"` … `"fullV2"` | accepted; `"reader-v1"` rejected as an unknown profile |
@@ -142,7 +142,7 @@ Host tests only; there is no case yet.
 
 ## Diagnostics and schema changes
 
-The new registry is exactly the specification table (116 rows). No schema:
+The new registry is exactly the specification table (118 rows). No schema:
 `DiagnosticDocument` version 2 is rendered by `vibra-schema` in step 24.
 
 ## Validation
@@ -161,7 +161,7 @@ Read: `cargo test -p vibra-conformance` lists
 `the_registry_and_the_specification_table_have_the_same_codes` as `ok`, not
 `ignored`. The workspace run shows two ignored tests in
 `vibra-conformance-v1` (example inventory, native parity) besides the
-child-process helpers. The last command counts 116.
+child-process helpers. The last command counts 118.
 
 The new packages need no crate that is not already in `Cargo.lock`, so
 `--offline` holds; run `cargo metadata --offline` once without `--locked`

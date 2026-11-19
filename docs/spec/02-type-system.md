@@ -262,6 +262,14 @@ names with equal types, in any written order; a record's canonical field
 order sorts names by their UTF-8 bytes. `{}` is the empty tuple. Both forms
 are accepted in every type position.
 
+A type nests at most 64 levels. A type with no component is one level, and
+every other type is one level more than its deepest component: an element,
+a tuple component, a field, a parameter, a result, a type argument, or the
+choice of an associated type. A written type nested deeper, and an
+expression whose type is, is `@type.depthExceeded` at the type or the
+expression. The limit is part of the language and is the same in every
+tool.
+
 An anonymous type has no owner: it declares no members and receives no
 `impl`. It conforms to `Any` and, under the structural rule of
 [Dict keys, equality, and order](#dict-keys-equality-and-order), to
@@ -490,6 +498,24 @@ bound. When an application's shape is itself invalid, only
 `@type.typeArgumentMismatch` is reported for it. Partial application,
 named or defaulted type arguments, multiple bounds on one parameter, and
 run-time type tests do not exist.
+
+A generic callable MUST NOT reach itself at a type built around one of its
+own type parameters. Each call of a generic callable, and each reference to
+one as a value, inside the body or the guards of a generic callable is an
+instantiation. So is each member of the implementation that a contract
+call's receiver selects there, and of each implementation that satisfies a
+bound of the callable being instantiated. A type argument of an
+instantiation carries a type parameter of the enclosing callable to the
+parameter it is for when it mentions it, and expands it when it mentions it
+and is not that parameter alone. Every chain of instantiations that leads a
+type parameter back to itself MUST hand it on unchanged at every step; a
+type argument that mentions no type parameter is on no such chain. An
+expanding type argument on such a chain is `@type.expandingInstantiation` at
+its call or reference, related to the other instantiations of the chain.
+A `fn f(T)` that calls `f` with a `List(T)` operand is rejected, and so is
+one that calls a `g(U)` at `List(T)` when `g` calls `f` at `U`. A call of
+`f` at `T` or at `U8` inside `f` is accepted, and so are two callables that
+exchange their parameters unchanged.
 
 ### Bounds
 
