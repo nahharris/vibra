@@ -101,7 +101,8 @@ fn a_recovered_document_is_returned_byte_for_byte() {
     for input in ["[1u8}", "\"open", "{a: [1u8 2u8}", "{a:   foo}", "{} {}"] {
         assert_eq!(format(input), input);
     }
-    let source = "fn f returns r: I32 do return 1i32 endfn";
+    // A `fn` without `returns` is recovered.
+    let source = "fn f takes {x: I32} do return x endfn";
     assert_eq!(
         format_document(&parse_source(None, source.as_bytes())).as_deref(),
         Some(source)

@@ -25,9 +25,17 @@ fn a_type_that_fits_is_one_line() {
         format("type   Celsius\n  of   F64\nendtype"),
         "type Celsius of F64 endtype\n"
     );
+}
+
+#[test]
+fn a_case_list_always_breaks() {
     assert_eq!(
-        format("type Color\n  case red\n  case green\nendtype"),
-        "type Color case red case green endtype\n"
+        format("type Color case red case green endtype"),
+        "type Color\n  case red\n  case green\nendtype\n"
+    );
+    assert_eq!(
+        format("type Unit case only endtype"),
+        "type Unit\n  case only\nendtype\n"
     );
 }
 

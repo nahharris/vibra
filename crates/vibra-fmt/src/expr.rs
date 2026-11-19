@@ -17,6 +17,9 @@
 //! - a brace or bracket form, and the arguments of an application, on one
 //!   line when they fit, otherwise one entry per line, one step in, with the
 //!   closing token on its own line;
+//! - the statements of a callable body one step in from `do`; a guard's
+//!   `else` on the next line one step in from its guard when both do not
+//!   fit on one line;
 //! - arguments, fields, entries, and statements in written order, always.
 //!
 //! A `let` in a body breaks every construct around it. A comment between two
@@ -27,7 +30,7 @@
 use vibra_syntax::{CstNode, SyntaxKind};
 
 use crate::layout::Item;
-use crate::source::{flat, generic, type_items};
+use crate::source::{callable, flat, type_items};
 
 /// One step of the layout.
 enum Work<'a> {
@@ -42,6 +45,10 @@ enum Work<'a> {
     Body(&'a CstNode),
     /// A written type.
     Type(Vec<&'a CstNode>),
+    /// A `requires` or `ensures` guard.
+    Guard(&'a CstNode),
+    /// The entries of a `labelled` section.
+    Labelled(&'a CstNode),
 }
 
 /// The grammar of a bracket group's entries.
@@ -91,6 +98,22 @@ pub(crate) fn expr_items(nodes: &[&CstNode], text: &str) -> Option<Vec<Item>> {
     run(Work::Expr(nodes.to_vec()), text)
 }
 
+/// The layout items of the statements of a `@body`, each after a break.
+pub(crate) fn body_items(node: &CstNode, text: &str) -> Option<Vec<Item>> {
+    run(Work::Body(node), text)
+}
+
+/// The layout items of a guard: its `else` on the next line, one step in,
+/// when the guard does not fit on one line.
+pub(crate) fn guard_items(node: &CstNode, text: &str) -> Option<Vec<Item>> {
+    run(Work::Guard(node), text)
+}
+
+/// The layout items of the `@labelled` entries `name: Type be default`.
+pub(crate) fn labelled_items(node: &CstNode, text: &str) -> Option<Vec<Item>> {
+    run(Work::Labelled(node), text)
+}
+
 /// The layout items of a `let` node: a local `let`, or a module value with
 /// no section but `be`.
 pub(crate) fn let_items(node: &CstNode, text: &str) -> Option<Vec<Item>> {
@@ -118,6 +141,8 @@ fn run<'a>(start: Work<'a>, text: &str) -> Option<Vec<Item>> {
             Work::Pattern(nodes) => pattern(&nodes, text, &mut next)?,
             Work::Body(node) => body(node, text, &mut next)?,
             Work::Type(nodes) => out.extend(type_items(&nodes, text)?),
+            Work::Guard(node) => guard(node, text, &mut next)?,
+            Work::Labelled(node) => labelled(node, text, &mut next)?,
         }
         work.extend(next.into_iter().rev());
     }
@@ -151,7 +176,7 @@ fn form<'a>(
         SyntaxKind::Match => match_form(node, text, next)?,
         SyntaxKind::DoBlock => do_form(node, text, next)?,
         SyntaxKind::Let | SyntaxKind::ModuleLet => let_form(node, text, next)?,
-        SyntaxKind::Construct => generic(node, text, out)?,
+        SyntaxKind::AnonFn | SyntaxKind::AnonProc => callable(node, text, out)?,
         kind if kind.is_leaf() && kind != SyntaxKind::Comment => {
             next.push(text_item(node.text(text)));
         }
@@ -570,4 +595,80 @@ fn body<'a>(node: &'a CstNode, text: &str, next: &mut Vec<Work<'a>>) -> Option<(
         newlines = 0;
     }
     prefixes.is_empty().then_some(())
+}
+
+/// `requires predicate [else consequence]`, or the same with `ensures`.
+fn guard<'a>(node: &'a CstNode, text: &str, next: &mut Vec<Work<'a>>) -> Option<()> {
+    let items = significant(node)?;
+    let (keyword, operand) = items.split_first()?;
+    let split = operand.iter().position(|item| is_word(item, text, "else"));
+    let (predicate, consequence) = match split {
+        Some(at) => (operand.get(..at)?, operand.get(at + 1..)),
+        None => (operand, None),
+    };
+    next.extend([
+        Work::Emit(Item::Begin),
+        text_item(format!("{} ", keyword.text(text))),
+        Work::Expr(predicate.to_vec()),
+    ]);
+    if let Some(consequence) = consequence {
+        next.extend([
+            Work::Emit(Item::Indent),
+            Work::Emit(Item::Space),
+            text_item("else "),
+            Work::Expr(consequence.to_vec()),
+            Work::Emit(Item::Dedent),
+        ]);
+    }
+    next.push(Work::Emit(Item::End));
+    Some(())
+}
+
+/// `{name: Type be default …}`: on one line when it fits, otherwise one
+/// entry per line, one step in, with the closing brace on its own line.
+fn labelled<'a>(node: &'a CstNode, text: &str, next: &mut Vec<Work<'a>>) -> Option<()> {
+    let items = significant(node)?;
+    let open = items.first()?.text(text);
+    let close = items.last()?.text(text);
+    let inner = items.get(1..items.len().saturating_sub(1))?;
+    if inner.is_empty() {
+        next.push(text_item(format!("{open}{close}")));
+        return Some(());
+    }
+    next.extend([
+        Work::Emit(Item::Begin),
+        text_item(open),
+        Work::Emit(Item::Indent),
+        Work::Emit(Item::Soft),
+    ]);
+    let mut at = 0;
+    while at < inner.len() {
+        if at > 0 {
+            next.push(Work::Emit(Item::Space));
+        }
+        let label = *inner.get(at)?;
+        if !inner
+            .get(at + 1)
+            .is_some_and(|colon| is_mark(colon, text, ":"))
+        {
+            return None;
+        }
+        next.push(text_item(format!("{}: ", flat(&[label], text)?)));
+        at += 2;
+        let be = at
+            + inner
+                .get(at..)?
+                .iter()
+                .position(|item| is_word(item, text, "be"))?;
+        next.extend([Work::Type(inner.get(at..be)?.to_vec()), text_item(" be ")]);
+        at = be + 1;
+        next.push(entry_value(inner, &mut at, Entries::Expressions, text)?);
+    }
+    next.extend([
+        Work::Emit(Item::Dedent),
+        Work::Emit(Item::Soft),
+        text_item(close),
+        Work::Emit(Item::End),
+    ]);
+    Some(())
 }
