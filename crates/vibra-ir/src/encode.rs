@@ -9,6 +9,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
+use std::rc::Rc;
 
 use crate::{
     Binder, Bound, EntityRef, ImplementationRecord, InterfaceKey, Library,
@@ -461,16 +462,42 @@ fn write_non_finite(out: &mut String, nan: bool, negative: bool) {
     out.push('}');
 }
 
-/// Writes the fields of a record or a case: `{name: v …}` in the given
-/// order, each value at its type.
-fn write_fields(
-    out: &mut String,
+/// A part of a value encoding still to write. The encoder keeps these on a
+/// work list, so that no host stack grows with the depth of the value.
+enum Piece<'v> {
+    /// Literal text.
+    Text(&'static str),
+    /// A value at its closed type.
+    Value(&'v Value, Rc<Type>),
+    /// `name: v`, a field of a record or a case.
+    Field(String, &'v Value, Rc<Type>),
+    /// `{kind: @tuple values: [k v]}`, an entry of a dict.
+    Entry(&'v Value, Rc<Type>, &'v Value, Rc<Type>),
+}
+
+/// Queues `children`, separated by spaces, and then `closing`.
+fn nest<'v>(
+    pending: &mut Vec<Piece<'v>>,
+    children: Vec<Piece<'v>>,
+    closing: &'static str,
+) {
+    pending.push(Piece::Text(closing));
+    let count = children.len();
+    for (index, child) in children.into_iter().rev().enumerate() {
+        pending.push(child);
+        if index.saturating_add(1) < count {
+            pending.push(Piece::Text(" "));
+        }
+    }
+}
+
+/// The fields of a record or a case in the given order, each at its type.
+fn field_pieces<'v>(
     declared: &[(String, Type)],
-    written: &[(String, Value)],
+    written: &'v [(String, Value)],
     ty: &Type,
     value: &Value,
-    table: &TypeTable,
-) -> Result<(), EncodeError> {
+) -> Result<Vec<Piece<'v>>, EncodeError> {
     if declared.len() != written.len()
         || !declared.iter().all(|(name, _)| {
             written.iter().filter(|(field, _)| field == name).count() == 1
@@ -478,41 +505,63 @@ fn write_fields(
     {
         return Err(mismatch(ty, value));
     }
-    out.push('{');
-    write_spaced(out, declared, |out, (name, field_type)| {
-        let field = written
-            .iter()
-            .find_map(|(field, held)| (field == name).then_some(held))
-            .ok_or_else(|| mismatch(ty, value))?;
-        out.push_str(name);
-        out.push_str(": ");
-        write_value(out, field, field_type, table)
-    })?;
-    out.push('}');
-    Ok(())
-}
-
-fn write_values(
-    out: &mut String,
-    values: &[Value],
-    types: &[Type],
-    table: &TypeTable,
-) -> Result<(), EncodeError> {
-    out.push('[');
-    write_spaced(out, values.iter().zip(types), |out, (value, ty)| {
-        write_value(out, value, ty, table)
-    })?;
-    out.push(']');
-    Ok(())
+    declared
+        .iter()
+        .map(|(name, field_type)| {
+            let field = written
+                .iter()
+                .find_map(|(field, held)| (field == name).then_some(held))
+                .ok_or_else(|| mismatch(ty, value))?;
+            Ok(Piece::Field(
+                name.clone(),
+                field,
+                Rc::new(field_type.clone()),
+            ))
+        })
+        .collect()
 }
 
 /// Appends the value encoding of `value` at the closed type `ty`.
-#[allow(clippy::too_many_lines)]
 fn write_value(
     out: &mut String,
     value: &Value,
     ty: &Type,
     table: &TypeTable,
+) -> Result<(), EncodeError> {
+    let mut pending = vec![Piece::Value(value, Rc::new(ty.clone()))];
+    while let Some(piece) = pending.pop() {
+        match piece {
+            Piece::Text(text) => out.push_str(text),
+            Piece::Value(value, ty) => {
+                write_node(out, value, &ty, table, &mut pending)?
+            }
+            Piece::Field(name, value, ty) => {
+                out.push_str(&name);
+                out.push_str(": ");
+                pending.push(Piece::Value(value, ty));
+            }
+            Piece::Entry(key, key_type, item, item_type) => {
+                out.push_str("{kind: @tuple values: [");
+                pending.extend([
+                    Piece::Text("]}"),
+                    Piece::Value(item, item_type),
+                    Piece::Text(" "),
+                    Piece::Value(key, key_type),
+                ]);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Appends the start of the encoding of `value` at `ty` and queues the
+/// rest: its children and its closing text.
+fn write_node<'v>(
+    out: &mut String,
+    value: &'v Value,
+    ty: &Type,
+    table: &TypeTable,
+    pending: &mut Vec<Piece<'v>>,
 ) -> Result<(), EncodeError> {
     if let Value::Function { .. } | Value::Closure { .. } = value {
         return Err(EncodeError::NoEncoding(describe(value)));
@@ -575,42 +624,50 @@ fn write_value(
             if held_type.is_interface_value() {
                 return Err(mismatch(ty, value));
             }
-            out.push_str("{kind: @interface held: ");
-            write_document(out, held, held_type, table)?;
-            out.push('}');
+            out.push_str("{kind: @interface held: {format: @value.v2 typeInfo: ");
+            write_type(out, held_type, false)?;
+            out.push_str(" value: ");
+            pending.push(Piece::Text("}}"));
+            pending.push(Piece::Value(held, Rc::new(held_type.clone())));
         }
         (Type::List(element), Value::List(items)) => {
             out.push_str("{kind: @list values: [");
-            write_spaced(out, items, |out, item| {
-                write_value(out, item, element, table)
-            })?;
-            out.push_str("]}");
+            let element = Rc::new(Type::clone(element));
+            let children = items
+                .iter()
+                .map(|item| Piece::Value(item, Rc::clone(&element)))
+                .collect();
+            nest(pending, children, "]}");
         }
         (Type::Tuple(types), Value::Tuple(values)) if types.len() == values.len() => {
-            out.push_str("{kind: @tuple values: ");
-            write_values(out, values, types, table)?;
-            out.push('}');
+            out.push_str("{kind: @tuple values: [");
+            let children = values
+                .iter()
+                .zip(types)
+                .map(|(value, ty)| Piece::Value(value, Rc::new(ty.clone())))
+                .collect();
+            nest(pending, children, "]}");
         }
         (Type::Record(fields), Value::Record(written)) => {
-            out.push_str("{kind: @record fields: ");
-            write_fields(out, fields.entries(), written, ty, value, table)?;
-            out.push('}');
+            let children = field_pieces(fields.entries(), written, ty, value)?;
+            out.push_str("{kind: @record fields: {");
+            nest(pending, children, "}}");
         }
         (Type::Declared(id, arguments), _) => {
-            write_declared(out, id, arguments, ty, value, table)?;
+            write_declared(out, (id, arguments), ty, value, table, pending)?;
         }
         _ => return Err(mismatch(ty, value)),
     }
     Ok(())
 }
 
-fn write_declared(
+fn write_declared<'v>(
     out: &mut String,
-    id: &TypeId,
-    arguments: &[Type],
+    (id, arguments): (&TypeId, &[Type]),
     ty: &Type,
-    value: &Value,
+    value: &'v Value,
     table: &TypeTable,
+    pending: &mut Vec<Piece<'v>>,
 ) -> Result<(), EncodeError> {
     let library = table.library().library_of(id);
     match (library, value) {
@@ -632,15 +689,19 @@ fn write_declared(
                 return Err(mismatch(ty, value));
             };
             out.push_str("{kind: @dict entries: [");
-            write_spaced(out, entries, |out, (entry_key, entry_value)| {
-                out.push_str("{kind: @tuple values: [");
-                write_value(out, entry_key, key, table)?;
-                out.push(' ');
-                write_value(out, entry_value, item, table)?;
-                out.push_str("]}");
-                Ok(())
-            })?;
-            out.push_str("]}");
+            let (key, item) = (Rc::new(key.clone()), Rc::new(item.clone()));
+            let children = entries
+                .iter()
+                .map(|(entry_key, entry_value)| {
+                    Piece::Entry(
+                        entry_key,
+                        Rc::clone(&key),
+                        entry_value,
+                        Rc::clone(&item),
+                    )
+                })
+                .collect();
+            nest(pending, children, "]}");
             return Ok(());
         }
         (Some(Library::Str | Library::Bytes | Library::Dict), _) => {
@@ -666,23 +727,28 @@ fn write_declared(
         (TypeBody::Tuple(types), Value::Tuple(values))
             if types.len() == values.len() =>
         {
-            let types = types
+            let _ = write!(out, "{{kind: @tuple typeInfo: {type_info} values: [");
+            let children = values
                 .iter()
-                .map(|component| component.instantiate(arguments))
-                .collect::<Vec<_>>();
-            let _ = write!(out, "{{kind: @tuple typeInfo: {type_info} values: ");
-            write_values(out, values, &types, table)?;
-            out.push('}');
+                .zip(types)
+                .map(|(value, component)| {
+                    Piece::Value(value, Rc::new(component.instantiate(arguments)))
+                })
+                .collect();
+            nest(pending, children, "]}");
         }
         (TypeBody::Record(fields), Value::Record(written)) => {
-            let _ = write!(out, "{{kind: @record typeInfo: {type_info} fields: ");
-            write_fields(out, &instantiate(fields), written, ty, value, table)?;
-            out.push('}');
+            let children = field_pieces(&instantiate(fields), written, ty, value)?;
+            let _ = write!(out, "{{kind: @record typeInfo: {type_info} fields: {{");
+            nest(pending, children, "}}");
         }
         (TypeBody::Wrapper(representation), Value::Wrapper(inner)) => {
             let _ = write!(out, "{{kind: @wrapper typeInfo: {type_info} value: ");
-            write_value(out, inner, &representation.instantiate(arguments), table)?;
-            out.push('}');
+            pending.push(Piece::Text("}"));
+            pending.push(Piece::Value(
+                inner,
+                Rc::new(representation.instantiate(arguments)),
+            ));
         }
         (TypeBody::Variant(_), Value::Variant { case, fields }) => {
             let declared = definition.case(case).ok_or_else(|| mismatch(ty, value))?;
@@ -692,18 +758,13 @@ fn write_declared(
                 if !fields.is_empty() {
                     return Err(mismatch(ty, value));
                 }
+                out.push('}');
             } else {
-                out.push_str(" payload: ");
-                write_fields(
-                    out,
-                    &instantiate(&declared.fields),
-                    fields,
-                    ty,
-                    value,
-                    table,
-                )?;
+                let children =
+                    field_pieces(&instantiate(&declared.fields), fields, ty, value)?;
+                out.push_str(" payload: {");
+                nest(pending, children, "}}");
             }
-            out.push('}');
         }
         _ => return Err(mismatch(ty, value)),
     }
