@@ -1,0 +1,19 @@
+id = "V2-SRC-READER-expr-recovery"
+rule = "V2-SRC-READER-expr-recovery"
+profile = "readerV2"
+operation = "reader"
+description = "07-diagnostics-and-conformance.md#recovery: `endlet` closes the open argument list as missing and then the value; the next value is exact, and the formatter returns the bytes unchanged"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+tree = "tree.vibon"
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@syntax.unmatchedDelimiter"
+level = "@error"
+span = { start = 17, end = 23 }
+related = [{ span = { start = 15, end = 16 } }]

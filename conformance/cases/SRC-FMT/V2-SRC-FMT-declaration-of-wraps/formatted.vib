@@ -1,0 +1,4 @@
+type Wide
+  of {first: Str second: Str third: U64 fourth: Bool fifth: Bool sixth: Bool seven: U8}
+  visibility @public
+endtype

@@ -1,0 +1,9 @@
+let label: Str be
+  if ready then
+    log("starting the request now")
+    "go"
+  else
+    log("waiting for the request now")
+    "wait"
+  endif
+endlet

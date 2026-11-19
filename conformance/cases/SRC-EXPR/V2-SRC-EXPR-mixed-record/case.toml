@@ -1,0 +1,16 @@
+id = "V2-SRC-EXPR-mixed-record"
+rule = "V2-SRC-EXPR-mixed-record"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#anonymous-products-and-collections: a record value whose entries are not all labelled is an invalid form over the brace form"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 22, end = 39 }

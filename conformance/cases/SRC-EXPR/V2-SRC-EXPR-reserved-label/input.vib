@@ -1,0 +1,1 @@
+let u: User be User(role: 1u8) endlet

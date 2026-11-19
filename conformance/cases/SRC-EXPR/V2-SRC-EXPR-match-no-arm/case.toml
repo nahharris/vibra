@@ -1,0 +1,16 @@
+id = "V2-SRC-EXPR-match-no-arm"
+rule = "V2-SRC-EXPR-match-no-arm"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#if-match-do: a `match` with no arm is an invalid form over the `match`"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 14, end = 34 }

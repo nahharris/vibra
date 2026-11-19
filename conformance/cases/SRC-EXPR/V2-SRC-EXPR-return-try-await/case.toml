@@ -1,0 +1,12 @@
+id = "V2-SRC-EXPR-return-try-await"
+rule = "V2-SRC-EXPR-return-try-await"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#return-try-await: the prefix chain `return try await f()` is read as return(try(await(f())))"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

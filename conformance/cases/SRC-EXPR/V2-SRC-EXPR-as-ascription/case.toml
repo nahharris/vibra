@@ -1,0 +1,16 @@
+id = "V2-SRC-EXPR-as-ascription"
+rule = "V2-SRC-EXPR-as-ascription"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#exclusions: `as` in an expression is an invalid form at the `as`"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 16, end = 18 }

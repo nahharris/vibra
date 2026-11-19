@@ -1,0 +1,16 @@
+id = "V2-SRC-READER-doc-string-misplaced"
+rule = "V2-SRC-READER-doc-string-misplaced"
+profile = "readerV2"
+operation = "reader"
+description = "07-diagnostics-and-conformance.md#syntax-and-data-diagnostics: a doc string outside `doc` is an invalid form over the smallest enclosing construct, the module value"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 0, end = 28 }

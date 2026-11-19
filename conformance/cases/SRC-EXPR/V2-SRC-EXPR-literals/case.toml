@@ -1,0 +1,12 @@
+id = "V2-SRC-EXPR-literals"
+rule = "V2-SRC-EXPR-literals"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#literals: every literal is a primary: string, character, integer, float, atom, and void"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

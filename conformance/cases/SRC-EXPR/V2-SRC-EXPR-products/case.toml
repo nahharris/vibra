@@ -1,0 +1,12 @@
+id = "V2-SRC-EXPR-products"
+rule = "V2-SRC-EXPR-products"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#anonymous-products-and-collections: a brace value is a tuple, or a record when its first entry is labelled"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"
