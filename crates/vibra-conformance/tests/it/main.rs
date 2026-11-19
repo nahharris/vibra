@@ -12,6 +12,7 @@ mod support;
 
 mod ambient_reads;
 mod architecture_boundary;
+mod deep_nesting;
 mod diagnostic_registry;
 mod manifest;
 mod runner;
