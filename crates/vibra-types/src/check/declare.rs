@@ -727,6 +727,28 @@ impl<'a> Program<'a> {
             })
     }
 
+    /// The library declaration the type `id` plays, if any.
+    pub(crate) fn library_of(&self, id: &TypeId) -> Option<Library> {
+        self.library
+            .iter()
+            .find_map(|(binding, entity)| match entity {
+                Entity::Type(index)
+                    if self.types.get(*index).and_then(|data| data.id.as_ref())
+                        == Some(id) =>
+                {
+                    Some(*binding)
+                }
+                _ => None,
+            })
+    }
+
+    /// The program index of the declared type `id`.
+    pub(crate) fn type_index_of(&self, id: &TypeId) -> Option<usize> {
+        self.types
+            .iter()
+            .position(|data| data.id.as_ref() == Some(id))
+    }
+
     /// The library type `library` applied to `arguments`, when supported.
     pub(crate) fn library_type(
         &self,
