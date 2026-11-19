@@ -41,6 +41,7 @@ vibra-syntax = { path = "crates/vibra-syntax" }
 vibra-syntax-v1 = { path = "crates/vibra-syntax-v1" }
 vibra-resolve-v1 = { path = "crates/vibra-resolve-v1" }
 vibra-schema = { path = "crates/vibra-schema" }
+vibra-types = { path = "crates/vibra-types" }
 vibra-types-v1 = { path = "crates/vibra-types-v1" }
 
 vibra-workspace = { path = "crates/vibra-workspace" }

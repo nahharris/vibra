@@ -1434,6 +1434,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vibra-types"
+version = "0.0.1"
+dependencies = [
+ "sha2",
+ "vibra-diagnostics",
+ "vibra-fmt",
+ "vibra-ir",
+ "vibra-syntax",
+]
+
+[[package]]
 name = "vibra-types-v1"
 version = "0.0.1"
 dependencies = [
