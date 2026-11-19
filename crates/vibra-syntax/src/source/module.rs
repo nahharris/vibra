@@ -8,17 +8,16 @@
 //! where a top-level form is expected is reported once over the balanced
 //! parenthesized form, and an `as` alone is reported at the `as`. Every
 //! `use` precedes every other top-level form; a later `use` is
-//! `@syntax.invalidForm` at its keyword. A `type`, an `interface`, and a
-//! module value `let` are shaped in their own grammar; each `fn`, `proc`,
-//! and `test` is `@tool.unavailable` over the whole form until its grammar
-//! exists.
+//! `@syntax.invalidForm` at its keyword. Every other form is shaped in its own
+//! grammar.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 
+use super::callable::CallableKind;
 use super::construct::is_trivia;
 use super::declaration::{Declaration, check_construct, check_sections, check_use};
 use super::section::Construct;
-use super::shape::shape_module_let;
+use super::shape::{CallableRole, Place, shape_callable, shape_module_let, shape_test};
 use super::type_decl::{DeclKind, SourceOptions, shape_declaration};
 use crate::cst::{CstNode, SyntaxKind};
 use crate::document::{Document, DocumentMode};
@@ -65,6 +64,20 @@ pub(crate) fn shape_module(
                     diagnostics,
                 ),
                 SyntaxKind::ModuleLet => shape_module_let(item, text, diagnostics),
+                SyntaxKind::FnDecl | SyntaxKind::ProcDecl => {
+                    let kind = if item.kind() == SyntaxKind::FnDecl {
+                        CallableKind::Fn
+                    } else {
+                        CallableKind::Proc
+                    };
+                    let role = CallableRole {
+                        kind,
+                        place: Place::TopLevel,
+                        standard_library: options.standard_library,
+                    };
+                    shape_callable(item, role, text, diagnostics)
+                }
+                SyntaxKind::Test => shape_test(item, text, diagnostics),
                 _ => item,
             };
             out.push(item);
@@ -101,17 +114,6 @@ fn check_form(
         return;
     }
     check_sections(item, text, diagnostics);
-    if matches!(
-        item.kind(),
-        SyntaxKind::TypeDecl | SyntaxKind::InterfaceDecl | SyntaxKind::ModuleLet
-    ) {
-        return;
-    }
-    diagnostics.push(Diagnostic::new(
-        DiagnosticCode::ToolUnavailable,
-        item.span(),
-        "the grammar of this form is not available in this reader",
-    ));
 }
 
 /// Ends a run of tokens that open no top-level form: its trailing trivia

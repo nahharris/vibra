@@ -3,7 +3,7 @@
 use vibra_diagnostics::DiagnosticCode::{
     self, NameReservedDeclaration, NameReservedLabel, SyntaxDuplicateSection,
     SyntaxInvalidForm, SyntaxInvalidSection, SyntaxMisplacedBinding,
-    SyntaxUnmatchedDelimiter, ToolUnavailable,
+    SyntaxUnmatchedDelimiter,
 };
 use vibra_syntax::source::{
     Declaration, Expr, ExprForm, ModuleLet, Pattern, PatternForm, Postfix, Primary,
@@ -746,13 +746,12 @@ fn a_doc_string_outside_doc_is_invalid() {
 }
 
 #[test]
-fn an_anonymous_callable_is_unavailable() {
+fn an_anonymous_callable_is_read_in_the_callable_grammar() {
     let text = "let f: Fn({} I32) be fn returns r: I32 do return 1i32 endfn endlet";
-    let start = text.find("fn returns").unwrap();
-    let end = text.find("endfn").unwrap() + 5;
-    assert_eq!(diagnostics(text), [(ToolUnavailable, start, end)]);
-    let text = "let f: Fn({} Void) be fn endfn endlet";
-    assert_eq!(diagnostics(text), [(ToolUnavailable, 22, 30)]);
+    assert!(diagnostics(text).is_empty());
+    // Without `do`, it is invalid at its closer.
+    let text = "let f: Fn({} Void) be fn returns r: Void endfn endlet";
+    assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 41, 46)]);
     // A named declaration is no expression.
     let text = "let f: U8 be type A of U8 endtype endlet";
     assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 13, 33)]);

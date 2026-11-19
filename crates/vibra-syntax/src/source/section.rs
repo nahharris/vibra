@@ -35,6 +35,8 @@ pub const fn is_construct(kind: SyntaxKind) -> bool {
             | SyntaxKind::If
             | SyntaxKind::Match
             | SyntaxKind::DoBlock
+            | SyntaxKind::AnonFn
+            | SyntaxKind::AnonProc
             | SyntaxKind::Construct
     )
 }
@@ -289,8 +291,8 @@ impl<'a> Where<'a> {
     }
 }
 
-/// A section whose operand is one tag: `visibility`, `representation`, or
-/// `role`.
+/// A section whose operand is one tag: `visibility`, `representation`,
+/// `role`, or `external`.
 #[derive(Clone, Copy, Debug)]
 pub struct TagSection<'a> {
     node: &'a CstNode,
@@ -298,13 +300,16 @@ pub struct TagSection<'a> {
 }
 
 impl<'a> TagSection<'a> {
-    /// The view of a `@visibility`, `@representation`, or `@role` node of the
-    /// document `text`.
+    /// The view of a `@visibility`, `@representation`, `@role`, or
+    /// `@external` node of the document `text`.
     #[must_use]
     pub fn new(node: &'a CstNode, text: &'a str) -> Option<Self> {
         matches!(
             node.kind(),
-            SyntaxKind::Visibility | SyntaxKind::Representation | SyntaxKind::Role
+            SyntaxKind::Visibility
+                | SyntaxKind::Representation
+                | SyntaxKind::Role
+                | SyntaxKind::External
         )
         .then_some(Self { node, text })
     }
@@ -331,6 +336,55 @@ impl<'a> TagSection<'a> {
             [tag] => Atom::of(tag, self.text),
             _ => None,
         }
+    }
+}
+
+/// A section whose operand is one string: `symbol` or `native`, a registry
+/// key in its registered spelling.
+#[derive(Clone, Copy, Debug)]
+pub struct StringSection<'a> {
+    node: &'a CstNode,
+    text: &'a str,
+}
+
+impl<'a> StringSection<'a> {
+    /// The view of a `@symbol` or `@native` node of the document `text`.
+    #[must_use]
+    pub fn new(node: &'a CstNode, text: &'a str) -> Option<Self> {
+        matches!(node.kind(), SyntaxKind::Symbol | SyntaxKind::Native)
+            .then_some(Self { node, text })
+    }
+
+    /// The node.
+    #[must_use]
+    pub const fn node(&self) -> &'a CstNode {
+        self.node
+    }
+
+    /// The section keyword.
+    #[must_use]
+    pub fn keyword(&self) -> &'a str {
+        self.node
+            .children()
+            .first()
+            .map_or("", |keyword| keyword.text(self.text))
+    }
+
+    /// The string token as written, quotes included.
+    #[must_use]
+    pub fn string(&self) -> Option<&'a str> {
+        match operand_of(self.node).as_slice() {
+            [string] if string.kind() == SyntaxKind::String => {
+                Some(string.text(self.text))
+            }
+            _ => None,
+        }
+    }
+
+    /// The string's value, its escapes decoded.
+    #[must_use]
+    pub fn value(&self) -> Option<String> {
+        self.string().and_then(crate::literal::decode_string)
     }
 }
 
