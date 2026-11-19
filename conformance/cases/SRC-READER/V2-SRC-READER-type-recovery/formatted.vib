@@ -1,0 +1,2 @@
+type A of {x: endtype
+type B of U8 endtype

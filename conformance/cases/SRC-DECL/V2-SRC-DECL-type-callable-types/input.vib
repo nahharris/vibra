@@ -1,0 +1,5 @@
+type Handler of Fn({I32 verbose: Bool} Bool) endtype
+
+type Job of Proc({Str} Void {DirWrite}) endtype
+
+type Plan of Intent(Void {DirWrite}) endtype

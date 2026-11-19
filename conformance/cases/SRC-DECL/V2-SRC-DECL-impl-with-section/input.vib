@@ -1,0 +1,1 @@
+type A of U8 impl P visibility @public endimpl endtype

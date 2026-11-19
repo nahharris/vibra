@@ -1,0 +1,12 @@
+id = "V2-SRC-DECL-type-section-order"
+rule = "V2-SRC-DECL-type-section-order"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#canonical-format: the body comes first, then given, then visibility; the declaration fits in 88 columns, so it is one line"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

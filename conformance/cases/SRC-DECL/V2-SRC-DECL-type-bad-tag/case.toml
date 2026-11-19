@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-type-bad-tag"
+rule = "V2-SRC-DECL-type-bad-tag"
+profile = "readerV2"
+operation = "reader"
+description = "07-diagnostics-and-conformance.md#syntax-and-data-diagnostics: a tag outside the closed set of a visibility section is an invalid form over the section"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 13, end = 32 }

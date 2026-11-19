@@ -1,0 +1,1 @@
+type H of Fn({I32} Bool) endtype

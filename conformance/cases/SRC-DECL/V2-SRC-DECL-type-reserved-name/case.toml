@@ -1,0 +1,17 @@
+id = "V2-SRC-DECL-type-reserved-name"
+rule = "V2-SRC-DECL-type-reserved-name"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#reserved-words: a reserved word as the declared name is a reserved declaration at the word, and the declaration is still built"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+tree = "tree.vibon"
+
+[[expect.diagnostics]]
+code = "@name.reservedDeclaration"
+level = "@error"
+span = { start = 5, end = 10 }

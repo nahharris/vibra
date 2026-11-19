@@ -1,0 +1,13 @@
+id = "V2-SRC-DECL-interface-assoc"
+rule = "V2-SRC-DECL-interface-assoc"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#interface: an interface with one associated type"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"
+formatted = "formatted.vib"

@@ -1,0 +1,4 @@
+type Sorted(T I)
+  of {items: I}
+  given {T: Ordered I: Iter(Item: T)}
+endtype

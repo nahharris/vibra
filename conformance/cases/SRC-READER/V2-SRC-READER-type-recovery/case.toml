@@ -1,0 +1,18 @@
+id = "V2-SRC-READER-type-recovery"
+rule = "V2-SRC-READER-type-recovery"
+profile = "readerV2"
+operation = "reader"
+description = "07-diagnostics-and-conformance.md#recovery: endtype closes the open brace as missing and then the type; the next type is exact, and the formatter returns the bytes unchanged"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@syntax.unmatchedDelimiter"
+level = "@error"
+span = { start = 14, end = 21 }
+related = [{ span = { start = 10, end = 11 } }]

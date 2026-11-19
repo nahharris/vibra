@@ -1,0 +1,1 @@
+type User of {name: Str id: UserId} visibility @public endtype
