@@ -131,12 +131,11 @@ fn implementation(receiver: Type, members: Vec<(&str, usize)>) -> Implementation
     .unwrap()
 }
 
-/// `Describe`: `describe(Self) Str`; `twice(Self) Str`, whose default
-/// concatenates two `describe`s of its receiver; and `down(Self) Self`.
+/// `Describe`: `describe(Self) Str`, and `twice(Self) Str`, whose default
+/// concatenates two `describe`s of its receiver.
 ///
-/// Functions: `BASE` describes `I32`, `BASE + 1` describes `U64`,
-/// `BASE + 2` is the default of `twice`, and `BASE + 3` is `down` on
-/// `U64`. `I32` overrides nothing else; `U64` also implements `down`.
+/// Functions: `BASE` describes `I32`, `BASE + 1` describes `U64`, and
+/// `BASE + 2` is the default of `twice`, which neither overrides.
 fn describe_parts() -> ModuleSetParts {
     let describe = |name: &str, receiver: Type, answer: &str| {
         function(name, signature(vec![receiver], str_type()), text(answer), 1)

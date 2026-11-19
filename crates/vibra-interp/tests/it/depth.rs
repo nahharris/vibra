@@ -14,9 +14,9 @@ use vibra_ir::{
 };
 
 use crate::{
-    BASE, base_parts, boolean, call, call_value, closure, construct, direct, fn_type,
-    function, id, if_else, node, program, set_with, signature, tail, u64_add,
-    u64_equal, u64_lit, u64_sub, var,
+    BASE, base_parts, call, call_value, closure, construct, direct, fn_type, function,
+    id, if_else, node, program, set_with, signature, tail, u64_add, u64_equal, u64_lit,
+    u64_sub, var,
 };
 
 const STACK: usize = 256 * 1024;
@@ -258,8 +258,10 @@ fn a_tail_call_through_an_interface_value_replaces_the_activation() {
     assert_eq!(execution.instrumentation.tail_transfer_count, INDIRECT + 1);
 }
 
-/// A pending `ensures … else` is work after the return: the written tail
-/// call is an ordinary call, and every activation stays alive.
+/// A pending `ensures result == 1 else 7` is work after the return: the
+/// written tail call is an ordinary call, and every activation stays alive.
+/// The innermost candidate, 0, fails, so its consequence runs; each caller's
+/// candidate is then 7, which fails in turn.
 #[test]
 fn a_pending_ensures_keeps_a_call_out_of_tail_position() {
     let execution = on_small_stack(|| {
@@ -267,7 +269,7 @@ fn a_pending_ensures_keeps_a_call_out_of_tail_position() {
             exit_guard: Some(ExitGuard {
                 candidate: 1,
                 guard: Guard {
-                    predicate: boolean(true),
+                    predicate: u64_equal(var(1, Type::U64), u64_lit(1)),
                     consequence: u64_lit(7),
                 },
             }),
@@ -281,7 +283,7 @@ fn a_pending_ensures_keeps_a_call_out_of_tail_position() {
         let main = main_function(call(BASE, vec![u64_lit(100)]));
         run_functions(vec![checked, main], BASE + 1, MemoryBudget::DEFAULT).unwrap()
     });
-    assert_eq!(execution.value.value(), &Value::U64(0));
+    assert_eq!(execution.value.value(), &Value::U64(7));
     // `main`, then `checked` at 100 down to 0.
     assert_eq!(execution.instrumentation.max_activation_depth, 102);
     assert_eq!(execution.instrumentation.tail_transfer_count, 0);

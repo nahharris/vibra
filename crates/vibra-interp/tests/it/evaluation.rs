@@ -133,6 +133,32 @@ fn unwrap_or_minus_one() -> CheckedFunction {
     )
 }
 
+/// When the pattern fails, only the fallback runs: the body after the `let`,
+/// a trap here, does not.
+#[test]
+fn let_else_runs_only_the_fallback_when_the_pattern_fails() {
+    let body = node(Expr::LetElse {
+        pattern: Pattern::Case {
+            case: "some".to_owned(),
+            fields: vec![("value".to_owned(), Pattern::Bind(1))],
+        },
+        value: Box::new(var(0, option(Type::I32))),
+        fallback: Box::new(node(Expr::Return(Box::new(int(-1))))),
+        body: Box::new(sequence(vec![trap_at(1), var(1, Type::I32)])),
+    });
+    let guarded_body = function(
+        "fallbackOnly",
+        signature(vec![option(Type::I32)], Type::I32),
+        body,
+        2,
+    );
+    let set = set_with(vec![guarded_body], Vec::new(), Vec::new());
+    assert_eq!(
+        eval(&set, &call(BASE, vec![none(Type::I32)])),
+        Evaluation::Value(Value::I32(-1))
+    );
+}
+
 #[test]
 fn let_else_binds_on_a_match_and_runs_only_the_fallback_otherwise() {
     let set = set_with(vec![unwrap_or_minus_one()], Vec::new(), Vec::new());
@@ -296,8 +322,9 @@ fn requires_else_skips_the_body_and_the_ensures() {
     );
 }
 
-/// `ensures result == 4 else 99`: the check runs on the candidate bound to
-/// the result name, and the consequence is returned without a second check.
+/// `ensures result == 4 else result + 100`: the check runs on the candidate
+/// bound to the result name, the consequence sees the same binding, and its
+/// value (106, which fails the check) is returned without a second check.
 #[test]
 fn ensures_else_checks_the_candidate_once_and_returns_the_consequence_unchecked() {
     let doubled = guarded(
@@ -312,7 +339,11 @@ fn ensures_else_checks_the_candidate_once_and_returns_the_consequence_unchecked(
             candidate: 1,
             guard: Guard {
                 predicate: i32_equal(var(1, Type::I32), int(4)),
-                consequence: int(99),
+                consequence: integer(
+                    IntegerType::I32,
+                    IntegerOp::Add,
+                    vec![var(1, Type::I32), int(100)],
+                ),
             },
         }),
     );
@@ -323,7 +354,7 @@ fn ensures_else_checks_the_candidate_once_and_returns_the_consequence_unchecked(
     );
     assert_eq!(
         eval(&set, &call(BASE, vec![int(3)])),
-        Evaluation::Value(Value::I32(99))
+        Evaluation::Value(Value::I32(106))
     );
 }
 
@@ -417,6 +448,15 @@ fn a_bare_where_leaves_no_check() {
     assert_eq!(
         eval(&set, &small_of(50)),
         Evaluation::Value(Value::Wrapper(Box::new(Value::I32(50))))
+    );
+    // The operands of a construction whose check was folded away still run.
+    let trapping_operand = construct(
+        Type::Declared(small_id(), Vec::new()),
+        Construction::Wrapper(Box::new(sequence(vec![trap_at(2), int(1)]))),
+    );
+    assert_eq!(
+        eval(&set, &trapping_operand),
+        Evaluation::Defect(Trap::InvalidCheckedProgram)
     );
 }
 

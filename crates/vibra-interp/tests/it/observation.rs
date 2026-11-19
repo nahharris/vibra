@@ -85,10 +85,96 @@ fn a_non_finite_float_is_observed_as_the_non_finite_record() {
         observe(Type::F64, negative, Vec::new()),
         "{format: @value.v2 typeInfo: @f64 value: {kind: @nonFinite value: @negativeInfinity}}"
     );
-    let nan = f64_row(FloatOp::Div, vec![f64_lit(0.0), f64_lit(0.0)]);
+    let zero = || lit(Type::F32, Value::f32(0.0));
+    let nan = row(
+        CompilerIntrinsic::Float(FloatType::F32, FloatOp::Div),
+        vec![zero(), zero()],
+    );
     assert_eq!(
-        observe(Type::F64, nan, Vec::new()),
-        "{format: @value.v2 typeInfo: @f64 value: {kind: @nonFinite value: @nan}}"
+        observe(Type::F32, nan, Vec::new()),
+        "{format: @value.v2 typeInfo: @f32 value: {kind: @nonFinite value: @nan}}"
+    );
+}
+
+/// The matrix's examples of saturation.
+#[test]
+fn saturating_arithmetic_clamps() {
+    use vibra_ir::external::{IntegerOp, IntegerType};
+    let set = library_set();
+    let apply = |integer: IntegerType, op: IntegerOp, operands: Vec<Node>| {
+        eval(&set, &crate::integer(integer, op, operands))
+    };
+    let i8_lit = |value: i8| lit(Type::I8, Value::I8(value));
+    assert_eq!(
+        apply(
+            IntegerType::I8,
+            IntegerOp::Add,
+            vec![i8_lit(127), i8_lit(1)]
+        ),
+        Evaluation::Value(Value::I8(127))
+    );
+    assert_eq!(
+        apply(
+            IntegerType::U8,
+            IntegerOp::Sub,
+            vec![lit(Type::U8, Value::U8(0)), lit(Type::U8, Value::U8(1))]
+        ),
+        Evaluation::Value(Value::U8(0))
+    );
+    assert_eq!(
+        apply(IntegerType::I8, IntegerOp::Neg, vec![i8_lit(-128)]),
+        Evaluation::Value(Value::I8(127))
+    );
+    assert_eq!(
+        apply(
+            IntegerType::I32,
+            IntegerOp::ShiftLeft,
+            vec![int(1), lit(Type::U32, Value::U32(40))]
+        ),
+        Evaluation::Value(Value::I32(2_147_483_647))
+    );
+}
+
+/// The matrix's examples of checked arithmetic.
+#[test]
+fn checked_arithmetic_gives_results() {
+    use vibra_ir::external::{IntegerOp, IntegerType};
+    let set = library_set();
+    let apply = |integer: IntegerType, op: IntegerOp, operands: Vec<Node>| {
+        eval(&set, &crate::integer(integer, op, operands))
+    };
+    let min = || int(i32::MIN);
+    assert_eq!(
+        apply(
+            IntegerType::I32,
+            IntegerOp::DivChecked,
+            vec![int(1), int(0)]
+        ),
+        Evaluation::Value(err_value("divisionByZero"))
+    );
+    assert_eq!(
+        apply(
+            IntegerType::I32,
+            IntegerOp::DivChecked,
+            vec![min(), int(-1)]
+        ),
+        Evaluation::Value(err_value("overflow"))
+    );
+    assert_eq!(
+        apply(
+            IntegerType::I32,
+            IntegerOp::RemChecked,
+            vec![min(), int(-1)]
+        ),
+        Evaluation::Value(crate::ok_value(Value::I32(0)))
+    );
+    assert_eq!(
+        apply(
+            IntegerType::U8,
+            IntegerOp::ShiftLeftChecked,
+            vec![lit(Type::U8, Value::U8(1)), lit(Type::U32, Value::U32(8))]
+        ),
+        Evaluation::Value(err_value("invalidShift"))
     );
 }
 

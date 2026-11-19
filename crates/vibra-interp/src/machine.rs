@@ -888,7 +888,7 @@ impl<'a> Machine<'a> {
                         &env.apply_all_named(&call.choices)?,
                     )?;
                     // Reboxing is work after the return, so only a result
-                    // that holds Self keeps the call out of tail position.
+                    // that holds `Self` keeps the call out of tail position.
                     if mentions_self(&result) {
                         rebox = Some((result, held_type.clone()));
                     }
@@ -1001,11 +1001,13 @@ impl<'a> Machine<'a> {
     /// else` is pending. A `return` around the call leaves nothing either.
     fn prepare_tail(&mut self) -> bool {
         if matches!(self.konts.last(), Some(Kont::Return)) {
-            while let Some(kont) = self.konts.last() {
-                if matches!(kont, Kont::Leave) {
-                    break;
-                }
-                self.konts.pop();
+            let boundary = self.konts.iter().rposition(|kont| {
+                matches!(kont, Kont::Leave | Kont::End | Kont::Global(_))
+            });
+            if let Some(at) = boundary
+                && matches!(self.konts.get(at), Some(Kont::Leave))
+            {
+                self.konts.truncate(at.saturating_add(1));
             }
         }
         matches!(self.konts.last(), Some(Kont::Leave))
