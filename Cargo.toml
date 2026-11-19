@@ -41,6 +41,7 @@ vibra-schema = { path = "crates/vibra-schema" }
 vibra-types-v1 = { path = "crates/vibra-types-v1" }
 vibra-wasm = { path = "crates/vibra-wasm" }
 vibra-wasm-run = { path = "crates/vibra-wasm-run" }
+vibra-workspace = { path = "crates/vibra-workspace" }
 vibra-workspace-v1 = { path = "crates/vibra-workspace-v1" }
 
 toml = "1"

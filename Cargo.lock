@@ -1734,6 +1734,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "vibra-workspace"
+version = "0.0.1"
+dependencies = [
+ "sha2",
+ "vibra-diagnostics",
+ "vibra-syntax",
+]
+
+[[package]]
 name = "vibra-workspace-v1"
 version = "0.0.1"
 dependencies = [

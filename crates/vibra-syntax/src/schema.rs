@@ -185,13 +185,27 @@ impl FieldSchema {
 #[derive(Clone, Debug)]
 pub struct RecordSchema {
     fields: Vec<FieldSchema>,
+    min_written: usize,
 }
 
 impl RecordSchema {
     /// A record of `fields`, in canonical order.
     #[must_use]
     pub const fn new(fields: Vec<FieldSchema>) -> Self {
-        Self { fields }
+        Self {
+            fields,
+            min_written: 0,
+        }
+    }
+
+    /// A record of `fields` that writes at least one of them: fewer is
+    /// `@data.invalidValue` at the record.
+    #[must_use]
+    pub const fn at_least_one(fields: Vec<FieldSchema>) -> Self {
+        Self {
+            fields,
+            min_written: 1,
+        }
     }
 
     /// The fields in canonical order.
@@ -926,6 +940,13 @@ impl Walk {
                 );
                 typed = None;
             }
+        }
+        if written.len() < schema.min_written {
+            self.value_fault(
+                node.span(),
+                format!("the record writes at least {} field(s)", schema.min_written),
+            );
+            typed = None;
         }
         typed.map(|fields| TypedNode {
             value: TypedValue::Record(fields),
