@@ -1504,7 +1504,11 @@ dependencies = [
  "toml",
  "vibra-diagnostics",
  "vibra-fmt",
+ "vibra-interp",
+ "vibra-ir",
  "vibra-syntax",
+ "vibra-wasm",
+ "vibra-wasm-run",
  "vibra-workspace",
 ]
 

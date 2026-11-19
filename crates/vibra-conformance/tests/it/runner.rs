@@ -12,14 +12,14 @@ use vibra_conformance::{
 };
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode, DocumentRevision, Fix};
 
-fn conformance(arguments: &[&std::ffi::OsStr]) -> Output {
+pub(crate) fn conformance(arguments: &[&std::ffi::OsStr]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_vibra-conformance"))
         .args(arguments)
         .output()
         .expect("the runner starts")
 }
 
-fn text(bytes: &[u8]) -> String {
+pub(crate) fn text(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 

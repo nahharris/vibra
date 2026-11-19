@@ -274,8 +274,8 @@ fn an_ambient_read_is_reported_and_comments_and_test_modules_are_not() {
     );
 }
 
-/// The runner starts the executables of the `windows` column in one module,
-/// `native_exe`; the only other process it starts is the baseline's.
+/// The v1 runner starts the executables of the `windows` column in one module,
+/// `native_exe`, and starts no other process.
 #[test]
 fn the_runner_launches_executables_in_one_module() {
     let mut users = Vec::new();
@@ -299,5 +299,5 @@ fn the_runner_launches_executables_in_one_module() {
         }
     }
     users.sort();
-    assert_eq!(users, ["baseline.rs", "native_exe.rs"]);
+    assert_eq!(users, ["native_exe.rs"]);
 }

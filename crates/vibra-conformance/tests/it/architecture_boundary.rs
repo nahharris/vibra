@@ -28,13 +28,19 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     ("vibra-syntax", &["vibra-diagnostics"]),
     // The new formatter: the layout rules over the reader's tree.
     ("vibra-fmt", &["vibra-diagnostics", "vibra-syntax"]),
-    // The new harness. It grows a dependency with each handler.
+    // The new harness. It grows a dependency with each handler. Its Wasm
+    // column joins the emitter and the runner and compares them with the
+    // reference interpreter on the same checked IR.
     (
         "vibra-conformance",
         &[
             "vibra-diagnostics",
             "vibra-fmt",
+            "vibra-interp",
+            "vibra-ir",
             "vibra-syntax",
+            "vibra-wasm",
+            "vibra-wasm-run",
             "vibra-workspace",
         ],
     ),
