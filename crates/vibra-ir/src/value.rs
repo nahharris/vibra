@@ -11,7 +11,10 @@ use crate::encode::{EncodeError, value_document};
 use crate::{Type, TypeTable};
 
 /// A value.
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+/// Equality and dropping walk the value with an explicit work list, so that
+/// no host stack grows with its depth.
+#[derive(Clone, Debug, Eq)]
 pub enum Value {
     /// An `I8`.
     I8(i8),
@@ -157,6 +160,158 @@ impl Value {
             }
             Self::Wrapper(value) | Self::Interface { held: value, .. } => vec![value],
             _ => Vec::new(),
+        }
+    }
+
+    /// Whether this value and `other` agree on everything but their
+    /// children, whose pairs are added to `pending`.
+    fn same_node<'v>(
+        &'v self,
+        other: &'v Self,
+        pending: &mut Vec<(&'v Self, &'v Self)>,
+    ) -> bool {
+        match (self, other) {
+            (Self::I8(left), Self::I8(right)) => left == right,
+            (Self::I16(left), Self::I16(right)) => left == right,
+            (Self::I32(left), Self::I32(right)) => left == right,
+            (Self::I64(left), Self::I64(right)) => left == right,
+            (Self::U8(left), Self::U8(right)) => left == right,
+            (Self::U16(left), Self::U16(right)) => left == right,
+            (Self::U32(left), Self::U32(right))
+            | (Self::F32(left), Self::F32(right)) => left == right,
+            (Self::U64(left), Self::U64(right))
+            | (Self::F64(left), Self::F64(right)) => left == right,
+            (Self::Char(left), Self::Char(right)) => left == right,
+            (Self::Atom(left), Self::Atom(right))
+            | (Self::Str(left), Self::Str(right)) => left == right,
+            (Self::Void, Self::Void) => true,
+            (Self::Bytes(left), Self::Bytes(right)) => left == right,
+            (Self::Tuple(left), Self::Tuple(right))
+            | (Self::List(left), Self::List(right))
+            | (Self::Closure { captures: left }, Self::Closure { captures: right }) => {
+                left.len() == right.len() && {
+                    pending.extend(left.iter().zip(right));
+                    true
+                }
+            }
+            (Self::Dict(left), Self::Dict(right)) => {
+                left.len() == right.len() && {
+                    pending.extend(left.iter().zip(right).flat_map(
+                        |((left_key, left_value), (right_key, right_value))| {
+                            [(left_key, right_key), (left_value, right_value)]
+                        },
+                    ));
+                    true
+                }
+            }
+            (Self::Record(left), Self::Record(right)) => {
+                same_fields(left, right, pending)
+            }
+            (
+                Self::Variant {
+                    case: left_case,
+                    fields: left,
+                },
+                Self::Variant {
+                    case: right_case,
+                    fields: right,
+                },
+            ) => left_case == right_case && same_fields(left, right, pending),
+            (Self::Wrapper(left), Self::Wrapper(right)) => {
+                pending.push((left, right));
+                true
+            }
+            (
+                Self::Interface {
+                    held_type: left_type,
+                    held: left,
+                },
+                Self::Interface {
+                    held_type: right_type,
+                    held: right,
+                },
+            ) => {
+                left_type == right_type && {
+                    pending.push((left, right));
+                    true
+                }
+            }
+            (
+                Self::Function {
+                    function: left,
+                    type_arguments: left_arguments,
+                },
+                Self::Function {
+                    function: right,
+                    type_arguments: right_arguments,
+                },
+            ) => left == right && left_arguments == right_arguments,
+            _ => false,
+        }
+    }
+
+    /// Moves the values directly inside this one to `pending`.
+    fn take_children(&mut self, pending: &mut Vec<Self>) {
+        match self {
+            Self::Tuple(values)
+            | Self::List(values)
+            | Self::Closure { captures: values } => {
+                pending.append(values);
+            }
+            Self::Dict(entries) => {
+                pending.extend(entries.drain(..).flat_map(|(key, value)| [key, value]));
+            }
+            Self::Record(fields) | Self::Variant { fields, .. } => {
+                pending.extend(fields.drain(..).map(|(_, value)| value));
+            }
+            Self::Wrapper(value) | Self::Interface { held: value, .. } => {
+                pending.push(std::mem::replace(&mut **value, Self::Void));
+            }
+            _ => {}
+        }
+    }
+}
+
+fn same_fields<'v>(
+    left: &'v [(String, Value)],
+    right: &'v [(String, Value)],
+    pending: &mut Vec<(&'v Value, &'v Value)>,
+) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|((left_name, _), (right_name, _))| left_name == right_name)
+        && {
+            pending.extend(
+                left.iter()
+                    .zip(right)
+                    .map(|((_, left_value), (_, right_value))| {
+                        (left_value, right_value)
+                    }),
+            );
+            true
+        }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        let mut pending = vec![(self, other)];
+        while let Some((left, right)) = pending.pop() {
+            if !left.same_node(right, &mut pending) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl Drop for Value {
+    fn drop(&mut self) {
+        let mut pending = Vec::new();
+        self.take_children(&mut pending);
+        while let Some(mut value) = pending.pop() {
+            value.take_children(&mut pending);
         }
     }
 }
