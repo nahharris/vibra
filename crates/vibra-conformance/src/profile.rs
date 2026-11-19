@@ -13,6 +13,7 @@ use vibra_diagnostics::Diagnostic;
 
 use crate::corpus::Case;
 use crate::manifest::Verdict;
+use crate::wasm::Executable;
 
 /// A versioned statement of what a tool supports.
 ///
@@ -291,6 +292,9 @@ pub struct CaseObservation {
     pub result: Option<String>,
     /// The `@testRun.v2` observation.
     pub test_run: Option<String>,
+    /// The checked IR of an executable case, which a second executor runs
+    /// beside the interpreter ("Differential execution").
+    pub executable: Option<Executable>,
 }
 
 impl CaseObservation {
@@ -307,6 +311,7 @@ impl CaseObservation {
             types: None,
             result: None,
             test_run: None,
+            executable: None,
         }
     }
 }

@@ -1,23 +1,23 @@
-//! The integer, `char`, and float primitive rows of the compiler registry, as data.
+//! The integer, `Char`, `List`, and float rows of the compiler registry that are a
+//! few instructions, as data.
 //!
 //! The registry's integer and float rows are a table of type by operation
-//! (`docs/spec/06-runtime.md`, "M3 compiler intrinsic registry"), and a row is a
-//! few instructions, so the
-//! emitter lowers each inline and no routine of the lowering names a row. A row
-//! is read through one table: [`plan`] maps a [`CompilerIntrinsic`] to the
-//! operands it takes (each an integer type, or `char`, which is a `u32`), the
-//! **outcome** it builds, and the **body** that computes it. The lowering of
-//! `lower.rs` builds the outcome from the computed selector the same way for
-//! every row of an outcome; this module writes the computation.
+//! (`docs/spec/06-runtime.md`, "Compiler intrinsic registry"), and a row is a
+//! few instructions, so the emitter lowers each inline and no routine of the
+//! lowering names a row. A row is read through one table: [`plan`] maps a
+//! [`CompilerIntrinsic`] to the operands it takes, the **outcome** it builds,
+//! and the **body** that computes it. The lowering builds the outcome from the
+//! computed selector the same way for every row of an outcome; this module
+//! writes the computation.
 //!
-//! | Outcome | Rows | The arena value built |
+//! | Outcome | Rows | The value built |
 //! | --- | --- | --- |
-//! | scalar | a conversion that cannot fail, `char.to-u32`, the float `add`, `sub`, `mul`, `div`, and `neg` | none: a cell |
-//! | `bool` | `equal` | the enum `bool`, discriminant `false` 0 and `true` 1 |
-//! | `ordering` | `compare`, the float `compare-total` | an enum of three `void` variants |
-//! | `(result t e)` | the checked operations, a conversion that can fail | `ok` of a cell, or `err` of an enum of `void` variants |
-//! | saturated scalar | the unchecked integer operations | none: a cell, after an unchecked `div` or `rem` traps on a zero divisor |
-//! | `(option char)` | `char.from-u32` | `some` of a cell, or `none` |
+//! | scalar | a conversion that cannot fail, `char.toU32`, `list.length`, the float `add`, `sub`, `mul`, `div`, and `neg` | none: a cell |
+//! | `Bool` | `equal` | the variant `Bool` |
+//! | `Ordering` | `compare`, the float `compareTotal` | a variant of three fieldless cases |
+//! | `Result(T E)` | the checked operations, a conversion that can fail | `ok` of a cell, or `err` of a fieldless case |
+//! | saturated scalar | the unchecked integer operations | none: a cell |
+//! | `Option(Char)` | `char.fromU32` | `some` of a cell, or `none` |
 //!
 //! # The computation
 //!
@@ -25,12 +25,13 @@
 //! at most 32 bits is sign- or zero-extended from the 32 bits of its cell, which
 //! hold it canonically (a signed type sign-extended to 32 bits, an unsigned one
 //! zero-extended), and a 64-bit type is its cell. The value of a row is left in
-//! the local `WR`, and one `i32` **selector** is left on the operand stack: the
-//! discriminant of a `bool` or an `ordering`, the **kind** of a checked result
-//! (`0` for `ok`, otherwise `1` plus the discriminant of the error variant), or
-//! whether a scalar is a `char`. No instruction can trap: a divisor is replaced
-//! by `1` before it can be zero or `-1`, and a shift count is masked by the
-//! engine and checked before its result is used.
+//! the local `WR`, and one `i32` **selector** is left on the operand stack:
+//! `1` when a `Bool` is `true` and `0` otherwise, the case index of an
+//! `Ordering`, the **kind** of a checked result (`0` for `ok`, otherwise `1`
+//! plus the case index of the error), or whether a scalar is a `Char`. No
+//! instruction can trap: a divisor is replaced by `1`
+//! before it can be zero or `-1`, and a shift count is masked by the engine and
+//! checked before its result is used.
 //!
 //! A type of at most 32 bits is computed exactly in 64 bits, so overflow is the
 //! result lying outside the type. A 64-bit type has no wider carrier, so its
@@ -38,65 +39,96 @@
 //! change, a quotient that does not give the factor back, a shifted-out bit).
 //! Division, remainder, negation, and the conversions need no such distinction.
 
-use vibra_ir_v1::external::{CompilerIntrinsic, FloatOp, IntegerOp, NumericType};
-use vibra_ir_v1::{CANONICAL_NAN_F32, CANONICAL_NAN_F64};
+use vibra_ir::external::{
+    CompilerIntrinsic, FloatOp, FloatType, IntegerOp, IntegerType,
+};
+use vibra_ir::{CANONICAL_NAN_F32, CANONICAL_NAN_F64};
 use wasm_encoder::Instruction as I;
 
 use crate::layout::header;
 use crate::lower::{FRAME, SCRATCH, WA, WB, WR};
 use crate::runtime::{Ins, ValueClass, c32, c64, get, ld32, ld64, set};
 
-/// How a row's result is built.
+/// A scalar type a row reads or builds.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Outcome {
-    /// A scalar of this integer type, left in a cell.
-    Scalar(NumericType),
-    /// `bool`.
-    Bool,
-    /// `ordering`.
-    Ordering,
-    /// `(result t e)`, where `t` is this integer type.
-    Checked(NumericType),
-    /// `(option char)`.
-    Option,
-    /// A scalar of this integer type that an unchecked row saturated at the
-    /// bounds of the type, left in a cell.
-    Saturated(NumericType),
+pub(crate) enum Scalar {
+    /// An integer type; `Char` is read as a `U32`.
+    Integer(IntegerType),
+    /// A float type.
+    Float(FloatType),
 }
 
-/// A way a checked row fails, which the checked result's error enum names.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Fault {
-    /// `overflow`.
-    Overflow,
-    /// `division-by-zero`.
-    DivisionByZero,
-    /// `invalid-shift`.
-    InvalidShift,
-    /// `out-of-range`.
-    OutOfRange,
-}
-
-impl Fault {
-    /// The variant of the error enum.
-    pub(crate) const fn variant(self) -> &'static str {
+impl Scalar {
+    /// Whether the type fills a 64-bit cell.
+    const fn wide(self) -> bool {
         match self {
-            Self::Overflow => "overflow",
-            Self::DivisionByZero => "division-by-zero",
-            Self::InvalidShift => "invalid-shift",
-            Self::OutOfRange => "out-of-range",
+            Self::Integer(integer) => integer.bits() == 64,
+            Self::Float(float) => matches!(float, FloatType::F64),
+        }
+    }
+
+    /// Whether a 32-bit cell of the type sign-extends.
+    const fn signed(self) -> bool {
+        match self {
+            Self::Integer(integer) => integer.is_signed(),
+            Self::Float(_) => false,
         }
     }
 }
 
-/// The discriminants a computation selects among, which the lowering reads
-/// from the shapes of the checked result type.
+/// How a row's result is built.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Outcome {
+    /// A scalar of this type, left in a cell.
+    Scalar(Scalar),
+    /// `Bool`.
+    Bool,
+    /// `Ordering`.
+    Ordering,
+    /// `Result(T E)`, where `T` is this integer type.
+    Checked(IntegerType),
+    /// `Option(Char)`.
+    Option,
+    /// A scalar of this integer type that an unchecked row saturated at the
+    /// bounds of the type, left in a cell.
+    Saturated(IntegerType),
+}
+
+/// A way a checked row fails, which the checked result's error type names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Fault {
+    /// `overflow`.
+    Overflow,
+    /// `divisionByZero`.
+    DivisionByZero,
+    /// `invalidShift`.
+    InvalidShift,
+    /// `outOfRange`.
+    OutOfRange,
+}
+
+impl Fault {
+    /// The case of the error type.
+    pub(crate) const fn case(self) -> &'static str {
+        match self {
+            Self::Overflow => "overflow",
+            Self::DivisionByZero => "divisionByZero",
+            Self::InvalidShift => "invalidShift",
+            Self::OutOfRange => "outOfRange",
+        }
+    }
+}
+
+/// The case indices a computation selects among, which the lowering reads
+/// from the declarations of the result type.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Names {
-    /// For each [`Fault`], `1` plus the discriminant of its variant.
+    /// For each [`Fault`], `1` plus the case index of its error.
     pub(crate) faults: [i32; 4],
-    /// The discriminants of `less`, `equal`, and `greater`.
+    /// The case indices of `less`, `equal`, and `greater`.
     pub(crate) order: [i32; 3],
+    /// The case indices of `false` and `true`.
+    pub(crate) truth: [i32; 2],
 }
 
 impl Names {
@@ -105,40 +137,43 @@ impl Names {
     }
 }
 
-/// The operation a checked row performs.
+/// The operation a row performs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Body {
     /// A checked arithmetic or shift row of this type.
-    Arithmetic(NumericType, IntegerOp),
+    Arithmetic(IntegerType, IntegerOp),
     /// An unchecked arithmetic or shift row of this type.
-    Unchecked(NumericType, IntegerOp),
+    Unchecked(IntegerType, IntegerOp),
     /// `equal` of this type.
     Equal,
     /// `compare` of this type.
-    Compare(NumericType),
+    Compare(IntegerType),
     /// The value of one integer type as another.
-    Convert(NumericType, NumericType),
-    /// `char.to-u32`: the value as it is.
+    Convert(IntegerType, IntegerType),
+    /// `char.toU32`: the value as it is.
     CharToU32,
-    /// `char.from-u32`: whether the value is a Unicode scalar.
+    /// `char.fromU32`: whether the value is a Unicode scalar.
     CharFromU32,
-    /// `array.length`: the component count, which the operand already is.
+    /// `list.length`: the component count, which the operand already is.
     Length,
-    /// A float row of this type (`f32` or `f64`).
-    Float(NumericType, FloatOp),
+    /// A float row of this type.
+    Float(FloatType, FloatOp),
 }
 
 /// What a row reads of an operand into its 64-bit local.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Operand {
-    /// An integer or `char` of this type, as its exact value.
-    Number(NumericType),
+    /// A number of this type, as its exact value.
+    Number(Scalar),
     /// The component count of the object the cell holds.
     Count,
 }
 
-fn numbers(types: Vec<NumericType>) -> Vec<Operand> {
-    types.into_iter().map(Operand::Number).collect()
+fn integers(types: Vec<IntegerType>) -> Vec<Operand> {
+    types
+        .into_iter()
+        .map(|integer| Operand::Number(Scalar::Integer(integer)))
+        .collect()
 }
 
 /// One row: its operands, its outcome, and the computation.
@@ -149,119 +184,122 @@ pub(crate) struct Plan {
     body: Body,
 }
 
+/// The checked counterpart of an unchecked integer member.
+const fn checked_of(op: IntegerOp) -> IntegerOp {
+    match op {
+        IntegerOp::Add => IntegerOp::AddChecked,
+        IntegerOp::Sub => IntegerOp::SubChecked,
+        IntegerOp::Mul => IntegerOp::MulChecked,
+        IntegerOp::Neg => IntegerOp::NegChecked,
+        IntegerOp::ShiftLeft => IntegerOp::ShiftLeftChecked,
+        IntegerOp::ShiftRight => IntegerOp::ShiftRightChecked,
+        other => other,
+    }
+}
+
 /// The table: what the emitter does for `intrinsic`, or `None` for a row it
-/// does not lower inline: a native implementation, a primitive row that loops (the
-/// `to-str` and `parse` rows, and the collection rows that copy), and the rows of
-/// the text and bytes types. The registry table of native imports decides which,
-/// so no row is named twice.
+/// does not lower inline: a native import (the `toStr` and `parse` rows and
+/// the rows of `Str`, `Bytes`, `List`, and `Dict` that copy), a row that
+/// applies a function value, and the assertion rows. The registry table of
+/// native imports decides which, so no row is named twice.
 pub(crate) fn plan(intrinsic: CompilerIntrinsic) -> Option<Plan> {
-    use NumericType::U32;
-    // A native implementation is the one Rust function both backends call, and
-    // a module reaches it by its import; only a primitive row with no loop is
-    // written inline. The registry table says which a row is.
-    if intrinsic.is_native() || intrinsic.native_import().is_some() {
+    use IntegerType::U32;
+    if intrinsic.native_import().is_some() {
         return None;
     }
     Some(match intrinsic {
-        CompilerIntrinsic::Float(numeric, op) => {
+        CompilerIntrinsic::Float(float, op) => {
+            let number = Operand::Number(Scalar::Float(float));
             let (operands, outcome) = match op {
                 FloatOp::Add | FloatOp::Sub | FloatOp::Mul | FloatOp::Div => {
-                    (vec![numeric, numeric], Outcome::Scalar(numeric))
+                    (vec![number, number], Outcome::Scalar(Scalar::Float(float)))
                 }
-                FloatOp::Neg => (vec![numeric], Outcome::Scalar(numeric)),
-                FloatOp::Equal => (vec![numeric, numeric], Outcome::Bool),
-                FloatOp::CompareTotal => (vec![numeric, numeric], Outcome::Ordering),
+                FloatOp::Neg => (vec![number], Outcome::Scalar(Scalar::Float(float))),
+                FloatOp::Equal => (vec![number, number], Outcome::Bool),
+                FloatOp::CompareTotal => (vec![number, number], Outcome::Ordering),
                 FloatOp::ToStr | FloatOp::Parse => return None,
             };
             Plan {
-                operands: numbers(operands),
+                operands,
                 outcome,
-                body: Body::Float(numeric, op),
+                body: Body::Float(float, op),
             }
         }
-        CompilerIntrinsic::Integer(numeric, op) if numeric.is_integer() => {
+        CompilerIntrinsic::Integer(integer, op) => {
             let (operands, outcome, body) = match op {
                 IntegerOp::AddChecked
                 | IntegerOp::SubChecked
                 | IntegerOp::MulChecked
                 | IntegerOp::DivChecked
                 | IntegerOp::RemChecked => (
-                    vec![numeric, numeric],
-                    Outcome::Checked(numeric),
-                    Body::Arithmetic(numeric, op),
+                    vec![integer, integer],
+                    Outcome::Checked(integer),
+                    Body::Arithmetic(integer, op),
                 ),
                 IntegerOp::NegChecked => (
-                    vec![numeric],
-                    Outcome::Checked(numeric),
-                    Body::Arithmetic(numeric, op),
+                    vec![integer],
+                    Outcome::Checked(integer),
+                    Body::Arithmetic(integer, op),
                 ),
                 IntegerOp::ShiftLeftChecked | IntegerOp::ShiftRightChecked => (
-                    vec![numeric, U32],
-                    Outcome::Checked(numeric),
-                    Body::Arithmetic(numeric, op),
+                    vec![integer, U32],
+                    Outcome::Checked(integer),
+                    Body::Arithmetic(integer, op),
                 ),
-                IntegerOp::Add
-                | IntegerOp::Sub
-                | IntegerOp::Mul
-                | IntegerOp::Div
-                | IntegerOp::Rem => (
-                    vec![numeric, numeric],
-                    Outcome::Saturated(numeric),
-                    Body::Unchecked(numeric, op),
+                IntegerOp::Add | IntegerOp::Sub | IntegerOp::Mul => (
+                    vec![integer, integer],
+                    Outcome::Saturated(integer),
+                    Body::Unchecked(integer, op),
                 ),
                 IntegerOp::Neg => (
-                    vec![numeric],
-                    Outcome::Saturated(numeric),
-                    Body::Unchecked(numeric, op),
+                    vec![integer],
+                    Outcome::Saturated(integer),
+                    Body::Unchecked(integer, op),
                 ),
                 IntegerOp::ShiftLeft | IntegerOp::ShiftRight => (
-                    vec![numeric, U32],
-                    Outcome::Saturated(numeric),
-                    Body::Unchecked(numeric, op),
+                    vec![integer, U32],
+                    Outcome::Saturated(integer),
+                    Body::Unchecked(integer, op),
                 ),
                 IntegerOp::Equal => {
-                    (vec![numeric, numeric], Outcome::Bool, Body::Equal)
+                    (vec![integer, integer], Outcome::Bool, Body::Equal)
                 }
                 IntegerOp::Compare => (
-                    vec![numeric, numeric],
+                    vec![integer, integer],
                     Outcome::Ordering,
-                    Body::Compare(numeric),
+                    Body::Compare(integer),
                 ),
                 IntegerOp::ToStr | IntegerOp::Parse => return None,
             };
             Plan {
-                operands: numbers(operands),
+                operands: integers(operands),
                 outcome,
                 body,
             }
         }
-        CompilerIntrinsic::Convert(source, target)
-            if source.is_integer() && target.is_integer() =>
-        {
-            Plan {
-                operands: numbers(vec![source]),
-                outcome: if CompilerIntrinsic::conversion_is_total(source, target) {
-                    Outcome::Scalar(target)
-                } else {
-                    Outcome::Checked(target)
-                },
-                body: Body::Convert(source, target),
-            }
-        }
+        CompilerIntrinsic::Convert(source, target) => Plan {
+            operands: integers(vec![source]),
+            outcome: if CompilerIntrinsic::conversion_is_total(source, target) {
+                Outcome::Scalar(Scalar::Integer(target))
+            } else {
+                Outcome::Checked(target)
+            },
+            body: Body::Convert(source, target),
+        },
         CompilerIntrinsic::CharToU32 => Plan {
-            operands: numbers(vec![U32]),
-            outcome: Outcome::Scalar(U32),
+            operands: integers(vec![U32]),
+            outcome: Outcome::Scalar(Scalar::Integer(U32)),
             body: Body::CharToU32,
         },
         CompilerIntrinsic::CharFromU32 => Plan {
-            operands: numbers(vec![U32]),
+            operands: integers(vec![U32]),
             outcome: Outcome::Option,
             body: Body::CharFromU32,
         },
-        // The one collection row that is a primitive row and does not loop.
-        CompilerIntrinsic::ArrayLength => Plan {
+        // The one collection row that does not loop.
+        CompilerIntrinsic::ListLength => Plan {
             operands: vec![Operand::Count],
-            outcome: Outcome::Scalar(NumericType::U64),
+            outcome: Outcome::Scalar(Scalar::Integer(IntegerType::U64)),
             body: Body::Length,
         },
         _ => return None,
@@ -269,7 +307,7 @@ pub(crate) fn plan(intrinsic: CompilerIntrinsic) -> Option<Plan> {
 }
 
 impl Plan {
-    /// The type of each operand, in order. A `char` is a `u32`.
+    /// The type of each operand, in order. A `Char` is a `U32`.
     pub(crate) fn operands(&self) -> &[Operand] {
         &self.operands
     }
@@ -277,16 +315,6 @@ impl Plan {
     /// What the row builds.
     pub(crate) const fn outcome(&self) -> Outcome {
         self.outcome
-    }
-
-    /// Whether the row leaves, above its value, an `i32` that is nonzero when
-    /// it must trap with `@runtime.division-by-zero`: an unchecked `div` or
-    /// `rem`.
-    pub(crate) const fn traps(&self) -> bool {
-        matches!(
-            self.body,
-            Body::Unchecked(_, IntegerOp::Div | IntegerOp::Rem)
-        )
     }
 
     /// The faults the row can report.
@@ -374,12 +402,13 @@ impl Plan {
     /// its type, on the operand stack: the 64 bits of a 64-bit type, and a type
     /// of at most 32 bits zero-extended from its 32 bits.
     pub(crate) fn value(&self) -> Vec<Ins> {
-        let ty = match self.outcome {
-            Outcome::Scalar(ty) | Outcome::Checked(ty) | Outcome::Saturated(ty) => ty,
-            Outcome::Bool | Outcome::Ordering | Outcome::Option => NumericType::U32,
+        let wide = match self.outcome {
+            Outcome::Scalar(ty) => ty.wide(),
+            Outcome::Checked(ty) | Outcome::Saturated(ty) => ty.bits() == 64,
+            Outcome::Bool | Outcome::Ordering | Outcome::Option => false,
         };
         let mut code = vec![get(WR)];
-        if !wide(ty) {
+        if !wide {
             code.extend([I::I32WrapI64, I::I64ExtendI32U]);
         }
         code
@@ -388,21 +417,18 @@ impl Plan {
     /// The class of the value of the row.
     pub(crate) fn class(&self) -> ValueClass {
         match self.outcome {
-            Outcome::Scalar(NumericType::F32) => ValueClass::F32,
-            Outcome::Scalar(NumericType::F64) => ValueClass::F64,
-            Outcome::Scalar(ty) | Outcome::Checked(ty) | Outcome::Saturated(ty)
-                if wide(ty) =>
+            Outcome::Scalar(Scalar::Float(FloatType::F32)) => ValueClass::F32,
+            Outcome::Scalar(Scalar::Float(FloatType::F64)) => ValueClass::F64,
+            Outcome::Scalar(Scalar::Integer(ty))
+            | Outcome::Checked(ty)
+            | Outcome::Saturated(ty)
+                if ty.bits() == 64 =>
             {
                 ValueClass::I64
             }
             _ => ValueClass::I32,
         }
     }
-}
-
-/// Whether a type fills a 64-bit cell.
-const fn wide(numeric: NumericType) -> bool {
-    numeric.bits() == 64
 }
 
 /// The 64 bits of an integer, which is how a constant of the table is written.
@@ -428,12 +454,12 @@ fn load(operand: Operand, offset: u32, local: u32, code: &mut Vec<Ins>) {
             return;
         }
     };
-    if wide(numeric) {
+    if numeric.wide() {
         code.push(ld64(offset));
     } else {
         code.extend([
             ld32(offset),
-            if numeric.is_signed() {
+            if numeric.signed() {
                 I::I64ExtendI32S
             } else {
                 I::I64ExtendI32U
@@ -463,7 +489,7 @@ fn equals(local: u32, value: i64) -> [Ins; 3] {
     [get(local), c64(value), I::I64Eq]
 }
 
-/// The discriminant of `ordering` for the values in `WA` and `WB`, left on the
+/// The case index of `Ordering` for the values in `WA` and `WB`, left on the
 /// operand stack: `equal` when they are the same integer, otherwise `less` when
 /// the first is below the second.
 fn order(names: &Names, signed: bool, code: &mut Vec<Ins>) {
@@ -536,8 +562,8 @@ fn total_order_key(single: bool, local: u32, code: &mut Vec<Ins>) {
 /// sign and payload are observed nowhere. `equal` is the engine's comparison, so
 /// a NaN is unequal to itself and the zeros are equal. `compare-total` first
 /// replaces a NaN by the canonical quiet NaN, then compares by `totalOrder`.
-fn float(numeric: NumericType, op: FloatOp, names: &Names, code: &mut Vec<Ins>) {
-    let single = numeric == NumericType::F32;
+fn float(numeric: FloatType, op: FloatOp, names: &Names, code: &mut Vec<Ins>) {
+    let single = numeric == FloatType::F32;
     // The result on the operand stack as bits in the cell format, into `WR`.
     let finish = |code: &mut Vec<Ins>| {
         if single {
@@ -584,9 +610,9 @@ fn float(numeric: NumericType, op: FloatOp, names: &Names, code: &mut Vec<Ins>) 
 }
 
 /// A checked arithmetic or shift row.
-fn arithmetic(numeric: NumericType, op: IntegerOp, names: &Names, code: &mut Vec<Ins>) {
+fn arithmetic(numeric: IntegerType, op: IntegerOp, names: &Names, code: &mut Vec<Ins>) {
     let signed = numeric.is_signed();
-    let exact = !wide(numeric);
+    let exact = numeric.bits() != 64;
     let (low, high) = numeric.range();
     let overflow = names.fault(Fault::Overflow);
     let (a, b, r) = (get(WA), get(WB), get(WR));
@@ -765,8 +791,6 @@ fn arithmetic(numeric: NumericType, op: IntegerOp, names: &Names, code: &mut Vec
         | IntegerOp::Add
         | IntegerOp::Sub
         | IntegerOp::Mul
-        | IntegerOp::Div
-        | IntegerOp::Rem
         | IntegerOp::Neg
         | IntegerOp::ShiftLeft
         | IntegerOp::ShiftRight => {}
@@ -778,31 +802,23 @@ fn arithmetic(numeric: NumericType, op: IntegerOp, names: &Names, code: &mut Vec
 const KINDS: Names = Names {
     faults: [1, 2, 3, 4],
     order: [0, 0, 0],
+    truth: [0, 1],
 };
 
 /// An unchecked row: its checked counterpart, whose value replaces by the bound
 /// of the type it would cross when that counterpart fails. The kind is kept in
-/// `SCRATCH`; an unchecked `div` or `rem` then leaves whether the divisor was
-/// zero, which traps.
-fn saturate(numeric: NumericType, op: IntegerOp, code: &mut Vec<Ins>) {
-    let checked = op.checked().unwrap_or(op);
-    arithmetic(numeric, checked, &KINDS, code);
+/// `SCRATCH`.
+fn saturate(numeric: IntegerType, op: IntegerOp, code: &mut Vec<Ins>) {
+    arithmetic(numeric, checked_of(op), &KINDS, code);
     code.push(set(SCRATCH));
     bound(numeric, op, code);
     code.extend([get(WR), get(SCRATCH), I::Select, set(WR)]);
-    if matches!(op, IntegerOp::Div | IntegerOp::Rem) {
-        code.extend([
-            get(SCRATCH),
-            c32(KINDS.fault(Fault::DivisionByZero)),
-            I::I32Eq,
-        ]);
-    }
 }
 
 /// The bound an unchecked row saturates at, from its operands in `WA` and `WB`:
 /// the end of the type its exact result lies past. A shift left of zero stays
 /// zero, and a shift right past the width floors to `0` or `-1`.
-fn bound(numeric: NumericType, op: IntegerOp, code: &mut Vec<Ins>) {
+fn bound(numeric: IntegerType, op: IntegerOp, code: &mut Vec<Ins>) {
     let signed = numeric.is_signed();
     let (low, high) = numeric.range();
     let (minimum, maximum) = (pattern(low), pattern(high));
@@ -818,7 +834,7 @@ fn bound(numeric: NumericType, op: IntegerOp, code: &mut Vec<Ins>) {
             code.extend(negative(WB));
             code.push(I::Select);
         }
-        (IntegerOp::Sub, false) | (IntegerOp::Rem, _) => code.push(c64(minimum.max(0))),
+        (IntegerOp::Sub, false) => code.push(c64(minimum.max(0))),
         (IntegerOp::Mul, true) => {
             code.extend([
                 c64(minimum),

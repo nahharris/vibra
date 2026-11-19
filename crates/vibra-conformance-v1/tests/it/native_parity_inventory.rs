@@ -496,45 +496,6 @@ fn run_binary(cases: &[&str], rows: &[(&str, &str)]) -> (bool, String) {
 }
 
 #[test]
-fn a_matched_cell_that_fails_fails_the_run() {
-    let (_, report) = report();
-    let statuses = report.native_statuses();
-    let (pending, matched) = one_pending_and_one_matched(&statuses);
-
-    // The right table: the run passes, and prints the native line.
-    let (ok, stdout) = run_binary(&[matched], &[(matched, "matched")]);
-    assert!(ok, "{stdout}");
-    assert!(
-        stdout.contains("native backend: stepper 1 matched, 0 pending, 0 failed\n"),
-        "{stdout}"
-    );
-
-    // A case the stepper cannot run, marked matched: the run fails and names
-    // the case and the reason.
-    let (ok, stdout) = run_binary(&[pending], &[(pending, "matched")]);
-    assert!(!ok, "{stdout}");
-    assert!(
-        stdout.contains(&format!(
-            "NATIVE {pending}: marked matched, but the stepper is pending"
-        )),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains("native backend: stepper 0 matched, 1 pending, 1 failed\n"),
-        "{stdout}"
-    );
-    // The interpreter and Wasm lines are untouched by it.
-    assert!(
-        stdout.contains("interpreter backend: 1 passed, 0 failed, 0 unavailable\n"),
-        "{stdout}"
-    );
-    assert!(
-        stdout.contains("wasm backend: 1 matched, 0 failed\n"),
-        "{stdout}"
-    );
-}
-
-#[test]
 fn a_cell_that_matches_but_is_marked_pending_fails() {
     let (_, report) = report();
     let statuses = report.native_statuses();

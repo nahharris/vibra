@@ -21,10 +21,9 @@
 //! observations, the filesystem-free resolver observation and its
 //! `@resolved.v1` artifact, and the tooling-profile snapshot-backed formatter
 //! observation. A profile with no handler reports its cases unavailable. Each
-//! accepted executable case also runs in the WebAssembly backend, against the
-//! case's one expectation, and a case on which either backend disagrees fails.
+//! accepted executable case also runs on the reference stepper, against the
+//! case's one expectation, and a case on which an executor disagrees fails.
 
-pub mod baseline;
 mod corpus;
 mod format;
 mod graph;
@@ -40,7 +39,6 @@ mod runner;
 mod standard;
 mod test_run;
 mod types;
-mod wasm;
 mod workspace_index;
 mod workspace_query;
 mod workspace_semantic;
@@ -68,18 +66,15 @@ pub use reader::ReaderV1Handler;
 pub use resolve::StaticV1ResolveHandler;
 pub use runner::{
     BackendObservation, BackendStatuses, CaseObservation, CaseReport, CaseStatus,
-    ConformanceRunner, DispatchResult, ExecutionObservation, HandlerError,
-    INSTANCE_MEMORY_LIMIT_BYTES, InterpreterCounts, ProfileDispatcher, ProfileHandler,
-    QueryObservation, RunReport, WasmCounts, WasmObservation, WasmStatus,
+    ConformanceRunner, DispatchResult, ExecutionObservation, ExecutorObservation,
+    ExecutorStatus, HandlerError, INSTANCE_MEMORY_LIMIT_BYTES, InterpreterCounts,
+    ProfileDispatcher, ProfileHandler, QueryObservation, RunReport,
 };
 pub use standard::standard_dispatcher;
 pub use test_run::{
     RowFailure, RowOrigin, RowTrap, TestRow, command_result, format_test_run,
 };
 pub use types::InterpreterV1Handler;
-pub use wasm::{
-    TestsObserved, observe as observe_wasm, observe_tests as observe_wasm_tests,
-};
 pub use workspace_index::ToolingV1IndexHandler;
 pub use workspace_query::ToolingV1QueryHandler;
 pub use workspace_semantic::{

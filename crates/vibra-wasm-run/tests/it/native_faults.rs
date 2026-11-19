@@ -1,10 +1,10 @@
-//! A native that refuses its operands (milestone 4 Step 10).
+//! A native that refuses its operands.
 //!
 //! `docs/spec/06-runtime.md`, "Native implementations": a native import reads the
 //! instance's memory through the toolchain's runtime only. A module the toolchain
 //! emitted never gives a native a bad operand, so a native that meets one means
 //! the toolchain is at fault. The call stops with no recorded status, and the
-//! runner reports the defect `@runtime.invalid-checked-program` with no origin,
+//! runner reports the defect `@runtime.invalidCheckedProgram` with no origin,
 //! never a program result, never a trap with an origin, and never a read outside
 //! the arena.
 //!
@@ -12,8 +12,9 @@
 //! and signature, with an operand a checked program cannot produce.
 
 use crate::support::{Spec, module, runner};
-use vibra_ir_v1::arena::{header, kind};
-use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir::Trap;
+use vibra_ir::arena::{header, kind};
+use vibra_ir::boundary::TrapCode;
 use vibra_wasm_run::{Outcome, ResultSlot};
 use wasm_encoder::{Instruction, MemArg, ValType};
 
@@ -86,7 +87,7 @@ fn forged(
 
 fn length_of(setup: Vec<Instruction<'static>>, operand: i32) -> Outcome {
     runner()
-        .run_entry(&forged("str.length", &[ValType::I32], setup, &[operand]))
+        .run_eval(&forged("str.length", &[ValType::I32], setup, &[operand]))
         .expect("a runnable module")
 }
 
@@ -100,10 +101,13 @@ fn defect(outcome: &Outcome, fragment: &str) {
         "{cause} does not mention {fragment}"
     );
     // The defect is reported as the registered trap, with no origin.
-    assert_eq!(Outcome::defect_trap(), TrapCode::InvalidCheckedProgram);
     assert_eq!(
-        Outcome::defect_trap().diagnostic_code().as_atom(),
-        "@runtime.invalid-checked-program"
+        Outcome::defect_trap(),
+        TrapCode::of(Trap::InvalidCheckedProgram)
+    );
+    assert_eq!(
+        Outcome::defect_trap().trap().code().as_atom(),
+        "@runtime.invalidCheckedProgram"
     );
 }
 
@@ -183,7 +187,7 @@ fn a_destination_that_is_not_sized_to_the_result_is_a_defect() {
         setup,
         &[1024, 2048, 3072],
     );
-    let outcome = runner().run_entry(&bytes).expect("a runnable module");
+    let outcome = runner().run_eval(&bytes).expect("a runnable module");
     defect(&outcome, "destination");
     // The same call, with a destination of the right size, completes.
     let mut setup = object(1024, kind::STR, 4, 64, 0);
@@ -196,7 +200,7 @@ fn a_destination_that_is_not_sized_to_the_result_is_a_defect() {
         &[1024, 2048, 3072],
     );
     assert!(matches!(
-        runner().run_entry(&bytes).expect("a runnable module"),
+        runner().run_eval(&bytes).expect("a runnable module"),
         Outcome::Completed { .. }
     ));
 }
@@ -212,7 +216,7 @@ fn a_destination_outside_the_memory_is_a_defect() {
         &[1024, 2048, 0x7fff_fff0],
     );
     defect(
-        &runner().run_entry(&bytes).expect("a runnable module"),
+        &runner().run_eval(&bytes).expect("a runnable module"),
         "outside",
     );
 }
@@ -223,13 +227,13 @@ fn a_cell_of_the_wrong_class_or_a_row_given_a_wrong_object_is_a_defect() {
     let mut setup = object(1024, kind::STR, 4, 64, 0);
     setup.extend(object(2048, kind::BYTES, 1, 64, 0));
     let bytes = forged(
-        "array.concat",
+        "list.concat",
         &[ValType::I32, ValType::I32, ValType::I32],
         setup,
         &[1024, 2048, 0],
     );
     defect(
-        &runner().run_entry(&bytes).expect("a runnable module"),
+        &runner().run_eval(&bytes).expect("a runnable module"),
         "kind",
     );
     // A `dict` is read as cells, and a `str` is not.
@@ -241,7 +245,7 @@ fn a_cell_of_the_wrong_class_or_a_row_given_a_wrong_object_is_a_defect() {
         &[1024, 0],
     );
     defect(
-        &runner().run_entry(&bytes).expect("a runnable module"),
+        &runner().run_eval(&bytes).expect("a runnable module"),
         "kind",
     );
 }
