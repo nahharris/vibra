@@ -1,0 +1,12 @@
+id = "V2-SRC-READER-comments-kept"
+rule = "V2-SRC-READER-comments-kept"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#canonical-format: comments stay at the end of their line or on their own line before the next form"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

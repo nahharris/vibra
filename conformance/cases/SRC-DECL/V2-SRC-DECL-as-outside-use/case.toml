@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-as-outside-use"
+rule = "V2-SRC-DECL-as-outside-use"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#exclusions: as outside a use is an invalid form at the as"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 19, end = 21 }

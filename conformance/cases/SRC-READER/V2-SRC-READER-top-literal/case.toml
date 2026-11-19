@@ -1,0 +1,16 @@
+id = "V2-SRC-READER-top-literal"
+rule = "V2-SRC-READER-top-literal"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#grammar: a literal where a top-level form is expected is an invalid form"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 0, end = 4 }

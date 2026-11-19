@@ -9,7 +9,7 @@ use std::path::Path;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 
-use crate::cst::{CstNode, GenericShaper, SyntaxKind, match_brackets};
+use crate::cst::{CstNode, match_brackets};
 use crate::data::{DataNode, DataShaper};
 use crate::lexer::{check_encoding, lex};
 
@@ -172,9 +172,11 @@ pub fn parse_data(source_id: Option<&str>, bytes: &[u8]) -> Document {
 
 /// Parses a `.vib` document.
 ///
-/// The source grammar is not implemented yet: the document is lexed and its
-/// brackets are matched, with their diagnostics, and one `@tool.unavailable`
-/// covers the whole document. The source mode accepts nothing.
+/// Reports the encoding, literal, name, and separator faults, unmatched
+/// delimiters and closers, top-level tokens that open no form, a late `use`,
+/// malformed imports, repeated sections, and `as` outside a `use`. Each
+/// `type`, `interface`, `fn`, `proc`, `let`, and `test` form is
+/// `@tool.unavailable` over the whole form until its grammar exists.
 #[must_use]
 pub fn parse_source(source_id: Option<&str>, bytes: &[u8]) -> Document {
     let (text, mut diagnostics) = check_encoding(bytes);
@@ -190,18 +192,7 @@ pub fn parse_source(source_id: Option<&str>, bytes: &[u8]) -> Document {
     };
     let lexed = lex(text);
     diagnostics.extend(lexed.diagnostics);
-    let items = match_brackets(
-        &lexed.tokens,
-        text.len(),
-        &mut GenericShaper,
-        &mut diagnostics,
-    );
-    diagnostics.push(Diagnostic::new(
-        DiagnosticCode::ToolUnavailable,
-        ByteSpan::new(0, text.len()),
-        "the source grammar is not available in this reader",
-    ));
-    let root = CstNode::interior(SyntaxKind::Source, items, 0);
+    let root = crate::source::parse(text, &lexed.tokens, &mut diagnostics);
     Document::finish(
         DocumentMode::Source,
         source_id,

@@ -1,0 +1,17 @@
+id = "V2-SRC-READER-recovery-then-valid"
+rule = "V2-SRC-READER-recovery-then-valid"
+profile = "readerV2"
+operation = "reader"
+description = "07-diagnostics-and-conformance.md#recovery: recovery skips to the next top-level form, and the formatter returns the bytes unchanged"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 14, end = 17 }

@@ -7,9 +7,10 @@
 //! reorders anything. If the parser recovered from a syntax error anywhere in
 //! a file, the formatter returns the file's bytes unchanged.
 //!
-//! This step formats VIBON data documents with the source-preserving
-//! formatter of `docs/spec/04-programs-and-packages.md`. The source grammar
-//! is not parsed yet, so a `.vib` document is returned unchanged.
+//! VIBON data documents get the source-preserving formatter of
+//! `docs/spec/04-programs-and-packages.md`. Source documents get the layout
+//! of their top-level forms: one blank line between forms, comments kept,
+//! and sections in canonical order.
 //!
 //! # Position in the architecture
 //!
@@ -17,6 +18,7 @@
 
 mod data;
 mod layout;
+mod source;
 
 use vibra_syntax::{Document, DocumentMode};
 
@@ -27,15 +29,21 @@ pub const COLUMN_LIMIT: usize = layout::WIDTH;
 ///
 /// Returns `None` when the document has no text: it was never read, or it is
 /// not valid UTF-8. A document with any diagnostic is returned byte for byte,
-/// because recovery may have been ambiguous; so is a source document, whose
-/// grammar is not parsed yet. Otherwise the data document is laid out and
-/// ends with one line feed.
+/// because recovery may have been ambiguous, and so is a document with an
+/// unavailable form, whose layout is not defined yet. So is a source
+/// document with a comment the layout cannot place. Otherwise the document
+/// is laid out, with LF line endings and one trailing line feed.
 #[must_use]
 pub fn format_document(document: &Document) -> Option<String> {
     let text = document.text()?;
     let root = document.root()?;
-    if !document.diagnostics().is_empty() || document.mode() == DocumentMode::Source {
+    if !document.diagnostics().is_empty() {
         return Some(text.to_owned());
     }
-    Some(layout::render(&data::document_items(root, text)))
+    Some(match document.mode() {
+        DocumentMode::Data => layout::render(&data::document_items(root, text)),
+        DocumentMode::Source => {
+            source::format(root, text).unwrap_or_else(|| text.to_owned())
+        }
+    })
 }
