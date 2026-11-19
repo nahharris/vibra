@@ -169,6 +169,8 @@ V2-PROJECT-decode-bad-version	active	04-programs-and-packages.md#project-file
 V2-PROJECT-decode-lib-with-entry	active	04-programs-and-packages.md#project-file
 V2-PROJECT-decode-git-rev	active	04-programs-and-packages.md#project-file
 V2-PROJECT-decode-dict-key-dup	active	04-programs-and-packages.md#schemas
+V2-PROJECT-decode-opaque-out-of-range	active	04-programs-and-packages.md#schemas
+V2-PROJECT-decode-opaque-exponent	active	04-programs-and-packages.md#decoded-values-and-canonical-bytes
 V1-PROJECT-graph-static-sorted	active	04-programs-and-packages.md#discovery-and-the-source-snapshot
 V1-PROJECT-graph-static-invalid-segment	active	04-programs-and-packages.md#discovery-and-the-source-snapshot
 V1-PROJECT-graph-static-collision	active	04-programs-and-packages.md#discovery-and-the-source-snapshot

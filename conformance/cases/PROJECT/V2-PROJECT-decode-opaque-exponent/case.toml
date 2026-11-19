@@ -1,0 +1,11 @@
+id = "V2-PROJECT-decode-opaque-exponent"
+rule = "V2-PROJECT-decode-opaque-exponent"
+profile = "staticV2"
+operation = "projectDecode"
+description = "04-programs-and-packages.md#decoded-values-and-canonical-bytes: unsuffixed exponents in opaque data are exact, so keys that differ beyond 64 bits stay two keys"
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+verdict = "accepted"

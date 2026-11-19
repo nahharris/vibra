@@ -279,15 +279,21 @@ fn scalar_key(value: &DataValue) -> String {
         }
         DataValue::Float(literal) => {
             let body = literal.body();
+            // A suffixed float is its value of the suffix's type; a written
+            // value beyond that type's finite range has no such value, so it
+            // is compared by its exact decimal value, as an unsuffixed one.
+            let exact = || format!("={}", decimal_value(body));
             let value = match literal.suffix {
-                Some(FloatSuffix::F32) => body.parse::<f32>().map_or_else(
-                    |_| body.to_owned(),
-                    |value| value.to_bits().to_string(),
-                ),
-                Some(FloatSuffix::F64) => body.parse::<f64>().map_or_else(
-                    |_| body.to_owned(),
-                    |value| value.to_bits().to_string(),
-                ),
+                Some(FloatSuffix::F32) => body
+                    .parse::<f32>()
+                    .ok()
+                    .filter(|value| value.is_finite())
+                    .map_or_else(exact, |value| value.to_bits().to_string()),
+                Some(FloatSuffix::F64) => body
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|value| value.is_finite())
+                    .map_or_else(exact, |value| value.to_bits().to_string()),
                 None => decimal_value(body),
             };
             let suffix = literal.suffix.map_or("", FloatSuffix::as_str);

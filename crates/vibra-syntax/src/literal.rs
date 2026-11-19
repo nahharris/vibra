@@ -10,6 +10,7 @@
 //! A malformed literal and an out-of-range literal are different errors.
 //! Nothing here checks range: `300u8` is a well-formed `U8` literal.
 
+use std::cmp::Ordering;
 use std::fmt;
 use std::str::Chars;
 
@@ -430,7 +431,8 @@ pub(crate) fn integer_value(body: &str) -> String {
 }
 
 /// The exact decimal value of an unsuffixed float body, as a sign, minimal
-/// significant digits, and a power of ten. The sign of zero is kept.
+/// significant digits, and a power of ten written in minimal decimal digits,
+/// however large. The sign of zero is kept.
 pub(crate) fn decimal_value(body: &str) -> String {
     let (negative, unsigned) = match body.strip_prefix('-') {
         Some(rest) => (true, rest),
@@ -446,9 +448,6 @@ pub(crate) fn decimal_value(body: &str) -> String {
     };
     let (whole, fraction) =
         mantissa_text.split_once('.').unwrap_or((mantissa_text, ""));
-    let Ok(exponent) = exponent_text.trim_start_matches('+').parse::<i64>() else {
-        return format!("{sign}{unsigned}");
-    };
     let digits = format!("{whole}{fraction}");
     let significant = digits.trim_start_matches('0');
     if significant.is_empty() {
@@ -456,23 +455,91 @@ pub(crate) fn decimal_value(body: &str) -> String {
     }
     let trimmed = significant.trim_end_matches('0');
     let trailing = significant.len() - trimmed.len();
-    let (Ok(fraction_len), Ok(trailing)) =
-        (i64::try_from(fraction.len()), i64::try_from(trailing))
-    else {
-        return format!("{sign}{unsigned}");
-    };
-    let power = exponent
-        .saturating_sub(fraction_len)
-        .saturating_add(trailing);
+    let power = add_to_decimal(
+        &add_to_decimal(exponent_text, false, trailing),
+        true,
+        fraction.len(),
+    );
     format!("{sign}{trimmed}e{power}")
+}
+
+/// The sum of the decimal integer `value`, an optional sign and digits of
+/// any length, and `step`, subtracted when `negative`: an optional `-` and
+/// minimal digits. The arithmetic is exact at every length.
+pub(crate) fn add_to_decimal(value: &str, negative: bool, step: usize) -> String {
+    let (value_negative, digits) = match value.strip_prefix('-') {
+        Some(digits) => (true, digits),
+        None => (false, value.strip_prefix('+').unwrap_or(value)),
+    };
+    let magnitude = digits.trim_start_matches('0');
+    let step = step.to_string();
+    let (result_negative, result) = if value_negative == negative {
+        (value_negative, add_magnitudes(magnitude, &step))
+    } else if compare_magnitudes(magnitude, &step) == Ordering::Less {
+        (negative, subtract_magnitudes(&step, magnitude))
+    } else {
+        (value_negative, subtract_magnitudes(magnitude, &step))
+    };
+    let result = result.trim_start_matches('0');
+    if result.is_empty() {
+        "0".to_owned()
+    } else if result_negative {
+        format!("-{result}")
+    } else {
+        result.to_owned()
+    }
+}
+
+/// The order of two magnitudes in minimal decimal digits.
+fn compare_magnitudes(left: &str, right: &str) -> Ordering {
+    left.len().cmp(&right.len()).then_with(|| left.cmp(right))
+}
+
+fn digit(character: char) -> u32 {
+    character.to_digit(10).unwrap_or_default()
+}
+
+/// The sum of two magnitudes written in decimal digits.
+fn add_magnitudes(left: &str, right: &str) -> String {
+    let mut left = left.chars().rev();
+    let mut right = right.chars().rev();
+    let mut digits: Vec<char> = Vec::new();
+    let mut carry = 0;
+    loop {
+        let (a, b) = (left.next(), right.next());
+        if a.is_none() && b.is_none() {
+            break;
+        }
+        let sum = a.map_or(0, digit) + b.map_or(0, digit) + carry;
+        digits.extend(char::from_digit(sum % 10, 10));
+        carry = sum / 10;
+    }
+    digits.extend(char::from_digit(carry, 10).filter(|_| carry > 0));
+    digits.iter().rev().collect()
+}
+
+/// `left - right` for magnitudes written in decimal digits, `left` not
+/// smaller than `right`.
+fn subtract_magnitudes(left: &str, right: &str) -> String {
+    let mut right = right.chars().rev();
+    let mut digits: Vec<char> = Vec::new();
+    let mut borrow = 0;
+    for a in left.chars().rev() {
+        let a = digit(a);
+        let b = right.next().map_or(0, digit) + borrow;
+        let (difference, next) = if a >= b { (a - b, 0) } else { (a + 10 - b, 1) };
+        digits.extend(char::from_digit(difference, 10));
+        borrow = next;
+    }
+    digits.iter().rev().collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        NumberKind, canonical_character, canonical_string, decimal_value,
-        decode_character, decode_string, integer_value, scan_character, scan_number,
-        scan_quoted, split_number,
+        NumberKind, add_to_decimal, canonical_character, canonical_string,
+        decimal_value, decode_character, decode_string, integer_value, scan_character,
+        scan_number, scan_quoted, split_number,
     };
 
     #[test]
@@ -578,5 +645,34 @@ mod tests {
         assert_eq!(decimal_value("0.0"), "0");
         assert_eq!(decimal_value("-0.0"), "-0");
         assert_ne!(decimal_value("1.5"), decimal_value("1.05"));
+    }
+
+    #[test]
+    fn decimal_exponents_are_exact_at_every_length() {
+        assert_eq!(decimal_value("1.50e3"), "15e2");
+        assert_eq!(decimal_value("120E-3"), "12e-2");
+        assert_eq!(
+            decimal_value("1e9223372036854775808"),
+            "1e9223372036854775808"
+        );
+        assert_ne!(
+            decimal_value("1e9223372036854775808"),
+            decimal_value("1e9223372036854775809")
+        );
+        let huge = "9".repeat(50);
+        assert_eq!(
+            decimal_value(&format!("10e{huge}")),
+            format!("1e1{}", "0".repeat(50))
+        );
+        assert_eq!(
+            decimal_value(&format!("0.5e-{huge}")),
+            format!("5e-1{}", "0".repeat(50))
+        );
+        assert_eq!(add_to_decimal("-3", false, 5), "2");
+        assert_eq!(add_to_decimal("3", true, 5), "-2");
+        assert_eq!(add_to_decimal("-3", false, 3), "0");
+        assert_eq!(add_to_decimal("+007", true, 0), "7");
+        assert_eq!(add_to_decimal("999", false, 1), "1000");
+        assert_eq!(add_to_decimal("1000", true, 1), "999");
     }
 }

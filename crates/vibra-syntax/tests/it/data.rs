@@ -288,6 +288,21 @@ fn decoded_equality_ignores_spelling_and_record_order_only() {
 }
 
 #[test]
+fn numbers_beyond_a_host_type_are_compared_exactly() {
+    // A grammar-only reader has no range check; two written values that
+    // overflow the host float, or whose exponent overflows 64 bits, are not
+    // equal unless their exact values are.
+    accepted("[1e999f64: 0u8 1e998f64: 1u8]");
+    accepted("[1e39f32: 0u8 1e40f32: 1u8]");
+    accepted("[1e9223372036854775808: 0u8 1e9223372036854775809: 1u8]");
+    let text = "[1e999f64: 0u8 10e998f64: 1u8]";
+    assert_eq!(
+        codes(data(text).diagnostics()),
+        [(DataDuplicateKey, 15, 24)]
+    );
+}
+
+#[test]
 fn the_mode_is_chosen_by_exact_extension() {
     assert_eq!(
         DocumentMode::from_path("a/b.vib"),
