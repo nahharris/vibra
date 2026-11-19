@@ -1,0 +1,5 @@
+fn f
+  returns r: Option(I32)
+  do
+    return Option.nothere()
+endfn

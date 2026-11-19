@@ -13,6 +13,7 @@ sha2.workspace = true
 vibra-diagnostics.workspace = true
 vibra-resolve.workspace = true
 vibra-syntax.workspace = true
+vibra-types.workspace = true
 
 [lints]
 workspace = true

@@ -215,9 +215,36 @@ fn self_is_visible_only_inside_a_type_an_interface_and_an_impl() {
 }
 
 #[test]
-fn a_prelude_path_with_members_waits_for_the_standard_library() {
-    let resolution = resolve_main("type A of Option.some endtype\n");
-    assert_eq!(codes(&resolution), [C::ToolUnavailable]);
+fn a_prelude_path_reaches_its_members() {
+    let text = "type A of Option.some endtype\n";
+    let resolution = resolve_main(text);
+    let (start, end) = span_of(text, "Option.some", 0);
+    assert_eq!(
+        flat(&resolution),
+        [(
+            C::NameWrongEntityKind,
+            "src/app/main.vib".to_owned(),
+            start,
+            end,
+            Vec::new()
+        )]
+    );
+    let text = "type A of Option.nothere endtype\n";
+    let resolution = resolve_main(text);
+    let (start, end) = span_of(text, "nothere", 0);
+    let option = crate::support::STD_MODULES[4].1;
+    let option = std::str::from_utf8(option).unwrap();
+    let (name, name_end) = span_of(option, "Option", 0);
+    assert_eq!(
+        flat(&resolution),
+        [(
+            C::NameUnknownSymbol,
+            "src/app/main.vib".to_owned(),
+            start,
+            end,
+            vec![("stdlib/src/std/option.vib".to_owned(), name, name_end)]
+        )]
+    );
 }
 
 #[test]

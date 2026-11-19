@@ -1,0 +1,8 @@
+fn f
+  returns r: Fn({I32} I32)
+  do
+    let outer be 1i32 endlet
+    return fn takes {x: I32} returns y: I32 do
+      return I32.add(x outer)
+    endfn
+endfn

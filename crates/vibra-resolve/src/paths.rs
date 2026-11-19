@@ -17,12 +17,23 @@
 //! "Dispatch": `Self` is visible inside a `type`, an `interface`, and an
 //! `impl`, and nowhere else.
 //!
+//! `docs/spec/01-source-language.md`, "Names and paths": a dotted name in an
+//! expression is resolved from the left. If its first identifier is a local
+//! binding or a module value, each later part reads a field. Otherwise the
+//! longest prefix that names an entity is the path, and the remaining parts
+//! read fields of its value; a part inside a module, a type, or an interface
+//! that names nothing is `@name.unknownSymbol`. Which field a read names is
+//! the checker's (`@type.unknownRecordField`), and so is a member reached
+//! through a type parameter, an associated type, or the `Self` of an
+//! interface, which dispatch selects.
+//!
 //! Every path that resolves to a declaration with an identity is a
-//! reference of the `@resolved.v2` observation.
+//! reference of the `@resolved.v2` observation, at the bytes of the path.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_syntax::source::{Callable, Ident, Path, Row, TypeBody, TypeExpr, TypeForm};
 
+use crate::constants;
 use crate::declare::own_params;
 use crate::graph::{
     Access, Binding, DeclView, Graph, ImplData, ImportTarget, MemberKind,
@@ -30,19 +41,21 @@ use crate::graph::{
 use crate::identity::{DeclarationId, DeclarationKind};
 use crate::imports::top_level;
 use crate::namespaces::at;
-use crate::prelude::{PreludeKind, SELF, prelude};
+use crate::prelude::{ANY, SELF};
+use crate::scope::Frames;
+use crate::snapshot::VisibleLocals;
 
 /// What a name or a path denotes.
 #[derive(Clone, Copy, Debug)]
-enum Entity {
-    /// A local declaration.
+pub(crate) enum Entity {
+    /// A local binding.
+    Local,
+    /// A declaration, local or embedded.
     Decl(usize),
-    /// A local module, through an import.
+    /// A module, local or embedded, through an import.
     Module(usize),
-    /// A module of `@std`, through an import.
-    StdModule,
-    /// A prelude name.
-    Prelude(PreludeKind),
+    /// The predeclared interface `Any`.
+    Any,
     /// A type parameter, declared at the span.
     Param(ByteSpan),
     /// `Self`: the enclosing type, or the receiver of an interface.
@@ -56,7 +69,7 @@ enum Entity {
 
 /// What a position requires.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Position {
+pub(crate) enum Position {
     /// A type: a type, an interface value type, a parameter, or `Self`.
     Type,
     /// An interface: a bound, or the target of an `impl` in a `type`.
@@ -67,17 +80,18 @@ enum Position {
     Row,
 }
 
-/// The names visible at a type position, besides the module scope and the
-/// prelude.
+/// The names an owner brings into scope, besides the module scope and the
+/// prelude: the type parameters, `Self`, and the associated names.
 #[derive(Clone, Debug, Default)]
-struct Scope {
-    params: Vec<(String, ByteSpan)>,
-    self_type: Option<Option<usize>>,
-    associated: Vec<(String, Option<usize>, ByteSpan)>,
+pub(crate) struct Scope {
+    pub(crate) params: Vec<(String, ByteSpan)>,
+    pub(crate) self_type: Option<Option<usize>>,
+    pub(crate) associated: Vec<(String, Option<usize>, ByteSpan)>,
 }
 
 impl Scope {
-    fn with_params(&self, params: &[Ident<'_>]) -> Self {
+    /// The same scope with the type parameters `params` added.
+    pub(crate) fn with_params(&self, params: &[Ident<'_>]) -> Self {
         let mut scope = self.clone();
         scope.params.extend(
             params
@@ -91,18 +105,15 @@ impl Scope {
 /// One resolved reference: its source, its bytes, and the identity.
 pub(crate) type Reference = (String, ByteSpan, DeclarationId);
 
-/// Resolves every path in a type position of the graph.
+/// Resolves every path of the graph, in type positions and in bodies, and
+/// returns the locals visible at each statement of the local modules.
 pub(crate) fn resolve_paths(
     graph: &Graph<'_>,
     out: &mut Vec<Diagnostic>,
     references: &mut Vec<Reference>,
-) {
-    let mut walker = Walker {
-        graph,
-        module: 0,
-        out,
-        references,
-    };
+) -> Vec<VisibleLocals> {
+    let mut walker = Walker::new(graph, out, references);
+    walker.constants = constants::table(graph);
     for module in 0..graph.modules.len() {
         walker.module = module;
         let Some(data) = graph.modules.get(module) else {
@@ -115,22 +126,85 @@ pub(crate) fn resolve_paths(
             walker.impl_block(*block);
         }
     }
+    walker.visible
 }
 
-struct Walker<'g, 'a, 'o> {
-    graph: &'g Graph<'a>,
-    module: usize,
-    out: &'o mut Vec<Diagnostic>,
+/// The walk over one graph: the module being walked, the lexical scopes open
+/// at the current position, and where diagnostics and references go.
+pub(crate) struct Walker<'g, 'a, 'o> {
+    pub(crate) graph: &'g Graph<'a>,
+    pub(crate) module: usize,
+    pub(crate) out: &'o mut Vec<Diagnostic>,
     references: &'o mut Vec<Reference>,
+    /// The lexical scopes open at the current position.
+    pub(crate) frames: Frames,
+    /// Whether each declaration is a constant module value.
+    constants: Vec<bool>,
+    /// The locals visible at each statement walked so far.
+    visible: Vec<VisibleLocals>,
+}
+
+impl<'g, 'a, 'o> Walker<'g, 'a, 'o> {
+    /// A walk over `graph` with no constant module value known yet.
+    pub(crate) fn new(
+        graph: &'g Graph<'a>,
+        out: &'o mut Vec<Diagnostic>,
+        references: &'o mut Vec<Reference>,
+    ) -> Self {
+        Self {
+            graph,
+            module: 0,
+            out,
+            references,
+            frames: Frames::default(),
+            constants: Vec::new(),
+            visible: Vec::new(),
+        }
+    }
 }
 
 impl<'a> Walker<'_, 'a, '_> {
-    fn source_id(&self) -> &str {
+    /// The source identity of the module being walked.
+    pub(crate) fn source_id(&self) -> &str {
         self.graph.source_id(self.module)
     }
 
-    fn report(&mut self, diagnostic: Diagnostic) {
+    /// Reports `diagnostic`.
+    pub(crate) fn report(&mut self, diagnostic: Diagnostic) {
         self.out.push(diagnostic);
+    }
+
+    /// Whether the declaration `index` is a constant module value.
+    pub(crate) fn is_constant(&self, index: usize) -> bool {
+        self.constants.get(index).copied().unwrap_or(false)
+    }
+
+    /// Records a reference at `span` to the declaration `index`.
+    pub(crate) fn reference(&mut self, span: ByteSpan, index: usize) {
+        if let Some(decl) = self.graph.decls.get(index) {
+            self.references.push((
+                self.source_id().to_owned(),
+                span,
+                decl.identity.clone(),
+            ));
+        }
+    }
+
+    /// Records the locals visible at the statement at `span`.
+    pub(crate) fn record_visible(&mut self, span: ByteSpan) {
+        if self.graph.is_embedded(self.module) {
+            return;
+        }
+        let names = self
+            .frames
+            .visible()
+            .map(|local| local.name.clone())
+            .collect();
+        self.visible.push(VisibleLocals {
+            source_id: self.source_id().to_owned(),
+            span,
+            names,
+        });
     }
 
     /// The scope inside the `type` or `interface` `owner`.
@@ -192,6 +266,14 @@ impl<'a> Walker<'_, 'a, '_> {
                         self.type_expr(&scope, bound, Position::Interface);
                     }
                 }
+                if let Some(invariant) = view.invariant() {
+                    if let Some(predicate) = invariant.predicate() {
+                        self.expr(&scope, predicate);
+                    }
+                    if let Some(consequence) = invariant.consequence() {
+                        self.expr(&scope, consequence);
+                    }
+                }
                 for member in view.members() {
                     self.callable(&scope, member);
                 }
@@ -212,22 +294,36 @@ impl<'a> Walker<'_, 'a, '_> {
                 if let Some(written) = view.written_type() {
                     self.type_expr(&Scope::default(), written, Position::Type);
                 }
+                if let Some(value) = view.value() {
+                    self.expr(&Scope::default(), value);
+                }
             }
             DeclView::Test(view) => {
+                let scope = Scope::default();
                 if let Some((_, written)) = view.takes() {
-                    self.type_expr(&Scope::default(), written, Position::Type);
+                    self.type_expr(&scope, written, Position::Type);
                 }
                 if let Some(row) = view.performs() {
-                    self.row(&Scope::default(), row);
+                    self.row(&scope, row);
                 }
+                self.frames.push();
+                if let Some((pattern, _)) = view.takes() {
+                    self.pattern(&scope, pattern, &mut Vec::new());
+                }
+                if let Some(body) = view.body() {
+                    self.statements(&scope, body);
+                }
+                self.frames.pop();
             }
             DeclView::Case(_) | DeclView::Assoc(_) => {}
         }
     }
 
-    /// The signature, `given` bounds, and `performs` row of a callable seen
-    /// from `outer`.
-    fn callable(&mut self, outer: &Scope, view: Callable<'a>) {
+    /// A callable seen from `outer`: its signature, `given` bounds, and
+    /// `performs` row; its labelled defaults; its guards; and its body. A
+    /// named callable sees no enclosing local; an anonymous one sees the
+    /// locals visible where it is written.
+    pub(crate) fn callable(&mut self, outer: &Scope, view: Callable<'a>) {
         let scope = outer.with_params(&view.params());
         for (_, written) in view.takes() {
             self.type_expr(&scope, written, Position::Type);
@@ -245,6 +341,11 @@ impl<'a> Walker<'_, 'a, '_> {
         }
         if let Some(row) = view.performs() {
             self.row(&scope, row);
+        }
+        let enclosing = (!view.is_anonymous()).then(|| self.frames.take());
+        self.callable_scope(&scope, view);
+        if let Some(frames) = enclosing {
+            self.frames.restore(frames);
         }
     }
 
@@ -315,7 +416,7 @@ impl<'a> Walker<'_, 'a, '_> {
 
     /// Resolves a type expression and every type inside it; returns what its
     /// head path denotes.
-    fn type_expr(
+    pub(crate) fn type_expr(
         &mut self,
         scope: &Scope,
         written: TypeExpr<'a>,
@@ -412,7 +513,7 @@ impl<'a> Walker<'_, 'a, '_> {
     /// The first name of a path, looked up innermost first: the type
     /// parameters, the associated names, `Self`, the module scope, and the
     /// prelude.
-    fn lookup(&self, scope: &Scope, name: &str) -> Option<Entity> {
+    pub(crate) fn lookup(&self, scope: &Scope, name: &str) -> Option<Entity> {
         if let Some((_, span)) = scope.params.iter().find(|(param, _)| param == name) {
             return Some(Entity::Param(*span));
         }
@@ -434,17 +535,20 @@ impl<'a> Walker<'_, 'a, '_> {
                 Binding::Decl(index) => Entity::Decl(index),
                 Binding::Import(index) => {
                     match self.graph.imports.get(index).map(|import| import.target) {
-                        Some(ImportTarget::LocalModule(module)) => {
-                            Entity::Module(module)
-                        }
-                        Some(ImportTarget::StdModule(_)) => Entity::StdModule,
+                        Some(ImportTarget::Module(module)) => Entity::Module(module),
                         Some(ImportTarget::Decl(decl)) => Entity::Decl(decl),
                         Some(ImportTarget::Unresolved) | None => Entity::Failed,
                     }
                 }
             });
         }
-        prelude(name).map(Entity::Prelude)
+        if name == ANY {
+            return Some(Entity::Any);
+        }
+        self.graph
+            .prelude
+            .get(name)
+            .map(|decl| decl.map_or(Entity::Failed, Entity::Decl))
     }
 
     /// Resolves one path in `position`; returns what it denotes, or `None`
@@ -459,19 +563,7 @@ impl<'a> Walker<'_, 'a, '_> {
         let segments = path.segments();
         let (first, rest) = segments.split_first()?;
         let Some(mut entity) = self.lookup(scope, first.text()) else {
-            let message = if first.text() == SELF {
-                "`Self` is visible only inside a `type`, an `interface`, and an `impl`"
-                    .to_owned()
-            } else {
-                format!("`{}` names nothing here", first.text())
-            };
-            let diagnostic = at(
-                DiagnosticCode::NameUnknownSymbol,
-                self.source_id(),
-                first.span(),
-                message,
-            );
-            self.report(diagnostic);
+            self.unknown_first(*first);
             return None;
         };
         for part in rest {
@@ -493,6 +585,130 @@ impl<'a> Walker<'_, 'a, '_> {
         Some(entity)
     }
 
+    /// Reports the first part of a path that names nothing.
+    fn unknown_first(&mut self, first: Ident<'a>) {
+        let message = if first.text() == SELF {
+            "`Self` is visible only inside a `type`, an `interface`, and an `impl`"
+                .to_owned()
+        } else {
+            format!("`{}` names nothing here", first.text())
+        };
+        let diagnostic = at(
+            DiagnosticCode::NameUnknownSymbol,
+            self.source_id(),
+            first.span(),
+            message,
+        );
+        self.report(diagnostic);
+    }
+
+    /// Resolves the dotted name `parts` in an expression or a pattern:
+    /// returns what its path denotes and how many parts the path takes, the
+    /// rest being field reads, or `None` when a fault was reported. A path
+    /// that ends at a declaration is a reference.
+    pub(crate) fn value_path(
+        &mut self,
+        scope: &Scope,
+        parts: &[Ident<'a>],
+    ) -> Option<(Entity, usize)> {
+        let (first, rest) = parts.split_first()?;
+        if first.is_reserved() {
+            return None;
+        }
+        if self.frames.find(first.text()).is_some() {
+            return Some((Entity::Local, 1));
+        }
+        let Some(mut entity) = self.lookup(scope, first.text()) else {
+            self.unknown_first(*first);
+            return None;
+        };
+        let mut consumed = 1;
+        let mut end = first.span().end();
+        for part in rest {
+            let span = ByteSpan::new(first.span().start(), part.span().end());
+            match self.member(entity, *part, span)? {
+                Step::Into(next) => {
+                    entity = next;
+                    consumed += 1;
+                    end = part.span().end();
+                }
+                Step::Dispatch => {
+                    consumed = parts.len();
+                    break;
+                }
+                Step::Value => break,
+            }
+        }
+        if let Entity::Decl(index) = entity {
+            self.reference(ByteSpan::new(first.span().start(), end), index);
+        }
+        Some((entity, consumed))
+    }
+
+    /// What the next part of an expression path does after `entity`, the
+    /// prefix spelled at `span`; `None` when a fault was reported.
+    fn member(
+        &mut self,
+        entity: Entity,
+        part: Ident<'a>,
+        span: ByteSpan,
+    ) -> Option<Step> {
+        let owner = match entity {
+            Entity::Failed => return None,
+            Entity::Local => return Some(Step::Value),
+            Entity::Param(_) | Entity::Associated(..) | Entity::SelfType(None) => {
+                return Some(Step::Dispatch);
+            }
+            Entity::Module(_) | Entity::Any => {
+                return self.step(entity, part, span).map(Step::Into);
+            }
+            Entity::SelfType(Some(owner)) => owner,
+            Entity::Decl(index) => {
+                match self.graph.decls.get(index).map(|decl| decl.kind()) {
+                    Some(DeclarationKind::Type | DeclarationKind::Interface) => index,
+                    Some(DeclarationKind::AssociatedType) => {
+                        return Some(Step::Dispatch);
+                    }
+                    _ => return Some(Step::Value),
+                }
+            }
+        };
+        let decl = self.graph.decls.get(owner)?;
+        let found = self.graph.decls.iter().position(|member| {
+            member.owner == Some(owner)
+                && member.name == part.text()
+                && member.kind() != DeclarationKind::AssociatedType
+        });
+        if let Some(index) = found {
+            return Some(Step::Into(Entity::Decl(index)));
+        }
+        let field = decl.members.iter().any(|member| {
+            member.name == part.text() && member.kind == MemberKind::Field
+        });
+        let message = if field {
+            format!(
+                "`{}` is a field of `{}`: a field is read from a value, not through its type",
+                part.text(),
+                decl.name
+            )
+        } else {
+            format!("`{}` has no member named `{}`", decl.name, part.text())
+        };
+        let diagnostic = at(
+            DiagnosticCode::NameUnknownSymbol,
+            self.source_id(),
+            part.span(),
+            message,
+        )
+        .with_related_source(
+            self.graph.source_id(decl.module),
+            decl.name_span,
+            "the declaration",
+        );
+        self.report(diagnostic);
+        None
+    }
+
     /// The entity `part` names inside `entity`, the prefix of a path.
     fn step(
         &mut self,
@@ -510,7 +726,7 @@ impl<'a> Walker<'_, 'a, '_> {
             )
         };
         match entity {
-            Entity::Failed => None,
+            Entity::Failed | Entity::Local => None,
             Entity::Param(declared) => {
                 let diagnostic = unknown(format!(
                     "a type parameter has no associated type path; `{}` names nothing",
@@ -565,13 +781,12 @@ impl<'a> Walker<'_, 'a, '_> {
                 }
                 Some(Entity::Decl(index))
             }
-            Entity::StdModule | Entity::Prelude(_) => {
-                self.report(at(
-                    DiagnosticCode::ToolUnavailable,
-                    &source_id,
-                    span,
-                    "the declarations of the standard library are not available to resolution yet",
+            Entity::Any => {
+                let diagnostic = unknown(format!(
+                    "the predeclared interface `Any` has no member `{}`",
+                    part.text()
                 ));
+                self.report(diagnostic);
                 None
             }
             Entity::Decl(index) => {
@@ -632,10 +847,9 @@ impl<'a> Walker<'_, 'a, '_> {
                     DeclarationKind::Test => Found::Other("a test"),
                 },
             ),
-            Entity::Module(_) | Entity::StdModule => Found::Other("a module"),
-            Entity::Prelude(PreludeKind::Type) => Found::Type,
-            Entity::Prelude(PreludeKind::Interface) => Found::Interface,
-            Entity::Prelude(PreludeKind::Value) => Found::Other("a module value"),
+            Entity::Module(_) => Found::Other("a module"),
+            Entity::Local => Found::Other("a local binding"),
+            Entity::Any => Found::Interface,
             Entity::Param(_) => Found::Parameter,
             Entity::SelfType(_) | Entity::Associated(..) => Found::Type,
         };
@@ -664,6 +878,18 @@ impl<'a> Walker<'_, 'a, '_> {
         self.report(diagnostic);
         None
     }
+}
+
+/// What the next part of an expression path does.
+#[derive(Clone, Copy, Debug)]
+enum Step {
+    /// The part names this entity inside the prefix.
+    Into(Entity),
+    /// The prefix is a value: the part and every later one read fields.
+    Value,
+    /// The prefix is a type parameter, an associated type, or the `Self` of
+    /// an interface: dispatch selects what the remaining parts name.
+    Dispatch,
 }
 
 /// The kind of entity a path found, as a position judges it.

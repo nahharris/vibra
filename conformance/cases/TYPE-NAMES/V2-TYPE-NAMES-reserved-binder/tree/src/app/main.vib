@@ -1,0 +1,7 @@
+fn f
+  takes {x: I32}
+  returns r: I32
+  do
+    let Option be x endlet
+    return x
+endfn

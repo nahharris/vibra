@@ -1,10 +1,107 @@
 //! Fixtures: a package `hello` with the library unit `@app` and the unit
-//! `@tests`, built from `(module path, text)` pairs.
+//! `@tests`, built from `(module path, text)` pairs, beside the embedded
+//! standard library read from `stdlib/`.
 
 use vibra_diagnostics::{DiagnosticCode, Level};
 use vibra_resolve::{
-    PackageId, Resolution, ResolveInput, SourceModule, SourceUnit, UnitKind, resolve,
+    Anchor, DeclarationKind, EmbeddedUnit, PackageId, PreludeBinding, Resolution,
+    ResolveInput, SourceModule, SourceUnit, UnitKind, resolve,
 };
+
+/// The embedded standard library's package.
+pub(crate) const STD_PACKAGE: (&str, &str) = ("std", "0.0.2");
+
+/// The modules of `stdlib/`, by module path.
+pub(crate) const STD_MODULES: [(&str, &[u8]); 6] = [
+    (
+        "@std.bool",
+        include_bytes!("../../../../stdlib/src/std/bool.vib"),
+    ),
+    (
+        "@std.builtin",
+        include_bytes!("../../../../stdlib/src/std/builtin.vib"),
+    ),
+    (
+        "@std.core",
+        include_bytes!("../../../../stdlib/src/std/core.vib"),
+    ),
+    (
+        "@std.iter",
+        include_bytes!("../../../../stdlib/src/std/iter.vib"),
+    ),
+    (
+        "@std.option",
+        include_bytes!("../../../../stdlib/src/std/option.vib"),
+    ),
+    (
+        "@std.result",
+        include_bytes!("../../../../stdlib/src/std/result.vib"),
+    ),
+];
+
+/// The prelude table of the type chapter, "The prelude", as the modules of
+/// `stdlib/` declare it: each name, its module, and its kind.
+pub(crate) const PRELUDE: [(&str, &str, DeclarationKind); 29] = [
+    ("Void", "@std.builtin", DeclarationKind::Type),
+    ("Never", "@std.builtin", DeclarationKind::Type),
+    ("Atom", "@std.builtin", DeclarationKind::Type),
+    ("Char", "@std.builtin", DeclarationKind::Type),
+    ("I8", "@std.builtin", DeclarationKind::Type),
+    ("I16", "@std.builtin", DeclarationKind::Type),
+    ("I32", "@std.builtin", DeclarationKind::Type),
+    ("I64", "@std.builtin", DeclarationKind::Type),
+    ("U8", "@std.builtin", DeclarationKind::Type),
+    ("U16", "@std.builtin", DeclarationKind::Type),
+    ("U32", "@std.builtin", DeclarationKind::Type),
+    ("U64", "@std.builtin", DeclarationKind::Type),
+    ("F32", "@std.builtin", DeclarationKind::Type),
+    ("F64", "@std.builtin", DeclarationKind::Type),
+    ("List", "@std.builtin", DeclarationKind::Type),
+    ("Str", "@std.builtin", DeclarationKind::Type),
+    ("Bytes", "@std.builtin", DeclarationKind::Type),
+    ("Dict", "@std.builtin", DeclarationKind::Type),
+    ("Bool", "@std.bool", DeclarationKind::Type),
+    ("true", "@std.bool", DeclarationKind::Value),
+    ("false", "@std.bool", DeclarationKind::Value),
+    ("Option", "@std.option", DeclarationKind::Type),
+    ("Result", "@std.result", DeclarationKind::Type),
+    ("Ordering", "@std.core", DeclarationKind::Type),
+    ("Equatable", "@std.core", DeclarationKind::Interface),
+    ("Ordered", "@std.core", DeclarationKind::Interface),
+    ("From", "@std.core", DeclarationKind::Interface),
+    ("TryFrom", "@std.core", DeclarationKind::Interface),
+    ("Iter", "@std.iter", DeclarationKind::Interface),
+];
+
+/// The identity of the top-level declaration `name` of kind `kind` in the
+/// standard-library module `module`.
+pub(crate) fn std_identity(module: &str, kind: DeclarationKind, name: &str) -> String {
+    Anchor::new(STD_PACKAGE.0, STD_PACKAGE.1, module, "", kind, name)
+        .identity()
+        .as_str()
+        .to_owned()
+}
+
+/// The embedded unit `@std` over the modules of `stdlib/`.
+pub(crate) fn embedded() -> EmbeddedUnit {
+    EmbeddedUnit::new(
+        PackageId::new(STD_PACKAGE.0, STD_PACKAGE.1),
+        "@std",
+        STD_MODULES
+            .iter()
+            .map(|(path, bytes)| {
+                let file = path.trim_start_matches("@std.");
+                SourceModule::new(*path, format!("stdlib/src/std/{file}.vib"), *bytes)
+            })
+            .collect(),
+        PRELUDE
+            .iter()
+            .map(|(name, module, kind)| {
+                PreludeBinding::new(*name, std_identity(module, *kind, name))
+            })
+            .collect(),
+    )
+}
 
 /// The source identity of a module path: `@app.a.b` is `src/app/a/b.vib`,
 /// `@tests.t` is `tests/t.vib`.
@@ -35,6 +132,7 @@ pub(crate) fn resolve_modules(modules: &[(&str, &str)]) -> Resolution {
             SourceUnit::new("@app", UnitKind::Lib, app),
             SourceUnit::new("@tests", UnitKind::Tests, tests),
         ],
+        embedded(),
     ))
 }
 

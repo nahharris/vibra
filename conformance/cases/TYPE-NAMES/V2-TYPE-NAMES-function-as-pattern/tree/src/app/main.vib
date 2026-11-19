@@ -1,0 +1,17 @@
+fn helper
+  returns h: I32
+  do
+    return 0i32
+endfn
+
+fn f
+  takes {x: I32}
+  returns r: I32
+  do
+    match x
+      case helper
+        return 1i32
+      case _
+        return 0i32
+    endmatch
+endfn

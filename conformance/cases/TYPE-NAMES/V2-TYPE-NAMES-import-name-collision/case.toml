@@ -15,5 +15,5 @@ verdict = "refuted"
 code = "@name.redeclaration"
 level = "@error"
 source = "src/app/main.vib"
-span = { start = 23, end = 25 }
-related = [{ source = "src/app/main.vib", span = { start = 9, end = 11 } }]
+span = { start = 25, end = 29 }
+related = [{ source = "src/app/main.vib", span = { start = 9, end = 13 } }]

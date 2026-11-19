@@ -4,7 +4,9 @@
 //! ([`load_stdlib`]): the `@stdlibManifest.v2` manifest, the digests of the
 //! modules, the external declarations checked against the `@compiler`
 //! registry, the nine language roles each claimed exactly once, and the
-//! prelude. The authority is `docs/spec`: "Language core and standard
+//! prelude. [`StdlibOverlay::embedded_unit`] hands the loaded library to
+//! resolution as its embedded unit `@std`. The authority is `docs/spec`:
+//! "Language core and standard
 //! library" and "The prelude" of the type chapter, "The standard library" of
 //! the programs chapter, and "Compiler intrinsic registry" and "External
 //! providers" of the runtime chapter.

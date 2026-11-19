@@ -1,0 +1,12 @@
+id = "V2-TYPE-NAMES-result-name-in-ensures"
+rule = "V2-TYPE-NAMES-result-name-in-ensures"
+profile = "staticV2"
+operation = "resolve"
+description = "01-source-language.md#fn-and-proc: the result name is visible in ensures"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

@@ -152,3 +152,75 @@ fn the_overlay_is_the_unit_std() {
 fn loading_twice_gives_the_same_library() {
     assert_eq!(load_stdlib(), load_stdlib());
 }
+
+#[test]
+fn the_overlay_is_resolution_s_embedded_unit() {
+    let stdlib = load_stdlib().expect("the embedded standard library loads");
+    let unit = stdlib.overlay().embedded_unit();
+    assert_eq!(unit.name(), "@std");
+    assert_eq!(unit.package().name(), "std");
+    assert_eq!(unit.package().version(), "0.0.2");
+    let modules = unit
+        .modules()
+        .iter()
+        .map(|module| (module.path(), module.source_id()))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        modules,
+        [
+            ("@std.bool", "stdlib/src/std/bool.vib"),
+            ("@std.builtin", "stdlib/src/std/builtin.vib"),
+            ("@std.core", "stdlib/src/std/core.vib"),
+            ("@std.iter", "stdlib/src/std/iter.vib"),
+            ("@std.option", "stdlib/src/std/option.vib"),
+            ("@std.result", "stdlib/src/std/result.vib"),
+        ]
+    );
+    for module in unit.modules() {
+        let loaded = stdlib.module(module.path()).expect("a loaded module");
+        assert_eq!(module.bytes(), loaded.bytes());
+    }
+    assert_eq!(
+        unit.prelude().len(),
+        PRELUDE.len() - 2,
+        "all but `Any` and `Self`"
+    );
+    for binding in unit.prelude() {
+        let declaration = stdlib
+            .prelude()
+            .get(binding.name())
+            .expect("a prelude name");
+        assert_eq!(binding.identity(), declaration.identity());
+    }
+}
+
+#[test]
+fn resolution_binds_a_prelude_name_through_the_embedded_unit() {
+    let stdlib = load_stdlib().expect("the embedded standard library loads");
+    let input = vibra_resolve::ResolveInput::new(
+        vibra_resolve::PackageId::new("hello", "0.1.0"),
+        vec![vibra_resolve::SourceUnit::new(
+            "@app",
+            vibra_resolve::UnitKind::Lib,
+            vec![vibra_resolve::SourceModule::new(
+                "@app.main",
+                "src/app/main.vib",
+                b"type A of Str endtype\n".to_vec(),
+            )],
+        )],
+        stdlib.overlay().embedded_unit(),
+    );
+    let resolution = vibra_resolve::resolve(&input);
+    assert!(
+        resolution.diagnostics().is_empty(),
+        "{:?}",
+        resolution.diagnostics()
+    );
+    let str_identity = stdlib.prelude().get("Str").expect("`Str`").identity();
+    let targets = resolution
+        .references()
+        .iter()
+        .map(|reference| reference.to().as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(targets, [str_identity]);
+}

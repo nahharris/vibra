@@ -1,0 +1,8 @@
+type User of {names: List(Str)} endtype
+
+fn f
+  takes {user: User}
+  returns r: U64
+  do
+    return List.length(user.names)
+endfn

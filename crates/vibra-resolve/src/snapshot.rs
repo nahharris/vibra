@@ -161,6 +161,36 @@ impl ResolvedReference {
     }
 }
 
+/// The local bindings visible at one statement of a body. It is not part of
+/// the `@resolved.v2` observation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VisibleLocals {
+    pub(crate) source_id: String,
+    pub(crate) span: ByteSpan,
+    pub(crate) names: Vec<String>,
+}
+
+impl VisibleLocals {
+    /// The source identity of the module.
+    #[must_use]
+    pub fn source_id(&self) -> &str {
+        &self.source_id
+    }
+
+    /// The bytes of the statement.
+    #[must_use]
+    pub const fn span(&self) -> ByteSpan {
+        self.span
+    }
+
+    /// The names visible at the start of the statement, outermost scope
+    /// first, each scope in binding order.
+    #[must_use]
+    pub fn names(&self) -> &[String] {
+        &self.names
+    }
+}
+
 /// Everything resolution established about one input.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Resolution {
@@ -170,9 +200,18 @@ pub struct Resolution {
     pub(crate) imports: Vec<ResolvedImport>,
     pub(crate) references: Vec<ResolvedReference>,
     pub(crate) diagnostics: Vec<Diagnostic>,
+    pub(crate) visible: Vec<VisibleLocals>,
 }
 
 impl Resolution {
+    /// The locals visible at each statement of the local modules, in the
+    /// order the statements are walked: each module in input order, its
+    /// declarations in written order.
+    #[must_use]
+    pub fn visible_locals(&self) -> &[VisibleLocals] {
+        &self.visible
+    }
+
     /// The modules, sorted by path.
     #[must_use]
     pub fn modules(&self) -> &[ResolvedModule] {

@@ -1,0 +1,12 @@
+id = "V2-TYPE-NAMES-anon-fn-scope"
+rule = "V2-TYPE-NAMES-anon-fn-scope"
+profile = "staticV2"
+operation = "resolve"
+description = "01-source-language.md#fn-and-proc: an anonymous fn sees the locals visible where it is written"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

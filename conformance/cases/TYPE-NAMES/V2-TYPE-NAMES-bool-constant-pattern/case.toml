@@ -1,0 +1,12 @@
+id = "V2-TYPE-NAMES-bool-constant-pattern"
+rule = "V2-TYPE-NAMES-bool-constant-pattern"
+profile = "staticV2"
+operation = "resolve"
+description = "01-source-language.md#patterns: true and false are constant patterns; neither arm binds"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

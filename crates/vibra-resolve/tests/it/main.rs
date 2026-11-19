@@ -10,8 +10,10 @@
 
 mod support;
 
+mod bodies;
 mod declarations;
 mod identity;
 mod imports;
 mod paths;
 mod snapshot;
+mod stdlib;

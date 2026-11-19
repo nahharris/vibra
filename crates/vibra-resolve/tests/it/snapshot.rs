@@ -38,9 +38,9 @@ fn the_snapshot_is_the_closed_record_in_its_orders() {
         .collect::<Vec<_>>()
         .join(" ");
     let expected = format!(
-        "{{format: @resolved.v2 package: {{name: \"hello\" version: \"0.1.0\"}} modules: [{{path: @app.main unit: @app sourceId: \"src/app/main.vib\"}} {{path: @app.model unit: @app sourceId: \"src/app/model.vib\"}}] declarations: [{declarations}] imports: [{{span: {{sourceId: \"src/app/main.vib\" start: 0u64 end: 21u64}} path: @app.model name: \"model\" to: \"{}\"}}] references: [{{span: {{sourceId: \"src/app/main.vib\" start: 39u64 end: 49u64}} to: \"{}\"}}]}}",
+        "{{format: @resolved.v2 package: {{name: \"hello\" version: \"0.1.0\"}} modules: [{{path: @app.main unit: @app sourceId: \"src/app/main.vib\"}} {{path: @app.model unit: @app sourceId: \"src/app/model.vib\"}}] declarations: [{declarations}] imports: [{{span: {{sourceId: \"src/app/main.vib\" start: 0u64 end: 21u64}} path: @app.model name: \"model\" to: \"{}\"}}] references: [{{span: {{sourceId: \"src/app/main.vib\" start: 39u64 end: 49u64}} to: \"{user}\"}} {{span: {{sourceId: \"src/app/model.vib\" start: 76u64 end: 80u64}} to: \"{user}\"}}]}}",
         id("@app.model", "", DeclarationKind::Module, "model"),
-        id("@app.model", "", DeclarationKind::Type, "User"),
+        user = id("@app.model", "", DeclarationKind::Type, "User"),
     );
     assert_eq!(resolution.canonical_text(), expected);
     let parsed = vibra_syntax::parse_data(None, resolution.canonical_text().as_bytes());
