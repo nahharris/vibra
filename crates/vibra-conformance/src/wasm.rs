@@ -165,6 +165,32 @@ fn result_type(program: &CheckedProgram) -> Option<Type> {
     }
 }
 
+/// The header of `conformance/wasm-support.tsv`, whose rows are
+/// `id<TAB>support<TAB>node` for each executable case.
+pub const WASM_SUPPORT_HEADER: &str = "id\tsupport\tnode";
+
+/// Whether the transition profile runs `executable`: `None` when the
+/// emitter lowers it, and otherwise the node kind that stopped the emit, the
+/// `node` column of `conformance/wasm-support.tsv`. Another emit error is
+/// the emitter's defect and is reported by its message.
+///
+/// # Errors
+///
+/// The message of an emit error that is not an unsupported node.
+pub fn unsupported_node(
+    executable: &Executable,
+) -> Result<Option<&'static str>, String> {
+    let emitted = match executable {
+        Executable::Program(program) => vibra_wasm::emit(program),
+        Executable::Tests { set, tests } => vibra_wasm::emit_tests(set, tests),
+    };
+    match emitted {
+        Ok(_) => Ok(None),
+        Err(EmitError::Unsupported { node, .. }) => Ok(Some(node)),
+        Err(other) => Err(other.to_string()),
+    }
+}
+
 /// The executor: the engine, and a fault hook for the harness's own tests.
 #[derive(Debug)]
 pub struct WasmExecutor {

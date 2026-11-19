@@ -147,7 +147,7 @@ fn guarded_program() -> CheckedProgram {
 }
 
 fn run(program: CheckedProgram, executor: WasmExecutor) -> RunReport {
-    let corpus = Corpus::discover(&one_interpret_case()).expect("the corpus loads");
+    let corpus = Corpus::discover(one_interpret_case()).expect("the corpus loads");
     let dispatcher = ProfileDispatcher::new()
         .with_handler(ConformanceProfile::InterpreterV2, Interpreter(program));
     ConformanceRunner::new(dispatcher)

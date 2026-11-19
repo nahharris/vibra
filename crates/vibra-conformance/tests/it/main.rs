@@ -16,3 +16,4 @@ mod diagnostic_registry;
 mod manifest;
 mod runner;
 mod wasm_column;
+mod wasm_support;

@@ -59,4 +59,4 @@ pub use rules::{
 };
 pub use runner::{CaseReport, CaseStatus, ConformanceRunner, ProfileCounts, RunReport};
 pub use standard::{DispatchResult, ProfileDispatcher, standard_dispatcher};
-pub use wasm::{Executable, WasmExecutor};
+pub use wasm::{Executable, WASM_SUPPORT_HEADER, WasmExecutor, unsupported_node};
