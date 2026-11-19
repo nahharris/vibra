@@ -872,7 +872,7 @@ impl<'a> Program<'a> {
                 }
                 let arguments = positional
                     .iter()
-                    .map(|argument| self.written_at(module, argument.clone(), scope))
+                    .map(|argument| self.written_at(module, *argument, scope))
                     .collect::<Result<Vec<_>, _>>()?;
                 if self.library_index(Library::Dict) == Some(index)
                     && let (Some(key), Some(key_written)) =
@@ -1024,6 +1024,7 @@ impl<'a> Program<'a> {
         for (module, diagnostic) in faults {
             self.fault(module, diagnostic);
         }
+        super::nominal::infinite_sizes(self);
         for index in 0..self.types.len() {
             let Some(data) = self.types.get(index) else {
                 continue;
@@ -1112,7 +1113,7 @@ impl<'a> Program<'a> {
                 Ok(TypeKind::Variant(read))
             }
             Some(TypeBody::Of(written)) => {
-                if written_depth(written.clone()) > Type::MAX_DEPTH {
+                if written_depth(written) > Type::MAX_DEPTH {
                     return Err(depth_fault(written.span()));
                 }
                 match written.form() {
@@ -1273,6 +1274,7 @@ impl<'a> Program<'a> {
     ) -> Result<(FnType, Vec<(String, ByteSpan)>), NoType> {
         let mut parameters = Vec::new();
         let mut names = Vec::new();
+        let mut deepest: Option<ByteSpan> = None;
         for (pattern, written) in view.takes() {
             let PatternForm::Path(path) = pattern.form() else {
                 return Err(NoType::Unsupported);
@@ -1282,10 +1284,24 @@ impl<'a> Program<'a> {
                 return Err(NoType::Unsupported);
             };
             names.push((name.text().to_owned(), name.span()));
-            parameters.push(self.written(module, written, scope)?);
+            let span = written.span();
+            let ty = self.written(module, written, scope)?;
+            if deepest.is_none() && ty.depth() >= Type::MAX_DEPTH {
+                deepest = Some(span);
+            }
+            parameters.push(ty);
         }
-        let (_, result) = view.result().ok_or(NoType::Unresolved)?;
-        let result = self.written(module, result, scope)?;
+        let (_, written) = view.result().ok_or(NoType::Unresolved)?;
+        let span = written.span();
+        let result = self.written(module, written, scope)?;
+        if deepest.is_none() && result.depth() >= Type::MAX_DEPTH {
+            deepest = Some(span);
+        }
+        // The callable's own type is one level more than its deepest
+        // parameter or result, and is a type of the program too.
+        if let Some(span) = deepest {
+            return Err(depth_fault(span));
+        }
         Ok((FnType::new(parameters, result), names))
     }
 

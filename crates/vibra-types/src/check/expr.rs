@@ -347,6 +347,9 @@ pub(crate) struct BodyChecker<'p, 'a> {
     /// The span of the argument being checked, so that a literal written
     /// there reports a mismatch as an argument that does not fit.
     argument: Option<ByteSpan>,
+    /// The span of a `let` initializer whose written type is faulty and
+    /// already reported, so that nothing fixing its type is not reported.
+    unfixed: Option<ByteSpan>,
 }
 
 /// The value of one checked callable body or initializer.
@@ -384,6 +387,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             references: Vec::new(),
             instantiations: Vec::new(),
             argument: None,
+            unfixed: None,
         }
     }
 
@@ -847,7 +851,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     let head = if supported {
                         Head::Contract(index, field.text().to_owned())
                     } else {
-                        Head::Error
+                        let module =
+                            program.interfaces.get(index).map(|data| data.module);
+                        let whole = ByteSpan::new(span.start(), suffix_span.end());
+                        module.map_or(Head::Error, |module| self.skipped(module, whole))
                     };
                     return (head, consumed + 1);
                 }
@@ -1536,10 +1543,24 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     }
                     match state.slot(at).cloned() {
                         Some(pattern) => {
-                            if !state.assignment.is_empty() {
-                                unify(&pattern, &actual, &mut state.assignment);
+                            let mut trial = state.assignment.clone();
+                            let fits = trial.is_empty()
+                                || unify(&pattern, &actual, &mut trial);
+                            if fits {
+                                state.assignment = trial;
                             }
                             match state.instance(&pattern) {
+                                None if !fits => {
+                                    self.report(
+                                        DiagnosticCode::TypeArgumentMismatch,
+                                        span,
+                                        format!(
+                                            "an argument of type `{actual}` does not fit this parameter"
+                                        ),
+                                    );
+                                    state.failed = true;
+                                    None
+                                }
                                 Some(expected) => self.conform(
                                     &expected,
                                     &actual,
@@ -1654,7 +1675,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             .filter(|(_, bound)| bound.is_none())
             .map(|(name, _)| name.clone())
             .collect::<Vec<_>>();
-        if !missing.is_empty() && state.params.is_some() {
+        if !missing.is_empty() && state.params.is_some() && !state.failed {
             self.ambiguous(state.application, &missing);
             state.failed = true;
         }
@@ -1904,7 +1925,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     let slot = match state.product {
                         Product::Tuple | Product::Record(_) => None,
                         Product::List => Some(&mut state.element),
-                        Product::Dict if at % 2 == 0 => Some(&mut state.element),
+                        Product::Dict if at.is_multiple_of(2) => Some(&mut state.element),
                         Product::Dict => Some(&mut state.value),
                     };
                     match slot {
@@ -1953,7 +1974,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     _ => None,
                 },
                 Product::List => state.element.clone(),
-                Product::Dict if at % 2 == 0 => state.element.clone(),
+                Product::Dict if at.is_multiple_of(2) => state.element.clone(),
                 Product::Dict => state.value.clone(),
             };
             return Step::Child(
@@ -2093,6 +2114,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         expected: Option<&Type>,
         what: &str,
     ) {
+        if self.unfixed == Some(span) {
+            return;
+        }
         match expected {
             Some(expected) => self.report(
                 DiagnosticCode::TypeMismatch,
@@ -2733,6 +2757,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     };
                     if view.written_type().is_some() && written.is_none() {
                         state.failed = true;
+                        self.unfixed = view.value().map(|value| expr_span(&value));
                     }
                     let Some(value) = view.value() else {
                         state.failed = true;

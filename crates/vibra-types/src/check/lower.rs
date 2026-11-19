@@ -24,6 +24,7 @@ use super::CheckResult;
 use super::cycle::initializer_cycles;
 use super::declare::{Entity, Program, TypeData, TypeKind};
 use super::expr::{BodyChecker, Checked, Layout, Reference, Target};
+use super::generics::{Instantiation, expanding_instantiations};
 
 /// The bodies of one pass.
 struct Pass {
@@ -33,6 +34,8 @@ struct Pass {
     faults: BTreeMap<Target, Vec<Diagnostic>>,
     /// The references of each declaration.
     references: BTreeMap<Target, Vec<Reference>>,
+    /// Every instantiation of a generic function inside a body.
+    instantiations: Vec<Instantiation>,
 }
 
 fn layout(program: &Program<'_>) -> Layout {
@@ -69,6 +72,7 @@ fn check_bodies(
         values: BTreeMap::new(),
         faults: BTreeMap::new(),
         references: BTreeMap::new(),
+        instantiations: Vec::new(),
     };
     for (index, data) in program.functions.iter().enumerate() {
         if !program.supported_fn(index) || data.external.is_some() {
@@ -89,6 +93,15 @@ fn check_bodies(
         let checked =
             checker.callable(signature, &data.params, &data.binders, self_type, body);
         pass.functions.insert(index, checked);
+        pass.instantiations
+            .extend(checker.instantiations.drain(..).map(
+                |(callee, arguments, span)| Instantiation {
+                    caller: index,
+                    callee,
+                    arguments,
+                    span,
+                },
+            ));
         pass.faults.insert(
             Target::Function(index),
             std::mem::take(&mut checker.diagnostics),
@@ -226,6 +239,7 @@ pub(crate) fn check_program(
         }
     }
     diagnostics.extend(initializer_cycles(&program, &pass.references));
+    diagnostics.extend(expanding_instantiations(&program, &pass.instantiations));
     diagnostics.sort_by(|left, right| {
         let order = |diagnostic: &Diagnostic| {
             let module = program

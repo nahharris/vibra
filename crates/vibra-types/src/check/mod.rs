@@ -15,8 +15,10 @@
 mod cycle;
 mod declare;
 mod expr;
+mod generics;
 mod literal;
 mod lower;
+mod nominal;
 
 use std::sync::Arc;
 
