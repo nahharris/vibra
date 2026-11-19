@@ -2,7 +2,7 @@
 
 use vibra_diagnostics::DiagnosticCode as C;
 
-use vibra_resolve::{Anchor, DeclarationId, DeclarationKind};
+use vibra_resolve::{Access, Anchor, DeclarationId, DeclarationKind};
 
 use crate::support::{
     STD_PACKAGE, assert_clean, codes, flat, resolve_modules, span_of, std_identity,
@@ -149,6 +149,89 @@ fn a_private_declaration_through_a_module_import_is_reported_at_the_path() {
             vec![("src/app/model.vib".to_owned(), secret.0, secret.1)]
         )]
     );
+}
+
+/// A public type with a private and a public static member, and a public
+/// interface whose members write no `visibility`.
+const MEMBERS: &str = "type Counter of U8\n  visibility @public\n  fn hidden\n    returns r: U8\n    do\n      return 1u8\n  endfn\n  fn shown\n    returns r: U8\n    visibility @public\n    do\n      return Counter.hidden()\n  endfn\nendtype\n\ninterface Shown\n  visibility @public\n  fn show\n    takes {value: Self}\n    returns r: U8\n  endfn\n  fn twice\n    takes {value: Self}\n    returns r: U8\n    do\n      return Shown.show(value)\n  endfn\nendinterface\n";
+
+#[test]
+fn a_private_static_member_from_another_module_is_reported_at_its_name() {
+    let main = "use @app.model.Counter enduse\n\nfn f returns r: U8 do return Counter.hidden() endfn\n";
+    let resolution = resolve_modules(&[("@app.main", main), ("@app.model", MEMBERS)]);
+    let (start, end) = span_of(main, "hidden", 0);
+    let hidden = span_of(MEMBERS, "hidden", 0);
+    assert_eq!(
+        flat(&resolution),
+        [(
+            C::NamePrivateAccess,
+            "src/app/main.vib".to_owned(),
+            start,
+            end,
+            vec![("src/app/model.vib".to_owned(), hidden.0, hidden.1)]
+        )]
+    );
+    // Through a module import too, and as a function value.
+    let module = "use @app.model enduse\n\nfn f returns r: Fn({} U8) do return model.Counter.hidden endfn\n";
+    let resolution = resolve_modules(&[("@app.main", module), ("@app.model", MEMBERS)]);
+    let (start, end) = span_of(module, "hidden", 0);
+    assert_eq!(
+        flat(&resolution),
+        [(
+            C::NamePrivateAccess,
+            "src/app/main.vib".to_owned(),
+            start,
+            end,
+            vec![("src/app/model.vib".to_owned(), hidden.0, hidden.1)]
+        )]
+    );
+}
+
+#[test]
+fn public_and_interface_members_from_another_module_and_any_member_inside_it() {
+    let main = "use @app.model.Counter enduse\n\nuse @app.model.Shown enduse\n\nfn f returns r: U8 do return Counter.shown() endfn\n\nfn g(T) takes {value: T} returns r: U8 given {T: Shown} do return Shown.twice(value) endfn\n";
+    assert_clean(&resolve_modules(&[
+        ("@app.main", main),
+        ("@app.model", MEMBERS),
+    ]));
+    // `Counter.shown` calls the private `Counter.hidden` inside its module.
+    assert_clean(&resolve_modules(&[("@app.model", MEMBERS)]));
+}
+
+#[test]
+fn a_member_of_a_private_type_is_reported_once_at_the_type() {
+    let model = "type Counter of U8\n  fn hidden\n    returns r: U8\n    do\n      return 1u8\n  endfn\nendtype\n";
+    let main = "use @app.model enduse\n\nfn f returns r: U8 do return model.Counter.hidden() endfn\n";
+    let resolution = resolve_modules(&[("@app.main", main), ("@app.model", model)]);
+    assert_eq!(codes(&resolution), [C::NamePrivateAccess]);
+    let (start, end) = span_of(main, "model.Counter", 0);
+    let found = flat(&resolution);
+    assert_eq!((found[0].2, found[0].3), (start, end));
+}
+
+#[test]
+fn an_interface_member_has_the_interface_s_access() {
+    let resolution = resolve_modules(&[("@app.model", MEMBERS)]);
+    let accesses: Vec<_> = resolution
+        .declarations()
+        .iter()
+        .map(|declaration| {
+            (declaration.anchor().name().to_owned(), declaration.access())
+        })
+        .collect();
+    for (name, access) in [
+        ("Counter", Access::Public),
+        ("hidden", Access::Private),
+        ("shown", Access::Public),
+        ("Shown", Access::Public),
+        ("show", Access::Public),
+        ("twice", Access::Public),
+    ] {
+        assert!(
+            accesses.contains(&(name.to_owned(), access)),
+            "{name}: {accesses:?}"
+        );
+    }
 }
 
 #[test]
