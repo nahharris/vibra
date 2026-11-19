@@ -35,6 +35,7 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-diagnostics",
             "vibra-fmt",
             "vibra-interp",
+            "vibra-ir",
             "vibra-resolve",
             "vibra-syntax",
             "vibra-types",

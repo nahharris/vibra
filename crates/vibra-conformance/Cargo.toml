@@ -19,6 +19,9 @@ vibra-syntax.workspace = true
 vibra-types.workspace = true
 vibra-workspace.workspace = true
 
+[dev-dependencies]
+vibra-ir.workspace = true
+
 [[bin]]
 name = "vibra-conformance"
 path = "src/bin/conformance.rs"
