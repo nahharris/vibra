@@ -101,6 +101,10 @@ V2-SRC-EXPR-reserved-label	active	01-source-language.md#reserved-words
 V2-SRC-EXPR-reserved-opener-label	active	01-source-language.md#reserved-words
 V2-SRC-EXPR-return-try-await	active	01-source-language.md#return-try-await
 V2-SRC-EXPR-try-return	active	01-source-language.md#grammar
+V2-SRC-FMT-comment-in-arguments	active	01-source-language.md#canonical-format
+V2-SRC-FMT-comment-in-module-value	active	01-source-language.md#canonical-format
+V2-SRC-FMT-comment-in-operand	active	01-source-language.md#canonical-format
+V2-SRC-FMT-comment-in-type	active	01-source-language.md#canonical-format
 V2-SRC-FMT-declaration-member-breaks	active	01-source-language.md#canonical-format
 V2-SRC-FMT-declaration-of-one-line	active	01-source-language.md#canonical-format
 V2-SRC-FMT-declaration-of-wraps	active	01-source-language.md#canonical-format

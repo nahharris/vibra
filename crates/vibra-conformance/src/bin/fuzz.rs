@@ -17,8 +17,8 @@
 //!   with the same properties.
 //! - `format`: mutated corpus inputs. A document with a diagnostic is
 //!   returned byte for byte; any other is formatted to a text that reads
-//!   with no diagnostic, formats to itself, and keeps the input's tokens up
-//!   to the section moves the canonical format makes.
+//!   with no diagnostic, formats to itself, keeps the input's tokens up to
+//!   the section moves the canonical format makes, and keeps every comment.
 //!
 //! Every finding is printed with its target, iteration, and seed, and the
 //! run exits 1 when there is one. A finding is closed by a reduced
@@ -33,7 +33,8 @@ use vibra_diagnostics::{ByteSpan, Diagnostic};
 use vibra_fmt::format_document;
 use vibra_syntax::source::keyword::is_section;
 use vibra_syntax::{
-    Document, DocumentMode, RESERVED_WORDS, SyntaxKind, check_encoding, lex, parse,
+    Document, DocumentMode, RESERVED_WORDS, SyntaxKind, TokenKind, check_encoding, lex,
+    parse,
 };
 
 /// The seed of a run that names none.
@@ -777,8 +778,36 @@ fn check_format(input: &[u8]) -> Result<(), String> {
             return Err("formatting is not idempotent".to_owned());
         }
         same_tokens(text, &once)?;
+        same_comments(text, &once)?;
     }
     Ok(())
+}
+
+/// The output holds the input's comments, each with its text, in any order:
+/// a comment moves with the section it belongs to.
+fn same_comments(input: &str, output: &str) -> Result<(), String> {
+    let comments = |text: &'_ str| -> Vec<String> {
+        let mut comments: Vec<String> = lex(text)
+            .tokens
+            .iter()
+            .filter(|token| token.kind == TokenKind::Comment)
+            .map(|token| {
+                token
+                    .span
+                    .text(text)
+                    .unwrap_or_default()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect();
+        comments.sort_unstable();
+        comments
+    };
+    if comments(input) == comments(output) {
+        Ok(())
+    } else {
+        Err("formatting added or lost a comment".to_owned())
+    }
 }
 
 const fn other(mode: DocumentMode) -> DocumentMode {

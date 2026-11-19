@@ -163,11 +163,20 @@ fn a_comment_breaks_the_type_and_stays_with_its_part() {
 }
 
 #[test]
-fn a_comment_inside_a_type_expression_leaves_the_document_unchanged() {
-    let text = "type A of {x: U8 // c\n  y: U8} endtype";
+fn a_comment_inside_a_type_expression_breaks_its_bracket_form() {
+    // The form holds a comment, so it is multi-line, and so is the `of`
+    // that carries it.
     assert_eq!(
-        format_document(&parse_source(None, text.as_bytes())).as_deref(),
-        Some(text)
+        format("type A of {x: U8 // c\n  y: U8} endtype"),
+        "type A\n  of {\n    x: U8 // c\n    y: U8\n  }\nendtype\n"
+    );
+    assert_eq!(
+        format("type A of {\n  // first\n  x: U8\n  // last\n} endtype"),
+        "type A\n  of {\n    // first\n    x: U8\n    // last\n  }\nendtype\n"
+    );
+    assert_eq!(
+        format("type A of List( // element\n U8) endtype"),
+        "type A\n  of List( // element\n    U8\n  )\nendtype\n"
     );
 }
 

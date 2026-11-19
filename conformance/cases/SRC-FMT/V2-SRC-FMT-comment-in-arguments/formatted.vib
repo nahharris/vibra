@@ -1,0 +1,6 @@
+let a: I32 be
+  f(
+    x // why
+    y
+  )
+endlet

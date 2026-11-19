@@ -23,10 +23,8 @@
 //!   members, then `impl` blocks, then `do`; within each group the written
 //!   order is kept, so cases, fields, and type arguments are never
 //!   reordered, and an empty `takes {}`, `labelled {}`, `given {}`, or
-//!   `performs {}` is removed;
-//! - a type expression on one line when it fits, otherwise its brace or
-//!   parenthesized forms one entry per line, one step in, with the closing
-//!   token on its own line;
+//!   `performs {}` is removed, its comments moving to the line before what
+//!   follows it;
 //! - a module value laid out as a `let` ([`crate::expr`]); with a
 //!   `visibility` or `doc` section, as a declaration whose last section is
 //!   `be` and its value.
@@ -34,16 +32,18 @@
 //! A `fn`, `proc`, or `test`, named or anonymous, is laid out with the
 //! expressions ([`crate::expr`]): its signature split into its sections, a
 //! guard's `else` on the next line one step in when both do not fit, and the
-//! body statements one step in from `do`. A form whose comments cannot be
-//! placed by these rules (a comment between the tokens of one operand) leaves
-//! the whole document unchanged.
+//! body statements one step in from `do`. Comments inside a form go with
+//! their tokens ([`crate::comments`]), so a comment moves with its section.
 
 use vibra_syntax::source::Construct;
 use vibra_syntax::source::keyword::{SECTIONS, section_rank};
 use vibra_syntax::{CstNode, SyntaxKind};
 
-use crate::expr::{body_items, expr_items, guard_items, labelled_items, let_items};
-use crate::layout::{Item, render};
+use crate::comments::Comments;
+use crate::expr::{
+    Work, close, emit, is_colon, run, significant, token, value_group, word,
+};
+use crate::layout::{Item, render, trailing_comment};
 
 /// The rank of the groups after the sections.
 const TYPE_MEMBERS: usize = SECTIONS.len();
@@ -68,9 +68,10 @@ enum Last {
     Comment,
 }
 
-/// The canonical text of a module with no diagnostic, or `None` when it
-/// holds a comment the layout cannot place.
+/// The canonical text of a module with no diagnostic. `None` only when the
+/// tree is not of a shape the reader accepts.
 pub(crate) fn format(root: &CstNode, text: &str) -> Option<String> {
+    let mut comments = Comments::of(root, text);
     let mut items = Vec::new();
     let mut last = Last::Nothing;
     let mut newlines = 0;
@@ -78,7 +79,7 @@ pub(crate) fn format(root: &CstNode, text: &str) -> Option<String> {
         match child.kind() {
             SyntaxKind::Whitespace => newlines += breaks(child.text(text)),
             SyntaxKind::Comment if last == Last::Form && newlines == 0 => {
-                items.push(Item::TrailingComment(comment(child, text)));
+                items.push(trailing_comment(text, child.span().start()));
                 last = Last::Comment;
             }
             SyntaxKind::Comment => {
@@ -89,7 +90,7 @@ pub(crate) fn format(root: &CstNode, text: &str) -> Option<String> {
             }
             _ => {
                 separate(&mut items, last, newlines);
-                declaration(child, text, &mut items)?;
+                run(Work::Declaration(child), text, &mut comments, &mut items)?;
                 last = Last::Form;
                 newlines = 0;
             }
@@ -120,18 +121,13 @@ fn separate(items: &mut Vec<Item>, last: Last, newlines: usize) {
 /// it, a case, a member, or the body.
 struct Unit<'a> {
     rank: usize,
-    leading: Vec<String>,
     nodes: Vec<&'a CstNode>,
-    trailing: Option<String>,
 }
 
 /// A declaration split into its head and its units.
 struct Parts<'a> {
     head: Vec<&'a CstNode>,
-    head_trailing: Option<String>,
     units: Vec<Unit<'a>>,
-    /// Comments after the last unit, before the closer.
-    closing: Vec<String>,
 }
 
 /// The rank of a child of a typed declaration that starts a unit, and
@@ -178,54 +174,29 @@ fn has_nested_let(node: &CstNode, text: &str) -> bool {
 /// the nodes after it, up to the next unit, belong to it.
 fn split<'a>(
     contents: impl IntoIterator<Item = &'a CstNode>,
-    text: &str,
     start: impl Fn(&CstNode) -> Option<(usize, bool)>,
 ) -> Option<Parts<'a>> {
     let mut parts = Parts {
         head: Vec::new(),
-        head_trailing: None,
         units: Vec::new(),
-        closing: Vec::new(),
     };
     // Whether the last unit takes the nodes that follow it.
     let mut open = false;
-    let mut newlines = 0;
     for child in contents {
-        match child.kind() {
-            SyntaxKind::Whitespace => newlines += breaks(child.text(text)),
-            SyntaxKind::Comment => {
-                let slot = match parts.units.last_mut() {
-                    Some(unit) => &mut unit.trailing,
-                    None => &mut parts.head_trailing,
-                };
-                if newlines == 0 && parts.closing.is_empty() && slot.is_none() {
-                    *slot = Some(comment(child, text));
-                } else {
-                    parts.closing.push(comment(child, text));
-                }
-            }
-            _ => {
-                if let Some((rank, takes_more)) = start(child) {
-                    parts.units.push(Unit {
-                        rank,
-                        leading: std::mem::take(&mut parts.closing),
-                        nodes: vec![child],
-                        trailing: None,
-                    });
-                    open = takes_more;
-                } else {
-                    if !parts.closing.is_empty() {
-                        return None;
-                    }
-                    match parts.units.last_mut() {
-                        Some(unit) if open && unit.trailing.is_none() => {
-                            unit.nodes.push(child)
-                        }
-                        None if parts.head_trailing.is_none() => parts.head.push(child),
-                        _ => return None,
-                    }
-                }
-                newlines = 0;
+        if matches!(child.kind(), SyntaxKind::Whitespace | SyntaxKind::Comment) {
+            continue;
+        }
+        if let Some((rank, takes_more)) = start(child) {
+            parts.units.push(Unit {
+                rank,
+                nodes: vec![child],
+            });
+            open = takes_more;
+        } else {
+            match parts.units.last_mut() {
+                Some(unit) if open => unit.nodes.push(child),
+                None => parts.head.push(child),
+                Some(_) => return None,
             }
         }
     }
@@ -233,128 +204,100 @@ fn split<'a>(
     Some(parts)
 }
 
-/// The layout items of one top-level form.
-fn declaration(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
+/// The opener, the contents, and the closer of a construct.
+fn frame(node: &CstNode) -> Option<(&CstNode, Vec<&CstNode>, &CstNode)> {
+    let mut items = significant(node);
+    let closer = items
+        .pop()
+        .filter(|last| last.kind() != SyntaxKind::Missing)?;
+    if items.is_empty() {
+        return None;
+    }
+    let opener = items.remove(0);
+    Some((opener, items, closer))
+}
+
+/// Schedules one declaration, named member, or anonymous callable.
+pub(crate) fn declaration<'a>(
+    node: &'a CstNode,
+    text: &str,
+    comments: &mut Comments,
+    next: &mut Vec<Work<'a>>,
+) -> Option<()> {
     match node.kind() {
         SyntaxKind::TypeDecl
         | SyntaxKind::InterfaceDecl
         | SyntaxKind::Impl
         | SyntaxKind::AssocType
-        | SyntaxKind::AssocChoice => typed(node, text, out),
-        SyntaxKind::ModuleLet => module_let(node, text, out),
-        SyntaxKind::FnDecl | SyntaxKind::ProcDecl | SyntaxKind::Test => {
-            callable(node, text, out)
-        }
-        _ => generic(node, text, out),
+        | SyntaxKind::AssocChoice => typed(node, text, comments, next),
+        SyntaxKind::ModuleLet => module_let(node, text, next),
+        SyntaxKind::FnDecl
+        | SyntaxKind::ProcDecl
+        | SyntaxKind::Test
+        | SyntaxKind::AnonFn
+        | SyntaxKind::AnonProc => callable(node, text, comments, next),
+        _ => generic(node, text, next),
     }
 }
 
 /// A module value: the layout of a `let` when it has only `be`, otherwise
 /// the declaration layout with `be` and its value as the last section.
-fn module_let(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
-    let children = node.children();
-    if children
-        .iter()
-        .any(|child| child.kind() == SyntaxKind::Comment)
-    {
-        return None;
-    }
-    let sections: Vec<&CstNode> = children
-        .iter()
-        .filter(|child| {
-            matches!(child.kind(), SyntaxKind::Visibility | SyntaxKind::Doc)
-        })
-        .collect();
+fn module_let<'a>(
+    node: &'a CstNode,
+    text: &str,
+    next: &mut Vec<Work<'a>>,
+) -> Option<()> {
+    let (opener, contents, closer) = frame(node)?;
+    let is_section = |child: &&CstNode| {
+        matches!(child.kind(), SyntaxKind::Visibility | SyntaxKind::Doc)
+    };
+    let mut sections: Vec<&CstNode> =
+        contents.iter().copied().filter(is_section).collect();
     if sections.is_empty() {
-        out.extend(let_items(node, text)?);
+        next.push(Work::Form(node));
         return Some(());
     }
-    let opener = children.first()?;
-    let closer = children
-        .last()
-        .filter(|last| last.kind() != SyntaxKind::Missing)?;
-    let contents = children.get(1..children.len().saturating_sub(1))?;
     let be = contents.iter().position(|child| {
         child.kind() == SyntaxKind::ReservedWord && child.text(text) == "be"
     })?;
     let head: Vec<&CstNode> = contents
         .get(..be)?
         .iter()
-        .filter(|child| {
-            child.kind() != SyntaxKind::Whitespace
-                && !matches!(child.kind(), SyntaxKind::Visibility | SyntaxKind::Doc)
-        })
+        .copied()
+        .filter(|child| !is_section(child))
         .collect();
-    let value: Vec<&CstNode> = contents
-        .get(be + 1..)?
-        .iter()
-        .filter(|child| child.kind() != SyntaxKind::Whitespace)
-        .collect();
-    let mut opener_items = vec![Item::Text(format!("{} ", opener.text(text)))];
     let (name, written) = head.split_at(head.len().min(2));
-    opener_items.push(Item::Text(flat(name, text)?));
-    opener_items.push(Item::Text(" ".to_owned()));
-    opener_items.extend(type_items(written, text)?);
-    let mut units: Vec<Unit<'_>> = sections
-        .iter()
-        .map(|section| {
-            let keyword = section
+    let mut opener_steps = Vec::from(word(opener, format!("{} ", opener.text(text))));
+    opener_steps.extend([
+        Work::Tokens(name.to_vec()),
+        emit(Item::Text(" ".to_owned())),
+        Work::Type(written.to_vec()),
+    ]);
+    sections.sort_by_key(|section| {
+        section_rank(
+            section
                 .children()
                 .first()
-                .map_or("", |word| word.text(text));
-            Some(Unit {
-                rank: section_rank(keyword)?,
-                leading: Vec::new(),
-                nodes: vec![*section],
-                trailing: None,
-            })
-        })
-        .collect::<Option<_>>()?;
-    units.sort_by_key(|unit| unit.rank);
-    let mut laid: Vec<(&Unit<'_>, Vec<Item>)> = Vec::with_capacity(units.len() + 1);
-    for unit in &units {
-        laid.push((unit, vec![Item::Text(flat(&unit.nodes, text)?)]));
-    }
-    let be_unit = Unit {
-        rank: BODY,
-        leading: Vec::new(),
-        nodes: Vec::new(),
-        trailing: None,
-    };
+                .map_or("", |keyword| keyword.text(text)),
+        )
+    });
+    let mut units: Vec<Vec<Work<'a>>> = sections
+        .into_iter()
+        .map(|section| vec![Work::Tokens(vec![section])])
+        .collect();
     // The value on the line of `be` when it fits, otherwise on the next line
     // one step in, as in a `let`.
-    let mut be_items = vec![
-        Item::Text("be".to_owned()),
-        Item::Begin,
-        Item::Indent,
-        Item::Space,
-    ];
-    be_items.extend(expr_items(&value, text)?);
-    be_items.extend([Item::Dedent, Item::End]);
-    laid.push((&be_unit, be_items));
-    let parts = Parts {
-        head: Vec::new(),
-        head_trailing: None,
-        units: Vec::new(),
-        closing: Vec::new(),
-    };
-    lay_out(
-        opener_items,
-        &parts,
-        laid,
-        closer.text(text),
-        false,
-        false,
-        out,
-    );
+    let mut be_steps = Vec::from(word(contents.get(be)?, "be"));
+    be_steps.extend(value_group(contents.get(be + 1..)?));
+    units.push(be_steps);
+    lay_out(opener_steps, units, closer, text, false, None, next);
     Some(())
 }
 
 /// A `use`: its sections by keyword, each operand written flat.
-fn generic(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
-    let construct = Construct::new(node, text)?;
-    let closer = construct.closer()?;
-    let parts = split(construct.contents(), text, |child| {
+fn generic<'a>(node: &'a CstNode, text: &str, next: &mut Vec<Work<'a>>) -> Option<()> {
+    let (opener, contents, closer) = frame(node)?;
+    let parts = split(contents, |child| {
         if child.kind() != SyntaxKind::Section {
             return None;
         }
@@ -364,25 +307,38 @@ fn generic(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
             .map_or("", |keyword| keyword.text(text));
         Some((section_rank(keyword)?, true))
     })?;
-    let mut opener = construct.keyword().to_owned();
-    if !parts.head.is_empty() {
-        opener.push(' ');
-        opener.push_str(&flat(&parts.head, text)?);
-    }
-    let mut units = Vec::with_capacity(parts.units.len());
-    for unit in &parts.units {
-        units.push((unit, vec![Item::Text(flat(&unit.nodes, text)?)]));
-    }
+    let opener_steps = head_steps(opener, &parts.head, text);
+    let units = parts
+        .units
+        .into_iter()
+        .map(|unit| vec![Work::Tokens(unit.nodes)])
+        .collect();
     lay_out(
-        vec![Item::Text(opener)],
-        &parts,
+        opener_steps,
         units,
-        closer.text(text),
+        closer,
+        text,
         has_nested_let(node, text),
-        false,
-        out,
+        None,
+        next,
     );
     Some(())
+}
+
+/// The opener of a declaration and its head on one line.
+fn head_steps<'a>(
+    opener: &'a CstNode,
+    head: &[&'a CstNode],
+    text: &str,
+) -> Vec<Work<'a>> {
+    let mut steps = Vec::from(token(opener, text));
+    if !head.is_empty() {
+        steps.extend([
+            emit(Item::Text(" ".to_owned())),
+            Work::Tokens(head.to_vec()),
+        ]);
+    }
+    steps
 }
 
 /// The rank of a child of a callable that starts a unit, and whether the
@@ -417,88 +373,77 @@ fn callable_rank(node: &CstNode, text: &str) -> Option<(usize, bool)> {
 /// its sections, every section in the canonical order and on its own line,
 /// and the body statements one step in from `do`. With no section it is one
 /// line.
-pub(crate) fn callable(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
-    let children = node.children();
-    let opener = children.first()?;
-    let closer = children
-        .last()
-        .filter(|last| last.kind() != SyntaxKind::Missing)?;
-    let contents = children.get(1..children.len().saturating_sub(1))?;
-    let flattened = contents.iter().flat_map(|child| {
+fn callable<'a>(
+    node: &'a CstNode,
+    text: &str,
+    comments: &mut Comments,
+    next: &mut Vec<Work<'a>>,
+) -> Option<()> {
+    let (opener, contents, closer) = frame(node)?;
+    let flattened = contents.into_iter().flat_map(|child| {
         if child.kind() == SyntaxKind::Signature {
-            child.children()
+            child.children().iter().collect()
         } else {
-            std::slice::from_ref(child)
+            vec![child]
         }
     });
-    let mut parts = split(flattened, text, |child| callable_rank(child, text))?;
-    drop_empty(&mut parts, text);
-    let mut head = opener.text(text).to_owned();
-    if !parts.head.is_empty() {
-        head.push(' ');
-        head.push_str(&flat(&parts.head, text)?);
-    }
-    let mut units = Vec::with_capacity(parts.units.len());
-    for unit in &parts.units {
-        units.push((unit, callable_unit(unit, text)?));
-    }
+    let mut parts = split(flattened, |child| callable_rank(child, text))?;
+    drop_empty(&mut parts, text, comments, closer);
+    let opener_steps = head_steps(opener, &parts.head, text);
     let broken = !parts.units.is_empty();
-    lay_out(
-        vec![Item::Text(head)],
-        &parts,
-        units,
-        closer.text(text),
-        broken,
-        false,
-        out,
-    );
+    let units = parts
+        .units
+        .iter()
+        .map(|unit| callable_unit(unit, text))
+        .collect::<Option<Vec<_>>>()?;
+    lay_out(opener_steps, units, closer, text, broken, None, next);
     Some(())
 }
 
-/// A callable unit's items.
-fn callable_unit(unit: &Unit<'_>, text: &str) -> Option<Vec<Item>> {
+/// A callable unit's steps.
+fn callable_unit<'a>(unit: &Unit<'a>, text: &str) -> Option<Vec<Work<'a>>> {
     let first = *unit.nodes.first()?;
     let rest = unit.nodes.get(1..)?;
-    let mut out = Vec::new();
+    let mut steps = Vec::new();
     match first.kind() {
         SyntaxKind::ReservedWord => match (first.text(text), rest) {
-            ("do", []) => out.push(Item::Text("do".to_owned())),
+            ("do", []) => steps.extend(word(first, "do")),
             ("do", [body]) => {
-                out.push(Item::Text("do".to_owned()));
-                let statements = body_items(body, text)?;
-                if !statements.is_empty() {
-                    out.push(Item::Indent);
-                    out.extend(statements);
-                    out.push(Item::Dedent);
-                }
+                steps.extend(word(first, "do"));
+                steps.extend([
+                    emit(Item::Indent),
+                    Work::Body(body),
+                    emit(Item::Dedent),
+                ]);
             }
             ("takes", [params]) => {
-                out.push(Item::Text("takes ".to_owned()));
-                out.extend(type_items(&[params], text)?);
+                steps.extend(word(first, "takes "));
+                steps.push(Work::Type(vec![params]));
             }
             ("labelled", [labelled]) => {
-                out.push(Item::Text("labelled ".to_owned()));
-                out.extend(labelled_items(labelled, text)?);
+                steps.extend(word(first, "labelled "));
+                steps.push(Work::Labelled(labelled));
             }
             ("returns", [name, colon, written @ ..]) if is_colon(colon, text) => {
-                out.push(Item::Text(format!("returns {}: ", flat(&[name], text)?)));
-                out.extend(type_items(written, text)?);
+                steps.extend(word(first, "returns "));
+                steps.push(Work::Tokens(vec![name]));
+                steps.extend(word(colon, ": "));
+                steps.push(Work::Type(written.to_vec()));
             }
             _ => return None,
         },
-        SyntaxKind::Requires | SyntaxKind::Ensures => {
-            out.extend(guard_items(first, text)?)
-        }
+        SyntaxKind::Requires | SyntaxKind::Ensures => steps.push(Work::Guard(first)),
         SyntaxKind::Given | SyntaxKind::Performs => {
-            let keyword = first.children().first()?.text(text);
-            let operand: Vec<&CstNode> = first.children().iter().skip(1).collect();
-            out.push(Item::Text(format!("{keyword} ")));
-            out.extend(type_items(&operand, text)?);
+            let items = significant(first);
+            let (keyword, operand) = items.split_first()?;
+            steps.extend(word(keyword, format!("{} ", keyword.text(text))));
+            steps.push(Work::Type(operand.to_vec()));
         }
-        _ => out.push(Item::Text(flat(&unit.nodes, text)?)),
+        _ => steps.push(Work::Tokens(unit.nodes.clone())),
     }
-    Some(out)
+    Some(steps)
 }
+
 /// Whether a unit is an empty `takes {}`, `labelled {}`, `given {}`, or
 /// `performs {}`, which the formatter removes.
 fn is_empty_section(unit: &Unit<'_>, text: &str) -> bool {
@@ -534,345 +479,174 @@ fn is_empty_bracket(node: &CstNode) -> bool {
         )
     })
 }
+
+/// Removes every empty section; its comments move to the line before the
+/// unit after it, or before the closer.
+fn drop_empty<'a>(
+    parts: &mut Parts<'a>,
+    text: &str,
+    comments: &mut Comments,
+    closer: &'a CstNode,
+) {
+    let mut carried: Vec<&CstNode> = Vec::new();
+    let mut kept = Vec::with_capacity(parts.units.len());
+    for unit in std::mem::take(&mut parts.units) {
+        if is_empty_section(&unit, text) {
+            carried.extend(&unit.nodes);
+            continue;
+        }
+        if let Some(first) = unit.nodes.first() {
+            comments.carry(&carried, first);
+            carried.clear();
+        }
+        kept.push(unit);
+    }
+    comments.carry(&carried, closer);
+    parts.units = kept;
+}
+
 /// A typed declaration: `type`, `interface`, `impl`, an associated type,
 /// or an associated choice.
-fn typed(node: &CstNode, text: &str, out: &mut Vec<Item>) -> Option<()> {
-    let children = node.children();
-    let opener = children.first()?;
-    let closer = children
-        .last()
-        .filter(|last| last.kind() != SyntaxKind::Missing)?;
-    let contents = children.get(1..children.len().saturating_sub(1))?;
-    let mut parts = split(contents, text, |child| typed_rank(child, text))?;
-    drop_empty(&mut parts, text);
-    let mut opener_items = vec![Item::Text(opener.text(text).to_owned())];
+fn typed<'a>(
+    node: &'a CstNode,
+    text: &str,
+    comments: &mut Comments,
+    next: &mut Vec<Work<'a>>,
+) -> Option<()> {
+    let (opener, contents, closer) = frame(node)?;
+    let mut parts = split(contents, |child| typed_rank(child, text))?;
+    drop_empty(&mut parts, text, comments, closer);
+    let mut opener_steps = Vec::from(token(opener, text));
     if !parts.head.is_empty() {
-        opener_items.push(Item::Text(" ".to_owned()));
+        opener_steps.push(emit(Item::Text(" ".to_owned())));
         if node.kind() == SyntaxKind::Impl {
-            opener_items.extend(type_items(&parts.head, text)?);
+            opener_steps.push(Work::Type(parts.head.clone()));
         } else {
-            opener_items.push(Item::Text(flat(&parts.head, text)?));
+            opener_steps.push(Work::Tokens(parts.head.clone()));
         }
     }
-    let mut units = Vec::with_capacity(parts.units.len());
-    for unit in &parts.units {
-        let mut items = Vec::new();
-        typed_unit(unit, text, &mut items)?;
-        units.push((unit, items));
-    }
-    // Every unit but `of` is a case, a section other than `of`, or a member.
-    let always_broken = parts.units.iter().any(|unit| {
+    let starts_with_of = |unit: &Unit<'_>| {
         unit.nodes
             .first()
-            .is_none_or(|node| node.kind() != SyntaxKind::ReservedWord)
-    });
-    let of_first = parts.units.first().is_some_and(|unit| {
-        unit.leading.is_empty()
-            && unit
-                .nodes
-                .first()
-                .is_some_and(|node| node.kind() == SyntaxKind::ReservedWord)
-    });
+            .is_some_and(|node| node.kind() == SyntaxKind::ReservedWord)
+    };
+    // Every unit but `of` is a case, a section other than `of`, or a member.
+    let always_broken = parts.units.iter().any(|unit| !starts_with_of(unit));
+    let of_first = parts
+        .units
+        .first()
+        .filter(|unit| starts_with_of(unit))
+        .and_then(|unit| unit.nodes.last().copied());
+    let units = parts
+        .units
+        .iter()
+        .map(|unit| typed_unit(unit, text))
+        .collect::<Option<Vec<_>>>()?;
     lay_out(
-        opener_items,
-        &parts,
+        opener_steps,
         units,
-        closer.text(text),
+        closer,
+        text,
         always_broken || has_nested_let(node, text),
         of_first,
-        out,
+        next,
     );
     Some(())
 }
 
-/// Removes every empty section; its comments move to the unit after it, or
-/// before the closer.
-fn drop_empty(parts: &mut Parts<'_>, text: &str) {
-    let mut carried: Vec<String> = Vec::new();
-    let mut kept = Vec::with_capacity(parts.units.len());
-    for mut unit in std::mem::take(&mut parts.units) {
-        if is_empty_section(&unit, text) {
-            carried.append(&mut unit.leading);
-            carried.extend(unit.trailing.take());
-            continue;
-        }
-        if !carried.is_empty() {
-            carried.append(&mut unit.leading);
-            unit.leading = std::mem::take(&mut carried);
-        }
-        kept.push(unit);
-    }
-    carried.append(&mut parts.closing);
-    parts.closing = carried;
-    parts.units = kept;
-}
-
-/// A typed unit's items.
-fn typed_unit(unit: &Unit<'_>, text: &str, out: &mut Vec<Item>) -> Option<()> {
+/// A typed unit's steps.
+fn typed_unit<'a>(unit: &Unit<'a>, text: &str) -> Option<Vec<Work<'a>>> {
     let first = *unit.nodes.first()?;
+    let mut steps = Vec::new();
     match first.kind() {
         SyntaxKind::ReservedWord => {
-            out.push(Item::Text("of ".to_owned()));
-            out.extend(type_items(unit.nodes.get(1..)?, text)?);
+            steps.extend(word(first, "of "));
+            steps.push(Work::Type(unit.nodes.get(1..)?.to_vec()));
         }
         SyntaxKind::Case => {
-            let parts: Vec<&CstNode> = first
-                .children()
-                .iter()
-                .filter(|child| child.kind() != SyntaxKind::Whitespace)
-                .collect();
-            let (record, name): (Vec<&CstNode>, Vec<&CstNode>) = parts
+            let (record, name): (Vec<&CstNode>, Vec<&CstNode>) = significant(first)
                 .into_iter()
                 .partition(|child| child.kind() == SyntaxKind::RecordType);
-            out.push(Item::Text(flat(&name, text)?));
+            steps.push(Work::Tokens(name));
             if !record.is_empty() {
-                out.push(Item::Text(" ".to_owned()));
-                out.extend(type_items(&record, text)?);
+                steps.extend([emit(Item::Text(" ".to_owned())), Work::Type(record)]);
             }
         }
         SyntaxKind::Given => {
-            let brace: Vec<&CstNode> = first
-                .children()
+            let items = significant(first);
+            let keyword = items.first()?;
+            let brace: Vec<&CstNode> = items
                 .iter()
+                .copied()
                 .filter(|child| child.kind() == SyntaxKind::Brace)
                 .collect();
-            if first
-                .children()
-                .iter()
-                .any(|child| child.kind() == SyntaxKind::Comment)
-            {
-                return None;
-            }
-            out.push(Item::Text("given ".to_owned()));
-            out.extend(type_items(&brace, text)?);
+            steps.extend(word(keyword, "given "));
+            steps.push(Work::Type(brace));
         }
         SyntaxKind::Where => {
-            let operand: Vec<&CstNode> = first
-                .children()
-                .iter()
-                .skip(1)
-                .filter(|child| child.kind() != SyntaxKind::Whitespace)
-                .collect();
+            let items = significant(first);
+            let (keyword, operand) = items.split_first()?;
             let split = operand.iter().position(|node| {
                 node.kind() == SyntaxKind::ReservedWord && node.text(text) == "else"
             });
             let (predicate, consequence) = match split {
-                Some(at) => (operand.get(..at)?, operand.get(at + 1..)),
-                None => (operand.as_slice(), None),
+                Some(at) => (operand.get(..at)?, operand.get(at..)),
+                None => (operand, None),
             };
-            out.push(Item::Text("where ".to_owned()));
-            out.extend(expr_items(predicate, text)?);
-            if let Some(consequence) = consequence {
-                out.push(Item::Text(" else ".to_owned()));
-                out.extend(expr_items(consequence, text)?);
+            steps.extend(word(keyword, "where "));
+            steps.push(Work::Expr(predicate.to_vec()));
+            if let Some((else_word, consequence)) =
+                consequence.and_then(<[_]>::split_first)
+            {
+                steps.extend(word(else_word, " else "));
+                steps.push(Work::Expr(consequence.to_vec()));
             }
         }
         SyntaxKind::AssocType
         | SyntaxKind::AssocChoice
         | SyntaxKind::Impl
         | SyntaxKind::FnDecl
-        | SyntaxKind::ProcDecl => declaration(first, text, out)?,
-        _ => out.push(Item::Text(flat(&unit.nodes, text)?)),
+        | SyntaxKind::ProcDecl => steps.push(Work::Declaration(first)),
+        _ => steps.push(Work::Tokens(unit.nodes.clone())),
     }
-    Some(())
+    Some(steps)
 }
 
 /// Lays out a declaration: on one line when it fits, holds no comment, and
 /// is not `broken`; otherwise its opener line, each unit on its own line one
-/// step in, and the closer on its own line. With `of_first`, the first unit
-/// is `of`, which stays on the opener's line when that line fits.
-fn lay_out(
-    opener: Vec<Item>,
-    parts: &Parts<'_>,
-    units: Vec<(&Unit<'_>, Vec<Item>)>,
-    closer: &str,
+/// step in, and the closer on its own line. With `of_first`, the last node
+/// of the first unit, that unit is `of`, which stays on the opener's line
+/// when that line fits.
+fn lay_out<'a>(
+    opener: Vec<Work<'a>>,
+    units: Vec<Vec<Work<'a>>>,
+    closer: &'a CstNode,
+    text: &str,
     broken: bool,
-    of_first: bool,
-    out: &mut Vec<Item>,
+    of_first: Option<&'a CstNode>,
+    next: &mut Vec<Work<'a>>,
 ) {
-    out.push(Item::Begin);
+    next.push(emit(Item::Begin));
     if broken {
-        out.push(Item::Force);
+        next.push(emit(Item::Force));
     }
-    out.extend(opener);
-    if let Some(trailing) = &parts.head_trailing {
-        out.push(Item::TrailingComment(trailing.clone()));
-    }
-    out.push(Item::Indent);
-    let glue = of_first && parts.head_trailing.is_none();
-    for (index, (unit, items)) in units.into_iter().enumerate() {
-        for leading in &unit.leading {
-            out.push(Item::Space);
-            out.push(Item::Comment(leading.clone()));
-        }
-        if index == 0 && glue {
-            out.extend([Item::Begin, Item::Space]);
-            out.extend(items);
-            out.push(Item::End);
+    next.extend(opener);
+    next.push(emit(Item::Indent));
+    for (index, steps) in units.into_iter().enumerate() {
+        if index == 0
+            && let Some(of_last) = of_first
+        {
+            // A comment after the type is after the group, so it does not
+            // move `of` off the opener's line.
+            next.extend([Work::Hold(of_last), emit(Item::Begin), emit(Item::Space)]);
+            next.extend(steps);
+            next.extend([emit(Item::End), Work::Release]);
         } else {
-            out.push(Item::Space);
-            out.extend(items);
-        }
-        if let Some(trailing) = &unit.trailing {
-            out.push(Item::TrailingComment(trailing.clone()));
+            next.push(emit(Item::Space));
+            next.extend(steps);
         }
     }
-    for closing in &parts.closing {
-        out.push(Item::Space);
-        out.push(Item::Comment(closing.clone()));
-    }
-    out.push(Item::Dedent);
-    out.push(Item::Space);
-    out.push(Item::Text(closer.to_owned()));
-    out.push(Item::End);
-}
-
-/// Whether a node is a bracket form of a type expression.
-const fn is_type_group(kind: SyntaxKind) -> bool {
-    matches!(
-        kind,
-        SyntaxKind::Paren
-            | SyntaxKind::Brace
-            | SyntaxKind::RecordType
-            | SyntaxKind::Inputs
-            | SyntaxKind::Row
-            | SyntaxKind::Params
-    )
-}
-
-fn is_colon(node: &CstNode, text: &str) -> bool {
-    node.kind() == SyntaxKind::Punctuation && node.text(text) == ":"
-}
-
-/// One step of the type-expression layout.
-enum Step<'a> {
-    Node(&'a CstNode),
-    Emit(Item),
-}
-
-/// Pushes the steps of one entry: a label and `:`, then one space, then the
-/// type; a `(…)` is glued to the head it applies.
-fn entry_steps<'a>(nodes: &[&'a CstNode], text: &str, steps: &mut Vec<Step<'a>>) {
-    for (index, node) in nodes.iter().enumerate() {
-        if index > 0 && !is_colon(node, text) && node.kind() != SyntaxKind::Paren {
-            steps.push(Step::Emit(Item::Text(" ".to_owned())));
-        }
-        steps.push(Step::Node(node));
-    }
-}
-
-/// Splits the contents of a bracket form into entries: a new entry starts
-/// at every node but a `:`, the node after a `:`, and a `(…)`.
-fn entries<'a>(nodes: &[&'a CstNode], text: &str) -> Vec<Vec<&'a CstNode>> {
-    let mut entries: Vec<Vec<&'a CstNode>> = Vec::new();
-    let mut previous: Option<&CstNode> = None;
-    for node in nodes {
-        let joins = previous.is_some_and(|previous| is_colon(previous, text))
-            || is_colon(node, text)
-            || node.kind() == SyntaxKind::Paren;
-        match entries.last_mut() {
-            Some(entry) if joins => entry.push(node),
-            _ => entries.push(vec![node]),
-        }
-        previous = Some(node);
-    }
-    entries
-}
-
-/// The layout items of a type expression: on one line when it fits,
-/// otherwise each bracket form one entry per line. `None` when a comment is
-/// among its tokens. Iterative.
-pub(crate) fn type_items(nodes: &[&CstNode], text: &str) -> Option<Vec<Item>> {
-    let significant: Vec<&CstNode> = nodes
-        .iter()
-        .copied()
-        .filter(|node| node.kind() != SyntaxKind::Whitespace)
-        .collect();
-    let mut steps: Vec<Step<'_>> = Vec::new();
-    entry_steps(&significant, text, &mut steps);
-    steps.reverse();
-    let mut out = Vec::new();
-    while let Some(step) = steps.pop() {
-        let node = match step {
-            Step::Emit(item) => {
-                out.push(item);
-                continue;
-            }
-            Step::Node(node) => node,
-        };
-        match node.kind() {
-            SyntaxKind::Comment => return None,
-            kind if is_type_group(kind) => {
-                let children = node.children();
-                let open = children.first()?.text(text);
-                let close = children.last()?.text(text);
-                let inner: Vec<&CstNode> = children
-                    .get(1..children.len().saturating_sub(1))?
-                    .iter()
-                    .filter(|child| child.kind() != SyntaxKind::Whitespace)
-                    .collect();
-                let mut group: Vec<Step<'_>> = Vec::new();
-                let parts = entries(&inner, text);
-                if parts.is_empty() {
-                    group.push(Step::Emit(Item::Text(format!("{open}{close}"))));
-                } else {
-                    group.extend([
-                        Step::Emit(Item::Begin),
-                        Step::Emit(Item::Text(open.to_owned())),
-                        Step::Emit(Item::Indent),
-                        Step::Emit(Item::Soft),
-                    ]);
-                    for (index, entry) in parts.iter().enumerate() {
-                        if index > 0 {
-                            group.push(Step::Emit(Item::Space));
-                        }
-                        entry_steps(entry, text, &mut group);
-                    }
-                    group.extend([
-                        Step::Emit(Item::Dedent),
-                        Step::Emit(Item::Soft),
-                        Step::Emit(Item::Text(close.to_owned())),
-                        Step::Emit(Item::End),
-                    ]);
-                }
-                steps.extend(group.into_iter().rev());
-            }
-            SyntaxKind::Path => out.push(Item::Text(flat(&[node], text)?)),
-            _ if node.kind().is_leaf() => {
-                out.push(Item::Text(node.text(text).to_owned()))
-            }
-            _ => return None,
-        }
-    }
-    Some(out)
-}
-
-/// The tokens below `nodes` on one line: one space between tokens, none
-/// after an opening bracket or before a closing one, none before `(` or
-/// `:`, and none around `.`. `None` when a comment is among them.
-pub(crate) fn flat(nodes: &[&CstNode], text: &str) -> Option<String> {
-    let mut out = String::new();
-    let mut previous: Option<&str> = None;
-    for leaf in nodes.iter().flat_map(|node| node.leaves()) {
-        match leaf.kind() {
-            SyntaxKind::Whitespace | SyntaxKind::Missing => continue,
-            SyntaxKind::Comment => return None,
-            _ => {}
-        }
-        let token = leaf.text(text);
-        let punctuation = leaf.kind() == SyntaxKind::Punctuation;
-        if let Some(previous) = previous {
-            let glued_after = matches!(previous, "(" | "{" | "[" | ".");
-            let glued_before =
-                punctuation && matches!(token, ")" | "}" | "]" | "(" | ":" | ".");
-            if !glued_after && !glued_before {
-                out.push(' ');
-            }
-        }
-        out.push_str(token);
-        previous = Some(if punctuation { token } else { "" });
-    }
-    Some(out)
+    next.extend(close(closer, text, true, Item::Space));
 }
 
 #[cfg(test)]
@@ -1081,10 +855,48 @@ mod tests {
     }
 
     #[test]
-    fn a_comment_inside_an_operand_leaves_the_document_unchanged() {
-        let document = parse_source(None, b"fn f returns r: // c\n I32 endfn");
-        assert!(format(document.root().unwrap(), document.text().unwrap()).is_none());
-        let document = parse_source(None, b"type A of {x: // c\n U8} endtype");
-        assert!(format(document.root().unwrap(), document.text().unwrap()).is_none());
+    fn a_comment_inside_a_section_stays_with_its_token() {
+        assert_eq!(
+            layout("fn f returns r: // c\n I32 do return 1i32 endfn"),
+            "fn f\n  returns r: // c\n  I32\n  do\n    return 1i32\nendfn\n"
+        );
+        assert_eq!(
+            layout(
+                "fn f returns r: I32 requires ready // why\n else 0i32 do return 1i32 endfn"
+            ),
+            "fn f\n  returns r: I32\n  requires ready // why\n    else 0i32\n  do\n    return 1i32\nendfn\n"
+        );
+        assert_eq!(
+            layout(
+                "fn f labelled {up: // c\n Bool be false} returns r: I32 do return 1i32 endfn"
+            ),
+            "fn f\n  labelled {\n    up: // c\n    Bool be false\n  }\n  returns r: I32\n  do\n    return 1i32\nendfn\n"
+        );
+        assert_eq!(
+            layout("use @std.io // io\n as io enduse"),
+            "use @std.io // io\n  as io\nenduse\n"
+        );
+    }
+
+    #[test]
+    fn the_comments_of_a_removed_empty_section_move_to_what_follows_it() {
+        for (text, expected) in [
+            (
+                "fn f takes {} // none\n returns r: I32 do return 1i32 endfn",
+                "fn f\n  // none\n  returns r: I32\n  do\n    return 1i32\nendfn\n",
+            ),
+            (
+                "proc p returns r: Void performs {} // none\n do return void endproc",
+                "proc p\n  returns r: Void\n  // none\n  do\n    return void\nendproc\n",
+            ),
+            (
+                "type A of U8 given {} // none\nendtype",
+                "type A of U8\n  // none\nendtype\n",
+            ),
+        ] {
+            let document = parse_source(None, text.as_bytes());
+            assert!(document.diagnostics().is_empty(), "{text:?} is valid");
+            assert_eq!(layout(text), expected, "{text:?}");
+        }
     }
 }
