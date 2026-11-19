@@ -1,0 +1,83 @@
+// The boolean type, which plays the `@bool` role, and its two values. The
+// connectives are ordinary members, so both operands are evaluated before a
+// call; `if` is the short-circuiting form.
+
+type Bool
+  case false
+  case true
+  role @bool
+  visibility @public
+  fn not
+    takes {value: Self}
+    returns negated: Self
+    visibility @public
+    do
+      match value case Bool.true() return false case Bool.false() return true endmatch
+  endfn
+  fn and
+    takes {left: Self right: Self}
+    returns both: Self
+    visibility @public
+    do
+      match left case Bool.true() return right case Bool.false() return false endmatch
+  endfn
+  fn or
+    takes {left: Self right: Self}
+    returns either: Self
+    visibility @public
+    do
+      match left case Bool.true() return true case Bool.false() return right endmatch
+  endfn
+  fn xor
+    takes {left: Self right: Self}
+    returns exactlyOne: Self
+    visibility @public
+    do
+      match left
+        case Bool.true()
+          return Bool.not(right)
+        case Bool.false()
+          return right
+      endmatch
+  endfn
+  impl Equatable
+    fn equal
+      takes {left: Self right: Self}
+      returns same: Bool
+      do
+        match left
+          case Bool.true()
+            return right
+          case Bool.false()
+            return Bool.not(right)
+        endmatch
+    endfn
+  endimpl
+  impl Ordered
+    fn compare
+      takes {left: Self right: Self}
+      returns order: Ordering
+      do
+        match left
+          case Bool.false()
+            match right
+              case Bool.false()
+                return Ordering.equal()
+              case Bool.true()
+                return Ordering.less()
+            endmatch
+          case Bool.true()
+            match right
+              case Bool.false()
+                return Ordering.greater()
+              case Bool.true()
+                return Ordering.equal()
+            endmatch
+        endmatch
+    endfn
+  endimpl
+endtype
+
+let true: Bool visibility @public be Bool.true() endlet
+
+let false: Bool visibility @public be Bool.false() endlet

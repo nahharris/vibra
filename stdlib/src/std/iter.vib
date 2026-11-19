@@ -1,0 +1,149 @@
+// Pure iteration: the `Iter` interface, which plays the `@iter` role, and the
+// four adapter types its default members return. Each adapter stores its
+// source as an interface value and pulls from it only when it is pulled.
+
+interface Iter
+  role @iter
+  visibility @public
+  type Item endtype
+  fn next
+    takes {value: Self}
+    returns step: Option({Item Self})
+  endfn
+  fn map(Out)
+    takes {value: Self f: Fn({Item} Out)}
+    returns mapped: Iter(Item: Out)
+    do
+      return MappedIter(source: value f: f)
+  endfn
+  fn filter
+    takes {value: Self keep: Fn({Item} Bool)}
+    returns filtered: Iter(Item: Item)
+    do
+      return FilteredIter(source: value keep: keep)
+  endfn
+  fn skip
+    takes {value: Self count: U64}
+    returns skipped: Iter(Item: Item)
+    do
+      return SkippedIter(source: value count: count)
+  endfn
+  fn take
+    takes {value: Self count: U64}
+    returns taken: Iter(Item: Item)
+    do
+      return TakenIter(source: value count: count)
+  endfn
+  fn collect
+    takes {value: Self}
+    returns items: List(Item)
+    do
+      return Iter.fold(
+        value
+        []
+        fn
+          takes {gathered: List(Item) item: Item}
+          returns appended: List(Item)
+          do
+            return List.append(gathered item)
+        endfn
+      )
+  endfn
+  fn fold(Acc)
+    takes {value: Self initial: Acc step: Fn({Acc Item} Acc)}
+    returns folded: Acc
+    do
+      match Iter.next(value)
+        case Option.some(value: {item rest})
+          return Iter.fold(rest step(initial item) step)
+        case Option.none()
+          return initial
+      endmatch
+  endfn
+endinterface
+
+type MappedIter(In Out) of {source: Iter(Item: In) f: Fn({In} Out)}
+  visibility @public
+  representation @private
+  impl Iter
+    type Item of Out endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        let MappedIter(source: inner f: f) be value endlet
+        let Option.some(value: {item rest}) be Iter.next(inner) else
+          return Option.none()
+        endlet
+        return Option.some(value: {f(item) MappedIter(source: rest f: f)})
+    endfn
+  endimpl
+endtype
+
+type FilteredIter(T) of {source: Iter(Item: T) keep: Fn({T} Bool)}
+  visibility @public
+  representation @private
+  impl Iter
+    type Item of T endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        let FilteredIter(source: inner keep: keep) be value endlet
+        let Option.some(value: {item rest}) be Iter.next(inner) else
+          return Option.none()
+        endlet
+        let remainder be FilteredIter(source: rest keep: keep) endlet
+        if keep(item) then
+          return Option.some(value: {item remainder})
+        else
+          return Iter.next(remainder)
+        endif
+    endfn
+  endimpl
+endtype
+
+type SkippedIter(T) of {source: Iter(Item: T) count: U64}
+  visibility @public
+  representation @private
+  impl Iter
+    type Item of T endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        let SkippedIter(source: inner count: count) be value endlet
+        let Option.some(value: {item rest}) be Iter.next(inner) else
+          return Option.none()
+        endlet
+        if Equatable.equal(count 0u64) then
+          return Option.some(value: {item SkippedIter(source: rest count: 0u64)})
+        else
+          return Iter.next(SkippedIter(source: rest count: U64.sub(count 1u64)))
+        endif
+    endfn
+  endimpl
+endtype
+
+type TakenIter(T) of {source: Iter(Item: T) count: U64}
+  visibility @public
+  representation @private
+  impl Iter
+    type Item of T endtype
+    fn next
+      takes {value: Self}
+      returns step: Option({Item Self})
+      do
+        let TakenIter(source: inner count: count) be value endlet
+        if Equatable.equal(count 0u64) then
+          return Option.none()
+        else
+          let Option.some(value: {item rest}) be Iter.next(inner) else
+            return Option.none()
+          endlet
+          let remainder be TakenIter(source: rest count: U64.sub(count 1u64)) endlet
+          return Option.some(value: {item remainder})
+        endif
+    endfn
+  endimpl
+endtype

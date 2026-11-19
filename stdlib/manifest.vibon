@@ -1,0 +1,167 @@
+{
+  format: @stdlibManifest.v2
+  package: {name: "std" version: "0.0.2"}
+  modules: [
+    {
+      path: @std.bool
+      digest: "sha256:13417f012cb71cb05c87bd81d44acd5d90c89285f8c93e15c9593c03bfe9f70a"
+      languageRoles: [@bool]
+    }
+    {
+      path: @std.builtin
+      digest: "sha256:6085e9a7f9040325b96a3a58f95d6461a634080214c2bdcac4e83981676241e1"
+      languageRoles: [@bytes @dict @str]
+    }
+    {
+      path: @std.core
+      digest: "sha256:fdfb4574bf5f3d008a617f234a40cfea6cca8862ebfd42d968b65af251e30600"
+      languageRoles: [@equatable @ordered]
+    }
+    {
+      path: @std.iter
+      digest: "sha256:cc1f9dd29ab6e8e7b8811f3fe16960f56b052564fe994d6f636ef55a89afa6f2"
+      languageRoles: [@iter]
+    }
+    {
+      path: @std.option
+      digest: "sha256:656a8e9201e2d8d2dea402d20bc514670dbb8e2922a883905dc811e4dc4ec87d"
+      languageRoles: [@option]
+    }
+    {
+      path: @std.result
+      digest: "sha256:65e3263072955285b838492df574a49afbb958acfadea7c0881d33377b2e224f"
+      languageRoles: [@result]
+    }
+  ]
+  symbols: {
+    compiler: [
+      "char.fromU32"
+      "char.toU32"
+      "f32.add"
+      "f32.compareTotal"
+      "f32.div"
+      "f32.equal"
+      "f32.mul"
+      "f32.neg"
+      "f32.sub"
+      "f64.add"
+      "f64.compareTotal"
+      "f64.div"
+      "f64.equal"
+      "f64.mul"
+      "f64.neg"
+      "f64.sub"
+      "i16.add"
+      "i16.addChecked"
+      "i16.divChecked"
+      "i16.mul"
+      "i16.mulChecked"
+      "i16.neg"
+      "i16.negChecked"
+      "i16.remChecked"
+      "i16.shiftLeft"
+      "i16.shiftLeftChecked"
+      "i16.shiftRight"
+      "i16.shiftRightChecked"
+      "i16.sub"
+      "i16.subChecked"
+      "i32.add"
+      "i32.addChecked"
+      "i32.divChecked"
+      "i32.mul"
+      "i32.mulChecked"
+      "i32.neg"
+      "i32.negChecked"
+      "i32.remChecked"
+      "i32.shiftLeft"
+      "i32.shiftLeftChecked"
+      "i32.shiftRight"
+      "i32.shiftRightChecked"
+      "i32.sub"
+      "i32.subChecked"
+      "i64.add"
+      "i64.addChecked"
+      "i64.divChecked"
+      "i64.mul"
+      "i64.mulChecked"
+      "i64.neg"
+      "i64.negChecked"
+      "i64.remChecked"
+      "i64.shiftLeft"
+      "i64.shiftLeftChecked"
+      "i64.shiftRight"
+      "i64.shiftRightChecked"
+      "i64.sub"
+      "i64.subChecked"
+      "i8.add"
+      "i8.addChecked"
+      "i8.divChecked"
+      "i8.mul"
+      "i8.mulChecked"
+      "i8.neg"
+      "i8.negChecked"
+      "i8.remChecked"
+      "i8.shiftLeft"
+      "i8.shiftLeftChecked"
+      "i8.shiftRight"
+      "i8.shiftRightChecked"
+      "i8.sub"
+      "i8.subChecked"
+      "list.append"
+      "list.concat"
+      "list.length"
+      "list.next"
+      "list.slice"
+      "u16.add"
+      "u16.addChecked"
+      "u16.divChecked"
+      "u16.mul"
+      "u16.mulChecked"
+      "u16.remChecked"
+      "u16.shiftLeft"
+      "u16.shiftLeftChecked"
+      "u16.shiftRight"
+      "u16.shiftRightChecked"
+      "u16.sub"
+      "u16.subChecked"
+      "u32.add"
+      "u32.addChecked"
+      "u32.divChecked"
+      "u32.mul"
+      "u32.mulChecked"
+      "u32.remChecked"
+      "u32.shiftLeft"
+      "u32.shiftLeftChecked"
+      "u32.shiftRight"
+      "u32.shiftRightChecked"
+      "u32.sub"
+      "u32.subChecked"
+      "u64.add"
+      "u64.addChecked"
+      "u64.divChecked"
+      "u64.mul"
+      "u64.mulChecked"
+      "u64.remChecked"
+      "u64.shiftLeft"
+      "u64.shiftLeftChecked"
+      "u64.shiftRight"
+      "u64.shiftRightChecked"
+      "u64.sub"
+      "u64.subChecked"
+      "u8.add"
+      "u8.addChecked"
+      "u8.divChecked"
+      "u8.mul"
+      "u8.mulChecked"
+      "u8.remChecked"
+      "u8.shiftLeft"
+      "u8.shiftLeftChecked"
+      "u8.shiftRight"
+      "u8.shiftRightChecked"
+      "u8.sub"
+      "u8.subChecked"
+    ]
+    host: []
+    nativeSymbol: []
+  }
+}
