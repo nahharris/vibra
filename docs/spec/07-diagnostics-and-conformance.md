@@ -668,7 +668,13 @@ resolution failed).
   declarations: [
     {
       identity: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
-      anchor: {package: "hello" version: "0.1.0" module: @hello.main kind: @proc name: "main"}
+      anchor: {
+        package: "hello"
+        version: "0.1.0"
+        module: @hello.main
+        kind: @proc
+        name: "main"
+      }
       access: @private
       span: {sourceId: "src/hello/main.vib" start: 0u64 end: 68u64}
     }

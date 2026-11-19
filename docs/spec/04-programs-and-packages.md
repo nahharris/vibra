@@ -216,11 +216,7 @@ A project is rooted by `project.vibon`, one `@project.v2` record:
       entry: @hello.main.main
       effects: [@std.env.EnvReadArgs @std.fs.DirReadText @std.io.StdoutText]
       grants: [
-        @args: {
-          provider: @host.env.args
-          resource: {kind: @processArguments}
-          after: []
-        }
+        @args: {provider: @host.env.args resource: {kind: @processArguments} after: []}
         @notes: {
           provider: @host.fs.directory
           resource: {kind: @argumentPath index: 0u64 source: @args}
@@ -238,11 +234,7 @@ A project is rooted by `project.vibon`, one `@project.v2` record:
           }
           after: [@args]
         }
-        @out: {
-          provider: @host.io.stdout
-          resource: {kind: @processStream}
-          after: []
-        }
+        @out: {provider: @host.io.stdout resource: {kind: @processStream} after: []}
       ]
     }
   ]
@@ -370,8 +362,11 @@ not change its visibility. An `entry` on a library is
 
 ```vibra
 use @std.env.EnvReadArgs enduse
+
 use @std.fs.DirReadText enduse
+
 use @std.io.StdoutText enduse
+
 use @std.process.ExitCode enduse
 
 proc main
@@ -523,7 +518,9 @@ resolve against the module's declarations. A walk that reaches no module is
 
 ```vibra
 use @std.fs.DirReadText enduse
+
 use @hello.model enduse
+
 use @billing.cents as money enduse
 ```
 
@@ -713,9 +710,13 @@ snapshot but of no target. A target module cannot name `@tests`
 
 ```vibra
 use @std.assert enduse
+
 use @std.test.TestWorld enduse
+
 use @std.fs.DirReadText enduse
+
 use @std.fs.RelativePath enduse
+
 use @hello.notes enduse
 
 test "counts the lines of a note"
@@ -723,8 +724,7 @@ test "counts the lines of a note"
   performs {TestWorld DirReadText}
   do
     let Result.ok(value: path) be RelativePath(["a.txt"]) endlet
-    let {readText: reader} be
-      await TestWorld.directory(world files: [path: "x\ny"])
+    let {readText: reader} be await TestWorld.directory(world files: [path: "x\ny"])
     endlet
     assert.equal(Result.ok(value: 2u64) await notes.countLines(reader path))
 endtest
@@ -900,14 +900,18 @@ except `revision`, which is the workspace revision test vector of the
   ]
   dependencies: []
   effects: [
-    {path: @std.io.StdoutText seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"}
+    {
+      path: @std.io.StdoutText
+      seed: "sha256:213e3a01ef10d7c10032616f8ab0da9a97fb729b9f98d723f4beb3158a25e2ad"
+    }
   ]
-  grants: [
-    @out: {provider: @host.io.stdout resource: {kind: @processStream} after: []}
-  ]
+  grants: [@out: {provider: @host.io.stdout resource: {kind: @processStream} after: []}]
   registry: {major: 2u32 minor: 0u32 symbols: ["io.stdoutText"]}
   outputs: [
-    {path: "hello.exe" digest: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"}
+    {
+      path: "hello.exe"
+      digest: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"
+    }
   ]
   semanticIdentity: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"
   artifactIdentity: "sha256:65c20520d3bde9ee2d53288d20df389fec9bce119c15722e95628d3005cf220f"

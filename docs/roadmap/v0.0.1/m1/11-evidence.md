@@ -46,7 +46,7 @@ baseline; this guide is not evidence of a completed campaign.
 
 ## Implemented evidence harness
 
-The tracked inventory is [`syntax-examples.tsv`](syntax-examples.tsv). The
+The tracked inventory is `syntax-examples.tsv` in the `v0.0.1` tag. The
 `evidence_step11` host test scans all active `docs/spec/*.md` chapters, checks
 45 fenced fragments and 2,087 inline code spans against stable section
 digests, rejects missing or stale rows, and losslessly exercises source and

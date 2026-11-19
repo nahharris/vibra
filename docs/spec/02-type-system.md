@@ -222,8 +222,11 @@ resolves in the flat module scope and so may be declared after the type.
 
 ```vibra
 type Percent of U8
-  where fn takes {value: U8} returns valid: Bool do
-    return Ordered.lessOrEqual(value 100u8)
+  where fn
+    takes {value: U8}
+    returns valid: Bool
+    do
+      return Ordered.lessOrEqual(value 100u8)
   endfn
 endtype
 
@@ -504,17 +507,21 @@ fn largest(T)
   given {T: Ordered}
   visibility @public
   do
-    return Iter.fold(items Option.none() fn
-      takes {best: Option(T) item: T}
-      returns next: Option(T)
-      do
-        match best
-          case Option.none()
-            return Option.some(value: item)
-          case Option.some(value: current)
-            return Option.some(value: Ordered.max(current item))
-        endmatch
-    endfn)
+    return Iter.fold(
+      items
+      Option.none()
+      fn
+        takes {best: Option(T) item: T}
+        returns next: Option(T)
+        do
+          match best
+            case Option.none()
+              return Option.some(value: item)
+            case Option.some(value: current)
+              return Option.some(value: Ordered.max(current item))
+          endmatch
+      endfn
+    )
 endfn
 ```
 
