@@ -61,6 +61,13 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         "vibra-host",
         &["vibra-diagnostics", "vibra-ir", "vibra-syntax"],
     ),
+    // The checker: the embedded standard library and its loader. It reads the
+    // registry and library names of `vibra-ir` and the reader's tree; only its
+    // tests use the formatter, to hold the modules and the manifest canonical.
+    (
+        "vibra-types",
+        &["vibra-diagnostics", "vibra-fmt", "vibra-ir", "vibra-syntax"],
+    ),
     // The leaf. Diagnostics are a language surface and know nothing else.
     ("vibra-diagnostics-v1", &[]),
     // The reader. Emits diagnostics; must not reach the formatter or schemas.
@@ -391,7 +398,7 @@ fn workspace_matches_the_declared_architecture() {
 }
 
 /// The number of rows, one for each crate directory.
-const ROWS: usize = 33;
+const ROWS: usize = 34;
 
 #[test]
 fn every_crate_directory_has_exactly_one_row() {
@@ -528,6 +535,7 @@ const SEMANTIC_CRATES: &[&str] = &[
     "vibra-ir",
     "vibra-interp",
     "vibra-native",
+    "vibra-types",
     "vibra-diagnostics-v1",
     "vibra-syntax-v1",
     "vibra-resolve-v1",
