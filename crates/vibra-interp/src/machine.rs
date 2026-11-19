@@ -745,6 +745,8 @@ impl<'a> Machine<'a> {
             Type::Declared(id, _) => library.library_of(id),
             _ => None,
         };
+        // The operand an invariant's predicate takes: the representation.
+        let mut representation = None;
         let value = match (construction, role) {
             (Construction::Dict(_), Some(Library::Dict)) => {
                 let key = dict_key(&value_type)?;
@@ -779,7 +781,11 @@ impl<'a> Machine<'a> {
             (Construction::Wrapper(_), Some(Library::Bytes)) => {
                 intrinsics::apply(CompilerIntrinsic::BytesFromList, &[single(done)?])?
             }
-            (Construction::Wrapper(_), _) => Val(Repr::Wrapper(Rc::new(single(done)?))),
+            (Construction::Wrapper(_), _) => {
+                let inner = single(done)?;
+                representation = Some(inner.clone());
+                Val(Repr::Wrapper(Rc::new(inner)))
+            }
             (Construction::Tuple(_), _) => Val::tuple(done),
             (Construction::List(_), _) => Val::list(done),
             (Construction::Record(fields), _) => Val(Repr::Record(Rc::new(
@@ -825,7 +831,8 @@ impl<'a> Machine<'a> {
                 env: Rc::new(TypeEnv::of(arguments.clone())),
             };
             let origin = self.origin;
-            return self.invoke(resolved, vec![value], false, origin);
+            let operand = representation.unwrap_or_else(|| value.clone());
+            return self.invoke(resolved, vec![operand], false, origin);
         }
         Ok(Step::Ret(value))
     }
@@ -880,7 +887,11 @@ impl<'a> Machine<'a> {
                         &member_arguments,
                         &env.apply_all_named(&call.choices)?,
                     )?;
-                    rebox = Some((result, held_type.clone()));
+                    // Reboxing is work after the return, so only a result
+                    // that holds Self keeps the call out of tail position.
+                    if mentions_self(&result) {
+                        rebox = Some((result, held_type.clone()));
+                    }
                     self.dispatch(
                         &call.interface,
                         &call.member,
@@ -1427,7 +1438,7 @@ impl<'a> Machine<'a> {
                 self.fold(function, items, 0, initial)
             }
             CompilerIntrinsic::AssertTrue | CompilerIntrinsic::AssertFalse => {
-                self.assertion_allowed(intrinsic)?;
+                self.assertion_allowed(intrinsic, origin)?;
                 let holds = single(args)?.as_bool().ok_or_else(|| {
                     Halt::Invalid("an assertion of a non-Bool".to_owned())
                 })?;
@@ -1444,7 +1455,7 @@ impl<'a> Machine<'a> {
                 }
             }
             CompilerIntrinsic::AssertEqual => {
-                self.assertion_allowed(intrinsic)?;
+                self.assertion_allowed(intrinsic, origin)?;
                 let [ty] = type_arguments else {
                     return invalid("`assert.equal` takes one type argument");
                 };
@@ -1487,10 +1498,15 @@ impl<'a> Machine<'a> {
         }
     }
 
-    fn assertion_allowed(&self, intrinsic: CompilerIntrinsic) -> Result<(), Halt> {
+    fn assertion_allowed(
+        &mut self,
+        intrinsic: CompilerIntrinsic,
+        origin: &'a SourceOrigin,
+    ) -> Result<(), Halt> {
         if self.mode == Mode::Test {
             Ok(())
         } else {
+            self.origin = Some(origin);
             invalid(format!("`{}` outside a test", intrinsic.symbol()))
         }
     }
