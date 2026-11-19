@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use vibra_fmt::{COLUMN_LIMIT, format_document};
-use vibra_syntax::{Document, parse_data, parse_source};
+use vibra_syntax::{Document, DocumentMode, parse, parse_data, parse_source};
 
 fn format(text: &str) -> String {
     format_document(&parse_data(None, text.as_bytes())).expect("a text")
@@ -130,21 +130,24 @@ fn corpus_inputs(directory: &Path, found: &mut Vec<PathBuf>) {
 
 #[test]
 fn formatting_is_idempotent_over_the_corpus_inputs() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../conformance/cases/SRC-READER");
+    let cases = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases");
     let mut inputs = Vec::new();
-    corpus_inputs(&root, &mut inputs);
+    corpus_inputs(&cases.join("SRC-READER"), &mut inputs);
+    corpus_inputs(&cases.join("SRC-DECL"), &mut inputs);
     assert!(
-        inputs.len() >= 27,
+        inputs.len() >= 44,
         "the reader corpus has its inputs: {inputs:?}"
     );
     for path in inputs {
         let bytes = std::fs::read(&path).expect("a readable input");
-        let document: Document = parse_data(None, &bytes);
+        let Some(mode) = DocumentMode::from_path(&path) else {
+            continue;
+        };
+        let document: Document = parse(mode, None, &bytes);
         let Some(once) = format_document(&document) else {
             continue;
         };
-        let twice = format_document(&parse_data(None, once.as_bytes()));
+        let twice = format_document(&parse(mode, None, once.as_bytes()));
         assert_eq!(twice.as_deref(), Some(once.as_str()), "{}", path.display());
     }
 }

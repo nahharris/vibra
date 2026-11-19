@@ -11,7 +11,7 @@
 //!   to the next section keyword, closer, or nested opener at the same depth;
 //!   `do` directly inside a `fn`, `proc`, or `test` is the body section, which
 //!   runs to the next section keyword or the closer and holds the constructs
-//!   nested in it;
+//!   nested in it; a `do` inside the body opens a block closed by `enddo`;
 //! - the word after `as` is a name position: a reserved word there other than
 //!   the construct's own closer is taken as the name;
 //! - a closer is resolved by kind (`docs/spec/07-diagnostics-and-conformance.md`,
@@ -206,11 +206,10 @@ impl Matcher<'_> {
             self.close_by_kind(token, |kind| kind == FrameKind::Construct(opener));
             return;
         }
-        let in_construct = self
-            .stack
-            .last()
-            .and_then(Frame::opener_word)
-            .map(|opener| (opener, BODY_CONSTRUCTS.contains(&opener)));
+        let in_construct = self.stack.last().and_then(|frame| {
+            let opener = frame.opener_word()?;
+            Some((opener, BODY_CONSTRUCTS.contains(&opener) && !frame.body))
+        });
         if word == "do"
             && let Some((_, true)) = in_construct
         {
