@@ -6,15 +6,18 @@
 //! anchor identity, the flat module scope, the imports with their derived
 //! names, the acyclic import graph, access at the referring position, the
 //! prelude reservations, the member namespaces, and the paths in type
-//! positions. `docs/spec/07-diagnostics-and-conformance.md`, "Persistent
-//! observations", fixes the `@resolved.v2` observation.
+//! positions. `docs/spec/01-source-language.md`, "Names and paths",
+//! "Bodies and statements", and "Patterns", fix what it establishes inside
+//! bodies: the lexical scopes, the binders and constant patterns, and the
+//! paths in expressions. `docs/spec/07-diagnostics-and-conformance.md`,
+//! "Persistent observations", fixes the `@resolved.v2` observation.
 //!
 //! [`resolve`] parses every module of a [`ResolveInput`] and returns a
 //! [`Resolution`]. The embedded standard library enters as an
 //! [`EmbeddedUnit`]: its modules are resolved with the local ones, a prelude
 //! name resolves to the declaration its prelude table names, and the
-//! observation holds only the local package. Local bindings and paths in
-//! expressions are resolved by a later step.
+//! observation holds only the local package. [`Resolution::visible_locals`]
+//! lists the locals visible at each statement of a body.
 //!
 //! # Position in the architecture
 //!
