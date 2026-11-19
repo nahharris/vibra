@@ -22,6 +22,7 @@
 //! file and no ambient state: the caller hands it every module's bytes, the
 //! standard library's included.
 
+mod constants;
 mod declare;
 mod graph;
 mod identity;
@@ -30,6 +31,7 @@ mod input;
 mod namespaces;
 mod paths;
 mod prelude;
+mod scope;
 mod snapshot;
 
 pub use graph::Access;
@@ -40,7 +42,7 @@ pub use input::{
 };
 pub use snapshot::{
     RESOLVED_FORMAT, Resolution, ResolvedDeclaration, ResolvedImport, ResolvedModule,
-    ResolvedReference,
+    ResolvedReference, VisibleLocals,
 };
 
 use graph::{Graph, ImportTarget};
@@ -58,7 +60,7 @@ pub fn resolve(input: &ResolveInput) -> Resolution {
     imports::resolve_imports(&mut graph, &mut diagnostics);
     declare::casing(&graph, &mut diagnostics);
     let mut references = Vec::new();
-    paths::resolve_paths(&graph, &mut diagnostics, &mut references);
+    let visible = paths::resolve_paths(&graph, &mut diagnostics, &mut references);
     let imports = graph
         .imports
         .iter()
@@ -125,6 +127,7 @@ pub fn resolve(input: &ResolveInput) -> Resolution {
             })
             .collect(),
         diagnostics,
+        visible,
     };
     resolution.sort();
     resolution
