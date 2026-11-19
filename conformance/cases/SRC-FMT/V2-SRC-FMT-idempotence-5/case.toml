@@ -1,0 +1,12 @@
+id = "V2-SRC-FMT-idempotence-5"
+rule = "V2-SRC-FMT-idempotence"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#canonical-format: formatting is idempotent; a proc written on one line: one section per line, the body statements one step in from do"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

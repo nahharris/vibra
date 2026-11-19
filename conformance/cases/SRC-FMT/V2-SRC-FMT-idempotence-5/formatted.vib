@@ -1,0 +1,8 @@
+proc copyNote
+  takes {reader: DirReadText writer: DirWriteText path: RelativePath}
+  returns outcome: Result(Void FsError)
+  performs {DirReadText DirWriteText}
+  do
+    let text be try await DirReadText.read(reader path) endlet
+    return await DirWriteText.write(writer path text)
+endproc

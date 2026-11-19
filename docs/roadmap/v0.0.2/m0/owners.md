@@ -52,7 +52,7 @@ Lexical rules that are not productions:
 | reserved words | 04 / 10 | `V2-SRC-READER-name-invalid`, `V2-SRC-DECL-type-reserved-field`, `V2-SRC-EXPR-reserved-label`, `V2-SRC-DECL-fn-reserved-label`, `V2-TYPE-NAMES-reserved-declaration`, `V2-TYPE-NAMES-reserved-value`, `V2-TYPE-NAMES-reserved-binder`, `V2-TYPE-NAMES-reserved-import` | `@syntax.invalidName`, `@name.reservedLabel`, `@name.reservedDeclaration`, `@name.reservedValueSpelling` | tree, `@resolved.v2` |
 | typed closers and recovery | 03 / 04 | `V2-SRC-READER-closer-crossed`, `V2-SRC-READER-closer-missing`, `V2-SRC-READER-closer-wrong`, `V2-SRC-READER-closer-eof`, `V2-SRC-READER-recovery-then-valid`, `V2-SRC-READER-type-recovery`, `V2-SRC-READER-expr-recovery`, `V2-SRC-READER-fn-recovery` | `@syntax.unmatchedDelimiter` | tree |
 | excluded spellings | 04 / 28 | `V2-SRC-READER-top-paren`, `V2-SRC-EXPR-paren-group`, `V2-TOOL-format-excluded-form` | `@syntax.invalidForm` | tree |
-| canonical format | 03 to 07 / 25 | `V2-SRC-FMT-wrap-arguments`, `V2-SRC-FMT-declaration-*`, `V2-SRC-EXPR-if-multiline`, `V2-SRC-DECL-fn-one-line`, `V2-SRC-DECL-fn-section-order`, `V2-SRC-DECL-type-section-order`, `V2-SRC-READER-vibon-wraps`, `V2-TOOL-format-*` | none | formatted text |
+| canonical format | 03 to 07 / 25 | `V2-SRC-FMT-idempotence-*`, `V2-SRC-FMT-wrap-arguments`, `V2-SRC-FMT-declaration-*`, `V2-SRC-EXPR-if-multiline`, `V2-SRC-DECL-fn-one-line`, `V2-SRC-DECL-fn-section-order`, `V2-SRC-DECL-type-section-order`, `V2-SRC-READER-vibon-wraps`, `V2-TOOL-format-*` | none | formatted text |
 
 ## Grammar productions
 

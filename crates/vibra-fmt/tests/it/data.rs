@@ -1,9 +1,7 @@
 //! The source-preserving VIBON formatter.
 
-use std::path::{Path, PathBuf};
-
 use vibra_fmt::{COLUMN_LIMIT, format_document};
-use vibra_syntax::{Document, DocumentMode, parse, parse_data, parse_source};
+use vibra_syntax::{parse_data, parse_source};
 
 fn format(text: &str) -> String {
     format_document(&parse_data(None, text.as_bytes())).expect("a text")
@@ -113,41 +111,4 @@ fn a_recovered_document_is_returned_byte_for_byte() {
 #[test]
 fn a_multi_line_string_breaks_its_form_and_keeps_its_bytes() {
     assert_eq!(format_checked("[\"a\nb\" 1]"), "[\n  \"a\nb\"\n  1\n]\n");
-}
-
-fn corpus_inputs(directory: &Path, found: &mut Vec<PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(directory) else {
-        return;
-    };
-    for entry in entries {
-        let path = entry.expect("a readable entry").path();
-        if path.is_dir() {
-            corpus_inputs(&path, found);
-        } else if path.file_stem().is_some_and(|stem| stem == "input") {
-            found.push(path);
-        }
-    }
-}
-
-#[test]
-fn formatting_is_idempotent_over_the_corpus_inputs() {
-    let cases = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases");
-    let mut inputs = Vec::new();
-    corpus_inputs(&cases, &mut inputs);
-    assert!(
-        inputs.len() >= 44,
-        "the reader corpus has its inputs: {inputs:?}"
-    );
-    for path in inputs {
-        let bytes = std::fs::read(&path).expect("a readable input");
-        let Some(mode) = DocumentMode::from_path(&path) else {
-            continue;
-        };
-        let document: Document = parse(mode, None, &bytes);
-        let Some(once) = format_document(&document) else {
-            continue;
-        };
-        let twice = format_document(&parse(mode, None, once.as_bytes()));
-        assert_eq!(twice.as_deref(), Some(once.as_str()), "{}", path.display());
-    }
 }

@@ -8,6 +8,7 @@
     missing_docs
 )]
 
+mod corpus;
 mod data;
 mod expr;
 mod source;
