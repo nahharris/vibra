@@ -31,7 +31,12 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // The new harness. It grows a dependency with each handler.
     (
         "vibra-conformance",
-        &["vibra-diagnostics", "vibra-fmt", "vibra-syntax"],
+        &[
+            "vibra-diagnostics",
+            "vibra-fmt",
+            "vibra-syntax",
+            "vibra-workspace",
+        ],
     ),
     // The version 2 wire contracts. They render the diagnostic model; no
     // language phase depends on them.

@@ -1,0 +1,17 @@
+id = "V2-PROJECT-decode-bad-version"
+rule = "V2-PROJECT-decode-bad-version"
+profile = "staticV2"
+operation = "projectDecode"
+description = "04-programs-and-packages.md#project-file: a version range is not one semantic version"
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@data.invalidValue"
+level = "@error"
+source = "project.vibon"
+span = { start = 54, end = 60 }

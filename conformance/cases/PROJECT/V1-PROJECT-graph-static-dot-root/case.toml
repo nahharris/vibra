@@ -1,0 +1,18 @@
+id = "V1-PROJECT-graph-static-dot-root"
+rule = "V1-PROJECT-graph-static-dot-root"
+profile = "staticV2"
+operation = "sourceGraph"
+description = "04-programs-and-packages.md#discovery-and-the-source-snapshot: a root with a dot part"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@project.invalidTargetRoot"
+level = "@error"
+source = "project.vibon"
+span = { start = 102, end = 109 }

@@ -1,0 +1,17 @@
+id = "V2-PROJECT-decode-dict-key-dup"
+rule = "V2-PROJECT-decode-dict-key-dup"
+profile = "staticV2"
+operation = "projectDecode"
+description = "04-programs-and-packages.md#schemas: a grant name written twice is a repeated typed key"
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@data.duplicateKey"
+level = "@error"
+source = "project.vibon"
+span = { start = 897, end = 902 }

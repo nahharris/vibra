@@ -110,6 +110,20 @@ impl Case {
             .collect()
     }
 
+    /// The canonical directory of the declared tree input, after checking
+    /// that it is a regular directory inside this case directory and not a
+    /// link; `None` when the case declares no tree.
+    pub fn tree_directory(&self) -> Result<Option<PathBuf>, CorpusError> {
+        self.manifest
+            .inputs
+            .tree
+            .as_deref()
+            .map(|relative| {
+                resolve_directory(&self.directory, relative, &self.manifest.id)
+            })
+            .transpose()
+    }
+
     /// Acquires every regular file under the declared tree input, in stable
     /// path order. Link targets must stay inside both the tree and the case
     /// directory; canonical directory identities suppress aliases and cycles.

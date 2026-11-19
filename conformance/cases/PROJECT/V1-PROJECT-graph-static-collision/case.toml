@@ -1,0 +1,18 @@
+id = "V1-PROJECT-graph-static-collision"
+rule = "V1-PROJECT-graph-static-collision"
+profile = "staticV2"
+operation = "sourceGraph"
+description = "04-programs-and-packages.md#discovery-and-the-source-snapshot: a module file beside a directory of its name"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@module.fileDirectoryCollision"
+level = "@error"
+source = "src/app/text.vib"
+span = { start = 0, end = 0 }

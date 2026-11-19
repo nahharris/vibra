@@ -1,0 +1,17 @@
+id = "V2-PROJECT-decode-bad-name"
+rule = "V2-PROJECT-decode-bad-name"
+profile = "staticV2"
+operation = "projectDecode"
+description = "04-programs-and-packages.md#project-file: a package name that is not a camelCase identifier"
+
+[inputs]
+project = "project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@data.invalidValue"
+level = "@error"
+source = "project.vibon"
+span = { start = 37, end = 45 }

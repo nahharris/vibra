@@ -17,13 +17,16 @@
 //!
 //! # Handlers
 //!
-//! [`ReaderV2Handler`] runs the `reader` operation under `readerV2`. Every
+//! [`ReaderV2Handler`] runs the `reader` operation under `readerV2`;
+//! [`ProjectDecodeHandler`] and [`SourceGraphHandler`] run `projectDecode`
+//! and `sourceGraph` under `staticV2`. Every
 //! other case is unavailable until the step that makes its observations
 //! exist registers a handler.
 
 mod corpus;
 mod manifest;
 mod profile;
+mod project;
 mod reader;
 mod rules;
 mod runner;
@@ -41,6 +44,7 @@ pub use profile::{
     CaseObservation, ConformanceOperation, ConformanceProfile, HandlerError,
     ProfileHandler, UnknownOperation, UnknownProfile,
 };
+pub use project::{ProjectDecodeHandler, SourceGraphHandler};
 pub use reader::ReaderV2Handler;
 pub use rules::{
     IdentityParts, InvalidIdentity, RULE_PREFIXES, RULES_FILE_NAME, RULES_HEADER,
