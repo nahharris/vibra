@@ -1,0 +1,18 @@
+id = "V2-TYPE-GENERIC-uninferable"
+rule = "V2-TYPE-GENERIC-uninferable"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: a type argument nothing determines is ambiguous at the application"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.ambiguousInference"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 88, end = 94 }

@@ -1,0 +1,12 @@
+id = "V2-TYPE-GENERIC-recursion-closed"
+rule = "V2-TYPE-GENERIC-recursion-closed"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#generics: recursion at a closed type argument does not expand"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

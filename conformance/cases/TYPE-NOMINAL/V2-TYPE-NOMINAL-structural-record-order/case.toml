@@ -1,0 +1,12 @@
+id = "V2-TYPE-NOMINAL-structural-record-order"
+rule = "V2-TYPE-NOMINAL-structural-record-order"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#structural-types: a structural record is its field set; the written order of a record value does not matter"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

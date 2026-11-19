@@ -579,3 +579,70 @@ fn v9_a_call_through_a_closure_value_binds_its_defaults() {
         Evaluation::Value(Value::I32(6))
     );
 }
+
+/// Runs `body` as an entry of result type `value_type` and gives where its
+/// trap was written.
+fn trap_start_of(value_type: Type, body: Node) -> usize {
+    let set = set_with(
+        vec![function("main", signature(Vec::new(), value_type), body, 0)],
+        Vec::new(),
+        Vec::new(),
+    );
+    let error = run(&program(set, BASE), MemoryBudget::DEFAULT).unwrap_err();
+    let vibra_interp::RuntimeError::Trap { origin, trap, .. } = error else {
+        panic!("a trap");
+    };
+    assert_eq!(trap, Trap::InvalidCheckedProgram);
+    origin.unwrap().span().start()
+}
+
+/// `value`, after a trap written at `start..start + 1`.
+fn trapping(start: usize, value: Node) -> Node {
+    sequence(vec![trap_at(start), value])
+}
+
+/// The operands of a tuple, a record, a list, and a dict run in written
+/// order, a dict entry's key before its value (`docs/spec/06-runtime.md`,
+/// "Evaluation"). Of two operands that both trap, the first written traps.
+#[test]
+fn products_evaluate_operands_in_written_order() {
+    let pair = vec![Type::I32, Type::I32];
+    let tuple = crate::tuple_of(pair, vec![trapping(2, int(1)), trapping(3, int(2))]);
+    assert_eq!(
+        trap_start_of(Type::Tuple(vec![Type::I32, Type::I32]), tuple),
+        2
+    );
+    let record_type =
+        Type::record([("a".to_owned(), Type::I32), ("b".to_owned(), Type::I32)])
+            .unwrap();
+    // `b` is written before `a`, so its operand runs first.
+    let record = construct(
+        record_type.clone(),
+        Construction::Record(vec![
+            ("b".to_owned(), trapping(2, int(2))),
+            ("a".to_owned(), trapping(3, int(1))),
+        ]),
+    );
+    assert_eq!(trap_start_of(record_type, record), 2);
+    let list =
+        crate::list_of(Type::I32, vec![trapping(2, int(1)), trapping(3, int(2))]);
+    assert_eq!(trap_start_of(Type::list(Type::I32), list), 2);
+    let atom = |name: &str| crate::lit(Type::Atom, Value::Atom(name.to_owned()));
+    let table = crate::dict(Type::Atom, Type::I32);
+    let entries = |key_trap: bool| {
+        let key = if key_trap {
+            trapping(2, atom("b"))
+        } else {
+            atom("b")
+        };
+        construct(
+            table.clone(),
+            Construction::Dict(vec![
+                (key, trapping(3, int(1))),
+                (trapping(4, atom("a")), trapping(5, int(2))),
+            ]),
+        )
+    };
+    assert_eq!(trap_start_of(table.clone(), entries(true)), 2);
+    assert_eq!(trap_start_of(table.clone(), entries(false)), 3);
+}

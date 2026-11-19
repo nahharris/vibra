@@ -1,0 +1,2 @@
+type Celsius of F64 endtype
+fn main returns r: Celsius do return Celsius(21.5f64) endfn

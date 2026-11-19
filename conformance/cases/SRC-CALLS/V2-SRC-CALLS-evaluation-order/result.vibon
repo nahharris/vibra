@@ -1,0 +1,1 @@
+{format: @value.v2 typeInfo: {kind: @record fields: {a: @i32 b: @i32}} value: {kind: @record fields: {a: 1i32 b: 2i32}}}

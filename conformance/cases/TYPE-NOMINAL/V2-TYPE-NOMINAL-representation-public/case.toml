@@ -1,0 +1,12 @@
+id = "V2-TYPE-NOMINAL-representation-public"
+rule = "V2-TYPE-NOMINAL-representation-public"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#representation-visibility: a public representation can be constructed from another module"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

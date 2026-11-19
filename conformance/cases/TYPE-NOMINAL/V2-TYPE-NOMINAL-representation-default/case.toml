@@ -1,0 +1,19 @@
+id = "V2-TYPE-NOMINAL-representation-default"
+rule = "V2-TYPE-NOMINAL-representation-default"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#representation-visibility: a type declared without visibility is private to its module, representation included"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.privateAccess"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 58, end = 69 }
+related = [{ source = "src/app/model.vib", span = { start = 5, end = 10 } }]

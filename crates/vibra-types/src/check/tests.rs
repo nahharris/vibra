@@ -255,3 +255,198 @@ fn tail_calls_run_in_constant_depth() {
     assert_eq!(execution.canonical, value("i32", "100000i32"));
     assert_eq!(execution.instrumentation.max_activation_depth, 1);
 }
+
+/// The member functions of `@std.builtin`'s `Dict` and `List` check clean:
+/// each is lowered and none is skipped with a note.
+#[test]
+fn dict_and_list_members_check_clean() {
+    let result = check_source(SOURCE, "fn main returns r: U8 do return 7u8 endfn\n");
+    assert!(!result.has_errors(), "{:#?}", result.diagnostics());
+    let names = result
+        .functions()
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>();
+    for member in [
+        "std.builtin.Dict.entries",
+        "std.builtin.List.length",
+        "std.builtin.List.append",
+        "std.builtin.List.concat",
+        "std.builtin.List.slice",
+    ] {
+        assert!(names.contains(&member), "{member} in {names:?}");
+    }
+    for note in result.notes() {
+        assert!(
+            !note.contains("`std.builtin.Dict") && !note.contains("`std.builtin.List"),
+            "{note}"
+        );
+    }
+    assert_eq!(
+        run("fn main returns r: U64 do return List.length([1i32 2i32]) endfn\n")
+            .as_deref(),
+        Ok(value("u64", "2u64").as_str())
+    );
+}
+
+/// The lowered body of the function `name` of an accepted `source`, as its
+/// debug text.
+fn lowered(source: &str, name: &str) -> String {
+    let result = check_source(SOURCE, source);
+    assert!(!result.has_errors(), "{:#?}", result.diagnostics());
+    let set = result
+        .module_set
+        .as_ref()
+        .map(|set| set.functions().to_vec());
+    let function = set
+        .into_iter()
+        .flatten()
+        .find(|function| function.name.ends_with(name));
+    format!("{:?}", function.map(|function| function.body))
+}
+
+/// A record value and a constructor are lowered with their operands in
+/// written order, which the interpreter then runs in that order
+/// (`vibra-interp`'s `products_evaluate_operands_in_written_order`): the
+/// field `b`, written first, comes first.
+#[test]
+fn products_lower_operands_in_written_order() {
+    let source =
+        "fn main returns r: {a: I32 b: I32} do return {b: 2i32 a: 1i32} endfn\n";
+    let body = lowered(source, "main");
+    assert!(body.contains("Record([(\"b\", "), "{body}");
+    let source = "type P of {a: I32 b: I32} endtype\n\
+                  fn main returns r: P do return P(b: 2i32 a: 1i32) endfn\n";
+    let body = lowered(source, "main");
+    assert!(body.contains("Record([(\"b\", "), "{body}");
+    let source = "type S case c {a: I32 b: I32} endtype\n\
+                  fn main returns r: S do return S.c(b: 2i32 a: 1i32) endfn\n";
+    let body = lowered(source, "main");
+    assert!(body.contains("fields: [(\"b\", "), "{body}");
+}
+
+/// The step 15 row: the operands of a tuple of calls are lowered in
+/// written order, and the value lists them in that order.
+#[test]
+fn tuple_of_calls_runs_in_written_order() {
+    let source = "fn main returns r: {I32 I32} do return {first() second()} endfn\n\
+                  fn first returns r: I32 do return 1i32 endfn\n\
+                  fn second returns r: I32 do return 2i32 endfn\n";
+    assert_eq!(
+        run(source).as_deref(),
+        Ok(
+            "{format: @value.v2 typeInfo: {kind: @tuple arguments: [@i32 @i32]} \
+            value: {kind: @tuple values: [1i32 2i32]}}"
+        )
+    );
+}
+
+/// A constructor binds labels exactly when its shape has field names
+/// (`docs/spec/02-type-system.md`, "Application").
+#[test]
+fn constructor_labels_follow_the_shape() {
+    let user = "type User of {name: Str id: U64} endtype\n";
+    let source =
+        format!("{user}fn f returns r: User do return User(\"Ada\" 1u64) endfn\n");
+    assert_eq!(
+        faults(&source),
+        [(
+            DiagnosticCode::TypeArgumentMismatch,
+            at(&source, "User(\"Ada\" 1u64)", 0)
+        )]
+    );
+    let source = "type Pair of {I32 Str} endtype\n\
+                  fn f returns r: Pair do return Pair(a: 1i32 b: \"x\") endfn\n";
+    assert_eq!(
+        faults(source),
+        [
+            (
+                DiagnosticCode::TypeArgumentMismatch,
+                at(source, "a: 1i32", 0)
+            ),
+            (
+                DiagnosticCode::TypeArgumentMismatch,
+                at(source, "b: \"x\"", 0)
+            ),
+        ]
+    );
+}
+
+/// A literal argument that does not fit its slot is an argument mismatch,
+/// like any other argument.
+#[test]
+fn literal_argument_is_an_argument_mismatch() {
+    let source = "fn inc takes {x: I32} returns r: I32 do return x endfn\n\
+                  fn f returns r: I32 do return inc(\"x\") endfn\n";
+    assert_eq!(
+        faults(source),
+        [(DiagnosticCode::TypeArgumentMismatch, at(source, "\"x\"", 0))]
+    );
+}
+
+/// A type argument is inferred from the expected type when no operand
+/// fixes it, and a generic function value takes its arguments from the
+/// written type it is bound to.
+#[test]
+fn type_arguments_from_the_expected_type() {
+    let source = "fn main returns r: Option(I32) do return none() endfn\n\
+                  fn none(T) returns r: Option(T) do return Option.none() endfn\n";
+    assert!(run(source).is_ok(), "{:?}", run(source));
+    let source = "fn main returns r: I32 do let f: Fn({I32} I32) be id endlet return f(4i32) endfn\n\
+                  fn id(T) takes {x: T} returns r: T do return x endfn\n";
+    assert_eq!(run(source).as_deref(), Ok(value("i32", "4i32").as_str()));
+    let source = "fn id(T) takes {x: T} returns r: T do return x endfn\n\
+                  fn main returns r: I32 do let f be id endlet return 1i32 endfn\n";
+    assert_eq!(
+        faults(source),
+        [(DiagnosticCode::TypeAmbiguousInference, at(source, "id", 1))]
+    );
+}
+
+/// The representation is hidden from other modules only: the declaring
+/// module builds and reads a private representation.
+#[test]
+fn private_representation_is_visible_in_its_module() {
+    let source = "type Token of {id: U64} visibility @public representation @private endtype\n\
+                  fn main returns r: U64 do let t be Token(id: 3u64) endlet return t.id endfn\n";
+    assert_eq!(run(source).as_deref(), Ok(value("u64", "3u64").as_str()));
+}
+
+/// Recursion through a `Dict` or a callable is finite; a parameter held in
+/// place is expanded, so holding a type in a `Box` of itself repeats.
+#[test]
+fn finite_size_through_collections_and_callables() {
+    for source in [
+        "type T of {kids: Dict(Str T)} endtype\n",
+        "type T of {next: Fn({} T)} endtype\n",
+        "type Box(V) of {item: V} endtype\ntype T of {kids: List(Box(T))} endtype\n",
+    ] {
+        assert_eq!(faults(source), [], "{source}");
+    }
+    let source = "type Box(V) of {item: V} endtype\ntype T of {b: Box(T)} endtype\n";
+    assert_eq!(
+        faults(source),
+        [(
+            DiagnosticCode::TypeInfiniteSize,
+            at(source, "type T of {b: Box(T)} endtype", 0)
+        )]
+    );
+}
+
+/// A callable's own type is one level more than its deepest parameter, so a
+/// parameter type of depth 64 makes the callable 65 deep; the same type is
+/// accepted on a local.
+#[test]
+fn callable_depth_counts_its_parameters() {
+    let deepest = format!("{}I32{}", "List(".repeat(63), ")".repeat(63));
+    let source =
+        format!("fn f takes {{x: {deepest}}} returns r: I32 do return 1i32 endfn\n");
+    assert_eq!(
+        faults(&source),
+        [(DiagnosticCode::TypeDepthExceeded, at(&source, &deepest, 0))]
+    );
+    let source = format!(
+        "fn f returns r: I32 do let x: {deepest} be [] endlet return 1i32 endfn\n"
+    );
+    assert_eq!(faults(&source), []);
+}

@@ -16,16 +16,18 @@ use std::sync::Arc;
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
     Arguments, CallTarget, Constant, Construction, ContractCall, Expr as IrExpr,
-    FnType, MatchArm, NamedTypes, Node, Pattern as IrPattern, SourceOrigin, Type,
-    Value,
+    FnType, Library, MatchArm, NamedTypes, Node, Pattern as IrPattern, SourceOrigin,
+    Type, Value,
 };
 use vibra_syntax::source::{
     Argument, Body, Expr, ExprForm, If, Match, MatchArm as ArmView, Pattern,
-    PatternForm, Postfix, Primary, Statement, Suffix,
+    PatternForm, Postfix, Primary, Statement, Suffix, TypeExpr,
 };
 use vibra_syntax::{CstNode, SyntaxKind};
 
-use super::declare::{Entity, NoType, Program, TypeKind, substitute_self};
+use super::declare::{
+    Entity, NoType, Program, Scope, TypeKind, key_diagnostic, substitute_self,
+};
 use super::literal::{self, LiteralFault};
 
 /// Where each supported declaration lands in the checked module set.
@@ -109,7 +111,9 @@ enum Head {
     Case(usize, String),
     /// A member of an interface: the interface's index and the member.
     Contract(usize, String),
-    /// A type, an interface, or a module.
+    /// A type, by its program index.
+    Type(usize),
+    /// An interface or a module.
     Static,
     /// Already reported.
     Error,
@@ -120,8 +124,39 @@ enum Head {
 enum Callee {
     Function(usize),
     Value(Option<Box<Node>>, Box<FnType>),
+    /// A case of a variant type.
     Case(usize, String),
+    /// A wrapper, declared tuple, or declared record.
+    Construct(usize),
     Contract(usize, String),
+    /// A lookup in a collection of the given type.
+    Lookup(Option<Box<Node>>, Box<Type>),
+}
+
+/// What a tuple, record, list, or dict literal builds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Product {
+    Tuple,
+    /// A record, with each field's name in written order.
+    Record(Vec<String>),
+    List,
+    /// A dict; its operands are its keys and values, alternating.
+    Dict,
+}
+
+struct ProductState<'a> {
+    product: Product,
+    operands: Vec<Expr<'a>>,
+    expected: Option<Type>,
+    next: usize,
+    /// The element type of a list, or the key and value types of a dict,
+    /// once known.
+    element: Option<Type>,
+    value: Option<Type>,
+    types: Vec<Option<Type>>,
+    nodes: Vec<Option<Node>>,
+    span: ByteSpan,
+    failed: bool,
 }
 
 struct PostfixState<'a> {
@@ -138,14 +173,57 @@ struct CallState<'a> {
     callee: Callee,
     args: Vec<Argument<'a>>,
     next: usize,
+    /// The parameter types, in which a type parameter of the callee is a
+    /// [`Type::Binder`] into `assignment`.
     params: Option<Vec<Type>>,
+    /// The field names of a shape with labels, in declaration order.
+    labels: Option<Vec<String>>,
+    /// The parameter each written argument binds.
+    binding: Vec<Option<usize>>,
     result: Option<Type>,
+    /// The callee's type parameters and what each is inferred to be.
+    binder_names: Vec<String>,
+    assignment: Vec<Option<Type>>,
+    /// Arguments whose parameter type was still open when they arrived.
+    deferred: Vec<(usize, Type, ByteSpan)>,
     receiver: Option<Type>,
     nodes: Vec<Option<Node>>,
     application: ByteSpan,
     callee_span: ByteSpan,
     failed: bool,
     never_reported: bool,
+}
+
+impl CallState<'_> {
+    /// `pattern` with every type parameter of the callee replaced by what it
+    /// was inferred to be, when each one it mentions is known.
+    fn instance(&self, pattern: &Type) -> Option<Type> {
+        if self.assignment.is_empty() {
+            return Some(pattern.clone());
+        }
+        let mut open = false;
+        pattern.visit(&mut |ty| {
+            if let Type::Binder(at) = ty {
+                open |= !matches!(self.assignment.get(*at), Some(Some(_)));
+            }
+        });
+        if open {
+            return None;
+        }
+        let arguments = self
+            .assignment
+            .iter()
+            .enumerate()
+            .map(|(at, bound)| bound.clone().unwrap_or(Type::Binder(at)))
+            .collect::<Vec<_>>();
+        Some(pattern.instantiate(&arguments))
+    }
+
+    /// The parameter type the written argument `at` binds.
+    fn slot(&self, at: usize) -> Option<&Type> {
+        let slot = self.binding.get(at).copied().flatten()?;
+        self.params.as_ref()?.get(slot)
+    }
 }
 
 struct IfState<'a> {
@@ -226,6 +304,7 @@ enum Task<'a> {
     Return(ByteSpan),
     Postfix(Box<PostfixState<'a>>),
     Call(Box<CallState<'a>>),
+    Product(Box<ProductState<'a>>),
     If(Box<IfState<'a>>),
     Match(Box<MatchState<'a>>),
     Body(Box<BodyState<'a>>),
@@ -252,12 +331,25 @@ pub(crate) struct BodyChecker<'p, 'a> {
     source_id: Arc<str>,
     text: &'a str,
     result: Option<Type>,
+    /// The type parameters in scope of the callable being checked.
+    binders: Vec<String>,
+    /// What `Self` denotes in it.
+    self_type: Option<Type>,
     locals: Vec<Local>,
     slots: Vec<Type>,
     /// The diagnostics found.
     pub(crate) diagnostics: Vec<Diagnostic>,
     /// The declarations the checked bodies refer to.
     pub(crate) references: Vec<Reference>,
+    /// Each call of, and reference to, a generic function: the function,
+    /// its type arguments, and where.
+    pub(crate) instantiations: Vec<(usize, Vec<Type>, ByteSpan)>,
+    /// The span of the argument being checked, so that a literal written
+    /// there reports a mismatch as an argument that does not fit.
+    argument: Option<ByteSpan>,
+    /// The span of a `let` initializer whose written type is faulty and
+    /// already reported, so that nothing fixing its type is not reported.
+    unfixed: Option<ByteSpan>,
 }
 
 /// The value of one checked callable body or initializer.
@@ -287,24 +379,35 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             source_id,
             text,
             result: None,
+            binders: Vec::new(),
+            self_type: None,
             locals: Vec::new(),
             slots: Vec::new(),
             diagnostics: Vec::new(),
             references: Vec::new(),
+            instantiations: Vec::new(),
+            argument: None,
+            unfixed: None,
         }
     }
 
     /// Checks the body of a callable of type `params -> result` whose
-    /// parameters are named `names`.
+    /// parameters are named `names`, with the type parameters `binders` and
+    /// `self_type` for `Self` in scope.
     pub(crate) fn callable(
         &mut self,
-        params: &[Type],
+        signature: &FnType,
         names: &[(String, ByteSpan)],
-        result: &Type,
+        binders: &[String],
+        self_type: Option<Type>,
         body: Body<'a>,
     ) -> Checked {
+        let params = &signature.parameters;
+        let result = &signature.result;
         self.locals.clear();
         self.slots.clear();
+        self.binders = binders.to_vec();
+        self.self_type = self_type;
         self.result = Some(result.clone());
         for (slot, (ty, (name, _))) in params.iter().zip(names).enumerate() {
             self.slots.push(ty.clone());
@@ -327,6 +430,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     pub(crate) fn initializer(&mut self, ty: &Type, value: Expr<'a>) -> Checked {
         self.locals.clear();
         self.slots.clear();
+        self.binders.clear();
+        self.self_type = None;
         self.result = None;
         let span = expr_span(&value);
         let out = self.run(Task::Expr(value, Ctx::Value(Some(ty.clone()))));
@@ -402,6 +507,28 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         None
     }
 
+    /// The checked type of a type written in a body, reporting why it has
+    /// none.
+    fn written(&mut self, written: TypeExpr<'_>) -> Option<Type> {
+        let scope = Scope {
+            self_type: self.self_type.as_ref(),
+            binders: &self.binders,
+        };
+        match self.program.written(self.module, written, scope) {
+            Ok(ty) => Some(ty),
+            Err(NoType::Unsupported) => {
+                self.unavailable(written.span(), "this type");
+                None
+            }
+            Err(NoType::Unresolved) => None,
+            Err(NoType::Fault(diagnostic)) => {
+                self.diagnostics
+                    .push(diagnostic.with_source_id(self.source_id.as_ref()));
+                None
+            }
+        }
+    }
+
     fn new_slot(&mut self, ty: Option<&Type>) -> usize {
         let slot = self.slots.len();
         self.slots.push(ty.cloned().unwrap_or(Type::Void));
@@ -421,6 +548,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 Task::Return(span) => self.finish_return(span, input.take()),
                 Task::Postfix(state) => self.step_postfix(state, input.take()),
                 Task::Call(state) => self.step_call(state, input.take()),
+                Task::Product(state) => self.step_product(state, input.take()),
                 Task::If(state) => self.step_if(state, input.take()),
                 Task::Match(state) => self.step_match(state, input.take()),
                 Task::Body(state) => self.step_body(state, input.take()),
@@ -590,10 +718,47 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 ));
                 Step::Child(Task::Postfix(state), child)
             }
-            Primary::Tuple(_) => self.unavailable_primary(primary_span, "a tuple"),
-            Primary::Record(_) => self.unavailable_primary(primary_span, "a record"),
-            Primary::List(_) => self.unavailable_primary(primary_span, "a list"),
-            Primary::Dict(_) => self.unavailable_primary(primary_span, "a dict"),
+            Primary::Tuple(operands) => self.start_product(
+                state,
+                Product::Tuple,
+                operands,
+                inner_ctx,
+                primary_span,
+            ),
+            Primary::Record(fields) => {
+                let names = fields
+                    .iter()
+                    .map(|(name, _)| name.text().to_owned())
+                    .collect();
+                let operands = fields.into_iter().map(|(_, value)| value).collect();
+                self.start_product(
+                    state,
+                    Product::Record(names),
+                    operands,
+                    inner_ctx,
+                    primary_span,
+                )
+            }
+            Primary::List(operands) => self.start_product(
+                state,
+                Product::List,
+                operands,
+                inner_ctx,
+                primary_span,
+            ),
+            Primary::Dict(entries) => {
+                let operands = entries
+                    .into_iter()
+                    .flat_map(|(key, value)| [key, value])
+                    .collect();
+                self.start_product(
+                    state,
+                    Product::Dict,
+                    operands,
+                    inner_ctx,
+                    primary_span,
+                )
+            }
             Primary::Callable(_) => {
                 self.unavailable_primary(primary_span, "an anonymous callable")
             }
@@ -667,9 +832,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         };
                         return (head, consumed + 1);
                     }
-                    if let TypeKind::Variant(cases) = &data.kind
-                        && cases.iter().any(|case| case == field.text())
-                    {
+                    if data.case(field.text()).is_some() {
                         return (
                             Head::Case(index, field.text().to_owned()),
                             consumed + 1,
@@ -688,7 +851,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     let head = if supported {
                         Head::Contract(index, field.text().to_owned())
                     } else {
-                        Head::Error
+                        let module =
+                            program.interfaces.get(index).map(|data| data.module);
+                        let whole = ByteSpan::new(span.start(), suffix_span.end());
+                        module.map_or(Head::Error, |module| self.skipped(module, whole))
                     };
                     return (head, consumed + 1);
                 }
@@ -709,7 +875,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     global.map(|global| self.node(IrExpr::Global(global), whole));
                 Head::Value(Box::new(Out { ty, node }))
             }
-            Entity::Type(_) | Entity::Interface(_) | Entity::Module(_) => Head::Static,
+            Entity::Type(index) => Head::Type(index),
+            Entity::Interface(_) | Entity::Module(_) => Head::Static,
             Entity::Fn(index) => {
                 let module = program.functions.get(index).map(|data| data.module);
                 module.map_or(Head::Error, |module| self.skipped(module, whole))
@@ -749,57 +916,53 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         while let Some((suffix, suffix_span)) = state.suffixes.get(state.next).cloned()
         {
             state.next += 1;
+            let last = state.next == state.suffixes.len();
             let callee_span = ByteSpan::new(state.start, state.end);
             let whole = ByteSpan::new(state.start, suffix_span.end());
             state.end = suffix_span.end();
             let head = std::mem::replace(&mut state.head, Head::Error);
             match suffix {
-                Suffix::Field(_) => {
-                    if matches!(&head, Head::Value(out) if out.ty.is_some()) {
-                        self.unavailable(whole, "a field read");
+                Suffix::Field(name) => {
+                    let value = match head {
+                        Head::Value(out) => Some(*out),
+                        Head::Function(index) => {
+                            Some(self.function_value(index, callee_span, None))
+                        }
+                        _ => None,
+                    };
+                    if let Some(value) = value {
+                        let out =
+                            self.field_read(value, name.text(), name.span(), whole);
+                        state.head = Head::Value(Box::new(out));
                     }
                 }
                 Suffix::Call(args) => {
-                    let callee = match head {
-                        Head::Function(index) => Callee::Function(index),
-                        Head::Case(ty, case) => Callee::Case(ty, case),
-                        Head::Contract(interface, member) => {
-                            Callee::Contract(interface, member)
-                        }
-                        Head::Value(out) => {
-                            let Out { ty, node } = *out;
-                            match &ty {
-                                Some(Type::Fn(signature)) => {
-                                    Callee::Value(node.map(Box::new), signature.clone())
-                                }
-                                Some(Type::Never) => {
-                                    self.report(
-                                        DiagnosticCode::TypeUnreachableCode,
-                                        callee_span,
-                                        "this callee never completes",
-                                    );
-                                    continue;
-                                }
-                                Some(ty) => {
-                                    self.report(
-                                        DiagnosticCode::TypeNotApplicable,
-                                        callee_span,
-                                        format!(
-                                            "a value of type `{ty}` cannot be applied"
-                                        ),
-                                    );
-                                    continue;
-                                }
-                                None => continue,
-                            }
-                        }
-                        Head::Static => {
-                            self.unavailable(callee_span, "applying a type");
-                            continue;
-                        }
-                        Head::Pending | Head::Error => continue,
+                    let expected = if last {
+                        state.ctx.expected().cloned()
+                    } else {
+                        None
                     };
-                    let call = self.call_state(callee, args, whole, callee_span);
+                    let callee = match head {
+                        Head::Function(index) => Some(Callee::Function(index)),
+                        Head::Case(ty, case) => Some(Callee::Case(ty, case)),
+                        Head::Contract(interface, member) => {
+                            Some(Callee::Contract(interface, member))
+                        }
+                        Head::Type(index) => self.constructor(index, callee_span),
+                        Head::Value(out) => self.applied_value(*out, callee_span),
+                        Head::Static => {
+                            self.report(
+                                DiagnosticCode::TypeNotApplicable,
+                                callee_span,
+                                "a module or an interface cannot be applied",
+                            );
+                            None
+                        }
+                        Head::Pending | Head::Error => None,
+                    };
+                    let Some(callee) = callee else { continue };
+                    let call =
+                        self.call_state(callee, args, whole, callee_span, expected);
                     state.head = Head::Pending;
                     return Step::Child(Task::Postfix(state), Task::Call(call));
                 }
@@ -808,7 +971,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         let whole = ByteSpan::new(state.start, state.end);
         let out = match std::mem::replace(&mut state.head, Head::Error) {
             Head::Value(out) => *out,
-            Head::Function(index) => self.function_value(index, whole),
+            Head::Function(index) => {
+                let expected = state.ctx.expected().cloned();
+                self.function_value(index, whole, expected.as_ref())
+            }
             Head::Case(..) => {
                 self.unavailable(whole, "a constructor used as a value");
                 Out::error()
@@ -817,29 +983,271 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 self.unavailable(whole, "an interface member used as a value");
                 Out::error()
             }
-            Head::Static => {
+            Head::Type(_) | Head::Static => {
                 self.unavailable(whole, "a type used as a value");
                 Out::error()
             }
             Head::Pending | Head::Error => Out::error(),
         };
-        let _ = &state.ctx;
         Step::Done(out)
     }
 
-    fn function_value(&mut self, index: usize, span: ByteSpan) -> Out {
+    /// The constructor a type applied as a callee denotes, reporting a type
+    /// that has none.
+    fn constructor(&mut self, index: usize, callee_span: ByteSpan) -> Option<Callee> {
         let program = self.program;
-        let Some(signature) = program
-            .functions
-            .get(index)
-            .and_then(|data| data.signature.clone())
-        else {
+        let data = program.types.get(index)?;
+        match data.kind {
+            TypeKind::Wrapper(_) | TypeKind::Tuple(_) | TypeKind::Record(_)
+                if data.id.is_some() =>
+            {
+                Some(Callee::Construct(index))
+            }
+            TypeKind::Unsupported => {
+                self.skipped(data.module, callee_span);
+                None
+            }
+            TypeKind::Faulty | TypeKind::Pending => None,
+            _ => {
+                self.report(
+                    DiagnosticCode::TypeNotApplicable,
+                    callee_span,
+                    format!(
+                        "the type `{}` has no constructor of its own; a variant type is built by one of its cases",
+                        data.name
+                    ),
+                );
+                None
+            }
+        }
+    }
+
+    /// The callee a value applied as a callee denotes: a function value or
+    /// a collection; any other value is reported.
+    fn applied_value(&mut self, out: Out, callee_span: ByteSpan) -> Option<Callee> {
+        let Out { ty, node } = out;
+        match ty {
+            Some(Type::Fn(ref signature)) => {
+                Some(Callee::Value(node.map(Box::new), signature.clone()))
+            }
+            Some(Type::Never) => {
+                self.report(
+                    DiagnosticCode::TypeUnreachableCode,
+                    callee_span,
+                    "this callee never completes",
+                );
+                None
+            }
+            Some(ty) if self.lookup_types(&ty).is_some() => {
+                Some(Callee::Lookup(node.map(Box::new), Box::new(ty)))
+            }
+            Some(ty) => {
+                self.report(
+                    DiagnosticCode::TypeNotApplicable,
+                    callee_span,
+                    format!("a value of type `{ty}` cannot be applied"),
+                );
+                None
+            }
+            None => None,
+        }
+    }
+
+    /// The key and item types of a lookup in a value of `collection`.
+    fn lookup_types(&self, collection: &Type) -> Option<(Type, Type)> {
+        match collection {
+            Type::List(element) => Some((Type::U64, element.as_ref().clone())),
+            Type::Declared(id, arguments) => match self.program.library_of(id)? {
+                Library::Str => Some((Type::U64, Type::Char)),
+                Library::Bytes => Some((Type::U64, Type::U8)),
+                Library::Dict => match arguments.as_slice() {
+                    [key, value] => Some((key.clone(), value.clone())),
+                    _ => None,
+                },
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// The key and value types of a `Dict` type.
+    fn dict_arguments(&self, ty: &Type) -> Option<(Type, Type)> {
+        match ty {
+            Type::Declared(id, arguments)
+                if self.program.library_of(id) == Some(Library::Dict) =>
+            {
+                match arguments.as_slice() {
+                    [key, value] => Some((key.clone(), value.clone())),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// Reports a use at `span`, in another module, of the representation of
+    /// the type `index` when that module cannot see it.
+    fn hidden(&mut self, index: usize, span: ByteSpan) -> bool {
+        let program = self.program;
+        let Some(data) = program.types.get(index) else {
+            return false;
+        };
+        if data.module == self.module || data.representation_public {
+            return false;
+        }
+        let mut diagnostic = Diagnostic::new(
+            DiagnosticCode::NameInaccessibleRepresentation,
+            span,
+            format!(
+                "the representation of `{}` is private to the module that declares it",
+                data.name
+            ),
+        )
+        .with_source_id(self.source_id.as_ref());
+        if let Some(module) = program.modules.get(data.module) {
+            let declared = data
+                .view
+                .name()
+                .map_or(data.view.construct().span(), |name| name.span());
+            diagnostic = diagnostic.with_related_source(
+                module.source_id.as_ref(),
+                declared,
+                "the type is declared here",
+            );
+        }
+        self.diagnostics.push(diagnostic);
+        true
+    }
+
+    /// A field read of `name` on `value`.
+    fn field_read(
+        &mut self,
+        value: Out,
+        name: &str,
+        name_span: ByteSpan,
+        whole: ByteSpan,
+    ) -> Out {
+        let Out { ty, node } = value;
+        let Some(ty) = ty else {
+            return Out::error();
+        };
+        if ty == Type::Never {
+            self.report(
+                DiagnosticCode::TypeUnreachableCode,
+                whole,
+                "this value never completes, so it has no field to read",
+            );
+            return Out::error();
+        }
+        let program = self.program;
+        let field = match &ty {
+            Type::Record(fields) => fields.get(name).cloned(),
+            Type::Declared(id, arguments) => {
+                match program
+                    .type_index_of(id)
+                    .map(|index| (index, program.types.get(index)))
+                {
+                    Some((index, Some(data))) => match &data.kind {
+                        TypeKind::Record(fields) => {
+                            let found = fields
+                                .iter()
+                                .find(|(field, _)| field == name)
+                                .map(|(_, field)| field.instantiate(arguments));
+                            if found.is_some() && self.hidden(index, name_span) {
+                                return Out::error();
+                            }
+                            found
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+        let Some(field) = field else {
+            self.report(
+                DiagnosticCode::TypeUnknownRecordField,
+                name_span,
+                format!("a value of type `{ty}` has no field `{name}`"),
+            );
+            return Out::error();
+        };
+        let node = node.map(|record| {
+            self.node(
+                IrExpr::Field {
+                    record: Box::new(record),
+                    field: name.to_owned(),
+                },
+                whole,
+            )
+        });
+        Out {
+            ty: Some(field),
+            node,
+        }
+    }
+
+    /// Reports that the type parameters `missing` of the call or reference
+    /// at `span` are not determined.
+    fn ambiguous(&mut self, span: ByteSpan, missing: &[String]) {
+        let mut diagnostic = Diagnostic::new(
+            DiagnosticCode::TypeAmbiguousInference,
+            span,
+            "nothing fixes every type argument here",
+        )
+        .with_source_id(self.source_id.as_ref());
+        for name in missing {
+            diagnostic = diagnostic.with_note(format!(
+                "nothing fixes `{name}`: an operand of a type that mentions it, or a written expected type, would"
+            ));
+        }
+        self.diagnostics.push(diagnostic);
+    }
+
+    fn function_value(
+        &mut self,
+        index: usize,
+        span: ByteSpan,
+        expected: Option<&Type>,
+    ) -> Out {
+        let program = self.program;
+        let Some(data) = program.functions.get(index) else {
+            return Out::error();
+        };
+        let Some(signature) = data.signature.clone() else {
             return Out::error();
         };
         self.references.push(Reference {
             target: Target::Function(index),
             span,
         });
+        let pattern = Type::function(signature);
+        let (ty, type_arguments) = if data.binders.is_empty() {
+            (pattern, Vec::new())
+        } else {
+            let mut assignment = vec![None; data.binders.len()];
+            if let Some(expected) = expected {
+                let mut trial = assignment.clone();
+                if unify(&pattern, expected, &mut trial) {
+                    assignment = trial;
+                }
+            }
+            let missing = data
+                .binders
+                .iter()
+                .zip(&assignment)
+                .filter(|(_, bound)| bound.is_none())
+                .map(|(name, _)| name.clone())
+                .collect::<Vec<_>>();
+            if !missing.is_empty() {
+                self.ambiguous(span, &missing);
+                return Out::error();
+            }
+            let arguments = assignment.into_iter().flatten().collect::<Vec<_>>();
+            self.instantiations.push((index, arguments.clone(), span));
+            (pattern.instantiate(&arguments), arguments)
+        };
         let node =
             self.layout
                 .functions
@@ -850,15 +1258,12 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                     self.node(
                         IrExpr::Function {
                             function,
-                            type_arguments: Vec::new(),
+                            type_arguments,
                         },
                         span,
                     )
                 });
-        Out {
-            ty: Some(Type::function(signature)),
-            node,
-        }
+        Out { ty: Some(ty), node }
     }
 
     fn call_state(
@@ -867,33 +1272,95 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         args: Vec<Argument<'a>>,
         application: ByteSpan,
         callee_span: ByteSpan,
+        expected: Option<Type>,
     ) -> Box<CallState<'a>> {
         let program = self.program;
+        let mut labels = None;
+        let mut binder_names = Vec::new();
         let (params, result) = match &callee {
-            Callee::Function(index) => match program
-                .functions
-                .get(*index)
-                .and_then(|data| data.signature.clone())
-            {
-                Some(signature) => (Some(signature.parameters), Some(signature.result)),
-                None => (None, None),
-            },
+            Callee::Function(index) => {
+                match program.functions.get(*index).and_then(|data| {
+                    data.signature.clone().map(|signature| (data, signature))
+                }) {
+                    Some((data, signature)) => {
+                        binder_names.clone_from(&data.binders);
+                        (Some(signature.parameters), Some(signature.result))
+                    }
+                    None => (None, None),
+                }
+            }
             Callee::Value(_, signature) => (
                 Some(signature.parameters.clone()),
                 Some(signature.result.clone()),
             ),
-            Callee::Case(ty, _) => (
-                Some(Vec::new()),
-                program.types.get(*ty).and_then(|data| data.self_type()),
-            ),
+            Callee::Case(ty, case) => {
+                match program
+                    .types
+                    .get(*ty)
+                    .and_then(|data| data.case(case).map(|case| (data, case)))
+                {
+                    Some((data, case)) => {
+                        binder_names.clone_from(&data.params);
+                        let params = match &case.fields {
+                            Some(fields) => {
+                                labels = Some(
+                                    fields
+                                        .iter()
+                                        .map(|(name, _)| name.clone())
+                                        .collect(),
+                                );
+                                fields.iter().map(|(_, ty)| ty.clone()).collect()
+                            }
+                            None => Vec::new(),
+                        };
+                        (Some(params), data.self_type())
+                    }
+                    None => (None, None),
+                }
+            }
+            Callee::Construct(ty) => match program.types.get(*ty) {
+                Some(data) => {
+                    binder_names.clone_from(&data.params);
+                    let params = match &data.kind {
+                        TypeKind::Record(fields) => {
+                            labels = Some(
+                                fields.iter().map(|(name, _)| name.clone()).collect(),
+                            );
+                            Some(fields.iter().map(|(_, ty)| ty.clone()).collect())
+                        }
+                        TypeKind::Tuple(components) => Some(components.clone()),
+                        TypeKind::Wrapper(representation) => {
+                            Some(vec![representation.clone()])
+                        }
+                        _ => None,
+                    };
+                    (params, data.self_type())
+                }
+                None => (None, None),
+            },
             Callee::Contract(..) => (None, None),
+            Callee::Lookup(_, collection) => match self.lookup_types(collection) {
+                Some((key, item)) => {
+                    let result = program.library_type(Library::Option, vec![item]);
+                    if result.is_none() {
+                        self.unavailable(application, "a lookup without `Option`");
+                    }
+                    (Some(vec![key]), result)
+                }
+                None => (None, None),
+            },
         };
         let mut state = Box::new(CallState {
             callee,
             args,
             next: 0,
             params,
+            labels,
+            binding: Vec::new(),
             result,
+            assignment: vec![None; binder_names.len()],
+            binder_names,
+            deferred: Vec::new(),
             receiver: None,
             nodes: Vec::new(),
             application,
@@ -901,29 +1368,138 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             failed: false,
             never_reported: false,
         });
-        for arg in &state.args {
-            if let Some(label) = arg.label {
-                let span =
-                    ByteSpan::new(label.span().start(), expr_span(&arg.value).end());
-                self.report(
-                    DiagnosticCode::TypeArgumentMismatch,
-                    span,
-                    format!("the callee takes no labelled argument `{}`", label.text()),
-                );
-                state.failed = true;
+        self.bind_arguments(&mut state);
+        if !matches!(state.callee, Callee::Contract(..)) {
+            self.check_arity(&mut state);
+        }
+        if !state.assignment.is_empty()
+            && let (Some(result), Some(expected)) = (&state.result, &expected)
+        {
+            let mut trial = state.assignment.clone();
+            if unify(result, expected, &mut trial) {
+                state.assignment = trial;
             }
+        }
+        if let Callee::Case(ty, _) | Callee::Construct(ty) = state.callee
+            && self.hidden(ty, callee_span)
+        {
+            state.failed = true;
         }
         state
     }
 
+    /// Binds each written argument to its parameter: by label in a shape
+    /// with field names, by position in any other.
+    fn bind_arguments(&mut self, state: &mut CallState<'a>) {
+        let span_of = |arg: &Argument<'_>| match arg.label {
+            Some(label) => {
+                ByteSpan::new(label.span().start(), expr_span(&arg.value).end())
+            }
+            None => expr_span(&arg.value),
+        };
+        let mut binding = Vec::new();
+        match state.labels.clone() {
+            Some(names) => {
+                let mut used = vec![false; names.len()];
+                let mut positional = false;
+                for arg in &state.args {
+                    let Some(label) = arg.label else {
+                        positional = true;
+                        binding.push(None);
+                        continue;
+                    };
+                    match names.iter().position(|name| name == label.text()) {
+                        Some(at) if used.get(at) == Some(&false) => {
+                            if let Some(slot) = used.get_mut(at) {
+                                *slot = true;
+                            }
+                            binding.push(Some(at));
+                        }
+                        Some(_) => {
+                            self.report(
+                                DiagnosticCode::TypeArgumentMismatch,
+                                span_of(arg),
+                                format!("the field `{}` is bound twice", label.text()),
+                            );
+                            state.failed = true;
+                            binding.push(None);
+                        }
+                        None => {
+                            self.report(
+                                DiagnosticCode::TypeArgumentMismatch,
+                                span_of(arg),
+                                format!("the shape has no field `{}`", label.text()),
+                            );
+                            state.failed = true;
+                            binding.push(None);
+                        }
+                    }
+                }
+                if positional {
+                    self.report(
+                        DiagnosticCode::TypeArgumentMismatch,
+                        state.application,
+                        "this shape has field names, so each argument names its field",
+                    );
+                    state.failed = true;
+                } else {
+                    let missing = names
+                        .iter()
+                        .zip(&used)
+                        .filter(|(_, used)| !**used)
+                        .map(|(name, _)| format!("`{name}`"))
+                        .collect::<Vec<_>>();
+                    if !missing.is_empty() {
+                        self.report(
+                            DiagnosticCode::TypeArgumentMismatch,
+                            state.application,
+                            format!(
+                                "no argument binds the field(s) {}",
+                                missing.join(", ")
+                            ),
+                        );
+                        state.failed = true;
+                    }
+                }
+            }
+            None => {
+                let mut next = 0;
+                for arg in &state.args {
+                    if let Some(label) = arg.label {
+                        self.report(
+                            DiagnosticCode::TypeArgumentMismatch,
+                            span_of(arg),
+                            format!(
+                                "the callee takes no labelled argument `{}`",
+                                label.text()
+                            ),
+                        );
+                        state.failed = true;
+                        binding.push(None);
+                    } else {
+                        binding.push(Some(next));
+                        next += 1;
+                    }
+                }
+            }
+        }
+        state.binding = binding;
+    }
+
     fn check_arity(&mut self, state: &mut CallState<'a>) {
+        if state.labels.is_some() {
+            return;
+        }
+        // A labelled argument to a callee without field names is reported
+        // where it is written, and still counts here, so that it is not
+        // reported again as a wrong arity.
+        let positional = state.args.len();
         if let Some(params) = &state.params
-            && params.len() != state.args.len()
+            && params.len() != positional
         {
             let message = format!(
-                "the callee takes {} argument(s), but {} are written",
+                "the callee takes {} argument(s), but {positional} are written",
                 params.len(),
-                state.args.len()
             );
             self.report(
                 DiagnosticCode::TypeArgumentMismatch,
@@ -939,12 +1515,6 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         mut state: Box<CallState<'a>>,
         input: Option<Out>,
     ) -> Step<'a> {
-        if state.next == 0
-            && input.is_none()
-            && !matches!(state.callee, Callee::Contract(..))
-        {
-            self.check_arity(&mut state);
-        }
         if let Some(out) = input {
             let at = state.next.saturating_sub(1);
             let span = state
@@ -974,19 +1544,39 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                             &mut state, interface, &member, &actual, span,
                         );
                     }
-                    match state
-                        .params
-                        .as_ref()
-                        .and_then(|params| params.get(at))
-                        .cloned()
-                    {
-                        Some(expected) => self.conform(
-                            &expected,
-                            &actual,
-                            out.node,
-                            span,
-                            DiagnosticCode::TypeArgumentMismatch,
-                        ),
+                    match state.slot(at).cloned() {
+                        Some(pattern) => {
+                            let mut trial = state.assignment.clone();
+                            let fits = trial.is_empty()
+                                || unify(&pattern, &actual, &mut trial);
+                            if fits {
+                                state.assignment = trial;
+                            }
+                            match state.instance(&pattern) {
+                                None if !fits => {
+                                    self.report(
+                                        DiagnosticCode::TypeArgumentMismatch,
+                                        span,
+                                        format!(
+                                            "an argument of type `{actual}` does not fit this parameter"
+                                        ),
+                                    );
+                                    state.failed = true;
+                                    None
+                                }
+                                Some(expected) => self.conform(
+                                    &expected,
+                                    &actual,
+                                    out.node,
+                                    span,
+                                    DiagnosticCode::TypeArgumentMismatch,
+                                ),
+                                None => {
+                                    state.deferred.push((at, actual, span));
+                                    out.node
+                                }
+                            }
+                        }
                         None => {
                             state.failed = true;
                             None
@@ -1007,11 +1597,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             let value = arg.value.clone();
             let at = state.next;
             state.next += 1;
-            let expected = state
-                .params
-                .as_ref()
-                .and_then(|params| params.get(at))
-                .cloned();
+            let expected = state.slot(at).and_then(|pattern| state.instance(pattern));
             let skip_rest = matches!(state.callee, Callee::Contract(..))
                 && at > 0
                 && state.receiver.is_none();
@@ -1020,6 +1606,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 state.nodes.push(None);
                 return self.step_call(state, None);
             }
+            self.argument = Some(expr_span(&value));
             return Step::Child(
                 Task::Call(state),
                 Task::Expr(value, Ctx::Value(expected)),
@@ -1082,107 +1669,478 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         }
     }
 
-    fn finish_call(&mut self, state: CallState<'a>) -> Out {
+    fn finish_call(&mut self, mut state: CallState<'a>) -> Out {
         let program = self.program;
+        let missing = state
+            .binder_names
+            .iter()
+            .zip(&state.assignment)
+            .filter(|(_, bound)| bound.is_none())
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        if !missing.is_empty() && state.params.is_some() && !state.failed {
+            self.ambiguous(state.application, &missing);
+            state.failed = true;
+        }
+        for (at, actual, span) in std::mem::take(&mut state.deferred) {
+            let expected = state.slot(at).and_then(|pattern| state.instance(pattern));
+            let node = state.nodes.get_mut(at).and_then(Option::take);
+            let node = match expected {
+                Some(expected) => self.conform(
+                    &expected,
+                    &actual,
+                    node,
+                    span,
+                    DiagnosticCode::TypeArgumentMismatch,
+                ),
+                None => None,
+            };
+            if node.is_none() {
+                state.failed = true;
+            }
+            if let Some(slot) = state.nodes.get_mut(at) {
+                *slot = node;
+            }
+        }
+        let mut result = state
+            .result
+            .as_ref()
+            .and_then(|result| state.instance(result));
+        if let Some(ty) = &result
+            && ty.depth() > Type::MAX_DEPTH
+        {
+            self.report(
+                DiagnosticCode::TypeDepthExceeded,
+                state.application,
+                format!(
+                    "the type of this expression nests more than {} levels",
+                    Type::MAX_DEPTH
+                ),
+            );
+            result = None;
+            state.failed = true;
+        }
+        let type_arguments = state
+            .assignment
+            .iter()
+            .flatten()
+            .cloned()
+            .collect::<Vec<_>>();
+        let complete_arguments = type_arguments.len() == state.assignment.len();
         let CallState {
             callee,
             nodes,
-            result,
+            binding,
+            labels,
             receiver,
             application,
             callee_span,
             failed,
             ..
         } = state;
-        let mut positional = Vec::new();
-        let mut complete = !failed;
+        let mut complete = !failed && result.is_some();
+        let mut written = Vec::new();
         for node in nodes {
             match node {
-                Some(node) => positional.push(node),
+                Some(node) => written.push(node),
                 None => complete = false,
             }
         }
-        let expr =
-            match callee {
-                Callee::Function(index) => {
-                    self.references.push(Reference {
-                        target: Target::Function(index),
-                        span: callee_span,
-                    });
-                    self.layout.functions.get(index).copied().flatten().map(
-                        |function| IrExpr::Call {
-                            target: CallTarget::Direct {
-                                function,
-                                type_arguments: Vec::new(),
-                            },
-                            arguments: Arguments {
-                                positional,
-                                labelled: Vec::new(),
-                            },
-                        },
-                    )
+        let named = |written: Vec<Node>| {
+            let names = labels.clone().unwrap_or_default();
+            binding
+                .iter()
+                .zip(written)
+                .filter_map(|(slot, node)| {
+                    slot.and_then(|slot| names.get(slot).cloned())
+                        .map(|name| (name, node))
+                })
+                .collect::<Vec<_>>()
+        };
+        let expr = match callee {
+            Callee::Function(index) => {
+                self.references.push(Reference {
+                    target: Target::Function(index),
+                    span: callee_span,
+                });
+                if !type_arguments.is_empty() && complete_arguments {
+                    self.instantiations.push((
+                        index,
+                        type_arguments.clone(),
+                        application,
+                    ));
                 }
-                Callee::Value(node, _) => node.map(|node| IrExpr::Call {
-                    target: CallTarget::Value(node),
-                    arguments: Arguments {
-                        positional,
-                        labelled: Vec::new(),
-                    },
-                }),
-                Callee::Case(ty, case) => {
-                    let value_type =
-                        program.types.get(ty).and_then(|data| data.self_type());
-                    value_type.map(|value_type| IrExpr::Construct {
-                        value_type,
-                        construction: Construction::Case {
-                            case,
-                            fields: Vec::new(),
+                self.layout
+                    .functions
+                    .get(index)
+                    .copied()
+                    .flatten()
+                    .map(|function| IrExpr::Call {
+                        target: CallTarget::Direct {
+                            function,
+                            type_arguments,
+                        },
+                        arguments: Arguments {
+                            positional: written,
+                            labelled: Vec::new(),
                         },
                     })
-                }
-                Callee::Contract(interface, member) => {
-                    let id = program
-                        .interfaces
-                        .get(interface)
-                        .and_then(|data| data.id.clone());
-                    if let Some(receiver) = &receiver
-                        && let Some(implementation) =
-                            program.implementation(interface, receiver)
-                        && let Some((_, function)) = implementation
-                            .members
-                            .iter()
-                            .find(|(name, _)| *name == member)
-                    {
-                        self.references.push(Reference {
-                            target: Target::Function(*function),
-                            span: callee_span,
-                        });
+            }
+            Callee::Value(node, _) => node.map(|node| IrExpr::Call {
+                target: CallTarget::Value(node),
+                arguments: Arguments {
+                    positional: written,
+                    labelled: Vec::new(),
+                },
+            }),
+            Callee::Case(_, case) => {
+                result.clone().map(|value_type| IrExpr::Construct {
+                    value_type,
+                    construction: Construction::Case {
+                        case,
+                        fields: named(written),
+                    },
+                })
+            }
+            Callee::Construct(ty) => {
+                let construction = match program.types.get(ty).map(|data| &data.kind) {
+                    Some(TypeKind::Record(_)) => {
+                        Some(Construction::Record(named(written)))
                     }
-                    match (id, receiver) {
-                        (Some(interface), Some(receiver)) => Some(IrExpr::Call {
-                            target: CallTarget::Contract(Box::new(ContractCall {
-                                interface,
-                                member,
-                                receiver,
-                                arguments: Vec::new(),
-                                choices: NamedTypes::empty(),
-                                member_arguments: Vec::new(),
-                            })),
-                            arguments: Arguments {
-                                positional,
-                                labelled: Vec::new(),
-                            },
-                        }),
-                        _ => None,
-                    }
+                    Some(TypeKind::Tuple(_)) => Some(Construction::Tuple(written)),
+                    Some(TypeKind::Wrapper(_)) => written
+                        .into_iter()
+                        .next()
+                        .map(|node| Construction::Wrapper(Box::new(node))),
+                    _ => None,
+                };
+                result
+                    .clone()
+                    .zip(construction)
+                    .map(|(value_type, construction)| IrExpr::Construct {
+                        value_type,
+                        construction,
+                    })
+            }
+            Callee::Contract(interface, member) => {
+                let id = program
+                    .interfaces
+                    .get(interface)
+                    .and_then(|data| data.id.clone());
+                if let Some(receiver) = &receiver
+                    && let Some(implementation) =
+                        program.implementation(interface, receiver)
+                    && let Some((_, function)) = implementation
+                        .members
+                        .iter()
+                        .find(|(name, _)| *name == member)
+                {
+                    self.references.push(Reference {
+                        target: Target::Function(*function),
+                        span: callee_span,
+                    });
                 }
-            };
+                match (id, receiver) {
+                    (Some(interface), Some(receiver)) => Some(IrExpr::Call {
+                        target: CallTarget::Contract(Box::new(ContractCall {
+                            interface,
+                            member,
+                            receiver,
+                            arguments: Vec::new(),
+                            choices: NamedTypes::empty(),
+                            member_arguments: Vec::new(),
+                        })),
+                        arguments: Arguments {
+                            positional: written,
+                            labelled: Vec::new(),
+                        },
+                    }),
+                    _ => None,
+                }
+            }
+            Callee::Lookup(collection, _) => collection
+                .zip(written.into_iter().next())
+                .map(|(collection, key)| IrExpr::Lookup {
+                    collection,
+                    key: Box::new(key),
+                }),
+        };
         let node = if complete {
             expr.map(|expr| self.node(expr, application))
         } else {
             None
         };
         Out { ty: result, node }
+    }
+
+    fn start_product(
+        &mut self,
+        state: Box<PostfixState<'a>>,
+        product: Product,
+        operands: Vec<Expr<'a>>,
+        ctx: Ctx,
+        span: ByteSpan,
+    ) -> Step<'a> {
+        let expected = ctx.expected().cloned();
+        let (element, value) = match (&product, &expected) {
+            (Product::List, Some(Type::List(element))) => {
+                (Some(element.as_ref().clone()), None)
+            }
+            (Product::Dict, Some(ty)) => match self.dict_arguments(ty) {
+                Some((key, value)) => (Some(key), Some(value)),
+                None => (None, None),
+            },
+            _ => (None, None),
+        };
+        let child = Task::Product(Box::new(ProductState {
+            product,
+            operands,
+            expected,
+            next: 0,
+            element,
+            value,
+            types: Vec::new(),
+            nodes: Vec::new(),
+            span,
+            failed: false,
+        }));
+        Step::Child(Task::Postfix(state), child)
+    }
+
+    fn step_product(
+        &mut self,
+        mut state: Box<ProductState<'a>>,
+        input: Option<Out>,
+    ) -> Step<'a> {
+        if let Some(out) = input {
+            let at = state.next.saturating_sub(1);
+            let span = state.operands.get(at).map_or(state.span, expr_span);
+            let (ty, node) = match out.ty {
+                Some(Type::Never) => {
+                    self.report(
+                        DiagnosticCode::TypeUnreachableCode,
+                        span,
+                        "this operand never completes, so nothing is built",
+                    );
+                    (None, None)
+                }
+                Some(actual) => {
+                    let slot = match state.product {
+                        Product::Tuple | Product::Record(_) => None,
+                        Product::List => Some(&mut state.element),
+                        Product::Dict if at.is_multiple_of(2) => {
+                            Some(&mut state.element)
+                        }
+                        Product::Dict => Some(&mut state.value),
+                    };
+                    match slot {
+                        Some(Some(expected)) => {
+                            let expected = expected.clone();
+                            let node = self.conform(
+                                &expected,
+                                &actual,
+                                out.node,
+                                span,
+                                DiagnosticCode::TypeMismatch,
+                            );
+                            (Some(actual), node)
+                        }
+                        Some(slot) => {
+                            *slot = Some(actual.clone());
+                            (Some(actual), out.node)
+                        }
+                        None => (Some(actual), out.node),
+                    }
+                }
+                None => (None, None),
+            };
+            if node.is_none() {
+                state.failed = true;
+            }
+            state.types.push(ty);
+            state.nodes.push(node);
+        }
+        if let Some(operand) = state.operands.get(state.next).cloned() {
+            let at = state.next;
+            state.next += 1;
+            let expected = match &state.product {
+                Product::Tuple => match &state.expected {
+                    Some(Type::Tuple(components))
+                        if components.len() == state.operands.len() =>
+                    {
+                        components.get(at).cloned()
+                    }
+                    _ => None,
+                },
+                Product::Record(names) => match &state.expected {
+                    Some(Type::Record(fields)) => {
+                        names.get(at).and_then(|name| fields.get(name)).cloned()
+                    }
+                    _ => None,
+                },
+                Product::List => state.element.clone(),
+                Product::Dict if at.is_multiple_of(2) => state.element.clone(),
+                Product::Dict => state.value.clone(),
+            };
+            return Step::Child(
+                Task::Product(state),
+                Task::Expr(operand, Ctx::Value(expected)),
+            );
+        }
+        Step::Done(self.finish_product(*state))
+    }
+
+    fn finish_product(&mut self, state: ProductState<'a>) -> Out {
+        let ProductState {
+            product,
+            operands,
+            expected,
+            element,
+            value,
+            types,
+            nodes,
+            span,
+            mut failed,
+            ..
+        } = state;
+        let components = types.into_iter().collect::<Option<Vec<_>>>();
+        let empty = operands.is_empty();
+        let mut ty = match &product {
+            Product::Tuple => components.map(Type::Tuple),
+            Product::Record(names) => components.and_then(|components| {
+                match Type::record(names.iter().cloned().zip(components)) {
+                    Ok(ty) => Some(ty),
+                    Err(_) => {
+                        self.unavailable(span, "a record value with a repeated field");
+                        None
+                    }
+                }
+            }),
+            Product::List => match element {
+                Some(element) => Some(Type::list(element)),
+                None if empty => {
+                    self.empty_collection(span, expected.as_ref(), "list");
+                    None
+                }
+                None => None,
+            },
+            Product::Dict => match (element, value) {
+                (Some(key), Some(value)) => {
+                    let inferred = expected
+                        .as_ref()
+                        .and_then(|expected| self.dict_arguments(expected))
+                        .is_none();
+                    let key_fault = if inferred {
+                        self.program.key_fault(&key)
+                    } else {
+                        None
+                    };
+                    match key_fault {
+                        Some(code) => {
+                            let at = operands.first().map_or(span, expr_span);
+                            self.diagnostics.push(
+                                key_diagnostic(code, at, &key)
+                                    .with_source_id(self.source_id.as_ref()),
+                            );
+                            None
+                        }
+                        None => {
+                            let dict = self
+                                .program
+                                .library_type(Library::Dict, vec![key, value]);
+                            if dict.is_none() {
+                                self.unavailable(span, "a dict without `Dict`");
+                            }
+                            dict
+                        }
+                    }
+                }
+                (None, None) if empty => {
+                    self.empty_collection(span, expected.as_ref(), "dict");
+                    None
+                }
+                _ => None,
+            },
+        };
+        if let Some(built) = &ty
+            && built.depth() > Type::MAX_DEPTH
+        {
+            self.report(
+                DiagnosticCode::TypeDepthExceeded,
+                span,
+                format!(
+                    "the type of this expression nests more than {} levels",
+                    Type::MAX_DEPTH
+                ),
+            );
+            ty = None;
+        }
+        if ty.is_none() {
+            failed = true;
+        }
+        let nodes = nodes.into_iter().collect::<Option<Vec<_>>>();
+        let node = match (failed, nodes, ty.clone()) {
+            (false, Some(nodes), Some(value_type)) => {
+                let construction = match product {
+                    Product::Tuple => Construction::Tuple(nodes),
+                    Product::Record(names) => {
+                        Construction::Record(names.into_iter().zip(nodes).collect())
+                    }
+                    Product::List => Construction::List(nodes),
+                    Product::Dict => {
+                        let mut pairs = Vec::new();
+                        let mut nodes = nodes.into_iter();
+                        while let (Some(key), Some(value)) =
+                            (nodes.next(), nodes.next())
+                        {
+                            pairs.push((key, value));
+                        }
+                        Construction::Dict(pairs)
+                    }
+                };
+                Some(self.node(
+                    IrExpr::Construct {
+                        value_type,
+                        construction,
+                    },
+                    span,
+                ))
+            }
+            _ => None,
+        };
+        Out { ty, node }
+    }
+
+    /// Reports an empty list or dict literal whose element types nothing
+    /// fixes.
+    fn empty_collection(
+        &mut self,
+        span: ByteSpan,
+        expected: Option<&Type>,
+        what: &str,
+    ) {
+        if self.unfixed == Some(span) {
+            return;
+        }
+        match expected {
+            Some(expected) => self.report(
+                DiagnosticCode::TypeMismatch,
+                span,
+                format!("expected `{expected}`, found an empty {what} literal"),
+            ),
+            None => {
+                let diagnostic = Diagnostic::new(
+                    DiagnosticCode::TypeAmbiguousInference,
+                    span,
+                    format!("nothing fixes the type of this empty {what}"),
+                )
+                .with_source_id(self.source_id.as_ref())
+                .with_note(
+                    "a written type on its binding, or an expected type from its position, would fix it",
+                );
+                self.diagnostics.push(diagnostic);
+            }
+        }
     }
 
     fn literal(&mut self, node: &CstNode, expected: Option<&Type>) -> Out {
@@ -1221,8 +2179,13 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                 Out::error()
             }
             Err(LiteralFault::Mismatch(ty)) => {
+                let code = if self.argument == Some(span) {
+                    DiagnosticCode::TypeArgumentMismatch
+                } else {
+                    DiagnosticCode::TypeMismatch
+                };
                 self.report(
-                    DiagnosticCode::TypeMismatch,
+                    code,
                     span,
                     format!("expected `{ty}`, found a numeric literal"),
                 );
@@ -1503,9 +2466,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             .types
             .iter()
             .find_map(|data| match (&data.kind, &data.id) {
-                (TypeKind::Variant(cases), Some(own)) if own == id => {
-                    Some((data.name.clone(), cases.clone()))
-                }
+                (TypeKind::Variant(cases), Some(own)) if own == id => Some((
+                    data.name.clone(),
+                    cases.iter().map(|case| case.name.clone()).collect(),
+                )),
                 _ => None,
             })
     }
@@ -1628,12 +2592,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             return None;
         };
         let data = self.program.types.get(ty)?;
-        match &data.kind {
-            TypeKind::Variant(cases) if cases.iter().any(|known| known == case) => {
-                Some((ty, (*case).to_owned()))
-            }
-            _ => None,
-        }
+        data.case(case).map(|_| (ty, (*case).to_owned()))
     }
 
     fn static_path(&self, names: &[&str]) -> Option<Entity> {
@@ -1690,10 +2649,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             );
             return (Cover::Nothing, None);
         }
-        let at = match &data.kind {
-            TypeKind::Variant(cases) => cases.iter().position(|known| known == case),
-            _ => None,
-        };
+        let at = data
+            .cases()
+            .and_then(|cases| cases.iter().position(|known| known.name == case));
         let cover = at.map_or(Cover::Nothing, Cover::Case);
         (
             cover,
@@ -1799,22 +2757,13 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         state.failed = true;
                     }
                     let written = match view.written_type() {
-                        Some(written) => {
-                            match self.program.written(self.module, written, None) {
-                                Ok(ty) => Some(ty),
-                                Err(NoType::Unsupported) => {
-                                    self.unavailable(written.span(), "this type");
-                                    state.failed = true;
-                                    None
-                                }
-                                Err(NoType::Unresolved) => {
-                                    state.failed = true;
-                                    None
-                                }
-                            }
-                        }
+                        Some(written) => self.written(written),
                         None => None,
                     };
+                    if view.written_type().is_some() && written.is_none() {
+                        state.failed = true;
+                        self.unfixed = view.value().map(|value| expr_span(&value));
+                    }
                     let Some(value) = view.value() else {
                         state.failed = true;
                         state.pieces.push(None);
@@ -2033,6 +2982,77 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
         }
         self.node(IrExpr::Sequence(reversed), span)
     }
+}
+
+/// Matches `pattern`, in which a [`Type::Binder`] below `assignment.len()`
+/// is a type parameter of a callee, against `actual`, recording what each
+/// parameter it meets must be. `Never` is never inferred. Whether every
+/// part matched.
+fn unify(pattern: &Type, actual: &Type, assignment: &mut [Option<Type>]) -> bool {
+    let mut pending = vec![(pattern, actual)];
+    while let Some((pattern, actual)) = pending.pop() {
+        match (pattern, actual) {
+            (Type::Binder(at), _) if *at < assignment.len() => {
+                if *actual == Type::Never {
+                    continue;
+                }
+                match assignment.get_mut(*at) {
+                    Some(Some(bound)) => {
+                        if bound != actual {
+                            return false;
+                        }
+                    }
+                    Some(slot) => *slot = Some(actual.clone()),
+                    None => return false,
+                }
+            }
+            (Type::List(pattern), Type::List(actual)) => {
+                pending.push((pattern, actual))
+            }
+            (Type::Tuple(patterns), Type::Tuple(actuals))
+                if patterns.len() == actuals.len() =>
+            {
+                pending.extend(patterns.iter().zip(actuals));
+            }
+            (Type::Record(patterns), Type::Record(actuals))
+                if patterns.names().eq(actuals.names()) =>
+            {
+                pending.extend(
+                    patterns
+                        .entries()
+                        .iter()
+                        .zip(actuals.entries())
+                        .map(|((_, pattern), (_, actual))| (pattern, actual)),
+                );
+            }
+            (Type::Declared(left, patterns), Type::Declared(right, actuals))
+                if left == right && patterns.len() == actuals.len() =>
+            {
+                pending.extend(patterns.iter().zip(actuals));
+            }
+            (Type::Fn(pattern), Type::Fn(actual))
+                if pattern.parameters.len() == actual.parameters.len()
+                    && pattern.labels.names().eq(actual.labels.names()) =>
+            {
+                pending.extend(pattern.parameters.iter().zip(&actual.parameters));
+                pending.extend(
+                    pattern
+                        .labels
+                        .entries()
+                        .iter()
+                        .zip(actual.labels.entries())
+                        .map(|((_, pattern), (_, actual))| (pattern, actual)),
+                );
+                pending.push((&pattern.result, &actual.result));
+            }
+            _ => {
+                if pattern != actual {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 /// The type of an `if` or `match` from its branches' types.

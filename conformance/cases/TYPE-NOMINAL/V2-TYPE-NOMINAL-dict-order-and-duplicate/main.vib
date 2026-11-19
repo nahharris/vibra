@@ -1,0 +1,1 @@
+fn main returns r: Dict(Str I32) do return ["b": 1i32 "a": 2i32 "a": 3i32] endfn

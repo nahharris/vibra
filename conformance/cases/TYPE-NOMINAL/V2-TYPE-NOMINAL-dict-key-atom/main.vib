@@ -1,0 +1,1 @@
+fn main returns r: Dict(Atom I32) do return [@b: 1i32 @a: 2i32] endfn

@@ -1,0 +1,1 @@
+type A of {next: A} endtype

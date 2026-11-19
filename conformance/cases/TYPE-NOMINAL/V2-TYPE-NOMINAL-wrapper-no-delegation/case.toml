@@ -1,0 +1,18 @@
+id = "V2-TYPE-NOMINAL-wrapper-no-delegation"
+rule = "V2-TYPE-NOMINAL-wrapper-no-delegation"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#application: a wrapper is not its representation: passing it where F64 is expected is an argument that does not fit its slot"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 69, end = 84 }

@@ -1,0 +1,18 @@
+id = "V2-TYPE-NOMINAL-variant-fieldless-args"
+rule = "V2-TYPE-NOMINAL-variant-fieldless-args"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#application: a fieldless case takes no argument; one is a wrong arity at the application"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 91, end = 108 }

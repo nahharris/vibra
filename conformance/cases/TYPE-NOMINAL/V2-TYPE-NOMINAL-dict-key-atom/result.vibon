@@ -1,0 +1,1 @@
+{format: @value.v2 typeInfo: {kind: @declared path: @std.builtin.Dict seed: "sha256:d755daa3ab2fb6013a460dfd86ecd8d839cc341ea29507ba205073e4a4fe4d09" arguments: [@atom @i32]} value: {kind: @dict entries: [{kind: @tuple values: [@a 2i32]} {kind: @tuple values: [@b 1i32]}]}}

@@ -1,0 +1,3 @@
+fn main returns r: {I32 I32} do return {first() second()} endfn
+fn first returns r: I32 do return 1i32 endfn
+fn second returns r: I32 do return 2i32 endfn

@@ -12,17 +12,19 @@ use std::sync::Arc;
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::{
-    Case, CheckedFunction, CheckedGlobal, CheckedModuleSet, FunctionBody,
-    Implementation, ImplementationRecord, InterfaceDefinition, InterfaceKey,
-    InterfaceMember, LibraryTypes, ModuleSetParts, NamedTypes, SignatureRecord,
-    SourceOrigin, Type, TypeBody, TypeDefinition, Visibility, encode_type,
+    Binder, Case, CheckedFunction, CheckedGlobal, CheckedModuleSet, FnType,
+    FunctionBody, Implementation, ImplementationRecord, InterfaceDefinition,
+    InterfaceKey, InterfaceMember, LibraryTypes, ModuleSetParts, NamedTypes,
+    SignatureRecord, SourceOrigin, Type, TypeBody, TypeDefinition, Visibility,
+    encode_type,
 };
 use vibra_syntax::Document;
 
 use super::CheckResult;
 use super::cycle::initializer_cycles;
-use super::declare::{Entity, Program, TypeKind};
+use super::declare::{Entity, Program, TypeData, TypeKind};
 use super::expr::{BodyChecker, Checked, Layout, Reference, Target};
+use super::generics::{Instantiation, expanding_instantiations};
 
 /// The bodies of one pass.
 struct Pass {
@@ -32,6 +34,8 @@ struct Pass {
     faults: BTreeMap<Target, Vec<Diagnostic>>,
     /// The references of each declaration.
     references: BTreeMap<Target, Vec<Reference>>,
+    /// Every instantiation of a generic function inside a body.
+    instantiations: Vec<Instantiation>,
 }
 
 fn layout(program: &Program<'_>) -> Layout {
@@ -68,6 +72,7 @@ fn check_bodies(
         values: BTreeMap::new(),
         faults: BTreeMap::new(),
         references: BTreeMap::new(),
+        instantiations: Vec::new(),
     };
     for (index, data) in program.functions.iter().enumerate() {
         if !program.supported_fn(index) || data.external.is_some() {
@@ -80,14 +85,23 @@ fn check_bodies(
         ) else {
             continue;
         };
+        let self_type = data
+            .owner
+            .and_then(|owner| program.types.get(owner))
+            .and_then(TypeData::self_type);
         let mut checker = BodyChecker::new(program, layout, data.module, text);
-        let checked = checker.callable(
-            &signature.parameters,
-            &data.params,
-            &signature.result,
-            body,
-        );
+        let checked =
+            checker.callable(signature, &data.params, &data.binders, self_type, body);
         pass.functions.insert(index, checked);
+        pass.instantiations
+            .extend(checker.instantiations.drain(..).map(
+                |(callee, arguments, span)| Instantiation {
+                    caller: index,
+                    callee,
+                    arguments,
+                    span,
+                },
+            ));
         pass.faults.insert(
             Target::Function(index),
             std::mem::take(&mut checker.diagnostics),
@@ -225,6 +239,7 @@ pub(crate) fn check_program(
         }
     }
     diagnostics.extend(initializer_cycles(&program, &pass.references));
+    diagnostics.extend(expanding_instantiations(&program, &pass.instantiations));
     diagnostics.sort_by(|left, right| {
         let order = |diagnostic: &Diagnostic| {
             let module = program
@@ -303,16 +318,32 @@ fn assemble(
             TypeKind::Variant(cases) => TypeBody::Variant(
                 cases
                     .iter()
-                    .map(|case| Case::new(case.clone(), Vec::new()))
+                    .map(|case| {
+                        Case::new(
+                            case.name.clone(),
+                            case.fields.clone().unwrap_or_default(),
+                        )
+                    })
                     .collect(),
             ),
             TypeKind::Wrapper(representation) => {
                 TypeBody::Wrapper(representation.clone())
             }
-            TypeKind::Scalar(_) | TypeKind::Unsupported => continue,
+            TypeKind::Tuple(components) => TypeBody::Tuple(components.clone()),
+            TypeKind::Record(fields) => TypeBody::Record(fields.clone()),
+            TypeKind::Scalar(_)
+            | TypeKind::List
+            | TypeKind::Pending
+            | TypeKind::Faulty
+            | TypeKind::Unsupported => continue,
+        };
+        let visibility = if data.representation_public {
+            Visibility::Public
+        } else {
+            Visibility::Private
         };
         let definition =
-            TypeDefinition::new(id, Vec::new(), body, None, Visibility::Public)
+            TypeDefinition::new(id, data.params.clone(), body, None, visibility)
                 .map_err(|error| error.to_string())?;
         types.push(definition);
     }
@@ -380,15 +411,14 @@ fn assemble(
                 data.qualified
             ));
         };
-        let record = SignatureRecord::new(Vec::new(), Type::function(signature))
-            .map_err(|error| error.to_string())?;
+        let record = signature_record(&data.binders, signature)?;
         let origin = origin(program, data.module, data.view.construct().span());
         let function = match data.external {
             Some(intrinsic) => CheckedFunction::external(
                 data.qualified.clone(),
                 record,
                 intrinsic,
-                Vec::new(),
+                (0..data.binders.len()).map(Type::Binder).collect(),
                 origin,
             ),
             None => {
@@ -483,6 +513,21 @@ fn assemble(
     Ok((set, names))
 }
 
+/// The signature record of a function with the type parameters `binders`,
+/// each bounded by `Any`.
+fn signature_record(
+    binders: &[String],
+    signature: FnType,
+) -> Result<SignatureRecord, String> {
+    let binders = binders
+        .iter()
+        .map(|name| Binder::new(name.clone(), None))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    SignatureRecord::new(binders, Type::function(signature))
+        .map_err(|error| error.to_string())
+}
+
 /// The first function with no parameter that the first local module
 /// declares at its top level.
 fn entry(program: &Program<'_>, layout: &Layout) -> Option<usize> {
@@ -532,8 +577,7 @@ fn types_document(program: &Program<'_>) -> Option<String> {
             continue;
         }
         let signature = data.signature.clone()?;
-        let record =
-            SignatureRecord::new(Vec::new(), Type::function(signature)).ok()?;
+        let record = signature_record(&data.binders, signature).ok()?;
         callables.push((
             data.identity.clone(),
             format!(

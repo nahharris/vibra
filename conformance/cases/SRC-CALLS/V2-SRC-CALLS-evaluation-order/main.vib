@@ -1,0 +1,2 @@
+fn trace takes {x: I32} returns r: I32 do return x endfn
+fn main returns r: {a: I32 b: I32} do return {b: trace(2i32) a: trace(1i32)} endfn

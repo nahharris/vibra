@@ -1,0 +1,18 @@
+id = "V2-TYPE-NOMINAL-depth-exceeded"
+rule = "V2-TYPE-NOMINAL-depth-exceeded"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#recursive-types: a written type that nests 65 levels is reported at the type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.depthExceeded"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 15, end = 402 }

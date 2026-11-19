@@ -1,0 +1,18 @@
+id = "V2-TYPE-NOMINAL-not-applicable"
+rule = "V2-TYPE-NOMINAL-not-applicable"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#application: a tuple value is not applicable; applying it is reported at the callee"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.notApplicable"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 54, end = 55 }
