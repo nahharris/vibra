@@ -404,7 +404,7 @@ fn workspace_matches_the_declared_architecture() {
 }
 
 /// The number of rows, one for each crate directory.
-const ROWS: usize = 34;
+const ROWS: usize = 35;
 
 #[test]
 fn every_crate_directory_has_exactly_one_row() {
