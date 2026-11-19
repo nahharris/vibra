@@ -26,14 +26,26 @@ fn a_type_that_fits_is_one_line() {
         "type Celsius of F64 endtype\n"
     );
     assert_eq!(
-        format("type User of {name: Str id: UserId}\n  visibility @public\nendtype"),
-        "type User of {name: Str id: UserId} visibility @public endtype\n"
+        format("type Color\n  case red\n  case green\nendtype"),
+        "type Color case red case green endtype\n"
+    );
+}
+
+#[test]
+fn a_type_with_a_section_other_than_of_is_on_several_lines() {
+    assert_eq!(
+        format("type User of {name: Str id: UserId} visibility @public endtype"),
+        "type User of {name: Str id: UserId}\n  visibility @public\nendtype\n"
     );
     assert_eq!(
         format(
-            "type Lookup(T)\n  case found {value: T}\n  case missing\n  visibility @public\nendtype"
+            "type Lookup(T) case found {value: T} case missing visibility @public endtype"
         ),
-        "type Lookup(T) case found {value: T} case missing visibility @public endtype\n"
+        "type Lookup(T)\n  case found {value: T}\n  case missing\n  visibility @public\nendtype\n"
+    );
+    assert_eq!(
+        format("type A of U8 visibility @public endtype"),
+        "type A of U8\n  visibility @public\nendtype\n"
     );
 }
 
@@ -41,19 +53,19 @@ fn a_type_that_fits_is_one_line() {
 fn sections_take_the_canonical_order_and_cases_keep_theirs() {
     assert_eq!(
         format("type A given {T: Any} of {x: T} visibility @public endtype"),
-        "type A of {x: T} given {T: Any} visibility @public endtype\n"
+        "type A of {x: T}\n  given {T: Any}\n  visibility @public\nendtype\n"
     );
     assert_eq!(
         format(
             "type V visibility @public case b case a doc \"\"\"v\"\"\" case c endtype"
         ),
-        "type V case b case a case c visibility @public doc \"\"\"v\"\"\" endtype\n"
+        "type V\n  case b\n  case a\n  case c\n  visibility @public\n  doc \"\"\"v\"\"\"\nendtype\n"
     );
     assert_eq!(
         format(
             "interface I doc \"\"\"i\"\"\" type Item endtype given {T: Any} endinterface"
         ),
-        "interface I given {T: Any} doc \"\"\"i\"\"\" type Item endtype endinterface\n"
+        "interface I\n  given {T: Any}\n  doc \"\"\"i\"\"\"\n  type Item endtype\nendinterface\n"
     );
 }
 
@@ -112,15 +124,15 @@ fn impl_blocks_and_associated_types_are_members() {
         format(
             "type Once of Option(U8)\n  impl Iter\n    type Item of U8 endtype\n  endimpl\nendtype"
         ),
-        "type Once of Option(U8) impl Iter type Item of U8 endtype endimpl endtype\n"
+        "type Once of Option(U8)\n  impl Iter\n    type Item of U8 endtype\n  endimpl\nendtype\n"
     );
     assert_eq!(
         format("interface Iter\n  type Item endtype\nendinterface"),
-        "interface Iter type Item endtype endinterface\n"
+        "interface Iter\n  type Item endtype\nendinterface\n"
     );
     assert_eq!(
         format("type A impl P endimpl visibility @public of U8 endtype"),
-        "type A of U8 visibility @public impl P endimpl endtype\n"
+        "type A of U8\n  visibility @public\n  impl P endimpl\nendtype\n"
     );
 }
 
@@ -138,7 +150,7 @@ fn a_comment_breaks_the_type_and_stays_with_its_part() {
         format(
             "type A\n  // the visibility\n  visibility @public of U8 // the body\nendtype"
         ),
-        "type A\n  of U8 // the body\n  // the visibility\n  visibility @public\nendtype\n"
+        "type A of U8 // the body\n  // the visibility\n  visibility @public\nendtype\n"
     );
 }
 
@@ -165,7 +177,9 @@ fn a_standard_library_type_is_formatted_too() {
     assert!(document.diagnostics().is_empty());
     assert_eq!(
         format_document(&document).as_deref(),
-        Some("type I32 of Intrinsic(@i32) role @ordered visibility @public endtype\n")
+        Some(
+            "type I32 of Intrinsic(@i32)\n  role @ordered\n  visibility @public\nendtype\n"
+        )
     );
 }
 

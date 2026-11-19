@@ -9,8 +9,8 @@ use vibra_syntax::source::keyword::{
     ADMISSIBLE_SECTIONS, SECTIONS, TAG_SETS, TYPE_HEADS,
 };
 use vibra_syntax::source::{
-    Declaration, Inputs, InterfaceDecl, Row, SourceOptions, TypeBody, TypeDecl,
-    TypeExpr, TypeForm,
+    Declaration, ExprForm, Inputs, InterfaceDecl, Primary, Row, SourceOptions,
+    TypeBody, TypeDecl, TypeExpr, TypeForm,
 };
 use vibra_syntax::{
     Document, SyntaxKind, module, parse_source, parse_source_with, tree_document,
@@ -598,26 +598,34 @@ fn type_doc_and_where() {
         [(SyntaxInvalidForm, 13, 23)]
     );
     // The operand of `where` runs to the next section and holds the
-    // expression constructs written in it.
+    // expression constructs written in it: a predicate expression and an
+    // `else` expression. The anonymous `fn` is unavailable until the
+    // callable grammar exists.
     let text = "type Percent of U8\n  where fn takes {value: U8} returns valid: Bool do\n    return Ordered.lessOrEqual(value 100u8)\n  endfn else zero\n  visibility @public\nendtype";
     let document = source(text);
-    assert!(
-        document.diagnostics().is_empty(),
-        "{:?}",
-        codes(document.diagnostics())
+    let callable = text.find("fn takes").unwrap()..text.find("endfn").unwrap() + 5;
+    assert_eq!(
+        codes(document.diagnostics()),
+        [(ToolUnavailable, callable.start, callable.end)]
     );
     let view = types(&document)[0];
     let invariant = view.invariant().unwrap();
-    let predicate = invariant.predicate_tokens();
-    assert_eq!(predicate.len(), 1);
-    assert_eq!(
-        predicate[0].text(text).split_whitespace().next(),
-        Some("fn")
-    );
-    let consequence = invariant.else_tokens().unwrap();
-    assert_eq!(consequence.len(), 1);
-    assert_eq!(consequence[0].text(text), "zero");
+    let ExprForm::Postfix(predicate) = invariant.predicate().unwrap().form() else {
+        panic!("the predicate is a postfix form");
+    };
+    let Some(Primary::Callable(callable)) = predicate.primary() else {
+        panic!("the predicate is the anonymous `fn`");
+    };
+    assert_eq!(callable.keyword(), "fn");
+    let ExprForm::Postfix(consequence) = invariant.consequence().unwrap().form() else {
+        panic!("the consequence is a postfix form");
+    };
+    assert_eq!(consequence.dotted().as_deref(), Some("zero"));
     assert!(view.visibility().is_some());
+    assert_eq!(
+        diagnostics("type A of U8 where ready else endtype"),
+        [(SyntaxInvalidForm, 13, 29)]
+    );
     assert_eq!(
         diagnostics("type A of U8 where visibility @public endtype"),
         [(SyntaxInvalidForm, 13, 18)]

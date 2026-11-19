@@ -1,0 +1,8 @@
+let n: U64 be
+  match value
+    case Option.some(value: text)
+      Str.length(text)
+    case Option.none()
+      0u64
+  endmatch
+endlet

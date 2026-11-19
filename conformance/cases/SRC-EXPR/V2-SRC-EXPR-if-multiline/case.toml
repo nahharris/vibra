@@ -1,0 +1,12 @@
+id = "V2-SRC-EXPR-if-multiline"
+rule = "V2-SRC-EXPR-if-multiline"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#canonical-format: a multi-line `if` keeps `then` on the condition's line and `else` alone at the `if`'s indentation"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

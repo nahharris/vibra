@@ -2,9 +2,9 @@
 //!
 //! `docs/spec/01-source-language.md`, "Declarations": Vibra has exactly seven
 //! top-level forms. `use` is complete here (`use atom [as identifier]
-//! enduse`); `type` and `interface` have their own modules; the other four
-//! are generic constructs whose bodies are reported `@tool.unavailable`
-//! until their own grammar exists. The generic section rules of "Grammar"
+//! enduse`); `type`, `interface`, and the module value `let` have their own
+//! modules; `fn`, `proc`, and `test` are generic constructs whose bodies are
+//! reported `@tool.unavailable` until their own grammar exists. The generic section rules of "Grammar"
 //! apply to every construct: a repeated section is
 //! `@syntax.duplicateSection` at the repeated keyword; in a `fn`, `proc`, or
 //! `test`, `do` comes last; a declaration's name comes before its sections;
@@ -18,6 +18,7 @@ use super::construct::is_trivia;
 use super::interface_decl::InterfaceDecl;
 use super::keyword::BODY_CONSTRUCTS;
 use super::section::{Construct, Section};
+use super::statement::ModuleLet;
 use super::type_decl::TypeDecl;
 use crate::cst::{CstNode, SyntaxKind};
 
@@ -34,8 +35,8 @@ pub enum Declaration<'a> {
     Fn(Construct<'a>),
     /// `proc … endproc`.
     Proc(Construct<'a>),
-    /// `let … endlet`.
-    Let(Construct<'a>),
+    /// `let … endlet`, a module value.
+    Let(ModuleLet<'a>),
     /// `test … endtest`.
     Test(Construct<'a>),
 }
@@ -54,7 +55,7 @@ impl<'a> Declaration<'a> {
             }
             SyntaxKind::FnDecl => Self::Fn(construct),
             SyntaxKind::ProcDecl => Self::Proc(construct),
-            SyntaxKind::ModuleLet => Self::Let(construct),
+            SyntaxKind::ModuleLet => Self::Let(ModuleLet::new(node, text)?),
             SyntaxKind::Test => Self::Test(construct),
             _ => return None,
         })
@@ -67,10 +68,10 @@ impl<'a> Declaration<'a> {
             Self::Use(view) => view.construct,
             Self::Type(view) => view.construct(),
             Self::Interface(view) => view.construct(),
-            Self::Fn(construct)
-            | Self::Proc(construct)
-            | Self::Let(construct)
-            | Self::Test(construct) => *construct,
+            Self::Let(view) => view.construct(),
+            Self::Fn(construct) | Self::Proc(construct) | Self::Test(construct) => {
+                *construct
+            }
         }
     }
 }

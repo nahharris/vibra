@@ -1,0 +1,16 @@
+id = "V2-SRC-EXPR-let-misplaced"
+rule = "V2-SRC-EXPR-let-misplaced"
+profile = "readerV2"
+operation = "reader"
+description = "07-diagnostics-and-conformance.md#binding-return-and-pattern-diagnostics: a `let` in an operand position is a misplaced binding at its keyword"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.misplacedBinding"
+level = "@error"
+span = { start = 16, end = 19 }

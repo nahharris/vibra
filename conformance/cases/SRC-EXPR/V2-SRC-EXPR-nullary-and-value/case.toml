@@ -1,0 +1,12 @@
+id = "V2-SRC-EXPR-nullary-and-value"
+rule = "V2-SRC-EXPR-nullary-and-value"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#application: `f()` is a nullary call and `f` the function value"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

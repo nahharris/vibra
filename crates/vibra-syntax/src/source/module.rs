@@ -8,15 +8,17 @@
 //! where a top-level form is expected is reported once over the balanced
 //! parenthesized form, and an `as` alone is reported at the `as`. Every
 //! `use` precedes every other top-level form; a later `use` is
-//! `@syntax.invalidForm` at its keyword. A `type` and an `interface` are
-//! shaped in their own grammar; each `fn`, `proc`, `let`, and `test` is
-//! `@tool.unavailable` over the whole form until its grammar exists.
+//! `@syntax.invalidForm` at its keyword. A `type`, an `interface`, and a
+//! module value `let` are shaped in their own grammar; each `fn`, `proc`,
+//! and `test` is `@tool.unavailable` over the whole form until its grammar
+//! exists.
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 
 use super::construct::is_trivia;
 use super::declaration::{Declaration, check_construct, check_sections, check_use};
 use super::section::Construct;
+use super::shape::shape_module_let;
 use super::type_decl::{DeclKind, SourceOptions, shape_declaration};
 use crate::cst::{CstNode, SyntaxKind};
 use crate::document::{Document, DocumentMode};
@@ -62,6 +64,7 @@ pub(crate) fn shape_module(
                     text,
                     diagnostics,
                 ),
+                SyntaxKind::ModuleLet => shape_module_let(item, text, diagnostics),
                 _ => item,
             };
             out.push(item);
@@ -100,7 +103,7 @@ fn check_form(
     check_sections(item, text, diagnostics);
     if matches!(
         item.kind(),
-        SyntaxKind::TypeDecl | SyntaxKind::InterfaceDecl
+        SyntaxKind::TypeDecl | SyntaxKind::InterfaceDecl | SyntaxKind::ModuleLet
     ) {
         return;
     }

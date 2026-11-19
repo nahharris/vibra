@@ -1,0 +1,4 @@
+let l: List(I32) be [1i32 2i32] endlet
+let d: Dict(Str Str) be ["name": "Ada" "role": "dev"] endlet
+let e: Dict(Str Str) be [:] endlet
+let z: List(I32) be [] endlet

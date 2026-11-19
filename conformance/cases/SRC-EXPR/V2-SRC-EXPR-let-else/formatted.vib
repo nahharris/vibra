@@ -1,0 +1,6 @@
+let n: I32 be
+  do
+    let Option.some(value: head) be items(0u64) else return 0i32 endlet
+    head
+  enddo
+endlet

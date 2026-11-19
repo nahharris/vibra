@@ -1,0 +1,12 @@
+id = "V2-SRC-EXPR-let-else"
+rule = "V2-SRC-EXPR-let-else"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#let: a refutable `let` with an `else` fallback; formatted, a `let` that fits stays on one line"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

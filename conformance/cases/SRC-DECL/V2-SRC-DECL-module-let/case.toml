@@ -1,0 +1,12 @@
+id = "V2-SRC-DECL-module-let"
+rule = "V2-SRC-DECL-module-let"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#module-values: a module value that fits is one line"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

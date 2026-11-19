@@ -1,0 +1,12 @@
+id = "V2-SRC-EXPR-application"
+rule = "V2-SRC-EXPR-application"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#application: a callee may be any expression; one postfix form holds the callee and both argument lists"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

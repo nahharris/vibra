@@ -1,0 +1,1 @@
+let r: {name: Str} be {name: "Ada" 1u8} endlet

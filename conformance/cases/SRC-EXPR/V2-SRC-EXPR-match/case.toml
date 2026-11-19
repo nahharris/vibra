@@ -1,0 +1,13 @@
+id = "V2-SRC-EXPR-match"
+rule = "V2-SRC-EXPR-match"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#if-match-do: a `match` with two arms; each arm's body ends at the next `case` or `endmatch`"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"
+formatted = "formatted.vib"

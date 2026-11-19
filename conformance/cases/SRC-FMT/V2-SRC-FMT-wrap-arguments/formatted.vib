@@ -1,0 +1,8 @@
+let r: Report be
+  Report.build(
+    customerName: "Ada Lovelace"
+    accountNumber: 12345678u64
+    region: "emea"
+    active: enabled
+  )
+endlet

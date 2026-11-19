@@ -1,0 +1,12 @@
+id = "V2-SRC-FMT-declaration-member-breaks"
+rule = "V2-SRC-FMT-declaration-member-breaks"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#canonical-format: an interface with a member is on several lines, the member one step in"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

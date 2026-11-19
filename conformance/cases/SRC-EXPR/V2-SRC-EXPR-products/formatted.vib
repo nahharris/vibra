@@ -1,0 +1,3 @@
+let t: {Str U64} be {"Ada" 42u64} endlet
+
+let r: {name: Str id: U64} be {name: "Ada" id: 42u64} endlet
