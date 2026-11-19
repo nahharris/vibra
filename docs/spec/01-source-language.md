@@ -368,7 +368,9 @@ Every declaration is private to its module unless it contains
 ```vibra
 use @std.io enduse
 
-type UserId of U64 visibility @public endtype
+type UserId of U64
+  visibility @public
+endtype
 
 let defaultRetries: U8 be 3u8 endlet
 
@@ -406,9 +408,15 @@ gives it named fields.
 ```vibra
 type Celsius of F64 endtype
 
-type User of {name: Str id: UserId} visibility @public endtype
+type User of {name: Str id: UserId}
+  visibility @public
+endtype
 
-type Lookup(T) case found {value: T} case missing visibility @public endtype
+type Lookup(T)
+  case found {value: T}
+  case missing
+  visibility @public
+endtype
 ```
 
 Type parameters are declared in the header. `given` gives a parameter its
@@ -439,7 +447,10 @@ written result type of each member may place `Self` only where the
 ```vibra
 interface Printable
   visibility @public
-  fn render takes {value: Self} returns text: Str endfn
+  fn render
+    takes {value: Self}
+    returns text: Str
+  endfn
 endinterface
 ```
 
@@ -459,7 +470,12 @@ type User of {name: Str id: UserId}
       return Str.length(user.name)
   endfn
   impl Printable
-    fn render takes {value: Self} returns text: Str do return value.name endfn
+    fn render
+      takes {value: Self}
+      returns text: Str
+      do
+        return value.name
+    endfn
   endimpl
 endtype
 ```
@@ -798,8 +814,13 @@ run-time type. The type chapter defines irrefutability and coverage.
 - a construct on one line when it holds no comment, no nested `let`, and
   fits within the limit; otherwise its opener line, its contents indented one
   step, and its closer on its own line at the opener's indentation;
-- in a multi-line declaration, each section on its own line, one step in, in
-  this order: `of` or the `case` list, `takes`, `labelled`, `returns`,
+- a `type`, `interface`, `impl`, `fn`, `proc`, or `test` construct
+  always on several lines when it has a member or any section other than
+  `of`, whatever its length: `type Celsius of F64 endtype` is one line, and
+  a type with a `visibility` section is not;
+- in a multi-line declaration, `of` on the opener's line when that line
+  fits, and each other section on its own line, one step in; the sections
+  are in this order: `of` or the `case` list, `takes`, `labelled`, `returns`,
   `given`, `where`, `requires`, `ensures`, `performs`, `role`,
   `visibility`, `representation`, `external`, `symbol`, `native`, `doc`,
   `as`, `be`, then the associated type declarations of an interface or the
