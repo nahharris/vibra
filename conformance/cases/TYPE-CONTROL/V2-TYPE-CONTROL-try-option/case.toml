@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-try-option"
+rule = "V2-TYPE-CONTROL-try-option"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#try: try yields the payload of some and leaves the callable with none"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

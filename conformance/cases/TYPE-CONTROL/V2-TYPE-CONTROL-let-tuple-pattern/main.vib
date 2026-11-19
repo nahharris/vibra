@@ -1,0 +1,1 @@
+fn main returns r: Str do let {a b} be {1i32 "x"} endlet return b endfn

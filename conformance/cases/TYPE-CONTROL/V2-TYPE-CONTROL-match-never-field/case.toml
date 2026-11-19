@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-match-never-field"
+rule = "V2-TYPE-CONTROL-match-never-field"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#coverage: a case with an uninhabited field needs no arm"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

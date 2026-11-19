@@ -1,0 +1,18 @@
+id = "V2-TYPE-CONTROL-pattern-shape-arity"
+rule = "V2-TYPE-CONTROL-pattern-shape-arity"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#patterns: a declared tuple pattern has exact arity"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 83, end = 90 }

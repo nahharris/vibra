@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-match-str-literal"
+rule = "V2-TYPE-CONTROL-match-str-literal"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#coverage: a string literal pattern matches that value and a binder covers the rest"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

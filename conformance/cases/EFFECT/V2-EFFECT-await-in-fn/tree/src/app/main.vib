@@ -1,0 +1,1 @@
+fn f takes {p: I32} returns r: I32 do let x be await p endlet return 0i32 endfn

@@ -1,0 +1,2 @@
+fn main returns r: {I32 I32} do return {f("a") f("b")} endfn
+fn f takes {s: Str} returns r: I32 do match s case "a" return 1i32 case _ return 0i32 endmatch endfn

@@ -1,0 +1,18 @@
+id = "V2-TYPE-CONTROL-try-in-fn-returning-plain"
+rule = "V2-TYPE-CONTROL-try-in-fn-returning-plain"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#try: try in a callable whose result is no carrier is invalid"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.invalidTry"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 55, end = 60 }

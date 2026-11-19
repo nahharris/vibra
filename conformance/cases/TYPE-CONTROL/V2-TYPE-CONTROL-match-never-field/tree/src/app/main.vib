@@ -1,0 +1,1 @@
+fn f takes {res: Result(I32 Never)} returns r: I32 do match res case Result.ok(value: v) return v endmatch endfn

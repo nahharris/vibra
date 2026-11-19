@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-discard-fallible"
+rule = "V2-TYPE-CONTROL-discard-fallible"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#fallible-values: let _ discards a fallible value explicitly"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

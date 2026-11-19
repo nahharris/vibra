@@ -1,0 +1,18 @@
+id = "V2-TYPE-CONTROL-pattern-shape-positional"
+rule = "V2-TYPE-CONTROL-pattern-shape-positional"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "01-source-language.md#patterns: a declared record pattern names its fields, so positional components are the wrong shape"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.argumentMismatch"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 99, end = 108 }

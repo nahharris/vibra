@@ -1,0 +1,1 @@
+fn f takes {n: I32} returns r: I32 do match n case 0i32 return 1i32 case 1i32 return 2i32 endmatch endfn

@@ -1,0 +1,18 @@
+id = "V2-TYPE-CONTROL-try-error-type"
+rule = "V2-TYPE-CONTROL-try-error-type"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#try: try never converts an error type"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@type.invalidTry"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 72, end = 77 }

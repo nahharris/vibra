@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-option-not-fallible"
+rule = "V2-TYPE-CONTROL-option-not-fallible"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#fallible-values: an Option is not fallible"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

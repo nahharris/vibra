@@ -1,0 +1,18 @@
+id = "V2-TYPE-CONTROL-unsupported-coverage"
+rule = "V2-TYPE-CONTROL-unsupported-coverage"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#coverage: the checker reports coverage it cannot decide within its limits and never assumes it: a match over a tuple of 12 Bool components with 4095 arms, every combination in counting order from all false except the last, all true"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.unsupportedCoverage"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 98, end = 364577 }

@@ -1,0 +1,2 @@
+fn attempt returns r: Result(Void Str) do return Result.ok(value: void) endfn
+fn f returns r: Void do let _ be attempt() endlet return void endfn

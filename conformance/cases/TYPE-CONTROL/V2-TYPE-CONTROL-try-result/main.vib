@@ -1,0 +1,4 @@
+fn main returns r: {I32 Str} do return {okValue(f(Result.ok(value: 1i32))) errText(f(Result.err(error: "bad")))} endfn
+fn f takes {x: Result(I32 Str)} returns r: Result(I32 Str) do let v be try x endlet return Result.ok(value: I32.add(v 1i32)) endfn
+fn okValue takes {x: Result(I32 Str)} returns r: I32 do match x case Result.ok(value: v) return v case Result.err(error: _) return 0i32 endmatch endfn
+fn errText takes {x: Result(I32 Str)} returns r: Str do match x case Result.ok(value: _) return "ok" case Result.err(error: e) return e endmatch endfn

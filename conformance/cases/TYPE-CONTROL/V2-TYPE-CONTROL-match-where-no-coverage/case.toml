@@ -1,0 +1,19 @@
+id = "V2-TYPE-CONTROL-match-where-no-coverage"
+rule = "V2-TYPE-CONTROL-match-where-no-coverage"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#coverage: a where never proves coverage: arms for every value the invariant admits leave the representation uncovered"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@pattern.nonExhaustive"
+level = "@error"
+source = "src/app/main.vib"
+span = { start = 216, end = 286 }
+notes = ["Bit(_)"]

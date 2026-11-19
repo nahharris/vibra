@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-try-expected-type"
+rule = "V2-TYPE-CONTROL-try-expected-type"
+profile = "staticV2"
+operation = "workspaceCheck"
+description = "02-type-system.md#try: the operand of a try with a written expected type U16 is checked at Result(U16 Str), which fixes the type argument of parse"
+
+[inputs]
+tree = "tree"
+project = "tree/project.vibon"
+
+[expect]
+verdict = "accepted"

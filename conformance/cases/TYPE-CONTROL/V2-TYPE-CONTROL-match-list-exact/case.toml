@@ -1,0 +1,12 @@
+id = "V2-TYPE-CONTROL-match-list-exact"
+rule = "V2-TYPE-CONTROL-match-list-exact"
+profile = "interpreterV2"
+operation = "interpret"
+description = "02-type-system.md#coverage: a list pattern matches a list of exactly its length"
+
+[inputs]
+source = "main.vib"
+
+[expect]
+verdict = "accepted"
+result = "result.vibon"

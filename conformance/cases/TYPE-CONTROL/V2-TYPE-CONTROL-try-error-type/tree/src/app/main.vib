@@ -1,0 +1,1 @@
+fn f takes {x: Result(I32 Str)} returns r: Result(I32 Bool) do let v be try x endlet return Result.ok(value: v) endfn
