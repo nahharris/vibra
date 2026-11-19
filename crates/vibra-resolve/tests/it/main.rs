@@ -10,6 +10,7 @@
 
 mod support;
 
+mod bodies;
 mod declarations;
 mod identity;
 mod imports;
