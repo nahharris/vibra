@@ -38,8 +38,8 @@ use crate::data::{
 };
 use crate::document::parse_data_for_schema;
 use crate::literal::{
-    FloatSuffix, IntegerSuffix, canonical_character, canonical_string, decimal_value,
-    integer_value,
+    FloatSuffix, IntegerSuffix, add_to_decimal, canonical_character, canonical_string,
+    decimal_value, integer_value,
 };
 
 /// A value constraint over the spelling of a string or an atom: `None` when
@@ -583,15 +583,38 @@ fn select_format(schema: &Schema, root: &DataNode) -> Option<Diagnostic> {
             "the required field `format` is missing",
         ));
     };
+    // An atom of another version is a format the reader does not implement;
+    // an unsuffixed number in this atom slot is a value fault, as in any
+    // slot with no number type; any other form is the wrong shape.
+    let span = format.value().span();
     match format.value().value() {
         DataValue::Atom(atom) if atom == schema.format => None,
-        _ => Some(Diagnostic::new(
+        DataValue::Atom(_) => Some(Diagnostic::new(
             DiagnosticCode::DataInvalidValue,
-            format.value().span(),
+            span,
             format!(
                 "this reader implements the format `{}` and no other",
                 schema.format
             ),
+        )),
+        DataValue::Integer(literal) if literal.suffix().is_none() => {
+            Some(Diagnostic::new(
+                DiagnosticCode::DataInvalidValue,
+                span,
+                "an unsuffixed number in a slot of type an atom",
+            ))
+        }
+        DataValue::Float(literal) if literal.suffix().is_none() => {
+            Some(Diagnostic::new(
+                DiagnosticCode::DataInvalidValue,
+                span,
+                "an unsuffixed number in a slot of type an atom",
+            ))
+        }
+        _ => Some(Diagnostic::new(
+            DiagnosticCode::DataInvalidShape,
+            span,
+            "the field `format` holds the format atom",
         )),
     }
 }
@@ -746,11 +769,8 @@ impl Walk {
                 self.variant(variant, node, fields)
             }
             (Slot::Variant(_), _) => self.wrong_form(node, "a record"),
-            (Slot::Opaque, _) => {
-                let mut out = String::new();
-                write_opaque(node, &mut out, &mut self.keys);
-                Some(TypedValue::Opaque(out))
-            }
+            (Slot::Opaque, _) => write_opaque(node, &mut self.value, &mut self.keys)
+                .map(TypedValue::Opaque),
         }
     }
 
@@ -1153,6 +1173,11 @@ fn decimal_text(sign: &str, digits: &str, exponent: i64) -> String {
         let (whole, fraction) = digits.split_at(split.min(digits.len()));
         return format!("{sign}{whole}.{fraction}");
     }
+    scientific_text(sign, digits, &exponent.to_string())
+}
+
+/// `sign` `d.ddd` `e` `exponent`, with one integral digit and no plus sign.
+fn scientific_text(sign: &str, digits: &str, exponent: &str) -> String {
     let mut characters = digits.chars();
     let first = characters.next().unwrap_or('0');
     let rest = characters.as_str();
@@ -1164,7 +1189,8 @@ fn decimal_text(sign: &str, digits: &str, exponent: i64) -> String {
 }
 
 /// The canonical text of an unsuffixed float in opaque data: its exact
-/// decimal value, in the notation of [`float_text`].
+/// decimal value, in the notation of [`float_text`], its exponent exact at
+/// every length.
 fn unsuffixed_float_text(literal: &FloatLiteral) -> String {
     let decimal = decimal_value(literal.body());
     let (sign, unsigned) = match decimal.strip_prefix('-') {
@@ -1174,88 +1200,101 @@ fn unsuffixed_float_text(literal: &FloatLiteral) -> String {
     let Some((digits, power)) = unsigned.split_once('e') else {
         return format!("{sign}0.0");
     };
-    let power = power.parse::<i64>().unwrap_or_default();
-    let length = i64::try_from(digits.len()).unwrap_or_default();
-    decimal_text(sign, digits, power.saturating_add(length - 1))
+    let exponent = add_to_decimal(power, false, digits.len().saturating_sub(1));
+    match exponent.parse::<i64>() {
+        Ok(exponent) => decimal_text(sign, digits, exponent),
+        // Beyond 64 bits the exponent is far outside the decimal range.
+        Err(_) => scientific_text(sign, digits, &exponent),
+    }
 }
 
-/// Writes opaque data as its canonical bytes, without recursion except
-/// through dict keys, and reports repeated dict keys (equal canonical key
-/// bytes) at the later key.
-fn write_opaque(root: &DataNode, out: &mut String, keys: &mut Vec<Diagnostic>) {
+/// The canonical bytes of a number in opaque data: its minimal digits and
+/// the suffix it was written with, or `None` when it lies outside the range
+/// of its written type.
+fn opaque_number(value: &DataValue) -> Option<String> {
+    match value {
+        DataValue::Integer(literal) => {
+            let digits = integer_value(literal.body());
+            match literal.suffix() {
+                Some(suffix) => digits
+                    .parse::<i128>()
+                    .ok()
+                    .filter(|value| in_range(*value, suffix))
+                    .map(|_| format!("{digits}{suffix}")),
+                None => Some(digits),
+            }
+        }
+        DataValue::Float(literal) => match literal.suffix() {
+            Some(FloatSuffix::F32) => literal
+                .body()
+                .parse::<f32>()
+                .ok()
+                .filter(|value| value.is_finite())
+                .map(|value| format!("{}f32", float_text(&format!("{value:e}")))),
+            Some(FloatSuffix::F64) => literal
+                .body()
+                .parse::<f64>()
+                .ok()
+                .filter(|value| value.is_finite())
+                .map(|value| format!("{}f64", float_text(&format!("{value:e}")))),
+            None => Some(unsuffixed_float_text(literal)),
+        },
+        _ => None,
+    }
+}
+
+/// Writes opaque data as its canonical bytes, without recursion. A number
+/// outside the range of its written type is reported at the number into
+/// `values` (step 5), and the result is `None`; a repeated dict key (equal
+/// canonical key bytes) is reported at the later key into `keys` (step 6).
+///
+/// A dict's keys are encoded first, each into its own buffer, as work items
+/// of their own; then the entries are sorted by those bytes and emitted.
+fn write_opaque(
+    root: &DataNode,
+    values: &mut Vec<Diagnostic>,
+    keys: &mut Vec<Diagnostic>,
+) -> Option<String> {
     enum Work<'a> {
         Node(&'a DataNode),
         Text(String),
+        /// Starts the canonical bytes of a dict key in a buffer of its own.
+        BeginKey,
+        /// Ends a key's bytes and gives them to the innermost pending dict.
+        EndKey,
+        /// Sorts the innermost pending dict by its key bytes and emits it.
+        EmitDict,
     }
+    /// A dict whose keys are being encoded.
+    struct Pending<'a> {
+        entries: &'a [DataEntry],
+        keys: Vec<String>,
+    }
+    let mut buffers = vec![String::new()];
+    let mut pending: Vec<Pending<'_>> = Vec::new();
+    let mut in_range = true;
     let mut work = vec![Work::Node(root)];
     while let Some(step) = work.pop() {
-        let node = match step {
-            Work::Text(text) => {
-                out.push_str(&text);
-                continue;
-            }
-            Work::Node(node) => node,
-        };
         let mut parts: Vec<Work<'_>> = Vec::new();
-        match node.value() {
-            DataValue::String(value) => out.push_str(&canonical_string(value)),
-            DataValue::Character(value) => out.push_str(&canonical_character(*value)),
-            DataValue::Bool(true) => out.push_str("true"),
-            DataValue::Bool(false) => out.push_str("false"),
-            DataValue::Void => out.push_str("void"),
-            DataValue::Atom(value) => out.push_str(value),
-            DataValue::Integer(literal) => {
-                out.push_str(&integer_value(literal.body()));
-                if let Some(suffix) = literal.suffix() {
-                    out.push_str(suffix.as_str());
+        let mut text = String::new();
+        match step {
+            Work::Text(written) => text = written,
+            Work::BeginKey => buffers.push(String::new()),
+            Work::EndKey => {
+                if buffers.len() > 1
+                    && let Some(key) = buffers.pop()
+                    && let Some(dict) = pending.last_mut()
+                {
+                    dict.keys.push(key);
                 }
             }
-            DataValue::Float(literal) => match literal.suffix() {
-                Some(FloatSuffix::F32) => {
-                    let value = literal.body().parse::<f32>().unwrap_or_default();
-                    let _ = write!(out, "{}f32", float_text(&format!("{value:e}")));
-                }
-                Some(FloatSuffix::F64) => {
-                    let value = literal.body().parse::<f64>().unwrap_or_default();
-                    let _ = write!(out, "{}f64", float_text(&format!("{value:e}")));
-                }
-                None => out.push_str(&unsuffixed_float_text(literal)),
-            },
-            DataValue::Tuple(elements) | DataValue::List(elements) => {
-                let (open, close) = if matches!(node.value(), DataValue::Tuple(_)) {
-                    ("{", "}")
-                } else {
-                    ("[", "]")
+            Work::EmitDict => {
+                let Some(dict) = pending.pop() else {
+                    continue;
                 };
-                parts.push(Work::Text(open.to_owned()));
-                for (index, element) in elements.iter().enumerate() {
-                    if index > 0 {
-                        parts.push(Work::Text(" ".to_owned()));
-                    }
-                    parts.push(Work::Node(element));
-                }
-                parts.push(Work::Text(close.to_owned()));
-            }
-            DataValue::Record(fields) => {
-                let mut sorted = fields.iter().collect::<Vec<_>>();
-                sorted.sort_by(|left, right| {
-                    left.name().as_bytes().cmp(right.name().as_bytes())
-                });
-                parts.push(Work::Text("{".to_owned()));
-                for (index, field) in sorted.into_iter().enumerate() {
-                    let separator = if index > 0 { " " } else { "" };
-                    parts.push(Work::Text(format!("{separator}{}: ", field.name())));
-                    parts.push(Work::Node(field.value()));
-                }
-                parts.push(Work::Text("}".to_owned()));
-            }
-            DataValue::Dict(entries) if entries.is_empty() => out.push_str("[:]"),
-            DataValue::Dict(entries) => {
                 let mut seen = BTreeSet::new();
-                let mut keyed = Vec::with_capacity(entries.len());
-                for entry in entries {
-                    let mut key = String::new();
-                    write_opaque(entry.key(), &mut key, keys);
+                let mut keyed = Vec::with_capacity(dict.entries.len());
+                for (entry, key) in dict.entries.iter().zip(dict.keys) {
                     if seen.insert(key.clone()) {
                         keyed.push((key, entry.value()));
                     } else {
@@ -1275,9 +1314,80 @@ fn write_opaque(root: &DataNode, out: &mut String, keys: &mut Vec<Diagnostic>) {
                 }
                 parts.push(Work::Text("]".to_owned()));
             }
+            Work::Node(node) => match node.value() {
+                DataValue::String(value) => text = canonical_string(value),
+                DataValue::Character(value) => text = canonical_character(*value),
+                DataValue::Bool(true) => text = "true".to_owned(),
+                DataValue::Bool(false) => text = "false".to_owned(),
+                DataValue::Void => text = "void".to_owned(),
+                DataValue::Atom(value) => text.clone_from(value),
+                number @ (DataValue::Integer(_) | DataValue::Float(_)) => {
+                    match opaque_number(number) {
+                        Some(canonical) => text = canonical,
+                        None => {
+                            in_range = false;
+                            values.push(Diagnostic::new(
+                                DiagnosticCode::DataInvalidValue,
+                                node.span(),
+                                "the value is out of range for its written type",
+                            ));
+                        }
+                    }
+                }
+                DataValue::Tuple(elements) | DataValue::List(elements) => {
+                    let (open, close) = if matches!(node.value(), DataValue::Tuple(_)) {
+                        ("{", "}")
+                    } else {
+                        ("[", "]")
+                    };
+                    parts.push(Work::Text(open.to_owned()));
+                    for (index, element) in elements.iter().enumerate() {
+                        if index > 0 {
+                            parts.push(Work::Text(" ".to_owned()));
+                        }
+                        parts.push(Work::Node(element));
+                    }
+                    parts.push(Work::Text(close.to_owned()));
+                }
+                DataValue::Record(fields) => {
+                    let mut sorted = fields.iter().collect::<Vec<_>>();
+                    sorted.sort_by(|left, right| {
+                        left.name().as_bytes().cmp(right.name().as_bytes())
+                    });
+                    parts.push(Work::Text("{".to_owned()));
+                    for (index, field) in sorted.into_iter().enumerate() {
+                        let separator = if index > 0 { " " } else { "" };
+                        parts
+                            .push(Work::Text(format!("{separator}{}: ", field.name())));
+                        parts.push(Work::Node(field.value()));
+                    }
+                    parts.push(Work::Text("}".to_owned()));
+                }
+                DataValue::Dict(entries) if entries.is_empty() => {
+                    text = "[:]".to_owned()
+                }
+                DataValue::Dict(entries) => {
+                    pending.push(Pending {
+                        entries,
+                        keys: Vec::with_capacity(entries.len()),
+                    });
+                    for entry in entries {
+                        parts.extend([
+                            Work::BeginKey,
+                            Work::Node(entry.key()),
+                            Work::EndKey,
+                        ]);
+                    }
+                    parts.push(Work::EmitDict);
+                }
+            },
+        }
+        if let Some(buffer) = buffers.last_mut() {
+            buffer.push_str(&text);
         }
         work.extend(parts.into_iter().rev());
     }
+    in_range.then(|| buffers.into_iter().next().unwrap_or_default())
 }
 
 #[cfg(test)]

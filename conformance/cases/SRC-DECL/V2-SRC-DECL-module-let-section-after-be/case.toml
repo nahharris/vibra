@@ -1,0 +1,17 @@
+id = "V2-SRC-DECL-module-let-section-after-be"
+rule = "V2-SRC-DECL-module-let-section-after-be"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#module-values: visibility and doc sit between the type and be, so a section after the initializer is @syntax.invalidForm at that section and the formatter keeps the bytes"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+formatted = "formatted.vib"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 17, end = 35 }

@@ -110,3 +110,32 @@ fn a_callable_is_laid_out_section_by_section() {
         "test \"adds\"\n  takes {world: World}\n  do\n    return void\nendtest\n"
     );
 }
+
+#[test]
+fn a_block_in_a_guard_stays_in_the_guard() {
+    let valid = |text: &str| {
+        assert!(
+            parse_source(None, text.as_bytes()).diagnostics().is_empty(),
+            "{text}"
+        );
+        format(text)
+    };
+    assert_eq!(
+        valid("fn f returns r: Void requires do true enddo do return void endfn"),
+        "fn f\n  returns r: Void\n  requires do true enddo\n  do\n    return void\nendfn\n"
+    );
+    assert_eq!(
+        valid(
+            "fn f returns r: Void ensures ready else do false enddo do return void endfn"
+        ),
+        "fn f\n  returns r: Void\n  ensures ready else do false enddo\n  do\n    return void\nendfn\n"
+    );
+    // A block that holds a `let` is multi-line: its opener line, its body
+    // one step in, and `enddo` at the opener line's indentation.
+    assert_eq!(
+        valid(
+            "fn f returns r: Void requires do let a be computeTheGuardValue(first second third) endlet a enddo do return void endfn"
+        ),
+        "fn f\n  returns r: Void\n  requires do\n    let a be computeTheGuardValue(first second third) endlet\n    a\n  enddo\n  do\n    return void\nendfn\n"
+    );
+}

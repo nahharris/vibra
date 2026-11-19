@@ -18,6 +18,8 @@ V2-SRC-DECL-fn-performs	active	01-source-language.md#grammar
 V2-SRC-DECL-fn-reserved-label	active	01-source-language.md#reserved-words
 V2-SRC-DECL-fn-section-order	active	01-source-language.md#grammar
 V2-SRC-DECL-given-bound-forms	active	01-source-language.md#grammar
+V2-SRC-DECL-guard-do-block	active	01-source-language.md#grammar
+V2-SRC-DECL-guard-else-do-block	active	01-source-language.md#grammar
 V2-SRC-DECL-impl-in-type	active	01-source-language.md#impl
 V2-SRC-DECL-impl-member-guard	active	01-source-language.md#impl
 V2-SRC-DECL-impl-top-level	active	01-source-language.md#impl
@@ -31,9 +33,11 @@ V2-SRC-DECL-module-let	active	01-source-language.md#module-values
 V2-SRC-DECL-module-let-else	active	01-source-language.md#module-values
 V2-SRC-DECL-module-let-no-type	active	01-source-language.md#module-values
 V2-SRC-DECL-module-let-pattern	active	01-source-language.md#module-values
+V2-SRC-DECL-module-let-section-after-be	active	01-source-language.md#module-values
 V2-SRC-DECL-module-let-visibility	active	01-source-language.md#module-values
 V2-SRC-DECL-proc-basic	active	01-source-language.md#fn-and-proc
 V2-SRC-DECL-proc-native	active	01-source-language.md#external-definitions
+V2-SRC-DECL-reserved-opener-binder	active	01-source-language.md#reserved-words
 V2-SRC-DECL-section-after-do	active	01-source-language.md#grammar
 V2-SRC-DECL-section-before-name	active	01-source-language.md#grammar
 V2-SRC-DECL-test-basic	active	01-source-language.md#test
@@ -71,6 +75,7 @@ V2-SRC-DECL-use-plain	active	01-source-language.md#use
 V2-SRC-DECL-use-string-locator	active	01-source-language.md#use
 V2-SRC-EXPR-application	active	01-source-language.md#application
 V2-SRC-EXPR-as-ascription	active	01-source-language.md#exclusions
+V2-SRC-EXPR-await-return	active	01-source-language.md#grammar
 V2-SRC-EXPR-collections	active	01-source-language.md#anonymous-products-and-collections
 V2-SRC-EXPR-do-block	active	01-source-language.md#bodies-and-statements
 V2-SRC-EXPR-field-path	active	01-source-language.md#names-and-paths
@@ -93,7 +98,13 @@ V2-SRC-EXPR-pattern-void	active	01-source-language.md#patterns
 V2-SRC-EXPR-patterns	active	01-source-language.md#patterns
 V2-SRC-EXPR-products	active	01-source-language.md#anonymous-products-and-collections
 V2-SRC-EXPR-reserved-label	active	01-source-language.md#reserved-words
+V2-SRC-EXPR-reserved-opener-label	active	01-source-language.md#reserved-words
 V2-SRC-EXPR-return-try-await	active	01-source-language.md#return-try-await
+V2-SRC-EXPR-try-return	active	01-source-language.md#grammar
+V2-SRC-FMT-comment-in-arguments	active	01-source-language.md#canonical-format
+V2-SRC-FMT-comment-in-module-value	active	01-source-language.md#canonical-format
+V2-SRC-FMT-comment-in-operand	active	01-source-language.md#canonical-format
+V2-SRC-FMT-comment-in-type	active	01-source-language.md#canonical-format
 V2-SRC-FMT-declaration-member-breaks	active	01-source-language.md#canonical-format
 V2-SRC-FMT-declaration-of-one-line	active	01-source-language.md#canonical-format
 V2-SRC-FMT-declaration-of-wraps	active	01-source-language.md#canonical-format
@@ -162,6 +173,9 @@ V2-PROJECT-decode-bad-version	active	04-programs-and-packages.md#project-file
 V2-PROJECT-decode-lib-with-entry	active	04-programs-and-packages.md#project-file
 V2-PROJECT-decode-git-rev	active	04-programs-and-packages.md#project-file
 V2-PROJECT-decode-dict-key-dup	active	04-programs-and-packages.md#schemas
+V2-PROJECT-decode-format-shape	active	04-programs-and-packages.md#schemas
+V2-PROJECT-decode-opaque-out-of-range	active	04-programs-and-packages.md#schemas
+V2-PROJECT-decode-opaque-exponent	active	04-programs-and-packages.md#decoded-values-and-canonical-bytes
 V1-PROJECT-graph-static-sorted	active	04-programs-and-packages.md#discovery-and-the-source-snapshot
 V1-PROJECT-graph-static-invalid-segment	active	04-programs-and-packages.md#discovery-and-the-source-snapshot
 V1-PROJECT-graph-static-collision	active	04-programs-and-packages.md#discovery-and-the-source-snapshot

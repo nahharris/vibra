@@ -9,13 +9,20 @@
 //!   closed by its typed closer, and a bracket opens a bracket group;
 //! - inside a construct, a section keyword starts a section whose operand runs
 //!   to the next section keyword, closer, or nested opener at the same depth;
-//!   `do` directly inside a `fn`, `proc`, or `test` is the body section, which
-//!   runs to the next section keyword or the closer and holds the constructs
-//!   nested in it; a `do` inside the body opens a block closed by `enddo`;
-//! - the word after `as`, the first word of a `type`, an `interface`, or a
-//!   `let`, and the word after `case` in a `match` are name positions: a
-//!   reserved word there other than the construct's own closer is taken as
-//!   the name or binder;
+//!   `do` at a section boundary directly inside a `fn`, `proc`, or `test` is
+//!   the body section, which runs to the next section keyword or the closer
+//!   and holds the constructs nested in it; a `do` that starts an expression
+//!   (the operand of `requires`, `ensures`, `where`, or `be`, a guard's
+//!   `else` consequence, or the operand of a prefix word) or a `do` inside
+//!   the body opens a block closed by `enddo`;
+//! - the word after `as` or `returns`, the first word of a `type`, an
+//!   `interface`, or a `let`, and the word after `case` in a `match` are name
+//!   positions: a reserved word there other than the construct's own closer
+//!   is taken as the name or binder;
+//! - a reserved word followed by `:` directly in a bracket group, and an
+//!   opener or a section keyword followed by `:` anywhere, is a label, a
+//!   binder, or a result name, which the shaper recovers and reports: no
+//!   opener or section keyword is ever followed by `:`;
 //! - a closer is resolved by kind (`docs/spec/07-diagnostics-and-conformance.md`,
 //!   "Recovery"), over constructs and brackets alike.
 //!
@@ -34,6 +41,13 @@ use super::keyword::{
 /// pattern, so a reserved word written there is its recovered name or
 /// binder, not a section or an opener.
 const NAMED_CONSTRUCTS: &[&str] = &["type", "interface", "let"];
+
+/// The words after which an expression is expected: the keywords of the
+/// sections whose operand is an expression, the `else` that introduces a
+/// guard's consequence, and the prefix words of `expr` and `unary`.
+const EXPECTS_EXPRESSION: &[&str] = &[
+    "requires", "ensures", "where", "be", "else", "return", "try", "await",
+];
 use crate::cst::{CstNode, SyntaxKind};
 use crate::lexer::{Token, TokenKind};
 
@@ -177,7 +191,9 @@ impl Matcher<'_> {
         });
     }
 
-    fn token(&mut self, token: Token) {
+    /// Reads one token; `colon` says whether the next significant token is a
+    /// `:`.
+    fn token(&mut self, token: Token, colon: bool) {
         if token.kind.is_trivia() {
             self.leaf(token);
             return;
@@ -191,6 +207,13 @@ impl Matcher<'_> {
             && std::mem::take(&mut frame.expect_name)
             && token.kind == TokenKind::ReservedWord
             && frame.opener_word().and_then(closer_of) != Some(word)
+        {
+            self.leaf(token);
+            return;
+        }
+        if token.kind == TokenKind::ReservedWord
+            && colon
+            && self.names_before_colon(word)
         {
             self.leaf(token);
             return;
@@ -221,6 +244,7 @@ impl Matcher<'_> {
         });
         if word == "do"
             && let Some((_, true)) = in_construct
+            && !self.expects_operand()
         {
             self.start_section(token, true);
             return;
@@ -236,7 +260,7 @@ impl Matcher<'_> {
         }
         if is_section(word) && in_construct.is_some() {
             self.start_section(token, false);
-            if word == "as"
+            if matches!(word, "as" | "returns")
                 && let Some(frame) = self.stack.last_mut()
             {
                 frame.expect_name = true;
@@ -252,6 +276,38 @@ impl Matcher<'_> {
         {
             frame.expect_name = true;
         }
+    }
+
+    /// Whether the reserved word `word`, followed by `:`, is a name: a label,
+    /// a binder, or a result name, recovered by the shaper. Directly in a
+    /// bracket group every word before `:` is a label or a binder. Elsewhere
+    /// an opener or a section keyword is, since none is ever followed by
+    /// `:`; a closer there still closes its construct, as an `if` may be a
+    /// dict key.
+    fn names_before_colon(&self, word: &str) -> bool {
+        let in_group = self
+            .stack
+            .last()
+            .is_some_and(|frame| matches!(frame.kind, FrameKind::Group(_)));
+        in_group || opener_keyword(word).is_some() || is_section(word)
+    }
+
+    /// Whether the innermost frame expects an expression next: its last
+    /// significant token is the keyword of a section whose operand is an
+    /// expression, the `else` of a guard, or a prefix word. A `do` there
+    /// starts that expression, so it is a block, not a body.
+    fn expects_operand(&self) -> bool {
+        let Some(frame) = self.stack.last() else {
+            return false;
+        };
+        let target = frame.section.as_ref().unwrap_or(&frame.items);
+        target
+            .iter()
+            .rev()
+            .find(|item| !is_trivia(item))
+            .filter(|item| item.kind() == SyntaxKind::ReservedWord)
+            .and_then(|item| item.span().text(self.text))
+            .is_some_and(|word| EXPECTS_EXPRESSION.contains(&word))
     }
 
     fn start_section(&mut self, token: Token, body: bool) {
@@ -360,8 +416,17 @@ pub(crate) fn match_constructs(
         stack: Vec::new(),
         diagnostics,
     };
-    for token in tokens {
-        matcher.token(*token);
+    // Whether each token is followed, after trivia, by a `:`.
+    let mut colon_after = vec![false; tokens.len()];
+    let mut next_is_colon = false;
+    for (slot, token) in colon_after.iter_mut().zip(tokens).rev() {
+        *slot = next_is_colon;
+        if !token.kind.is_trivia() {
+            next_is_colon = token.kind == TokenKind::Colon;
+        }
+    }
+    for (token, colon) in tokens.iter().zip(colon_after) {
+        matcher.token(*token, colon);
     }
     matcher.finish()
 }

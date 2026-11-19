@@ -1,0 +1,3 @@
+type A of {x: U8
+  // the second
+  y: U8} endtype

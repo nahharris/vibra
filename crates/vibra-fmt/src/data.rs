@@ -15,7 +15,7 @@
 
 use vibra_syntax::{CstNode, SyntaxKind};
 
-use crate::layout::Item;
+use crate::layout::{Item, trailing_comment};
 
 /// One line of a form's contents, before layout.
 struct Line<'a> {
@@ -84,10 +84,10 @@ fn form<'a>(node: &'a CstNode, text: &str, out: &mut Vec<Work<'a>>) {
     out.push(Work::Emit(Item::Begin));
     out.push(Work::Emit(Item::Text(opener.text(text).to_owned())));
     if let Some(opener_comment) = opener_comment {
-        out.push(Work::Emit(Item::TrailingComment(comment(
-            opener_comment,
+        out.push(Work::Emit(trailing_comment(
             text,
-        ))));
+            opener_comment.span().start(),
+        )));
     }
     out.push(Work::Emit(Item::Indent));
     for (index, line) in lines.iter().enumerate() {
@@ -111,7 +111,7 @@ fn push_line<'a>(line: &Line<'a>, text: &str, out: &mut Vec<Work<'a>>) {
         out.push(Work::Node(line.node));
     }
     if let Some(trailing) = line.trailing {
-        out.push(Work::Emit(Item::TrailingComment(comment(trailing, text))));
+        out.push(Work::Emit(trailing_comment(text, trailing.span().start())));
     }
 }
 
@@ -137,7 +137,7 @@ fn pair<'a>(node: &'a CstNode, text: &str, out: &mut Vec<Work<'a>>) {
                     }
                     out.push(Work::Emit(Item::Comment(comment(child, text))));
                 } else {
-                    out.push(Work::Emit(Item::TrailingComment(comment(child, text))));
+                    out.push(Work::Emit(trailing_comment(text, child.span().start())));
                 }
                 out.push(Work::Emit(Item::Hard));
                 after_break = true;

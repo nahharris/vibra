@@ -410,16 +410,21 @@ impl<'t> Level<'t> {
     /// Reads one expression at the next significant item; trivia before it
     /// goes to `out`. Returns whether an expression was read. A `return`,
     /// `try`, or `await` with no operand is kept in an `@error` node and
-    /// makes the level malformed.
+    /// makes the level malformed, and so does a `return` after `try` or
+    /// `await`: `return` starts an `expr`, never a `unary`.
     fn expr(&mut self, out: &mut Vec<Slot>) -> bool {
         let mut prefix: Vec<Slot> = Vec::new();
+        let mut unary = false;
         while let Some(item) = self.peek_sig() {
-            let is_prefix = ["return", "try", "await"]
-                .iter()
-                .any(|word| self.is_word(item, word));
-            if !is_prefix {
+            let returns = self.is_word(item, "return");
+            let is_unary = self.is_word(item, "try") || self.is_word(item, "await");
+            if !returns && !is_unary {
                 break;
             }
+            if returns && unary {
+                self.malformed = true;
+            }
+            unary |= is_unary;
             if prefix.is_empty() {
                 self.trivia(out);
             } else {
@@ -904,12 +909,15 @@ impl<'t> Level<'t> {
     /// Reads the sections of a `let` after its head: `be` and its
     /// expression, the sections of `admitted`, and nothing else. A section
     /// that is repeated is already `@syntax.duplicateSection`, and `as` is
-    /// already `@syntax.invalidForm`; another section is
-    /// `@syntax.invalidSection` over the section.
+    /// already `@syntax.invalidForm`. In a module value, `be` and its
+    /// initializer come last: a section after them is `@syntax.invalidForm`
+    /// at that section. Any other section is `@syntax.invalidSection` over
+    /// the section.
     fn sections(&mut self, out: &mut Vec<Slot>, admitted: &[&str]) {
         let mut seen: Vec<String> = Vec::new();
         // A local `let` has read its `be` already.
-        if admitted.is_empty() {
+        let local = admitted.is_empty();
+        if local {
             seen.push("be".to_owned());
         }
         while let Some(item) = self.peek_sig() {
@@ -929,7 +937,17 @@ impl<'t> Level<'t> {
                 continue;
             }
             let region = self.region();
+            let after_be = !local && seen.iter().any(|seen| seen == "be");
             if repeated || word == "as" {
+                out.push(Slot::Ready(error_node(region)));
+            } else if after_be {
+                seen.push(word);
+                let span = region_span(&region);
+                self.push_diagnostic(
+                    DiagnosticCode::SyntaxInvalidForm,
+                    span,
+                    "a module value's sections sit between its type and `be`",
+                );
                 out.push(Slot::Ready(error_node(region)));
             } else if admitted.contains(&word.as_str()) {
                 seen.push(word.clone());

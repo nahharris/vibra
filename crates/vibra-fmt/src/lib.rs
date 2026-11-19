@@ -17,6 +17,7 @@
 //!
 //! This crate consumes the reader's tree; no language crate depends on it.
 
+mod comments;
 mod data;
 mod expr;
 mod layout;
@@ -31,9 +32,12 @@ pub const COLUMN_LIMIT: usize = layout::WIDTH;
 ///
 /// Returns `None` when the document has no text: it was never read, or it is
 /// not valid UTF-8. A document with any diagnostic is returned byte for byte,
-/// because recovery may have been ambiguous, and so is a source document
-/// with a comment the layout cannot place. Otherwise the document
-/// is laid out, with LF line endings and one trailing line feed.
+/// because recovery may have been ambiguous; it is the only document returned
+/// unchanged. Every other document is laid out, comments included, with LF
+/// line endings and one trailing line feed.
+///
+/// `None` for a document the reader accepts would be a defect of this
+/// formatter: the reader's tree of every accepted document has a layout.
 #[must_use]
 pub fn format_document(document: &Document) -> Option<String> {
     let text = document.text()?;
@@ -41,10 +45,8 @@ pub fn format_document(document: &Document) -> Option<String> {
     if !document.diagnostics().is_empty() {
         return Some(text.to_owned());
     }
-    Some(match document.mode() {
-        DocumentMode::Data => layout::render(&data::document_items(root, text)),
-        DocumentMode::Source => {
-            source::format(root, text).unwrap_or_else(|| text.to_owned())
-        }
-    })
+    match document.mode() {
+        DocumentMode::Data => Some(layout::render(&data::document_items(root, text))),
+        DocumentMode::Source => source::format(root, text),
+    }
 }

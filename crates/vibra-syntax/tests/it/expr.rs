@@ -496,6 +496,30 @@ fn return_try_await_nest_as_prefixes() {
 }
 
 #[test]
+fn return_is_not_the_operand_of_try_or_await() {
+    // `unary = "try", unary | "await", unary | postfix`: `return` starts an
+    // `expr`, never a `unary`, so it cannot follow `try` or `await`.
+    let text = "fn f returns r: Void do try return void endfn";
+    assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 0, text.len())]);
+    assert_eq!(
+        diagnostics("let n: I32 be do await return f() enddo endlet"),
+        [(SyntaxInvalidForm, 14, 39)]
+    );
+    assert_eq!(
+        diagnostics("let n: I32 be do try await return f() enddo endlet"),
+        [(SyntaxInvalidForm, 14, 43)]
+    );
+    assert_eq!(
+        diagnostics("let n: I32 be g(try return x) endlet"),
+        [(SyntaxInvalidForm, 15, 29)]
+    );
+    // `return` before them, and `return` after `return`, stay valid.
+    accepted("let n: I32 be do return try await f() enddo endlet");
+    accepted("let n: I32 be do return return f() enddo endlet");
+    accepted("fn f returns r: Void do return try void endfn");
+}
+
+#[test]
 fn a_paren_where_an_expression_is_expected_is_invalid_once() {
     assert_eq!(
         diagnostics("let n: I32 be (a) endlet"),
@@ -532,6 +556,85 @@ fn a_reserved_label_is_recovered() {
         diagnostics("let r: R be {doc: 1u8} endlet"),
         [(NameReservedLabel, 13, 16)]
     );
+}
+
+#[test]
+fn a_reserved_opener_or_closer_as_a_label_is_one_reserved_label() {
+    // Any reserved word followed by `:` at a label position is the label,
+    // reported once, an opener or a closer included.
+    for word in [
+        "if",
+        "do",
+        "fn",
+        "proc",
+        "match",
+        "let",
+        "type",
+        "use",
+        "test",
+        "impl",
+        "interface",
+        "enddo",
+        "endif",
+        "endfn",
+        "endlet",
+        "takes",
+        "be",
+    ] {
+        for (template, prefix) in [
+            ("let x: U8 be f(W: 0u8) endlet", "let x: U8 be f("),
+            ("let x: R be {W: 0u8} endlet", "let x: R be {"),
+            ("let x: R be {a: 1u8 W: 0u8} endlet", "let x: R be {a: 1u8 "),
+            ("type A of {W: U8} endtype", "type A of {"),
+            ("type A of Iter(W: U8) endtype", "type A of Iter("),
+            (
+                "fn f labelled {W: Bool be false} returns r: Void do return void endfn",
+                "fn f labelled {",
+            ),
+            (
+                "let x: U8 be match v case P(W: q) 0u8 endmatch endlet",
+                "let x: U8 be match v case P(",
+            ),
+            (
+                "let x: U8 be match v case {W: q} 0u8 endmatch endlet",
+                "let x: U8 be match v case {",
+            ),
+        ] {
+            let text = template.replace('W', word);
+            let at = prefix.len();
+            let document = source(&text);
+            assert_eq!(
+                codes(document.diagnostics()),
+                [(NameReservedLabel, at, at + word.len())],
+                "{text}"
+            );
+        }
+    }
+    let document = source("let x: U8 be f(if: 0u8) endlet");
+    let value = values(&document)[0].value().unwrap();
+    let [Suffix::Call(arguments)] =
+        <[Suffix<'_>; 1]>::try_from(postfix(&value).suffixes()).unwrap()
+    else {
+        panic!("one application");
+    };
+    let label = arguments[0].label.unwrap();
+    assert_eq!(label.text(), "if");
+    assert!(label.is_reserved());
+    // A binder or a result name that is an opener is the recovered name.
+    let text = "fn f takes {do: I32} returns if: I32 do return 1i32 endfn";
+    assert_eq!(
+        diagnostics(text),
+        [
+            (NameReservedDeclaration, 12, 14),
+            (NameReservedDeclaration, 29, 31)
+        ]
+    );
+    // The word after `returns` is the result name, a closer included.
+    let text = "fn f returns enddo: I32 do return 1i32 endfn";
+    assert_eq!(diagnostics(text), [(NameReservedDeclaration, 13, 18)]);
+    // A closer before `:` still closes its construct: a dict key may be an
+    // `if`.
+    accepted("let d: Dict(U8 U8) be [if c then 1u8 else 2u8 endif: 0u8] endlet");
 }
 
 /// A module value whose value is a `match` over `v` with one arm per
@@ -713,6 +816,18 @@ fn module_value() {
     assert_eq!(
         diagnostics("let a: U8 be 1u8 be 2u8 endlet"),
         [(SyntaxDuplicateSection, 17, 19)]
+    );
+    // `visibility` and `doc` sit between the type and `be`: a section after
+    // the initializer is invalid at that section.
+    assert_eq!(
+        diagnostics("let n: U8 be 0u8 visibility @public endlet"),
+        [(SyntaxInvalidForm, 17, 35)]
+    );
+    let text = "let n: U8 be 0u8 doc \"\"\"A value.\"\"\" endlet";
+    assert_eq!(diagnostics(text), [(SyntaxInvalidForm, 17, text.len() - 7)]);
+    assert_eq!(
+        diagnostics("let n: U8 visibility @public be 0u8 where ready endlet"),
+        [(SyntaxInvalidForm, 36, 47)]
     );
     assert_eq!(
         diagnostics("let do: U8 be 1u8 endlet"),

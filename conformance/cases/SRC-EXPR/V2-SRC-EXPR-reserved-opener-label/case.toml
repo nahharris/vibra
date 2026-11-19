@@ -1,0 +1,16 @@
+id = "V2-SRC-EXPR-reserved-opener-label"
+rule = "V2-SRC-EXPR-reserved-opener-label"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#reserved-words: an opener word in a label position is the label, with the single diagnostic @name.reservedLabel"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.reservedLabel"
+level = "@error"
+span = { start = 15, end = 17 }

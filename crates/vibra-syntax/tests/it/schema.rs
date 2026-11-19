@@ -326,6 +326,117 @@ fn opaque_data_has_its_own_canonical_rules() {
 }
 
 #[test]
+fn opaque_dict_keys_nested_in_key_position_are_encoded_without_recursion() {
+    const DEPTH: usize = 10_000;
+    // `K` starts as `0u8` and becomes `[K: 0u8]` at each level, so every
+    // level is a dict in the key position of the next.
+    let key = format!("{}0u8{}", "[".repeat(DEPTH), ": 0u8]".repeat(DEPTH));
+    let text = format!("{{format: @sample.v1 name: \"a\" count: 1 extra: {key}}}");
+    let expected =
+        format!("{{format: @sample.v1 name: \"a\" count: 1u32 extra: {key}}}");
+    let bytes = std::thread::Builder::new()
+        .stack_size(256 * 1024)
+        .spawn(move || canonical(&text))
+        .expect("a thread")
+        .join()
+        .expect("no stack overflow");
+    assert_eq!(bytes, expected);
+}
+
+#[test]
+fn an_opaque_number_out_of_its_written_types_range_is_a_value_fault() {
+    for number in ["1e999f64", "-1e999f64", "1e39f32", "300u8", "-1u8", "128i8"] {
+        let text =
+            format!("{{format: @sample.v1 name: \"a\" count: 1 extra: {number}}}");
+        assert_eq!(
+            faults(&read(&text)),
+            [(DiagnosticCode::DataInvalidValue, at(&text, number, 0))],
+            "{text}"
+        );
+        // In key position too, and the value fault comes before any repeated
+        // key.
+        let text = format!(
+            "{{format: @sample.v1 name: \"a\" count: 1 extra: [{number}: 0u8 {number}: 1u8]}}"
+        );
+        assert_eq!(
+            faults(&read(&text)),
+            [
+                (DiagnosticCode::DataInvalidValue, at(&text, number, 0)),
+                (DiagnosticCode::DataInvalidValue, at(&text, number, 1)),
+            ],
+            "{text}"
+        );
+    }
+    // The limits themselves are in range.
+    let bytes = canonical(
+        "{format: @sample.v1 name: \"a\" count: 1 extra: {255u8 -128i8 1.7976931348623157e308f64}}",
+    );
+    assert_eq!(
+        bytes,
+        "{format: @sample.v1 name: \"a\" count: 1u32 extra: {255u8 -128i8 1.7976931348623157e308f64}}"
+    );
+}
+
+#[test]
+fn an_unsuffixed_opaque_float_keeps_its_exact_exponent() {
+    // Exponents beyond 64 bits are normalized exactly: two different keys
+    // stay two keys, and no exponent becomes zero.
+    let bytes = canonical(
+        "{format: @sample.v1 name: \"a\" count: 1 extra: [1e9223372036854775809: 1u8 1e9223372036854775808: 0u8]}",
+    );
+    assert_eq!(
+        bytes,
+        "{format: @sample.v1 name: \"a\" count: 1u32 extra: [1e9223372036854775808: 0u8 1e9223372036854775809: 1u8]}"
+    );
+    let huge = "9".repeat(60);
+    let bytes = canonical(&format!(
+        "{{format: @sample.v1 name: \"a\" count: 1 extra: {{1.50e{huge} 120e-{huge} 0.0e{huge}}}}}"
+    ));
+    let mut plus_one = "1".to_owned();
+    plus_one.push_str(&"0".repeat(60));
+    let minus_two = format!("{}7", "9".repeat(59));
+    assert_eq!(
+        bytes,
+        format!(
+            "{{format: @sample.v1 name: \"a\" count: 1u32 extra: {{1.5e{huge} 1.2e-{minus_two} 0.0}}}}"
+        )
+    );
+    // Equal exact values are one key.
+    let text = format!(
+        "{{format: @sample.v1 name: \"a\" count: 1 extra: [1e{plus_one}: 0u8 10e{huge}: 1u8]}}"
+    );
+    assert_eq!(
+        faults(&read(&text)),
+        [(
+            DiagnosticCode::DataDuplicateKey,
+            at(&text, &format!("10e{huge}"), 0)
+        )]
+    );
+}
+
+#[test]
+fn a_format_of_the_wrong_form_is_a_shape_fault() {
+    for value in ["[]", "\"@sample.v1\"", "{}", "true", "1u8"] {
+        let text = format!("{{format: {value} name: \"a\" count: 1}}");
+        assert_eq!(
+            faults(&read(&text)),
+            [(DiagnosticCode::DataInvalidShape, at(&text, value, 0))],
+            "{text}"
+        );
+    }
+    // A well-formed atom of another version, and an unsuffixed number in the
+    // atom slot, are value faults.
+    for value in ["@other", "@sample.v2", "1"] {
+        let text = format!("{{format: {value} name: \"a\" count: 1}}");
+        assert_eq!(
+            faults(&read(&text)),
+            [(DiagnosticCode::DataInvalidValue, at(&text, value, 0))],
+            "{text}"
+        );
+    }
+}
+
+#[test]
 fn diagnostics_carry_the_source_identity() {
     let decoded = read("{format: @sample.v1 name: \"a\"}");
     assert_eq!(

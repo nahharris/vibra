@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-reserved-opener-binder"
+rule = "V2-SRC-DECL-reserved-opener-binder"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#reserved-words: an opener word as a parameter binder is the binder, with the single diagnostic @name.reservedDeclaration"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@name.reservedDeclaration"
+level = "@error"
+span = { start = 12, end = 14 }

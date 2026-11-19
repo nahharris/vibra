@@ -1,0 +1,1 @@
+let x: U8 be f(if: 0u8) endlet
