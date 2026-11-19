@@ -1,0 +1,12 @@
+id = "V2-SRC-DECL-fn-section-order"
+rule = "V2-SRC-DECL-fn-section-order"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#grammar: sections are accepted in any order and the formatter moves takes before returns"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

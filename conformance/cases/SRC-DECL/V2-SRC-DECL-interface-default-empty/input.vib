@@ -1,0 +1,1 @@
+interface I fn f takes {v: Self} returns r: Str do endfn endinterface

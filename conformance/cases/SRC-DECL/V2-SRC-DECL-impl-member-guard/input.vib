@@ -1,0 +1,5 @@
+type A of U8
+  impl P
+    fn f takes {v: Self} returns r: U8 requires true do return 1u8 endfn
+  endimpl
+endtype

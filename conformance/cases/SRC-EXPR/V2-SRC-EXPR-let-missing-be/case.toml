@@ -1,0 +1,16 @@
+id = "V2-SRC-EXPR-let-missing-be"
+rule = "V2-SRC-EXPR-let-missing-be"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#let: a local `let` without `be` is an invalid form over that `let`"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 17, end = 34 }

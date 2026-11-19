@@ -1,7 +1,8 @@
-//! Validation under exactly the v1 feature baseline
-//! (`docs/spec/06-runtime.md`, "WebAssembly boundary").
+//! Validation under exactly the transition feature baseline
+//! (`docs/spec/06-runtime.md`, "Wasm transition").
 
 use crate::support::{Spec, module};
+use vibra_ir::boundary::{Entry, MEMORY_EXPORT, exports};
 use vibra_wasm_run::{ValidationError, validate};
 use wasm_encoder::{
     AbstractHeapType, CodeSection, ConstExpr, CustomSection, ExportKind, ExportSection,
@@ -16,7 +17,7 @@ fn conforming() -> Vec<u8> {
 }
 
 /// A module with one defined memory, optionally exported, and `body` as the
-/// only function, exported as `vibra_v1_entry`.
+/// only function, exported as `vibra_v1_eval`.
 fn small(
     memory: MemoryType,
     memory_export: Option<&str>,
@@ -32,7 +33,7 @@ fn small(
     if let Some(name) = memory_export {
         exports.export(name, ExportKind::Memory, 0);
     }
-    exports.export("vibra_v1_entry", ExportKind::Func, 0);
+    exports.export("vibra_v1_eval", ExportKind::Func, 0);
     let mut code = CodeSection::new();
     let mut function = Function::new([]);
     for instruction in body {
@@ -111,7 +112,7 @@ fn multiple_results_and_function_tables_validate() {
     memories.memory(one_page());
     let mut exports = ExportSection::new();
     exports.export("vibra_v1_memory", ExportKind::Memory, 0);
-    exports.export("vibra_v1_entry", ExportKind::Func, 0);
+    exports.export("vibra_v1_eval", ExportKind::Func, 0);
     let mut code = CodeSection::new();
     let mut entry = Function::new([]);
     entry.instruction(&Instruction::I32Const(0));
@@ -229,11 +230,14 @@ fn an_export_outside_the_versioned_table_is_rejected() {
 
 #[test]
 fn the_full_export_table_validates_and_so_does_a_subset() {
-    // Today's modules export a subset of the table; by the end of Stage 4A they
-    // export all of it. Validation admits both and nothing outside it.
+    // An emitted module exports the whole table, and a hand-built one a part
+    // of it. Validation admits both and nothing outside it.
     let mut types = TypeSection::new();
     types.ty().function([], []);
-    let names = vibra_ir_v1::boundary::FUNCTION_EXPORTS;
+    let names = exports(Entry::Eval)
+        .into_iter()
+        .filter(|name| *name != MEMORY_EXPORT)
+        .collect::<Vec<_>>();
     let mut functions = FunctionSection::new();
     let mut code = CodeSection::new();
     let mut exports = ExportSection::new();
@@ -255,6 +259,36 @@ fn the_full_export_table_validates_and_so_does_a_subset() {
     module.section(&code);
     let summary = validate(&module.finish()).expect("the full table validates");
     assert_eq!(summary.exports.len(), names.len() + 1);
+}
+
+#[test]
+fn a_module_with_both_entry_exports_is_rejected() {
+    let mut types = TypeSection::new();
+    types.ty().function([], []);
+    let mut functions = FunctionSection::new();
+    functions.function(0);
+    let mut memories = MemorySection::new();
+    memories.memory(one_page());
+    let mut exports = ExportSection::new();
+    exports.export("vibra_v1_memory", ExportKind::Memory, 0);
+    exports.export("vibra_v1_eval", ExportKind::Func, 0);
+    exports.export("vibra_v1_test", ExportKind::Func, 0);
+    let mut code = CodeSection::new();
+    let mut body = Function::new([]);
+    body.instruction(&Instruction::End);
+    code.function(&body);
+    let mut module = Module::new();
+    module.section(&types);
+    module.section(&functions);
+    module.section(&memories);
+    module.section(&exports);
+    module.section(&code);
+    assert_eq!(
+        rejected(&module.finish()),
+        ValidationError::ForeignExport {
+            name: "vibra_v1_test".to_owned()
+        }
+    );
 }
 
 #[test]

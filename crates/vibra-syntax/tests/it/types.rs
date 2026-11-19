@@ -3,14 +3,14 @@
 
 use vibra_diagnostics::DiagnosticCode::{
     self, NameReservedDeclaration, NameReservedLabel, SyntaxDuplicateSection,
-    SyntaxInvalidForm, SyntaxInvalidSection, SyntaxUnmatchedDelimiter, ToolUnavailable,
+    SyntaxInvalidForm, SyntaxInvalidSection, SyntaxUnmatchedDelimiter,
 };
 use vibra_syntax::source::keyword::{
     ADMISSIBLE_SECTIONS, SECTIONS, TAG_SETS, TYPE_HEADS,
 };
 use vibra_syntax::source::{
-    Declaration, Inputs, InterfaceDecl, Row, SourceOptions, TypeBody, TypeDecl,
-    TypeExpr, TypeForm,
+    Declaration, ExprForm, Inputs, InterfaceDecl, Primary, Row, SourceOptions,
+    TypeBody, TypeDecl, TypeExpr, TypeForm,
 };
 use vibra_syntax::{
     Document, SyntaxKind, module, parse_source, parse_source_with, tree_document,
@@ -598,26 +598,31 @@ fn type_doc_and_where() {
         [(SyntaxInvalidForm, 13, 23)]
     );
     // The operand of `where` runs to the next section and holds the
-    // expression constructs written in it.
+    // expression constructs written in it: a predicate expression and an
+    // `else` expression, here an anonymous `fn`.
     let text = "type Percent of U8\n  where fn takes {value: U8} returns valid: Bool do\n    return Ordered.lessOrEqual(value 100u8)\n  endfn else zero\n  visibility @public\nendtype";
     let document = source(text);
-    assert!(
-        document.diagnostics().is_empty(),
-        "{:?}",
-        codes(document.diagnostics())
-    );
+    assert!(document.diagnostics().is_empty());
     let view = types(&document)[0];
     let invariant = view.invariant().unwrap();
-    let predicate = invariant.predicate_tokens();
-    assert_eq!(predicate.len(), 1);
-    assert_eq!(
-        predicate[0].text(text).split_whitespace().next(),
-        Some("fn")
-    );
-    let consequence = invariant.else_tokens().unwrap();
-    assert_eq!(consequence.len(), 1);
-    assert_eq!(consequence[0].text(text), "zero");
+    let ExprForm::Postfix(predicate) = invariant.predicate().unwrap().form() else {
+        panic!("the predicate is a postfix form");
+    };
+    let Some(Primary::Callable(callable)) = predicate.primary() else {
+        panic!("the predicate is the anonymous `fn`");
+    };
+    assert_eq!(callable.keyword(), "fn");
+    assert!(callable.is_anonymous());
+    assert_eq!(callable.result().unwrap().0.text(), "valid");
+    let ExprForm::Postfix(consequence) = invariant.consequence().unwrap().form() else {
+        panic!("the consequence is a postfix form");
+    };
+    assert_eq!(consequence.dotted().as_deref(), Some("zero"));
     assert!(view.visibility().is_some());
+    assert_eq!(
+        diagnostics("type A of U8 where ready else endtype"),
+        [(SyntaxInvalidForm, 13, 29)]
+    );
     assert_eq!(
         diagnostics("type A of U8 where visibility @public endtype"),
         [(SyntaxInvalidForm, 13, 18)]
@@ -628,10 +633,14 @@ fn type_doc_and_where() {
 fn interface_basic() {
     let text = "interface Printable\n  visibility @public\n  fn render\n    takes {value: Self}\n    returns text: Str\n  endfn\nendinterface";
     let document = source(text);
-    assert_eq!(codes(document.diagnostics()), [(ToolUnavailable, 43, 106)]);
+    assert!(document.diagnostics().is_empty());
     let view = interfaces(&document)[0];
     assert_eq!(view.name().unwrap().text(), "Printable");
-    assert_eq!(view.members().len(), 1);
+    let members = view.members();
+    assert_eq!(members.len(), 1);
+    assert_eq!(members[0].name().unwrap().text(), "render");
+    // An abstract member has no body.
+    assert!(members[0].body().is_none());
     assert_eq!(view.visibility().unwrap().tag().unwrap().text(), "@public");
     // An interface with no items is complete.
     assert!(diagnostics("interface I endinterface").is_empty());
@@ -715,8 +724,8 @@ fn impl_top_level() {
     );
     // Inside anything but a `type` or an `interface`, too.
     assert_eq!(
-        diagnostics("fn f impl P endimpl endfn"),
-        [(ToolUnavailable, 0, 25), (SyntaxInvalidForm, 5, 19)]
+        diagnostics("fn f returns r: I32 impl P endimpl do return 1i32 endfn"),
+        [(SyntaxInvalidForm, 20, 34)]
     );
     assert_eq!(
         diagnostics("type A of U8 impl P impl Q endimpl endimpl endtype"),
@@ -742,10 +751,15 @@ fn nested_constructs_a_type_does_not_admit() {
         diagnostics("type A of U8 if c then x endif endtype"),
         [(SyntaxInvalidForm, 13, 30)]
     );
-    // A named member is unavailable until the callable grammar exists.
+    // A named member is read in the callable grammar: one without `do` is
+    // invalid at its closer.
     assert_eq!(
         diagnostics("type A of U8 fn f returns r: U8 endfn endtype"),
-        [(ToolUnavailable, 13, 37)]
+        [(SyntaxInvalidForm, 32, 37)]
+    );
+    assert!(
+        diagnostics("type A of U8 fn f returns r: U8 do return 1u8 endfn endtype")
+            .is_empty()
     );
 }
 
@@ -780,7 +794,7 @@ fn section_alternatives(grammar: &str, production: &str) -> Vec<String> {
         _ => body.split_once('=').unwrap().1,
     };
     alternatives
-        .split(['|', '}', '{', ','])
+        .split(['|', '}', '{', ',', '[', ']'])
         .map(str::trim)
         .filter(|word| SECTIONS.contains(word))
         .map(str::to_owned)
@@ -814,6 +828,12 @@ fn the_admissibility_table_is_the_chapters_grammar() {
         ("type", section_alternatives(grammar, "type-item")),
         ("interface", section_alternatives(grammar, "interface-decl")),
         ("impl", section_alternatives(grammar, "impl")),
+        ("fn", section_alternatives(grammar, "fn-decl")),
+        ("proc", section_alternatives(grammar, "proc-decl")),
+        ("anon-fn", section_alternatives(grammar, "anon-fn")),
+        ("anon-proc", section_alternatives(grammar, "anon-proc")),
+        ("test", section_alternatives(grammar, "test")),
+        ("let", section_alternatives(grammar, "module-let")),
     ];
     assert_eq!(ADMISSIBLE_SECTIONS.len(), expected.len());
     for ((kind, sections), (expected_kind, expected_sections)) in
@@ -841,6 +861,7 @@ fn the_admissibility_table_is_the_chapters_grammar() {
                 }
                 assert_eq!(tags.len(), 9);
             }
+            "external" => assert_eq!(*tags, ["@compiler", "@host"]),
             _ => assert_eq!(*tags, ["@public", "@private"], "{section}"),
         }
     }

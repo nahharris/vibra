@@ -11,6 +11,7 @@ use vibra_diagnostics::ByteSpan;
 
 use super::construct::is_trivia;
 use super::declaration::{Atom, Ident};
+use super::expr::{Expr, is_word, read_expr, significant};
 use super::types::{TypeExpr, type_entries};
 use crate::cst::{CstNode, SyntaxKind};
 
@@ -30,6 +31,12 @@ pub const fn is_construct(kind: SyntaxKind) -> bool {
             | SyntaxKind::Impl
             | SyntaxKind::AssocType
             | SyntaxKind::AssocChoice
+            | SyntaxKind::Let
+            | SyntaxKind::If
+            | SyntaxKind::Match
+            | SyntaxKind::DoBlock
+            | SyntaxKind::AnonFn
+            | SyntaxKind::AnonProc
             | SyntaxKind::Construct
     )
 }
@@ -245,8 +252,7 @@ impl<'a> Given<'a> {
     }
 }
 
-/// `where predicate [else consequence]`. The operands are captured as
-/// tokens here and typed by the expression grammar.
+/// `where predicate [else consequence]`, two expressions.
 #[derive(Clone, Copy, Debug)]
 pub struct Where<'a> {
     node: &'a CstNode,
@@ -266,36 +272,27 @@ impl<'a> Where<'a> {
         self.node
     }
 
-    fn split(&self) -> (Vec<&'a CstNode>, Option<Vec<&'a CstNode>>) {
-        let operand = operand_of(self.node);
-        let at = operand.iter().position(|node| {
-            node.kind() == SyntaxKind::ReservedWord && node.text(self.text) == "else"
-        });
-        match at {
-            Some(at) => {
-                let mut predicate = operand;
-                let consequence = predicate.split_off(at).into_iter().skip(1).collect();
-                (predicate, Some(consequence))
-            }
-            None => (operand, None),
-        }
+    /// The predicate.
+    #[must_use]
+    pub fn predicate(&self) -> Option<Expr<'a>> {
+        let items = significant(self.node);
+        read_expr(&items, &mut 1, self.text)
     }
 
-    /// The predicate's tokens, groups, and constructs, without trivia.
+    /// The consequence after `else`, when an `else` is written.
     #[must_use]
-    pub fn predicate_tokens(&self) -> Vec<&'a CstNode> {
-        self.split().0
-    }
-
-    /// The consequence's tokens after `else`, when an `else` is written.
-    #[must_use]
-    pub fn else_tokens(&self) -> Option<Vec<&'a CstNode>> {
-        self.split().1
+    pub fn consequence(&self) -> Option<Expr<'a>> {
+        let items = significant(self.node);
+        let mut at = items
+            .iter()
+            .position(|item| is_word(item, self.text, "else"))?
+            + 1;
+        read_expr(&items, &mut at, self.text)
     }
 }
 
-/// A section whose operand is one tag: `visibility`, `representation`, or
-/// `role`.
+/// A section whose operand is one tag: `visibility`, `representation`,
+/// `role`, or `external`.
 #[derive(Clone, Copy, Debug)]
 pub struct TagSection<'a> {
     node: &'a CstNode,
@@ -303,13 +300,16 @@ pub struct TagSection<'a> {
 }
 
 impl<'a> TagSection<'a> {
-    /// The view of a `@visibility`, `@representation`, or `@role` node of the
-    /// document `text`.
+    /// The view of a `@visibility`, `@representation`, `@role`, or
+    /// `@external` node of the document `text`.
     #[must_use]
     pub fn new(node: &'a CstNode, text: &'a str) -> Option<Self> {
         matches!(
             node.kind(),
-            SyntaxKind::Visibility | SyntaxKind::Representation | SyntaxKind::Role
+            SyntaxKind::Visibility
+                | SyntaxKind::Representation
+                | SyntaxKind::Role
+                | SyntaxKind::External
         )
         .then_some(Self { node, text })
     }
@@ -336,6 +336,55 @@ impl<'a> TagSection<'a> {
             [tag] => Atom::of(tag, self.text),
             _ => None,
         }
+    }
+}
+
+/// A section whose operand is one string: `symbol` or `native`, a registry
+/// key in its registered spelling.
+#[derive(Clone, Copy, Debug)]
+pub struct StringSection<'a> {
+    node: &'a CstNode,
+    text: &'a str,
+}
+
+impl<'a> StringSection<'a> {
+    /// The view of a `@symbol` or `@native` node of the document `text`.
+    #[must_use]
+    pub fn new(node: &'a CstNode, text: &'a str) -> Option<Self> {
+        matches!(node.kind(), SyntaxKind::Symbol | SyntaxKind::Native)
+            .then_some(Self { node, text })
+    }
+
+    /// The node.
+    #[must_use]
+    pub const fn node(&self) -> &'a CstNode {
+        self.node
+    }
+
+    /// The section keyword.
+    #[must_use]
+    pub fn keyword(&self) -> &'a str {
+        self.node
+            .children()
+            .first()
+            .map_or("", |keyword| keyword.text(self.text))
+    }
+
+    /// The string token as written, quotes included.
+    #[must_use]
+    pub fn string(&self) -> Option<&'a str> {
+        match operand_of(self.node).as_slice() {
+            [string] if string.kind() == SyntaxKind::String => {
+                Some(string.text(self.text))
+            }
+            _ => None,
+        }
+    }
+
+    /// The string's value, its escapes decoded.
+    #[must_use]
+    pub fn value(&self) -> Option<String> {
+        self.string().and_then(crate::literal::decode_string)
     }
 }
 

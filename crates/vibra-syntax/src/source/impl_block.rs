@@ -13,9 +13,9 @@
 //! one type expression, and it admits no section. It is shaped by the
 //! declaration shaping of [`super::type_decl`].
 
+use super::callable::Callable;
 use super::construct::is_trivia;
 use super::declaration::Ident;
-use super::section::Construct;
 use super::type_decl::{children_of_kind, declared_name, members, of_operand};
 use super::types::{TypeExpr, type_entries};
 use crate::cst::{CstNode, SyntaxKind};
@@ -55,6 +55,8 @@ impl<'a> Impl<'a> {
                     && matches!(
                         child.kind(),
                         SyntaxKind::AssocChoice
+                            | SyntaxKind::FnDecl
+                            | SyntaxKind::ProcDecl
                             | SyntaxKind::Construct
                             | SyntaxKind::Error
                     )
@@ -80,7 +82,7 @@ impl<'a> Impl<'a> {
 
     /// The named `fn` and `proc` members, in written order.
     #[must_use]
-    pub fn members(&self) -> Vec<Construct<'a>> {
+    pub fn members(&self) -> Vec<Callable<'a>> {
         members(self.node, self.text)
     }
 }

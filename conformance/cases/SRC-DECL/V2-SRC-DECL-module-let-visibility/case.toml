@@ -1,0 +1,12 @@
+id = "V2-SRC-DECL-module-let-visibility"
+rule = "V2-SRC-DECL-module-let-visibility"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#module-values: `visibility` is written between the type and `be`; a module value that fits is one line"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

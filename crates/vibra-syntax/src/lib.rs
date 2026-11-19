@@ -9,11 +9,12 @@
 //!
 //! A document is parsed by the grammar its extension selects
 //! ([`DocumentMode::from_path`]). [`parse_data`] is complete. [`parse_source`]
-//! parses the source grammar ([`source`]): the module, the seven top-level
-//! forms recognized by keyword and typed closer, generic sections, `use`,
-//! and the type grammar (`type`, `interface`, `impl`, type expressions) in
-//! full. The bodies of `fn`, `proc`, `let`, and `test` forms and of named
-//! `fn` and `proc` members are reported `@tool.unavailable`, once per form.
+//! parses the whole source grammar ([`source`]): the module, the seven
+//! top-level forms recognized by keyword and typed closer, generic sections,
+//! `use`, the type grammar (`type`, `interface`, `impl`, type expressions),
+//! the module value `let`, `fn` and `proc` declarations, members, and
+//! anonymous expressions with their signatures and guards, `test`, and the
+//! expression, statement, and pattern grammar.
 //!
 //! [`decode`] reads a data document under a closed record [`Schema`], in the
 //! validation order of the programs chapter's "Schemas", and

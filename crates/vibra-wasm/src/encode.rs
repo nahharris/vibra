@@ -6,20 +6,19 @@
 //! them. No custom section is written, not even a `name` section, because a v1
 //! module the toolchain emits before `vibra build` exists carries none.
 //!
-//! The function index space is the lowered functions (the language functions in
-//! source order, then the module-value initializers), then the runtime routines
-//! of [`crate::runtime`], the entry export, the frame routines, and last the
-//! object constructor when the program builds an object. The one function table
-//! holds the language functions at their own indices, which is how the
+//! The function index space is the native imports, then the lowered instances
+//! in the order the lowering numbered them, then the runtime routines of
+//! [`crate::runtime`], the entry export, the frame routines, the object
+//! constructor, and last the extra routines of the lowering. The one function
+//! table holds the instances at their own positions, which is how the
 //! dispatcher reaches the function of a frame.
 
 use std::borrow::Cow;
 
-use vibra_ir_v1::boundary::{
-    ENTRY_EXPORT, HOST_IMPORT_MODULE, MEMORY_EXPORT, NATIVE_IMPORT_MODULE, TEST_EXPORT,
+use vibra_ir::boundary::{
+    EVAL_EXPORT, MEMORY_EXPORT, NATIVE_IMPORT_MODULE, TEST_EXPORT,
 };
-use vibra_ir_v1::external::host::{HostRow, HostType};
-use vibra_ir_v1::external::{NativeRow, Scalar};
+use vibra_ir::external::{NativeRow, Scalar};
 use wasm_encoder::{
     CodeSection, ConstExpr, DataCountSection, DataSection, ElementSection, Elements,
     EntityType, ExportKind, ExportSection, Function, FunctionSection, ImportSection,
@@ -27,10 +26,9 @@ use wasm_encoder::{
     ValType,
 };
 
-use crate::host::host_routines;
 use crate::runtime::{
     Ins, Routine, Routines, TestEntry, ValueClass, accessor_exports, core_routines,
-    entry_export, frame_routines, new_object, raw_entry_export, test_export,
+    eval_export, frame_routines, new_object, raw_entry_export, test_export,
 };
 
 /// The pages of linear memory the module defines. The arena grows from here by
@@ -72,19 +70,13 @@ impl Types {
 /// How the entry export starts the program.
 #[derive(Clone, Debug)]
 pub(crate) enum Entry {
-    /// A test module: the tests `vibra_v1_test` runs, by position, in a module
-    /// with `module_values` module values.
-    Tests {
-        entries: Vec<TestEntry>,
-        module_values: u32,
-    },
-    /// A program: the entry is the language function `function`, run on a
-    /// frame of `slots` slots by the dispatcher, in a module with
-    /// `module_values` module values.
+    /// A test module: the tests `vibra_v1_test` runs, by position.
+    Tests { entries: Vec<TestEntry> },
+    /// An evaluation module: `vibra_v1_eval` runs the instance `function` on
+    /// a frame of `slots` slots by the dispatcher, and its result has `class`.
     Program {
         function: u32,
         slots: u32,
-        module_values: u32,
         class: ValueClass,
     },
     /// A scaffold (`support`): the entry is the plain function `function`,
@@ -97,23 +89,16 @@ pub(crate) enum Entry {
 pub(crate) struct Parts {
     pub(crate) functions: Vec<FunctionCode>,
     /// The functions of the function table, in table order: the indices of the
-    /// language functions.
+    /// lowered instances.
     pub(crate) table: Vec<u32>,
     pub(crate) entry: Entry,
     pub(crate) segments: Vec<Vec<u8>>,
-    pub(crate) include_new: bool,
     /// The native imports, in the order of their function indices, which come
     /// before every defined function.
     pub(crate) imports: Vec<NativeRow>,
-    /// The host imports, which follow the native imports in the function index
-    /// space. A module that has any also has the builders.
-    pub(crate) host_imports: Vec<&'static HostRow>,
-    /// Routines after the object constructor: the comparers of closed key shapes.
+    /// Routines after the object constructor.
     pub(crate) extra: Vec<Routine>,
-    /// Whether the allocator counts (see [`Routines::measure`]).
-    pub(crate) measure: bool,
 }
-
 /// The routine indices of a module of `function_count` lowered functions.
 pub(crate) const fn routines_for(function_count: u32) -> Routines {
     Routines::plan(function_count)
@@ -122,16 +107,10 @@ pub(crate) const fn routines_for(function_count: u32) -> Routines {
 /// Encodes the module, or `None` when a size does not fit 32 bits.
 pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
     let function_count = u32::try_from(parts.functions.len()).ok()?;
-    let import_count = u32::try_from(parts.imports.len())
-        .ok()?
-        .checked_add(u32::try_from(parts.host_imports.len()).ok()?)?;
+    let import_count = u32::try_from(parts.imports.len()).ok()?;
     // The imports take the first function indices, so every defined function,
     // the runtime routines included, is numbered after them.
-    let fns = Routines {
-        measure: parts.measure,
-        ..routines_for(import_count.checked_add(function_count)?)
-    };
-
+    let fns = routines_for(import_count.checked_add(function_count)?);
     let mut types = Types::default();
     // The type of every function the dispatcher can reach.
     let dispatch_type = types.intern(&[ValType::I32], &[]);
@@ -145,20 +124,8 @@ pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
         let result = scalar(row.result());
         imports.import(
             NATIVE_IMPORT_MODULE,
-            row.name(),
+            &row.name(),
             EntityType::Function(types.intern(&params, &[result])),
-        );
-    }
-    for row in &parts.host_imports {
-        let params = row
-            .parameters
-            .iter()
-            .map(|parameter| host_param(parameter.ty))
-            .collect::<Vec<_>>();
-        imports.import(
-            HOST_IMPORT_MODULE,
-            row.symbol,
-            EntityType::Function(types.intern(&params, &[ValType::I64])),
         );
     }
     let mut functions = FunctionSection::new();
@@ -174,47 +141,27 @@ pub(crate) fn module(parts: &Parts) -> Option<Vec<u8>> {
     }
     let mut routines = core_routines(&fns);
     routines.push(match &parts.entry {
-        Entry::Tests {
-            entries,
-            module_values,
-        } => test_export(&fns, entries, *module_values),
+        Entry::Tests { entries } => test_export(&fns, entries),
         Entry::Program {
             function,
             slots,
-            module_values,
             class,
-        } => entry_export(&fns, *function, *slots, *module_values, *class),
+        } => eval_export(&fns, *function, *slots, *class),
         Entry::Raw { function, class } => raw_entry_export(&fns, *function, *class),
     });
     routines.extend(frame_routines(&fns, dispatch_type));
-    if parts.include_new {
-        routines.push(new_object(&fns));
-        if !parts.host_imports.is_empty() {
-            routines.extend(host_routines(&fns));
-        }
-        routines.extend(parts.extra.iter().cloned());
-    }
+    routines.push(new_object(&fns));
+    routines.extend(parts.extra.iter().cloned());
     let mut exports = ExportSection::new();
     exports.export(MEMORY_EXPORT, ExportKind::Memory, 0);
     let entry_name = if matches!(parts.entry, Entry::Tests { .. }) {
         TEST_EXPORT
     } else {
-        ENTRY_EXPORT
+        EVAL_EXPORT
     };
     exports.export(entry_name, ExportKind::Func, fns.entry_export);
     for (name, index) in accessor_exports(&fns) {
         exports.export(name, ExportKind::Func, index);
-    }
-    if !parts.host_imports.is_empty() {
-        for (offset, routine) in host_routines(&fns).iter().enumerate() {
-            if let Some(name) = routine.export {
-                exports.export(
-                    name,
-                    ExportKind::Func,
-                    fns.new + 1 + u32::try_from(offset).ok()?,
-                );
-            }
-        }
     }
     for routine in &routines {
         add_routine(&mut types, &mut functions, &mut code, routine);
@@ -290,19 +237,4 @@ fn add_routine(
         function.instruction(instruction);
     }
     code.function(&function);
-}
-
-/// The WebAssembly type of a parameter of a host import: a scalar crosses as
-/// itself, and every other parameter as the `i64` ID of an arena value.
-fn host_param(ty: HostType) -> ValType {
-    match ty {
-        HostType::I64
-        | HostType::U64
-        | HostType::Void
-        | HostType::Str
-        | HostType::Bytes
-        | HostType::Path
-        | HostType::FsMetadata
-        | HostType::Array(_) => ValType::I64,
-    }
 }

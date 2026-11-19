@@ -1,0 +1,1 @@
+fn f takes {{a b}: {I32 I32}} returns r: I32 do return a endfn

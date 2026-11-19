@@ -4,7 +4,6 @@
 use vibra_diagnostics::DiagnosticCode::{
     self, NameReservedDeclaration, SyntaxDuplicateSection, SyntaxInvalidForm,
     SyntaxInvalidSection, SyntaxMissingSeparator, SyntaxUnmatchedDelimiter,
-    ToolUnavailable,
 };
 use vibra_syntax::source::keyword::{
     BODY_CONSTRUCTS, CONSTRUCTS, EXPRESSION_WORDS, SECTIONS, SEPARATORS, TOP_LEVEL,
@@ -148,12 +147,12 @@ fn as_outside_use() {
         [(SyntaxInvalidForm, 19, 21)]
     );
     assert_eq!(
-        diagnostics("fn f as x endfn"),
-        [(ToolUnavailable, 0, 15), (SyntaxInvalidForm, 5, 7)]
+        diagnostics("fn f returns r: I32 as x do return 1i32 endfn"),
+        [(SyntaxInvalidForm, 20, 22)]
     );
     assert_eq!(
-        diagnostics("fn f returns r: {as} endfn"),
-        [(ToolUnavailable, 0, 26), (SyntaxInvalidForm, 17, 19)]
+        diagnostics("fn f returns r: {as} do return 1i32 endfn"),
+        [(SyntaxInvalidForm, 17, 19)]
     );
 }
 
@@ -252,9 +251,9 @@ fn closer_by_kind() {
     let document = source("fn f returns r: I32 do match x endfn");
     assert_eq!(
         codes(document.diagnostics()),
-        [(ToolUnavailable, 0, 36), (SyntaxUnmatchedDelimiter, 31, 36)]
+        [(SyntaxUnmatchedDelimiter, 31, 36)]
     );
-    let unmatched = &document.diagnostics()[1];
+    let unmatched = &document.diagnostics()[0];
     assert_eq!(unmatched.related().len(), 1);
     assert_eq!(unmatched.related()[0].span.start(), 23);
     assert_eq!(unmatched.related()[0].span.end(), 28);
@@ -262,59 +261,50 @@ fn closer_by_kind() {
     let document = source("fn f takes {x: I32 endfn");
     assert_eq!(
         codes(document.diagnostics()),
-        [(ToolUnavailable, 0, 24), (SyntaxUnmatchedDelimiter, 19, 24)]
+        [(SyntaxUnmatchedDelimiter, 19, 24)]
     );
 }
 
 #[test]
 fn closer_eof() {
-    assert_eq!(
-        diagnostics("fn f"),
-        [(SyntaxUnmatchedDelimiter, 0, 2), (ToolUnavailable, 0, 4)]
-    );
+    assert_eq!(diagnostics("fn f"), [(SyntaxUnmatchedDelimiter, 0, 2)]);
     // Trailing whitespace stays outside a construct closed as missing.
-    assert_eq!(
-        diagnostics("fn f\n\n"),
-        [(SyntaxUnmatchedDelimiter, 0, 2), (ToolUnavailable, 0, 4)]
-    );
+    assert_eq!(diagnostics("fn f\n\n"), [(SyntaxUnmatchedDelimiter, 0, 2)]);
 }
 
 #[test]
 fn duplicate_section() {
     assert_eq!(
-        diagnostics("fn f returns r: I32 returns s: I32 endfn"),
-        [(ToolUnavailable, 0, 40), (SyntaxDuplicateSection, 20, 27)]
+        diagnostics("fn f returns r: I32 returns s: I32 do return 1i32 endfn"),
+        [(SyntaxDuplicateSection, 20, 27)]
     );
 }
 
 #[test]
 fn do_comes_last_and_the_name_comes_first() {
     assert_eq!(
-        diagnostics("fn f do return x visibility @public endfn"),
-        [(SyntaxInvalidForm, 0, 41), (ToolUnavailable, 0, 41)]
+        diagnostics("fn f returns r: I32 do return x visibility @public endfn"),
+        [(SyntaxInvalidForm, 0, 56)]
     );
     assert_eq!(
-        diagnostics("fn returns r: I32 endfn"),
-        [(SyntaxInvalidForm, 0, 23), (ToolUnavailable, 0, 23)]
+        diagnostics("fn returns r: I32 do return 1i32 endfn"),
+        [(SyntaxInvalidForm, 0, 38)]
     );
     // Inside a body, `do` opens a block closed by `enddo`.
-    assert_eq!(
-        diagnostics("fn f returns r: I32 do do return x enddo endfn"),
-        [(ToolUnavailable, 0, 46)]
-    );
+    assert!(diagnostics("fn f returns r: I32 do do return x enddo endfn").is_empty());
 }
 
 #[test]
-fn every_form_without_its_grammar_is_unavailable_once() {
-    assert!(diagnostics("type A of U8 endtype").is_empty());
-    assert!(diagnostics("interface I endinterface").is_empty());
-    for (text, end) in [
-        ("fn f returns r: I32 endfn", 25),
-        ("proc p returns r: I32 endproc", 29),
-        ("let x: I32 be 1i32 endlet", 25),
-        ("test \"t\" do endtest", 19),
+fn every_form_is_read_in_its_own_grammar() {
+    for text in [
+        "type A of U8 endtype",
+        "interface I endinterface",
+        "let x: I32 be 1i32 endlet",
+        "fn f returns r: I32 do return 1i32 endfn",
+        "proc p returns r: Void do return void endproc",
+        "test \"t\" do endtest",
     ] {
-        assert_eq!(diagnostics(text), [(ToolUnavailable, 0, end)], "{text}");
+        assert!(diagnostics(text).is_empty(), "{text}");
     }
 }
 
@@ -356,6 +346,10 @@ fn check_invariants(text: &str) {
     if let Some(module) = module(&document) {
         for declaration in module.declarations() {
             let _ = declaration.construct().sections();
+            if let Declaration::Let(value) = declaration {
+                let _ = (value.name(), value.written_type(), value.visibility());
+                crate::expr::walk(value.value());
+            }
         }
     }
 }
@@ -405,19 +399,16 @@ fn random_keyword_sequences_never_panic_and_keep_every_byte_in_one_leaf() {
 fn deep_construct_nesting_is_parsed_checked_and_dropped_without_recursion() {
     const DEPTH: usize = 100_000;
     let text = format!(
-        "fn f do {}x{} endfn",
+        "fn f returns r: I32 do {}x{} endfn",
         "if c then ".repeat(DEPTH),
         " endif".repeat(DEPTH)
     );
     let document = source(&text);
-    assert_eq!(
-        codes(document.diagnostics()),
-        [(ToolUnavailable, 0, text.len())]
-    );
+    assert!(document.diagnostics().is_empty());
     assert!(tree_document(&document).unwrap().len() > DEPTH);
     let open = format!("fn f do {}", "match x ".repeat(DEPTH));
     let recovered = source(&open);
-    assert_eq!(recovered.diagnostics().len(), DEPTH + 2);
+    assert_eq!(recovered.diagnostics().len(), DEPTH + 1);
     drop(recovered);
     drop(document);
 }

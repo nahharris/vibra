@@ -8,7 +8,7 @@
 //! launcher takes the quota as its first argument and the case's `@host-world.v1`
 //! document on standard input, and writes one observation document
 //! (`vibra_nexus_bridge::harness::observation`). Each run is turned into a
-//! [`WasmObservation`] and held to the case's one expectation by
+//! [`ExecutorObservation`] and held to the case's one expectation by
 //! `runner::executor_status`, the function the Wasm backend and the stepper are
 //! held to.
 //!
@@ -41,7 +41,7 @@ use vibra_syntax_v1::{DataNode, DataValue, Literal, parse_data};
 
 use crate::native::EntryJob;
 use crate::native_read::{Definitions, DumpSource, Stop, decode_dump, read};
-use crate::runner::{BackendObservation, ExecutionObservation, WasmObservation};
+use crate::runner::{BackendObservation, ExecutionObservation, ExecutorObservation};
 
 /// How long a launched executable may run.
 const TIMEOUT: Duration = Duration::from_secs(120);
@@ -52,7 +52,7 @@ pub(crate) struct WindowsRun {
     /// The quota of the run: [`u64::MAX`] for unbounded.
     pub(crate) quota: u64,
     /// What the executable did, in the terms the Wasm backend uses.
-    pub(crate) observation: BackendObservation<WasmObservation>,
+    pub(crate) observation: BackendObservation<ExecutorObservation>,
     /// The origin ordinal the launcher reported for a trap.
     pub(crate) trap_origin: Option<u32>,
     /// Whether the run observed the entry's result: false when the run
@@ -283,7 +283,7 @@ fn parse(
             Err(Stop::Fault(cause)) => (
                 None,
                 true,
-                Some(WasmObservation::Failed {
+                Some(ExecutorObservation::Failed {
                     reason: format!(
                         "{}: the executable's result is unreadable: {cause}",
                         vibra_ir_v1::boundary::TrapCode::InvalidCheckedProgram
@@ -294,7 +294,7 @@ fn parse(
             ),
         };
         let outcome =
-            outcome.unwrap_or(WasmObservation::Completed(ExecutionObservation {
+            outcome.unwrap_or(ExecutorObservation::Completed(ExecutionObservation {
                 result,
                 audit_trace: audit.clone(),
             }));
@@ -311,12 +311,12 @@ fn parse(
         "@completed" => completed(false)?,
         "@program-failed" => completed(true)?,
         "@trapped" => (
-            BackendObservation::new(WasmObservation::Trapped(trap)),
+            BackendObservation::new(ExecutorObservation::Trapped(trap)),
             true,
             Some(origin),
         ),
         "@memory-exhausted" => (
-            BackendObservation::new(WasmObservation::HostEvent(
+            BackendObservation::new(ExecutorObservation::HostEvent(
                 DiagnosticCode::RuntimeMemoryExhausted.as_atom().to_owned(),
             )),
             true,
@@ -357,7 +357,7 @@ mod tests {
         let scalar = r#"(record node: @scalar class: @i32 bits: "4294967289")"#;
         let run = run("completed", scalar, &Type::I32).expect("a document");
         assert!(run.result_observed);
-        let WasmObservation::Completed(execution) = &run.observation.outcome else {
+        let ExecutorObservation::Completed(execution) = &run.observation.outcome else {
             panic!("{run:?}");
         };
         assert_eq!(
@@ -383,7 +383,8 @@ mod tests {
             };
             let run = run("completed", value, &ty).expect("a document");
             assert!(!run.result_observed, "{value}");
-            let WasmObservation::Completed(execution) = &run.observation.outcome else {
+            let ExecutorObservation::Completed(execution) = &run.observation.outcome
+            else {
                 panic!("{run:?}");
             };
             assert_eq!(execution.result, None, "no result is invented for {value}");
@@ -393,7 +394,7 @@ mod tests {
             .expect("a document");
         assert!(matches!(
             run.observation.outcome,
-            WasmObservation::Failed { .. }
+            ExecutorObservation::Failed { .. }
         ));
         // And a document that is not the launcher's is an error of the launch.
         assert!(parse("(((", 1, &Type::Void, &Definitions::new()).is_err());

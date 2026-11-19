@@ -2,16 +2,11 @@ id = "V2-SRC-DECL-interface-basic"
 rule = "V2-SRC-DECL-interface-basic"
 profile = "readerV2"
 operation = "reader"
-description = "01-source-language.md#interface: an interface with a fn member, which is unavailable until the callable grammar exists; the formatter returns a document with a diagnostic unchanged"
+description = "01-source-language.md#interface: an interface with an abstract fn member, which has no do; the example is its own canonical layout"
 
 [inputs]
 source = "input.vib"
 
 [expect]
-verdict = "refuted"
+verdict = "accepted"
 formatted = "formatted.vib"
-
-[[expect.diagnostics]]
-code = "@tool.unavailable"
-level = "@error"
-span = { start = 43, end = 106 }

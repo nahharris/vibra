@@ -8,7 +8,7 @@
 //! Both runs are held to the case's one expectation, by the comparison the Wasm
 //! backend uses.
 //!
-//! The stepper reports in the terms of [`WasmObservation`]: it completed with a
+//! The stepper reports in the terms of [`ExecutorObservation`]: it completed with a
 //! canonical result and an audit trace, it trapped with a code, it ended in the
 //! host event, or it failed.
 //!
@@ -49,8 +49,8 @@ use vibra_nexus_eval::{EvalError, Evaluator};
 
 use crate::native_read::{Live, Stop, read};
 use crate::runner::{
-    BackendObservation, ExecutionObservation, INSTANCE_MEMORY_LIMIT_BYTES,
-    WasmObservation,
+    BackendObservation, ExecutionObservation, ExecutorObservation,
+    INSTANCE_MEMORY_LIMIT_BYTES,
 };
 
 /// The package that owns the observation of values and the test table.
@@ -94,7 +94,7 @@ pub struct StepperRun {
     /// The quota of the run: [`u64::MAX`] for unbounded.
     pub quota: u64,
     /// What the run observed, in the terms the Wasm backend uses.
-    pub observation: BackendObservation<WasmObservation>,
+    pub observation: BackendObservation<ExecutorObservation>,
     /// The origin ordinal of the trap that ended the run, when one did.
     pub trap_origin: Option<u32>,
 }
@@ -244,7 +244,7 @@ fn refused(name: &str) -> NativeObservation {
 fn failed(reason: String) -> NativeObservation {
     NativeObservation::Ran(vec![StepperRun {
         quota: UNBOUNDED,
-        observation: BackendObservation::new(WasmObservation::Failed { reason }),
+        observation: BackendObservation::new(ExecutorObservation::Failed { reason }),
         trap_origin: None,
     }])
 }
@@ -256,7 +256,7 @@ fn step(
     program: &CheckedProgram,
     world: &HostWorld,
     quota: u64,
-) -> Result<(BackendObservation<WasmObservation>, Option<u32>), &'static str> {
+) -> Result<(BackendObservation<ExecutorObservation>, Option<u32>), &'static str> {
     let mut origin = None;
     let observation = step_run(code, program, world, quota, &mut origin)?;
     Ok((observation, origin))
@@ -268,12 +268,12 @@ fn step_run(
     world: &HostWorld,
     quota: u64,
     origin: &mut Option<u32>,
-) -> Result<BackendObservation<WasmObservation>, &'static str> {
+) -> Result<BackendObservation<ExecutorObservation>, &'static str> {
     let limit = u64::try_from(INSTANCE_MEMORY_LIMIT_BYTES).unwrap_or(u64::MAX);
     let mut host = WorldProvider::new(world);
     let mut ctx = Context::new(limit, code.globals(), &mut host);
     let memory_exhausted = || {
-        BackendObservation::new(WasmObservation::HostEvent(
+        BackendObservation::new(ExecutorObservation::HostEvent(
             DiagnosticCode::RuntimeMemoryExhausted.as_atom().to_owned(),
         ))
     };
@@ -316,7 +316,7 @@ fn step_run(
             let audit_trace = ctx.audit().to_vec();
             let program_failed = value.is_err_variant();
             Ok(BackendObservation {
-                outcome: WasmObservation::Completed(ExecutionObservation {
+                outcome: ExecutorObservation::Completed(ExecutionObservation {
                     result: Some(value.canonical_observation(&result_type)),
                     audit_trace,
                 }),
@@ -328,7 +328,7 @@ fn step_run(
                 return Ok(defect("the stepper trapped on a verified program"));
             }
             *origin = Some(trap.origin);
-            Ok(BackendObservation::new(WasmObservation::Trapped(
+            Ok(BackendObservation::new(ExecutorObservation::Trapped(
                 trap.code.diagnostic_code().as_atom().to_owned(),
             )))
         }
@@ -339,8 +339,8 @@ fn step_run(
     }
 }
 
-fn defect(cause: &str) -> BackendObservation<WasmObservation> {
-    BackendObservation::new(WasmObservation::Failed {
+fn defect(cause: &str) -> BackendObservation<ExecutorObservation> {
+    BackendObservation::new(ExecutorObservation::Failed {
         reason: format!(
             "{}: {cause}",
             vibra_ir_v1::boundary::TrapCode::InvalidCheckedProgram

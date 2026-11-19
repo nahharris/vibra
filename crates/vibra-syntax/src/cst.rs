@@ -29,8 +29,10 @@ use crate::lexer::{Token, TokenKind};
 /// kinds, [`SyntaxKind::Construct`], and [`SyntaxKind::Section`] are generic
 /// groups, which the tree observation writes as their children in their
 /// place: a bracket form that is no production of its own (a tuple type, the
-/// arguments of a type application, the braces of `given`), and the
-/// constructs and sections of a grammar this crate does not parse yet.
+/// arguments of a type application or a call, the braces of `given`, a
+/// tuple, record, list, or dict value, a bracket pattern), and the
+/// constructs and sections that the construct matcher builds before shaping
+/// and that recovery keeps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum SyntaxKind {
     /// The document node of a `.vibon` document.
@@ -85,12 +87,50 @@ pub enum SyntaxKind {
     Row,
     /// The `path` production.
     Path,
-    /// The `fn-decl` production, at the top level.
+    /// The `fn-decl` production: a named `fn`, at the top level or a member.
     FnDecl,
-    /// The `proc-decl` production, at the top level.
+    /// The `proc-decl` production: a named `proc`, at the top level or a
+    /// member.
     ProcDecl,
+    /// The `signature` production: `takes`, `labelled`, and `returns`.
+    Signature,
+    /// The `params` production: the brace of `takes`.
+    Params,
+    /// The `labelled` production: the brace of `labelled`.
+    Labelled,
+    /// The `requires` production.
+    Requires,
+    /// The `ensures` production.
+    Ensures,
+    /// The `performs` production.
+    Performs,
+    /// The `external` production.
+    External,
+    /// The `symbol` production.
+    Symbol,
+    /// The `native` production.
+    Native,
+    /// The `anon-fn` production: an anonymous `fn` expression.
+    AnonFn,
+    /// The `anon-proc` production: an anonymous `proc` expression.
+    AnonProc,
     /// The `module-let` production.
     ModuleLet,
+    /// The `body` production: a sequence of statements.
+    Body,
+    /// The `let` production: a local binding statement.
+    Let,
+    /// The `postfix` production: a primary and its applications and field
+    /// reads.
+    Postfix,
+    /// The `if` production.
+    If,
+    /// The `match` production.
+    Match,
+    /// The `arm` production: one `case` of a `match`.
+    Arm,
+    /// The `do-block` production.
+    DoBlock,
     /// The `test` production.
     Test,
     /// Tokens a recovery step consumed without building a form.
@@ -166,7 +206,25 @@ impl SyntaxKind {
             Self::Path => "@path",
             Self::FnDecl => "@fnDecl",
             Self::ProcDecl => "@procDecl",
+            Self::Signature => "@signature",
+            Self::Params => "@params",
+            Self::Labelled => "@labelled",
+            Self::Requires => "@requires",
+            Self::Ensures => "@ensures",
+            Self::Performs => "@performs",
+            Self::External => "@external",
+            Self::Symbol => "@symbol",
+            Self::Native => "@native",
+            Self::AnonFn => "@anonFn",
+            Self::AnonProc => "@anonProc",
             Self::ModuleLet => "@moduleLet",
+            Self::Body => "@body",
+            Self::Let => "@let",
+            Self::Postfix => "@postfix",
+            Self::If => "@if",
+            Self::Match => "@match",
+            Self::Arm => "@arm",
+            Self::DoBlock => "@doBlock",
             Self::Test => "@test",
             Self::Error => "@error",
             Self::Brace

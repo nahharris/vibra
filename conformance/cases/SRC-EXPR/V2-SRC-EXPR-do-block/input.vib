@@ -1,0 +1,4 @@
+let n: I32 be do
+  let a be 1i32 endlet
+  I32.add(a a)
+enddo endlet

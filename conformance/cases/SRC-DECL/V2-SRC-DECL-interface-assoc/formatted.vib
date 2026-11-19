@@ -1,1 +1,3 @@
-interface Iter type Item endtype endinterface
+interface Iter
+  type Item endtype
+endinterface

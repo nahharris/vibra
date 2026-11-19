@@ -55,10 +55,6 @@ impl ProfileHandler for InterpreterV1Handler {
                     accepted: checked.accepted(),
                     diagnostics: checked.diagnostics().to_vec(),
                     host_event: host_event_atom(&error),
-                    wasm: Some(crate::wasm::observe_entry(
-                        program,
-                        &vibra_host_v1::HostWorld::default(),
-                    )),
                     native: Some(crate::native::observe_entry(
                         program,
                         &vibra_host_v1::HostWorld::default(),
@@ -79,10 +75,6 @@ impl ProfileHandler for InterpreterV1Handler {
                 },
                 program_failed: Some(execution.program_failed()),
             }),
-            wasm: Some(crate::wasm::observe_entry(
-                program,
-                &vibra_host_v1::HostWorld::default(),
-            )),
             native: Some(crate::native::observe_entry(
                 program,
                 &vibra_host_v1::HostWorld::default(),

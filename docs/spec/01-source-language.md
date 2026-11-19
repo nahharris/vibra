@@ -815,9 +815,9 @@ run-time type. The type chapter defines irrefutability and coverage.
   fits within the limit; otherwise its opener line, its contents indented one
   step, and its closer on its own line at the opener's indentation;
 - a `type`, `interface`, `impl`, `fn`, `proc`, or `test` construct
-  always on several lines when it has a member or any section other than
-  `of`, whatever its length: `type Celsius of F64 endtype` is one line, and
-  a type with a `visibility` section is not;
+  always on several lines when it has a member, a `case`, or any section
+  other than `of`, whatever its length: `type Celsius of F64 endtype` is one
+  line, and a type with a `visibility` section or a `case` list is not;
 - in a multi-line declaration, `of` on the opener's line when that line
   fits, and each other section on its own line, one step in; the sections
   are in this order: `of` or the `case` list, `takes`, `labelled`, `returns`,

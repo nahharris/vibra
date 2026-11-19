@@ -7,17 +7,15 @@ use crate::support::{
     GLOBAL_ACTUAL, GLOBAL_EXPECTED, GLOBAL_FAILURE, GLOBAL_RESULT, Spec, module,
     record, runner,
 };
-use vibra_ir_v1::TestAssertion;
-use vibra_ir_v1::boundary::TrapCode;
+use vibra_ir::Trap;
+use vibra_ir::boundary::{Failure, TrapCode};
 use vibra_wasm_run::{MemoryLimit, Outcome, ResultSlot, Runner, RunnerError};
 use wasm_encoder::Instruction;
 
 const PAGE: usize = 65_536;
 
 fn run(spec: &Spec<'_>) -> Outcome {
-    runner()
-        .run_entry(&module(spec))
-        .expect("a runnable module")
+    runner().run_eval(&module(spec)).expect("a runnable module")
 }
 
 #[test]
@@ -52,9 +50,8 @@ fn a_completed_entry_reports_its_result_id() {
 #[test]
 fn a_recorded_trap_is_read_with_its_code_and_origin() {
     for (code, trap) in [
-        (1, TrapCode::InvalidCheckedProgram),
-        (2, TrapCode::UnobservableFunction),
-        (3, TrapCode::InvalidHostValue),
+        (1, TrapCode::of(Trap::InvalidCheckedProgram)),
+        (3, TrapCode::of(Trap::InvalidHostValue)),
     ] {
         let mut entry = record(1, code, 7);
         entry.push(Instruction::Unreachable);
@@ -81,7 +78,7 @@ fn origin_zero_is_no_origin() {
             ..Spec::default()
         }),
         Outcome::Trapped {
-            code: TrapCode::InvalidCheckedProgram,
+            code: TrapCode::of(Trap::InvalidCheckedProgram),
             origin: None
         }
     );
@@ -98,7 +95,10 @@ fn a_stop_with_no_recorded_status_is_the_toolchain_defect() {
     };
     assert!(cause.contains("no recorded status"), "{cause}");
     // The defect is reported as the registered trap with no origin.
-    assert_eq!(Outcome::defect_trap(), TrapCode::InvalidCheckedProgram);
+    assert_eq!(
+        Outcome::defect_trap(),
+        TrapCode::of(Trap::InvalidCheckedProgram)
+    );
 }
 
 #[test]
@@ -116,15 +116,18 @@ fn a_status_outside_the_table_is_a_defect() {
 
 #[test]
 fn a_trap_code_outside_the_table_is_a_defect() {
-    let mut entry = record(1, 9, 0);
-    entry.push(Instruction::Unreachable);
-    assert!(matches!(
-        run(&Spec {
-            entry,
-            ..Spec::default()
-        }),
-        Outcome::Defect { .. }
-    ));
+    // `2` and `4` are unassigned, and never returned.
+    for code in [0, 2, 4, 9] {
+        let mut entry = record(1, code, 0);
+        entry.push(Instruction::Unreachable);
+        assert!(matches!(
+            run(&Spec {
+                entry,
+                ..Spec::default()
+            }),
+            Outcome::Defect { .. }
+        ));
+    }
 }
 
 #[test]
@@ -172,7 +175,7 @@ fn a_failed_assertion_is_read_with_its_operands() {
             ..Spec::default()
         }),
         Outcome::AssertionFailed {
-            failure: TestAssertion::Equal,
+            failure: Failure::AssertEqual,
             origin: Some(4),
             operands: Some((11, u64::MAX)),
         }
@@ -190,7 +193,7 @@ fn a_failed_assertion_is_read_with_its_operands() {
             ..Spec::default()
         }),
         Outcome::AssertionFailed {
-            failure: TestAssertion::True,
+            failure: Failure::AssertTrue,
             origin: Some(5),
             operands: None,
         }
@@ -211,7 +214,7 @@ fn growth_past_the_limit_is_the_host_event_even_if_the_module_continues() {
     };
     let runner = Runner::new(MemoryLimit::new(2 * PAGE)).expect("engine");
     assert_eq!(
-        runner.run_entry(&module(&spec)).expect("runnable"),
+        runner.run_eval(&module(&spec)).expect("runnable"),
         Outcome::MemoryExhausted
     );
 }
@@ -228,7 +231,7 @@ fn growth_within_the_limit_succeeds() {
     };
     let runner = Runner::new(MemoryLimit::new(2 * PAGE)).expect("engine");
     assert_eq!(
-        runner.run_entry(&module(&spec)).expect("runnable"),
+        runner.run_eval(&module(&spec)).expect("runnable"),
         Outcome::Completed {
             result: ResultSlot::from_bits(0),
             live_size: 0
@@ -242,7 +245,7 @@ fn the_limit_exactly_at_the_modules_need_runs_and_one_page_under_does_not() {
     let empty = module(&Spec::default());
     let exactly = Runner::new(MemoryLimit::new(PAGE)).expect("engine");
     assert_eq!(
-        exactly.run_entry(&empty).expect("runnable"),
+        exactly.run_eval(&empty).expect("runnable"),
         Outcome::Completed {
             result: ResultSlot::from_bits(0),
             live_size: 0
@@ -250,7 +253,7 @@ fn the_limit_exactly_at_the_modules_need_runs_and_one_page_under_does_not() {
     );
     let under = Runner::new(MemoryLimit::new(0)).expect("engine");
     assert_eq!(
-        under.run_entry(&empty).expect("runnable"),
+        under.run_eval(&empty).expect("runnable"),
         Outcome::MemoryExhausted
     );
 
@@ -261,12 +264,12 @@ fn the_limit_exactly_at_the_modules_need_runs_and_one_page_under_does_not() {
     });
     let exactly = Runner::new(MemoryLimit::new(3 * PAGE)).expect("engine");
     assert!(matches!(
-        exactly.run_entry(&three).expect("runnable"),
+        exactly.run_eval(&three).expect("runnable"),
         Outcome::Completed { .. }
     ));
     let under = Runner::new(MemoryLimit::new(2 * PAGE)).expect("engine");
     assert_eq!(
-        under.run_entry(&three).expect("runnable"),
+        under.run_eval(&three).expect("runnable"),
         Outcome::MemoryExhausted
     );
 }
@@ -312,8 +315,8 @@ fn a_native_import_nobody_supplies_is_refused_by_name() {
         ..Spec::default()
     };
     let error = runner()
-        .run_entry(&module(&spec))
-        .expect_err("no native is supplied yet");
+        .run_eval(&module(&spec))
+        .expect_err("no such native is supplied");
     assert_eq!(
         error,
         RunnerError::UnsuppliedImport {
@@ -330,7 +333,7 @@ fn a_module_that_is_not_v1_never_reaches_the_engine() {
         ..Spec::default()
     };
     assert!(matches!(
-        runner().run_entry(&module(&spec)),
+        runner().run_eval(&module(&spec)),
         Err(RunnerError::Invalid(_))
     ));
 }

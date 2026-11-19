@@ -2,10 +2,9 @@
 //!
 //! `docs/spec/01-source-language.md`, "Declarations": Vibra has exactly seven
 //! top-level forms. `use` is complete here (`use atom [as identifier]
-//! enduse`); `type` and `interface` have their own modules; the other four
-//! are generic constructs whose bodies are reported `@tool.unavailable`
-//! until their own grammar exists. The generic section rules of "Grammar"
-//! apply to every construct: a repeated section is
+//! enduse`); `type`, `interface`, `fn`, `proc`, `test`, and the module value
+//! `let` have their own modules. The generic section rules of "Grammar" apply
+//! to every construct: a repeated section is
 //! `@syntax.duplicateSection` at the repeated keyword; in a `fn`, `proc`, or
 //! `test`, `do` comes last; a declaration's name comes before its sections;
 //! `as` outside a `use` is `@syntax.invalidForm` at the `as`; and an `impl`
@@ -14,10 +13,13 @@
 
 use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 
+use super::callable::Callable;
 use super::construct::is_trivia;
 use super::interface_decl::InterfaceDecl;
 use super::keyword::BODY_CONSTRUCTS;
 use super::section::{Construct, Section};
+use super::statement::ModuleLet;
+use super::test_decl::Test;
 use super::type_decl::TypeDecl;
 use crate::cst::{CstNode, SyntaxKind};
 
@@ -31,13 +33,13 @@ pub enum Declaration<'a> {
     /// `interface … endinterface`.
     Interface(InterfaceDecl<'a>),
     /// `fn … endfn`.
-    Fn(Construct<'a>),
+    Fn(Callable<'a>),
     /// `proc … endproc`.
-    Proc(Construct<'a>),
-    /// `let … endlet`.
-    Let(Construct<'a>),
+    Proc(Callable<'a>),
+    /// `let … endlet`, a module value.
+    Let(ModuleLet<'a>),
     /// `test … endtest`.
-    Test(Construct<'a>),
+    Test(Test<'a>),
 }
 
 impl<'a> Declaration<'a> {
@@ -52,10 +54,10 @@ impl<'a> Declaration<'a> {
             SyntaxKind::InterfaceDecl => {
                 Self::Interface(InterfaceDecl::new(node, text)?)
             }
-            SyntaxKind::FnDecl => Self::Fn(construct),
-            SyntaxKind::ProcDecl => Self::Proc(construct),
-            SyntaxKind::ModuleLet => Self::Let(construct),
-            SyntaxKind::Test => Self::Test(construct),
+            SyntaxKind::FnDecl => Self::Fn(Callable::new(node, text)?),
+            SyntaxKind::ProcDecl => Self::Proc(Callable::new(node, text)?),
+            SyntaxKind::ModuleLet => Self::Let(ModuleLet::new(node, text)?),
+            SyntaxKind::Test => Self::Test(Test::new(node, text)?),
             _ => return None,
         })
     }
@@ -67,10 +69,9 @@ impl<'a> Declaration<'a> {
             Self::Use(view) => view.construct,
             Self::Type(view) => view.construct(),
             Self::Interface(view) => view.construct(),
-            Self::Fn(construct)
-            | Self::Proc(construct)
-            | Self::Let(construct)
-            | Self::Test(construct) => *construct,
+            Self::Let(view) => view.construct(),
+            Self::Fn(view) | Self::Proc(view) => view.construct(),
+            Self::Test(view) => view.construct(),
         }
     }
 }

@@ -75,10 +75,13 @@ pub const EXPRESSION_WORDS: &[&str] = &["return", "try", "await", "void"];
 pub const TYPE_HEADS: &[&str] = &["Fn", "Proc", "Intent", "Intrinsic"];
 
 /// The sections each declaration kind admits, one row per kind, from the
-/// grammar's `type-item`, `interface-decl`, and `impl` productions. The body
-/// of a `type` (`of` or its `case` list) is part of the declaration's
-/// structure, not a row entry. A section that is not in its kind's row is
-/// `@syntax.invalidSection`.
+/// grammar's `type-item`, `interface-decl`, `impl`, `fn-decl`, `proc-decl`,
+/// `anon-fn`, `anon-proc`, `test`, and `module-let` productions. The
+/// structure of a declaration is not a row entry: the body of a `type` (`of`
+/// or its `case` list), the signature of a callable (`takes`, `labelled`,
+/// `returns`), the `takes` of a `test`, the body `do`, and the `be` of a
+/// module value. A section that
+/// is not in its kind's row is `@syntax.invalidSection`.
 pub const ADMISSIBLE_SECTIONS: &[(&str, &[&str])] = &[
     (
         "type",
@@ -93,19 +96,60 @@ pub const ADMISSIBLE_SECTIONS: &[(&str, &[&str])] = &[
     ),
     ("interface", &["given", "role", "visibility", "doc"]),
     ("impl", &[]),
+    (
+        "fn",
+        &[
+            "given",
+            "requires",
+            "ensures",
+            "visibility",
+            "external",
+            "symbol",
+            "native",
+            "doc",
+        ],
+    ),
+    (
+        "proc",
+        &[
+            "given",
+            "requires",
+            "ensures",
+            "performs",
+            "visibility",
+            "external",
+            "symbol",
+            "doc",
+        ],
+    ),
+    ("anon-fn", &["given", "requires", "ensures"]),
+    ("anon-proc", &["given", "requires", "ensures", "performs"]),
+    ("test", &["performs"]),
+    ("let", &["visibility", "doc"]),
 ];
+
+/// The sections of a callable's signature, admitted by every `fn` and
+/// `proc`, named or anonymous, in the order of the `signature` production.
+pub const SIGNATURE_SECTIONS: &[&str] = &["takes", "labelled", "returns"];
+
+/// The guard sections a member of an `impl` does not declare, from the type
+/// chapter's "Implementations": the contract's guards are its guards.
+pub const IMPLEMENTATION_MEMBER_EXCLUDED: &[&str] = &["requires", "ensures", "where"];
 
 /// The sections admissible only in the embedded standard library; elsewhere
 /// each is `@syntax.invalidSection`.
-pub const STANDARD_LIBRARY_SECTIONS: &[&str] = &["role"];
+pub const STANDARD_LIBRARY_SECTIONS: &[&str] =
+    &["role", "external", "symbol", "native"];
 
 /// The closed tag set of each section whose operand is a tag, from the
-/// source chapter ("Declarations") and the type chapter ("Language core and
-/// standard library"). Any other operand is `@syntax.invalidForm` over the
-/// section.
+/// source chapter ("Declarations" and "External definitions"), the type
+/// chapter ("Language core and standard library"), and the runtime chapter
+/// ("External providers"). Any other operand is `@syntax.invalidForm` over
+/// the section.
 pub const TAG_SETS: &[(&str, &[&str])] = &[
     ("visibility", &["@public", "@private"]),
     ("representation", &["@public", "@private"]),
+    ("external", &["@compiler", "@host"]),
     (
         "role",
         &[

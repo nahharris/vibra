@@ -1,0 +1,12 @@
+id = "V2-SRC-EXPR-do-block"
+rule = "V2-SRC-EXPR-do-block"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#bodies-and-statements: a `do` block holds a body: a `let` statement and an expression statement"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

@@ -1504,7 +1504,11 @@ dependencies = [
  "toml",
  "vibra-diagnostics",
  "vibra-fmt",
+ "vibra-interp",
+ "vibra-ir",
  "vibra-syntax",
+ "vibra-wasm",
+ "vibra-wasm-run",
  "vibra-workspace",
 ]
 
@@ -1530,10 +1534,7 @@ dependencies = [
  "vibra-schema-v1",
  "vibra-syntax-v1",
  "vibra-types-v1",
- "vibra-wasm",
- "vibra-wasm-run",
  "vibra-workspace-v1",
- "wasmparser 0.261.0",
 ]
 
 [[package]]
@@ -1573,6 +1574,17 @@ name = "vibra-fs-scope"
 version = "0.0.1"
 dependencies = [
  "windows-sys",
+]
+
+[[package]]
+name = "vibra-host"
+version = "0.0.1"
+dependencies = [
+ "getrandom",
+ "serde_json",
+ "vibra-diagnostics",
+ "vibra-ir",
+ "vibra-syntax",
 ]
 
 [[package]]
@@ -1624,6 +1636,13 @@ version = "0.0.1"
 dependencies = [
  "vibra-exec",
  "vibra-ir-v1",
+]
+
+[[package]]
+name = "vibra-native"
+version = "0.0.1"
+dependencies = [
+ "vibra-ir",
 ]
 
 [[package]]
@@ -1725,8 +1744,8 @@ dependencies = [
 name = "vibra-wasm"
 version = "0.0.1"
 dependencies = [
- "vibra-diagnostics-v1",
- "vibra-ir-v1",
+ "vibra-diagnostics",
+ "vibra-ir",
  "wasm-encoder 0.261.0",
 ]
 
@@ -1734,9 +1753,11 @@ dependencies = [
 name = "vibra-wasm-run"
 version = "0.0.1"
 dependencies = [
- "vibra-host-v1",
- "vibra-ir-v1",
- "vibra-native-v1",
+ "vibra-diagnostics",
+ "vibra-interp",
+ "vibra-ir",
+ "vibra-native",
+ "vibra-wasm",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
  "wasmtime",

@@ -1,0 +1,17 @@
+id = "V2-SRC-EXPR-pattern-reserved-binder"
+rule = "V2-SRC-EXPR-pattern-reserved-binder"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#reserved-words: a reserved word as a pattern binder is a reserved declaration at the word, and the arm still binds it"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+tree = "tree.vibon"
+
+[[expect.diagnostics]]
+code = "@name.reservedDeclaration"
+level = "@error"
+span = { start = 46, end = 51 }

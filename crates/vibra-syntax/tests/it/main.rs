@@ -10,7 +10,10 @@
 
 mod support;
 
+mod callable;
 mod data;
+mod examples;
+mod expr;
 mod lexer;
 mod schema;
 mod source;

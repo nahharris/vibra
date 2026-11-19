@@ -101,7 +101,8 @@ fn a_recovered_document_is_returned_byte_for_byte() {
     for input in ["[1u8}", "\"open", "{a: [1u8 2u8}", "{a:   foo}", "{} {}"] {
         assert_eq!(format(input), input);
     }
-    let source = "fn f returns r: I32 do return 1i32 endfn";
+    // A `fn` without `returns` is recovered.
+    let source = "fn f takes {x: I32} do return x endfn";
     assert_eq!(
         format_document(&parse_source(None, source.as_bytes())).as_deref(),
         Some(source)
@@ -132,8 +133,7 @@ fn corpus_inputs(directory: &Path, found: &mut Vec<PathBuf>) {
 fn formatting_is_idempotent_over_the_corpus_inputs() {
     let cases = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../conformance/cases");
     let mut inputs = Vec::new();
-    corpus_inputs(&cases.join("SRC-READER"), &mut inputs);
-    corpus_inputs(&cases.join("SRC-DECL"), &mut inputs);
+    corpus_inputs(&cases, &mut inputs);
     assert!(
         inputs.len() >= 44,
         "the reader corpus has its inputs: {inputs:?}"

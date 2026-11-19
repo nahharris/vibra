@@ -13,15 +13,23 @@
 use wasm_encoder::{BlockType, Instruction as I, MemArg, ValType};
 
 use crate::layout::{
-    self, CellClass, Kind, MAX_CLASS, MIN_CLASS, TABLE_ENTRY_SIZE,
-    TABLE_FIRST_CAPACITY, header, state,
+    self, CellClass, MAX_CLASS, MIN_CLASS, TABLE_ENTRY_SIZE, TABLE_FIRST_CAPACITY,
+    header, state,
 };
-use vibra_ir_v1::boundary::{
+use vibra_ir::Trap;
+use vibra_ir::boundary::{
     FAILURE_ACTUAL_EXPORT, FAILURE_EXPECTED_EXPORT, FAILURE_EXPORT, LENGTH_EXPORT,
     LIVE_SIZE_EXPORT, ORIGIN_EXPORT, READ_F32_EXPORT, READ_F64_EXPORT, READ_I32_EXPORT,
     READ_I64_EXPORT, READ_ID_EXPORT, RELEASE_EXPORT, RESULT_EXPORT, STATUS_EXPORT,
     TRAP_CODE_EXPORT, TrapCode, VARIANT_EXPORT,
 };
+
+/// The trap code of `@runtime.invalidCheckedProgram`.
+pub(crate) const INVALID_CHECKED_PROGRAM: i32 =
+    TrapCode::of(Trap::InvalidCheckedProgram).code();
+
+/// The trap code of `@runtime.invalidHostValue`.
+pub(crate) const INVALID_HOST_VALUE: i32 = TrapCode::of(Trap::InvalidHostValue).code();
 
 /// An instruction with no borrowed data.
 pub(crate) type Ins = I<'static>;
@@ -91,10 +99,9 @@ pub struct Routines {
     pub equal: u32,
     /// The first of the exported accessors, in the order they are exported.
     pub first_accessor: u32,
-    /// `(id) -> ()`: the `vibra_v1_release` accessor, which the module also
-    /// calls to drop the ID it issued for a borrowed argument of a host call.
+    /// `(id) -> ()`: the `vibra_v1_release` accessor.
     pub release_id: u32,
-    /// `() -> ()`: the `vibra_v1_entry` export.
+    /// The `vibra_v1_eval` or `vibra_v1_test` export.
     pub entry_export: u32,
     /// `(function, slots) -> frame`: pushes an activation's frame on the frame
     /// stack and makes it the top.
@@ -111,10 +118,6 @@ pub struct Routines {
     /// object, with a count of one. It is the last routine and is present only
     /// when the module builds an object.
     pub new: u32,
-    /// Whether the allocator also counts, for the performance baseline: it adds
-    /// one to `alloc_count` and raises `live_peak` at every allocation. A module
-    /// built without it has neither instruction.
-    pub measure: bool,
 }
 
 /// The accessors in the order they are emitted and exported.
@@ -219,7 +222,6 @@ impl Routines {
             run: first_accessor + accessors + 3,
             reframe: first_accessor + accessors + 4,
             new: first_accessor + accessors + 5,
-            measure: false,
         }
     }
 }
@@ -362,12 +364,9 @@ pub(crate) fn push(code: &mut Vec<Ins>, parts: &[Ins]) {
     code.extend_from_slice(parts);
 }
 
-/// The trap `@runtime.invalid-host-value`, as the instructions that raise it.
+/// The trap `@runtime.invalidHostValue`, as the instructions that raise it.
 pub(crate) fn invalid_host_value(fns: &Routines) -> [Ins; 2] {
-    [
-        c32(TrapCode::InvalidHostValue.code()),
-        I::Call(fns.stop_trap),
-    ]
+    [c32(INVALID_HOST_VALUE), I::Call(fns.stop_trap)]
 }
 
 // -- the routines -----------------------------------------------------------
@@ -533,18 +532,6 @@ fn alloc(fns: &Routines) -> Routine {
     push(&mut code, &[ZERO]);
     push(&mut code, &load_state64(state::LIVE_SIZE));
     push(&mut code, &[get(bytes), I::I64Add, st64(state::LIVE_SIZE)]);
-    if fns.measure {
-        // The performance baseline's counters: one more allocation, and a new
-        // peak when the live size passes the old one.
-        push(&mut code, &[ZERO]);
-        push(&mut code, &load_state64(state::ALLOC_COUNT));
-        push(&mut code, &[c64(1), I::I64Add, st64(state::ALLOC_COUNT)]);
-        push(&mut code, &load_state64(state::LIVE_SIZE));
-        push(&mut code, &load_state64(state::LIVE_PEAK));
-        push(&mut code, &[I::I64GtU, I::If(EMPTY), ZERO]);
-        push(&mut code, &load_state64(state::LIVE_SIZE));
-        push(&mut code, &[st64(state::LIVE_PEAK), I::End]);
-    }
     push(
         &mut code,
         &[
@@ -1049,7 +1036,7 @@ fn new_id(fns: &Routines) -> Routine {
 
 /// `(id) -> i32`: the handle-table entry of a valid ID. A zero ID, a slot the
 /// table never handed out, and an entry that holds another ID (a released or
-/// never-issued one) are `@runtime.invalid-host-value`.
+/// never-issued one) are `@runtime.invalidHostValue`.
 fn entry_of(fns: &Routines) -> Routine {
     // Locals: 1 slot, 2 entry.
     let (slot, entry) = (1, 2);
@@ -1085,7 +1072,7 @@ fn entry_of(fns: &Routines) -> Routine {
     make(&[I64], &[I32], &[I32, I32], code)
 }
 
-/// Instructions that trap `@runtime.invalid-host-value` unless the kind of the
+/// Instructions that trap `@runtime.invalidHostValue` unless the kind of the
 /// object in `object` is in `mask`.
 fn require_kind(fns: &Routines, object: u32, mask: u32) -> Vec<Ins> {
     let mut code = vec![
@@ -1138,22 +1125,9 @@ fn wide(address: u32) -> Routine {
     make(&[], &[I64], &[], code)
 }
 
-/// `(id) -> ()`: the host drops its hold on an ID.
+/// `(id) -> ()`: the host drops its hold on an ID. The entry of the ID is
+/// freed, and then the value is dropped.
 fn release_id(fns: &Routines) -> Routine {
-    id_release(fns, false)
-}
-
-/// `(id) -> i32`: the module takes the reference an ID's entry held and frees
-/// the entry. The value must be a sealed `(result t e)` value: an enum with a
-/// variant of `ok` or `err`. The offset is the module's, with the count the
-/// entry held, so the host must not release the ID.
-pub(crate) fn adopt(fns: &Routines) -> Routine {
-    id_release(fns, true)
-}
-
-/// The entry of an ID freed, and then, for a release, the value dropped or,
-/// for an adoption, the value checked first and answered.
-fn id_release(fns: &Routines, adopting: bool) -> Routine {
     // Locals: 1 entry, 2 object, 3 slot, 4 live IDs.
     let (entry, object, slot, live) = (1, 2, 3, 4);
     let mut code = vec![
@@ -1165,22 +1139,6 @@ fn id_release(fns: &Routines, adopting: bool) -> Routine {
         ld32(8),
         set(object),
     ];
-    if adopting {
-        // A result is a sealed enum of two variants.
-        code.extend(require_kind(fns, object, 1 << Kind::Enum.code()));
-        code.extend([get(object), ld32(header::UNSEALED), I::If(EMPTY)]);
-        code.extend(invalid_host_value(fns));
-        code.extend([
-            I::End,
-            get(object),
-            ld32(header::VARIANT),
-            c32(1),
-            I::I32GtU,
-            I::If(EMPTY),
-        ]);
-        code.extend(invalid_host_value(fns));
-        code.push(I::End);
-    }
     code.extend([
         get(0),
         I::I32WrapI64,
@@ -1223,10 +1181,7 @@ fn id_release(fns: &Routines, adopting: bool) -> Routine {
     ] {
         code.extend([ZERO, c32(0), st32(address)]);
     }
-    if adopting {
-        code.extend([I::End, get(object), I::End]);
-        return make(&[I64], &[I32], &[I32, I32, I32, I32], code);
-    }
+
     code.extend([I::End, get(object), I::Call(fns.drop), I::End]);
     make(&[I64], &[], &[I32, I32, I32, I32], code)
 }
@@ -1771,78 +1726,52 @@ pub(crate) fn frame_routines(fns: &Routines, dispatch_type: u32) -> Vec<Routine>
     ]
 }
 
-/// The entry export of a program: clears the record and the result, allocates
-/// the module-value state when the program has module values, pushes the
-/// entry's frame, runs the dispatcher, and stores the entry's result in the
-/// result slot. A reference result is registered in the handle table, which
-/// takes its own count, and the activation's count is dropped.
-pub(crate) fn entry_export(
+/// The `vibra_v1_eval` export of an evaluation module: clears the record and
+/// the result, pushes the entry's frame, runs the dispatcher, and stores the
+/// entry's result in the result slot. A reference result is registered in
+/// the handle table, which takes its own count, and the activation's count
+/// is dropped.
+pub(crate) fn eval_export(
     fns: &Routines,
     entry: u32,
     entry_slots: u32,
-    module_values: u32,
     class: ValueClass,
 ) -> Routine {
     // Local 0 is the ID slot (i64), 1 the object.
     let (slot, object) = (0, 1);
-    let mut code = vec![I::Call(fns.begin), ZERO, c64(0), st64(state::RESULT)];
-    code.extend(module_value_state(fns, module_values, object));
-    code.extend([
+    let mut code = vec![
+        I::Call(fns.begin),
+        ZERO,
+        c64(0),
+        st64(state::RESULT),
         c32(index(entry)),
         c32(index(entry_slots)),
         I::Call(fns.push_frame),
         I::Drop,
         I::Call(fns.run),
-    ]);
+    ];
     code.extend(take_ret(fns, class, slot, object));
     code.push(I::End);
     make(&[], &[], &[I64, I32], code)
 }
 
-/// The instance's module-value state, two cells for each value, allocated by
-/// the first run of an exported entry; `object` is a scratch local.
-fn module_value_state(fns: &Routines, module_values: u32, object: u32) -> Vec<Ins> {
-    let mut code = Vec::new();
-    if module_values != 0 {
-        code.extend(load_state32(state::MODULE_VALUES));
-        code.extend([
-            I::I32Eqz,
-            I::If(EMPTY),
-            c32(layout::Kind::Tuple.code().cast_signed()),
-            c32(index(layout::STRIDE_CELLS)),
-            c32(index(module_values.saturating_mul(2))),
-            c32(0),
-            I::Call(fns.new),
-            set(object),
-            ZERO,
-            get(object),
-            st32(state::MODULE_VALUES),
-            I::End,
-        ]);
-    }
-    code
-}
-
 /// One test the `vibra_v1_test` export can run: the function and frame size of
-/// its entry, or `None` for an entry that is not a test (it takes a parameter
-/// or returns a value), which the reference interpreter refuses as an invalid
-/// body.
+/// its entry, or `None` for an entry that is not a test (it returns a value),
+/// which the reference interpreter refuses as an invalid body.
 pub(crate) type TestEntry = Option<(u32, u32)>;
 
 /// The `vibra_v1_test` export: `(i32) -> ()` runs the test at that position in
-/// a fresh instance, as the entry export runs the entry. A position outside the
+/// a fresh instance, as the eval export runs the entry. A position outside the
 /// list, or of an entry that is not a test, is the trap
-/// `@runtime.invalid-checked-program`.
-pub(crate) fn test_export(
-    fns: &Routines,
-    tests: &[TestEntry],
-    module_values: u32,
-) -> Routine {
-    // Local 0 is the position, 1 the object.
-    let object = 1;
-    let mut code = vec![I::Call(fns.begin), ZERO, c64(0), st64(state::RESULT)];
-    code.extend(module_value_state(fns, module_values, object));
-    code.push(I::Block(EMPTY));
+/// `@runtime.invalidCheckedProgram`.
+pub(crate) fn test_export(fns: &Routines, tests: &[TestEntry]) -> Routine {
+    let mut code = vec![
+        I::Call(fns.begin),
+        ZERO,
+        c64(0),
+        st64(state::RESULT),
+        I::Block(EMPTY),
+    ];
     for (position, test) in tests.iter().enumerate() {
         let Some((function, slots)) = test else {
             continue;
@@ -1862,14 +1791,13 @@ pub(crate) fn test_export(
         ]);
     }
     code.extend([
-        c32(vibra_ir_v1::boundary::TrapCode::InvalidCheckedProgram.code()),
+        c32(INVALID_CHECKED_PROGRAM),
         I::Call(fns.stop_trap),
         I::End,
         I::End,
     ]);
-    make(&[I32], &[], &[I32], code)
+    make(&[I32], &[], &[], code)
 }
-
 /// What a completed entry does with the cell it was handed: a scalar's bits go
 /// to the result slot, and an arena value is registered in the handle table.
 fn take_ret(fns: &Routines, class: ValueClass, slot: u32, object: u32) -> Vec<Ins> {
@@ -1990,7 +1918,7 @@ mod tests {
         let mut seen = std::collections::BTreeSet::new();
         for (name, _) in accessor_exports(&fns) {
             assert!(
-                vibra_ir_v1::boundary::FUNCTION_EXPORTS.contains(&name),
+                vibra_ir::boundary::ACCESSOR_EXPORTS.contains(&name),
                 "{name}"
             );
             assert!(seen.insert(name), "{name} is exported twice");

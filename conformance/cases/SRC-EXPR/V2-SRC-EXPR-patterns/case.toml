@@ -1,0 +1,12 @@
+id = "V2-SRC-EXPR-patterns"
+rule = "V2-SRC-EXPR-patterns"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#patterns: a `match` with twelve arms: discard, the four pattern literals, constructors with labelled and positional patterns, and tuple, record, and list patterns"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+tree = "tree.vibon"

@@ -4,8 +4,9 @@
 //! suites": no crate that checks, lowers, or executes a program uses the ambient
 //! filesystem, environment, clock, or random source. The few tooling crates that
 //! read a project, a command line, or a corpus are named below, and the provider
-//! crate `vibra-host-v1` is where the ambient reads of a running program live, so
-//! that every one of them passes through the host provider and a registry row.
+//! crates `vibra-host` and `vibra-host-v1` are where the ambient reads of a
+//! running program live, so that every one of them passes through the host
+//! provider and a registry row.
 
 // A test asserts by panicking, and indexes fixtures it just built.
 use crate::support::{rust_sources, workspace_root};
@@ -13,9 +14,9 @@ use crate::support::{rust_sources, workspace_root};
 use std::collections::BTreeSet;
 use std::path::Path;
 
-/// The crate that reads ambient state on behalf of a running program: the system
-/// provider.
-const PROVIDER_CRATE: &str = "vibra-host-v1";
+/// The crates that read ambient state on behalf of a running program: the
+/// system provider.
+const PROVIDER_CRATES: &[&str] = &["vibra-host", "vibra-host-v1"];
 
 /// The tooling crates that may read ambient state, each for the reason given.
 /// They check, lower, or execute nothing by themselves: they hand explicit
@@ -104,7 +105,7 @@ fn scanned_crates(root: &Path) -> BTreeSet<String> {
     let exempt = TOOLING_EXCEPTIONS
         .iter()
         .map(|(name, _)| *name)
-        .chain([PROVIDER_CRATE])
+        .chain(PROVIDER_CRATES.iter().copied())
         .collect::<BTreeSet<_>>();
     crate_names(root)
         .into_iter()
@@ -182,21 +183,23 @@ fn the_tooling_exceptions_and_the_provider_crate_exist_and_the_provider_does_rea
         );
         assert!(!reason.is_empty());
     }
-    assert!(crates.contains(PROVIDER_CRATE));
-    // The audit is not vacuous: the provider is where the reads are.
-    let provider = scan(&root, PROVIDER_CRATE);
-    for api in [
-        "std::fs",
-        "std::env",
-        "SystemTime",
-        "Instant::now",
-        "getrandom",
-        "io::stdin(",
-    ] {
-        assert!(
-            provider.iter().any(|line| line.contains(api)),
-            "the provider crate no longer reads through `{api}`: {provider:?}"
-        );
+    for provider_crate in PROVIDER_CRATES {
+        assert!(crates.contains(*provider_crate));
+        // The audit is not vacuous: the provider is where the reads are.
+        let provider = scan(&root, provider_crate);
+        for api in [
+            "std::fs",
+            "std::env",
+            "SystemTime",
+            "Instant::now",
+            "getrandom",
+            "io::stdin(",
+        ] {
+            assert!(
+                provider.iter().any(|line| line.contains(api)),
+                "`{provider_crate}` no longer reads through `{api}`: {provider:?}"
+            );
+        }
     }
 }
 
@@ -243,7 +246,7 @@ fn the_emitter_the_checker_and_the_interpreter_are_scanned() {
     for exempt in TOOLING_EXCEPTIONS
         .iter()
         .map(|(name, _)| *name)
-        .chain([PROVIDER_CRATE])
+        .chain(PROVIDER_CRATES.iter().copied())
     {
         assert!(!scanned_crates.contains(exempt), "`{exempt}` is exempt");
     }
@@ -271,8 +274,8 @@ fn an_ambient_read_is_reported_and_comments_and_test_modules_are_not() {
     );
 }
 
-/// The runner starts the executables of the `windows` column in one module,
-/// `native_exe`; the only other process it starts is the baseline's.
+/// The v1 runner starts the executables of the `windows` column in one module,
+/// `native_exe`, and starts no other process.
 #[test]
 fn the_runner_launches_executables_in_one_module() {
     let mut users = Vec::new();
@@ -296,5 +299,5 @@ fn the_runner_launches_executables_in_one_module() {
         }
     }
     users.sort();
-    assert_eq!(users, ["baseline.rs", "native_exe.rs"]);
+    assert_eq!(users, ["native_exe.rs"]);
 }

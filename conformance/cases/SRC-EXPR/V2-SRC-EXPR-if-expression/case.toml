@@ -1,0 +1,12 @@
+id = "V2-SRC-EXPR-if-expression"
+rule = "V2-SRC-EXPR-if-expression"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#if-match-do: an `if` that fits is one line"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

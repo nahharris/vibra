@@ -82,8 +82,8 @@ the vertical-slice rule.
 | 03 | [lexer-and-vibon](steps/03-lexer-and-vibon.md) | vertical | 02 | 12, 13, 24 | `vibra-syntax`, `vibra-fmt` (new), `vibra-conformance`, `conformance/cases`, CI | landed |
 | 04 | [source-skeleton](steps/04-source-skeleton.md) | vertical | 03 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | landed |
 | 05 | [type-declarations](steps/05-type-declarations.md) | vertical | 04 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | landed |
-| 06 | [expressions-and-patterns](steps/06-expressions-and-patterns.md) | vertical | 05 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |
-| 07 | [callables-and-tests-syntax](steps/07-callables-and-tests-syntax.md) | vertical | 06 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | planned |
+| 06 | [expressions-and-patterns](steps/06-expressions-and-patterns.md) | vertical | 05 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | landed |
+| 07 | [callables-and-tests-syntax](steps/07-callables-and-tests-syntax.md) | vertical | 06 | 09, 12, 13, 24, 27 | `vibra-syntax`, `vibra-fmt`, `conformance/cases` | landed |
 | 08 | [reader-exit](steps/08-reader-exit.md) | evidence | 07 | 09, 10, 11, 12, 13, 14, 24, 27 | `vibra-conformance`, `vibra-conformance-v1` (the ignored inventory test deleted), `fuzz/`, `conformance/cases` | planned |
 | 09 | [project-and-source-graph](steps/09-project-and-source-graph.md) | vertical | 03 | 04, 05, 06, 07, 08, 12, 13, 14, 24, 27 | `vibra-workspace` (new), `vibra-conformance`, `conformance/cases` | landed |
 | 10 | [resolve-declarations](steps/10-resolve-declarations.md) | vertical | 07, 09 | 08, 12, 13, 14, 24, 27 | `vibra-resolve` (new), `vibra-workspace`, `vibra-conformance`, `conformance/cases` | planned |
@@ -103,7 +103,7 @@ the vertical-slice rule.
 | 24 | [cli-skeleton](steps/24-cli-skeleton.md) | vertical | 02 | 03 to 23, 27 | `vibra-schema`, `vibra-cli` (new) | landed |
 | 25 | [cli-fmt-check](steps/25-cli-fmt-check.md) | vertical | 08, 15, 24 | 16 to 23, 27 | `vibra-cli`, `vibra-schema`, `vibra-workspace`, `vibra-conformance`, `conformance/cases` | planned |
 | 26 | [cli-test](steps/26-cli-test.md) | vertical | 23, 25 | 18 to 22, 27 | `vibra-cli`, `vibra-schema` | planned |
-| 27 | [runtime-crate-port](steps/27-runtime-crate-port.md) | infrastructure | 03, 13 | 04 to 11, 14 to 26 | `vibra-host`, `vibra-native` (new), `vibra-wasm`, `vibra-wasm-run`, `vibra-ir`, `vibra-conformance`, `vibra-conformance-v1` (its Wasm column removed) | planned |
+| 27 | [runtime-crate-port](steps/27-runtime-crate-port.md) | infrastructure | 03, 13 | 04 to 11, 14 to 26 | `vibra-host`, `vibra-native` (new), `vibra-wasm`, `vibra-wasm-run`, `vibra-ir`, `vibra-conformance`, `vibra-conformance-v1` (its Wasm column removed) | landed |
 | 28 | [cutover](steps/28-cutover.md) | infrastructure | 08, 20, 22, 23, 26, 27; X2-01 (Nexus plan) | — | every `-v1` crate (deleted), `Cargo.toml`, CI, `README.md`, `examples/`, `docs/roadmap` | planned |
 | 29 | [m1-exit](steps/29-m1-exit.md) | evidence | 28 | — | `examples/`, `conformance/cases`, this directory | planned |
 

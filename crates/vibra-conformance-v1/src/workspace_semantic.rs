@@ -9,7 +9,7 @@ use crate::corpus::{Case, HostWorldError};
 use crate::manifest::ConformanceOperation;
 use crate::runner::{
     BackendObservation, CaseObservation, ExecutionObservation, HandlerError,
-    ProfileHandler, WasmObservation,
+    ProfileHandler,
 };
 use crate::test_run::{TestRow, format_test_run};
 
@@ -108,21 +108,12 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             None
         };
         let mut host_event = None;
-        // Both backends run the one checked program of the target.
         // The reference stepper runs the same program over a fresh world.
         let native = if accepted {
             result
                 .check()
                 .program_for_target(target)
                 .map(|program| crate::native::observe_entry(program, &world))
-        } else {
-            None
-        };
-        let wasm = if accepted {
-            result
-                .check()
-                .program_for_target(target)
-                .map(|program| crate::wasm::observe_entry(program, &world))
         } else {
             None
         };
@@ -182,7 +173,6 @@ impl ProfileHandler for InterpreterV1WorkspaceRunHandler {
             diagnostics,
             interpreter,
             host_event,
-            wasm,
             native,
             entry,
             ..CaseObservation::default()
@@ -238,8 +228,7 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
                 ("@command.trap", true)
             }
             // A host event ends the run with no result and no trace; the
-            // event is the diagnostic's code. The Wasm backend runs the same
-            // tests and must end with the same event.
+            // event is the diagnostic's code.
             vibra_workspace_v1::semantic::TestSuiteStatus::OperationalFailure => {
                 let Some(event) = result
                     .diagnostics()
@@ -253,12 +242,6 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
                 return Ok(CaseObservation {
                     accepted: true,
                     host_event: Some(event),
-                    wasm: Some(BackendObservation::new(
-                        crate::wasm::observe_stopped_tests(
-                            result.stopped_programs(),
-                            &world,
-                        ),
-                    )),
                     native: Some(crate::native::observe_tests(
                         result.stopped_programs(),
                     )),
@@ -283,23 +266,6 @@ impl ProfileHandler for InterpreterV1WorkspaceTestHandler {
             native: accepted.then(|| {
                 crate::native::observe_tests(
                     result.items().iter().filter_map(|item| item.program()),
-                )
-            }),
-            // Both backends run the tests of the one workspace.
-            wasm: accepted.then(|| {
-                BackendObservation::new(
-                    match crate::wasm::observe_tests(result.items(), &world) {
-                        crate::wasm::TestsObserved::Rows(rows) => {
-                            WasmObservation::Completed(ExecutionObservation {
-                                result: Some(format_test_run(
-                                    crate::test_run::command_result(&rows),
-                                    &rows,
-                                )),
-                                audit_trace: Vec::new(),
-                            })
-                        }
-                        crate::wasm::TestsObserved::Stopped(observation) => observation,
-                    },
                 )
             }),
             ..CaseObservation::default()

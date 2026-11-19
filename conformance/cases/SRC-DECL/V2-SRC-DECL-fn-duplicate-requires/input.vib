@@ -1,0 +1,1 @@
+fn f takes {x: I32} returns r: I32 requires a requires b do return x endfn

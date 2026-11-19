@@ -10,13 +10,15 @@
 //! VIBON data documents get the source-preserving formatter of
 //! `docs/spec/04-programs-and-packages.md`. Source documents get the layout
 //! of their top-level forms: one blank line between forms, comments kept,
-//! and sections in canonical order.
+//! sections in canonical order, and the expressions, statements, and
+//! patterns of module values.
 //!
 //! # Position in the architecture
 //!
 //! This crate consumes the reader's tree; no language crate depends on it.
 
 mod data;
+mod expr;
 mod layout;
 mod source;
 
@@ -29,9 +31,8 @@ pub const COLUMN_LIMIT: usize = layout::WIDTH;
 ///
 /// Returns `None` when the document has no text: it was never read, or it is
 /// not valid UTF-8. A document with any diagnostic is returned byte for byte,
-/// because recovery may have been ambiguous, and so is a document with an
-/// unavailable form, whose layout is not defined yet. So is a source
-/// document with a comment the layout cannot place. Otherwise the document
+/// because recovery may have been ambiguous, and so is a source document
+/// with a comment the layout cannot place. Otherwise the document
 /// is laid out, with LF line endings and one trailing line feed.
 #[must_use]
 pub fn format_document(document: &Document) -> Option<String> {

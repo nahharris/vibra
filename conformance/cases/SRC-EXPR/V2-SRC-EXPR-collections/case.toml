@@ -1,0 +1,11 @@
+id = "V2-SRC-EXPR-collections"
+rule = "V2-SRC-EXPR-collections"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#anonymous-products-and-collections: a bracket value is a list, a dict when its first entry has a key, and `[:]` is the empty dict"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"

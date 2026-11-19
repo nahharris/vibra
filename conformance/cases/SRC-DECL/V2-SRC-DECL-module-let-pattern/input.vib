@@ -1,0 +1,1 @@
+let {a b}: {U8 U8} be {1u8 2u8} endlet

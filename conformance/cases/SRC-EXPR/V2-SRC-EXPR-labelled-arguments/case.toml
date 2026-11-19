@@ -1,0 +1,12 @@
+id = "V2-SRC-EXPR-labelled-arguments"
+rule = "V2-SRC-EXPR-labelled-arguments"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#application: labelled arguments keep their written order"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "accepted"
+formatted = "formatted.vib"

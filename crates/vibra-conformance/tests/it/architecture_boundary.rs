@@ -28,13 +28,19 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     ("vibra-syntax", &["vibra-diagnostics"]),
     // The new formatter: the layout rules over the reader's tree.
     ("vibra-fmt", &["vibra-diagnostics", "vibra-syntax"]),
-    // The new harness. It grows a dependency with each handler.
+    // The new harness. It grows a dependency with each handler. Its Wasm
+    // column joins the emitter and the runner and compares them with the
+    // reference interpreter on the same checked IR.
     (
         "vibra-conformance",
         &[
             "vibra-diagnostics",
             "vibra-fmt",
+            "vibra-interp",
+            "vibra-ir",
             "vibra-syntax",
+            "vibra-wasm",
+            "vibra-wasm-run",
             "vibra-workspace",
         ],
     ),
@@ -50,6 +56,18 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     ("vibra-workspace", &["vibra-diagnostics", "vibra-syntax"]),
     // The reference interpreter runs checked IR and knows no front end.
     ("vibra-interp", &["vibra-diagnostics", "vibra-ir"]),
+    // The toolchain-owned native code of a transition module: it reads the
+    // closed table of native imports and the arena layout of `vibra-ir` and
+    // reaches no engine and no emitter.
+    ("vibra-native", &["vibra-ir"]),
+    // The host provider over the major-1 host rows: the provider trait, the
+    // system provider, the in-memory world, and the audit event. It reads the
+    // registry of `vibra-ir` and the data grammar of `vibra-syntax` for the two
+    // documents it owns. No crate of the pipeline depends on it.
+    (
+        "vibra-host",
+        &["vibra-diagnostics", "vibra-ir", "vibra-syntax"],
+    ),
     // The leaf. Diagnostics are a language surface and know nothing else.
     ("vibra-diagnostics-v1", &[]),
     // The reader. Emits diagnostics; must not reach the formatter or schemas.
@@ -130,8 +148,8 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
     // The WebAssembly emitter is the second consumer of checked IR, beside the
     // interpreter. It reaches no engine, and it does not reach the native-code
     // crate either: a module names a native only by the import names recorded
-    // in `vibra-ir-v1`.
-    ("vibra-wasm", &["vibra-diagnostics-v1", "vibra-ir-v1"]),
+    // in `vibra-ir`. Its tests read diagnostic codes.
+    ("vibra-wasm", &["vibra-diagnostics", "vibra-ir"]),
     // The toolchain-owned native code, written once against a value-access
     // interface that the interpreter and the runner each implement. It reaches
     // no engine and no emitter: it reads the closed table of native imports and
@@ -150,12 +168,20 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
         &["vibra-diagnostics-v1", "vibra-ir-v1", "vibra-syntax-v1"],
     ),
     // The runner is the only crate that depends on the engine. It reads the
-    // boundary names and codes recorded in `vibra-ir-v1`, and it supplies the
-    // imports of the native-code crate over the instance memory. It
-    // does not depend on the emitter: the harness joins them.
+    // boundary names and codes recorded in `vibra-ir`, and it supplies the
+    // imports of the native-code crate over the instance memory; a module
+    // imports nothing else. It does not depend on the emitter: the harness
+    // joins them. Its tests emit programs and run them beside the reference
+    // interpreter.
     (
         "vibra-wasm-run",
-        &["vibra-host-v1", "vibra-ir-v1", "vibra-native-v1"],
+        &[
+            "vibra-diagnostics",
+            "vibra-interp",
+            "vibra-ir",
+            "vibra-native",
+            "vibra-wasm",
+        ],
     ),
     // The actor kernel is generic over an executor and knows no language, no
     // value layout, and no backend: it needs no other crate (N19).
@@ -243,8 +269,6 @@ const ARCHITECTURE: &[(&str, &[&str])] = &[
             "vibra-schema-v1",
             "vibra-resolve-v1",
             "vibra-syntax-v1",
-            "vibra-wasm",
-            "vibra-wasm-run",
             "vibra-workspace-v1",
             "vibra-exec",
             "vibra-host-v1",
@@ -397,7 +421,7 @@ fn workspace_matches_the_declared_architecture() {
 }
 
 /// The number of rows, one for each crate directory.
-const ROWS: usize = 33;
+const ROWS: usize = 35;
 
 #[test]
 fn every_crate_directory_has_exactly_one_row() {
@@ -533,6 +557,7 @@ const SEMANTIC_CRATES: &[&str] = &[
     "vibra-fmt",
     "vibra-ir",
     "vibra-interp",
+    "vibra-native",
     "vibra-diagnostics-v1",
     "vibra-syntax-v1",
     "vibra-resolve-v1",
@@ -597,8 +622,8 @@ fn only_the_harness_depends_on_the_runner() {
     for (name, edges) in workspace_graph(&workspace_root()) {
         assert_eq!(
             edges.contains(RUNNER_CRATE),
-            name == "vibra-conformance-v1",
-            "`{name}`: only `vibra-conformance-v1` depends on `{RUNNER_CRATE}`"
+            name == "vibra-conformance",
+            "`{name}`: only `vibra-conformance` depends on `{RUNNER_CRATE}`"
         );
     }
 }
@@ -625,23 +650,21 @@ fn the_emitter_has_no_engine_and_no_native_code_crate() {
         };
         assert_eq!(
             section("dependencies"),
-            BTreeSet::from(["vibra-ir-v1".to_owned(), "wasm-encoder".to_owned()]),
-            "the emitter depends on `vibra-ir-v1` and the encoder only (`vibra-diagnostics-v1` \
-             is permitted but unused)"
+            BTreeSet::from(["vibra-ir".to_owned(), "wasm-encoder".to_owned()]),
+            "the emitter depends on `vibra-ir` and the encoder only"
         );
         assert!(
             section("dev-dependencies")
-                .is_subset(&BTreeSet::from(["vibra-diagnostics-v1".to_owned()])),
-            "the emitter's tests may use `vibra-diagnostics-v1` and nothing else"
+                .is_subset(&BTreeSet::from(["vibra-diagnostics".to_owned()])),
+            "the emitter's tests may use `vibra-diagnostics` and nothing else"
         );
         assert!(section("build-dependencies").is_empty());
     }
     assert!(checked, "the emitter crate exists");
 }
 
-/// The toolchain-owned native code crate. It is written once and called by both
-/// backends: the interpreter directly, and the runner for the imports of a
-/// module. The emitter never depends on it.
+/// The v1 toolchain-owned native code crate, which the v1 reference
+/// interpreter and Nexus call. The emitter never depends on it.
 const NATIVE_CRATE: &str = "vibra-native-v1";
 
 #[test]
@@ -656,8 +679,8 @@ fn only_the_two_backends_run_the_native_code_and_it_reaches_neither_the_engine_n
     assert_eq!(
         dependents,
         // Nexus hands the native code a view of its value store (N7).
-        BTreeSet::from(["vibra-interp-v1", "vibra-nexus", "vibra-wasm-run"]),
-        "the reference interpreter, the runner, and Nexus call the native code, and nothing else does"
+        BTreeSet::from(["vibra-interp-v1", "vibra-nexus"]),
+        "the v1 reference interpreter and Nexus call the v1 native code, and nothing else does"
     );
     let own = graph.get(NATIVE_CRATE).expect("the native crate exists");
     assert_eq!(
@@ -680,9 +703,9 @@ fn only_the_two_backends_run_the_native_code_and_it_reaches_neither_the_engine_n
     }
 }
 
-/// The host provider crate. The reference interpreter and the runner may call it,
-/// and the harness depends on it to decode a case's host world and hand each
-/// backend a fresh provider. The emitter and the language phases never do: a
+/// The v1 host provider crate. The v1 reference interpreter and the native
+/// track may call it, and the v1 harness depends on it to decode a case's host
+/// world and hand each backend a fresh provider. The emitter and the language phases never do: a
 /// module names a host operation only by the registry symbol and signature that
 /// `vibra-ir-v1` records.
 const HOST_CRATE: &str = "vibra-host-v1";
@@ -706,7 +729,6 @@ fn only_the_backends_and_the_harness_depend_on_the_host_provider() {
         // its `harness` profile a world provider.
         "vibra-nexus-bridge",
         "vibra-nexus-eval",
-        "vibra-wasm-run",
         "vibra-workspace-v1",
     ]);
     assert!(

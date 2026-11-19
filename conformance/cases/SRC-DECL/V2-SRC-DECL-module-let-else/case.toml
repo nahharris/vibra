@@ -1,0 +1,16 @@
+id = "V2-SRC-DECL-module-let-else"
+rule = "V2-SRC-DECL-module-let-else"
+profile = "readerV2"
+operation = "reader"
+description = "01-source-language.md#module-values: a module value has no `else` fallback: an invalid form over the module value"
+
+[inputs]
+source = "input.vib"
+
+[expect]
+verdict = "refuted"
+
+[[expect.diagnostics]]
+code = "@syntax.invalidForm"
+level = "@error"
+span = { start = 0, end = 39 }
