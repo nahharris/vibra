@@ -10,6 +10,7 @@
 
 use std::fmt;
 
+mod check;
 mod conformance;
 mod constant;
 mod encode;

@@ -621,7 +621,7 @@ fn write_node<'v>(
         }
         (Type::Void, Value::Void) => out.push_str("void"),
         (Type::Any | Type::Interface(..), Value::Interface { held_type, held }) => {
-            if held_type.is_interface_value() {
+            if held_type.is_interface_value() || held_type.depth() > Type::MAX_DEPTH {
                 return Err(mismatch(ty, value));
             }
             out.push_str("{kind: @interface held: {format: @value.v2 typeInfo: ");

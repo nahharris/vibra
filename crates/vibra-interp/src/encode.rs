@@ -422,6 +422,11 @@ fn from_visit<'a>(
             leaf(Repr::Atom(atom))
         }
         (Type::Void, Value::Void) => leaf(Repr::Void),
+        (Type::Any | Type::Interface(..), Value::Interface { held_type, .. })
+            if held_type.depth() > Type::MAX_DEPTH =>
+        {
+            Err(mismatch(ty))
+        }
         (Type::Any | Type::Interface(..), Value::Interface { held_type, held }) => {
             Ok(Node(
                 RuntimeShape::Interface(held_type.clone()),
@@ -451,6 +456,13 @@ fn from_visit<'a>(
         (Type::Record(fields), Value::Record(written)) => {
             let (names, children) = neutral_fields(fields.entries(), written, ty)?;
             Ok(Node(RuntimeShape::Record(names), children))
+        }
+        (Type::Fn(_) | Type::Proc(_), Value::Function { type_arguments, .. })
+            if type_arguments
+                .iter()
+                .any(|argument| argument.depth() > Type::MAX_DEPTH) =>
+        {
+            Err(mismatch(ty))
         }
         (
             Type::Fn(_) | Type::Proc(_),

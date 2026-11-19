@@ -441,6 +441,12 @@ pub struct Substitution<'a> {
 }
 
 impl Type {
+    /// The deepest a type of the checked IR nests: a type written in a
+    /// module set, an expression, or a value, and a type the check of a
+    /// body works out. Within it the host may recurse over a type; the
+    /// checked IR rejects a deeper one before any such recursion.
+    pub const MAX_DEPTH: usize = 64;
+
     /// The compiler-owned scalar types, in the order of the chapter's wire
     /// atoms.
     pub const SCALARS: [Self; 14] = [
@@ -560,11 +566,45 @@ impl Type {
         found
     }
 
-    /// Calls `visit` on this type and on every type nested in it.
+    /// Calls `visit` on this type and on every type nested in it, outermost
+    /// first and then in [`Self::components`] order.
     pub fn visit(&self, visit: &mut impl FnMut(&Self)) {
-        visit(self);
-        for component in self.components() {
-            component.visit(visit);
+        let mut pending = vec![self];
+        while let Some(ty) = pending.pop() {
+            visit(ty);
+            pending.extend(ty.components().into_iter().rev());
+        }
+    }
+
+    /// The number of levels this type nests: one for a type with no
+    /// component. It is measured without recursing.
+    #[must_use]
+    pub fn depth(&self) -> usize {
+        let mut deepest = 0;
+        let mut pending = vec![(self, 1_usize)];
+        while let Some((ty, depth)) = pending.pop() {
+            deepest = deepest.max(depth);
+            let below = depth.saturating_add(1);
+            pending.extend(ty.components().into_iter().map(|inner| (inner, below)));
+        }
+        deepest
+    }
+
+    /// Checks that this type nests at most [`Self::MAX_DEPTH`] levels, the
+    /// bound under which every other operation on a type may recurse over
+    /// it.
+    ///
+    /// # Errors
+    ///
+    /// [`IrError::InvalidType`] for a deeper type.
+    pub fn check_depth(&self) -> Result<(), IrError> {
+        if self.depth() <= Self::MAX_DEPTH {
+            Ok(())
+        } else {
+            Err(IrError::InvalidType(format!(
+                "a type nested more than {} levels deep",
+                Self::MAX_DEPTH
+            )))
         }
     }
 
@@ -599,47 +639,53 @@ impl Type {
     }
 
     /// Checks the shape of this type where `scope` says which open forms are
-    /// valid: a record has a field, an atom is spelled as one, a binder is in
-    /// range, and `Self` and association slots appear only in an interface
-    /// member.
+    /// valid: it nests at most [`Self::MAX_DEPTH`] levels, a record has a
+    /// field, an atom is spelled as one, a binder is in range, and `Self` and
+    /// association slots appear only in an interface member.
     ///
     /// # Errors
     ///
-    /// The first violation found.
+    /// The first violation found, a type nested too deep before any other.
     pub fn validate(&self, scope: OpenScope<'_>) -> Result<(), IrError> {
-        match self {
-            Self::AtomSingleton(atom) if !is_atom_path(atom) => {
-                return Err(IrError::InvalidType(format!("`@{atom}` is not an atom")));
-            }
-            Self::Record(fields) if fields.is_empty() => {
-                return Err(IrError::InvalidType(
-                    "a record type has at least one field".to_owned(),
-                ));
-            }
-            Self::Binder(index) if *index >= scope.binders() => {
-                return Err(IrError::MisplacedOpenForm(format!(
-                    "binder {index} with {} binders in scope",
-                    scope.binders()
-                )));
-            }
-            Self::SelfType if !matches!(scope, OpenScope::InterfaceMember { .. }) => {
-                return Err(IrError::MisplacedOpenForm(
-                    "`Self` outside a member of an interface".to_owned(),
-                ));
-            }
-            Self::Associated(name) => match scope {
-                OpenScope::InterfaceMember { associated, .. }
-                    if associated.iter().any(|declared| declared == name) => {}
-                _ => {
-                    return Err(IrError::MisplacedOpenForm(format!(
-                        "association slot `{name}` outside the interface that declares it"
+        self.check_depth()?;
+        let mut pending = vec![self];
+        while let Some(ty) = pending.pop() {
+            match ty {
+                Self::AtomSingleton(atom) if !is_atom_path(atom) => {
+                    return Err(IrError::InvalidType(format!(
+                        "`@{atom}` is not an atom"
                     )));
                 }
-            },
-            _ => {}
-        }
-        for component in self.components() {
-            component.validate(scope)?;
+                Self::Record(fields) if fields.is_empty() => {
+                    return Err(IrError::InvalidType(
+                        "a record type has at least one field".to_owned(),
+                    ));
+                }
+                Self::Binder(index) if *index >= scope.binders() => {
+                    return Err(IrError::MisplacedOpenForm(format!(
+                        "binder {index} with {} binders in scope",
+                        scope.binders()
+                    )));
+                }
+                Self::SelfType
+                    if !matches!(scope, OpenScope::InterfaceMember { .. }) =>
+                {
+                    return Err(IrError::MisplacedOpenForm(
+                        "`Self` outside a member of an interface".to_owned(),
+                    ));
+                }
+                Self::Associated(name) => match scope {
+                    OpenScope::InterfaceMember { associated, .. }
+                        if associated.iter().any(|declared| declared == name) => {}
+                    _ => {
+                        return Err(IrError::MisplacedOpenForm(format!(
+                            "association slot `{name}` outside the interface that declares it"
+                        )));
+                    }
+                },
+                _ => {}
+            }
+            pending.extend(ty.components().into_iter().rev());
         }
         Ok(())
     }

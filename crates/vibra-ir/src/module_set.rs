@@ -13,13 +13,12 @@ use std::sync::Arc;
 
 use crate::conformance::Evidence;
 use crate::encode::{TypeTable, encode_value};
-use crate::expr::{Checker, ClosureBody, Expr, Tables, expect};
-use crate::external::{CompilerIntrinsic, RowType};
+use crate::expr::{Checker, Tables, expect};
+use crate::external::CompilerIntrinsic;
 use crate::{
-    Arguments, CallTarget, Constant, Construction, ExitGuard, FnType, Guard,
-    Implementation, InterfaceDefinition, IrError, Library, LibraryTypes, Node,
-    OpenScope, Pattern, SignatureRecord, SourceOrigin, Substitution, Type, TypeBody,
-    TypeDefinition, TypeId,
+    Constant, ExitGuard, FnType, Guard, Implementation, InterfaceDefinition, IrError,
+    Library, LibraryTypes, Node, OpenScope, SignatureRecord, SourceOrigin,
+    Substitution, Type, TypeBody, TypeDefinition, TypeId,
 };
 
 /// A module value: an immutable, typed, lazily initialized `let`.
@@ -311,14 +310,14 @@ pub(crate) fn may_match(created: &Type, callee: &Type) -> bool {
 
 /// The facts a body's check gathers, kept beside the checker.
 #[derive(Debug, Default)]
-struct Gathered {
-    facts: Facts,
-    closures: Vec<(Type, Facts)>,
+pub(crate) struct Gathered {
+    pub(crate) facts: Facts,
+    pub(crate) closures: Vec<(Type, Facts)>,
 }
 
 impl Gathered {
     /// Takes in a closure whose body gathered `inner`, returning its number.
-    fn absorb(&mut self, closure_type: Type, mut inner: Self) -> usize {
+    pub(crate) fn absorb(&mut self, closure_type: Type, mut inner: Self) -> usize {
         let base = self.closures.len();
         inner.facts.rebase(base);
         for (_, facts) in &mut inner.closures {
@@ -332,7 +331,7 @@ impl Gathered {
 }
 
 /// The functions a contract call of `member` on `interface` may select.
-fn contract_targets(
+pub(crate) fn contract_targets(
     tables: &Tables<'_>,
     interface: &TypeId,
     member: &str,
@@ -354,259 +353,12 @@ fn contract_targets(
     targets
 }
 
-fn ordered_targets(tables: &Tables<'_>) -> BTreeSet<usize> {
+pub(crate) fn ordered_targets(tables: &Tables<'_>) -> BTreeSet<usize> {
     tables
         .library
         .get(Library::Ordered)
         .map(|ordered| contract_targets(tables, ordered, "compare"))
         .unwrap_or_default()
-}
-
-/// Walks a body that has been checked and gathers its facts. Types come from
-/// a second check of each callee, which has passed once already.
-fn gather(
-    checker: &mut Checker<'_>,
-    node: &Node,
-    out: &mut Gathered,
-) -> Result<(), IrError> {
-    let tables = checker.tables;
-    match &node.expr {
-        Expr::Global(index) => {
-            out.facts.reads.insert(*index);
-        }
-        Expr::Function {
-            function,
-            type_arguments,
-        } => {
-            let ty = tables.function_type(*function, type_arguments)?;
-            out.facts.values.push((Callable::Function(*function), ty));
-        }
-        Expr::Closure { closure, captures } => {
-            for capture in captures {
-                gather(checker, capture, out)?;
-            }
-            let mut inner = Gathered::default();
-            gather_closure(checker, closure, &mut inner)?;
-            let number = out.absorb(closure.value_type.clone(), inner);
-            out.facts
-                .values
-                .push((Callable::Closure(number), closure.value_type.clone()));
-        }
-        Expr::Intrinsic {
-            intrinsic,
-            type_arguments,
-            arguments,
-        } => {
-            for parameter in intrinsic.row().parameters {
-                if let RowType::Fn(..) = parameter {
-                    out.facts
-                        .indirect
-                        .push(parameter.instantiate(tables.library, type_arguments)?);
-                }
-            }
-            for argument in arguments {
-                gather(checker, argument, out)?;
-            }
-        }
-        Expr::Construct {
-            value_type,
-            construction,
-        } => {
-            if let Type::Declared(id, _) = value_type {
-                if tables.library.get(Library::Dict) == Some(id) {
-                    out.facts.calls.extend(ordered_targets(&tables));
-                } else if let Some(invariant) = tables.definition(id)?.invariant()
-                    && invariant.consequence.is_some()
-                {
-                    out.facts.calls.insert(invariant.predicate);
-                }
-            }
-            match construction {
-                Construction::Tuple(operands) | Construction::List(operands) => {
-                    for operand in operands {
-                        gather(checker, operand, out)?;
-                    }
-                }
-                Construction::Record(fields) | Construction::Case { fields, .. } => {
-                    for (_, operand) in fields {
-                        gather(checker, operand, out)?;
-                    }
-                }
-                Construction::Wrapper(operand) => gather(checker, operand, out)?,
-                Construction::Dict(entries) => {
-                    for (key, value) in entries {
-                        gather(checker, key, out)?;
-                        gather(checker, value, out)?;
-                    }
-                }
-            }
-        }
-        Expr::Lookup { collection, key } => {
-            let collection_type = checker.check(collection)?;
-            if tables
-                .library
-                .arguments_of(Library::Dict, &collection_type)
-                .is_some()
-            {
-                out.facts.calls.extend(ordered_targets(&tables));
-            }
-            gather(checker, collection, out)?;
-            gather(checker, key, out)?;
-        }
-        Expr::Call { target, arguments } | Expr::TailCall { target, arguments } => {
-            gather_call(checker, target, arguments, out)?;
-        }
-        Expr::Sequence(statements) => {
-            for statement in statements {
-                gather(checker, statement, out)?;
-            }
-        }
-        Expr::Let { slot, value, body } => {
-            let value_type = checker.check(value)?;
-            gather(checker, value, out)?;
-            match slot {
-                Some(slot) => {
-                    let held = checker.bind(*slot, value_type)?;
-                    let gathered = gather(checker, body, out);
-                    checker.restore(vec![(*slot, held)]);
-                    gathered?;
-                }
-                None => gather(checker, body, out)?,
-            }
-        }
-        Expr::LetElse {
-            pattern,
-            value,
-            fallback,
-            body,
-        } => {
-            let value_type = checker.check(value)?;
-            gather(checker, value, out)?;
-            gather(checker, fallback, out)?;
-            gather_bound(checker, pattern, &value_type, body, out)?;
-        }
-        Expr::Match { subject, arms, .. } => {
-            let subject_type = checker.check(subject)?;
-            gather(checker, subject, out)?;
-            for arm in arms {
-                gather_bound(checker, &arm.pattern, &subject_type, &arm.body, out)?;
-            }
-        }
-        Expr::If {
-            condition,
-            then_branch,
-            else_branch,
-        } => {
-            gather(checker, condition, out)?;
-            gather(checker, then_branch, out)?;
-            if let Some(else_branch) = else_branch {
-                gather(checker, else_branch, out)?;
-            }
-        }
-        Expr::Field { record: value, .. }
-        | Expr::Return(value)
-        | Expr::Try(value)
-        | Expr::WidenToInterface { value, .. }
-        | Expr::WidenAtom(value) => gather(checker, value, out)?,
-        Expr::Literal(_)
-        | Expr::Variable { .. }
-        | Expr::Captured { .. }
-        | Expr::Default(_) => {}
-    }
-    Ok(())
-}
-
-fn gather_bound(
-    checker: &mut Checker<'_>,
-    pattern: &Pattern,
-    subject: &Type,
-    body: &Node,
-    out: &mut Gathered,
-) -> Result<(), IrError> {
-    let mut bound = Vec::new();
-    let gathered = checker
-        .check_pattern(pattern, subject, &mut bound)
-        .and_then(|()| gather(checker, body, out));
-    checker.restore(bound);
-    gathered
-}
-
-fn gather_call(
-    checker: &mut Checker<'_>,
-    target: &CallTarget,
-    arguments: &Arguments,
-    out: &mut Gathered,
-) -> Result<(), IrError> {
-    let tables = checker.tables;
-    match target {
-        CallTarget::Direct { function, .. } => {
-            out.facts.calls.insert(*function);
-        }
-        CallTarget::Value(callee) => {
-            let callee_type = checker.check(callee)?;
-            out.facts.indirect.push(callee_type);
-            gather(checker, callee, out)?;
-        }
-        CallTarget::Contract(call) => {
-            out.facts.calls.extend(contract_targets(
-                &tables,
-                &call.interface,
-                &call.member,
-            ));
-        }
-    }
-    for argument in &arguments.positional {
-        gather(checker, argument, out)?;
-    }
-    for (_, argument) in &arguments.labelled {
-        gather(checker, argument, out)?;
-    }
-    Ok(())
-}
-
-fn gather_closure(
-    checker: &Checker<'_>,
-    closure: &ClosureBody,
-    out: &mut Gathered,
-) -> Result<(), IrError> {
-    let mut inner = closure_checker(checker, closure)?;
-    gather(&mut inner, &closure.body, out)
-}
-
-/// The checker of a closure's body, its argument slots bound.
-fn closure_checker<'a>(
-    outer: &Checker<'a>,
-    closure: &ClosureBody,
-) -> Result<Checker<'a>, IrError> {
-    let (parameters, labels, result) = match &closure.value_type {
-        Type::Fn(signature) => (
-            &signature.parameters,
-            &signature.labels,
-            signature.result.clone(),
-        ),
-        Type::Proc(signature) => (
-            &signature.parameters,
-            &signature.labels,
-            signature.result.clone(),
-        ),
-        other => {
-            return Err(IrError::InvalidExpression(format!(
-                "a closure of {other}, which is not callable"
-            )));
-        }
-    };
-    let mut inner = Checker::new(outer.tables, outer.scope, closure.slot_count);
-    inner.evidence = outer.evidence;
-    inner.captures.clone_from(&closure.captures);
-    inner.result = Some(result);
-    inner.in_guard = outer.in_guard;
-    let slot_types = parameters
-        .iter()
-        .chain(labels.entries().iter().map(|(_, value)| value));
-    for (slot, ty) in slot_types.enumerate() {
-        inner.bind(slot, ty.clone())?;
-    }
-    Ok(inner)
 }
 
 fn check_names_distinct<'a>(
@@ -924,9 +676,11 @@ impl CheckedModuleSet {
             tables.check_type(&global.value_type, OpenScope::Closed)?;
             let mut checker =
                 Checker::new(tables, OpenScope::Closed, global.slot_count);
-            expect(&global.value_type, &checker.check(&global.initializer)?)?;
             let mut gathered = Gathered::default();
-            gather(&mut checker, &global.initializer, &mut gathered)?;
+            expect(
+                &global.value_type,
+                &checker.check_gathering(&global.initializer, &mut gathered)?,
+            )?;
             flow.absorb_owner(gathered, |flow, facts| flow.globals.push(facts));
         }
         for (index, function) in self.functions.iter().enumerate() {
@@ -1075,8 +829,7 @@ impl CheckedModuleSet {
         let mut gathered = Gathered::default();
         match &function.body {
             FunctionBody::Expr(body) => {
-                expect(&result, &checker.check(body)?)?;
-                gather(&mut checker, body, &mut gathered)?;
+                expect(&result, &checker.check_gathering(body, &mut gathered)?)?;
             }
             FunctionBody::Intrinsic {
                 intrinsic,
@@ -1089,6 +842,9 @@ impl CheckedModuleSet {
                         expected: row.generics.len(),
                         actual: type_arguments.len(),
                     });
+                }
+                for argument in type_arguments {
+                    argument.check_depth()?;
                 }
                 let parameters = row
                     .parameters
@@ -1130,10 +886,14 @@ impl CheckedModuleSet {
         result: &Type,
         gathered: &mut Gathered,
     ) -> Result<(), IrError> {
-        expect(&table_bool(&self.table)?, &checker.check(&guard.predicate)?)?;
-        expect(result, &checker.check(&guard.consequence)?)?;
-        gather(checker, &guard.predicate, gathered)?;
-        gather(checker, &guard.consequence, gathered)
+        expect(
+            &table_bool(&self.table)?,
+            &checker.check_gathering(&guard.predicate, gathered)?,
+        )?;
+        expect(
+            result,
+            &checker.check_gathering(&guard.consequence, gathered)?,
+        )
     }
 
     /// The declared types and the library bindings, for encoding.
