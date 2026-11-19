@@ -21,11 +21,11 @@ use vibra_ir::{
 };
 use vibra_syntax::source::{
     Argument, Body, Expr, ExprForm, If, Match, MatchArm as ArmView, Pattern,
-    PatternForm, Postfix, Primary, Statement, Suffix,
+    PatternForm, Postfix, Primary, Statement, Suffix, TypeExpr,
 };
 use vibra_syntax::{CstNode, SyntaxKind};
 
-use super::declare::{Entity, NoType, Program, TypeKind, substitute_self};
+use super::declare::{Entity, NoType, Program, Scope, TypeKind, substitute_self};
 use super::literal::{self, LiteralFault};
 
 /// Where each supported declaration lands in the checked module set.
@@ -252,6 +252,10 @@ pub(crate) struct BodyChecker<'p, 'a> {
     source_id: Arc<str>,
     text: &'a str,
     result: Option<Type>,
+    /// The type parameters in scope of the callable being checked.
+    binders: Vec<String>,
+    /// What `Self` denotes in it.
+    self_type: Option<Type>,
     locals: Vec<Local>,
     slots: Vec<Type>,
     /// The diagnostics found.
@@ -287,6 +291,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             source_id,
             text,
             result: None,
+            binders: Vec::new(),
+            self_type: None,
             locals: Vec::new(),
             slots: Vec::new(),
             diagnostics: Vec::new(),
@@ -295,16 +301,22 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     }
 
     /// Checks the body of a callable of type `params -> result` whose
-    /// parameters are named `names`.
+    /// parameters are named `names`, with the type parameters `binders` and
+    /// `self_type` for `Self` in scope.
     pub(crate) fn callable(
         &mut self,
-        params: &[Type],
+        signature: &FnType,
         names: &[(String, ByteSpan)],
-        result: &Type,
+        binders: &[String],
+        self_type: Option<Type>,
         body: Body<'a>,
     ) -> Checked {
+        let params = &signature.parameters;
+        let result = &signature.result;
         self.locals.clear();
         self.slots.clear();
+        self.binders = binders.to_vec();
+        self.self_type = self_type;
         self.result = Some(result.clone());
         for (slot, (ty, (name, _))) in params.iter().zip(names).enumerate() {
             self.slots.push(ty.clone());
@@ -327,6 +339,8 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
     pub(crate) fn initializer(&mut self, ty: &Type, value: Expr<'a>) -> Checked {
         self.locals.clear();
         self.slots.clear();
+        self.binders.clear();
+        self.self_type = None;
         self.result = None;
         let span = expr_span(&value);
         let out = self.run(Task::Expr(value, Ctx::Value(Some(ty.clone()))));
@@ -400,6 +414,28 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             format!("expected `{expected}`, found `{actual}`"),
         );
         None
+    }
+
+    /// The checked type of a type written in a body, reporting why it has
+    /// none.
+    fn written(&mut self, written: TypeExpr<'_>) -> Option<Type> {
+        let scope = Scope {
+            self_type: self.self_type.as_ref(),
+            binders: &self.binders,
+        };
+        match self.program.written(self.module, written, scope) {
+            Ok(ty) => Some(ty),
+            Err(NoType::Unsupported) => {
+                self.unavailable(written.span(), "this type");
+                None
+            }
+            Err(NoType::Unresolved) => None,
+            Err(NoType::Fault(diagnostic)) => {
+                self.diagnostics
+                    .push(diagnostic.with_source_id(self.source_id.as_ref()));
+                None
+            }
+        }
     }
 
     fn new_slot(&mut self, ty: Option<&Type>) -> usize {
@@ -667,9 +703,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         };
                         return (head, consumed + 1);
                     }
-                    if let TypeKind::Variant(cases) = &data.kind
-                        && cases.iter().any(|case| case == field.text())
-                    {
+                    if data.case(field.text()).is_some() {
                         return (
                             Head::Case(index, field.text().to_owned()),
                             consumed + 1,
@@ -1503,9 +1537,10 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             .types
             .iter()
             .find_map(|data| match (&data.kind, &data.id) {
-                (TypeKind::Variant(cases), Some(own)) if own == id => {
-                    Some((data.name.clone(), cases.clone()))
-                }
+                (TypeKind::Variant(cases), Some(own)) if own == id => Some((
+                    data.name.clone(),
+                    cases.iter().map(|case| case.name.clone()).collect(),
+                )),
                 _ => None,
             })
     }
@@ -1628,12 +1663,7 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             return None;
         };
         let data = self.program.types.get(ty)?;
-        match &data.kind {
-            TypeKind::Variant(cases) if cases.iter().any(|known| known == case) => {
-                Some((ty, (*case).to_owned()))
-            }
-            _ => None,
-        }
+        data.case(case).map(|_| (ty, (*case).to_owned()))
     }
 
     fn static_path(&self, names: &[&str]) -> Option<Entity> {
@@ -1690,10 +1720,9 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
             );
             return (Cover::Nothing, None);
         }
-        let at = match &data.kind {
-            TypeKind::Variant(cases) => cases.iter().position(|known| known == case),
-            _ => None,
-        };
+        let at = data
+            .cases()
+            .and_then(|cases| cases.iter().position(|known| known.name == case));
         let cover = at.map_or(Cover::Nothing, Cover::Case);
         (
             cover,
@@ -1799,22 +1828,12 @@ impl<'p, 'a> BodyChecker<'p, 'a> {
                         state.failed = true;
                     }
                     let written = match view.written_type() {
-                        Some(written) => {
-                            match self.program.written(self.module, written, None) {
-                                Ok(ty) => Some(ty),
-                                Err(NoType::Unsupported) => {
-                                    self.unavailable(written.span(), "this type");
-                                    state.failed = true;
-                                    None
-                                }
-                                Err(NoType::Unresolved) => {
-                                    state.failed = true;
-                                    None
-                                }
-                            }
-                        }
+                        Some(written) => self.written(written),
                         None => None,
                     };
+                    if view.written_type().is_some() && written.is_none() {
+                        state.failed = true;
+                    }
                     let Some(value) = view.value() else {
                         state.failed = true;
                         state.pieces.push(None);

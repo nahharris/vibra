@@ -7,14 +7,20 @@
 //! names here are looked up without reporting: a name that does not resolve
 //! leaves an error type that reports nothing again.
 //!
-//! The checker supports `fn` declarations with bare-name parameters and
-//! written scalar, variant, and `Fn` types; module values of those types;
-//! variant types whose cases have no fields, with their members; and, in the
-//! embedded standard library, the intrinsic scalar types with their external
-//! members, the `Str` and `Bytes` wrappers, and interfaces whose members are
-//! abstract and not generic, with the implementations of them. Any other
+//! The checker supports `fn` declarations with bare-name parameters, type
+//! parameters bounded by `Any`, and written types of every form but `Proc`,
+//! `Intent`, and interface values; module values of those types; wrappers,
+//! declared tuples, declared records, and variant types, generic or not, with
+//! their members; and, in the embedded standard library, the intrinsic
+//! scalar types and `List(T)` with their external members, and interfaces
+//! whose abstract members are not generic, with the implementations of them.
+//! A default member of such an interface is skipped with a note. Any other
 //! declaration of a local module is `@tool.unavailable` over the declaration;
 //! one of the standard library is skipped with a note.
+//!
+//! A written type nests at most [`Type::MAX_DEPTH`] levels, measured before
+//! it is converted; an applied type supplies exactly its head's parameters;
+//! and the key of a `Dict` implements `Ordered`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -23,7 +29,7 @@ use vibra_diagnostics::{ByteSpan, Diagnostic, DiagnosticCode};
 use vibra_ir::external::compiler::CompilerIntrinsic;
 use vibra_ir::{FnType, Library, Type, TypeId};
 use vibra_syntax::source::{
-    Callable, Declaration, ExprForm, Impl, InterfaceDecl, Module, ModuleLet,
+    Callable, Declaration, ExprForm, Given, Impl, InterfaceDecl, Module, ModuleLet,
     PatternForm, Primary, SourceOptions, Suffix, TypeBody, TypeDecl, TypeExpr,
     TypeForm,
 };
@@ -98,15 +104,35 @@ pub(crate) struct ModuleData<'a> {
     pub(crate) scope: BTreeMap<String, Entity>,
 }
 
-/// The shape of a declared type.
+/// One case of a variant type.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CaseData {
+    pub(crate) name: String,
+    /// The named fields in declaration order, `None` for a case without
+    /// fields. A type parameter is a [`Type::Binder`].
+    pub(crate) fields: Option<Vec<(String, Type)>>,
+}
+
+/// The shape of a declared type. A type parameter in a representation is a
+/// [`Type::Binder`] at its position.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TypeKind {
     /// An intrinsic scalar type of the standard library.
     Scalar(Type),
-    /// A variant type whose cases have no fields, in written order.
-    Variant(Vec<String>),
-    /// A wrapper type of the standard library over its representation.
+    /// The standard library's `List(T)`.
+    List,
+    /// A wrapper over its representation.
     Wrapper(Type),
+    /// A declared tuple over its components.
+    Tuple(Vec<Type>),
+    /// A declared record over its fields, in declaration order.
+    Record(Vec<(String, Type)>),
+    /// A variant type over its cases, in declaration order.
+    Variant(Vec<CaseData>),
+    /// A type whose body is still being read.
+    Pending,
+    /// A type whose body has a fault, reported once at the body.
+    Faulty,
     /// Any other type.
     Unsupported,
 }
@@ -119,23 +145,63 @@ pub(crate) struct TypeData<'a> {
     pub(crate) view: TypeDecl<'a>,
     pub(crate) identity: String,
     pub(crate) kind: TypeKind,
-    /// The checked IR identity of a variant or wrapper type.
+    /// The checked IR identity of a declared type.
     pub(crate) id: Option<TypeId>,
+    /// The type parameters, in written order.
+    pub(crate) params: Vec<String>,
+    /// Whether the representation is visible in every module that sees the
+    /// type: the `representation` section, or else the type's own
+    /// visibility.
+    pub(crate) representation_public: bool,
     /// The members, by name.
     pub(crate) members: BTreeMap<String, usize>,
 }
 
 impl TypeData<'_> {
-    /// The type the declaration denotes, when this checker supports it.
+    /// The type the declaration denotes inside itself: applied to its own
+    /// parameters, when this checker supports it.
     pub(crate) fn self_type(&self) -> Option<Type> {
         match (&self.kind, &self.id) {
             (TypeKind::Scalar(ty), _) => Some(ty.clone()),
-            (TypeKind::Variant(_) | TypeKind::Wrapper(_), Some(id)) => {
-                Some(Type::Declared(id.clone(), Vec::new()))
-            }
+            (TypeKind::List, _) => Some(Type::list(Type::Binder(0))),
+            (TypeKind::Unsupported | TypeKind::Faulty, _) | (_, None) => None,
+            (_, Some(id)) => Some(Type::Declared(
+                id.clone(),
+                (0..self.params.len()).map(Type::Binder).collect(),
+            )),
+        }
+    }
+
+    /// The type the declaration denotes applied to `arguments`.
+    pub(crate) fn applied(&self, arguments: Vec<Type>) -> Option<Type> {
+        match (&self.kind, &self.id) {
+            (TypeKind::Scalar(ty), _) => Some(ty.clone()),
+            (TypeKind::List, _) => arguments.into_iter().next().map(Type::list),
+            (TypeKind::Unsupported | TypeKind::Faulty, _) | (_, None) => None,
+            (_, Some(id)) => Some(Type::Declared(id.clone(), arguments)),
+        }
+    }
+
+    /// The cases of a variant type.
+    pub(crate) fn cases(&self) -> Option<&[CaseData]> {
+        match &self.kind {
+            TypeKind::Variant(cases) => Some(cases),
             _ => None,
         }
     }
+
+    /// The case `name` of a variant type.
+    pub(crate) fn case(&self, name: &str) -> Option<&CaseData> {
+        self.cases()?.iter().find(|case| case.name == name)
+    }
+}
+
+/// The type parameters a written type may name, and what `Self` denotes.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct Scope<'s> {
+    pub(crate) self_type: Option<&'s Type>,
+    /// Each name in scope stands for the [`Type::Binder`] at its position.
+    pub(crate) binders: &'s [String],
 }
 
 /// One `fn`: top level, a member of a type, or a member of an `impl`.
@@ -151,7 +217,10 @@ pub(crate) struct FnData<'a> {
     pub(crate) identity: String,
     /// The qualified name the checked IR records.
     pub(crate) qualified: String,
-    /// The signature, when this checker supports the header.
+    /// The type parameters in scope: the owner's, then its own.
+    pub(crate) binders: Vec<String>,
+    /// The signature, when this checker supports the header; a type
+    /// parameter is a [`Type::Binder`] into `binders`.
     pub(crate) signature: Option<FnType>,
     /// Each parameter's name and span, in order.
     pub(crate) params: Vec<(String, ByteSpan)>,
@@ -231,17 +300,22 @@ pub(crate) struct Program<'a> {
     pub(crate) diagnostics: Vec<Diagnostic>,
     /// The declaration bound to each library declaration.
     pub(crate) library: Vec<(Library, Entity)>,
+    /// The receiver of every written `impl Ordered`.
+    pub(crate) ordered: Vec<Type>,
     local_package: PackageName,
     embedded_package: PackageName,
 }
 
 /// Why a written type has no checked type here.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum NoType {
     /// The form is outside this checker's support.
     Unsupported,
-    /// A name that resolution already reported.
+    /// A name that resolution already reported, or a fault reported
+    /// elsewhere.
     Unresolved,
+    /// A fault of the written type, still to be reported; it has no source.
+    Fault(Box<Diagnostic>),
 }
 
 /// The inputs [`Program::build`] reads beside the parsed modules.
@@ -280,6 +354,7 @@ impl<'a> Program<'a> {
             notes: Vec::new(),
             diagnostics: Vec::new(),
             library: Vec::new(),
+            ordered: Vec::new(),
             local_package: inputs.local.clone(),
             embedded_package: inputs.embedded.clone(),
         };
@@ -294,15 +369,6 @@ impl<'a> Program<'a> {
                 program.prelude.insert(name.clone(), entity);
             }
         }
-        program.type_kinds();
-        program.interface_headers();
-        program.function_headers();
-        program.value_headers();
-        program.implementations(pending_impls);
-        program.str_type = inputs
-            .str_role
-            .as_ref()
-            .and_then(|(module, name)| program.role_type(module, name));
         program.library = inputs
             .library
             .iter()
@@ -312,6 +378,15 @@ impl<'a> Program<'a> {
                     .map(|entity| (*library, entity))
             })
             .collect();
+        program.type_kinds(&pending_impls);
+        program.interface_headers();
+        program.function_headers();
+        program.value_headers();
+        program.implementations(pending_impls);
+        program.str_type = inputs
+            .str_role
+            .as_ref()
+            .and_then(|(module, name)| program.role_type(module, name));
         program.bool_type = inputs
             .bool_role
             .as_ref()
@@ -381,6 +456,15 @@ impl<'a> Program<'a> {
                     let Some(name) = decl.name() else { continue };
                     let index = self.types.len();
                     let type_name = name.text().to_owned();
+                    let params = decl
+                        .params()
+                        .iter()
+                        .map(|param| param.text().to_owned())
+                        .collect::<Vec<_>>();
+                    let representation = decl.representation().or(decl.visibility());
+                    let representation_public = representation
+                        .and_then(|section| section.tag())
+                        .is_some_and(|tag| tag.text() == "@public");
                     self.types.push(TypeData {
                         module: module_index,
                         name: type_name.clone(),
@@ -388,6 +472,8 @@ impl<'a> Program<'a> {
                         identity: identity("", "@type", name.text()),
                         kind: TypeKind::Unsupported,
                         id: None,
+                        params: params.clone(),
+                        representation_public,
                         members: BTreeMap::new(),
                     });
                     self.declare(module_index, &type_name, Entity::Type(index));
@@ -396,6 +482,10 @@ impl<'a> Program<'a> {
                             continue;
                         };
                         let fn_index = self.functions.len();
+                        let mut binders = params.clone();
+                        binders.extend(
+                            member.params().iter().map(|param| param.text().to_owned()),
+                        );
                         self.functions.push(FnData {
                             module: module_index,
                             owner: Some(index),
@@ -407,6 +497,7 @@ impl<'a> Program<'a> {
                                 "{dotted}.{type_name}.{}",
                                 member_name.text()
                             ),
+                            binders,
                             signature: None,
                             params: Vec::new(),
                             external: None,
@@ -445,6 +536,11 @@ impl<'a> Program<'a> {
                         view: callable,
                         identity: identity("", "@fn", name.text()),
                         qualified: format!("{dotted}.{}", name.text()),
+                        binders: callable
+                            .params()
+                            .iter()
+                            .map(|param| param.text().to_owned())
+                            .collect(),
                         signature: None,
                         params: Vec::new(),
                         external: None,
@@ -590,40 +686,131 @@ impl<'a> Program<'a> {
             .or_else(|| self.prelude.get(name).copied())
     }
 
-    /// The checked type of a written type expression, read in `module`, with
-    /// `self_type` standing for `Self`.
+    /// Reports a fault found in a declaration of `module`: as a diagnostic in
+    /// a local module in scope, as a note in the standard library.
+    pub(crate) fn fault(&mut self, module: usize, diagnostic: Diagnostic) {
+        let Some(data) = self.modules.get(module) else {
+            return;
+        };
+        if !data.in_scope {
+            return;
+        }
+        if data.embedded {
+            self.notes.push(format!(
+                "{} has a declaration this checker rejects: {}",
+                data.path,
+                diagnostic.message()
+            ));
+        } else {
+            let diagnostic = diagnostic.with_source_id(data.source_id.as_ref());
+            self.diagnostics.push(diagnostic);
+        }
+    }
+
+    /// Reports why a written type of the declaration `what` has no checked
+    /// type.
+    fn no_type(&mut self, module: usize, span: ByteSpan, what: &str, why: NoType) {
+        match why {
+            NoType::Unsupported => self.unsupported(module, span, what),
+            NoType::Unresolved => {}
+            NoType::Fault(diagnostic) => self.fault(module, *diagnostic),
+        }
+    }
+
+    /// The program index of the type bound to `library`.
+    pub(crate) fn library_index(&self, library: Library) -> Option<usize> {
+        self.library
+            .iter()
+            .find_map(|(binding, entity)| match entity {
+                Entity::Type(index) if *binding == library => Some(*index),
+                _ => None,
+            })
+    }
+
+    /// The library type `library` applied to `arguments`, when supported.
+    pub(crate) fn library_type(
+        &self,
+        library: Library,
+        arguments: Vec<Type>,
+    ) -> Option<Type> {
+        let data = self.types.get(self.library_index(library)?)?;
+        if data.params.len() != arguments.len() {
+            return None;
+        }
+        data.applied(arguments)
+    }
+
+    /// Why `key` cannot key a dict, when it cannot: a callable anywhere in
+    /// its structure is `@type.functionNotEquatable`; any other type that
+    /// does not implement `Ordered`, written or structurally, is
+    /// `@type.invalidDictKey`.
+    pub(crate) fn key_fault(&self, key: &Type) -> Option<DiagnosticCode> {
+        let mut callable = false;
+        key.visit(&mut |ty| {
+            callable |= matches!(ty, Type::Fn(_) | Type::Proc(_) | Type::Intent(_));
+        });
+        if callable {
+            return Some(DiagnosticCode::TypeFunctionNotEquatable);
+        }
+        let mut pending = vec![key];
+        while let Some(ty) = pending.pop() {
+            match ty {
+                Type::Atom | Type::AtomSingleton(_) => {}
+                Type::Tuple(_) | Type::Record(_) => pending.extend(ty.components()),
+                other if self.ordered.contains(other) => {}
+                _ => return Some(DiagnosticCode::TypeInvalidDictKey),
+            }
+        }
+        None
+    }
+
+    /// The checked type of a written type expression, read in `module` in
+    /// `scope`. Its depth is measured first, without recursing, so every
+    /// later walk over it is bounded.
     pub(crate) fn written(
         &self,
         module: usize,
         written: TypeExpr<'_>,
-        self_type: Option<&Type>,
+        scope: Scope<'_>,
     ) -> Result<Type, NoType> {
-        self.written_at(module, written, self_type, 0)
+        if written_depth(written) > Type::MAX_DEPTH {
+            return Err(depth_fault(written.span()));
+        }
+        let ty = self.written_at(module, written, scope)?;
+        if ty.depth() > Type::MAX_DEPTH {
+            return Err(depth_fault(written.span()));
+        }
+        Ok(ty)
     }
 
     fn written_at(
         &self,
         module: usize,
         written: TypeExpr<'_>,
-        self_type: Option<&Type>,
-        depth: usize,
+        scope: Scope<'_>,
     ) -> Result<Type, NoType> {
-        if depth >= Type::MAX_DEPTH {
-            return Err(NoType::Unsupported);
-        }
         match written.form().ok_or(NoType::Unresolved)? {
             TypeForm::Path {
                 path,
                 positional,
                 labelled,
             } => {
-                if !positional.is_empty() || !labelled.is_empty() {
-                    return Err(NoType::Unsupported);
-                }
                 let segments = path.segments();
                 let (first, rest) = segments.split_first().ok_or(NoType::Unresolved)?;
-                if first.text() == "Self" && rest.is_empty() {
-                    return self_type.cloned().ok_or(NoType::Unsupported);
+                if rest.is_empty() && positional.is_empty() && labelled.is_empty() {
+                    if first.text() == "Self" {
+                        return scope.self_type.cloned().ok_or(NoType::Unsupported);
+                    }
+                    if let Some(at) = scope
+                        .binders
+                        .iter()
+                        .position(|binder| binder == first.text())
+                    {
+                        return Ok(Type::Binder(at));
+                    }
+                    if first.text() == "Any" && self.lookup(module, "Any").is_none() {
+                        return Ok(Type::Any);
+                    }
                 }
                 let mut entity = self
                     .lookup(module, first.text())
@@ -638,15 +825,45 @@ impl<'a> Program<'a> {
                         _ => return Err(NoType::Unresolved),
                     };
                 }
-                match entity {
-                    Entity::Type(index) => self
-                        .types
-                        .get(index)
-                        .and_then(TypeData::self_type)
-                        .ok_or(NoType::Unsupported),
-                    Entity::Interface(_) => Err(NoType::Unsupported),
-                    _ => Err(NoType::Unresolved),
+                let index = match entity {
+                    Entity::Type(index) => index,
+                    Entity::Interface(_) => return Err(NoType::Unsupported),
+                    _ => return Err(NoType::Unresolved),
+                };
+                let data = self.types.get(index).ok_or(NoType::Unresolved)?;
+                let written_count = positional.len() + labelled.len();
+                if !labelled.is_empty() || positional.len() != data.params.len() {
+                    return Err(NoType::Fault(Box::new(Diagnostic::new(
+                        DiagnosticCode::TypeTypeArgumentMismatch,
+                        written.span(),
+                        format!(
+                            "`{}` takes {} positional type argument(s), but {written_count} are written",
+                            data.name,
+                            data.params.len()
+                        ),
+                    ))));
                 }
+                match data.kind {
+                    TypeKind::Unsupported => return Err(NoType::Unsupported),
+                    TypeKind::Faulty => return Err(NoType::Unresolved),
+                    _ => {}
+                }
+                let arguments = positional
+                    .iter()
+                    .map(|argument| self.written_at(module, argument.clone(), scope))
+                    .collect::<Result<Vec<_>, _>>()?;
+                if self.library_index(Library::Dict) == Some(index)
+                    && let (Some(key), Some(key_written)) =
+                        (arguments.first(), positional.first())
+                    && let Some(code) = self.key_fault(key)
+                {
+                    return Err(NoType::Fault(Box::new(key_diagnostic(
+                        code,
+                        key_written.span(),
+                        key,
+                    ))));
+                }
+                data.applied(arguments).ok_or(NoType::Unsupported)
             }
             TypeForm::Atom(atom) => Ok(Type::AtomSingleton(
                 atom.text()
@@ -654,6 +871,24 @@ impl<'a> Program<'a> {
                     .unwrap_or(atom.text())
                     .to_owned(),
             )),
+            TypeForm::Tuple(components) => Ok(Type::Tuple(
+                components
+                    .into_iter()
+                    .map(|component| self.written_at(module, component, scope))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            TypeForm::Record(fields) => {
+                let fields = fields
+                    .into_iter()
+                    .map(|(name, field)| {
+                        Ok((
+                            name.text().to_owned(),
+                            self.written_at(module, field, scope)?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, NoType>>()?;
+                Type::record(fields).map_err(|_| NoType::Unsupported)
+            }
             TypeForm::Fn { inputs, result } => {
                 if !inputs.labelled().is_empty() {
                     return Err(NoType::Unsupported);
@@ -661,96 +896,238 @@ impl<'a> Program<'a> {
                 let parameters = inputs
                     .positional()
                     .into_iter()
-                    .map(|input| self.written_at(module, input, self_type, depth + 1))
+                    .map(|input| self.written_at(module, input, scope))
                     .collect::<Result<Vec<_>, _>>()?;
-                let result = self.written_at(module, result, self_type, depth + 1)?;
+                let result = self.written_at(module, result, scope)?;
                 Ok(Type::function(FnType::new(parameters, result)))
             }
-            TypeForm::Tuple(_)
-            | TypeForm::Record(_)
-            | TypeForm::Proc { .. }
-            | TypeForm::Intent { .. } => Err(NoType::Unsupported),
+            TypeForm::Proc { .. } | TypeForm::Intent { .. } => Err(NoType::Unsupported),
         }
     }
 
-    /// Decides the shape of every type.
-    fn type_kinds(&mut self) {
-        let mut kinds = Vec::new();
-        for (index, data) in self.types.iter().enumerate() {
-            let Some(module) = self.modules.get(data.module) else {
+    /// Decides the shape of every type: first which bodies this checker can
+    /// read, then each body, until no type turns out unsupported.
+    fn type_kinds(&mut self, pending_impls: &[(usize, Impl<'a>)]) {
+        for index in 0..self.types.len() {
+            let Some(data) = self.types.get(index) else {
                 continue;
             };
-            let plain = data.view.params().is_empty()
-                && data.view.given().is_none()
-                && data.view.invariant().is_none();
+            let embedded = self
+                .modules
+                .get(data.module)
+                .is_some_and(|module| module.embedded);
+            let plain =
+                data.view.invariant().is_none() && bounds_are_any(data.view.given());
             let kind = match data.view.body() {
-                Some(TypeBody::Intrinsic(tag)) if plain => {
-                    scalar(tag.text()).map_or(TypeKind::Unsupported, TypeKind::Scalar)
-                }
-                Some(TypeBody::Cases(cases))
-                    if plain && cases.iter().all(|case| case.fields().is_none()) =>
-                {
-                    let names = cases
-                        .iter()
-                        .filter_map(|case| {
-                            case.name().map(|name| name.text().to_owned())
-                        })
-                        .collect::<Vec<_>>();
-                    if names.len() == cases.len() {
-                        TypeKind::Variant(names)
+                Some(TypeBody::Intrinsic(tag)) if plain && embedded => {
+                    if tag.text() == "@list" && data.params.len() == 1 {
+                        TypeKind::List
+                    } else if data.params.is_empty() {
+                        scalar(tag.text())
+                            .map_or(TypeKind::Unsupported, TypeKind::Scalar)
                     } else {
                         TypeKind::Unsupported
                     }
                 }
-                Some(TypeBody::Of(written)) if plain && module.embedded => {
-                    list_of_scalar(written)
-                        .map_or(TypeKind::Unsupported, TypeKind::Wrapper)
+                Some(TypeBody::Cases(_) | TypeBody::Of(_)) if plain => {
+                    TypeKind::Pending
                 }
                 _ => TypeKind::Unsupported,
             };
-            kinds.push((index, kind));
-        }
-        for (index, kind) in kinds {
-            let module = self.types.get(index).map(|data| data.module);
-            let span = self
-                .types
-                .get(index)
-                .map(|data| data.view.construct().span());
-            let unsupported = kind == TypeKind::Unsupported;
-            if let Some(data) = self.types.get_mut(index) {
-                if matches!(kind, TypeKind::Variant(_) | TypeKind::Wrapper(_)) {
-                    let path = format!(
-                        "{}.{}",
-                        self.modules
-                            .get(data.module)
-                            .map(|module| module.path.trim_start_matches('@'))
-                            .unwrap_or_default(),
-                        data.name
-                    );
-                    data.id = TypeId::new(path, data.identity.clone()).ok();
-                }
-                data.kind = kind;
-            }
-            if unsupported && let (Some(module), Some(span)) = (module, span) {
-                let what = format!(
-                    "the type `{}`",
-                    self.types
-                        .get(index)
-                        .map(|data| data.name.as_str())
-                        .unwrap_or_default()
+            let id = if kind == TypeKind::Pending {
+                let path = format!(
+                    "{}.{}",
+                    self.modules
+                        .get(data.module)
+                        .map(|module| module.path.trim_start_matches('@'))
+                        .unwrap_or_default(),
+                    data.name
                 );
-                self.unsupported(module, span, &what);
+                TypeId::new(path, data.identity.clone()).ok()
+            } else {
+                None
+            };
+            let kind = if kind == TypeKind::Pending && id.is_none() {
+                TypeKind::Unsupported
+            } else {
+                kind
+            };
+            if let Some(data) = self.types.get_mut(index) {
+                data.kind = kind;
+                data.id = id;
             }
+        }
+        self.ordered = self.ordered_receivers(pending_impls);
+        let mut faults = Vec::new();
+        loop {
+            let mut changed = false;
+            let mut decided = Vec::new();
+            for (index, data) in self.types.iter().enumerate() {
+                if matches!(
+                    data.kind,
+                    TypeKind::Pending
+                        | TypeKind::Wrapper(_)
+                        | TypeKind::Tuple(_)
+                        | TypeKind::Record(_)
+                        | TypeKind::Variant(_)
+                ) {
+                    decided.push((index, self.body_kind(index)));
+                }
+            }
+            for (index, kind) in decided {
+                let Some(data) = self.types.get_mut(index) else {
+                    continue;
+                };
+                match kind {
+                    Ok(kind) => data.kind = kind,
+                    Err(why) => {
+                        changed = true;
+                        data.id = None;
+                        data.kind = match why {
+                            NoType::Fault(diagnostic) => {
+                                faults.push((data.module, *diagnostic));
+                                TypeKind::Faulty
+                            }
+                            NoType::Unsupported | NoType::Unresolved => {
+                                TypeKind::Unsupported
+                            }
+                        };
+                    }
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        for (module, diagnostic) in faults {
+            self.fault(module, diagnostic);
+        }
+        for index in 0..self.types.len() {
+            let Some(data) = self.types.get(index) else {
+                continue;
+            };
+            if data.kind != TypeKind::Unsupported {
+                continue;
+            }
+            let module = data.module;
+            let span = data.view.construct().span();
+            let what = format!("the type `{}`", data.name);
+            self.unsupported(module, span, &what);
         }
     }
 
-    /// Reads every interface whose members are abstract, non-generic `fn`
-    /// members of written supported types.
+    /// The receiver of every `impl Ordered` written in a type without
+    /// parameters.
+    fn ordered_receivers(&self, pending_impls: &[(usize, Impl<'a>)]) -> Vec<Type> {
+        let Some(ordered) = self.library.iter().find_map(|(binding, entity)| {
+            (*binding == Library::Ordered).then_some(*entity)
+        }) else {
+            return Vec::new();
+        };
+        let mut receivers = Vec::new();
+        for (owner, block) in pending_impls {
+            let Some(data) = self.types.get(*owner) else {
+                continue;
+            };
+            if !data.params.is_empty() {
+                continue;
+            }
+            let target = block.target().and_then(|target| match target.form() {
+                Some(TypeForm::Path {
+                    path,
+                    positional,
+                    labelled,
+                }) if positional.is_empty() && labelled.is_empty() => {
+                    match path.segments().as_slice() {
+                        [name] => self.lookup(data.module, name.text()),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            });
+            if target == Some(ordered)
+                && let Some(receiver) = data.self_type()
+            {
+                receivers.push(receiver);
+            }
+        }
+        receivers
+    }
+
+    /// The shape of the body of the type `index`.
+    fn body_kind(&self, index: usize) -> Result<TypeKind, NoType> {
+        let data = self.types.get(index).ok_or(NoType::Unresolved)?;
+        let module = data.module;
+        let self_type = data.self_type();
+        let scope = Scope {
+            self_type: self_type.as_ref(),
+            binders: &data.params,
+        };
+        match data.view.body() {
+            Some(TypeBody::Cases(cases)) => {
+                let mut read = Vec::new();
+                for case in cases {
+                    let name = case.name().ok_or(NoType::Unresolved)?.text().to_owned();
+                    let fields = match case.fields() {
+                        None => None,
+                        Some(fields) => Some(
+                            fields
+                                .into_iter()
+                                .map(|(field, written)| {
+                                    Ok((
+                                        field.text().to_owned(),
+                                        self.written(module, written, scope)?,
+                                    ))
+                                })
+                                .collect::<Result<Vec<_>, NoType>>()?,
+                        ),
+                    };
+                    read.push(CaseData { name, fields });
+                }
+                if read.is_empty() {
+                    return Err(NoType::Unsupported);
+                }
+                Ok(TypeKind::Variant(read))
+            }
+            Some(TypeBody::Of(written)) => {
+                if written_depth(written.clone()) > Type::MAX_DEPTH {
+                    return Err(depth_fault(written.span()));
+                }
+                match written.form() {
+                    Some(TypeForm::Tuple(components)) => Ok(TypeKind::Tuple(
+                        components
+                            .into_iter()
+                            .map(|component| self.written(module, component, scope))
+                            .collect::<Result<Vec<_>, _>>()?,
+                    )),
+                    Some(TypeForm::Record(fields)) => Ok(TypeKind::Record(
+                        fields
+                            .into_iter()
+                            .map(|(field, written)| {
+                                Ok((
+                                    field.text().to_owned(),
+                                    self.written(module, written, scope)?,
+                                ))
+                            })
+                            .collect::<Result<Vec<_>, NoType>>()?,
+                    )),
+                    _ => Ok(TypeKind::Wrapper(self.written(module, written, scope)?)),
+                }
+            }
+            _ => Err(NoType::Unsupported),
+        }
+    }
+
+    /// Reads every interface of the standard library whose abstract members
+    /// are non-generic `fn` members of written supported types. Its default
+    /// members are skipped, each with a note.
     fn interface_headers(&mut self) {
         let mut results = Vec::new();
+        let mut defaults = Vec::new();
         for (index, data) in self.interfaces.iter().enumerate() {
             let view = data.view;
             let mut members = Vec::new();
+            let mut skipped = Vec::new();
             let mut supported = view.params().is_empty()
                 && view.given().is_none()
                 && view.assoc_types().is_empty()
@@ -766,11 +1143,23 @@ impl<'a> Program<'a> {
                     supported = false;
                     break;
                 };
-                if member.body().is_some() || !plain_callable(&member) {
+                if member.body().is_some() {
+                    skipped.push((
+                        data.module,
+                        member.construct().span(),
+                        format!("the default member `{}.{}`", data.name, name.text()),
+                    ));
+                    continue;
+                }
+                if !plain_callable(&member) || !member.params().is_empty() {
                     supported = false;
                     break;
                 }
-                match self.callable_type(data.module, &member, Some(&Type::SelfType)) {
+                let scope = Scope {
+                    self_type: Some(&Type::SelfType),
+                    binders: &[],
+                };
+                match self.callable_type(data.module, &member, scope).ok() {
                     Some((signature, _)) => {
                         let receiver = signature
                             .parameters
@@ -786,6 +1175,12 @@ impl<'a> Program<'a> {
                 }
             }
             results.push((index, supported.then_some(members)));
+            if supported {
+                defaults.append(&mut skipped);
+            }
+        }
+        for (module, span, what) in defaults {
+            self.unsupported(module, span, &what);
         }
         for (index, members) in results {
             let Some(data) = self.interfaces.get(index) else {
@@ -847,29 +1242,29 @@ impl<'a> Program<'a> {
     }
 
     /// The type of a callable header with bare-name parameters and written
-    /// supported types, with the parameter names; `None` otherwise.
+    /// supported types, read in `scope`, with the parameter names.
     pub(crate) fn callable_type(
         &self,
         module: usize,
         view: &Callable<'_>,
-        self_type: Option<&Type>,
-    ) -> Option<(FnType, Vec<(String, ByteSpan)>)> {
+        scope: Scope<'_>,
+    ) -> Result<(FnType, Vec<(String, ByteSpan)>), NoType> {
         let mut parameters = Vec::new();
         let mut names = Vec::new();
         for (pattern, written) in view.takes() {
             let PatternForm::Path(path) = pattern.form() else {
-                return None;
+                return Err(NoType::Unsupported);
             };
             let segments = path.segments();
             let [name] = segments.as_slice() else {
-                return None;
+                return Err(NoType::Unsupported);
             };
             names.push((name.text().to_owned(), name.span()));
-            parameters.push(self.written(module, written, self_type).ok()?);
+            parameters.push(self.written(module, written, scope)?);
         }
-        let (_, result) = view.result()?;
-        let result = self.written(module, result, self_type).ok()?;
-        Some((FnType::new(parameters, result), names))
+        let (_, result) = view.result().ok_or(NoType::Unresolved)?;
+        let result = self.written(module, result, scope)?;
+        Ok((FnType::new(parameters, result), names))
     }
 
     /// Reads the header of every `fn`.
@@ -878,9 +1273,9 @@ impl<'a> Program<'a> {
         for (index, data) in self.functions.iter().enumerate() {
             let owner = data.owner.and_then(|owner| self.types.get(owner));
             let owner_supported = data.owner.is_none()
-                || owner.is_some_and(|owner| owner.kind != TypeKind::Unsupported);
+                || owner.is_some_and(|owner| owner.self_type().is_some());
             if !owner_supported {
-                results.push((index, None, None));
+                results.push((index, Err(NoType::Unresolved), None));
                 continue;
             }
             let self_type = owner.and_then(TypeData::self_type);
@@ -889,36 +1284,35 @@ impl<'a> Program<'a> {
                 .symbol()
                 .and_then(|symbol| symbol.value())
                 .and_then(|symbol| CompilerIntrinsic::from_symbol(&symbol));
-            let header = plain_callable(&data.view)
-                .then(|| {
-                    self.callable_type(data.module, &data.view, self_type.as_ref())
-                })
-                .flatten()
-                .filter(|_| external.is_some() || data.view.body().is_some());
+            let scope = Scope {
+                self_type: self_type.as_ref(),
+                binders: &data.binders,
+            };
+            let header = if !plain_callable(&data.view)
+                || (external.is_none() && data.view.body().is_none())
+            {
+                Err(NoType::Unsupported)
+            } else {
+                self.callable_type(data.module, &data.view, scope)
+            };
             results.push((index, header, external));
         }
         for (index, header, external) in results {
             let Some(data) = self.functions.get(index) else {
                 continue;
             };
-            let report = data.owner.is_none_or(|owner| {
-                self.types
-                    .get(owner)
-                    .is_some_and(|owner| owner.kind != TypeKind::Unsupported)
-            });
             let module = data.module;
             let span = data.view.construct().span();
             let what = format!("the function `{}`", data.qualified);
             match header {
-                Some((signature, params)) => {
+                Ok((signature, params)) => {
                     if let Some(data) = self.functions.get_mut(index) {
                         data.signature = Some(signature);
                         data.params = params;
                         data.external = external;
                     }
                 }
-                None if report => self.unsupported(module, span, &what),
-                None => {}
+                Err(why) => self.no_type(module, span, &what, why),
             }
         }
         for module in 0..self.modules.len() {
@@ -954,7 +1348,9 @@ impl<'a> Program<'a> {
             let ty = data
                 .view
                 .written_type()
-                .and_then(|written| self.written(data.module, written, None).ok());
+                .map_or(Err(NoType::Unresolved), |written| {
+                    self.written(data.module, written, Scope::default())
+                });
             results.push((index, ty));
         }
         for (index, ty) in results {
@@ -965,12 +1361,12 @@ impl<'a> Program<'a> {
             let span = data.view.construct().span();
             let what = format!("the module value `{}`", data.name);
             match ty {
-                Some(ty) => {
+                Ok(ty) => {
                     if let Some(data) = self.values.get_mut(index) {
                         data.ty = Some(ty);
                     }
                 }
-                None => self.unsupported(module, span, &what),
+                Err(why) => self.no_type(module, span, &what, why),
             }
         }
     }
@@ -983,7 +1379,7 @@ impl<'a> Program<'a> {
                 continue;
             };
             let module = data.module;
-            let receiver = data.self_type();
+            let receiver = data.self_type().filter(|_| data.params.is_empty());
             let interface = block.target().and_then(|target| match target.form() {
                 Some(TypeForm::Path {
                     path,
@@ -1028,8 +1424,12 @@ impl<'a> Program<'a> {
                     complete = false;
                     continue;
                 };
-                let header = plain_callable(&member)
-                    .then(|| self.callable_type(module, &member, Some(&receiver)))
+                let scope = Scope {
+                    self_type: Some(&receiver),
+                    binders: &[],
+                };
+                let header = (plain_callable(&member) && member.params().is_empty())
+                    .then(|| self.callable_type(module, &member, scope).ok())
                     .flatten();
                 let declared = expected
                     .iter()
@@ -1073,6 +1473,7 @@ impl<'a> Program<'a> {
                         "{dotted}.{owner_name}.{interface_name}.{}",
                         name.text()
                     ),
+                    binders: Vec::new(),
                     signature: Some(signature),
                     params,
                     external,
@@ -1164,14 +1565,9 @@ impl<'a> Program<'a> {
             match (entity, remaining, applied) {
                 (Entity::Type(ty), [case], true) => {
                     let data = self.types.get(ty)?;
-                    return match &data.kind {
-                        TypeKind::Variant(cases)
-                            if cases.iter().any(|known| known == case) =>
-                        {
-                            Some((ty, (*case).to_owned()))
-                        }
-                        _ => None,
-                    };
+                    let fieldless = data.params.is_empty()
+                        && data.case(case).is_some_and(|found| found.fields.is_none());
+                    return fieldless.then(|| (ty, (*case).to_owned()));
                 }
                 (Entity::Value(next), [], false) => current = next,
                 _ => return None,
@@ -1199,14 +1595,27 @@ impl<'a> Program<'a> {
 }
 
 /// Whether a callable header has only what this checker supports besides
-/// its types: no type parameters, labelled parameters, guards, or row.
+/// its types and type parameters: no labelled parameters, guards, row, or
+/// bound other than `Any`.
 fn plain_callable(view: &Callable<'_>) -> bool {
-    view.params().is_empty()
-        && view.labelled().is_empty()
-        && view.given().is_none()
+    view.labelled().is_empty()
+        && bounds_are_any(view.given())
         && view.requires().is_none()
         && view.ensures().is_none()
         && view.performs().is_none()
+}
+
+/// Whether every entry of a `given` section, if any, is the bound `Any`.
+fn bounds_are_any(given: Option<Given<'_>>) -> bool {
+    given.is_none_or(|given| {
+        given.entries().iter().all(|(_, bound)| {
+            matches!(
+                bound.form(),
+                Some(TypeForm::Path { path, positional, labelled })
+                    if path.dotted() == "Any" && positional.is_empty() && labelled.is_empty()
+            )
+        })
+    })
 }
 
 /// The compiler-owned scalar type of an intrinsic tag.
@@ -1230,42 +1639,65 @@ fn scalar(tag: &str) -> Option<Type> {
     })
 }
 
-/// The representation `List(Char)` or `List(U8)` of a standard-library
-/// wrapper.
-fn list_of_scalar(written: TypeExpr<'_>) -> Option<Type> {
-    let TypeForm::Path {
-        path,
-        positional,
-        labelled,
-    } = written.form()?
-    else {
-        return None;
-    };
-    if path.dotted() != "List" || !labelled.is_empty() {
-        return None;
+/// The number of levels a written type nests, measured as the type
+/// chapter measures a type and without recursing.
+pub(crate) fn written_depth(written: TypeExpr<'_>) -> usize {
+    let mut deepest = 0;
+    let mut pending = vec![(written, 1_usize)];
+    while let Some((written, depth)) = pending.pop() {
+        deepest = deepest.max(depth);
+        let below = depth.saturating_add(1);
+        let children = match written.form() {
+            Some(TypeForm::Path {
+                positional,
+                labelled,
+                ..
+            }) => positional
+                .into_iter()
+                .chain(labelled.into_iter().map(|(_, ty)| ty))
+                .collect(),
+            Some(TypeForm::Tuple(components)) => components,
+            Some(TypeForm::Record(fields)) => {
+                fields.into_iter().map(|(_, ty)| ty).collect()
+            }
+            Some(
+                TypeForm::Fn { inputs, result } | TypeForm::Proc { inputs, result, .. },
+            ) => {
+                let mut children = inputs.positional();
+                children.extend(inputs.labelled().into_iter().map(|(_, ty)| ty));
+                children.push(result);
+                children
+            }
+            Some(TypeForm::Intent { result, .. }) => vec![result],
+            Some(TypeForm::Atom(_)) | None => Vec::new(),
+        };
+        pending.extend(children.into_iter().map(|child| (child, below)));
     }
-    let [element] = positional.as_slice() else {
-        return None;
-    };
-    let TypeForm::Path {
-        path,
-        positional,
-        labelled,
-    } = element.form()?
-    else {
-        return None;
-    };
-    if !positional.is_empty() || !labelled.is_empty() {
-        return None;
-    }
-    let element = match path.dotted().as_str() {
-        "Char" => Type::Char,
-        "U8" => Type::U8,
-        _ => return None,
-    };
-    Some(Type::list(element))
+    deepest
 }
 
+/// `@type.depthExceeded` at `span`.
+pub(crate) fn depth_fault(span: ByteSpan) -> NoType {
+    NoType::Fault(Box::new(Diagnostic::new(
+        DiagnosticCode::TypeDepthExceeded,
+        span,
+        format!("this type nests more than {} levels", Type::MAX_DEPTH),
+    )))
+}
+
+/// The diagnostic `code` of [`Program::key_fault`] for `key` at `span`.
+pub(crate) fn key_diagnostic(
+    code: DiagnosticCode,
+    span: ByteSpan,
+    key: &Type,
+) -> Diagnostic {
+    let message = if code == DiagnosticCode::TypeFunctionNotEquatable {
+        format!("`{key}` holds a callable, which is not equatable, so it keys no dict")
+    } else {
+        format!("`{key}` does not implement `Ordered`, so it keys no dict")
+    };
+    Diagnostic::new(code, span, message)
+}
 /// `signature` with `Self` replaced by `receiver`.
 pub(crate) fn substitute_self(signature: &FnType, receiver: &Type) -> FnType {
     let replace = |ty: &Type| {
