@@ -167,11 +167,9 @@ fn read_fences(chapter: &str, markdown: &str) -> Vec<(usize, Language, Fence)> {
 
 fn read(language: Language, text: &str, standard_library: bool) -> Document {
     match language {
-        Language::Source => parse_source_with(
-            None,
-            text.as_bytes(),
-            SourceOptions { standard_library },
-        ),
+        Language::Source => {
+            parse_source_with(None, text.as_bytes(), SourceOptions { standard_library })
+        }
         Language::Data => parse_data(None, text.as_bytes()),
     }
 }
@@ -220,10 +218,13 @@ fn every_fenced_block_of_the_specification_is_read() {
             {
                 *slot = true;
             }
-            let reading = named.and_then(|index| READINGS.get(index)).map(|row| row.reading);
+            let reading = named
+                .and_then(|index| READINGS.get(index))
+                .map(|row| row.reading);
             let plain = read(language, &fence.text, false);
             if leaf_text(&plain).as_deref() != Some(fence.text.as_str()) {
-                failures.push(format!("{at}: the leaves do not concatenate to the fence"));
+                failures
+                    .push(format!("{at}: the leaves do not concatenate to the fence"));
             }
             let observed = codes(&plain);
             match reading {
@@ -237,7 +238,8 @@ fn every_fenced_block_of_the_specification_is_read() {
                             .iter()
                             .any(|leaf| leaf.kind() == SyntaxKind::Missing)
                     {
-                        failures.push(format!("{at}: a clean fence has a missing leaf"));
+                        failures
+                            .push(format!("{at}: a clean fence has a missing leaf"));
                     }
                     let formatted = format_document(&plain);
                     if formatted.as_deref() != Some(fence.text.as_str()) {
@@ -251,7 +253,8 @@ fn every_fenced_block_of_the_specification_is_read() {
                     if expected.is_empty() {
                         failures.push(format!("{at}: a rejected row names no code"));
                     } else if observed.is_empty() {
-                        failures.push(format!("{at}: stale row, the fence reads clean"));
+                        failures
+                            .push(format!("{at}: stale row, the fence reads clean"));
                     } else if observed != expected {
                         failures.push(format!(
                             "{at}: expected {expected:?}, observed {observed:?}"
@@ -261,7 +264,8 @@ fn every_fenced_block_of_the_specification_is_read() {
                 Some(Reading::StandardLibrary) => {
                     let library = read(language, &fence.text, true);
                     if observed.is_empty() {
-                        failures.push(format!("{at}: stale row, the fence reads clean"));
+                        failures
+                            .push(format!("{at}: stale row, the fence reads clean"));
                     }
                     let library_codes = codes(&library);
                     if !library_codes.is_empty() {
@@ -287,8 +291,7 @@ fn every_fenced_block_of_the_specification_is_read() {
 
 #[test]
 fn the_scanner_tracks_tilde_fences_and_matching_delimiters() {
-    let markdown =
-        "# Example\n~~~vibon\n{text: \"value\"}\n```\n~~~\n\n```vibra\nuse @a enduse\n```\n";
+    let markdown = "# Example\n~~~vibon\n{text: \"value\"}\n```\n~~~\n\n```vibra\nuse @a enduse\n```\n";
     let found = fences(markdown);
     assert_eq!(found.len(), 2);
     assert_eq!(found[0].info, "vibon");
